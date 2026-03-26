@@ -6,8 +6,3 @@ edition = "2024"
 [dependencies]
 winit = "0.30"
 wgpu = { version = "29.0.0", features = ["wgsl"] }
-pollster = "0.4"
-bytemuck = { version = "1.25", features = ["derive"] }
-ab_glyph = "0.2.32"
-font-kit = "0.14.3"
-taffy = "0.9"
