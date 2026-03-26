@@ -5,7 +5,9 @@ edition = "2024"
 
 [dependencies]
 winit = "0.30"
-softbuffer = "0.4"
-font-kit = "0.14.3"
+wgpu = { version = "29.0.0", features = ["wgsl"] }
+pollster = "0.4"
+bytemuck = { version = "1.25", features = ["derive"] }
 ab_glyph = "0.2.32"
-glyph_brush_draw_cache = "0.1.6"
+font-kit = "0.14.3"
+taffy = "0.9"
