@@ -89,9 +89,10 @@ impl Default for Wrap {
 pub struct LayoutStyle {
     pub width: Option<f32>,
     pub height: Option<f32>,
+    pub fill_width: bool,
+    pub fill_height: bool,
     pub padding: Insets,
     pub margin: Insets,
-    pub align: Align,
     pub grow: f32,
 }
 
@@ -100,9 +101,10 @@ impl Default for LayoutStyle {
         Self {
             width: None,
             height: None,
+            fill_width: false,
+            fill_height: false,
             padding: Insets::ZERO,
             margin: Insets::ZERO,
-            align: Align::Start,
             grow: 0.0,
         }
     }

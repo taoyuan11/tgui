@@ -21,12 +21,10 @@ This project is under active development.
 - `Observable<T>` and `Binding<T>` for reactive UI data flow
 - `Command` and `ValueCommand` for UI-to-ViewModel actions
 - `Text`, `Button`, `Input`, and layout container widgets
-- Taffy (`0.9.2`) as the layout engine
+- `Taffy` as the layout engine
 - `wgpu`-based rendering backend
 
 ## Installation
-
-Add `tgui` from local path or git while the crate is not yet published.
 
 ```toml
 [dependencies]

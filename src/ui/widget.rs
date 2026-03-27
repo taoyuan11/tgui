@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use taffy::prelude::{
     AlignItems as TaffyAlignItems, AvailableSpace, Display, FlexDirection, FlexWrap,
     JustifyContent as TaffyJustifyContent, Style as TaffyStyle, TaffyTree, auto,
-    evenly_sized_tracks, length, line,
+    evenly_sized_tracks, length, line, percent,
 };
 use taffy::{NodeId as TaffyNodeId, Size as TaffySize};
 use winit::event::{ElementState, MouseButton, WindowEvent};
@@ -156,11 +156,6 @@ impl Text {
         self
     }
 
-    pub fn align(mut self, align: Align) -> Self {
-        self.layout.align = align;
-        self
-    }
-
     pub fn font(mut self, font_family: impl Into<String>) -> Self {
         self.font_family = Some(font_family.into());
         self
@@ -209,6 +204,8 @@ struct ContainerLayout {
     gap: f32,
     justify: Justify,
     align: Align,
+    align_x: Option<Align>,
+    align_y: Option<Align>,
 }
 
 impl ContainerLayout {
@@ -219,6 +216,8 @@ impl ContainerLayout {
             gap: 0.0,
             justify: Justify::Start,
             align: Align::Start,
+            align_x: None,
+            align_y: None,
         }
     }
 }
@@ -349,21 +348,24 @@ impl<VM> Element<VM> {
     ) -> TaffyStyle {
         let mut style = TaffyStyle {
             size: TaffySize {
-                width: self
-                    .layout
-                    .width
-                    .map(length)
-                    .unwrap_or_else(|| if is_root { length(viewport.width) } else { auto() }),
-                height: self
-                    .layout
-                    .height
-                    .map(length)
-                    .unwrap_or_else(|| if is_root { length(viewport.height) } else { auto() }),
+                width: if is_root {
+                    length(viewport.width)
+                } else if self.layout.fill_width {
+                    percent(1.0)
+                } else {
+                    self.layout.width.map(length).unwrap_or_else(auto)
+                },
+                height: if is_root {
+                    length(viewport.height)
+                } else if self.layout.fill_height {
+                    percent(1.0)
+                } else {
+                    self.layout.height.map(length).unwrap_or_else(auto)
+                },
             },
             margin: to_taffy_rect_auto(self.layout.margin),
             padding: to_taffy_rect(self.layout.padding),
             flex_grow: self.layout.grow.max(0.0),
-            align_self: map_align_self(self.layout.align),
             ..Default::default()
         };
 
@@ -513,14 +515,16 @@ fn apply_container_style(style: &mut TaffyStyle, layout: ContainerLayout) {
         ContainerKind::Flow | ContainerKind::Column => {
             style.display = Display::Flex;
             style.flex_direction = FlexDirection::Column;
-            style.justify_content = map_justify_content(layout.justify);
-            style.align_items = map_align_items(layout.align);
+            style.justify_content =
+                layout.align_y.map(map_axis_align_content).or_else(|| map_justify_content(layout.justify));
+            style.align_items = map_align_items(layout.align_x.unwrap_or(layout.align));
         }
         ContainerKind::Row => {
             style.display = Display::Flex;
             style.flex_direction = FlexDirection::Row;
-            style.justify_content = map_justify_content(layout.justify);
-            style.align_items = map_align_items(layout.align);
+            style.justify_content =
+                layout.align_x.map(map_axis_align_content).or_else(|| map_justify_content(layout.justify));
+            style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
         }
         ContainerKind::Flex { direction, wrap } => {
             style.display = Display::Flex;
@@ -532,21 +536,31 @@ fn apply_container_style(style: &mut TaffyStyle, layout: ContainerLayout) {
                 Wrap::NoWrap => FlexWrap::NoWrap,
                 Wrap::Wrap => FlexWrap::Wrap,
             };
-            style.justify_content = map_justify_content(layout.justify);
-            style.align_items = map_align_items(layout.align);
+            match direction {
+                Axis::Horizontal => {
+                    style.justify_content =
+                        layout.align_x.map(map_axis_align_content).or_else(|| map_justify_content(layout.justify));
+                    style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
+                }
+                Axis::Vertical => {
+                    style.justify_content =
+                        layout.align_y.map(map_axis_align_content).or_else(|| map_justify_content(layout.justify));
+                    style.align_items = map_align_items(layout.align_x.unwrap_or(layout.align));
+                }
+            }
         }
         ContainerKind::Grid { columns } => {
             style.display = Display::Grid;
             style.grid_template_columns = evenly_sized_tracks(columns.max(1) as u16);
-            style.justify_items = map_align_items(layout.align);
-            style.align_items = map_stack_cross_align(layout.justify);
+            style.justify_items = map_align_items(layout.align_x.unwrap_or(layout.align));
+            style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
         }
         ContainerKind::Stack => {
             style.display = Display::Grid;
             style.grid_template_columns = vec![auto()];
             style.grid_template_rows = vec![auto()];
-            style.justify_items = map_align_items(layout.align);
-            style.align_items = map_stack_cross_align(layout.justify);
+            style.justify_items = map_align_items(layout.align_x.unwrap_or(layout.align));
+            style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
         }
     }
 }
@@ -560,10 +574,6 @@ fn map_align_items(align: Align) -> Option<TaffyAlignItems> {
     })
 }
 
-fn map_align_self(align: Align) -> Option<TaffyAlignItems> {
-    map_align_items(align)
-}
-
 fn map_justify_content(justify: Justify) -> Option<TaffyJustifyContent> {
     Some(match justify {
         Justify::Start => TaffyJustifyContent::Start,
@@ -573,13 +583,13 @@ fn map_justify_content(justify: Justify) -> Option<TaffyJustifyContent> {
     })
 }
 
-fn map_stack_cross_align(justify: Justify) -> Option<TaffyAlignItems> {
-    Some(match justify {
-        Justify::Start => TaffyAlignItems::Start,
-        Justify::Center => TaffyAlignItems::Center,
-        Justify::End => TaffyAlignItems::End,
-        Justify::SpaceBetween => TaffyAlignItems::Stretch,
-    })
+fn map_axis_align_content(align: Align) -> TaffyJustifyContent {
+    match align {
+        Align::Start => TaffyJustifyContent::Start,
+        Align::Center => TaffyJustifyContent::Center,
+        Align::End => TaffyJustifyContent::End,
+        Align::Stretch => TaffyJustifyContent::Start,
+    }
 }
 
 fn to_taffy_rect(insets: Insets) -> taffy::prelude::Rect<taffy::style::LengthPercentage> {
@@ -956,6 +966,22 @@ impl<VM> Container<VM> {
     pub fn align(mut self, align: Align) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
             layout.align = align;
+            layout.align_x = Some(align);
+            layout.align_y = Some(align);
+        }
+        self
+    }
+
+    pub fn align_x(mut self, align: Align) -> Self {
+        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
+            layout.align_x = Some(align);
+        }
+        self
+    }
+
+    pub fn align_y(mut self, align: Align) -> Self {
+        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
+            layout.align_y = Some(align);
         }
         self
     }
@@ -979,14 +1005,35 @@ macro_rules! impl_layout_container {
             pub fn size(mut self, width: f32, height: f32) -> Self {
                 self.0.element.layout.width = Some(width);
                 self.0.element.layout.height = Some(height);
+                self.0.element.layout.fill_width = false;
+                self.0.element.layout.fill_height = false;
                 self
             }
             pub fn width(mut self, width: f32) -> Self {
                 self.0.element.layout.width = Some(width);
+                self.0.element.layout.fill_width = false;
                 self
             }
             pub fn height(mut self, height: f32) -> Self {
                 self.0.element.layout.height = Some(height);
+                self.0.element.layout.fill_height = false;
+                self
+            }
+            pub fn fill_width(mut self) -> Self {
+                self.0.element.layout.fill_width = true;
+                self.0.element.layout.width = None;
+                self
+            }
+            pub fn fill_height(mut self) -> Self {
+                self.0.element.layout.fill_height = true;
+                self.0.element.layout.height = None;
+                self
+            }
+            pub fn fill_size(mut self) -> Self {
+                self.0.element.layout.fill_width = true;
+                self.0.element.layout.fill_height = true;
+                self.0.element.layout.width = None;
+                self.0.element.layout.height = None;
                 self
             }
             pub fn margin(mut self, insets: Insets) -> Self {
@@ -1014,6 +1061,12 @@ macro_rules! impl_layout_container {
             }
             pub fn align(self, align: Align) -> Self {
                 Self(self.0.align(align))
+            }
+            pub fn align_x(self, align: Align) -> Self {
+                Self(self.0.align_x(align))
+            }
+            pub fn align_y(self, align: Align) -> Self {
+                Self(self.0.align_y(align))
             }
         }
         impl<VM> From<$name<VM>> for Element<VM> {
@@ -1126,16 +1179,40 @@ impl<VM> Button<VM> {
     pub fn size(mut self, width: f32, height: f32) -> Self {
         self.element.layout.width = Some(width);
         self.element.layout.height = Some(height);
+        self.element.layout.fill_width = false;
+        self.element.layout.fill_height = false;
         self
     }
 
     pub fn width(mut self, width: f32) -> Self {
         self.element.layout.width = Some(width);
+        self.element.layout.fill_width = false;
         self
     }
 
     pub fn height(mut self, height: f32) -> Self {
         self.element.layout.height = Some(height);
+        self.element.layout.fill_height = false;
+        self
+    }
+
+    pub fn fill_width(mut self) -> Self {
+        self.element.layout.fill_width = true;
+        self.element.layout.width = None;
+        self
+    }
+
+    pub fn fill_height(mut self) -> Self {
+        self.element.layout.fill_height = true;
+        self.element.layout.height = None;
+        self
+    }
+
+    pub fn fill_size(mut self) -> Self {
+        self.element.layout.fill_width = true;
+        self.element.layout.fill_height = true;
+        self.element.layout.width = None;
+        self.element.layout.height = None;
         self
     }
 
@@ -1146,11 +1223,6 @@ impl<VM> Button<VM> {
 
     pub fn padding(mut self, insets: Insets) -> Self {
         self.element.layout.padding = insets;
-        self
-    }
-
-    pub fn align(mut self, align: Align) -> Self {
-        self.element.layout.align = align;
         self
     }
 
@@ -1204,16 +1276,40 @@ impl<VM> Input<VM> {
     pub fn size(mut self, width: f32, height: f32) -> Self {
         self.element.layout.width = Some(width);
         self.element.layout.height = Some(height);
+        self.element.layout.fill_width = false;
+        self.element.layout.fill_height = false;
         self
     }
 
     pub fn width(mut self, width: f32) -> Self {
         self.element.layout.width = Some(width);
+        self.element.layout.fill_width = false;
         self
     }
 
     pub fn height(mut self, height: f32) -> Self {
         self.element.layout.height = Some(height);
+        self.element.layout.fill_height = false;
+        self
+    }
+
+    pub fn fill_width(mut self) -> Self {
+        self.element.layout.fill_width = true;
+        self.element.layout.width = None;
+        self
+    }
+
+    pub fn fill_height(mut self) -> Self {
+        self.element.layout.fill_height = true;
+        self.element.layout.height = None;
+        self
+    }
+
+    pub fn fill_size(mut self) -> Self {
+        self.element.layout.fill_width = true;
+        self.element.layout.fill_height = true;
+        self.element.layout.width = None;
+        self.element.layout.height = None;
         self
     }
 
@@ -1224,11 +1320,6 @@ impl<VM> Input<VM> {
 
     pub fn padding(mut self, insets: Insets) -> Self {
         self.element.layout.padding = insets;
-        self
-    }
-
-    pub fn align(mut self, align: Align) -> Self {
-        self.element.layout.align = align;
         self
     }
 

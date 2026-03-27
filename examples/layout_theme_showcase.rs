@@ -37,8 +37,10 @@ fn main() -> Result<(), tgui::TguiError> {
         .with_view_model(|_| ())
         .root_view(|_| {
             Column::new()
+                .align(Align::Center)
+                .fill_size()
                 .background(wgpu::Color {
-                    r: 0.10,
+                    r: 1.0,
                     g: 0.12,
                     b: 0.15,
                     a: 1.0,
@@ -58,8 +60,9 @@ fn main() -> Result<(), tgui::TguiError> {
                 )
                 .child(
                     Row::new()
+                        .fill_width()
                         .gap(12.0)
-                        .align(Align::Stretch)
+                        .align(Align::End)
                         .child(
                             Button::new(
                                 Text::new("Primary".to_string())
