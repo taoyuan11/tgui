@@ -1,8 +1,19 @@
 [package]
 name = "tgui"
-version = "0.1.0"
-edition = "2024"
+version = "0.0.1"
+authors = ["a2542209451@gmail.com"]
+edition = "2021"
+description = "A modern, high-performance GUI library for Rust."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/youruser/tgui"
+readme = "README.md"
+keywords = ["gui", "graphics", "wgpu", "ui"]
+categories = ["gui", "rendering"]
 
 [dependencies]
+bytemuck = { version = "1.24", features = ["derive"] }
+cosmic-text = "0.18"
+pollster = "0.4"
+taffy = "0.7"
 winit = "0.30"
-wgpu = { version = "29.0.0", features = ["wgsl"] }
+wgpu = { version = "29", features = ["wgsl"] }
