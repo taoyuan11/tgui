@@ -67,7 +67,7 @@ This project is under active development.
 
 ```toml
 [dependencies]
-tgui = "0.0.3"
+tgui = "0.0.4"
 ```
 
 or use the repository directly:
