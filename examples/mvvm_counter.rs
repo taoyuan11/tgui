@@ -22,11 +22,7 @@ impl CounterViewModel {
     fn clear_color(&self) -> tgui::Binding<Color> {
         self.clicks.binding().map(|count| {
             let phase = (count % 6) as u8;
-            Color::rgb(
-                20 + phase * 18,
-                31 + phase * 10,
-                46 + phase * 8,
-            )
+            Color::rgb(20 + phase * 18, 31 + phase * 10, 46 + phase * 8)
         })
     }
 

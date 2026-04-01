@@ -7,8 +7,23 @@ use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, ViewModel};
 use crate::runtime::{BoundRuntime, Runtime, WindowBindings, WindowCommand};
 use crate::text::font::FontCatalog;
-use crate::ui::theme::Theme;
+use crate::ui::theme::{Theme, ThemeMode};
 use crate::ui::widget::{Element, WidgetTree};
+
+#[derive(Debug, Clone)]
+pub(crate) enum ThemeSelection {
+    System,
+    Fixed(Theme),
+}
+
+impl ThemeSelection {
+    pub(crate) fn from_mode(mode: ThemeMode) -> Self {
+        match mode {
+            ThemeMode::System => Self::System,
+            ThemeMode::Light | ThemeMode::Dark => Self::Fixed(Theme::from_mode(mode, None)),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Application {
@@ -16,8 +31,9 @@ pub struct Application {
     width: u32,
     height: u32,
     clear_color: Color,
+    clear_color_overridden: bool,
     fonts: FontCatalog,
-    theme: Theme,
+    theme: ThemeSelection,
 }
 
 impl Application {
@@ -26,9 +42,10 @@ impl Application {
             title: "tgui".to_string(),
             width: 800,
             height: 600,
-            clear_color: Color::hexa(0x14171CFF),
+            clear_color: Theme::default().palette.window_background,
+            clear_color_overridden: false,
             fonts: FontCatalog::default(),
-            theme: Theme::default(),
+            theme: ThemeSelection::System,
         }
     }
 
@@ -45,6 +62,7 @@ impl Application {
 
     pub fn clear_color(mut self, clear_color: Color) -> Self {
         self.clear_color = clear_color;
+        self.clear_color_overridden = true;
         self
     }
 
@@ -59,8 +77,10 @@ impl Application {
     }
 
     pub fn theme(mut self, theme: Theme) -> Self {
-        self.clear_color = theme.palette.window_background;
-        self.theme = theme;
+        if !self.clear_color_overridden {
+            self.clear_color = theme.palette.window_background;
+        }
+        self.theme = ThemeSelection::Fixed(theme);
         self
     }
 
@@ -81,7 +101,9 @@ impl Application {
             title: self.title.clone(),
             size: LogicalSize::new(self.width as f64, self.height as f64),
             clear_color: self.clear_color,
+            clear_color_overridden: self.clear_color_overridden,
             fonts: self.fonts.clone(),
+            theme: self.theme.clone(),
         }
     }
 }
@@ -97,8 +119,15 @@ pub(crate) struct ApplicationConfig {
     pub(crate) title: String,
     pub(crate) size: LogicalSize<f64>,
     pub(crate) clear_color: Color,
+    pub(crate) clear_color_overridden: bool,
     pub(crate) fonts: FontCatalog,
+    pub(crate) theme: ThemeSelection,
 }
+
+type TitleBinding<VM> = Box<dyn Fn(&VM) -> Binding<String> + Send + Sync>;
+type ClearColorBinding<VM> = Box<dyn Fn(&VM) -> Binding<Color> + Send + Sync>;
+type ThemeModeBinding<VM> = Box<dyn Fn(&VM) -> Binding<ThemeMode> + Send + Sync>;
+type RootViewFactory<VM> = Box<dyn Fn(&VM) -> Element<VM> + Send + Sync>;
 
 pub struct ApplicationBuilder<VM, F>
 where
@@ -107,9 +136,10 @@ where
 {
     app: Application,
     factory: F,
-    title_binding: Option<Box<dyn Fn(&VM) -> Binding<String> + Send + Sync>>,
-    clear_color_binding: Option<Box<dyn Fn(&VM) -> Binding<Color> + Send + Sync>>,
-    root_view: Option<Box<dyn Fn(&VM) -> Element<VM> + Send + Sync>>,
+    title_binding: Option<TitleBinding<VM>>,
+    clear_color_binding: Option<ClearColorBinding<VM>>,
+    theme_mode_binding: Option<ThemeModeBinding<VM>>,
+    root_view: Option<RootViewFactory<VM>>,
     commands: Vec<WindowCommand<VM>>,
 }
 
@@ -124,6 +154,7 @@ where
             factory,
             title_binding: None,
             clear_color_binding: None,
+            theme_mode_binding: None,
             root_view: None,
             commands: Vec::new(),
         }
@@ -142,6 +173,14 @@ where
         binding: impl Fn(&VM) -> Binding<Color> + Send + Sync + 'static,
     ) -> Self {
         self.clear_color_binding = Some(Box::new(binding));
+        self
+    }
+
+    pub fn bind_theme_mode(
+        mut self,
+        binding: impl Fn(&VM) -> Binding<ThemeMode> + Send + Sync + 'static,
+    ) -> Self {
+        self.theme_mode_binding = Some(Box::new(binding));
         self
     }
 
@@ -165,6 +204,7 @@ where
         let window_bindings = WindowBindings {
             title: self.title_binding.map(|binding| binding(&view_model)),
             clear_color: self.clear_color_binding.map(|binding| binding(&view_model)),
+            theme_mode: self.theme_mode_binding.map(|binding| binding(&view_model)),
         };
         let widget_tree = self
             .root_view
@@ -175,7 +215,6 @@ where
             view_model,
             window_bindings,
             widget_tree,
-            self.app.theme.clone(),
             self.commands,
             invalidation,
         )?

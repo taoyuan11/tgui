@@ -1,6 +1,6 @@
 use tgui::{
-    Align, Application, Axis, Button, Color, Column, Flex, FontWeight, Grid, Insets, Justify,
-    Row, Stack, Text, Theme, Wrap,
+    Align, Application, Axis, Button, Color, Column, Flex, FontWeight, Grid, Insets, Justify, Row,
+    Stack, Text, Theme, Wrap,
 };
 
 fn main() -> Result<(), tgui::TguiError> {
@@ -43,8 +43,8 @@ fn main() -> Result<(), tgui::TguiError> {
                         )
                         .child(
                             Button::new(Text::new("Secondary".to_string()).font_size(18.0))
-                            .grow(1.0)
-                            .background(Color::hex(0x475C75)),
+                                .grow(1.0)
+                                .background(Color::hex(0x475C75)),
                         )
                         .child(
                             Stack::new()
@@ -68,7 +68,7 @@ fn main() -> Result<(), tgui::TguiError> {
                                 .child(card("Grid C"))
                                 .child(card("Grid D"))
                                 .child(card("Grid E"))
-                                .child(card("Grid F"))
+                                .child(card("Grid F")),
                         )
                         .child(
                             Flex::new(Axis::Vertical)
@@ -83,7 +83,7 @@ fn main() -> Result<(), tgui::TguiError> {
                                 .child(chip("Grid"))
                                 .child(chip("Row"))
                                 .child(chip("Column")),
-                        )
+                        ),
                 )
                 .into()
         })
@@ -102,7 +102,7 @@ fn card(label: &str) -> tgui::Element<()> {
 
 fn chip(label: &str) -> tgui::Element<()> {
     Button::new(Text::new(label.to_string()).font_size(15.0))
-    .size(128.0, 42.0)
-    .background(Color::hex(0x423828))
-    .into()
+        .size(128.0, 42.0)
+        .background(Color::hex(0x423828))
+        .into()
 }

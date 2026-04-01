@@ -39,18 +39,13 @@ impl Default for Insets {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Align {
+    #[default]
     Start,
     Center,
     End,
     Stretch,
-}
-
-impl Default for Align {
-    fn default() -> Self {
-        Self::Start
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,30 +54,20 @@ pub enum Axis {
     Vertical,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Justify {
+    #[default]
     Start,
     Center,
     End,
     SpaceBetween,
 }
 
-impl Default for Justify {
-    fn default() -> Self {
-        Self::Start
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Wrap {
+    #[default]
     NoWrap,
     Wrap,
-}
-
-impl Default for Wrap {
-    fn default() -> Self {
-        Self::NoWrap
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

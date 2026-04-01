@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cosmic_text::fontdb::{Family, ID, Query, Stretch, Style, Weight};
+use cosmic_text::fontdb::{Family, Query, Stretch, Style, Weight, ID};
 use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping, Wrap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

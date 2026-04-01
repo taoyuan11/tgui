@@ -3,9 +3,9 @@ use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::window::{Window, WindowAttributes, WindowId};
+use winit::window::{Theme as WindowTheme, Window, WindowAttributes, WindowId};
 
-use crate::application::ApplicationConfig;
+use crate::application::{ApplicationConfig, ThemeSelection};
 use crate::foundation::binding::{Binding, InvalidationSignal};
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
@@ -13,7 +13,7 @@ use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, ViewModel};
 use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::FontManager;
-use crate::ui::theme::Theme;
+use crate::ui::theme::{Theme, ThemeMode};
 use crate::ui::widget::{
     Point, Rect, ScenePrimitives, WidgetCommand as UiCommand, WidgetId, WidgetTree,
 };
@@ -48,7 +48,6 @@ pub struct BoundRuntime<VM> {
     view_model: VM,
     window_bindings: WindowBindings,
     widget_tree: Option<WidgetTree<VM>>,
-    theme: Theme,
     commands: Vec<WindowCommand<VM>>,
     invalidation: InvalidationSignal,
 }
@@ -59,7 +58,6 @@ impl<VM: ViewModel> BoundRuntime<VM> {
         view_model: VM,
         window_bindings: WindowBindings,
         widget_tree: Option<WidgetTree<VM>>,
-        theme: Theme,
         commands: Vec<WindowCommand<VM>>,
         invalidation: InvalidationSignal,
     ) -> Result<Self, TguiError> {
@@ -71,7 +69,6 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             view_model,
             window_bindings,
             widget_tree,
-            theme,
             commands,
             invalidation,
         })
@@ -83,7 +80,6 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             self.view_model,
             self.window_bindings,
             self.widget_tree,
-            self.theme,
             self.commands,
             self.invalidation,
         );
@@ -101,6 +97,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
 pub struct WindowBindings {
     pub(crate) title: Option<Binding<String>>,
     pub(crate) clear_color: Option<Binding<Color>>,
+    pub(crate) theme_mode: Option<Binding<ThemeMode>>,
 }
 
 pub struct WindowCommand<VM> {
@@ -130,6 +127,35 @@ impl RuntimeHandler {
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: TguiError) {
         self.error = Some(error);
         event_loop.exit();
+    }
+
+    fn resolved_theme(&self, window: &Window) -> Theme {
+        resolve_theme(&self.config.theme, window.theme())
+    }
+
+    fn render_hidden_frame(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        let Some(renderer) = self.renderer.as_mut() else {
+            return true;
+        };
+
+        match renderer.render(&ScenePrimitives::default()) {
+            Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => true,
+            Ok(RenderStatus::ReconfigureSurface) => {
+                renderer.reconfigure();
+                match renderer.render(&ScenePrimitives::default()) {
+                    Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => true,
+                    Ok(RenderStatus::ReconfigureSurface) => true,
+                    Err(error) => {
+                        self.fail(event_loop, error);
+                        false
+                    }
+                }
+            }
+            Err(error) => {
+                self.fail(event_loop, error);
+                false
+            }
+        }
     }
 }
 
@@ -163,11 +189,14 @@ impl<VM> BoundRuntimeHandler<VM> {
         view_model: VM,
         window_bindings: WindowBindings,
         widget_tree: Option<WidgetTree<VM>>,
-        theme: Theme,
         commands: Vec<WindowCommand<VM>>,
         invalidation: InvalidationSignal,
     ) -> Self {
         let font_manager = FontManager::new(&config.fonts);
+        let theme = match &config.theme {
+            ThemeSelection::Fixed(theme) => theme.clone(),
+            ThemeSelection::System => Theme::default(),
+        };
         Self {
             config,
             font_manager,
@@ -192,7 +221,47 @@ impl<VM> BoundRuntimeHandler<VM> {
         event_loop.exit();
     }
 
+    fn uses_system_theme(&self) -> bool {
+        matches!(self.active_theme_selection(), ThemeSelection::System)
+    }
+
+    fn apply_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+        self.invalidate_scene();
+        if !self.config.clear_color_overridden && self.window_bindings.clear_color.is_none() {
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.set_clear_color(self.theme.palette.window_background);
+            }
+        }
+    }
+
+    fn apply_window_theme(&mut self, window_theme: Option<WindowTheme>) {
+        if self.uses_system_theme() {
+            self.apply_theme(resolve_theme(&self.active_theme_selection(), window_theme));
+        }
+    }
+
+    fn active_theme_selection(&self) -> ThemeSelection {
+        self.window_bindings
+            .theme_mode
+            .as_ref()
+            .map(|binding| ThemeSelection::from_mode(binding.get()))
+            .unwrap_or_else(|| self.config.theme.clone())
+    }
+
+    fn sync_theme_binding(&mut self) {
+        let resolved_theme = resolve_theme(
+            &self.active_theme_selection(),
+            self.window.as_ref().and_then(|window| window.theme()),
+        );
+        if self.theme != resolved_theme {
+            self.apply_theme(resolved_theme);
+        }
+    }
+
     fn sync_bindings(&mut self) {
+        self.sync_theme_binding();
+
         if let Some(window) = self.window.as_ref() {
             if let Some(binding) = self.window_bindings.title.as_ref() {
                 window.set_title(&binding.get());
@@ -268,6 +337,39 @@ impl<VM> BoundRuntimeHandler<VM> {
             } | WindowEvent::KeyboardInput { .. }
         )
     }
+
+    fn render_current_frame(&mut self) -> Result<RenderStatus, TguiError> {
+        self.sync_bindings();
+        let primitives = self.render_primitives();
+        let renderer = self
+            .renderer
+            .as_mut()
+            .expect("renderer should exist before drawing");
+        renderer.render(&primitives)
+    }
+
+    fn render_hidden_frame(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        let status = match self.render_current_frame() {
+            Ok(status) => status,
+            Err(error) => {
+                self.fail(event_loop, error);
+                return false;
+            }
+        };
+
+        if matches!(status, RenderStatus::ReconfigureSurface) {
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.reconfigure();
+            }
+
+            if let Err(error) = self.render_current_frame() {
+                self.fail(event_loop, error);
+                return false;
+            }
+        }
+
+        true
+    }
 }
 
 impl ApplicationHandler for RuntimeHandler {
@@ -290,21 +392,31 @@ impl ApplicationHandler for RuntimeHandler {
             }
         };
 
-        let renderer =
-            match Renderer::new(window.clone(), self.config.clear_color, &self.config.fonts) {
-                Ok(renderer) => renderer,
-                Err(error) => {
-                    self.fail(event_loop, error);
-                    return;
-                }
-            };
+        let clear_color = if self.config.clear_color_overridden {
+            self.config.clear_color
+        } else {
+            self.resolved_theme(&window).palette.window_background
+        };
+
+        let renderer = match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                self.fail(event_loop, error);
+                return;
+            }
+        };
 
         self.window_id = Some(window.id());
         self.renderer = Some(renderer);
         self.window = Some(window);
 
+        if !self.render_hidden_frame(event_loop) {
+            return;
+        }
+
         if let Some(window) = self.window.as_ref() {
-            window.set_visible(true)
+            window.set_visible(true);
+            window.request_redraw();
         }
     }
 
@@ -320,6 +432,21 @@ impl ApplicationHandler for RuntimeHandler {
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::ThemeChanged(_) => {
+                if !self.config.clear_color_overridden {
+                    let clear_color = self
+                        .window
+                        .as_ref()
+                        .map(|window| self.resolved_theme(window).palette.window_background)
+                        .unwrap_or(self.config.clear_color);
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        renderer.set_clear_color(clear_color);
+                    }
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.resize(size);
@@ -365,19 +492,29 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
             }
         };
 
-        let renderer =
-            match Renderer::new(window.clone(), self.config.clear_color, &self.config.fonts) {
-                Ok(renderer) => renderer,
-                Err(error) => {
-                    self.fail(event_loop, error);
-                    return;
-                }
+        self.theme = resolve_theme(&self.active_theme_selection(), window.theme());
+        let clear_color =
+            if self.window_bindings.clear_color.is_some() || self.config.clear_color_overridden {
+                self.config.clear_color
+            } else {
+                self.theme.palette.window_background
             };
+
+        let renderer = match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                self.fail(event_loop, error);
+                return;
+            }
+        };
 
         self.window_id = Some(window.id());
         self.renderer = Some(renderer);
         self.window = Some(window);
-        self.sync_bindings();
+
+        if !self.render_hidden_frame(event_loop) {
+            return;
+        }
 
         if let Some(window) = self.window.as_ref() {
             window.set_visible(true);
@@ -450,6 +587,13 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::ThemeChanged(theme) => {
+                self.apply_window_theme(Some(theme));
+                self.sync_bindings();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::Resized(size) => {
                 self.invalidate_scene();
                 if let Some(renderer) = self.renderer.as_mut() {
@@ -460,23 +604,27 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
                     window.request_redraw();
                 }
             }
-            WindowEvent::RedrawRequested => {
-                self.sync_bindings();
-                let primitives = self.render_primitives();
-
-                if let Some(renderer) = self.renderer.as_mut() {
-                    match renderer.render(&primitives) {
-                        Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
-                        Ok(RenderStatus::ReconfigureSurface) => renderer.reconfigure(),
-                        Err(error) => self.fail(event_loop, error),
+            WindowEvent::RedrawRequested => match self.render_current_frame() {
+                Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
+                Ok(RenderStatus::ReconfigureSurface) => {
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        renderer.reconfigure();
                     }
                 }
-            }
+                Err(error) => self.fail(event_loop, error),
+            },
             _ => {}
         }
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         self.request_redraw_if_dirty();
+    }
+}
+
+fn resolve_theme(selection: &ThemeSelection, window_theme: Option<WindowTheme>) -> Theme {
+    match selection {
+        ThemeSelection::System => Theme::from_window_theme(window_theme),
+        ThemeSelection::Fixed(theme) => theme.clone(),
     }
 }

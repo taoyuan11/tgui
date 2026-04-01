@@ -18,6 +18,7 @@ pub enum RenderStatus {
 }
 
 pub struct Renderer {
+    window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -76,11 +77,11 @@ impl Renderer {
         fonts: &FontCatalog,
     ) -> Result<Self, TguiError> {
         let size = window.inner_size();
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = wgpu::Instance::new(instance_descriptor(clear_color));
         let surface = instance.create_surface(window.clone())?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
+                power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })
@@ -106,27 +107,14 @@ impl Renderer {
             .or_else(|| caps.formats.first().copied())
             .ok_or(TguiError::NoSurfaceFormat)?;
 
-        let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Fifo) {
-            wgpu::PresentMode::Fifo
-        } else {
-            caps.present_modes
-                .first()
-                .copied()
-                .unwrap_or(wgpu::PresentMode::AutoVsync)
-        };
-
-        let alpha_mode = caps
-            .alpha_modes
-            .first()
-            .copied()
-            .unwrap_or(wgpu::CompositeAlphaMode::Auto);
+        let alpha_mode = transparent_alpha_mode(&caps.alpha_modes);
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: size.width.max(1),
             height: size.height.max(1),
-            present_mode,
+            present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -263,6 +251,7 @@ impl Renderer {
         surface.configure(&device, &config);
 
         Ok(Self {
+            window,
             surface,
             device,
             queue,
@@ -359,7 +348,7 @@ impl Renderer {
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.clear_color.into()),
+                        load: wgpu::LoadOp::Clear(surface_clear_color(self.clear_color)),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -393,6 +382,7 @@ impl Renderer {
         }
 
         self.queue.submit(Some(encoder.finish()));
+        self.window.pre_present_notify();
         frame.present();
 
         Ok(RenderStatus::Rendered)
@@ -593,12 +583,7 @@ fn text_weight(weight: FontWeight) -> Weight {
 }
 
 fn color_to_text(color: TguiColor) -> Color {
-    Color::rgba(
-        color.r,
-        color.g,
-        color.b,
-        color.a,
-    )
+    Color::rgba(color.r, color.g, color.b, color.a)
 }
 
 fn blend_pixel(pixels: &mut [u8], width: u32, x: u32, y: u32, src: [u8; 4]) {
@@ -659,10 +644,10 @@ impl RectVertex {
             let y0 = 1.0 - primitive.rect.y / height * 2.0;
             let y1 = 1.0 - (primitive.rect.y + primitive.rect.height) / height * 2.0;
             let color = [
-                primitive.color.r as f32,
-                primitive.color.g as f32,
-                primitive.color.b as f32,
-                primitive.color.a as f32,
+                primitive.color.r as f32 / 255.0,
+                primitive.color.g as f32 / 255.0,
+                primitive.color.b as f32 / 255.0,
+                primitive.color.a as f32 / 255.0,
             ];
 
             vertices.extend_from_slice(&[
@@ -694,6 +679,61 @@ impl RectVertex {
         }
 
         vertices
+    }
+}
+
+fn instance_descriptor(clear_color: TguiColor) -> wgpu::InstanceDescriptor {
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = instance_backends(clear_color);
+    descriptor
+}
+
+fn instance_backends(clear_color: TguiColor) -> wgpu::Backends {
+    #[cfg(target_os = "windows")]
+    {
+        if clear_color.a < 255 {
+            return wgpu::Backends::PRIMARY;
+        }
+    }
+
+    default_backends()
+}
+
+fn default_backends() -> wgpu::Backends {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return wgpu::Backends::BROWSER_WEBGPU;
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        return wgpu::Backends::METAL;
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
+    {
+        return wgpu::Backends::VULKAN;
+    }
+
+    #[allow(unreachable_code)]
+    wgpu::Backends::all()
+}
+
+fn transparent_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::CompositeAlphaMode {
+    modes
+        .iter()
+        .copied()
+        .find(|mode| *mode != wgpu::CompositeAlphaMode::Opaque)
+        .unwrap_or(wgpu::CompositeAlphaMode::Auto)
+}
+
+fn surface_clear_color(color: TguiColor) -> wgpu::Color {
+    let alpha = color.a as f64 / 255.0;
+    wgpu::Color {
+        r: (color.r as f64 / 255.0) * alpha,
+        g: (color.g as f64 / 255.0) * alpha,
+        b: (color.b as f64 / 255.0) * alpha,
+        a: alpha,
     }
 }
 

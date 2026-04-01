@@ -4,8 +4,11 @@ pub trait ViewModel: Send + 'static {}
 
 impl<T> ViewModel for T where T: Send + 'static {}
 
+type CommandHandler<T> = dyn Fn(&mut T) + Send + Sync;
+type ValueCommandHandler<T, V> = dyn Fn(&mut T, V) + Send + Sync;
+
 pub struct Command<T> {
-    handler: Arc<dyn Fn(&mut T) + Send + Sync>,
+    handler: Arc<CommandHandler<T>>,
 }
 
 impl<T> Clone for Command<T> {
@@ -29,7 +32,7 @@ impl<T> Command<T> {
 }
 
 pub struct ValueCommand<T, V> {
-    handler: Arc<dyn Fn(&mut T, V) + Send + Sync>,
+    handler: Arc<ValueCommandHandler<T, V>>,
 }
 
 impl<T, V> Clone for ValueCommand<T, V> {

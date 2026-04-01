@@ -1,4 +1,6 @@
-use tgui::{Align, Application, Axis, Color, Column, Element, Flex, Text, TguiError, ViewModelContext, Wrap};
+use tgui::{
+    Align, Application, Axis, Color, Column, Element, Flex, Text, TguiError, ViewModelContext, Wrap,
+};
 
 fn main() -> Result<(), TguiError> {
     Application::new()
@@ -11,9 +13,8 @@ fn main() -> Result<(), TguiError> {
 struct LayoutDemo {}
 
 impl LayoutDemo {
-
     fn new(_: &ViewModelContext) -> Self {
-        Self{}
+        Self {}
     }
 
     fn view(&self) -> Element<Self> {
@@ -21,22 +22,28 @@ impl LayoutDemo {
             .fill_size()
             .gap(20.0)
             .wrap(Wrap::Wrap)
-            .child(Self::column_layout(Align::Start, "Align::Start".to_string()))
-            .child(Self::column_layout(Align::Center, "Align::Center".to_string()))
+            .child(Self::column_layout(
+                Align::Start,
+                "Align::Start".to_string(),
+            ))
+            .child(Self::column_layout(
+                Align::Center,
+                "Align::Center".to_string(),
+            ))
             .child(Self::column_layout(Align::End, "Align::End".to_string()))
-            .child(Self::column_layout(Align::Stretch, "Align::Stretch".to_string()))
+            .child(Self::column_layout(
+                Align::Stretch,
+                "Align::Stretch".to_string(),
+            ))
             .into()
     }
-
 
     fn column_layout(align: Align, align_text: String) -> Element<Self> {
         Column::new()
             .size(200.0, 200.0)
-            .background(Color::WHITE)
+            .background(Color::rgba(255, 255, 255, 100))
             .align(align)
-            .child(
-                Text::new(align_text).color(Color::BLACK)
-            ).into()
+            .child(Text::new(align_text).color(Color::BLACK))
+            .into()
     }
-
 }
