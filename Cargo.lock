@@ -1852,10 +1852,11 @@ dependencies = [
 
 [[package]]
 name = "tgui"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "bytemuck",
  "cosmic-text",
+ "log",
  "pollster",
  "taffy",
  "wgpu",

@@ -4,7 +4,7 @@ use taffy::prelude::{
     Style as TaffyStyle, TaffyTree,
 };
 use taffy::Size as TaffySize;
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::ElementState;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 use crate::animation::{AnimationEngine, WidgetProperty};
@@ -15,9 +15,9 @@ use crate::ui::layout::{Align, Axis, Insets, Justify, LayoutStyle, Wrap};
 use crate::ui::theme::Theme;
 
 use super::common::{
-    ComputedScene, ContainerKind, ContainerLayout, HitInteraction, HitRegion, LayoutNode,
-    MeasureContext, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, Value,
-    VisualStyle, WidgetId, WidgetKind,
+    ComputedScene, ContainerKind, ContainerLayout, HitInteraction, HitRegion, InteractionHandlers,
+    LayoutNode, MeasureContext, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive,
+    Value, VisualStyle, WidgetId, WidgetKind,
 };
 use super::text::Text;
 
@@ -25,6 +25,7 @@ pub struct Element<VM> {
     pub(crate) id: WidgetId,
     pub(crate) layout: LayoutStyle,
     pub(crate) visual: VisualStyle,
+    pub(crate) interactions: InteractionHandlers<VM>,
     pub(crate) background: Option<Value<Color>>,
     pub(crate) kind: WidgetKind<VM>,
 }
@@ -45,6 +46,56 @@ struct VisualContext {
 }
 
 impl<VM> Element<VM> {
+    pub fn border(
+        mut self,
+        width: impl Into<Value<f32>>,
+        color: impl Into<Value<Color>>,
+    ) -> Self {
+        self.visual.border_width = width.into();
+        self.visual.border_color = color.into();
+        self
+    }
+
+    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
+        self.visual.border_color = color.into();
+        self
+    }
+
+    pub fn border_radius(mut self, radius: impl Into<Value<f32>>) -> Self {
+        self.visual.border_radius = radius.into();
+        self
+    }
+
+    pub fn border_width(mut self, width: impl Into<Value<f32>>) -> Self {
+        self.visual.border_width = width.into();
+        self
+    }
+
+    pub fn on_click(mut self, command: Command<VM>) -> Self {
+        self.interactions.on_click = Some(command);
+        self
+    }
+
+    pub fn on_double_click(mut self, command: Command<VM>) -> Self {
+        self.interactions.on_double_click = Some(command);
+        self
+    }
+
+    pub fn on_mouse_enter(mut self, command: Command<VM>) -> Self {
+        self.interactions.on_mouse_enter = Some(command);
+        self
+    }
+
+    pub fn on_mouse_leave(mut self, command: Command<VM>) -> Self {
+        self.interactions.on_mouse_leave = Some(command);
+        self
+    }
+
+    pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
+        self.interactions.on_mouse_move = Some(command);
+        self
+    }
+
     fn measure_context(&self) -> MeasureContext {
         match &self.kind {
             WidgetKind::Container { .. } => MeasureContext::None,
@@ -167,12 +218,44 @@ impl<VM> Element<VM> {
             layout_frame.height,
         );
         let opacity = visual_context.opacity
-            * self.visual.opacity.resolve_widget(
+            * self.visual.opacity.resolve_widget_clamped(
                 context.animations,
                 self.id,
                 WidgetProperty::Opacity,
                 context.now,
+                0.0,
+                1.0,
             );
+        let border_width = self
+            .visual
+            .border_width
+            .resolve_widget(
+                context.animations,
+                self.id,
+                WidgetProperty::BorderWidth,
+                context.now,
+            )
+            .max(0.0);
+        let border_radius = self
+            .visual
+            .border_radius
+            .resolve_widget(
+                context.animations,
+                self.id,
+                WidgetProperty::BorderRadius,
+                context.now,
+            )
+            .max(0.0);
+        let border_color = self
+            .visual
+            .border_color
+            .resolve_widget(
+                context.animations,
+                self.id,
+                WidgetProperty::BorderColor,
+                context.now,
+            )
+            .with_alpha_factor(opacity);
 
         let background = match &self.kind {
             WidgetKind::Button { .. } => self
@@ -214,10 +297,35 @@ impl<VM> Element<VM> {
         }
         .with_alpha_factor(opacity);
 
-        if background.a > 0 {
+        let background_inset = border_width.min(frame.width * 0.5).min(frame.height * 0.5);
+        let background_frame = frame.inset(Insets::all(background_inset));
+        let background_radius = (border_radius - background_inset).max(0.0);
+
+        if background.a > 0 && background_frame.width > 0.0 && background_frame.height > 0.0 {
             computed.scene.shapes.push(RenderPrimitive {
-                rect: frame,
+                rect: background_frame,
                 color: background,
+                corner_radius: background_radius,
+                stroke_width: 0.0,
+            });
+        }
+
+        push_border_primitives(
+            &mut computed.scene,
+            frame,
+            border_width,
+            border_color,
+            border_radius,
+        );
+
+        if self.interactions.has_any() {
+            computed.hit_regions.push(HitRegion {
+                rect: frame,
+                interaction: HitInteraction::Widget {
+                    id: self.id,
+                    interactions: self.interactions.clone(),
+                    focusable: matches!(self.kind, WidgetKind::Button { .. }),
+                },
             });
         }
 
@@ -255,7 +363,7 @@ impl<VM> Element<VM> {
                     self.id,
                 );
             }
-            WidgetKind::Button { label, on_click } => {
+            WidgetKind::Button { label } => {
                 push_text_primitives(
                     label,
                     frame,
@@ -271,12 +379,6 @@ impl<VM> Element<VM> {
                     opacity,
                     self.id,
                 );
-                if let Some(command) = on_click.clone() {
-                    computed.hit_regions.push(HitRegion {
-                        rect: frame,
-                        interaction: HitInteraction::Command(command),
-                    });
-                }
             }
             WidgetKind::Input {
                 text,
@@ -311,6 +413,7 @@ impl<VM> Element<VM> {
                     rect: frame,
                     interaction: HitInteraction::FocusInput {
                         id: self.id,
+                        interactions: self.interactions.clone(),
                         on_change: on_change.clone(),
                         text: current_text,
                     },
@@ -515,22 +618,14 @@ fn push_text_primitives(
         .unwrap_or(theme.typography.font_size.max(1.0));
     let line_height = (font_size * 1.25).max(font_size + 4.0);
     let inner = frame.inset(padding);
-    let (measured_width, measured_height) = font_manager.measure_text(
+    let (measured_width, measured_height) = font_manager.measure_text_raw(
         &content,
         text_request.clone(),
         font_size,
         line_height,
         text.letter_spacing,
     );
-    let content_frame = Rect::new(
-        inner.x,
-        inner.y + ((inner.height - measured_height).max(0.0) * 0.5),
-        inner.width.min(measured_width).max(0.0),
-        inner
-            .height
-            .min(measured_height.max(line_height))
-            .max(line_height),
-    );
+    let content_frame = centered_text_frame(inner, measured_width, measured_height, line_height);
 
     scene.texts.push(TextPrimitive {
         content: content.clone(),
@@ -565,8 +660,53 @@ fn push_text_primitives(
                 content_frame.height.max(line_height),
             ),
             color: theme.palette.text.with_alpha_factor(opacity),
+            corner_radius: 0.0,
+            stroke_width: 0.0,
         });
     }
+}
+
+fn centered_text_frame(
+    inner: Rect,
+    measured_width: f32,
+    measured_height: f32,
+    line_height: f32,
+) -> Rect {
+    let content_height = inner
+        .height
+        .min(measured_height.max(line_height))
+        .max(line_height);
+
+    Rect::new(
+        inner.x,
+        inner.y + ((inner.height - content_height).max(0.0) * 0.5),
+        inner.width.min(measured_width).max(0.0),
+        content_height,
+    )
+}
+
+fn push_border_primitives(
+    scene: &mut ScenePrimitives,
+    frame: Rect,
+    border_width: f32,
+    border_color: Color,
+    border_radius: f32,
+) {
+    if border_color.a == 0 {
+        return;
+    }
+
+    let thickness = border_width.min(frame.width * 0.5).min(frame.height * 0.5).max(0.0);
+    if thickness <= 0.0 {
+        return;
+    }
+
+    scene.shapes.push(RenderPrimitive {
+        rect: frame,
+        color: border_color,
+        corner_radius: border_radius,
+        stroke_width: thickness,
+    });
 }
 
 pub struct WidgetTree<VM> {
@@ -641,99 +781,148 @@ impl<VM> WidgetTree<VM> {
             .scene
     }
 
-    pub(crate) fn handle_window_event(
+    fn hit_path_from_computed(
+        computed: &ComputedScene<VM>,
+        point: Point,
+    ) -> Vec<HitInteraction<VM>> {
+        let mut path = Vec::new();
+        let mut ids = Vec::new();
+
+        for hit in computed
+            .hit_regions
+            .iter()
+            .filter(|hit| hit.rect.contains(point))
+        {
+            let id = match &hit.interaction {
+                HitInteraction::Widget { id, .. } | HitInteraction::FocusInput { id, .. } => *id,
+            };
+
+            if let Some(index) = ids.iter().position(|existing| *existing == id) {
+                path[index] = hit.interaction.clone();
+            } else {
+                ids.push(id);
+                path.push(hit.interaction.clone());
+            }
+        }
+
+        path
+    }
+
+    pub(crate) fn hit_test(
         &self,
         font_manager: &FontManager,
         theme: &Theme,
         animations: &mut AnimationEngine,
         viewport: Rect,
-        event: &WindowEvent,
         cursor_position: Option<Point>,
+        focused_input: Option<WidgetId>,
+    ) -> Option<HitInteraction<VM>> {
+        self.hit_path(
+            font_manager,
+            theme,
+            animations,
+            viewport,
+            cursor_position,
+            focused_input,
+        )
+        .pop()
+    }
+
+    pub(crate) fn hit_path(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        animations: &mut AnimationEngine,
+        viewport: Rect,
+        cursor_position: Option<Point>,
+        focused_input: Option<WidgetId>,
+    ) -> Vec<HitInteraction<VM>> {
+        let Some(point) = cursor_position else {
+            return Vec::new();
+        };
+        let computed = self.compute_scene(font_manager, theme, animations, viewport, focused_input);
+        Self::hit_path_from_computed(&computed, point)
+    }
+
+    pub(crate) fn handle_keyboard_event(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        animations: &mut AnimationEngine,
+        viewport: Rect,
+        event: &winit::event::KeyEvent,
         focused_input: Option<WidgetId>,
     ) -> WidgetEventResult<VM> {
         let computed = self.compute_scene(font_manager, theme, animations, viewport, focused_input);
 
-        match event {
-            WindowEvent::MouseInput {
-                state: ElementState::Pressed,
-                button: MouseButton::Left,
-                ..
-            } => {
-                if let Some(point) = cursor_position {
-                    for hit in computed.hit_regions.iter().rev() {
-                        if hit.rect.contains(point) {
-                            return match &hit.interaction {
-                                HitInteraction::Command(command) => WidgetEventResult::new(
-                                    Some(WidgetCommand::Command(command.clone())),
-                                    None,
-                                    true,
-                                ),
-                                HitInteraction::FocusInput { id, .. } => {
-                                    WidgetEventResult::new(None, Some(*id), true)
-                                }
-                            };
-                        }
-                    }
-                }
-                WidgetEventResult::new(None, None, false)
+        if let Some(focused) = focused_input {
+            if event.state != ElementState::Pressed {
+                return WidgetEventResult::new(None, Some(focused), false);
             }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if let Some(focused) = focused_input {
-                    if event.state != ElementState::Pressed {
-                        return WidgetEventResult::new(None, Some(focused), false);
-                    }
 
-                    for hit in &computed.hit_regions {
-                        if let HitInteraction::FocusInput {
-                            id,
-                            on_change,
-                            text,
-                        } = &hit.interaction
-                        {
-                            if *id == focused {
-                                let on_change = match on_change.clone() {
-                                    Some(on_change) => on_change,
-                                    None => {
-                                        return WidgetEventResult::new(None, Some(focused), false);
-                                    }
-                                };
-                                let mut next_value = text.clone();
-                                if matches!(
-                                    event.physical_key,
-                                    PhysicalKey::Code(KeyCode::Backspace)
-                                ) {
-                                    next_value.pop();
-                                    return WidgetEventResult::new(
-                                        Some(WidgetCommand::Value(on_change, next_value)),
-                                        Some(focused),
-                                        true,
-                                    );
-                                }
-
-                                if let Some(input) = event.text.as_ref() {
-                                    let appended = input
-                                        .chars()
-                                        .filter(|ch| !ch.is_control())
-                                        .collect::<String>();
-                                    if appended.is_empty() {
-                                        return WidgetEventResult::new(None, Some(focused), false);
-                                    }
-                                    next_value.push_str(&appended);
-                                    return WidgetEventResult::new(
-                                        Some(WidgetCommand::Value(on_change, next_value)),
-                                        Some(focused),
-                                        true,
-                                    );
-                                }
+            for hit in &computed.hit_regions {
+                if let HitInteraction::FocusInput {
+                    id,
+                    on_change,
+                    text,
+                    ..
+                } = &hit.interaction
+                {
+                    if *id == focused {
+                        let on_change = match on_change.clone() {
+                            Some(on_change) => on_change,
+                            None => {
+                                return WidgetEventResult::new(None, Some(focused), false);
                             }
+                        };
+                        let mut next_value = text.clone();
+                        if matches!(event.physical_key, PhysicalKey::Code(KeyCode::Backspace)) {
+                            next_value.pop();
+                            return WidgetEventResult::new(
+                                Some(WidgetCommand::Value(on_change, next_value)),
+                                Some(focused),
+                                true,
+                            );
+                        }
+
+                        if let Some(input) = event.text.as_ref() {
+                            let appended = input
+                                .chars()
+                                .filter(|ch| !ch.is_control())
+                                .collect::<String>();
+                            if appended.is_empty() {
+                                return WidgetEventResult::new(None, Some(focused), false);
+                            }
+                            next_value.push_str(&appended);
+                            return WidgetEventResult::new(
+                                Some(WidgetCommand::Value(on_change, next_value)),
+                                Some(focused),
+                                true,
+                            );
                         }
                     }
                 }
-
-                WidgetEventResult::new(None, focused_input, false)
             }
-            _ => WidgetEventResult::new(None, focused_input, false),
         }
+
+        WidgetEventResult::new(None, focused_input, false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::centered_text_frame;
+    use crate::ui::widget::common::Rect;
+
+    #[test]
+    fn centers_text_using_actual_render_height() {
+        let inner = Rect::new(12.0, 8.0, 180.0, 24.0);
+        let frame = centered_text_frame(inner, 56.0, 18.0, 18.0);
+
+        assert_eq!(frame.x, 12.0);
+        assert_eq!(frame.y, 11.0);
+        assert_eq!(frame.width, 56.0);
+        assert_eq!(frame.height, 18.0);
     }
 }
 

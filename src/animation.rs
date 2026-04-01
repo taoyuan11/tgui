@@ -87,6 +87,9 @@ impl Default for Transition {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum WidgetProperty {
     Background,
+    BorderColor,
+    BorderRadius,
+    BorderWidth,
     TextColor,
     Opacity,
     Offset,

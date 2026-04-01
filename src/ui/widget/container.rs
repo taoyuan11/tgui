@@ -1,8 +1,10 @@
 use crate::foundation::color::Color;
+use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::{Align, Axis, Insets, Justify, LayoutStyle, Wrap};
 
 use super::common::{
-    ContainerKind, ContainerLayout, Point, Value, VisualStyle, WidgetId, WidgetKind,
+    ContainerKind, ContainerLayout, InteractionHandlers, Point, Value, VisualStyle, WidgetId,
+    WidgetKind,
 };
 use super::core::Element;
 
@@ -46,6 +48,7 @@ impl<VM> Container<VM> {
                 id: WidgetId::next(),
                 layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
+                interactions: InteractionHandlers::default(),
                 background: None,
                 kind: WidgetKind::Container {
                     layout,
@@ -60,6 +63,31 @@ impl<VM> Container<VM> {
         self
     }
 
+    pub fn border(
+        mut self,
+        width: impl Into<Value<f32>>,
+        color: impl Into<Value<Color>>,
+    ) -> Self {
+        self.element.visual.border_width = width.into();
+        self.element.visual.border_color = color.into();
+        self
+    }
+
+    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
+        self.element.visual.border_color = color.into();
+        self
+    }
+
+    pub fn border_radius(mut self, radius: impl Into<Value<f32>>) -> Self {
+        self.element.visual.border_radius = radius.into();
+        self
+    }
+
+    pub fn border_width(mut self, width: impl Into<Value<f32>>) -> Self {
+        self.element.visual.border_width = width.into();
+        self
+    }
+
     pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
         self.element.visual.opacity = opacity.into();
         self
@@ -67,6 +95,31 @@ impl<VM> Container<VM> {
 
     pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
         self.element.visual.offset = offset.into();
+        self
+    }
+
+    pub fn on_click(mut self, command: Command<VM>) -> Self {
+        self.element.interactions.on_click = Some(command);
+        self
+    }
+
+    pub fn on_double_click(mut self, command: Command<VM>) -> Self {
+        self.element.interactions.on_double_click = Some(command);
+        self
+    }
+
+    pub fn on_mouse_enter(mut self, command: Command<VM>) -> Self {
+        self.element.interactions.on_mouse_enter = Some(command);
+        self
+    }
+
+    pub fn on_mouse_leave(mut self, command: Command<VM>) -> Self {
+        self.element.interactions.on_mouse_leave = Some(command);
+        self
+    }
+
+    pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
+        self.element.interactions.on_mouse_move = Some(command);
         self
     }
 
@@ -197,12 +250,52 @@ macro_rules! impl_layout_container {
                 Self(self.0.background(color))
             }
 
+            pub fn border(
+                self,
+                width: impl Into<Value<f32>>,
+                color: impl Into<Value<Color>>,
+            ) -> Self {
+                Self(self.0.border(width, color))
+            }
+
+            pub fn border_color(self, color: impl Into<Value<Color>>) -> Self {
+                Self(self.0.border_color(color))
+            }
+
+            pub fn border_radius(self, radius: impl Into<Value<f32>>) -> Self {
+                Self(self.0.border_radius(radius))
+            }
+
+            pub fn border_width(self, width: impl Into<Value<f32>>) -> Self {
+                Self(self.0.border_width(width))
+            }
+
             pub fn opacity(self, opacity: impl Into<Value<f32>>) -> Self {
                 Self(self.0.opacity(opacity))
             }
 
             pub fn offset(self, offset: impl Into<Value<Point>>) -> Self {
                 Self(self.0.offset(offset))
+            }
+
+            pub fn on_click(self, command: Command<VM>) -> Self {
+                Self(self.0.on_click(command))
+            }
+
+            pub fn on_double_click(self, command: Command<VM>) -> Self {
+                Self(self.0.on_double_click(command))
+            }
+
+            pub fn on_mouse_enter(self, command: Command<VM>) -> Self {
+                Self(self.0.on_mouse_enter(command))
+            }
+
+            pub fn on_mouse_leave(self, command: Command<VM>) -> Self {
+                Self(self.0.on_mouse_leave(command))
+            }
+
+            pub fn on_mouse_move(self, command: ValueCommand<VM, Point>) -> Self {
+                Self(self.0.on_mouse_move(command))
             }
 
             pub fn child(self, child: impl IntoChildren<VM>) -> Self {

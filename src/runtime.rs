@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::animation::{
     default_theme_transition, AnimationEngine, AnimationKey, Transition, WindowProperty,
@@ -19,8 +19,10 @@ use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::FontManager;
 use crate::ui::theme::{Theme, ThemeMode};
 use crate::ui::widget::{
-    Point, Rect, ScenePrimitives, WidgetCommand as UiCommand, WidgetId, WidgetTree,
+    HitInteraction, Point, Rect, ScenePrimitives, WidgetCommand as UiCommand, WidgetId, WidgetTree,
 };
+
+const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 
 pub struct Runtime {
     event_loop: EventLoop<()>,
@@ -175,6 +177,9 @@ struct BoundRuntimeHandler<VM> {
     animation_engine: AnimationEngine,
     animation_epoch: u64,
     cursor_position: Option<Point>,
+    hovered_widgets: Vec<HoveredWidget<VM>>,
+    pending_click: Option<PendingClick<VM>>,
+    focused_widget: Option<FocusedWidget<VM>>,
     focused_input: Option<WidgetId>,
     cached_scene: Option<CachedScene>,
     window: Option<Arc<Window>>,
@@ -188,6 +193,24 @@ struct CachedScene {
     focused_input: Option<WidgetId>,
     animation_epoch: u64,
     primitives: ScenePrimitives,
+}
+
+struct PendingClick<VM> {
+    widget_id: WidgetId,
+    deadline: Instant,
+    command: Option<Command<VM>>,
+}
+
+struct FocusedWidget<VM> {
+    widget_id: WidgetId,
+    on_blur: Option<Command<VM>>,
+}
+
+struct HoveredWidget<VM> {
+    widget_id: WidgetId,
+    on_mouse_enter: Option<Command<VM>>,
+    on_mouse_leave: Option<Command<VM>>,
+    on_mouse_move: Option<crate::foundation::view_model::ValueCommand<VM, Point>>,
 }
 
 impl<VM> BoundRuntimeHandler<VM> {
@@ -216,6 +239,9 @@ impl<VM> BoundRuntimeHandler<VM> {
             animation_engine: AnimationEngine::default(),
             animation_epoch: 0,
             cursor_position: None,
+            hovered_widgets: Vec::new(),
+            pending_click: None,
+            focused_widget: None,
             focused_input: None,
             cached_scene: None,
             window: None,
@@ -345,11 +371,13 @@ impl<VM> BoundRuntimeHandler<VM> {
     fn should_dispatch_widget_event(event: &WindowEvent) -> bool {
         matches!(
             event,
-            WindowEvent::MouseInput {
-                state: ElementState::Pressed,
-                button: MouseButton::Left,
-                ..
-            } | WindowEvent::KeyboardInput { .. }
+            WindowEvent::CursorMoved { .. }
+                | WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Left,
+                    ..
+                }
+                | WindowEvent::KeyboardInput { .. }
         )
     }
 
@@ -364,6 +392,8 @@ impl<VM> BoundRuntimeHandler<VM> {
     }
 
     fn drive_animations(&mut self, event_loop: &ActiveEventLoop, now: Instant) {
+        self.flush_pending_click_if_due(now);
+
         if self.animation_engine.refresh(now) {
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
             self.invalidate_scene();
@@ -372,7 +402,7 @@ impl<VM> BoundRuntimeHandler<VM> {
             }
         }
 
-        if let Some(deadline) = self.animation_engine.next_frame_deadline(now) {
+        if let Some(deadline) = self.next_deadline(now) {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
@@ -462,6 +492,232 @@ impl<VM> BoundRuntimeHandler<VM> {
     ) -> Color {
         self.animation_engine
             .resolve_color(AnimationKey::Window(property), target, transition, now)
+    }
+
+    fn next_deadline(&self, now: Instant) -> Option<Instant> {
+        let animation_deadline = self.animation_engine.next_frame_deadline(now);
+        let click_deadline = self.pending_click.as_ref().map(|pending| pending.deadline);
+        match (animation_deadline, click_deadline) {
+            (Some(left), Some(right)) => Some(left.min(right)),
+            (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+            (None, None) => None,
+        }
+    }
+
+    fn flush_pending_click_if_due(&mut self, now: Instant) {
+        let should_flush = self
+            .pending_click
+            .as_ref()
+            .map(|pending| pending.deadline <= now)
+            .unwrap_or(false);
+        if !should_flush {
+            return;
+        }
+
+        if let Some(pending) = self.pending_click.take() {
+            if let Some(command) = pending.command {
+                command.execute(&mut self.view_model);
+                self.invalidate_scene();
+                self.invalidation.mark_dirty();
+            }
+        }
+    }
+
+    fn hit_test(&mut self, viewport: Rect) -> Option<HitInteraction<VM>> {
+        self.widget_tree.as_ref()?.hit_test(
+            &self.font_manager,
+            &self.theme,
+            &mut self.animation_engine,
+            viewport,
+            self.cursor_position,
+            self.focused_input,
+        )
+    }
+
+    fn hover_path(&mut self, viewport: Rect) -> Vec<HoveredWidget<VM>> {
+        self.widget_tree
+            .as_ref()
+            .map(|tree| {
+                tree.hit_path(
+                    &self.font_manager,
+                    &self.theme,
+                    &mut self.animation_engine,
+                    viewport,
+                    self.cursor_position,
+                    self.focused_input,
+                )
+                .into_iter()
+                .map(|interaction| match interaction {
+                    HitInteraction::Widget {
+                        id, interactions, ..
+                    }
+                    | HitInteraction::FocusInput {
+                        id, interactions, ..
+                    } => HoveredWidget {
+                        widget_id: id,
+                        on_mouse_enter: interactions.on_mouse_enter,
+                        on_mouse_leave: interactions.on_mouse_leave,
+                        on_mouse_move: interactions.on_mouse_move,
+                    },
+                })
+                .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn handle_hover(&mut self, viewport: Rect) {
+        let cursor_position = self.cursor_position;
+        let next_hovered = self.hover_path(viewport);
+        let mut prefix_len = 0usize;
+        while prefix_len < self.hovered_widgets.len()
+            && prefix_len < next_hovered.len()
+            && self.hovered_widgets[prefix_len].widget_id == next_hovered[prefix_len].widget_id
+        {
+            prefix_len += 1;
+        }
+
+        let previous_hovered = std::mem::take(&mut self.hovered_widgets);
+        for previous in previous_hovered[prefix_len..].iter().rev() {
+            if let Some(command) = previous.on_mouse_leave.clone() {
+                command.execute(&mut self.view_model);
+                self.invalidate_scene();
+                self.invalidation.mark_dirty();
+            }
+        }
+
+        for hovered in next_hovered[prefix_len..].iter() {
+            if let Some(command) = hovered.on_mouse_enter.clone() {
+                command.execute(&mut self.view_model);
+                self.invalidate_scene();
+                self.invalidation.mark_dirty();
+            }
+        }
+
+        if let Some(position) = cursor_position {
+            for hovered in &next_hovered {
+                if let Some(command) = hovered.on_mouse_move.clone() {
+                    command.execute(&mut self.view_model, position);
+                    self.invalidate_scene();
+                    self.invalidation.mark_dirty();
+                }
+            }
+        }
+
+        self.hovered_widgets = next_hovered;
+    }
+
+    fn update_focus(
+        &mut self,
+        next_widget: Option<FocusedWidget<VM>>,
+        next_input: Option<WidgetId>,
+        on_focus: Option<Command<VM>>,
+    ) {
+        let current_id = self
+            .focused_widget
+            .as_ref()
+            .map(|focused| focused.widget_id);
+        let next_id = next_widget.as_ref().map(|focused| focused.widget_id);
+
+        if current_id == next_id {
+            self.focused_input = next_input;
+            return;
+        }
+
+        let mut fired_handler = false;
+        if let Some(previous) = self.focused_widget.take() {
+            if let Some(command) = previous.on_blur {
+                command.execute(&mut self.view_model);
+                fired_handler = true;
+            }
+        }
+
+        self.focused_widget = next_widget;
+        self.focused_input = next_input;
+
+        if let Some(command) = on_focus {
+            if next_id.is_some() {
+                command.execute(&mut self.view_model);
+                fired_handler = true;
+            }
+        }
+
+        if fired_handler {
+            self.invalidate_scene();
+            self.invalidation.mark_dirty();
+        }
+    }
+
+    fn handle_mouse_press(&mut self, viewport: Rect, now: Instant) {
+        self.flush_pending_click_if_due(now);
+
+        let hit = self.hit_test(viewport);
+        let Some(hit) = hit else {
+            self.update_focus(None, None, None);
+            self.pending_click = None;
+            return;
+        };
+
+        let (widget_id, interactions, focus_target, focus_input, focus_command) = match hit {
+            HitInteraction::Widget {
+                id,
+                interactions,
+                focusable,
+            } => (
+                id,
+                interactions.clone(),
+                focusable.then_some(id),
+                None,
+                focusable.then_some(interactions.on_focus.clone()).flatten(),
+            ),
+            HitInteraction::FocusInput {
+                id, interactions, ..
+            } => (
+                id,
+                interactions.clone(),
+                Some(id),
+                Some(id),
+                interactions.on_focus.clone(),
+            ),
+        };
+
+        self.update_focus(
+            focus_target.map(|id| FocusedWidget {
+                widget_id: id,
+                on_blur: interactions.on_blur.clone(),
+            }),
+            focus_input,
+            focus_command,
+        );
+
+        let is_double_click = self
+            .pending_click
+            .as_ref()
+            .map(|pending| pending.widget_id == widget_id && pending.deadline > now)
+            .unwrap_or(false);
+
+        if is_double_click {
+            self.pending_click = None;
+            if let Some(command) = interactions.on_double_click.or(interactions.on_click) {
+                command.execute(&mut self.view_model);
+                self.invalidate_scene();
+                self.invalidation.mark_dirty();
+            }
+            return;
+        }
+
+        if interactions.on_double_click.is_some() {
+            self.pending_click = Some(PendingClick {
+                widget_id,
+                deadline: now + DOUBLE_CLICK_THRESHOLD,
+                command: interactions.on_click,
+            });
+        } else if let Some(command) = interactions.on_click {
+            command.execute(&mut self.view_model);
+            self.invalidate_scene();
+            self.invalidation.mark_dirty();
+        } else {
+            self.pending_click = None;
+        }
     }
 }
 
@@ -632,41 +888,74 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
             });
         }
 
-        if Self::should_dispatch_widget_event(&event) {
-            if let Some(tree) = self.widget_tree.as_ref() {
-                let previous_focus = self.focused_input;
-                let viewport = self.viewport_rect();
-                let widget_result = tree.handle_window_event(
-                    &self.font_manager,
-                    &self.theme,
-                    &mut self.animation_engine,
-                    viewport,
-                    &event,
-                    self.cursor_position,
-                    self.focused_input,
-                );
-
-                self.focused_input = widget_result.focus;
-                if self.focused_input != previous_focus {
-                    self.invalidate_scene();
-                }
-
-                if let Some(command) = widget_result.command {
-                    match command {
-                        UiCommand::Command(command) => command.execute(&mut self.view_model),
-                        UiCommand::Value(command, value) => {
-                            command.execute(&mut self.view_model, value)
-                        }
-                    }
+        if matches!(event, WindowEvent::CursorLeft { .. }) {
+            self.cursor_position = None;
+            for hovered in std::mem::take(&mut self.hovered_widgets).into_iter().rev() {
+                if let Some(command) = hovered.on_mouse_leave {
+                    command.execute(&mut self.view_model);
                     self.invalidate_scene();
                     self.invalidation.mark_dirty();
                 }
+            }
+        }
 
-                if widget_result.request_redraw {
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
+        if Self::should_dispatch_widget_event(&event) {
+            let viewport = self.viewport_rect();
+            let previous_focus = self.focused_input;
+
+            match &event {
+                WindowEvent::CursorMoved { .. } => {
+                    self.handle_hover(viewport);
+                }
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    self.handle_mouse_press(viewport, Instant::now());
+                }
+                WindowEvent::KeyboardInput { event, .. } => {
+                    if let Some(tree) = self.widget_tree.as_ref() {
+                        let widget_result = tree.handle_keyboard_event(
+                            &self.font_manager,
+                            &self.theme,
+                            &mut self.animation_engine,
+                            viewport,
+                            event,
+                            self.focused_input,
+                        );
+
+                        self.focused_input = widget_result.focus;
+
+                        if let Some(command) = widget_result.command {
+                            match command {
+                                UiCommand::Command(command) => {
+                                    command.execute(&mut self.view_model)
+                                }
+                                UiCommand::Value(command, value) => {
+                                    command.execute(&mut self.view_model, value)
+                                }
+                            }
+                            self.invalidate_scene();
+                            self.invalidation.mark_dirty();
+                        }
+
+                        if widget_result.request_redraw {
+                            if let Some(window) = self.window.as_ref() {
+                                window.request_redraw();
+                            }
+                        }
                     }
                 }
+                _ => {}
+            }
+
+            if self.focused_input != previous_focus {
+                self.invalidate_scene();
+            }
+
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
             }
         }
 

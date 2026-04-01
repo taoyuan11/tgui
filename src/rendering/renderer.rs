@@ -631,6 +631,10 @@ fn blend_pixel(pixels: &mut [u8], width: u32, x: u32, y: u32, src: [u8; 4]) {
 struct RectVertex {
     position: [f32; 2],
     color: [f32; 4],
+    local_position: [f32; 2],
+    rect_size: [f32; 2],
+    corner_radius: f32,
+    stroke_width: f32,
 }
 
 impl RectVertex {
@@ -648,6 +652,36 @@ impl RectVertex {
                     format: wgpu::VertexFormat::Float32x4,
                     offset: std::mem::size_of::<[f32; 2]>() as u64,
                     shader_location: 1,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: (std::mem::size_of::<[f32; 2]>()
+                        + std::mem::size_of::<[f32; 4]>()) as u64,
+                    shader_location: 2,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: (std::mem::size_of::<[f32; 2]>()
+                        + std::mem::size_of::<[f32; 4]>()
+                        + std::mem::size_of::<[f32; 2]>()) as u64,
+                    shader_location: 3,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32,
+                    offset: (std::mem::size_of::<[f32; 2]>()
+                        + std::mem::size_of::<[f32; 4]>()
+                        + std::mem::size_of::<[f32; 2]>()
+                        + std::mem::size_of::<[f32; 2]>()) as u64,
+                    shader_location: 4,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32,
+                    offset: (std::mem::size_of::<[f32; 2]>()
+                        + std::mem::size_of::<[f32; 4]>()
+                        + std::mem::size_of::<[f32; 2]>()
+                        + std::mem::size_of::<[f32; 2]>()
+                        + std::mem::size_of::<f32>()) as u64,
+                    shader_location: 5,
                 },
             ],
         }
@@ -667,31 +701,66 @@ impl RectVertex {
                 primitive.color.b as f32 / 255.0,
                 primitive.color.a as f32 / 255.0,
             ];
+            let rect_size = [primitive.rect.width.max(0.0), primitive.rect.height.max(0.0)];
+            let radius = primitive
+                .corner_radius
+                .max(0.0)
+                .min(rect_size[0] * 0.5)
+                .min(rect_size[1] * 0.5);
+            let stroke_width = primitive
+                .stroke_width
+                .max(0.0)
+                .min(rect_size[0] * 0.5)
+                .min(rect_size[1] * 0.5);
 
             vertices.extend_from_slice(&[
                 Self {
                     position: [x0, y0],
                     color,
+                    local_position: [0.0, 0.0],
+                    rect_size,
+                    corner_radius: radius,
+                    stroke_width,
                 },
                 Self {
                     position: [x1, y0],
                     color,
+                    local_position: [rect_size[0], 0.0],
+                    rect_size,
+                    corner_radius: radius,
+                    stroke_width,
                 },
                 Self {
                     position: [x1, y1],
                     color,
+                    local_position: [rect_size[0], rect_size[1]],
+                    rect_size,
+                    corner_radius: radius,
+                    stroke_width,
                 },
                 Self {
                     position: [x0, y0],
                     color,
+                    local_position: [0.0, 0.0],
+                    rect_size,
+                    corner_radius: radius,
+                    stroke_width,
                 },
                 Self {
                     position: [x1, y1],
                     color,
+                    local_position: [rect_size[0], rect_size[1]],
+                    rect_size,
+                    corner_radius: radius,
+                    stroke_width,
                 },
                 Self {
                     position: [x0, y1],
                     color,
+                    local_position: [0.0, rect_size[1]],
+                    rect_size,
+                    corner_radius: radius,
+                    stroke_width,
                 },
             ]);
         }

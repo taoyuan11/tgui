@@ -1,8 +1,9 @@
 use crate::foundation::color::Color;
+use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
 use crate::ui::layout::{Insets, LayoutStyle};
 
-use super::common::{Point, Value, VisualStyle, WidgetId, WidgetKind};
+use super::common::{InteractionHandlers, Point, Value, VisualStyle, WidgetId, WidgetKind};
 use super::core::Element;
 
 #[derive(Clone)]
@@ -53,6 +54,31 @@ impl Text {
         self
     }
 
+    pub fn border(
+        mut self,
+        width: impl Into<Value<f32>>,
+        color: impl Into<Value<Color>>,
+    ) -> Self {
+        self.visual.border_width = width.into();
+        self.visual.border_color = color.into();
+        self
+    }
+
+    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
+        self.visual.border_color = color.into();
+        self
+    }
+
+    pub fn border_radius(mut self, radius: impl Into<Value<f32>>) -> Self {
+        self.visual.border_radius = radius.into();
+        self
+    }
+
+    pub fn border_width(mut self, width: impl Into<Value<f32>>) -> Self {
+        self.visual.border_width = width.into();
+        self
+    }
+
     pub fn color(mut self, color: impl Into<Value<Color>>) -> Self {
         self.color = Some(color.into());
         self
@@ -82,6 +108,58 @@ impl Text {
         self.visual.offset = offset.into();
         self
     }
+
+    pub fn on_click<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_interactions(InteractionHandlers {
+            on_click: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_double_click<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_interactions(InteractionHandlers {
+            on_double_click: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_mouse_enter<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_interactions(InteractionHandlers {
+            on_mouse_enter: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_mouse_leave<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_interactions(InteractionHandlers {
+            on_mouse_leave: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_mouse_move<VM>(self, command: ValueCommand<VM, Point>) -> Element<VM> {
+        self.into_element_with_interactions(InteractionHandlers {
+            on_mouse_move: Some(command),
+            ..Default::default()
+        })
+    }
+
+    fn into_element_with_interactions<VM>(
+        self,
+        interactions: InteractionHandlers<VM>,
+    ) -> Element<VM> {
+        let background = self.background.clone();
+        let layout = self.layout;
+        let visual = self.visual.clone();
+        Element {
+            id: WidgetId::next(),
+            layout,
+            visual,
+            interactions,
+            background,
+            kind: WidgetKind::Text { text: self },
+        }
+    }
 }
 
 impl<VM> From<Text> for Element<VM> {
@@ -93,6 +171,7 @@ impl<VM> From<Text> for Element<VM> {
             id: WidgetId::next(),
             layout,
             visual,
+            interactions: InteractionHandlers::default(),
             background,
             kind: WidgetKind::Text { text: value },
         }

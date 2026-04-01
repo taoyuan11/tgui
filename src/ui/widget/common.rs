@@ -72,6 +72,9 @@ impl Rect {
 
 #[derive(Clone)]
 pub struct VisualStyle {
+    pub border_color: Value<Color>,
+    pub border_radius: Value<f32>,
+    pub border_width: Value<f32>,
     pub opacity: Value<f32>,
     pub offset: Value<Point>,
 }
@@ -79,9 +82,62 @@ pub struct VisualStyle {
 impl Default for VisualStyle {
     fn default() -> Self {
         Self {
+            border_color: Value::Static(Color::TRANSPARENT),
+            border_radius: Value::Static(0.0),
+            border_width: Value::Static(0.0),
             opacity: Value::Static(1.0),
             offset: Value::Static(Point::ZERO),
         }
+    }
+}
+
+pub(crate) struct InteractionHandlers<VM> {
+    pub on_click: Option<Command<VM>>,
+    pub on_double_click: Option<Command<VM>>,
+    pub on_focus: Option<Command<VM>>,
+    pub on_blur: Option<Command<VM>>,
+    pub on_mouse_enter: Option<Command<VM>>,
+    pub on_mouse_leave: Option<Command<VM>>,
+    pub on_mouse_move: Option<ValueCommand<VM, Point>>,
+}
+
+impl<VM> Clone for InteractionHandlers<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            on_click: self.on_click.clone(),
+            on_double_click: self.on_double_click.clone(),
+            on_focus: self.on_focus.clone(),
+            on_blur: self.on_blur.clone(),
+            on_mouse_enter: self.on_mouse_enter.clone(),
+            on_mouse_leave: self.on_mouse_leave.clone(),
+            on_mouse_move: self.on_mouse_move.clone(),
+        }
+    }
+}
+
+impl<VM> Default for InteractionHandlers<VM> {
+    fn default() -> Self {
+        Self {
+            on_click: None,
+            on_double_click: None,
+            on_focus: None,
+            on_blur: None,
+            on_mouse_enter: None,
+            on_mouse_leave: None,
+            on_mouse_move: None,
+        }
+    }
+}
+
+impl<VM> InteractionHandlers<VM> {
+    pub(crate) fn has_any(&self) -> bool {
+        self.on_click.is_some()
+            || self.on_double_click.is_some()
+            || self.on_focus.is_some()
+            || self.on_blur.is_some()
+            || self.on_mouse_enter.is_some()
+            || self.on_mouse_leave.is_some()
+            || self.on_mouse_move.is_some()
     }
 }
 
@@ -152,10 +208,23 @@ impl Value<f32> {
                 id: widget_id.raw(),
                 property,
             },
-            self.resolve().clamp(0.0, 1.0),
+            self.resolve(),
             self.transition(),
             now,
         )
+    }
+
+    pub(crate) fn resolve_widget_clamped(
+        &self,
+        animations: &mut AnimationEngine,
+        widget_id: WidgetId,
+        property: WidgetProperty,
+        now: Instant,
+        min: f32,
+        max: f32,
+    ) -> f32 {
+        self.resolve_widget(animations, widget_id, property, now)
+            .clamp(min, max)
     }
 }
 
@@ -183,6 +252,8 @@ impl Value<Point> {
 pub struct RenderPrimitive {
     pub rect: Rect,
     pub color: Color,
+    pub corner_radius: f32,
+    pub stroke_width: f32,
 }
 
 #[derive(Clone)]
@@ -249,7 +320,6 @@ pub(crate) enum WidgetKind<VM> {
     },
     Button {
         label: Text,
-        on_click: Option<Command<VM>>,
     },
     Input {
         text: Text,
@@ -271,14 +341,45 @@ pub(crate) struct LayoutNode {
     pub children: Vec<LayoutNode>,
 }
 
-#[derive(Clone)]
 pub(crate) enum HitInteraction<VM> {
-    Command(Command<VM>),
+    Widget {
+        id: WidgetId,
+        interactions: InteractionHandlers<VM>,
+        focusable: bool,
+    },
     FocusInput {
         id: WidgetId,
+        interactions: InteractionHandlers<VM>,
         on_change: Option<ValueCommand<VM, String>>,
         text: String,
     },
+}
+
+impl<VM> Clone for HitInteraction<VM> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Widget {
+                id,
+                interactions,
+                focusable,
+            } => Self::Widget {
+                id: *id,
+                interactions: interactions.clone(),
+                focusable: *focusable,
+            },
+            Self::FocusInput {
+                id,
+                interactions,
+                on_change,
+                text,
+            } => Self::FocusInput {
+                id: *id,
+                interactions: interactions.clone(),
+                on_change: on_change.clone(),
+                text: text.clone(),
+            },
+        }
+    }
 }
 
 #[derive(Clone)]

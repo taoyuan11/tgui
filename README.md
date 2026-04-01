@@ -1,37 +1,76 @@
 # tgui
 
-`tgui` is a modern, GPU-accelerated Rust GUI framework built with `wgpu`, `cosmic-text`, and `taffy`.
+`tgui` is a modern, GPU-accelerated Rust GUI framework built on top of `wgpu`, `winit`, `cosmic-text`, and `taffy`.
 
-It currently provides:
-- A window/runtime layer based on `winit`
-- MVVM-style state, bindings, and commands
-- A widget tree with `Row`, `Column`, `Grid`, `Flex`, and `Stack`
-- Text rendering with custom font registration and fallback
+It is designed around a small MVVM-style API:
+
+- `Application` for window and runtime setup
+- `Observable<T>` / `Binding<T>` for reactive state
+- `Command` / `ValueCommand` for ViewModel actions
+- a compact widget tree made of `Text`, `Button`, `Input`, and layout containers
 
 ## Status
 
 This project is under active development.
 
-- The architecture is usable for demos and local tools.
-- APIs may still change while milestones continue.
+- The runtime, MVVM flow, rendering, layout, and core widgets are usable today.
+- The API is still evolving, especially around styling, rendering quality, and higher-level widgets.
 
-## Features
+## Current Features
 
-- `Application` builder with window/theme/font configuration
-- `Observable<T>` and `Binding<T>` for reactive UI data flow
-- `Command` and `ValueCommand` for UI-to-ViewModel actions
-- `Text`, `Button`, `Input`, and layout container widgets
-- `Taffy` as the layout engine
-- `wgpu`-based rendering backend
+- `Application` builder with:
+  - window title and size
+  - custom fonts and default font
+  - fixed theme or bound `ThemeMode`
+  - bound window title and clear color
+  - global keyboard / mouse input bindings
+- MVVM primitives:
+  - `Observable<T>`
+  - `Binding<T>`
+  - `Command`
+  - `ValueCommand`
+  - `ViewModelContext`
+- Widgets:
+  - `Text`
+  - `Button`
+  - `Input`
+  - `Container`
+  - `Row`
+  - `Column`
+  - `Grid`
+  - `Flex`
+  - `Stack`
+- Layout powered by `taffy`
+- GPU rendering powered by `wgpu`
+- Text shaping and rasterization powered by `cosmic-text`
+- Public visual styling APIs:
+  - `background(...)`
+  - `border(...)`
+  - `border_width(...)`
+  - `border_color(...)`
+  - `border_radius(...)`
+  - `opacity(...)`
+  - `offset(...)`
+- Public interaction APIs:
+  - `on_click(...)`
+  - `on_double_click(...)`
+  - `on_mouse_enter(...)`
+  - `on_mouse_leave(...)`
+  - `on_mouse_move(...)`
+  - `on_focus(...)` / `on_blur(...)` on `Button` and `Input`
+- Declarative transitions for bound visual values:
+  - `binding.animated(Transition::ease_out(...))`
+  - built-in interpolation for `Color`, `f32`, and `Point`
+- Runtime theme transitions when switching `ThemeMode`
 
 ## Installation
 
 ```toml
 [dependencies]
-tgui = "0.0.1"
+tgui = "0.0.3"
 ```
 
-or
+or use the repository directly:
 
 ```toml
 [dependencies]
@@ -40,7 +79,7 @@ tgui = { git = "https://github.com/nandebishitaoyuan/tgui.git" }
 
 ## Quick Start
 
-### 1. Basic Window
+### Basic Window
 
 ```rust
 use tgui::Application;
@@ -53,16 +92,18 @@ fn main() -> Result<(), tgui::TguiError> {
 }
 ```
 
-### 2. MVVM + Widget Tree
+### MVVM + Widget Tree
 
 ```rust
-use tgui::{Application, Binding, Column, Insets, Text, ViewModelContext};
+use tgui::{
+    Application, Binding, Button, Column, Command, Insets, Text, ViewModelContext,
+};
 
-struct DemoVm {
+struct CounterVm {
     count: tgui::Observable<u32>,
 }
 
-impl DemoVm {
+impl CounterVm {
     fn new(ctx: &ViewModelContext) -> Self {
         Self {
             count: ctx.observable(0),
@@ -70,49 +111,165 @@ impl DemoVm {
     }
 
     fn title(&self) -> Binding<String> {
-        self.count.binding().map(|n| format!("count: {n}"))
+        self.count
+            .binding()
+            .map(|count| format!("count: {count}"))
+    }
+
+    fn increment(&mut self) {
+        self.count.update(|count| *count += 1);
     }
 
     fn view(&self) -> tgui::Element<Self> {
         Column::new()
             .padding(Insets::all(24.0))
-            .child(Text::new(self.count.binding().map(|n| format!("Clicks: {n}"))))
+            .gap(12.0)
+            .child(Text::new(
+                self.count
+                    .binding()
+                    .map(|count| format!("Clicks: {count}")),
+            ))
+            .child(
+                Button::new(Text::new("Increment"))
+                    .on_click(Command::new(Self::increment)),
+            )
             .into()
     }
 }
 
 fn main() -> Result<(), tgui::TguiError> {
     Application::new()
-        .with_view_model(DemoVm::new)
-        .bind_title(DemoVm::title)
-        .root_view(DemoVm::view)
+        .with_view_model(CounterVm::new)
+        .bind_title(CounterVm::title)
+        .root_view(CounterVm::view)
         .run()
 }
 ```
 
-## Fonts
+## Declarative Animation
 
-Register custom fonts and optionally set a default font:
+Bindings can opt into transitions directly:
+
+```rust
+use std::time::Duration;
+use tgui::{Color, Point, Transition};
+
+let color = expanded
+    .binding()
+    .map(|value| {
+        if value {
+            Color::hexa(0x2563EBFF)
+        } else {
+            Color::hexa(0xF97316FF)
+        }
+    })
+    .animated(Transition::ease_out(Duration::from_millis(240)));
+
+let offset = expanded
+    .binding()
+    .map(|value| {
+        if value {
+            Point { x: 0.0, y: 0.0 }
+        } else {
+            Point { x: 0.0, y: 24.0 }
+        }
+    })
+    .animated(Transition::ease_in_out(Duration::from_millis(260)));
+```
+
+Animated bindings work with:
+
+- widget background color
+- widget border color / width / radius
+- text color
+- opacity
+- offset
+- bound window clear color
+
+## Styling and Interaction
+
+All core widgets and layout containers support the same style-oriented builder pattern:
+
+```rust
+use tgui::{Color, Command, Point, Stack, ValueCommand};
+
+let card = Stack::new()
+    .size(200.0, 200.0)
+    .background(Color::rgb(255, 255, 255))
+    .border(2.0, Color::rgb(0, 0, 0))
+    .border_radius(24.0)
+    .opacity(0.96)
+    .offset(Point { x: 0.0, y: 8.0 })
+    .on_click(Command::new(|_| {}))
+    .on_mouse_move(ValueCommand::new(|_, point| {
+        let _ = (point.x, point.y);
+    }));
+```
+
+Mouse interaction APIs are available on layout widgets as well, not only on buttons.
+
+## Themes and Fonts
+
+Set a fixed theme:
+
+```rust
+use tgui::{Application, Theme};
+
+Application::new().theme(Theme::dark());
+```
+
+Or bind the theme mode from the ViewModel:
+
+```rust
+use tgui::{Application, ThemeMode};
+
+Application::new()
+    .with_view_model(App::new)
+    .bind_theme_mode(App::theme_mode)
+    .root_view(App::view);
+```
+
+Theme transitions are animated by the runtime when the bound `ThemeMode` changes.
+
+Register custom fonts and optionally choose a default font:
 
 ```rust
 Application::new()
-    .font("icon", include_bytes!("./assets/icon-font.ttf"))
-    .default_font("JetBrains Mono");
+    .font("ui", include_bytes!("./assets/YourFont.ttf"))
+    .default_font("ui");
 ```
 
-Use a specific font on a text widget:
+Use a specific font on a `Text` widget:
 
 ```rust
-Text::new("Hello").font("JetBrains Mono")
+use tgui::Text;
+
+let title = Text::new("Hello tgui")
+    .font("ui")
+    .font_size(24.0);
 ```
 
-## Run Examples
+## Examples
+
+Available examples in this repository:
+
+- `basic_window`
+- `mvvm_counter`
+- `animation_showcase`
+- `theme`
+- `input`
+- `layout`
+- `layout_theme_showcase`
+- `widgets_showcase`
+
+Run them with:
 
 ```bash
 cargo run --example basic_window
 cargo run --example mvvm_counter
-cargo run --example widgets_showcase
-cargo run --example layout_theme_showcase
+cargo run --example animation_showcase
+cargo run --example theme
+cargo run --example input
 ```
 
 ## Development
@@ -121,14 +278,16 @@ cargo run --example layout_theme_showcase
 cargo fmt
 cargo check
 cargo check --examples
+cargo test
 ```
 
 ## Current Limitations
 
-- Text rendering is still evolving and may receive further performance improvements.
-- APIs are not frozen yet and may change between milestones.
+- The widget set is still intentionally small.
+- Animations currently focus on visual properties; layout animation and enter / exit animation are not implemented yet.
+- Rendering and styling quality are improving quickly, so visual details may still change between releases.
+- Public APIs are not frozen yet.
 
 ## License
 
-Dual-licensed under:
-- MIT
+MIT

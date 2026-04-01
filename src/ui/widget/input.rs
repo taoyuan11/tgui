@@ -1,8 +1,8 @@
 use crate::foundation::color::Color;
-use crate::foundation::view_model::ValueCommand;
+use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::{Insets, LayoutStyle};
 
-use super::common::{Point, Value, VisualStyle, WidgetId, WidgetKind};
+use super::common::{InteractionHandlers, Point, Value, VisualStyle, WidgetId, WidgetKind};
 use super::core::Element;
 use super::text::Text;
 
@@ -20,6 +20,7 @@ impl<VM> Input<VM> {
                     ..LayoutStyle::default()
                 },
                 visual: VisualStyle::default(),
+                interactions: InteractionHandlers::default(),
                 background: None,
                 kind: WidgetKind::Input {
                     text,
@@ -112,6 +113,31 @@ impl<VM> Input<VM> {
         self
     }
 
+    pub fn border(
+        mut self,
+        width: impl Into<Value<f32>>,
+        color: impl Into<Value<Color>>,
+    ) -> Self {
+        self.element.visual.border_width = width.into();
+        self.element.visual.border_color = color.into();
+        self
+    }
+
+    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
+        self.element.visual.border_color = color.into();
+        self
+    }
+
+    pub fn border_radius(mut self, radius: impl Into<Value<f32>>) -> Self {
+        self.element.visual.border_radius = radius.into();
+        self
+    }
+
+    pub fn border_width(mut self, width: impl Into<Value<f32>>) -> Self {
+        self.element.visual.border_width = width.into();
+        self
+    }
+
     pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
         self.element.visual.opacity = opacity.into();
         self
@@ -126,6 +152,41 @@ impl<VM> Input<VM> {
         if let WidgetKind::Input { on_change, .. } = &mut self.element.kind {
             *on_change = Some(command);
         }
+        self
+    }
+
+    pub fn on_click(mut self, command: Command<VM>) -> Self {
+        self.element.interactions.on_click = Some(command);
+        self
+    }
+
+    pub fn on_double_click(mut self, command: Command<VM>) -> Self {
+        self.element.interactions.on_double_click = Some(command);
+        self
+    }
+
+    pub fn on_focus(mut self, command: Command<VM>) -> Self {
+        self.element.interactions.on_focus = Some(command);
+        self
+    }
+
+    pub fn on_blur(mut self, command: Command<VM>) -> Self {
+        self.element.interactions.on_blur = Some(command);
+        self
+    }
+
+    pub fn on_mouse_enter(mut self, command: Command<VM>) -> Self {
+        self.element.interactions.on_mouse_enter = Some(command);
+        self
+    }
+
+    pub fn on_mouse_leave(mut self, command: Command<VM>) -> Self {
+        self.element.interactions.on_mouse_leave = Some(command);
+        self
+    }
+
+    pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
+        self.element.interactions.on_mouse_move = Some(command);
         self
     }
 }
