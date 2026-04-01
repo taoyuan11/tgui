@@ -1,6 +1,7 @@
 use winit::dpi::LogicalSize;
 
 use crate::foundation::binding::{Binding, InvalidationSignal, ViewModelContext};
+use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, ViewModel};
@@ -14,7 +15,7 @@ pub struct Application {
     title: String,
     width: u32,
     height: u32,
-    clear_color: wgpu::Color,
+    clear_color: Color,
     fonts: FontCatalog,
     theme: Theme,
 }
@@ -25,12 +26,7 @@ impl Application {
             title: "tgui".to_string(),
             width: 800,
             height: 600,
-            clear_color: wgpu::Color {
-                r: 0.08,
-                g: 0.09,
-                b: 0.11,
-                a: 1.0,
-            },
+            clear_color: Color::hexa(0x14171CFF),
             fonts: FontCatalog::default(),
             theme: Theme::default(),
         }
@@ -47,7 +43,7 @@ impl Application {
         self
     }
 
-    pub fn clear_color(mut self, clear_color: wgpu::Color) -> Self {
+    pub fn clear_color(mut self, clear_color: Color) -> Self {
         self.clear_color = clear_color;
         self
     }
@@ -100,7 +96,7 @@ impl Default for Application {
 pub(crate) struct ApplicationConfig {
     pub(crate) title: String,
     pub(crate) size: LogicalSize<f64>,
-    pub(crate) clear_color: wgpu::Color,
+    pub(crate) clear_color: Color,
     pub(crate) fonts: FontCatalog,
 }
 
@@ -112,7 +108,7 @@ where
     app: Application,
     factory: F,
     title_binding: Option<Box<dyn Fn(&VM) -> Binding<String> + Send + Sync>>,
-    clear_color_binding: Option<Box<dyn Fn(&VM) -> Binding<wgpu::Color> + Send + Sync>>,
+    clear_color_binding: Option<Box<dyn Fn(&VM) -> Binding<Color> + Send + Sync>>,
     root_view: Option<Box<dyn Fn(&VM) -> Element<VM> + Send + Sync>>,
     commands: Vec<WindowCommand<VM>>,
 }
@@ -143,7 +139,7 @@ where
 
     pub fn bind_clear_color(
         mut self,
-        binding: impl Fn(&VM) -> Binding<wgpu::Color> + Send + Sync + 'static,
+        binding: impl Fn(&VM) -> Binding<Color> + Send + Sync + 'static,
     ) -> Self {
         self.clear_color_binding = Some(Box::new(binding));
         self

@@ -1,4 +1,4 @@
-use tgui::{Application, Binding, Column, FontWeight, Insets, Text, ViewModelContext};
+use tgui::{Application, Binding, Color, Column, FontWeight, Insets, Text, ViewModelContext};
 
 struct WidgetDemoViewModel {
     clicks: tgui::Observable<u32>,
@@ -31,18 +31,13 @@ impl WidgetDemoViewModel {
             .binding()
             .map(|count| format!("点我点我: {count}"));
 
-        let background = wgpu::Color {
-            r: 0.0,
-            g: 0.0,
-            b: 0.0,
-            a: 1.0,
-        };
+        let background = Color::BLACK;
 
         Column::new()
             .padding(Insets::all(24.0))
             .gap(20.0)
             .child(
-                Text::new('\u{e88a}'.to_string())
+                Text::new("\u{e88a}".to_string())
                     .font("icon")
                     .font_size(20.0)
                     .background(background)

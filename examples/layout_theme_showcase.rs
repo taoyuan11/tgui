@@ -1,34 +1,14 @@
 use tgui::{
-    Align, Application, Axis, Button, Column, Flex, FontWeight, Grid, Insets, Justify, Row, Stack,
-    Text, Theme, Wrap,
+    Align, Application, Axis, Button, Color, Column, Flex, FontWeight, Grid, Insets, Justify,
+    Row, Stack, Text, Theme, Wrap,
 };
 
 fn main() -> Result<(), tgui::TguiError> {
     let mut theme = Theme::default();
-    theme.palette.window_background = wgpu::Color {
-        r: 0.06,
-        g: 0.08,
-        b: 0.10,
-        a: 0.0,
-    };
-    theme.palette.surface = wgpu::Color {
-        r: 0.12,
-        g: 0.15,
-        b: 0.18,
-        a: 1.0,
-    };
-    theme.palette.surface_muted = wgpu::Color {
-        r: 0.17,
-        g: 0.20,
-        b: 0.25,
-        a: 1.0,
-    };
-    theme.palette.accent = wgpu::Color {
-        r: 0.13,
-        g: 0.49,
-        b: 0.58,
-        a: 1.0,
-    };
+    theme.palette.window_background = Color::hexa(0x0F141A00);
+    theme.palette.surface = Color::hex(0x1F262E);
+    theme.palette.surface_muted = Color::hex(0x2B3340);
+    theme.palette.accent = Color::hex(0x217D94);
     theme.typography.font_size = 17.0;
 
     Application::new()
@@ -39,24 +19,14 @@ fn main() -> Result<(), tgui::TguiError> {
             Column::new()
                 .align(Align::Center)
                 .fill_size()
-                .background(wgpu::Color {
-                    r: 1.0,
-                    g: 0.12,
-                    b: 0.15,
-                    a: 1.0,
-                })
+                .background(Color::hex(0xFF1F26))
                 .padding(Insets::all(20.0))
                 .gap(16.0)
                 .child(
                     Text::new("Milestone 4 Layout + Theme".to_string())
                         .font_size(22.0)
                         .font_weight(FontWeight::SEMIBOLD)
-                        .background(wgpu::Color {
-                            r: 0.16,
-                            g: 0.20,
-                            b: 0.25,
-                            a: 1.0,
-                        }),
+                        .background(Color::hex(0x293340)),
                 )
                 .child(
                     Row::new()
@@ -74,23 +44,13 @@ fn main() -> Result<(), tgui::TguiError> {
                         .child(
                             Button::new(Text::new("Secondary".to_string()).font_size(18.0))
                             .grow(1.0)
-                            .background(wgpu::Color {
-                                r: 0.28,
-                                g: 0.36,
-                                b: 0.46,
-                                a: 1.0,
-                            }),
+                            .background(Color::hex(0x475C75)),
                         )
                         .child(
                             Stack::new()
                                 .width(220.0)
                                 .height(96.0)
-                                .background(wgpu::Color {
-                                    r: 0.21,
-                                    g: 0.17,
-                                    b: 0.13,
-                                    a: 1.0,
-                                })
+                                .background(Color::hex(0x362B21))
                                 .align(Align::Center)
                                 .child(
                                     Text::new("Stack".to_string())
@@ -133,12 +93,7 @@ fn main() -> Result<(), tgui::TguiError> {
 fn card(label: &str) -> tgui::Element<()> {
     Stack::new()
         .height(88.0)
-        .background(wgpu::Color {
-            r: 0.16,
-            g: 0.18,
-            b: 0.23,
-            a: 1.0,
-        })
+        .background(Color::hex(0x29303B))
         .align(Align::Center)
         .justify(Justify::Center)
         .child(Text::new(label.to_string()).font_weight(FontWeight::MEDIUM))
@@ -148,11 +103,6 @@ fn card(label: &str) -> tgui::Element<()> {
 fn chip(label: &str) -> tgui::Element<()> {
     Button::new(Text::new(label.to_string()).font_size(15.0))
     .size(128.0, 42.0)
-    .background(wgpu::Color {
-        r: 0.26,
-        g: 0.22,
-        b: 0.16,
-        a: 1.0,
-    })
+    .background(Color::hex(0x423828))
     .into()
 }

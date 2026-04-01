@@ -1,3 +1,5 @@
+use crate::foundation::color::Color;
+
 #[derive(Clone, Debug)]
 pub struct Theme {
     pub palette: Palette,
@@ -17,60 +19,25 @@ impl Default for Theme {
 
 #[derive(Clone, Debug)]
 pub struct Palette {
-    pub window_background: wgpu::Color,
-    pub surface: wgpu::Color,
-    pub surface_muted: wgpu::Color,
-    pub accent: wgpu::Color,
-    pub text: wgpu::Color,
-    pub text_muted: wgpu::Color,
-    pub input_background: wgpu::Color,
+    pub window_background: Color,
+    pub surface: Color,
+    pub surface_muted: Color,
+    pub accent: Color,
+    pub text: Color,
+    pub text_muted: Color,
+    pub input_background: Color,
 }
 
 impl Default for Palette {
     fn default() -> Self {
         Self {
-            window_background: wgpu::Color {
-                r: 0.08,
-                g: 0.09,
-                b: 0.11,
-                a: 1.0,
-            },
-            surface: wgpu::Color {
-                r: 0.14,
-                g: 0.16,
-                b: 0.20,
-                a: 1.0,
-            },
-            surface_muted: wgpu::Color {
-                r: 0.18,
-                g: 0.20,
-                b: 0.25,
-                a: 1.0,
-            },
-            accent: wgpu::Color {
-                r: 0.18,
-                g: 0.34,
-                b: 0.62,
-                a: 0.92,
-            },
-            text: wgpu::Color {
-                r: 0.94,
-                g: 0.95,
-                b: 0.97,
-                a: 1.0,
-            },
-            text_muted: wgpu::Color {
-                r: 0.73,
-                g: 0.76,
-                b: 0.81,
-                a: 0.85,
-            },
-            input_background: wgpu::Color {
-                r: 0.15,
-                g: 0.16,
-                b: 0.20,
-                a: 0.96,
-            },
+            window_background: Color::hexa(0x14171CFF),
+            surface: Color::hexa(0x242933FF),
+            surface_muted: Color::hexa(0x2E3340FF),
+            accent: Color::hexa(0x2E579EEB),
+            text: Color::hexa(0xF0F2F7FF),
+            text_muted: Color::hexa(0xBAC2CFD9),
+            input_background: Color::hexa(0x262933F5),
         }
     }
 }

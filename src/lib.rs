@@ -7,6 +7,7 @@ mod ui;
 
 pub use application::Application;
 pub use foundation::binding::{Binding, Observable, ViewModelContext};
+pub use foundation::color::Color;
 pub use foundation::error::TguiError;
 pub use foundation::event::InputTrigger;
 pub use foundation::view_model::{Command, ValueCommand, ViewModel};

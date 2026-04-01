@@ -7,6 +7,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::application::ApplicationConfig;
 use crate::foundation::binding::{Binding, InvalidationSignal};
+use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, ViewModel};
@@ -99,7 +100,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
 #[derive(Default)]
 pub struct WindowBindings {
     pub(crate) title: Option<Binding<String>>,
-    pub(crate) clear_color: Option<Binding<wgpu::Color>>,
+    pub(crate) clear_color: Option<Binding<Color>>,
 }
 
 pub struct WindowCommand<VM> {

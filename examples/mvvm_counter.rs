@@ -1,4 +1,4 @@
-use tgui::{Application, Command, InputTrigger, ViewModelContext};
+use tgui::{Application, Color, Command, InputTrigger, ViewModelContext};
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
@@ -19,15 +19,14 @@ impl CounterViewModel {
             .map(|count| format!("tgui mvvm counter - clicks: {count}"))
     }
 
-    fn clear_color(&self) -> tgui::Binding<wgpu::Color> {
+    fn clear_color(&self) -> tgui::Binding<Color> {
         self.clicks.binding().map(|count| {
-            let phase = (count % 6) as f64;
-            wgpu::Color {
-                r: 0.08 + phase * 0.07,
-                g: 0.12 + phase * 0.04,
-                b: 0.18 + phase * 0.03,
-                a: 1.0,
-            }
+            let phase = (count % 6) as u8;
+            Color::rgb(
+                20 + phase * 18,
+                31 + phase * 10,
+                46 + phase * 8,
+            )
         })
     }
 

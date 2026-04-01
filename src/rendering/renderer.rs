@@ -6,6 +6,7 @@ use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
+use crate::foundation::color::Color as TguiColor;
 use crate::foundation::error::TguiError;
 use crate::text::font::{FontCatalog, FontWeight};
 use crate::ui::widget::{RenderPrimitive, ScenePrimitives, TextPrimitive};
@@ -26,7 +27,7 @@ pub struct Renderer {
     text_bind_group_layout: wgpu::BindGroupLayout,
     text_sampler: wgpu::Sampler,
     size: PhysicalSize<u32>,
-    clear_color: wgpu::Color,
+    clear_color: TguiColor,
     text_system: TextSystem,
     text_cache: Vec<TextCacheEntry>,
 }
@@ -63,7 +64,7 @@ struct TextCacheKey {
 impl Renderer {
     pub fn new(
         window: Arc<Window>,
-        clear_color: wgpu::Color,
+        clear_color: TguiColor,
         fonts: &FontCatalog,
     ) -> Result<Self, TguiError> {
         pollster::block_on(Self::new_async(window, clear_color, fonts))
@@ -71,7 +72,7 @@ impl Renderer {
 
     async fn new_async(
         window: Arc<Window>,
-        clear_color: wgpu::Color,
+        clear_color: TguiColor,
         fonts: &FontCatalog,
     ) -> Result<Self, TguiError> {
         let size = window.inner_size();
@@ -358,7 +359,7 @@ impl Renderer {
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.clear_color),
+                        load: wgpu::LoadOp::Clear(self.clear_color.into()),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -397,7 +398,7 @@ impl Renderer {
         Ok(RenderStatus::Rendered)
     }
 
-    pub fn set_clear_color(&mut self, clear_color: wgpu::Color) {
+    pub fn set_clear_color(&mut self, clear_color: TguiColor) {
         self.clear_color = clear_color;
     }
 
@@ -421,12 +422,7 @@ impl Renderer {
             font_family: text.font_family.clone(),
             width,
             height,
-            color: [
-                float_channel(text.color.r),
-                float_channel(text.color.g),
-                float_channel(text.color.b),
-                float_channel(text.color.a),
-            ],
+            color: text.color.to_rgba8(),
             font_size_bits: text.font_size.to_bits(),
             line_height_bits: text.line_height.to_bits(),
             letter_spacing_bits: text.letter_spacing.to_bits(),
@@ -596,17 +592,13 @@ fn text_weight(weight: FontWeight) -> Weight {
     Weight(weight.0)
 }
 
-fn color_to_text(color: wgpu::Color) -> Color {
+fn color_to_text(color: TguiColor) -> Color {
     Color::rgba(
-        float_channel(color.r),
-        float_channel(color.g),
-        float_channel(color.b),
-        float_channel(color.a),
+        color.r,
+        color.g,
+        color.b,
+        color.a,
     )
-}
-
-fn float_channel(value: f64) -> u8 {
-    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 fn blend_pixel(pixels: &mut [u8], width: u32, x: u32, y: u32, src: [u8; 4]) {

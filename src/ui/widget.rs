@@ -10,6 +10,7 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 use crate::foundation::binding::Binding;
+use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::{FontManager, FontWeight, TextFontRequest};
 use crate::ui::layout::{Align, Axis, Insets, Justify, LayoutStyle, Wrap};
@@ -99,14 +100,14 @@ impl<T> From<Binding<T>> for Value<T> {
 #[derive(Clone, Copy)]
 pub struct RenderPrimitive {
     pub rect: Rect,
-    pub color: wgpu::Color,
+    pub color: Color,
 }
 
 #[derive(Clone)]
 pub struct TextPrimitive {
     pub content: String,
     pub frame: Rect,
-    pub color: wgpu::Color,
+    pub color: Color,
     pub font_family: Option<String>,
     pub font_size: f32,
     pub font_weight: FontWeight,
@@ -125,8 +126,8 @@ pub struct Text {
     layout: LayoutStyle,
     content: Value<String>,
     font_family: Option<String>,
-    background: Option<Value<wgpu::Color>>,
-    color: Option<Value<wgpu::Color>>,
+    background: Option<Value<Color>>,
+    color: Option<Value<Color>>,
     font_size: Option<f32>,
     font_weight: FontWeight,
     letter_spacing: f32,
@@ -134,6 +135,7 @@ pub struct Text {
 
 impl Text {
     pub fn new(content: impl Into<Value<String>>) -> Self {
+
         Self {
             layout: LayoutStyle::default(),
             content: content.into(),
@@ -161,12 +163,12 @@ impl Text {
         self
     }
 
-    pub fn background(mut self, color: impl Into<Value<wgpu::Color>>) -> Self {
+    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
         self.background = Some(color.into());
         self
     }
 
-    pub fn color(mut self, color: impl Into<Value<wgpu::Color>>) -> Self {
+    pub fn color(mut self, color: impl Into<Value<Color>>) -> Self {
         self.color = Some(color.into());
         self
     }
@@ -244,7 +246,7 @@ enum WidgetKind<VM> {
 pub struct Element<VM> {
     id: WidgetId,
     layout: LayoutStyle,
-    background: Option<Value<wgpu::Color>>,
+    background: Option<Value<Color>>,
     kind: WidgetKind<VM>,
 }
 
@@ -414,15 +416,10 @@ impl<VM> Element<VM> {
                 .background
                 .as_ref()
                 .map(Value::resolve)
-                .unwrap_or(wgpu::Color {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 0.0,
-                    a: 0.0,
-                }),
+                .unwrap_or(Color::TRANSPARENT),
         };
 
-        if background.a > 0.0 {
+        if background.a > 0 {
             computed.scene.shapes.push(RenderPrimitive {
                 rect: frame,
                 color: background,
@@ -930,7 +927,7 @@ impl<VM> Container<VM> {
         }
     }
 
-    pub fn background(mut self, color: impl Into<Value<wgpu::Color>>) -> Self {
+    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
         self.element.background = Some(color.into());
         self
     }
@@ -1044,7 +1041,7 @@ macro_rules! impl_layout_container {
                 self.0.element.layout.grow = grow;
                 self
             }
-            pub fn background(self, color: impl Into<Value<wgpu::Color>>) -> Self {
+            pub fn background(self, color: impl Into<Value<Color>>) -> Self {
                 Self(self.0.background(color))
             }
             pub fn child(self, child: impl Into<Element<VM>>) -> Self {
@@ -1231,7 +1228,7 @@ impl<VM> Button<VM> {
         self
     }
 
-    pub fn background(mut self, color: impl Into<Value<wgpu::Color>>) -> Self {
+    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
         self.element.background = Some(color.into());
         self
     }
@@ -1338,7 +1335,7 @@ impl<VM> Input<VM> {
         self
     }
 
-    pub fn background(mut self, color: impl Into<Value<wgpu::Color>>) -> Self {
+    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
         self.element.background = Some(color.into());
         self
     }
