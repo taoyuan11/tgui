@@ -1,7 +1,9 @@
 use crate::foundation::color::Color;
 use crate::ui::layout::{Align, Axis, Insets, Justify, LayoutStyle, Wrap};
 
-use super::common::{ContainerKind, ContainerLayout, Value, WidgetId, WidgetKind};
+use super::common::{
+    ContainerKind, ContainerLayout, Point, Value, VisualStyle, WidgetId, WidgetKind,
+};
 use super::core::Element;
 
 pub trait IntoChildren<VM> {
@@ -43,6 +45,7 @@ impl<VM> Container<VM> {
             element: Element {
                 id: WidgetId::next(),
                 layout: LayoutStyle::default(),
+                visual: VisualStyle::default(),
                 background: None,
                 kind: WidgetKind::Container {
                     layout,
@@ -54,6 +57,16 @@ impl<VM> Container<VM> {
 
     pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
         self.element.background = Some(color.into());
+        self
+    }
+
+    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
+        self.element.visual.opacity = opacity.into();
+        self
+    }
+
+    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
+        self.element.visual.offset = offset.into();
         self
     }
 
@@ -182,6 +195,14 @@ macro_rules! impl_layout_container {
 
             pub fn background(self, color: impl Into<Value<Color>>) -> Self {
                 Self(self.0.background(color))
+            }
+
+            pub fn opacity(self, opacity: impl Into<Value<f32>>) -> Self {
+                Self(self.0.opacity(opacity))
+            }
+
+            pub fn offset(self, offset: impl Into<Value<Point>>) -> Self {
+                Self(self.0.offset(offset))
             }
 
             pub fn child(self, child: impl IntoChildren<VM>) -> Self {

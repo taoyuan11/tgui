@@ -2,7 +2,7 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::Command;
 use crate::ui::layout::{Insets, LayoutStyle};
 
-use super::common::{Value, WidgetId, WidgetKind};
+use super::common::{Point, Value, VisualStyle, WidgetId, WidgetKind};
 use super::core::Element;
 use super::text::Text;
 
@@ -19,6 +19,7 @@ impl<VM> Button<VM> {
                     padding: Insets::symmetric(12.0, 8.0),
                     ..LayoutStyle::default()
                 },
+                visual: VisualStyle::default(),
                 background: None,
                 kind: WidgetKind::Button {
                     label,
@@ -85,6 +86,16 @@ impl<VM> Button<VM> {
 
     pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
         self.element.background = Some(color.into());
+        self
+    }
+
+    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
+        self.element.visual.opacity = opacity.into();
+        self
+    }
+
+    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
+        self.element.visual.offset = offset.into();
         self
     }
 

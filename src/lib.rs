@@ -1,3 +1,4 @@
+mod animation;
 mod application;
 mod foundation;
 mod rendering;
@@ -12,6 +13,7 @@ macro_rules! children {
     };
 }
 
+pub use animation::{Easing, Transition};
 pub use application::Application;
 pub use foundation::binding::{Binding, Observable, ViewModelContext};
 pub use foundation::color::Color;

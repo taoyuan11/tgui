@@ -1,6 +1,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::animation::Transition;
+
 #[derive(Clone, Default)]
 pub(crate) struct InvalidationSignal {
     dirty: Arc<AtomicBool>,
@@ -81,12 +83,14 @@ impl<T: Clone> Observable<T> {
 #[derive(Clone)]
 pub struct Binding<T> {
     reader: Arc<dyn Fn() -> T + Send + Sync>,
+    transition: Option<Transition>,
 }
 
 impl<T> Binding<T> {
     pub fn new(reader: impl Fn() -> T + Send + Sync + 'static) -> Self {
         Self {
             reader: Arc::new(reader),
+            transition: None,
         }
     }
 
@@ -94,11 +98,23 @@ impl<T> Binding<T> {
         (self.reader)()
     }
 
+    pub fn animated(mut self, transition: Transition) -> Self {
+        self.transition = Some(transition);
+        self
+    }
+
     pub fn map<U>(&self, mapper: impl Fn(T) -> U + Send + Sync + 'static) -> Binding<U>
     where
         T: 'static,
     {
         let reader = self.reader.clone();
-        Binding::new(move || mapper(reader()))
+        Binding {
+            reader: Arc::new(move || mapper(reader())),
+            transition: self.transition,
+        }
+    }
+
+    pub(crate) fn transition(&self) -> Option<Transition> {
+        self.transition
     }
 }

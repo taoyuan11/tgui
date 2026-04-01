@@ -7,6 +7,7 @@ use taffy::Size as TaffySize;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
+use crate::animation::{AnimationEngine, WidgetProperty};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::{FontManager, TextFontRequest};
@@ -15,23 +16,32 @@ use crate::ui::theme::Theme;
 
 use super::common::{
     ComputedScene, ContainerKind, ContainerLayout, HitInteraction, HitRegion, LayoutNode,
-    MeasureContext, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, Value, WidgetId,
-    WidgetKind,
+    MeasureContext, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, Value,
+    VisualStyle, WidgetId, WidgetKind,
 };
 use super::text::Text;
 
 pub struct Element<VM> {
     pub(crate) id: WidgetId,
     pub(crate) layout: LayoutStyle,
+    pub(crate) visual: VisualStyle,
     pub(crate) background: Option<Value<Color>>,
     pub(crate) kind: WidgetKind<VM>,
 }
 
-struct CollectContext<'a> {
+struct CollectContext<'a, 'b> {
     taffy: &'a TaffyTree<MeasureContext>,
     font_manager: &'a FontManager,
     theme: &'a Theme,
     focused_input: Option<WidgetId>,
+    animations: &'b mut AnimationEngine,
+    now: std::time::Instant,
+}
+
+#[derive(Clone, Copy)]
+struct VisualContext {
+    origin: Point,
+    opacity: f32,
 }
 
 impl<VM> Element<VM> {
@@ -130,38 +140,79 @@ impl<VM> Element<VM> {
     fn collect_primitives(
         &self,
         layout_node: &LayoutNode,
-        parent_origin: Point,
-        context: &CollectContext<'_>,
+        visual_context: VisualContext,
+        context: &mut CollectContext<'_, '_>,
         computed: &mut ComputedScene<VM>,
     ) {
         let layout = context
             .taffy
             .layout(layout_node.node)
             .expect("layout node should exist");
-        let frame = Rect::new(
-            parent_origin.x + layout.location.x,
-            parent_origin.y + layout.location.y,
+        let layout_frame = Rect::new(
+            visual_context.origin.x + layout.location.x,
+            visual_context.origin.y + layout.location.y,
             layout.size.width,
             layout.size.height,
         );
+        let offset = self.visual.offset.resolve_widget(
+            context.animations,
+            self.id,
+            WidgetProperty::Offset,
+            context.now,
+        );
+        let frame = Rect::new(
+            layout_frame.x + offset.x,
+            layout_frame.y + offset.y,
+            layout_frame.width,
+            layout_frame.height,
+        );
+        let opacity = visual_context.opacity
+            * self.visual.opacity.resolve_widget(
+                context.animations,
+                self.id,
+                WidgetProperty::Opacity,
+                context.now,
+            );
 
         let background = match &self.kind {
             WidgetKind::Button { .. } => self
                 .background
                 .as_ref()
-                .map(Value::resolve)
+                .map(|background| {
+                    background.resolve_widget(
+                        context.animations,
+                        self.id,
+                        WidgetProperty::Background,
+                        context.now,
+                    )
+                })
                 .unwrap_or(context.theme.palette.accent),
             WidgetKind::Input { .. } => self
                 .background
                 .as_ref()
-                .map(Value::resolve)
+                .map(|background| {
+                    background.resolve_widget(
+                        context.animations,
+                        self.id,
+                        WidgetProperty::Background,
+                        context.now,
+                    )
+                })
                 .unwrap_or(context.theme.palette.input_background),
             _ => self
                 .background
                 .as_ref()
-                .map(Value::resolve)
+                .map(|background| {
+                    background.resolve_widget(
+                        context.animations,
+                        self.id,
+                        WidgetProperty::Background,
+                        context.now,
+                    )
+                })
                 .unwrap_or(Color::TRANSPARENT),
-        };
+        }
+        .with_alpha_factor(opacity);
 
         if background.a > 0 {
             computed.scene.shapes.push(RenderPrimitive {
@@ -175,9 +226,12 @@ impl<VM> Element<VM> {
                 for (child, child_layout) in children.iter().zip(layout_node.children.iter()) {
                     child.collect_primitives(
                         child_layout,
-                        Point {
-                            x: frame.x,
-                            y: frame.y,
+                        VisualContext {
+                            origin: Point {
+                                x: frame.x,
+                                y: frame.y,
+                            },
+                            opacity,
                         },
                         context,
                         computed,
@@ -190,11 +244,15 @@ impl<VM> Element<VM> {
                     frame,
                     context.font_manager,
                     context.theme,
+                    context.animations,
+                    context.now,
                     &mut computed.scene,
                     false,
                     text.layout.padding,
                     None,
                     context.theme.palette.text,
+                    opacity,
+                    self.id,
                 );
             }
             WidgetKind::Button { label, on_click } => {
@@ -203,11 +261,15 @@ impl<VM> Element<VM> {
                     frame,
                     context.font_manager,
                     context.theme,
+                    context.animations,
+                    context.now,
                     &mut computed.scene,
                     false,
                     self.layout.padding,
                     None,
                     context.theme.palette.text,
+                    opacity,
+                    self.id,
                 );
                 if let Some(command) = on_click.clone() {
                     computed.hit_regions.push(HitRegion {
@@ -235,11 +297,15 @@ impl<VM> Element<VM> {
                     frame,
                     context.font_manager,
                     context.theme,
+                    context.animations,
+                    context.now,
                     &mut computed.scene,
                     active,
                     self.layout.padding,
                     Some(current_text.as_str()),
                     fallback_color,
+                    opacity,
+                    self.id,
                 );
                 computed.hit_regions.push(HitRegion {
                     rect: frame,
@@ -419,11 +485,15 @@ fn push_text_primitives(
     frame: Rect,
     font_manager: &FontManager,
     theme: &Theme,
+    animations: &mut AnimationEngine,
+    now: std::time::Instant,
     scene: &mut ScenePrimitives,
     show_caret: bool,
     padding: Insets,
     caret_content: Option<&str>,
     fallback_color: Color,
+    opacity: f32,
+    widget_id: WidgetId,
 ) {
     let content = text.content.resolve();
     let text_request = TextFontRequest {
@@ -438,7 +508,7 @@ fn push_text_primitives(
     let color = text
         .color
         .as_ref()
-        .map(Value::resolve)
+        .map(|color| color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now))
         .unwrap_or(fallback_color);
     let font_size = text
         .font_size
@@ -465,7 +535,7 @@ fn push_text_primitives(
     scene.texts.push(TextPrimitive {
         content: content.clone(),
         frame: content_frame,
-        color,
+        color: color.with_alpha_factor(opacity),
         font_family: Some(resolved.primary_font),
         font_size,
         font_weight: text.font_weight,
@@ -488,8 +558,13 @@ fn push_text_primitives(
         };
         let caret_x = (inner.x + inner.width.min(caret_width) + 1.0).max(inner.x);
         scene.overlay_shapes.push(RenderPrimitive {
-            rect: Rect::new(caret_x, content_frame.y, 2.0, content_frame.height.max(line_height)),
-            color: theme.palette.text,
+            rect: Rect::new(
+                caret_x,
+                content_frame.y,
+                2.0,
+                content_frame.height.max(line_height),
+            ),
+            color: theme.palette.text.with_alpha_factor(opacity),
         });
     }
 }
@@ -507,6 +582,7 @@ impl<VM> WidgetTree<VM> {
         &self,
         font_manager: &FontManager,
         theme: &Theme,
+        animations: &mut AnimationEngine,
         viewport: Rect,
         focused_input: Option<WidgetId>,
     ) -> ComputedScene<VM> {
@@ -529,19 +605,25 @@ impl<VM> WidgetTree<VM> {
             .expect("widget tree layout should compute");
 
         let mut computed = ComputedScene::default();
-        let context = CollectContext {
+        let now = std::time::Instant::now();
+        let mut context = CollectContext {
             taffy: &taffy,
             font_manager,
             theme,
             focused_input,
+            animations,
+            now,
         };
         self.root.collect_primitives(
             &root_layout,
-            Point {
-                x: viewport.x,
-                y: viewport.y,
+            VisualContext {
+                origin: Point {
+                    x: viewport.x,
+                    y: viewport.y,
+                },
+                opacity: 1.0,
             },
-            &context,
+            &mut context,
             &mut computed,
         );
         computed
@@ -551,10 +633,11 @@ impl<VM> WidgetTree<VM> {
         &self,
         font_manager: &FontManager,
         theme: &Theme,
+        animations: &mut AnimationEngine,
         viewport: Rect,
         focused_input: Option<WidgetId>,
     ) -> ScenePrimitives {
-        self.compute_scene(font_manager, theme, viewport, focused_input)
+        self.compute_scene(font_manager, theme, animations, viewport, focused_input)
             .scene
     }
 
@@ -562,12 +645,13 @@ impl<VM> WidgetTree<VM> {
         &self,
         font_manager: &FontManager,
         theme: &Theme,
+        animations: &mut AnimationEngine,
         viewport: Rect,
         event: &WindowEvent,
         cursor_position: Option<Point>,
         focused_input: Option<WidgetId>,
     ) -> WidgetEventResult<VM> {
-        let computed = self.compute_scene(font_manager, theme, viewport, focused_input);
+        let computed = self.compute_scene(font_manager, theme, animations, viewport, focused_input);
 
         match event {
             WindowEvent::MouseInput {

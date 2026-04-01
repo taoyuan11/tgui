@@ -1,5 +1,9 @@
 use std::sync::Arc;
+use std::time::Instant;
 
+use crate::animation::{
+    default_theme_transition, AnimationEngine, AnimationKey, Transition, WindowProperty,
+};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -168,6 +172,8 @@ struct BoundRuntimeHandler<VM> {
     widget_tree: Option<WidgetTree<VM>>,
     commands: Vec<WindowCommand<VM>>,
     invalidation: InvalidationSignal,
+    animation_engine: AnimationEngine,
+    animation_epoch: u64,
     cursor_position: Option<Point>,
     focused_input: Option<WidgetId>,
     cached_scene: Option<CachedScene>,
@@ -180,6 +186,7 @@ struct BoundRuntimeHandler<VM> {
 struct CachedScene {
     viewport: Rect,
     focused_input: Option<WidgetId>,
+    animation_epoch: u64,
     primitives: ScenePrimitives,
 }
 
@@ -206,6 +213,8 @@ impl<VM> BoundRuntimeHandler<VM> {
             widget_tree,
             commands,
             invalidation,
+            animation_engine: AnimationEngine::default(),
+            animation_epoch: 0,
             cursor_position: None,
             focused_input: None,
             cached_scene: None,
@@ -228,11 +237,6 @@ impl<VM> BoundRuntimeHandler<VM> {
     fn apply_theme(&mut self, theme: Theme) {
         self.theme = theme;
         self.invalidate_scene();
-        if !self.config.clear_color_overridden && self.window_bindings.clear_color.is_none() {
-            if let Some(renderer) = self.renderer.as_mut() {
-                renderer.set_clear_color(self.theme.palette.window_background);
-            }
-        }
     }
 
     fn apply_window_theme(&mut self, window_theme: Option<WindowTheme>) {
@@ -259,7 +263,7 @@ impl<VM> BoundRuntimeHandler<VM> {
         }
     }
 
-    fn sync_bindings(&mut self) {
+    fn sync_bindings(&mut self, now: Instant) {
         self.sync_theme_binding();
 
         if let Some(window) = self.window.as_ref() {
@@ -268,17 +272,25 @@ impl<VM> BoundRuntimeHandler<VM> {
             }
         }
 
+        let theme = self.animated_theme(now);
         if let Some(renderer) = self.renderer.as_mut() {
             if let Some(binding) = self.window_bindings.clear_color.as_ref() {
-                renderer.set_clear_color(binding.get());
+                renderer.set_clear_color(self.animation_engine.resolve_color(
+                    AnimationKey::Window(WindowProperty::ClearColor),
+                    binding.get(),
+                    binding.transition(),
+                    now,
+                ));
+            } else if !self.config.clear_color_overridden {
+                renderer.set_clear_color(theme.palette.window_background);
             }
         }
     }
 
-    fn request_redraw_if_dirty(&mut self) {
+    fn request_redraw_if_dirty(&mut self, now: Instant) {
         if self.invalidation.take_dirty() {
             self.invalidate_scene();
-            self.sync_bindings();
+            self.sync_bindings(now);
 
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
@@ -289,26 +301,29 @@ impl<VM> BoundRuntimeHandler<VM> {
     fn render_primitives(&mut self) -> ScenePrimitives {
         let viewport = self.viewport_rect();
         if let Some(cached) = self.cached_scene.as_ref() {
-            if cached.viewport == viewport && cached.focused_input == self.focused_input {
+            if cached.viewport == viewport
+                && cached.focused_input == self.focused_input
+                && cached.animation_epoch == self.animation_epoch
+            {
                 return cached.primitives.clone();
             }
         }
 
-        let primitives = self
-            .widget_tree
-            .as_ref()
-            .map(|tree| {
-                tree.render_primitives(
-                    &self.font_manager,
-                    &self.theme,
-                    viewport,
-                    self.focused_input,
-                )
-            })
-            .unwrap_or_default();
+        let theme = self.animated_theme(Instant::now());
+        let primitives = match self.widget_tree.as_ref() {
+            Some(tree) => tree.render_primitives(
+                &self.font_manager,
+                &theme,
+                &mut self.animation_engine,
+                viewport,
+                self.focused_input,
+            ),
+            None => ScenePrimitives::default(),
+        };
         self.cached_scene = Some(CachedScene {
             viewport,
             focused_input: self.focused_input,
+            animation_epoch: self.animation_epoch,
             primitives: primitives.clone(),
         });
         primitives
@@ -339,13 +354,32 @@ impl<VM> BoundRuntimeHandler<VM> {
     }
 
     fn render_current_frame(&mut self) -> Result<RenderStatus, TguiError> {
-        self.sync_bindings();
+        self.sync_bindings(Instant::now());
         let primitives = self.render_primitives();
         let renderer = self
             .renderer
             .as_mut()
             .expect("renderer should exist before drawing");
         renderer.render(&primitives)
+    }
+
+    fn drive_animations(&mut self, event_loop: &ActiveEventLoop, now: Instant) {
+        if self.animation_engine.refresh(now) {
+            self.animation_epoch = self.animation_epoch.wrapping_add(1);
+            self.invalidate_scene();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
+
+        if let Some(deadline) = self.animation_engine.next_frame_deadline(now) {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
     }
 
     fn render_hidden_frame(&mut self, event_loop: &ActiveEventLoop) -> bool {
@@ -369,6 +403,65 @@ impl<VM> BoundRuntimeHandler<VM> {
         }
 
         true
+    }
+
+    fn animated_theme(&mut self, now: Instant) -> Theme {
+        let transition = Some(default_theme_transition());
+        let mut theme = self.theme.clone();
+        theme.palette.window_background = self.resolve_theme_color(
+            WindowProperty::ThemeWindowBackground,
+            theme.palette.window_background,
+            transition,
+            now,
+        );
+        theme.palette.surface = self.resolve_theme_color(
+            WindowProperty::ThemeSurface,
+            theme.palette.surface,
+            transition,
+            now,
+        );
+        theme.palette.surface_muted = self.resolve_theme_color(
+            WindowProperty::ThemeSurfaceMuted,
+            theme.palette.surface_muted,
+            transition,
+            now,
+        );
+        theme.palette.accent = self.resolve_theme_color(
+            WindowProperty::ThemeAccent,
+            theme.palette.accent,
+            transition,
+            now,
+        );
+        theme.palette.text = self.resolve_theme_color(
+            WindowProperty::ThemeText,
+            theme.palette.text,
+            transition,
+            now,
+        );
+        theme.palette.text_muted = self.resolve_theme_color(
+            WindowProperty::ThemeTextMuted,
+            theme.palette.text_muted,
+            transition,
+            now,
+        );
+        theme.palette.input_background = self.resolve_theme_color(
+            WindowProperty::ThemeInputBackground,
+            theme.palette.input_background,
+            transition,
+            now,
+        );
+        theme
+    }
+
+    fn resolve_theme_color(
+        &mut self,
+        property: WindowProperty,
+        target: Color,
+        transition: Option<Transition>,
+        now: Instant,
+    ) -> Color {
+        self.animation_engine
+            .resolve_color(AnimationKey::Window(property), target, transition, now)
     }
 }
 
@@ -542,10 +635,12 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
         if Self::should_dispatch_widget_event(&event) {
             if let Some(tree) = self.widget_tree.as_ref() {
                 let previous_focus = self.focused_input;
+                let viewport = self.viewport_rect();
                 let widget_result = tree.handle_window_event(
                     &self.font_manager,
                     &self.theme,
-                    self.viewport_rect(),
+                    &mut self.animation_engine,
+                    viewport,
                     &event,
                     self.cursor_position,
                     self.focused_input,
@@ -589,7 +684,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::ThemeChanged(theme) => {
                 self.apply_window_theme(Some(theme));
-                self.sync_bindings();
+                self.sync_bindings(Instant::now());
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
@@ -617,8 +712,10 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        self.request_redraw_if_dirty();
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let now = Instant::now();
+        self.request_redraw_if_dirty(now);
+        self.drive_animations(event_loop, now);
     }
 }
 

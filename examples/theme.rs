@@ -32,7 +32,7 @@ impl ThemeDemo {
         let current_mode = self
             .mode
             .binding()
-            .map(|mode| format!("Current mode: {}", mode_label(mode)));
+            .map(|mode| format!("当前模式：{}", mode_label(mode)));
 
         Column::new()
             .fill_size()
@@ -40,16 +40,17 @@ impl ThemeDemo {
             .gap(20.0)
             .align(Align::Center)
             .child(children![
-                Text::new("Theme Switcher".to_string()).font_size(30.0),
+                // 主题色的过渡现在由运行时内建处理，这里只需要切换 ThemeMode。
+                Text::new("主题切换动画".to_string()).font_size(30.0),
                 Text::new(current_mode).font_size(18.0),
                 Row::new().gap(12.0).child(children![
-                    Button::new(Text::new("light".to_string())).on_click(Command::new(
+                    Button::new(Text::new("浅色".to_string())).on_click(Command::new(
                         |app: &mut ThemeDemo| { app.set_theme(ThemeMode::Light) }
                     )),
-                    Button::new(Text::new("dark".to_string())).on_click(Command::new(
+                    Button::new(Text::new("深色".to_string())).on_click(Command::new(
                         |app: &mut ThemeDemo| { app.set_theme(ThemeMode::Dark) }
                     )),
-                    Button::new(Text::new("system".to_string())).on_click(Command::new(
+                    Button::new(Text::new("跟随系统".to_string())).on_click(Command::new(
                         |app: &mut ThemeDemo| { app.set_theme(ThemeMode::System) }
                     )),
                 ]),
@@ -60,9 +61,9 @@ impl ThemeDemo {
 
 fn mode_label(mode: ThemeMode) -> &'static str {
     match mode {
-        ThemeMode::Light => "light",
-        ThemeMode::Dark => "dark",
-        ThemeMode::System => "system",
+        ThemeMode::Light => "浅色",
+        ThemeMode::Dark => "深色",
+        ThemeMode::System => "跟随系统",
     }
 }
 

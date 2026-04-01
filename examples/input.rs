@@ -1,4 +1,7 @@
-use tgui::{children, Align, Application, Column, Element, Input, Observable, Text, ValueCommand, ViewModelContext};
+use tgui::{
+    children, Align, Application, Column, Element, Input, Observable, Text, ValueCommand,
+    ViewModelContext,
+};
 
 fn main() -> Result<(), tgui::TguiError> {
     Application::new()
@@ -8,13 +11,13 @@ fn main() -> Result<(), tgui::TguiError> {
 }
 
 struct App {
-    input_value: Observable<String>
+    input_value: Observable<String>,
 }
 
 impl App {
     fn new(context: &ViewModelContext) -> App {
         App {
-            input_value: context.observable(String::new())
+            input_value: context.observable(String::new()),
         }
     }
 
@@ -24,13 +27,13 @@ impl App {
         Column::new()
             .fill_size()
             .align(Align::Center)
-            .child(children![
-                Input::new(text)
+            .child(children![Input::new(text)
                 .placeholder_with_str("Please select a value")
-                .on_change(ValueCommand::new(|app: &mut App, value: String| {
-                    app.input_value.set(value);
-                }))
-            ])
+                .on_change(ValueCommand::new(
+                    |app: &mut App, value: String| {
+                        app.input_value.set(value);
+                    }
+                ))])
             .into()
     }
 }

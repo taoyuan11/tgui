@@ -1,5 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
+use crate::animation::{AnimationEngine, AnimationKey, Transition, WidgetProperty};
 use taffy::NodeId as TaffyNodeId;
 
 use crate::foundation::binding::Binding;
@@ -18,6 +20,10 @@ pub struct WidgetId(u64);
 impl WidgetId {
     pub(crate) fn next() -> Self {
         Self(NEXT_WIDGET_ID.fetch_add(1, Ordering::Relaxed))
+    }
+
+    pub(crate) fn raw(self) -> u64 {
+        self.0
     }
 }
 
@@ -65,6 +71,21 @@ impl Rect {
 }
 
 #[derive(Clone)]
+pub struct VisualStyle {
+    pub opacity: Value<f32>,
+    pub offset: Value<Point>,
+}
+
+impl Default for VisualStyle {
+    fn default() -> Self {
+        Self {
+            opacity: Value::Static(1.0),
+            offset: Value::Static(Point::ZERO),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub enum Value<T> {
     Static(T),
     Bound(Binding<T>),
@@ -75,6 +96,13 @@ impl<T: Clone> Value<T> {
         match self {
             Self::Static(value) => value.clone(),
             Self::Bound(binding) => binding.get(),
+        }
+    }
+
+    pub(crate) fn transition(&self) -> Option<Transition> {
+        match self {
+            Self::Static(_) => None,
+            Self::Bound(binding) => binding.transition(),
         }
     }
 }
@@ -88,6 +116,66 @@ impl<T> From<T> for Value<T> {
 impl<T> From<Binding<T>> for Value<T> {
     fn from(value: Binding<T>) -> Self {
         Self::Bound(value)
+    }
+}
+
+impl Value<Color> {
+    pub(crate) fn resolve_widget(
+        &self,
+        animations: &mut AnimationEngine,
+        widget_id: WidgetId,
+        property: WidgetProperty,
+        now: Instant,
+    ) -> Color {
+        animations.resolve_color(
+            AnimationKey::Widget {
+                id: widget_id.raw(),
+                property,
+            },
+            self.resolve(),
+            self.transition(),
+            now,
+        )
+    }
+}
+
+impl Value<f32> {
+    pub(crate) fn resolve_widget(
+        &self,
+        animations: &mut AnimationEngine,
+        widget_id: WidgetId,
+        property: WidgetProperty,
+        now: Instant,
+    ) -> f32 {
+        animations.resolve_f32(
+            AnimationKey::Widget {
+                id: widget_id.raw(),
+                property,
+            },
+            self.resolve().clamp(0.0, 1.0),
+            self.transition(),
+            now,
+        )
+    }
+}
+
+impl Value<Point> {
+    pub(crate) fn resolve_widget(
+        &self,
+        animations: &mut AnimationEngine,
+        widget_id: WidgetId,
+        property: WidgetProperty,
+        now: Instant,
+    ) -> Point {
+        animations.resolve_point(
+            AnimationKey::Widget {
+                id: widget_id.raw(),
+                property,
+            },
+            self.resolve(),
+            self.transition(),
+            now,
+        )
     }
 }
 
@@ -211,4 +299,8 @@ impl<VM> Default for ComputedScene<VM> {
             hit_regions: Vec::new(),
         }
     }
+}
+
+impl Point {
+    pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
 }

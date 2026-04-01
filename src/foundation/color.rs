@@ -40,6 +40,13 @@ impl Color {
     pub const fn to_rgba8(self) -> [u8; 4] {
         [self.r, self.g, self.b, self.a]
     }
+
+    pub(crate) fn with_alpha_factor(self, factor: f32) -> Self {
+        let alpha = ((self.a as f32) * factor.clamp(0.0, 1.0))
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        Self { a: alpha, ..self }
+    }
 }
 
 impl Default for Color {

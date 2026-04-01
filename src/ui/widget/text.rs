@@ -2,12 +2,13 @@ use crate::foundation::color::Color;
 use crate::text::font::FontWeight;
 use crate::ui::layout::{Insets, LayoutStyle};
 
-use super::common::{Value, WidgetId, WidgetKind};
+use super::common::{Point, Value, VisualStyle, WidgetId, WidgetKind};
 use super::core::Element;
 
 #[derive(Clone)]
 pub struct Text {
     pub(crate) layout: LayoutStyle,
+    pub(crate) visual: VisualStyle,
     pub(crate) content: Value<String>,
     pub(crate) font_family: Option<String>,
     pub(crate) background: Option<Value<Color>>,
@@ -21,6 +22,7 @@ impl Text {
     pub fn new(content: impl Into<Value<String>>) -> Self {
         Self {
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             content: content.into(),
             font_family: None,
             background: None,
@@ -70,15 +72,27 @@ impl Text {
         self.letter_spacing = spacing;
         self
     }
+
+    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
+        self.visual.opacity = opacity.into();
+        self
+    }
+
+    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
+        self.visual.offset = offset.into();
+        self
+    }
 }
 
 impl<VM> From<Text> for Element<VM> {
     fn from(value: Text) -> Self {
         let background = value.background.clone();
         let layout = value.layout;
+        let visual = value.visual.clone();
         Element {
             id: WidgetId::next(),
             layout,
+            visual,
             background,
             kind: WidgetKind::Text { text: value },
         }
