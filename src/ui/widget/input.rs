@@ -1,8 +1,8 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::ui::layout::{Insets, LayoutStyle};
+use crate::ui::layout::{Insets, LayoutStyle, Value};
 
-use super::common::{InteractionHandlers, Point, Value, VisualStyle, WidgetId, WidgetKind};
+use super::common::{InteractionHandlers, Point, VisualStyle, WidgetId, WidgetKind};
 use super::core::Element;
 use super::text::Text;
 
@@ -16,7 +16,7 @@ impl<VM> Input<VM> {
             element: Element {
                 id: WidgetId::next(),
                 layout: LayoutStyle {
-                    padding: Insets::symmetric(12.0, 8.0),
+                    padding: Value::Static(Insets::symmetric(12.0, 8.0)),
                     ..LayoutStyle::default()
                 },
                 visual: VisualStyle::default(),
@@ -31,22 +31,22 @@ impl<VM> Input<VM> {
         }
     }
 
-    pub fn size(mut self, width: f32, height: f32) -> Self {
-        self.element.layout.width = Some(width);
-        self.element.layout.height = Some(height);
+    pub fn size(mut self, width: impl Into<Value<f32>>, height: impl Into<Value<f32>>) -> Self {
+        self.element.layout.width = Some(width.into());
+        self.element.layout.height = Some(height.into());
         self.element.layout.fill_width = false;
         self.element.layout.fill_height = false;
         self
     }
 
-    pub fn width(mut self, width: f32) -> Self {
-        self.element.layout.width = Some(width);
+    pub fn width(mut self, width: impl Into<Value<f32>>) -> Self {
+        self.element.layout.width = Some(width.into());
         self.element.layout.fill_width = false;
         self
     }
 
-    pub fn height(mut self, height: f32) -> Self {
-        self.element.layout.height = Some(height);
+    pub fn height(mut self, height: impl Into<Value<f32>>) -> Self {
+        self.element.layout.height = Some(height.into());
         self.element.layout.fill_height = false;
         self
     }
@@ -71,18 +71,18 @@ impl<VM> Input<VM> {
         self
     }
 
-    pub fn margin(mut self, insets: Insets) -> Self {
-        self.element.layout.margin = insets;
+    pub fn margin(mut self, insets: impl Into<Value<Insets>>) -> Self {
+        self.element.layout.margin = insets.into();
         self
     }
 
-    pub fn padding(mut self, insets: Insets) -> Self {
-        self.element.layout.padding = insets;
+    pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
+        self.element.layout.padding = insets.into();
         self
     }
 
-    pub fn grow(mut self, grow: f32) -> Self {
-        self.element.layout.grow = grow;
+    pub fn grow(mut self, grow: impl Into<Value<f32>>) -> Self {
+        self.element.layout.grow = grow.into();
         self
     }
 
@@ -113,11 +113,7 @@ impl<VM> Input<VM> {
         self
     }
 
-    pub fn border(
-        mut self,
-        width: impl Into<Value<f32>>,
-        color: impl Into<Value<Color>>,
-    ) -> Self {
+    pub fn border(mut self, width: impl Into<Value<f32>>, color: impl Into<Value<Color>>) -> Self {
         self.element.visual.border_width = width.into();
         self.element.visual.border_color = color.into();
         self

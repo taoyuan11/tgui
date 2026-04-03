@@ -1,10 +1,9 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::ui::layout::{Align, Axis, Insets, Justify, LayoutStyle, Wrap};
+use crate::ui::layout::{Align, Axis, Insets, Justify, LayoutStyle, Value, Wrap};
 
 use super::common::{
-    ContainerKind, ContainerLayout, InteractionHandlers, Point, Value, VisualStyle, WidgetId,
-    WidgetKind,
+    ContainerKind, ContainerLayout, InteractionHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::core::Element;
 
@@ -63,11 +62,7 @@ impl<VM> Container<VM> {
         self
     }
 
-    pub fn border(
-        mut self,
-        width: impl Into<Value<f32>>,
-        color: impl Into<Value<Color>>,
-    ) -> Self {
+    pub fn border(mut self, width: impl Into<Value<f32>>, color: impl Into<Value<Color>>) -> Self {
         self.element.visual.border_width = width.into();
         self.element.visual.border_color = color.into();
         self
@@ -130,16 +125,16 @@ impl<VM> Container<VM> {
         self
     }
 
-    pub fn padding(mut self, padding: Insets) -> Self {
+    pub fn padding(mut self, padding: impl Into<Value<Insets>>) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.padding = padding;
+            layout.padding = padding.into();
         }
         self
     }
 
-    pub fn gap(mut self, gap: f32) -> Self {
+    pub fn gap(mut self, gap: impl Into<Value<f32>>) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.gap = gap;
+            layout.gap = gap.into();
         }
         self
     }
@@ -196,22 +191,26 @@ pub struct Flex<VM>(Container<VM>);
 macro_rules! impl_layout_container {
     ($name:ident) => {
         impl<VM> $name<VM> {
-            pub fn size(mut self, width: f32, height: f32) -> Self {
-                self.0.element.layout.width = Some(width);
-                self.0.element.layout.height = Some(height);
+            pub fn size(
+                mut self,
+                width: impl Into<Value<f32>>,
+                height: impl Into<Value<f32>>,
+            ) -> Self {
+                self.0.element.layout.width = Some(width.into());
+                self.0.element.layout.height = Some(height.into());
                 self.0.element.layout.fill_width = false;
                 self.0.element.layout.fill_height = false;
                 self
             }
 
-            pub fn width(mut self, width: f32) -> Self {
-                self.0.element.layout.width = Some(width);
+            pub fn width(mut self, width: impl Into<Value<f32>>) -> Self {
+                self.0.element.layout.width = Some(width.into());
                 self.0.element.layout.fill_width = false;
                 self
             }
 
-            pub fn height(mut self, height: f32) -> Self {
-                self.0.element.layout.height = Some(height);
+            pub fn height(mut self, height: impl Into<Value<f32>>) -> Self {
+                self.0.element.layout.height = Some(height.into());
                 self.0.element.layout.fill_height = false;
                 self
             }
@@ -236,13 +235,13 @@ macro_rules! impl_layout_container {
                 self
             }
 
-            pub fn margin(mut self, insets: Insets) -> Self {
-                self.0.element.layout.margin = insets;
+            pub fn margin(mut self, insets: impl Into<Value<Insets>>) -> Self {
+                self.0.element.layout.margin = insets.into();
                 self
             }
 
-            pub fn grow(mut self, grow: f32) -> Self {
-                self.0.element.layout.grow = grow;
+            pub fn grow(mut self, grow: impl Into<Value<f32>>) -> Self {
+                self.0.element.layout.grow = grow.into();
                 self
             }
 
@@ -302,11 +301,11 @@ macro_rules! impl_layout_container {
                 Self(self.0.child(child))
             }
 
-            pub fn padding(self, padding: Insets) -> Self {
+            pub fn padding(self, padding: impl Into<Value<Insets>>) -> Self {
                 Self(self.0.padding(padding))
             }
 
-            pub fn gap(self, gap: f32) -> Self {
+            pub fn gap(self, gap: impl Into<Value<f32>>) -> Self {
                 Self(self.0.gap(gap))
             }
 

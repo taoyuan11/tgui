@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use tgui::{
-    Application, Binding, Button, Color, Column, Command, Insets, Point, Text, Transition,
-    ViewModelContext,
+    Application, Binding, Button, Color, Column, Command, Insets, PlaybackDirection, Point, Text,
+    Transition, ViewModelContext,
 };
 
 struct AnimationShowcaseVm {
@@ -56,7 +56,9 @@ impl AnimationShowcaseVm {
         self.expanded
             .binding()
             .map(|expanded| if expanded { 1.0 } else { 0.72 })
-            .animated(Transition::ease_out(Duration::from_millis(220)))
+            .animated(
+                Transition::ease_out(Duration::from_millis(220)).delay(Duration::from_millis(20)),
+            )
     }
 
     fn card_offset(&self) -> Binding<Point> {
@@ -70,6 +72,39 @@ impl AnimationShowcaseVm {
                 }
             })
             .animated(Transition::ease_in_out(Duration::from_millis(260)))
+    }
+
+    fn card_width(&self) -> Binding<f32> {
+        self.expanded
+            .binding()
+            .map(|expanded| if expanded { 280.0 } else { 180.0 })
+            .animated(
+                Transition::ease_in_out(Duration::from_millis(320))
+                    .delay(Duration::from_millis(30)),
+            )
+    }
+
+    fn card_padding(&self) -> Binding<Insets> {
+        self.expanded
+            .binding()
+            .map(|expanded| {
+                if expanded {
+                    Insets::symmetric(28.0, 18.0)
+                } else {
+                    Insets::symmetric(16.0, 12.0)
+                }
+            })
+            .animated(Transition::ease_in_out(Duration::from_millis(280)))
+    }
+
+    fn stack_gap(&self) -> Binding<f32> {
+        self.expanded
+            .binding()
+            .map(|expanded| if expanded { 28.0 } else { 16.0 })
+            .animated(
+                Transition::ease_in_out(Duration::from_millis(300))
+                    .direction(PlaybackDirection::Normal),
+            )
     }
 
     fn hint_color(&self) -> Binding<Color> {
@@ -92,10 +127,12 @@ impl AnimationShowcaseVm {
     fn view(&self) -> tgui::Element<Self> {
         Column::new()
             .padding(Insets::all(24.0))
-            .gap(16.0)
+            .gap(self.stack_gap())
             .child(
-                Text::new("Declarative transitions for color, opacity and offset".to_string())
-                    .color(self.hint_color()),
+                Text::new(
+                    "Declarative transitions for color, opacity, offset and layout".to_string(),
+                )
+                .color(self.hint_color()),
             )
             .child(
                 Button::new(Text::new(self.expanded.binding().map(|expanded| {
@@ -105,7 +142,8 @@ impl AnimationShowcaseVm {
                         "Expand card".to_string()
                     }
                 })))
-                .padding(Insets::symmetric(16.0, 12.0))
+                .width(self.card_width())
+                .padding(self.card_padding())
                 .background(self.card_color())
                 .opacity(self.card_opacity())
                 .offset(self.card_offset())

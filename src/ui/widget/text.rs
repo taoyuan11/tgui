@@ -1,9 +1,9 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
-use crate::ui::layout::{Insets, LayoutStyle};
+use crate::ui::layout::{Insets, LayoutStyle, Value};
 
-use super::common::{InteractionHandlers, Point, Value, VisualStyle, WidgetId, WidgetKind};
+use super::common::{InteractionHandlers, Point, VisualStyle, WidgetId, WidgetKind};
 use super::core::Element;
 
 #[derive(Clone)]
@@ -34,13 +34,13 @@ impl Text {
         }
     }
 
-    pub fn margin(mut self, insets: Insets) -> Self {
-        self.layout.margin = insets;
+    pub fn margin(mut self, insets: impl Into<Value<Insets>>) -> Self {
+        self.layout.margin = insets.into();
         self
     }
 
-    pub fn padding(mut self, insets: Insets) -> Self {
-        self.layout.padding = insets;
+    pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
+        self.layout.padding = insets.into();
         self
     }
 
@@ -54,11 +54,7 @@ impl Text {
         self
     }
 
-    pub fn border(
-        mut self,
-        width: impl Into<Value<f32>>,
-        color: impl Into<Value<Color>>,
-    ) -> Self {
+    pub fn border(mut self, width: impl Into<Value<f32>>, color: impl Into<Value<Color>>) -> Self {
         self.visual.border_width = width.into();
         self.visual.border_color = color.into();
         self
@@ -149,7 +145,7 @@ impl Text {
         interactions: InteractionHandlers<VM>,
     ) -> Element<VM> {
         let background = self.background.clone();
-        let layout = self.layout;
+        let layout = self.layout.clone();
         let visual = self.visual.clone();
         Element {
             id: WidgetId::next(),
@@ -165,7 +161,7 @@ impl Text {
 impl<VM> From<Text> for Element<VM> {
     fn from(value: Text) -> Self {
         let background = value.background.clone();
-        let layout = value.layout;
+        let layout = value.layout.clone();
         let visual = value.visual.clone();
         Element {
             id: WidgetId::next(),

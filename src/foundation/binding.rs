@@ -1,7 +1,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::animation::Transition;
+use crate::animation::{
+    AnimatedValue, AnimationControllerBuilder, AnimationCoordinator, Transition,
+};
 
 #[derive(Clone, Default)]
 pub(crate) struct InvalidationSignal {
@@ -27,15 +29,27 @@ impl InvalidationSignal {
 #[derive(Clone)]
 pub struct ViewModelContext {
     invalidation: InvalidationSignal,
+    animations: AnimationCoordinator,
 }
 
 impl ViewModelContext {
-    pub(crate) fn new(invalidation: InvalidationSignal) -> Self {
-        Self { invalidation }
+    pub(crate) fn new(invalidation: InvalidationSignal, animations: AnimationCoordinator) -> Self {
+        Self {
+            invalidation,
+            animations,
+        }
     }
 
     pub fn observable<T>(&self, value: T) -> Observable<T> {
         Observable::new(value, self.invalidation.clone())
+    }
+
+    pub fn animated_value<T>(&self, value: T) -> AnimatedValue<T> {
+        AnimatedValue::new(value, self.invalidation.clone())
+    }
+
+    pub fn timeline(&self) -> AnimationControllerBuilder {
+        AnimationControllerBuilder::new(self.animations.clone(), self.invalidation.clone())
     }
 }
 
@@ -98,8 +112,8 @@ impl<T> Binding<T> {
         (self.reader)()
     }
 
-    pub fn animated(mut self, transition: Transition) -> Self {
-        self.transition = Some(transition);
+    pub fn animated(mut self, transition: impl Into<Transition>) -> Self {
+        self.transition = Some(transition.into());
         self
     }
 

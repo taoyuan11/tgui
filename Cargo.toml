@@ -24,6 +24,10 @@ bytemuck = { version = "1.24", features = ["derive"] }
 cosmic-text = "0.18"
 pollster = "0.4"
 taffy = "0.10"
+unicode-segmentation = "1.12"
 winit = { version = "0.30" }
 wgpu = { version = "29", features = ["wgsl"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+arboard = "3.6"
 log = "0.4.29"

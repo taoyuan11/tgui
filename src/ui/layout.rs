@@ -1,3 +1,57 @@
+use std::fmt;
+
+use crate::animation::Transition;
+use crate::foundation::binding::Binding;
+
+#[derive(Clone)]
+pub enum Value<T> {
+    Static(T),
+    Bound(Binding<T>),
+}
+
+impl<T: Clone> Value<T> {
+    pub fn resolve(&self) -> T {
+        match self {
+            Self::Static(value) => value.clone(),
+            Self::Bound(binding) => binding.get(),
+        }
+    }
+
+    pub(crate) fn transition(&self) -> Option<Transition> {
+        match self {
+            Self::Static(_) => None,
+            Self::Bound(binding) => binding.transition(),
+        }
+    }
+}
+
+impl<T> From<T> for Value<T> {
+    fn from(value: T) -> Self {
+        Self::Static(value)
+    }
+}
+
+impl<T> From<Binding<T>> for Value<T> {
+    fn from(value: Binding<T>) -> Self {
+        Self::Bound(value)
+    }
+}
+
+impl From<&str> for Value<String> {
+    fn from(value: &str) -> Self {
+        Self::Static(value.to_string())
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Value<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Static(value) => f.debug_tuple("Static").field(value).finish(),
+            Self::Bound(_) => f.write_str("Bound(..)"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Insets {
     pub left: f32,
@@ -70,15 +124,15 @@ pub enum Wrap {
     Wrap,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct LayoutStyle {
-    pub width: Option<f32>,
-    pub height: Option<f32>,
+    pub width: Option<Value<f32>>,
+    pub height: Option<Value<f32>>,
     pub fill_width: bool,
     pub fill_height: bool,
-    pub padding: Insets,
-    pub margin: Insets,
-    pub grow: f32,
+    pub padding: Value<Insets>,
+    pub margin: Value<Insets>,
+    pub grow: Value<f32>,
 }
 
 impl Default for LayoutStyle {
@@ -88,9 +142,9 @@ impl Default for LayoutStyle {
             height: None,
             fill_width: false,
             fill_height: false,
-            padding: Insets::ZERO,
-            margin: Insets::ZERO,
-            grow: 0.0,
+            padding: Value::Static(Insets::ZERO),
+            margin: Value::Static(Insets::ZERO),
+            grow: Value::Static(0.0),
         }
     }
 }

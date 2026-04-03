@@ -1,4 +1,7 @@
-use tgui::{children, Align, Application, Color, Column, Command, Element, Input, Observable, Stack, Text, ValueCommand, ViewModelContext};
+use tgui::{
+    children, Align, Application, Color, Column, Command, Element, Input, Observable, Stack, Text,
+    ValueCommand, ViewModelContext,
+};
 
 fn main() -> Result<(), tgui::TguiError> {
     Application::new()
@@ -30,16 +33,10 @@ impl App {
             .on_focus(Command::new(|_| println!("Input focused")))
             .on_blur(Command::new(|_| println!("Input blurred")));
 
-        let stack = Stack::new()
-            .size(200.0, 200.0)
-            .background(Color::rgb(255, 255, 255))
-            .border(5.0, Color::rgb(0,0,0))
-            .border_radius(50.0);
-
         Column::new()
             .fill_size()
             .align(Align::Center)
-            .child(children![input, stack])
+            .child(input)
             .gap(50.0)
             .into()
     }

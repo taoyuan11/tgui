@@ -48,16 +48,20 @@ impl ThemeDemo {
                 Text::new("主题切换动画".to_string()).font_size(30.0),
                 Text::new(current_mode).font_size(18.0),
                 Row::new().gap(12.0).child(children![
-                    Button::new(Text::new("浅色".to_string())).on_click(Command::new(
-                        |app: &mut ThemeDemo| { app.set_theme(ThemeMode::Light) }
-                    )).on_focus(Command::new(|_| println!("focus Button1")))
-                    .on_blur(Command::new(|_| println!("blur Button1"))),
+                    Button::new(Text::new("浅色".to_string()))
+                        .on_click(Command::new(|app: &mut ThemeDemo| {
+                            app.set_theme(ThemeMode::Light)
+                        }))
+                        .on_focus(Command::new(|_| println!("focus Button1")))
+                        .on_blur(Command::new(|_| println!("blur Button1"))),
                     Button::new(Text::new("深色".to_string())).on_click(Command::new(
                         |app: &mut ThemeDemo| { app.set_theme(ThemeMode::Dark) }
                     )),
-                    Button::new(Text::new("跟随系统".to_string())).on_click(Command::new(
-                        |app: &mut ThemeDemo| { app.set_theme(ThemeMode::System) }
-                    )).border_radius(6.0),
+                    Button::new(Text::new("跟随系统".to_string()))
+                        .on_click(Command::new(|app: &mut ThemeDemo| {
+                            app.set_theme(ThemeMode::System)
+                        }))
+                        .border_radius(6.0),
                 ]),
             ])
             .into()

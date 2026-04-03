@@ -1,13 +1,18 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::animation::{
-    default_theme_transition, AnimationEngine, AnimationKey, Transition, WindowProperty,
+    default_theme_transition, AnimationCoordinator, AnimationEngine, AnimationKey, Transition,
+    WindowProperty,
 };
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, Ime, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::window::{Theme as WindowTheme, Window, WindowAttributes, WindowId};
+use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+use winit::window::{
+    Cursor, CursorIcon, ImePurpose, Theme as WindowTheme, Window, WindowAttributes, WindowId,
+};
 
 use crate::application::{ApplicationConfig, ThemeSelection};
 use crate::foundation::binding::{Binding, InvalidationSignal};
@@ -19,10 +24,13 @@ use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::FontManager;
 use crate::ui::theme::{Theme, ThemeMode};
 use crate::ui::widget::{
-    HitInteraction, Point, Rect, ScenePrimitives, WidgetCommand as UiCommand, WidgetId, WidgetTree,
+    HitInteraction, InputEditState, InputSnapshot, Point, Rect, RenderedWidgetScene,
+    ScenePrimitives, WidgetId, WidgetTree,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
+const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 
 pub struct Runtime {
     event_loop: EventLoop<()>,
@@ -56,6 +64,7 @@ pub struct BoundRuntime<VM> {
     widget_tree: Option<WidgetTree<VM>>,
     commands: Vec<WindowCommand<VM>>,
     invalidation: InvalidationSignal,
+    animations: AnimationCoordinator,
 }
 
 impl<VM: ViewModel> BoundRuntime<VM> {
@@ -66,6 +75,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
         widget_tree: Option<WidgetTree<VM>>,
         commands: Vec<WindowCommand<VM>>,
         invalidation: InvalidationSignal,
+        animations: AnimationCoordinator,
     ) -> Result<Self, TguiError> {
         let event_loop = EventLoop::new()?;
         event_loop.set_control_flow(ControlFlow::Wait);
@@ -77,6 +87,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             widget_tree,
             commands,
             invalidation,
+            animations,
         })
     }
 
@@ -88,6 +99,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             self.widget_tree,
             self.commands,
             self.invalidation,
+            self.animations,
         );
         self.event_loop.run_app(&mut handler)?;
 
@@ -174,13 +186,18 @@ struct BoundRuntimeHandler<VM> {
     widget_tree: Option<WidgetTree<VM>>,
     commands: Vec<WindowCommand<VM>>,
     invalidation: InvalidationSignal,
+    animations: AnimationCoordinator,
     animation_engine: AnimationEngine,
     animation_epoch: u64,
+    caret_blink_started_at: Option<Instant>,
     cursor_position: Option<Point>,
+    modifiers: ModifiersState,
     hovered_widgets: Vec<HoveredWidget<VM>>,
     pending_click: Option<PendingClick<VM>>,
     focused_widget: Option<FocusedWidget<VM>>,
     focused_input: Option<WidgetId>,
+    input_states: HashMap<WidgetId, InputEditState>,
+    clipboard: ClipboardService,
     cached_scene: Option<CachedScene>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
@@ -191,8 +208,9 @@ struct BoundRuntimeHandler<VM> {
 struct CachedScene {
     viewport: Rect,
     focused_input: Option<WidgetId>,
+    caret_visible: bool,
     animation_epoch: u64,
-    primitives: ScenePrimitives,
+    rendered: RenderedWidgetScene,
 }
 
 struct PendingClick<VM> {
@@ -208,9 +226,46 @@ struct FocusedWidget<VM> {
 
 struct HoveredWidget<VM> {
     widget_id: WidgetId,
+    prefers_text_cursor: bool,
     on_mouse_enter: Option<Command<VM>>,
     on_mouse_leave: Option<Command<VM>>,
     on_mouse_move: Option<crate::foundation::view_model::ValueCommand<VM, Point>>,
+}
+
+#[derive(Default)]
+struct ClipboardService {
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    inner: Option<arboard::Clipboard>,
+}
+
+impl ClipboardService {
+    fn get_text(&mut self) -> Option<String> {
+        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+        {
+            if self.inner.is_none() {
+                self.inner = arboard::Clipboard::new().ok();
+            }
+            return self
+                .inner
+                .as_mut()
+                .and_then(|clipboard| clipboard.get_text().ok());
+        }
+
+        #[allow(unreachable_code)]
+        None
+    }
+
+    fn set_text(&mut self, text: String) {
+        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+        {
+            if self.inner.is_none() {
+                self.inner = arboard::Clipboard::new().ok();
+            }
+            if let Some(clipboard) = self.inner.as_mut() {
+                let _ = clipboard.set_text(text);
+            }
+        }
+    }
 }
 
 impl<VM> BoundRuntimeHandler<VM> {
@@ -221,6 +276,7 @@ impl<VM> BoundRuntimeHandler<VM> {
         widget_tree: Option<WidgetTree<VM>>,
         commands: Vec<WindowCommand<VM>>,
         invalidation: InvalidationSignal,
+        animations: AnimationCoordinator,
     ) -> Self {
         let font_manager = FontManager::new(&config.fonts);
         let theme = match &config.theme {
@@ -236,13 +292,18 @@ impl<VM> BoundRuntimeHandler<VM> {
             widget_tree,
             commands,
             invalidation,
+            animations,
             animation_engine: AnimationEngine::default(),
             animation_epoch: 0,
+            caret_blink_started_at: None,
             cursor_position: None,
+            modifiers: ModifiersState::default(),
             hovered_widgets: Vec::new(),
             pending_click: None,
             focused_widget: None,
             focused_input: None,
+            input_states: HashMap::new(),
+            clipboard: ClipboardService::default(),
             cached_scene: None,
             window: None,
             renderer: None,
@@ -324,35 +385,44 @@ impl<VM> BoundRuntimeHandler<VM> {
         }
     }
 
-    fn render_primitives(&mut self) -> ScenePrimitives {
+    fn render_primitives(&mut self) -> RenderedWidgetScene {
         let viewport = self.viewport_rect();
+        let caret_visible = self.input_caret_visible(Instant::now());
+        let focused_input_state = self
+            .focused_input
+            .and_then(|id| self.focused_input_state(id))
+            .cloned();
         if let Some(cached) = self.cached_scene.as_ref() {
             if cached.viewport == viewport
                 && cached.focused_input == self.focused_input
+                && cached.caret_visible == caret_visible
                 && cached.animation_epoch == self.animation_epoch
             {
-                return cached.primitives.clone();
+                return cached.rendered.clone();
             }
         }
 
         let theme = self.animated_theme(Instant::now());
-        let primitives = match self.widget_tree.as_ref() {
-            Some(tree) => tree.render_primitives(
+        let rendered = match self.widget_tree.as_ref() {
+            Some(tree) => tree.render_output(
                 &self.font_manager,
                 &theme,
                 &mut self.animation_engine,
                 viewport,
                 self.focused_input,
+                focused_input_state.as_ref(),
+                caret_visible,
             ),
-            None => ScenePrimitives::default(),
+            None => RenderedWidgetScene::default(),
         };
         self.cached_scene = Some(CachedScene {
             viewport,
             focused_input: self.focused_input,
+            caret_visible,
             animation_epoch: self.animation_epoch,
-            primitives: primitives.clone(),
+            rendered: rendered.clone(),
         });
-        primitives
+        rendered
     }
 
     fn viewport_rect(&self) -> Rect {
@@ -383,16 +453,33 @@ impl<VM> BoundRuntimeHandler<VM> {
 
     fn render_current_frame(&mut self) -> Result<RenderStatus, TguiError> {
         self.sync_bindings(Instant::now());
-        let primitives = self.render_primitives();
+        let rendered = self.render_primitives();
+        if let (Some(window), Some(caret_rect)) = (self.window.as_ref(), rendered.ime_cursor_area) {
+            window.set_ime_cursor_area(
+                winit::dpi::PhysicalPosition::new(caret_rect.x as i32, caret_rect.y as i32),
+                winit::dpi::PhysicalSize::new(
+                    caret_rect.width.ceil().max(1.0) as u32,
+                    caret_rect.height.ceil().max(1.0) as u32,
+                ),
+            );
+        }
         let renderer = self
             .renderer
             .as_mut()
             .expect("renderer should exist before drawing");
-        renderer.render(&primitives)
+        renderer.render(&rendered.primitives)
     }
 
     fn drive_animations(&mut self, event_loop: &ActiveEventLoop, now: Instant) {
         self.flush_pending_click_if_due(now);
+
+        if self.animations.refresh(now) {
+            self.animation_epoch = self.animation_epoch.wrapping_add(1);
+            self.invalidate_scene();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
 
         if self.animation_engine.refresh(now) {
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
@@ -496,12 +583,50 @@ impl<VM> BoundRuntimeHandler<VM> {
 
     fn next_deadline(&self, now: Instant) -> Option<Instant> {
         let animation_deadline = self.animation_engine.next_frame_deadline(now);
+        let controller_deadline = self.animations.next_frame_deadline(now);
+        let caret_deadline = self.next_caret_blink_deadline(now);
         let click_deadline = self.pending_click.as_ref().map(|pending| pending.deadline);
-        match (animation_deadline, click_deadline) {
-            (Some(left), Some(right)) => Some(left.min(right)),
-            (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
-            (None, None) => None,
+        [
+            animation_deadline,
+            controller_deadline,
+            caret_deadline,
+            click_deadline,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    fn reset_caret_blink(&mut self, now: Instant) {
+        if self.focused_input.is_some() {
+            self.caret_blink_started_at = Some(now);
+            self.invalidate_scene();
         }
+    }
+
+    fn input_caret_visible(&self, now: Instant) -> bool {
+        let Some(_) = self.focused_input else {
+            return false;
+        };
+        let Some(started_at) = self.caret_blink_started_at else {
+            return true;
+        };
+        let phase = now.saturating_duration_since(started_at).as_millis()
+            / CARET_BLINK_INTERVAL.as_millis().max(1);
+        phase % 2 == 0
+    }
+
+    fn next_caret_blink_deadline(&self, now: Instant) -> Option<Instant> {
+        let Some(_) = self.focused_input else {
+            return None;
+        };
+        let Some(started_at) = self.caret_blink_started_at else {
+            return Some(now + CARET_BLINK_INTERVAL);
+        };
+        let interval_ms = CARET_BLINK_INTERVAL.as_millis().max(1);
+        let elapsed_ms = now.saturating_duration_since(started_at).as_millis();
+        let next_boundary_ms = ((elapsed_ms / interval_ms) + 1) * interval_ms;
+        Some(started_at + Duration::from_millis(next_boundary_ms as u64))
     }
 
     fn flush_pending_click_if_due(&mut self, now: Instant) {
@@ -520,6 +645,301 @@ impl<VM> BoundRuntimeHandler<VM> {
                 self.invalidate_scene();
                 self.invalidation.mark_dirty();
             }
+        }
+    }
+
+    fn focused_input_state(&self, id: WidgetId) -> Option<&InputEditState> {
+        self.input_states.get(&id)
+    }
+
+    fn focused_input_snapshot(&self) -> Option<InputSnapshot<VM>> {
+        let id = self.focused_input?;
+        self.widget_tree.as_ref()?.input_snapshot(id)
+    }
+
+    fn sync_ime_allowed(&self) {
+        if let Some(window) = self.window.as_ref() {
+            let ime_allowed = self.focused_input.is_some();
+            window.set_ime_allowed(ime_allowed);
+            if ime_allowed {
+                window.set_ime_purpose(ImePurpose::Normal);
+            }
+        }
+    }
+
+    fn ensure_input_state(&mut self, widget_id: WidgetId, text: &str) -> &mut InputEditState {
+        self.input_states
+            .entry(widget_id)
+            .and_modify(|state| *state = state.clone().clamped_to(text))
+            .or_insert_with(|| InputEditState::caret_at(text))
+    }
+
+    fn update_input_state(
+        &mut self,
+        widget_id: WidgetId,
+        text: &str,
+        update: impl FnOnce(&mut InputEditState),
+    ) {
+        let state = self.ensure_input_state(widget_id, text);
+        update(state);
+        *state = state.clone().clamped_to(text);
+        if self.focused_input == Some(widget_id) {
+            self.reset_caret_blink(Instant::now());
+        }
+        self.invalidate_scene();
+    }
+
+    fn set_input_focus_state(&mut self, widget_id: WidgetId, text: &str) {
+        let state = self.ensure_input_state(widget_id, text);
+        *state = InputEditState::caret_at(text);
+        self.caret_blink_started_at = Some(Instant::now());
+        self.invalidate_scene();
+    }
+
+    fn clear_input_composition(&mut self, widget_id: WidgetId, text: &str) {
+        if let Some(state) = self.input_states.get_mut(&widget_id) {
+            state.composition = None;
+            *state = state.clone().clamped_to(text);
+            if self.focused_input == Some(widget_id) {
+                self.reset_caret_blink(Instant::now());
+            }
+            self.invalidate_scene();
+        }
+    }
+
+    fn apply_input_text_change(
+        &mut self,
+        snapshot: &InputSnapshot<VM>,
+        new_text: String,
+        new_cursor: usize,
+    ) {
+        {
+            let state = self.ensure_input_state(snapshot.id, &new_text);
+            state.cursor = new_cursor.min(new_text.len());
+            state.anchor = state.cursor;
+            state.composition = None;
+        }
+        self.reset_caret_blink(Instant::now());
+
+        if let Some(command) = snapshot.on_change.clone() {
+            command.execute(&mut self.view_model, new_text);
+            self.invalidation.mark_dirty();
+        }
+
+        self.invalidate_scene();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    fn insert_input_text(&mut self, snapshot: &InputSnapshot<VM>, inserted: &str) {
+        if snapshot.on_change.is_none() || inserted.is_empty() {
+            return;
+        }
+
+        let sanitized = normalize_single_line_text(inserted);
+        if sanitized.is_empty() {
+            return;
+        }
+
+        let state = self
+            .focused_input_state(snapshot.id)
+            .cloned()
+            .unwrap_or_else(|| InputEditState::caret_at(&snapshot.text))
+            .clamped_to(&snapshot.text);
+        let replace_range = state
+            .selection_range()
+            .unwrap_or((state.cursor, state.cursor));
+        let mut next_text = snapshot.text.clone();
+        next_text.replace_range(replace_range.0..replace_range.1, &sanitized);
+        self.apply_input_text_change(snapshot, next_text, replace_range.0 + sanitized.len());
+    }
+
+    fn handle_input_ime(&mut self, ime: Ime) {
+        let Some(snapshot) = self.focused_input_snapshot() else {
+            return;
+        };
+        let current_text = snapshot.text.clone();
+        let state = self
+            .focused_input_state(snapshot.id)
+            .cloned()
+            .unwrap_or_else(|| InputEditState::caret_at(&current_text))
+            .clamped_to(&current_text);
+
+        match ime {
+            Ime::Enabled => {
+                self.sync_ime_allowed();
+            }
+            Ime::Preedit(text, cursor) => {
+                let replace_range = state
+                    .composition
+                    .as_ref()
+                    .map(|composition| composition.replace_range)
+                    .unwrap_or_else(|| {
+                        state
+                            .selection_range()
+                            .unwrap_or((state.cursor, state.cursor))
+                    });
+                self.update_input_state(snapshot.id, &current_text, |edit| {
+                    if text.is_empty() {
+                        edit.composition = None;
+                    } else {
+                        edit.composition = Some(crate::ui::widget::CompositionState {
+                            replace_range,
+                            text,
+                            cursor,
+                        });
+                    }
+                });
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            Ime::Commit(text) => {
+                let replace_range = state
+                    .composition
+                    .as_ref()
+                    .map(|composition| composition.replace_range)
+                    .unwrap_or_else(|| {
+                        state
+                            .selection_range()
+                            .unwrap_or((state.cursor, state.cursor))
+                    });
+                let sanitized = normalize_single_line_text(&text);
+                let mut next_text = current_text.clone();
+                next_text.replace_range(replace_range.0..replace_range.1, &sanitized);
+                self.apply_input_text_change(
+                    &snapshot,
+                    next_text,
+                    replace_range.0 + sanitized.len(),
+                );
+            }
+            Ime::Disabled => {
+                self.clear_input_composition(snapshot.id, &current_text);
+            }
+        }
+    }
+
+    fn handle_input_keyboard_event(&mut self, event: &winit::event::KeyEvent) {
+        let Some(snapshot) = self.focused_input_snapshot() else {
+            return;
+        };
+
+        if event.state != ElementState::Pressed {
+            return;
+        }
+
+        self.reset_caret_blink(Instant::now());
+
+        let text = snapshot.text.clone();
+        let mut state = self
+            .focused_input_state(snapshot.id)
+            .cloned()
+            .unwrap_or_else(|| InputEditState::caret_at(&text))
+            .clamped_to(&text);
+        let extend_selection = self.modifiers.shift_key();
+
+        if is_primary_shortcut_modifier(self.modifiers) {
+            match event.physical_key {
+                PhysicalKey::Code(KeyCode::KeyA) => {
+                    state.cursor = text.len();
+                    state.anchor = 0;
+                    self.input_states.insert(snapshot.id, state);
+                    self.invalidate_scene();
+                }
+                PhysicalKey::Code(KeyCode::KeyC) => {
+                    if let Some((start, end)) = state.selection_range() {
+                        self.clipboard.set_text(text[start..end].to_string());
+                    }
+                }
+                PhysicalKey::Code(KeyCode::KeyX) => {
+                    if let Some((start, end)) = state.selection_range() {
+                        self.clipboard.set_text(text[start..end].to_string());
+                        if snapshot.on_change.is_some() {
+                            let mut next_text = text.clone();
+                            next_text.replace_range(start..end, "");
+                            self.apply_input_text_change(&snapshot, next_text, start);
+                        }
+                    }
+                }
+                PhysicalKey::Code(KeyCode::KeyV) => {
+                    if let Some(clipboard_text) = self.clipboard.get_text() {
+                        self.insert_input_text(&snapshot, &clipboard_text);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match event.physical_key {
+            PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                let next = if !extend_selection {
+                    state.selection_range().map(|(start, _)| start)
+                } else {
+                    None
+                }
+                .unwrap_or_else(|| previous_grapheme_boundary(&text, state.cursor));
+                move_cursor(&mut state, next, extend_selection);
+            }
+            PhysicalKey::Code(KeyCode::ArrowRight) => {
+                let next = if !extend_selection {
+                    state.selection_range().map(|(_, end)| end)
+                } else {
+                    None
+                }
+                .unwrap_or_else(|| next_grapheme_boundary(&text, state.cursor));
+                move_cursor(&mut state, next, extend_selection);
+            }
+            PhysicalKey::Code(KeyCode::Home) => move_cursor(&mut state, 0, extend_selection),
+            PhysicalKey::Code(KeyCode::End) => {
+                move_cursor(&mut state, text.len(), extend_selection)
+            }
+            PhysicalKey::Code(KeyCode::Backspace) => {
+                if snapshot.on_change.is_none() {
+                    return;
+                }
+                let (start, end) = state.selection_range().unwrap_or_else(|| {
+                    let previous = previous_grapheme_boundary(&text, state.cursor);
+                    (previous, state.cursor)
+                });
+                if start == end {
+                    return;
+                }
+                let mut next_text = text.clone();
+                next_text.replace_range(start..end, "");
+                self.apply_input_text_change(&snapshot, next_text, start);
+                return;
+            }
+            PhysicalKey::Code(KeyCode::Delete) => {
+                if snapshot.on_change.is_none() {
+                    return;
+                }
+                let (start, end) = state.selection_range().unwrap_or_else(|| {
+                    let next = next_grapheme_boundary(&text, state.cursor);
+                    (state.cursor, next)
+                });
+                if start == end {
+                    return;
+                }
+                let mut next_text = text.clone();
+                next_text.replace_range(start..end, "");
+                self.apply_input_text_change(&snapshot, next_text, start);
+                return;
+            }
+            _ => {
+                if let Some(input) = event.text.as_ref() {
+                    self.insert_input_text(&snapshot, input);
+                    return;
+                }
+                return;
+            }
+        }
+
+        self.input_states.insert(snapshot.id, state);
+        self.invalidate_scene();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
         }
     }
 
@@ -547,18 +967,23 @@ impl<VM> BoundRuntimeHandler<VM> {
                     self.focused_input,
                 )
                 .into_iter()
-                .map(|interaction| match interaction {
-                    HitInteraction::Widget {
-                        id, interactions, ..
+                .map(|interaction| {
+                    let prefers_text_cursor =
+                        matches!(&interaction, HitInteraction::FocusInput { .. });
+                    match interaction {
+                        HitInteraction::Widget {
+                            id, interactions, ..
+                        }
+                        | HitInteraction::FocusInput {
+                            id, interactions, ..
+                        } => HoveredWidget {
+                            widget_id: id,
+                            prefers_text_cursor,
+                            on_mouse_enter: interactions.on_mouse_enter,
+                            on_mouse_leave: interactions.on_mouse_leave,
+                            on_mouse_move: interactions.on_mouse_move,
+                        },
                     }
-                    | HitInteraction::FocusInput {
-                        id, interactions, ..
-                    } => HoveredWidget {
-                        widget_id: id,
-                        on_mouse_enter: interactions.on_mouse_enter,
-                        on_mouse_leave: interactions.on_mouse_leave,
-                        on_mouse_move: interactions.on_mouse_move,
-                    },
                 })
                 .collect()
             })
@@ -604,6 +1029,20 @@ impl<VM> BoundRuntimeHandler<VM> {
         }
 
         self.hovered_widgets = next_hovered;
+
+        if let Some(window) = self.window.as_ref() {
+            let cursor = if self
+                .hovered_widgets
+                .last()
+                .map(|hovered| hovered.prefers_text_cursor)
+                .unwrap_or(false)
+            {
+                Cursor::Icon(CursorIcon::Text)
+            } else {
+                Cursor::Icon(CursorIcon::Default)
+            };
+            window.set_cursor(cursor);
+        }
     }
 
     fn update_focus(
@@ -611,6 +1050,7 @@ impl<VM> BoundRuntimeHandler<VM> {
         next_widget: Option<FocusedWidget<VM>>,
         next_input: Option<WidgetId>,
         on_focus: Option<Command<VM>>,
+        input_text: Option<&str>,
     ) {
         let current_id = self
             .focused_widget
@@ -620,7 +1060,19 @@ impl<VM> BoundRuntimeHandler<VM> {
 
         if current_id == next_id {
             self.focused_input = next_input;
+            self.caret_blink_started_at = next_input.map(|_| Instant::now());
+            self.sync_ime_allowed();
             return;
+        }
+
+        if let Some(previous_input) = self.focused_input {
+            if let Some(snapshot) = self
+                .widget_tree
+                .as_ref()
+                .and_then(|tree| tree.input_snapshot(previous_input))
+            {
+                self.clear_input_composition(previous_input, &snapshot.text);
+            }
         }
 
         let mut fired_handler = false;
@@ -633,6 +1085,11 @@ impl<VM> BoundRuntimeHandler<VM> {
 
         self.focused_widget = next_widget;
         self.focused_input = next_input;
+        self.caret_blink_started_at = next_input.map(|_| Instant::now());
+        if let (Some(input_id), Some(text)) = (next_input, input_text) {
+            self.set_input_focus_state(input_id, text);
+        }
+        self.sync_ime_allowed();
 
         if let Some(command) = on_focus {
             if next_id.is_some() {
@@ -652,33 +1109,39 @@ impl<VM> BoundRuntimeHandler<VM> {
 
         let hit = self.hit_test(viewport);
         let Some(hit) = hit else {
-            self.update_focus(None, None, None);
+            self.update_focus(None, None, None, None);
             self.pending_click = None;
             return;
         };
 
-        let (widget_id, interactions, focus_target, focus_input, focus_command) = match hit {
-            HitInteraction::Widget {
-                id,
-                interactions,
-                focusable,
-            } => (
-                id,
-                interactions.clone(),
-                focusable.then_some(id),
-                None,
-                focusable.then_some(interactions.on_focus.clone()).flatten(),
-            ),
-            HitInteraction::FocusInput {
-                id, interactions, ..
-            } => (
-                id,
-                interactions.clone(),
-                Some(id),
-                Some(id),
-                interactions.on_focus.clone(),
-            ),
-        };
+        let (widget_id, interactions, focus_target, focus_input, focus_command, input_text) =
+            match hit {
+                HitInteraction::Widget {
+                    id,
+                    interactions,
+                    focusable,
+                } => (
+                    id,
+                    interactions.clone(),
+                    focusable.then_some(id),
+                    None,
+                    focusable.then_some(interactions.on_focus.clone()).flatten(),
+                    None,
+                ),
+                HitInteraction::FocusInput {
+                    id,
+                    interactions,
+                    text,
+                    ..
+                } => (
+                    id,
+                    interactions.clone(),
+                    Some(id),
+                    Some(id),
+                    interactions.on_focus.clone(),
+                    Some(text),
+                ),
+            };
 
         self.update_focus(
             focus_target.map(|id| FocusedWidget {
@@ -687,6 +1150,7 @@ impl<VM> BoundRuntimeHandler<VM> {
             }),
             focus_input,
             focus_command,
+            input_text.as_deref(),
         );
 
         let is_double_click = self
@@ -888,6 +1352,10 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
             });
         }
 
+        if let WindowEvent::ModifiersChanged(modifiers) = &event {
+            self.modifiers = modifiers.state();
+        }
+
         if matches!(event, WindowEvent::CursorLeft { .. }) {
             self.cursor_position = None;
             for hovered in std::mem::take(&mut self.hovered_widgets).into_iter().rev() {
@@ -896,6 +1364,9 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
                     self.invalidate_scene();
                     self.invalidation.mark_dirty();
                 }
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.set_cursor(Cursor::Icon(CursorIcon::Default));
             }
         }
 
@@ -915,37 +1386,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
                     self.handle_mouse_press(viewport, Instant::now());
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
-                    if let Some(tree) = self.widget_tree.as_ref() {
-                        let widget_result = tree.handle_keyboard_event(
-                            &self.font_manager,
-                            &self.theme,
-                            &mut self.animation_engine,
-                            viewport,
-                            event,
-                            self.focused_input,
-                        );
-
-                        self.focused_input = widget_result.focus;
-
-                        if let Some(command) = widget_result.command {
-                            match command {
-                                UiCommand::Command(command) => {
-                                    command.execute(&mut self.view_model)
-                                }
-                                UiCommand::Value(command, value) => {
-                                    command.execute(&mut self.view_model, value)
-                                }
-                            }
-                            self.invalidate_scene();
-                            self.invalidation.mark_dirty();
-                        }
-
-                        if widget_result.request_redraw {
-                            if let Some(window) = self.window.as_ref() {
-                                window.request_redraw();
-                            }
-                        }
-                    }
+                    self.handle_input_keyboard_event(event);
                 }
                 _ => {}
             }
@@ -971,12 +1412,21 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::Focused(false) => {
+                self.update_focus(None, None, None, None);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::ThemeChanged(theme) => {
                 self.apply_window_theme(Some(theme));
                 self.sync_bindings(Instant::now());
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
+            }
+            WindowEvent::Ime(ime) => {
+                self.handle_input_ime(ime);
             }
             WindowEvent::Resized(size) => {
                 self.invalidate_scene();
@@ -1008,9 +1458,85 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
     }
 }
 
+fn is_primary_shortcut_modifier(modifiers: ModifiersState) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        modifiers.super_key()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        modifiers.control_key()
+    }
+}
+
+fn normalize_single_line_text(text: &str) -> String {
+    text.chars()
+        .map(|ch| match ch {
+            '\r' | '\n' => ' ',
+            other => other,
+        })
+        .filter(|ch| !ch.is_control() || *ch == ' ')
+        .collect()
+}
+
+fn move_cursor(state: &mut InputEditState, next: usize, extend_selection: bool) {
+    state.cursor = next;
+    if !extend_selection {
+        state.anchor = next;
+    }
+    state.composition = None;
+}
+
+fn grapheme_boundaries(text: &str) -> Vec<usize> {
+    let mut boundaries = vec![0];
+    for (index, grapheme) in text.grapheme_indices(true) {
+        boundaries.push(index + grapheme.len());
+    }
+    boundaries
+}
+
+fn previous_grapheme_boundary(text: &str, cursor: usize) -> usize {
+    grapheme_boundaries(text)
+        .into_iter()
+        .take_while(|boundary| *boundary < cursor)
+        .last()
+        .unwrap_or(0)
+}
+
+fn next_grapheme_boundary(text: &str, cursor: usize) -> usize {
+    grapheme_boundaries(text)
+        .into_iter()
+        .find(|boundary| *boundary > cursor)
+        .unwrap_or(text.len())
+}
+
 fn resolve_theme(selection: &ThemeSelection, window_theme: Option<WindowTheme>) -> Theme {
     match selection {
         ThemeSelection::System => Theme::from_window_theme(window_theme),
         ThemeSelection::Fixed(theme) => theme.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{next_grapheme_boundary, normalize_single_line_text, previous_grapheme_boundary};
+
+    #[test]
+    fn grapheme_navigation_keeps_emoji_cluster_intact() {
+        let text = "A👨‍👩‍👧‍👦中";
+        let emoji_start = previous_grapheme_boundary(text, text.len());
+        let end = next_grapheme_boundary(text, 1);
+
+        assert_eq!(&text[1..end], "👨‍👩‍👧‍👦");
+        assert_eq!(emoji_start, end);
+    }
+
+    #[test]
+    fn normalize_single_line_text_replaces_newlines_with_spaces() {
+        assert_eq!(
+            normalize_single_line_text("hello\r\nworld\t!"),
+            "hello  world!"
+        );
     }
 }

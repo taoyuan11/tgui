@@ -655,8 +655,8 @@ impl RectVertex {
                 },
                 wgpu::VertexAttribute {
                     format: wgpu::VertexFormat::Float32x2,
-                    offset: (std::mem::size_of::<[f32; 2]>()
-                        + std::mem::size_of::<[f32; 4]>()) as u64,
+                    offset: (std::mem::size_of::<[f32; 2]>() + std::mem::size_of::<[f32; 4]>())
+                        as u64,
                     shader_location: 2,
                 },
                 wgpu::VertexAttribute {
@@ -701,7 +701,10 @@ impl RectVertex {
                 primitive.color.b as f32 / 255.0,
                 primitive.color.a as f32 / 255.0,
             ];
-            let rect_size = [primitive.rect.width.max(0.0), primitive.rect.height.max(0.0)];
+            let rect_size = [
+                primitive.rect.width.max(0.0),
+                primitive.rect.height.max(0.0),
+            ];
             let radius = primitive
                 .corner_radius
                 .max(0.0)

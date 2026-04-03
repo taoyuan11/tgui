@@ -58,9 +58,12 @@ This project is under active development.
   - `on_mouse_leave(...)`
   - `on_mouse_move(...)`
   - `on_focus(...)` / `on_blur(...)` on `Button` and `Input`
-- Declarative transitions for bound visual values:
-  - `binding.animated(Transition::ease_out(...))`
-  - built-in interpolation for `Color`, `f32`, and `Point`
+- Advanced animation APIs:
+  - declarative `Binding::animated(...)` with `Transition` or `AnimationSpec<T>`
+  - command-style `AnimatedValue<T>` + `ViewModelContext::timeline()`
+  - playback controls: delay, repeat, direction, speed, pause/resume/restart/seek/reverse
+  - built-in interpolation for `Color`, `f32`, `Point`, and `Insets`
+  - layout animation for width, height, gap, padding, margin, and grow
 - Runtime theme transitions when switching `ThemeMode`
 
 ## Installation
@@ -148,11 +151,11 @@ fn main() -> Result<(), tgui::TguiError> {
 
 ## Declarative Animation
 
-Bindings can opt into transitions directly:
+Bindings can opt into advanced transitions directly:
 
 ```rust
 use std::time::Duration;
-use tgui::{Color, Point, Transition};
+use tgui::{Color, Insets, Point, Transition};
 
 let color = expanded
     .binding()
@@ -175,6 +178,20 @@ let offset = expanded
         }
     })
     .animated(Transition::ease_in_out(Duration::from_millis(260)));
+
+let padding = expanded
+    .binding()
+    .map(|value| {
+        if value {
+            Insets::symmetric(28.0, 18.0)
+        } else {
+            Insets::symmetric(16.0, 12.0)
+        }
+    })
+    .animated(
+        Transition::ease_in_out(Duration::from_millis(280))
+            .delay(Duration::from_millis(20)),
+    );
 ```
 
 Animated bindings work with:
@@ -184,7 +201,49 @@ Animated bindings work with:
 - text color
 - opacity
 - offset
+- width / height
+- gap / padding / margin / grow
 - bound window clear color
+
+`Binding::animated(...)` also accepts `AnimationSpec<T>` when you want to reuse the same playback profile shape as controller-driven timelines.
+
+## Timeline Animation
+
+For command-style animation, create `AnimatedValue<T>` instances and drive them with a timeline controller:
+
+```rust
+use std::time::Duration;
+use tgui::{
+    AnimationCurve, AnimationSpec, Keyframes, Playback, PlaybackDirection, Point,
+    ViewModelContext,
+};
+
+let offset = ctx.animated_value(Point { x: 0.0, y: 0.0 });
+let timeline = ctx
+    .timeline()
+    .playback(
+        Playback::default()
+            .repeat(2)
+            .direction(PlaybackDirection::Alternate),
+    )
+    .track(
+        offset.clone(),
+        AnimationSpec::from(
+            Keyframes::timed(Duration::from_millis(800))
+                .curve(AnimationCurve::EaseInOutCubic)
+                .at(Duration::ZERO, Point { x: 0.0, y: 0.0 })
+                .at(Duration::from_millis(400), Point { x: 0.0, y: 24.0 })
+                .at(Duration::from_millis(800), Point { x: 0.0, y: -12.0 }),
+        ),
+    )
+    .build();
+
+timeline.play();
+timeline.pause();
+timeline.resume();
+timeline.seek_percent(0.5);
+timeline.reverse();
+```
 
 ## Styling and Interaction
 
@@ -256,6 +315,7 @@ Available examples in this repository:
 - `basic_window`
 - `mvvm_counter`
 - `animation_showcase`
+- `timeline_controller`
 - `theme`
 - `input`
 - `layout`
@@ -268,6 +328,7 @@ Run them with:
 cargo run --example basic_window
 cargo run --example mvvm_counter
 cargo run --example animation_showcase
+cargo run --example timeline_controller
 cargo run --example theme
 cargo run --example input
 ```
@@ -284,7 +345,7 @@ cargo test
 ## Current Limitations
 
 - The widget set is still intentionally small.
-- Animations currently focus on visual properties; layout animation and enter / exit animation are not implemented yet.
+- Enter / exit lifecycle animation is not implemented yet.
 - Rendering and styling quality are improving quickly, so visual details may still change between releases.
 - Public APIs are not frozen yet.
 

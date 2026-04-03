@@ -1,14 +1,13 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use crate::animation::{AnimationEngine, AnimationKey, Transition, WidgetProperty};
+use crate::animation::{AnimationEngine, AnimationKey, WidgetProperty};
 use taffy::NodeId as TaffyNodeId;
 
-use crate::foundation::binding::Binding;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
-use crate::ui::layout::{Align, Axis, Insets, Justify, Wrap};
+use crate::ui::layout::{Align, Axis, Insets, Justify, Value, Wrap};
 
 use super::text::Text;
 
@@ -141,40 +140,6 @@ impl<VM> InteractionHandlers<VM> {
     }
 }
 
-#[derive(Clone)]
-pub enum Value<T> {
-    Static(T),
-    Bound(Binding<T>),
-}
-
-impl<T: Clone> Value<T> {
-    pub fn resolve(&self) -> T {
-        match self {
-            Self::Static(value) => value.clone(),
-            Self::Bound(binding) => binding.get(),
-        }
-    }
-
-    pub(crate) fn transition(&self) -> Option<Transition> {
-        match self {
-            Self::Static(_) => None,
-            Self::Bound(binding) => binding.transition(),
-        }
-    }
-}
-
-impl<T> From<T> for Value<T> {
-    fn from(value: T) -> Self {
-        Self::Static(value)
-    }
-}
-
-impl<T> From<Binding<T>> for Value<T> {
-    fn from(value: Binding<T>) -> Self {
-        Self::Bound(value)
-    }
-}
-
 impl Value<Color> {
     pub(crate) fn resolve_widget(
         &self,
@@ -248,6 +213,26 @@ impl Value<Point> {
     }
 }
 
+impl Value<Insets> {
+    pub(crate) fn resolve_widget(
+        &self,
+        animations: &mut AnimationEngine,
+        widget_id: WidgetId,
+        property: WidgetProperty,
+        now: Instant,
+    ) -> Insets {
+        animations.resolve_insets(
+            AnimationKey::Widget {
+                id: widget_id.raw(),
+                property,
+            },
+            self.resolve(),
+            self.transition(),
+            now,
+        )
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct RenderPrimitive {
     pub rect: Rect,
@@ -285,11 +270,11 @@ pub(crate) enum ContainerKind {
     Flex { direction: Axis, wrap: Wrap },
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ContainerLayout {
     pub kind: ContainerKind,
-    pub padding: Insets,
-    pub gap: f32,
+    pub padding: Value<Insets>,
+    pub gap: Value<f32>,
     pub justify: Justify,
     pub align: Align,
     pub align_x: Option<Align>,
@@ -300,8 +285,8 @@ impl ContainerLayout {
     pub(crate) fn flow() -> Self {
         Self {
             kind: ContainerKind::Flow,
-            padding: Insets::ZERO,
-            gap: 0.0,
+            padding: Value::Static(Insets::ZERO),
+            gap: Value::Static(0.0),
             justify: Justify::Start,
             align: Align::Start,
             align_x: None,
@@ -391,6 +376,7 @@ pub(crate) struct HitRegion<VM> {
 pub(crate) struct ComputedScene<VM> {
     pub scene: ScenePrimitives,
     pub hit_regions: Vec<HitRegion<VM>>,
+    pub ime_cursor_area: Option<Rect>,
 }
 
 impl<VM> Default for ComputedScene<VM> {
@@ -398,10 +384,69 @@ impl<VM> Default for ComputedScene<VM> {
         Self {
             scene: ScenePrimitives::default(),
             hit_regions: Vec::new(),
+            ime_cursor_area: None,
         }
     }
 }
 
 impl Point {
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct InputEditState {
+    pub cursor: usize,
+    pub anchor: usize,
+    pub composition: Option<CompositionState>,
+}
+
+impl InputEditState {
+    pub(crate) fn caret_at(text: &str) -> Self {
+        let end = text.len();
+        Self {
+            cursor: end,
+            anchor: end,
+            composition: None,
+        }
+    }
+
+    pub(crate) fn selection_range(&self) -> Option<(usize, usize)> {
+        (self.cursor != self.anchor)
+            .then_some((self.cursor.min(self.anchor), self.cursor.max(self.anchor)))
+    }
+
+    pub(crate) fn clamped_to(mut self, text: &str) -> Self {
+        let len = text.len();
+        self.cursor = self.cursor.min(len);
+        self.anchor = self.anchor.min(len);
+        if let Some(composition) = &mut self.composition {
+            composition.replace_range.0 = composition.replace_range.0.min(len);
+            composition.replace_range.1 = composition.replace_range.1.min(len);
+            if composition.replace_range.0 > composition.replace_range.1 {
+                composition.replace_range =
+                    (composition.replace_range.1, composition.replace_range.1);
+            }
+        }
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CompositionState {
+    pub replace_range: (usize, usize),
+    pub text: String,
+    pub cursor: Option<(usize, usize)>,
+}
+
+#[derive(Clone)]
+pub(crate) struct InputSnapshot<VM> {
+    pub id: WidgetId,
+    pub on_change: Option<ValueCommand<VM, String>>,
+    pub text: String,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct RenderedWidgetScene {
+    pub primitives: ScenePrimitives,
+    pub ime_cursor_area: Option<Rect>,
 }

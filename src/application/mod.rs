@@ -1,5 +1,6 @@
 use winit::dpi::LogicalSize;
 
+use crate::animation::AnimationCoordinator;
 use crate::foundation::binding::{Binding, InvalidationSignal, ViewModelContext};
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
@@ -199,7 +200,8 @@ where
 
     pub fn run(self) -> Result<(), TguiError> {
         let invalidation = InvalidationSignal::new();
-        let context = ViewModelContext::new(invalidation.clone());
+        let animations = AnimationCoordinator::default();
+        let context = ViewModelContext::new(invalidation.clone(), animations.clone());
         let view_model = (self.factory)(&context);
         let window_bindings = WindowBindings {
             title: self.title_binding.map(|binding| binding(&view_model)),
@@ -217,6 +219,7 @@ where
             widget_tree,
             self.commands,
             invalidation,
+            animations,
         )?
         .run()
     }
