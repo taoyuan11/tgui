@@ -2048,11 +2048,12 @@ dependencies = [
 
 [[package]]
 name = "tgui"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "arboard",
  "bytemuck",
  "cosmic-text",
+ "jni",
  "log",
  "pollster",
  "taffy",

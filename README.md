@@ -70,12 +70,20 @@ This project is under active development.
 - Runtime theme transitions when switching `ThemeMode`
 - Container overflow clipping with optional bi-directional mouse-wheel scrolling
 - Visual scrollbars for scrollable containers with customizable styling
+- Android support behind the `android` feature:
+  - NativeActivity runtime
+  - touch input
+  - `ThemeMode::System` integration
+  - Android system font discovery
+  - foreground / background surface recovery
 
 ## Installation
 
+For desktop targets:
+
 ```toml
 [dependencies]
-tgui = "0.0.4"
+tgui = "0.0.5"
 ```
 
 or use the repository directly:
@@ -83,6 +91,20 @@ or use the repository directly:
 ```toml
 [dependencies]
 tgui = { git = "https://github.com/nandebishitaoyuan/tgui.git" }
+```
+
+For Android targets, enable the `android` feature:
+
+```toml
+[dependencies]
+tgui = { version = "0.0.5", features = ["android"] }
+```
+
+If you create an Android NativeActivity app directly, `winit` also needs its Android activity feature:
+
+```toml
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30", features = ["android-native-activity"] }
 ```
 
 ## Quick Start
@@ -344,6 +366,106 @@ let title = Text::new("Hello tgui")
     .font_size(24.0);
 ```
 
+On Android, `tgui` also loads system fonts automatically, so a manually registered default font is not required just to make the app start or render text.
+
+## Android
+
+Android support is feature-gated:
+
+```toml
+[dependencies]
+tgui = { path = "../..", features = ["android"] }
+```
+
+The current Android path is based on `NativeActivity`. `ThemeMode::System`, touch interaction, system font discovery, and background-to-foreground resume are supported in the runtime.
+
+### Minimal Android Project Setup
+
+A minimal Android example project looks like this:
+
+```toml
+[package]
+name = "android_basic_window"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+tgui = { path = "../..", features = ["android"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30", features = ["android-native-activity"] }
+
+[package.metadata.android.sdk]
+min_sdk_version = 23
+target_sdk_version = 34
+
+[package.metadata.android.application.activity]
+config_changes = "orientation|keyboardHidden|screenSize|screenLayout|uiMode"
+
+[lib]
+crate-type = ["cdylib"]
+```
+
+The Rust entry point should export `android_main`:
+
+```rust
+#[cfg(target_os = "android")]
+use tgui::{Application, TguiError};
+#[cfg(target_os = "android")]
+use winit::platform::android::activity::AndroidApp;
+
+#[cfg(target_os = "android")]
+fn run_android_entry(app: AndroidApp) -> Result<(), TguiError> {
+    Application::new()
+        .title("tgui android")
+        .run_android(app)
+}
+
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub fn android_main(app: AndroidApp) {
+    if let Err(error) = run_android_entry(app) {
+        panic!("failed to run android app: {error}");
+    }
+}
+```
+
+### Build And Run
+
+1. Set Android toolchain environment variables:
+
+```bash
+ANDROID_HOME=/path/to/Android/Sdk
+ANDROID_NDK_HOME=/path/to/Android/Sdk/ndk/<version>
+```
+
+2. Build the Android APK:
+
+```bash
+cargo apk build --manifest-path examples/android_basic_window/Cargo.toml --target x86_64-linux-android
+```
+
+For a physical ARM64 device, use:
+
+```bash
+cargo apk build --manifest-path examples/android_basic_window/Cargo.toml --target aarch64-linux-android
+```
+
+3. Install to a connected device or emulator:
+
+```bash
+adb install -r examples/android_basic_window/target/debug/apk/android_basic_window.apk
+```
+
+4. Launch the example manually if needed:
+
+```bash
+adb shell am start -n rust.android_basic_window/android.app.NativeActivity
+```
+
+The example manifest package is currently `rust.android_basic_window`, so the launch command above matches the generated APK.
+
 ## Examples
 
 Available examples in this repository:
@@ -358,25 +480,39 @@ Available examples in this repository:
 - `scroll`
 - `layout_theme_showcase`
 - `widgets_showcase`
+- `android_basic_window`
 
-Run them with:
+All runnable examples now live in their own Cargo projects under `examples/<name>/`.
+`examples/static` is a shared assets folder, not a standalone example project.
+
+Run desktop examples with `--manifest-path`:
 
 ```bash
-cargo run --example basic_window
-cargo run --example mvvm_counter
-cargo run --example animation_showcase
-cargo run --example timeline_controller
-cargo run --example theme
-cargo run --example input
-cargo run --example scroll
+cargo run --manifest-path examples/basic_window/Cargo.toml
+cargo run --manifest-path examples/mvvm_counter/Cargo.toml
+cargo run --manifest-path examples/animation_showcase/Cargo.toml
+cargo run --manifest-path examples/timeline_controller/Cargo.toml
+cargo run --manifest-path examples/theme/Cargo.toml
+cargo run --manifest-path examples/input/Cargo.toml
+cargo run --manifest-path examples/layout/Cargo.toml
+cargo run --manifest-path examples/scroll/Cargo.toml
+cargo run --manifest-path examples/layout_theme_showcase/Cargo.toml
+cargo run --manifest-path examples/widgets_showcase/Cargo.toml
 ```
+
+Build the Android example with:
+
+```bash
+cargo apk build --manifest-path examples/android_basic_window/Cargo.toml --target x86_64-linux-android
+```
+
+The Android example already enables `tgui`'s `android` feature in its own `Cargo.toml`, so you do not need to pass `--features android` on the command line.
 
 ## Development
 
 ```bash
 cargo fmt
 cargo check
-cargo check --examples
 cargo test
 ```
 

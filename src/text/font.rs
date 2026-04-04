@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use cosmic_text::fontdb::{Family, Query, Stretch, Style, Weight, ID};
@@ -31,7 +32,18 @@ impl FontCatalog {
     pub(crate) fn register_font(&mut self, name: impl Into<String>, bytes: &'static [u8]) {
         self.named_fonts.push(NamedFont {
             name: name.into(),
-            bytes,
+            source: FontSource::Binary(bytes),
+        });
+    }
+
+    pub(crate) fn register_font_file(
+        &mut self,
+        name: impl Into<String>,
+        path: impl Into<PathBuf>,
+    ) {
+        self.named_fonts.push(NamedFont {
+            name: name.into(),
+            source: FontSource::File(path.into()),
         });
     }
 
@@ -39,18 +51,42 @@ impl FontCatalog {
         self.default_font = Some(name.into());
     }
 
-    pub(crate) fn font_sources(&self) -> Vec<cosmic_text::fontdb::Source> {
-        self.named_fonts
-            .iter()
-            .map(|font| cosmic_text::fontdb::Source::Binary(Arc::new(font.bytes.to_vec())))
-            .collect()
+    pub(crate) fn configure_font_system(
+        &self,
+        font_system: &mut FontSystem,
+    ) -> Vec<(String, String)> {
+        #[cfg(target_os = "android")]
+        load_android_system_fonts(font_system.db_mut());
+
+        let mut aliases = Vec::with_capacity(self.named_fonts.len());
+        for font in &self.named_fonts {
+            let ids = font_system.db_mut().load_font_source(match &font.source {
+                FontSource::Binary(bytes) => {
+                    cosmic_text::fontdb::Source::Binary(Arc::new(bytes.to_vec()))
+                }
+                FontSource::File(path) => cosmic_text::fontdb::Source::File(path.clone().into()),
+            });
+            let actual_family = ids
+                .iter()
+                .find_map(|id| face_family_name(font_system.db(), *id))
+                .unwrap_or_else(|| font.name.clone());
+            aliases.push((font.name.clone(), actual_family));
+        }
+
+        aliases
     }
 }
 
 #[derive(Debug, Clone)]
 struct NamedFont {
     name: String,
-    bytes: &'static [u8],
+    source: FontSource,
+}
+
+#[derive(Debug, Clone)]
+enum FontSource {
+    Binary(&'static [u8]),
+    File(PathBuf),
 }
 
 #[derive(Debug, Clone)]
@@ -84,19 +120,7 @@ struct TextMeasureKey {
 impl FontManager {
     pub(crate) fn new(catalog: &FontCatalog) -> Self {
         let mut font_system = FontSystem::new();
-        let mut aliases = Vec::with_capacity(catalog.named_fonts.len());
-        for font in &catalog.named_fonts {
-            let ids = font_system
-                .db_mut()
-                .load_font_source(cosmic_text::fontdb::Source::Binary(Arc::new(
-                    font.bytes.to_vec(),
-                )));
-            let actual_family = ids
-                .iter()
-                .find_map(|id| face_family_name(font_system.db(), *id))
-                .unwrap_or_else(|| font.name.clone());
-            aliases.push((font.name.clone(), actual_family));
-        }
+        let aliases = catalog.configure_font_system(&mut font_system);
 
         Self {
             font_system: RefCell::new(font_system),
@@ -231,6 +255,89 @@ impl FontManager {
             .query(&query)
             .and_then(|id| face_family_name(self.font_system.borrow().db(), id))
     }
+}
+
+#[cfg(target_os = "android")]
+fn load_android_system_fonts(database: &mut cosmic_text::fontdb::Database) {
+    for path in [
+        "/system/fonts",
+        "/system_ext/fonts",
+        "/product/fonts",
+        "/vendor/fonts",
+    ] {
+        let path = std::path::Path::new(path);
+        if path.exists() {
+            database.load_fonts_dir(path);
+        }
+    }
+
+    let sans_family = first_matching_family(
+        database,
+        &[
+            "Roboto",
+            "Roboto Static",
+            "Roboto Flex",
+            "Droid Sans",
+            "Noto Sans CJK SC",
+            "Noto Sans CJK TC",
+            "Noto Sans CJK JP",
+            "Noto Sans CJK KR",
+            "Noto Sans",
+        ],
+    )
+    .or_else(|| first_loaded_family(database));
+
+    let serif_family = first_matching_family(
+        database,
+        &[
+            "Noto Serif",
+            "Noto Serif CJK SC",
+            "Noto Serif CJK TC",
+            "Noto Serif CJK JP",
+            "Noto Serif CJK KR",
+        ],
+    )
+    .or_else(|| sans_family.clone());
+
+    let monospace_family = first_matching_family(
+        database,
+        &["Droid Sans Mono", "Cutive Mono", "Roboto Mono", "Noto Sans Mono"],
+    )
+    .or_else(|| sans_family.clone());
+
+    if let Some(family) = sans_family {
+        database.set_sans_serif_family(family.clone());
+        database.set_cursive_family(family.clone());
+        database.set_fantasy_family(family);
+    }
+    if let Some(family) = serif_family {
+        database.set_serif_family(family);
+    }
+    if let Some(family) = monospace_family {
+        database.set_monospace_family(family);
+    }
+}
+
+#[cfg(target_os = "android")]
+fn first_matching_family(
+    database: &cosmic_text::fontdb::Database,
+    candidates: &[&str],
+) -> Option<String> {
+    candidates.iter().find_map(|candidate| {
+        database.faces().find_map(|face| {
+            face.families
+                .iter()
+                .find(|(family, _)| family.eq_ignore_ascii_case(candidate))
+                .map(|(family, _)| family.clone())
+        })
+    })
+}
+
+#[cfg(target_os = "android")]
+fn first_loaded_family(database: &cosmic_text::fontdb::Database) -> Option<String> {
+    database
+        .faces()
+        .find_map(|face| face.families.first().map(|(family, _)| family.clone()))
 }
 
 fn face_family_name(database: &cosmic_text::fontdb::Database, id: ID) -> Option<String> {

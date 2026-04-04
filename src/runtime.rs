@@ -6,10 +6,21 @@ use crate::animation::{
     default_theme_transition, AnimationCoordinator, AnimationEngine, AnimationKey, Transition,
     WindowProperty,
 };
+#[cfg(all(target_os = "android", feature = "android"))]
+use jni::{
+    JavaVM, JValue, jni_sig, jni_str,
+    objects::JObject,
+};
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+#[cfg(all(target_os = "android", feature = "android"))]
+use winit::platform::android::activity::AndroidApp;
+#[cfg(all(target_os = "android", feature = "android"))]
+use winit::platform::android::activity::ndk::configuration::UiModeNight;
+#[cfg(all(target_os = "android", feature = "android"))]
+use winit::platform::android::EventLoopBuilderExtAndroid;
 use winit::window::{
     Cursor, CursorIcon, ImePurpose, Theme as WindowTheme, Window, WindowAttributes, WindowId,
 };
@@ -31,21 +42,61 @@ use unicode_segmentation::UnicodeSegmentation;
 
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
+#[cfg(all(target_os = "android", feature = "android"))]
+const ANDROID_SYSTEM_THEME_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+#[cfg(all(target_os = "android", feature = "android"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SystemBarStyle {
+    color: Color,
+    use_dark_icons: bool,
+}
+
+#[cfg(all(target_os = "android", feature = "android"))]
+impl SystemBarStyle {
+    fn from_theme(theme: &Theme) -> Self {
+        let color = theme.palette.window_background;
+        Self {
+            color,
+            use_dark_icons: is_light_color(color),
+        }
+    }
+}
 
 pub struct Runtime {
     event_loop: EventLoop<()>,
     config: ApplicationConfig,
+    #[cfg(all(target_os = "android", feature = "android"))]
+    android_app: Option<AndroidApp>,
 }
 
 impl Runtime {
     pub fn new(config: ApplicationConfig) -> Result<Self, TguiError> {
-        let event_loop = EventLoop::new()?;
-        event_loop.set_control_flow(ControlFlow::Poll);
-        Ok(Self { event_loop, config })
+        let event_loop = build_event_loop(ControlFlow::Poll)?;
+        Ok(Self {
+            event_loop,
+            config,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            android_app: None,
+        })
+    }
+
+    #[cfg(all(target_os = "android", feature = "android"))]
+    pub fn new_android(config: ApplicationConfig, app: AndroidApp) -> Result<Self, TguiError> {
+        let event_loop = build_event_loop_with_android_app(ControlFlow::Poll, app.clone())?;
+        Ok(Self {
+            event_loop,
+            config,
+            android_app: Some(app),
+        })
     }
 
     pub fn run(self) -> Result<(), TguiError> {
-        let mut handler = RuntimeHandler::new(self.config);
+        let mut handler = RuntimeHandler::new(
+            self.config,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            self.android_app,
+        );
         self.event_loop.run_app(&mut handler)?;
 
         if let Some(error) = handler.error {
@@ -65,6 +116,8 @@ pub struct BoundRuntime<VM> {
     commands: Vec<WindowCommand<VM>>,
     invalidation: InvalidationSignal,
     animations: AnimationCoordinator,
+    #[cfg(all(target_os = "android", feature = "android"))]
+    android_app: Option<AndroidApp>,
 }
 
 impl<VM: ViewModel> BoundRuntime<VM> {
@@ -77,8 +130,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
         invalidation: InvalidationSignal,
         animations: AnimationCoordinator,
     ) -> Result<Self, TguiError> {
-        let event_loop = EventLoop::new()?;
-        event_loop.set_control_flow(ControlFlow::Wait);
+        let event_loop = build_event_loop(ControlFlow::Wait)?;
         Ok(Self {
             event_loop,
             config,
@@ -88,6 +140,33 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             commands,
             invalidation,
             animations,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            android_app: None,
+        })
+    }
+
+    #[cfg(all(target_os = "android", feature = "android"))]
+    pub fn new_android(
+        config: ApplicationConfig,
+        view_model: VM,
+        window_bindings: WindowBindings,
+        widget_tree: Option<WidgetTree<VM>>,
+        commands: Vec<WindowCommand<VM>>,
+        invalidation: InvalidationSignal,
+        animations: AnimationCoordinator,
+        app: AndroidApp,
+    ) -> Result<Self, TguiError> {
+        let event_loop = build_event_loop_with_android_app(ControlFlow::Wait, app.clone())?;
+        Ok(Self {
+            event_loop,
+            config,
+            view_model,
+            window_bindings,
+            widget_tree,
+            commands,
+            invalidation,
+            animations,
+            android_app: Some(app),
         })
     }
 
@@ -100,6 +179,8 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             self.commands,
             self.invalidation,
             self.animations,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            self.android_app,
         );
         self.event_loop.run_app(&mut handler)?;
 
@@ -109,6 +190,24 @@ impl<VM: ViewModel> BoundRuntime<VM> {
 
         Ok(())
     }
+}
+
+fn build_event_loop(control_flow: ControlFlow) -> Result<EventLoop<()>, TguiError> {
+    let event_loop = EventLoop::new()?;
+    event_loop.set_control_flow(control_flow);
+    Ok(event_loop)
+}
+
+#[cfg(all(target_os = "android", feature = "android"))]
+fn build_event_loop_with_android_app(
+    control_flow: ControlFlow,
+    app: AndroidApp,
+) -> Result<EventLoop<()>, TguiError> {
+    let mut builder = EventLoop::builder();
+    builder.with_android_app(app);
+    let event_loop = builder.build()?;
+    event_loop.set_control_flow(control_flow);
+    Ok(event_loop)
 }
 
 #[derive(Default)]
@@ -129,16 +228,27 @@ struct RuntimeHandler {
     renderer: Option<Renderer>,
     window_id: Option<WindowId>,
     error: Option<TguiError>,
+    #[cfg(all(target_os = "android", feature = "android"))]
+    android_app: Option<AndroidApp>,
+    #[cfg(all(target_os = "android", feature = "android"))]
+    system_bar_style: Option<SystemBarStyle>,
 }
 
 impl RuntimeHandler {
-    fn new(config: ApplicationConfig) -> Self {
+    fn new(
+        config: ApplicationConfig,
+        #[cfg(all(target_os = "android", feature = "android"))] android_app: Option<AndroidApp>,
+    ) -> Self {
         Self {
             config,
             window: None,
             renderer: None,
             window_id: None,
             error: None,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            android_app,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            system_bar_style: None,
         }
     }
 
@@ -148,7 +258,32 @@ impl RuntimeHandler {
     }
 
     fn resolved_theme(&self, window: &Window) -> Theme {
-        resolve_theme(&self.config.theme, window.theme())
+        resolve_theme(
+            &self.config.theme,
+            resolve_window_theme(
+                Some(window),
+                #[cfg(all(target_os = "android", feature = "android"))]
+                self.android_app.as_ref(),
+            ),
+        )
+    }
+
+    #[cfg(all(target_os = "android", feature = "android"))]
+    fn sync_system_bar_style(&mut self, theme: &Theme) {
+        let Some(app) = self.android_app.as_ref() else {
+            return;
+        };
+        let style = SystemBarStyle::from_theme(theme);
+        if self.system_bar_style == Some(style) {
+            return;
+        }
+
+        if let Err(error) = apply_android_system_bar_style(app, style) {
+            eprintln!("failed to sync Android system bar style: {error}");
+            return;
+        }
+
+        self.system_bar_style = Some(style);
     }
 
     fn render_hidden_frame(&mut self, event_loop: &ActiveEventLoop) -> bool {
@@ -173,6 +308,66 @@ impl RuntimeHandler {
                 self.fail(event_loop, error);
                 false
             }
+        }
+    }
+
+    fn resume_existing_window(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+
+        let clear_color = if self.config.clear_color_overridden {
+            self.config.clear_color
+        } else {
+            self.resolved_theme(&window).palette.window_background
+        };
+
+        match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
+            Ok(renderer) => self.renderer = Some(renderer),
+            Err(error) => {
+                self.fail(event_loop, error);
+                return;
+            }
+        }
+
+        #[cfg(all(target_os = "android", feature = "android"))]
+        {
+            let theme = self.resolved_theme(&window);
+            self.sync_system_bar_style(&theme);
+        }
+
+        if !self.render_hidden_frame(event_loop) {
+            return;
+        }
+
+        window.request_redraw();
+        window.set_visible(true);
+    }
+
+    fn suspend(&mut self) {
+        self.renderer = None;
+        #[cfg(all(target_os = "android", feature = "android"))]
+        {
+            self.system_bar_style = None;
+        }
+    }
+
+    fn handle_runtime_redraw(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+
+        match renderer.render(&ScenePrimitives::default()) {
+            Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
+            Ok(RenderStatus::ReconfigureSurface) => {
+                renderer.reconfigure();
+                match renderer.render(&ScenePrimitives::default()) {
+                    Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
+                    Ok(RenderStatus::ReconfigureSurface) => {}
+                    Err(error) => self.fail(event_loop, error),
+                }
+            }
+            Err(error) => self.fail(event_loop, error),
         }
     }
 }
@@ -207,6 +402,10 @@ struct BoundRuntimeHandler<VM> {
     renderer: Option<Renderer>,
     window_id: Option<WindowId>,
     error: Option<TguiError>,
+    #[cfg(all(target_os = "android", feature = "android"))]
+    android_app: Option<AndroidApp>,
+    #[cfg(all(target_os = "android", feature = "android"))]
+    system_bar_style: Option<SystemBarStyle>,
 }
 
 struct CachedScene {
@@ -270,14 +469,14 @@ impl ClipboardService {
         None
     }
 
-    fn set_text(&mut self, text: String) {
+    fn set_text(&mut self, _text: String) {
         #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
         {
             if self.inner.is_none() {
                 self.inner = arboard::Clipboard::new().ok();
             }
             if let Some(clipboard) = self.inner.as_mut() {
-                let _ = clipboard.set_text(text);
+                let _ = clipboard.set_text(_text);
             }
         }
     }
@@ -292,6 +491,7 @@ impl<VM> BoundRuntimeHandler<VM> {
         commands: Vec<WindowCommand<VM>>,
         invalidation: InvalidationSignal,
         animations: AnimationCoordinator,
+        #[cfg(all(target_os = "android", feature = "android"))] android_app: Option<AndroidApp>,
     ) -> Self {
         let font_manager = FontManager::new(&config.fonts);
         let theme = match &config.theme {
@@ -328,12 +528,34 @@ impl<VM> BoundRuntimeHandler<VM> {
             renderer: None,
             window_id: None,
             error: None,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            android_app,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            system_bar_style: None,
         }
     }
 
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: TguiError) {
         self.error = Some(error);
         event_loop.exit();
+    }
+
+    #[cfg(all(target_os = "android", feature = "android"))]
+    fn sync_system_bar_style(&mut self, theme: &Theme) {
+        let Some(app) = self.android_app.as_ref() else {
+            return;
+        };
+        let style = SystemBarStyle::from_theme(theme);
+        if self.system_bar_style == Some(style) {
+            return;
+        }
+
+        if let Err(error) = apply_android_system_bar_style(app, style) {
+            eprintln!("failed to sync Android system bar style: {error}");
+            return;
+        }
+
+        self.system_bar_style = Some(style);
     }
 
     fn uses_system_theme(&self) -> bool {
@@ -347,7 +569,15 @@ impl<VM> BoundRuntimeHandler<VM> {
 
     fn apply_window_theme(&mut self, window_theme: Option<WindowTheme>) {
         if self.uses_system_theme() {
-            self.apply_theme(resolve_theme(&self.active_theme_selection(), window_theme));
+            self.apply_theme(resolve_theme(
+                &self.active_theme_selection(),
+                resolve_window_theme(
+                    self.window.as_deref(),
+                    #[cfg(all(target_os = "android", feature = "android"))]
+                    self.android_app.as_ref(),
+                )
+                .or(window_theme),
+            ));
         }
     }
 
@@ -362,15 +592,30 @@ impl<VM> BoundRuntimeHandler<VM> {
     fn sync_theme_binding(&mut self) {
         let resolved_theme = resolve_theme(
             &self.active_theme_selection(),
-            self.window.as_ref().and_then(|window| window.theme()),
+            resolve_window_theme(
+                self.window.as_deref(),
+                #[cfg(all(target_os = "android", feature = "android"))]
+                self.android_app.as_ref(),
+            ),
         );
         if self.theme != resolved_theme {
             self.apply_theme(resolved_theme);
         }
     }
 
+    fn refresh_platform_theme(&mut self) -> bool {
+        let previous_theme = self.theme.clone();
+        self.sync_theme_binding();
+        self.theme != previous_theme
+    }
+
     fn sync_bindings(&mut self, now: Instant) {
         self.sync_theme_binding();
+        #[cfg(all(target_os = "android", feature = "android"))]
+        {
+            let theme = self.theme.clone();
+            self.sync_system_bar_style(&theme);
+        }
 
         if let Some(window) = self.window.as_ref() {
             if let Some(binding) = self.window_bindings.title.as_ref() {
@@ -467,6 +712,7 @@ impl<VM> BoundRuntimeHandler<VM> {
             event,
             WindowEvent::CursorMoved { .. }
                 | WindowEvent::MouseWheel { .. }
+                | WindowEvent::Touch(_)
                 | WindowEvent::MouseInput {
                     state: ElementState::Pressed,
                     button: MouseButton::Left,
@@ -477,6 +723,12 @@ impl<VM> BoundRuntimeHandler<VM> {
     }
 
     fn render_current_frame(&mut self) -> Result<RenderStatus, TguiError> {
+        // Android can deliver a redraw before a replacement surface is ready.
+        // In that case we simply skip the frame and wait for the next resume/redraw.
+        if self.renderer.is_none() {
+            return Ok(RenderStatus::SkipFrame);
+        }
+
         self.sync_bindings(Instant::now());
         let rendered = self.render_primitives();
         if let (Some(window), Some(caret_rect)) = (self.window.as_ref(), rendered.ime_cursor_area) {
@@ -495,10 +747,54 @@ impl<VM> BoundRuntimeHandler<VM> {
         renderer.render(&rendered.primitives)
     }
 
-    fn drive_animations(&mut self, event_loop: &ActiveEventLoop, now: Instant) {
+    #[cfg(all(target_os = "android", feature = "android"))]
+    fn render_immediately(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_none() || self.renderer.is_none() {
+            return;
+        }
+
+        match self.render_current_frame() {
+            Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
+            Ok(RenderStatus::ReconfigureSurface) => {
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.reconfigure();
+                }
+                match self.render_current_frame() {
+                    Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
+                    Ok(RenderStatus::ReconfigureSurface) => {}
+                    Err(error) => self.fail(event_loop, error),
+                }
+            }
+            Err(error) => self.fail(event_loop, error),
+        }
+    }
+
+    fn set_pointer_position(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
+        self.cursor_position = Some(Point {
+            x: position.x as f32,
+            y: position.y as f32,
+        });
+    }
+
+    fn clear_pointer_position(&mut self) {
+        self.cursor_position = None;
+        for hovered in std::mem::take(&mut self.hovered_widgets).into_iter().rev() {
+            if let Some(command) = hovered.on_mouse_leave {
+                command.execute(&mut self.view_model);
+                self.invalidate_scene();
+                self.invalidation.mark_dirty();
+            }
+        }
+        self.hovered_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
+        self.update_cursor_icon();
+    }
+
+    fn drive_animations(&mut self, event_loop: &ActiveEventLoop, now: Instant) -> bool {
         self.flush_pending_click_if_due(now);
 
+        let mut frame_advanced = false;
         if self.animations.refresh(now) {
+            frame_advanced = true;
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
             self.invalidate_scene();
             if let Some(window) = self.window.as_ref() {
@@ -507,6 +803,7 @@ impl<VM> BoundRuntimeHandler<VM> {
         }
 
         if self.animation_engine.refresh(now) {
+            frame_advanced = true;
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
             self.invalidate_scene();
             if let Some(window) = self.window.as_ref() {
@@ -520,8 +817,18 @@ impl<VM> BoundRuntimeHandler<VM> {
                 window.request_redraw();
             }
         } else {
+            #[cfg(all(target_os = "android", feature = "android"))]
+            if self.uses_system_theme() {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    now + ANDROID_SYSTEM_THEME_POLL_INTERVAL,
+                ));
+                return frame_advanced;
+            }
+
             event_loop.set_control_flow(ControlFlow::Wait);
         }
+
+        frame_advanced
     }
 
     fn render_hidden_frame(&mut self, event_loop: &ActiveEventLoop) -> bool {
@@ -545,6 +852,51 @@ impl<VM> BoundRuntimeHandler<VM> {
         }
 
         true
+    }
+
+    fn resume_existing_window(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+
+        self.sync_theme_binding();
+        self.invalidate_scene();
+        let clear_color =
+            if self.window_bindings.clear_color.is_some() || self.config.clear_color_overridden {
+                self.config.clear_color
+            } else {
+                self.theme.palette.window_background
+            };
+
+        match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
+            Ok(renderer) => self.renderer = Some(renderer),
+            Err(error) => {
+                self.fail(event_loop, error);
+                return;
+            }
+        }
+
+        #[cfg(all(target_os = "android", feature = "android"))]
+        {
+            let theme = self.theme.clone();
+            self.sync_system_bar_style(&theme);
+        }
+
+        if !self.render_hidden_frame(event_loop) {
+            return;
+        }
+
+        window.request_redraw();
+        window.set_visible(true);
+    }
+
+    fn suspend(&mut self) {
+        self.renderer = None;
+        self.cached_scene = None;
+        #[cfg(all(target_os = "android", feature = "android"))]
+        {
+            self.system_bar_style = None;
+        }
     }
 
     fn animated_theme(&mut self, now: Instant) -> Theme {
@@ -1430,6 +1782,7 @@ impl<VM> BoundRuntimeHandler<VM> {
 impl ApplicationHandler for RuntimeHandler {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
+            self.resume_existing_window(event_loop);
             return;
         }
 
@@ -1452,6 +1805,11 @@ impl ApplicationHandler for RuntimeHandler {
         } else {
             self.resolved_theme(&window).palette.window_background
         };
+        #[cfg(all(target_os = "android", feature = "android"))]
+        {
+            let theme = self.resolved_theme(&window);
+            self.sync_system_bar_style(&theme);
+        }
 
         let renderer = match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
             Ok(renderer) => renderer,
@@ -1489,16 +1847,39 @@ impl ApplicationHandler for RuntimeHandler {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::ThemeChanged(_) => {
                 if !self.config.clear_color_overridden {
-                    let clear_color = self
+                    let resolved_theme = self
                         .window
                         .as_ref()
-                        .map(|window| self.resolved_theme(window).palette.window_background)
+                        .map(|window| self.resolved_theme(window));
+                    let clear_color = resolved_theme
+                        .as_ref()
+                        .map(|theme| theme.palette.window_background)
                         .unwrap_or(self.config.clear_color);
                     if let Some(renderer) = self.renderer.as_mut() {
                         renderer.set_clear_color(clear_color);
                     }
+                    #[cfg(all(target_os = "android", feature = "android"))]
+                    if let Some(theme) = resolved_theme.as_ref() {
+                        self.sync_system_bar_style(theme);
+                    }
                 }
                 if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                if let Some(window) = self.window.clone() {
+                    if !self.config.clear_color_overridden {
+                        let theme = self.resolved_theme(&window);
+                        if let Some(renderer) = self.renderer.as_mut() {
+                            renderer.set_clear_color(theme.palette.window_background);
+                            renderer.resize(window.inner_size());
+                        }
+                        #[cfg(all(target_os = "android", feature = "android"))]
+                        self.sync_system_bar_style(&theme);
+                    } else if let Some(renderer) = self.renderer.as_mut() {
+                        renderer.resize(window.inner_size());
+                    }
                     window.request_redraw();
                 }
             }
@@ -1507,15 +1888,7 @@ impl ApplicationHandler for RuntimeHandler {
                     renderer.resize(size);
                 }
             }
-            WindowEvent::RedrawRequested => {
-                if let Some(renderer) = self.renderer.as_mut() {
-                    match renderer.render(&ScenePrimitives::default()) {
-                        Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
-                        Ok(RenderStatus::ReconfigureSurface) => renderer.reconfigure(),
-                        Err(error) => self.fail(event_loop, error),
-                    }
-                }
-            }
+            WindowEvent::RedrawRequested => self.handle_runtime_redraw(event_loop),
             _ => {}
         }
     }
@@ -1525,11 +1898,16 @@ impl ApplicationHandler for RuntimeHandler {
             window.request_redraw();
         }
     }
+
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.suspend();
+    }
 }
 
 impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
+            self.resume_existing_window(event_loop);
             return;
         }
 
@@ -1547,7 +1925,19 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
             }
         };
 
-        self.theme = resolve_theme(&self.active_theme_selection(), window.theme());
+        self.theme = resolve_theme(
+            &self.active_theme_selection(),
+            resolve_window_theme(
+                Some(&window),
+                #[cfg(all(target_os = "android", feature = "android"))]
+                self.android_app.as_ref(),
+            ),
+        );
+        #[cfg(all(target_os = "android", feature = "android"))]
+        {
+            let theme = self.theme.clone();
+            self.sync_system_bar_style(&theme);
+        }
         let clear_color =
             if self.window_bindings.clear_color.is_some() || self.config.clear_color_overridden {
                 self.config.clear_color
@@ -1588,10 +1978,11 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
         }
 
         if let WindowEvent::CursorMoved { position, .. } = &event {
-            self.cursor_position = Some(Point {
-                x: position.x as f32,
-                y: position.y as f32,
-            });
+            self.set_pointer_position(*position);
+        }
+
+        if let WindowEvent::Touch(touch) = &event {
+            self.set_pointer_position(touch.location);
         }
 
         if let WindowEvent::ModifiersChanged(modifiers) = &event {
@@ -1599,16 +1990,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
         }
 
         if matches!(event, WindowEvent::CursorLeft { .. }) {
-            self.cursor_position = None;
-            for hovered in std::mem::take(&mut self.hovered_widgets).into_iter().rev() {
-                if let Some(command) = hovered.on_mouse_leave {
-                    command.execute(&mut self.view_model);
-                    self.invalidate_scene();
-                    self.invalidation.mark_dirty();
-                }
-            }
-            self.hovered_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
-            self.update_cursor_icon();
+            self.clear_pointer_position();
         }
 
         if Self::should_dispatch_widget_event(&event) {
@@ -1628,6 +2010,25 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
                 WindowEvent::MouseWheel { delta, .. } => {
                     self.handle_mouse_wheel(*delta);
                 }
+                WindowEvent::Touch(touch) => match touch.phase {
+                    TouchPhase::Started => {
+                        if !self.begin_scrollbar_drag() {
+                            self.handle_mouse_press(viewport, Instant::now());
+                        } else {
+                            self.update_cursor_icon();
+                        }
+                    }
+                    TouchPhase::Moved => {
+                        if self.active_scrollbar_drag.is_some() {
+                            self.handle_scrollbar_drag();
+                            self.sync_scrollbar_hover();
+                            self.update_cursor_icon();
+                        } else {
+                            self.handle_hover(viewport);
+                        }
+                    }
+                    TouchPhase::Ended | TouchPhase::Cancelled => {}
+                },
                 WindowEvent::MouseInput {
                     state: ElementState::Pressed,
                     button: MouseButton::Left,
@@ -1680,6 +2081,16 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
                     window.request_redraw();
                 }
             }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                self.apply_window_theme(None);
+                self.invalidate_scene();
+                if let Some(window) = self.window.as_ref() {
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        renderer.resize(window.inner_size());
+                    }
+                    window.request_redraw();
+                }
+            }
             WindowEvent::Ime(ime) => {
                 self.handle_input_ime(ime);
             }
@@ -1689,6 +2100,15 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
                 ..
             } => {
                 self.end_scrollbar_drag();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::Touch(touch)
+                if matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled) =>
+            {
+                self.end_scrollbar_drag();
+                self.clear_pointer_position();
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
@@ -1703,23 +2123,48 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
                     window.request_redraw();
                 }
             }
-            WindowEvent::RedrawRequested => match self.render_current_frame() {
+            WindowEvent::RedrawRequested => {
+                match self.render_current_frame() {
                 Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
                 Ok(RenderStatus::ReconfigureSurface) => {
                     if let Some(renderer) = self.renderer.as_mut() {
                         renderer.reconfigure();
                     }
+                    match self.render_current_frame() {
+                        Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
+                        Ok(RenderStatus::ReconfigureSurface) => {}
+                        Err(error) => self.fail(event_loop, error),
+                    }
                 }
                 Err(error) => self.fail(event_loop, error),
-            },
+                }
+            }
             _ => {}
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
+        let theme_changed = self.refresh_platform_theme();
+        if theme_changed {
+            self.sync_bindings(now);
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
         self.request_redraw_if_dirty(now);
+        #[cfg(all(target_os = "android", feature = "android"))]
+        let animation_frame_advanced = self.drive_animations(event_loop, now);
+        #[cfg(not(all(target_os = "android", feature = "android")))]
         self.drive_animations(event_loop, now);
+        #[cfg(all(target_os = "android", feature = "android"))]
+        if theme_changed || animation_frame_advanced {
+            self.render_immediately(event_loop);
+        }
+    }
+
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.suspend();
     }
 }
 
@@ -1813,6 +2258,309 @@ fn resolve_theme(selection: &ThemeSelection, window_theme: Option<WindowTheme>) 
         ThemeSelection::System => Theme::from_window_theme(window_theme),
         ThemeSelection::Fixed(theme) => theme.clone(),
     }
+}
+
+fn resolve_window_theme(
+    window: Option<&Window>,
+    #[cfg(all(target_os = "android", feature = "android"))] android_app: Option<&AndroidApp>,
+) -> Option<WindowTheme> {
+    #[cfg(all(target_os = "android", feature = "android"))]
+    if let Some(app) = android_app {
+        if let Some(theme) = resolve_android_window_theme(app) {
+            return Some(theme);
+        }
+    }
+
+    window.and_then(|window| window.theme())
+}
+
+#[cfg(all(target_os = "android", feature = "android"))]
+fn resolve_android_window_theme(app: &AndroidApp) -> Option<WindowTheme> {
+    resolve_android_window_theme_from_java(app).or_else(|| match app.config().ui_mode_night() {
+        UiModeNight::No => Some(WindowTheme::Light),
+        UiModeNight::Yes => Some(WindowTheme::Dark),
+        UiModeNight::Any | UiModeNight::__Unknown(_) => None,
+        _ => None,
+    })
+}
+
+#[cfg(all(target_os = "android", feature = "android"))]
+fn resolve_android_window_theme_from_java(app: &AndroidApp) -> Option<WindowTheme> {
+    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) };
+    let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
+
+    vm.attach_current_thread(|env| -> jni::errors::Result<Option<WindowTheme>> {
+        let activity = unsafe { env.as_cast_raw::<JObject>(&activity_raw)? };
+        let ui_mode_service = env
+            .get_static_field(
+                jni_str!("android/content/Context"),
+                jni_str!("UI_MODE_SERVICE"),
+                jni_sig!("Ljava/lang/String;"),
+            )?
+            .l()?;
+        let ui_mode_manager = env
+            .call_method(
+                &activity,
+                jni_str!("getSystemService"),
+                jni_sig!("(Ljava/lang/String;)Ljava/lang/Object;"),
+                &[JValue::Object(&ui_mode_service)],
+            )?
+            .l()?;
+
+        if !ui_mode_manager.is_null() {
+            let night_mode = env
+                .call_method(
+                    &ui_mode_manager,
+                    jni_str!("getNightMode"),
+                    jni_sig!("()I"),
+                    &[],
+                )?
+                .i()?;
+            let light = env
+                .get_static_field(
+                    jni_str!("android/app/UiModeManager"),
+                    jni_str!("MODE_NIGHT_NO"),
+                    jni_sig!("I"),
+                )?
+                .i()?;
+            let dark = env
+                .get_static_field(
+                    jni_str!("android/app/UiModeManager"),
+                    jni_str!("MODE_NIGHT_YES"),
+                    jni_sig!("I"),
+                )?
+                .i()?;
+
+            match night_mode {
+                mode if mode == light => return Ok(Some(WindowTheme::Light)),
+                mode if mode == dark => return Ok(Some(WindowTheme::Dark)),
+                _ => {}
+            }
+        }
+
+        let resources = env
+            .call_method(
+                &activity,
+                jni_str!("getResources"),
+                jni_sig!("()Landroid/content/res/Resources;"),
+                &[],
+            )?
+            .l()?;
+        let configuration = env
+            .call_method(
+                &resources,
+                jni_str!("getConfiguration"),
+                jni_sig!("()Landroid/content/res/Configuration;"),
+                &[],
+            )?
+            .l()?;
+
+        let ui_mode = env
+            .get_field(&configuration, jni_str!("uiMode"), jni_sig!("I"))?
+            .i()?;
+        let mask = env
+            .get_static_field(
+                jni_str!("android/content/res/Configuration"),
+                jni_str!("UI_MODE_NIGHT_MASK"),
+                jni_sig!("I"),
+            )?
+            .i()?;
+        let light = env
+            .get_static_field(
+                jni_str!("android/content/res/Configuration"),
+                jni_str!("UI_MODE_NIGHT_NO"),
+                jni_sig!("I"),
+            )?
+            .i()?;
+        let dark = env
+            .get_static_field(
+                jni_str!("android/content/res/Configuration"),
+                jni_str!("UI_MODE_NIGHT_YES"),
+                jni_sig!("I"),
+            )?
+            .i()?;
+
+        Ok(match ui_mode & mask {
+            mode if mode == light => Some(WindowTheme::Light),
+            mode if mode == dark => Some(WindowTheme::Dark),
+            _ => None,
+        })
+    })
+    .ok()
+    .flatten()
+}
+
+#[cfg(all(target_os = "android", feature = "android"))]
+fn apply_android_system_bar_style(
+    app: &AndroidApp,
+    style: SystemBarStyle,
+) -> Result<(), String> {
+    let scheduler_app = app.clone();
+    let callback_app = scheduler_app.clone();
+    scheduler_app.run_on_java_main_thread(Box::new(move || {
+        if let Err(error) = apply_android_system_bar_style_on_main_thread(&callback_app, style) {
+            eprintln!("failed to sync Android system bars: {error}");
+        }
+    }));
+
+    Ok(())
+}
+
+#[cfg(all(target_os = "android", feature = "android"))]
+fn apply_android_system_bar_style_on_main_thread(
+    app: &AndroidApp,
+    style: SystemBarStyle,
+) -> Result<(), String> {
+    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) };
+    let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
+
+    vm.attach_current_thread(|env| -> jni::errors::Result<()> {
+        let activity = unsafe { env.as_cast_raw::<JObject>(&activity_raw)? };
+        let window = env
+            .call_method(
+                &activity,
+                jni_str!("getWindow"),
+                jni_sig!("()Landroid/view/Window;"),
+                &[],
+            )?
+            .l()?;
+
+        let bar_color = color_to_android_argb(style.color);
+        env.call_method(
+            &window,
+            jni_str!("setStatusBarColor"),
+            jni_sig!("(I)V"),
+            &[JValue::Int(bar_color)],
+        )?;
+        env.call_method(
+            &window,
+            jni_str!("setNavigationBarColor"),
+            jni_sig!("(I)V"),
+            &[JValue::Int(bar_color)],
+        )?;
+
+        let sdk_int = env
+            .get_static_field(
+                jni_str!("android/os/Build$VERSION"),
+                jni_str!("SDK_INT"),
+                jni_sig!("I"),
+            )?
+            .i()?;
+
+        if sdk_int >= 30 {
+            let controller = env
+                .call_method(
+                    &window,
+                    jni_str!("getInsetsController"),
+                    jni_sig!("()Landroid/view/WindowInsetsController;"),
+                    &[],
+                )?
+                .l()?;
+
+            if !controller.is_null() {
+                let light_status = env
+                    .get_static_field(
+                        jni_str!("android/view/WindowInsetsController"),
+                        jni_str!("APPEARANCE_LIGHT_STATUS_BARS"),
+                        jni_sig!("I"),
+                    )?
+                    .i()?;
+                let light_navigation = env
+                    .get_static_field(
+                        jni_str!("android/view/WindowInsetsController"),
+                        jni_str!("APPEARANCE_LIGHT_NAVIGATION_BARS"),
+                        jni_sig!("I"),
+                    )?
+                    .i()?;
+                let mask = light_status | light_navigation;
+                let appearance = if style.use_dark_icons { mask } else { 0 };
+                env.call_method(
+                    &controller,
+                    jni_str!("setSystemBarsAppearance"),
+                    jni_sig!("(II)V"),
+                    &[JValue::Int(appearance), JValue::Int(mask)],
+                )?;
+            }
+        } else {
+            let decor_view = env
+                .call_method(
+                    &window,
+                    jni_str!("getDecorView"),
+                    jni_sig!("()Landroid/view/View;"),
+                    &[],
+                )?
+                .l()?;
+            let mut visibility = env
+                .call_method(
+                    &decor_view,
+                    jni_str!("getSystemUiVisibility"),
+                    jni_sig!("()I"),
+                    &[],
+                )?
+                .i()?;
+
+            let light_status = if sdk_int >= 23 {
+                env.get_static_field(
+                    jni_str!("android/view/View"),
+                    jni_str!("SYSTEM_UI_FLAG_LIGHT_STATUS_BAR"),
+                    jni_sig!("I"),
+                )?
+                .i()?
+            } else {
+                0
+            };
+            let light_navigation = if sdk_int >= 26 {
+                env.get_static_field(
+                    jni_str!("android/view/View"),
+                    jni_str!("SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR"),
+                    jni_sig!("I"),
+                )?
+                .i()?
+            } else {
+                0
+            };
+
+            let flags = light_status | light_navigation;
+            if style.use_dark_icons {
+                visibility |= flags;
+            } else {
+                visibility &= !flags;
+            }
+
+            env.call_method(
+                &decor_view,
+                jni_str!("setSystemUiVisibility"),
+                jni_sig!("(I)V"),
+                &[JValue::Int(visibility)],
+            )?;
+        }
+
+        Ok(())
+    })
+    .map_err(|error| format!("failed to sync Android system bars: {error}"))?;
+
+    Ok(())
+}
+
+#[cfg(all(target_os = "android", feature = "android"))]
+fn color_to_android_argb(color: Color) -> i32 {
+    ((color.a as i32) << 24) | ((color.r as i32) << 16) | ((color.g as i32) << 8) | color.b as i32
+}
+
+#[cfg(all(target_os = "android", feature = "android"))]
+fn is_light_color(color: Color) -> bool {
+    let to_linear = |channel: u8| {
+        let value = channel as f32 / 255.0;
+        if value <= 0.03928 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+
+    let luminance =
+        0.2126 * to_linear(color.r) + 0.7152 * to_linear(color.g) + 0.0722 * to_linear(color.b);
+    luminance > 0.5
 }
 
 #[cfg(test)]

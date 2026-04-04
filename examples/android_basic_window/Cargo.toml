@@ -1,0 +1,24 @@
+[package]
+name = "android_basic_window"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+tgui = { path = "../..", features = ["android"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30", features = ["android-native-activity"] }
+
+[package.metadata.android]
+strip = "strip"
+
+[package.metadata.android.sdk]
+min_sdk_version = 23
+target_sdk_version = 34
+
+[package.metadata.android.application.activity]
+config_changes = "orientation|keyboardHidden|screenSize|screenLayout|uiMode"
+
+[lib]
+crate-type = ["cdylib"]

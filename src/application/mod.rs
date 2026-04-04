@@ -1,4 +1,6 @@
 use winit::dpi::LogicalSize;
+#[cfg(all(target_os = "android", feature = "android"))]
+use winit::platform::android::activity::AndroidApp;
 
 use crate::animation::AnimationCoordinator;
 use crate::foundation::binding::{Binding, InvalidationSignal, ViewModelContext};
@@ -72,6 +74,15 @@ impl Application {
         self
     }
 
+    pub fn font_file(
+        mut self,
+        name: impl Into<String>,
+        path: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        self.fonts.register_font_file(name, path);
+        self
+    }
+
     pub fn default_font(mut self, name: impl Into<String>) -> Self {
         self.fonts.set_default_font(name);
         self
@@ -87,6 +98,11 @@ impl Application {
 
     pub fn run(self) -> Result<(), TguiError> {
         Runtime::new(self.config())?.run()
+    }
+
+    #[cfg(all(target_os = "android", feature = "android"))]
+    pub fn run_android(self, app: AndroidApp) -> Result<(), TguiError> {
+        Runtime::new_android(self.config(), app)?.run()
     }
 
     pub fn with_view_model<VM, F>(self, factory: F) -> ApplicationBuilder<VM, F>
@@ -220,6 +236,34 @@ where
             self.commands,
             invalidation,
             animations,
+        )?
+        .run()
+    }
+
+    #[cfg(all(target_os = "android", feature = "android"))]
+    pub fn run_android(self, app: AndroidApp) -> Result<(), TguiError> {
+        let invalidation = InvalidationSignal::new();
+        let animations = AnimationCoordinator::default();
+        let context = ViewModelContext::new(invalidation.clone(), animations.clone());
+        let view_model = (self.factory)(&context);
+        let window_bindings = WindowBindings {
+            title: self.title_binding.map(|binding| binding(&view_model)),
+            clear_color: self.clear_color_binding.map(|binding| binding(&view_model)),
+            theme_mode: self.theme_mode_binding.map(|binding| binding(&view_model)),
+        };
+        let widget_tree = self
+            .root_view
+            .map(|root_view| WidgetTree::new(root_view(&view_model)));
+
+        BoundRuntime::new_android(
+            self.app.config(),
+            view_model,
+            window_bindings,
+            widget_tree,
+            self.commands,
+            invalidation,
+            animations,
+            app,
         )?
         .run()
     }

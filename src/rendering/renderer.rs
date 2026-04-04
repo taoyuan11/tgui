@@ -245,9 +245,7 @@ impl Renderer {
         });
 
         let mut font_system = FontSystem::new();
-        for source in fonts.font_sources() {
-            font_system.db_mut().load_font_source(source);
-        }
+        let _ = fonts.configure_font_system(&mut font_system);
 
         surface.configure(&device, &config);
 
@@ -809,13 +807,18 @@ impl RectVertex {
 fn instance_descriptor(clear_color: TguiColor) -> wgpu::InstanceDescriptor {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = instance_backends(clear_color);
+    #[cfg(all(target_os = "android", feature = "android"))]
+    {
+        descriptor.flags = wgpu::InstanceFlags::empty();
+        descriptor.backend_options.gl.debug_fns = wgpu::GlDebugFns::Disabled;
+    }
     descriptor
 }
 
-fn instance_backends(clear_color: TguiColor) -> wgpu::Backends {
+fn instance_backends(_clear_color: TguiColor) -> wgpu::Backends {
     #[cfg(target_os = "windows")]
     {
-        if clear_color.a < 255 {
+        if _clear_color.a < 255 {
             return wgpu::Backends::PRIMARY;
         }
     }
@@ -834,7 +837,24 @@ fn default_backends() -> wgpu::Backends {
         return wgpu::Backends::METAL;
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
+    #[cfg(all(
+        target_os = "android",
+        feature = "android",
+        any(target_arch = "x86", target_arch = "x86_64")
+    ))]
+    {
+        return wgpu::Backends::GL;
+    }
+
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "linux",
+        all(
+            target_os = "android",
+            feature = "android",
+            not(any(target_arch = "x86", target_arch = "x86_64"))
+        )
+    ))]
     {
         return wgpu::Backends::VULKAN;
     }
