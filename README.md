@@ -120,10 +120,8 @@ For OHOS targets, enable the `ohos` feature:
 tgui = { version = "0.0.5", features = ["ohos"] }
 ```
 
-If you package an OHOS app with `cargo ohos-app`, make sure the application crate exposes a direct
-dependency named `winit-ohos`. In this repository the OHOS example does that through a tiny shim
-crate under `examples/support/winit_ohos_shim`, which re-exports `tgui-winit-ohos` for the
-packager's template detection.
+If you package an OHOS app with `cargo ohos-app`, the packager can now detect
+`tgui-winit-ohos` directly, so a separate `winit-ohos` shim dependency is no longer required.
 
 A minimal dependency setup looks like this:
 
@@ -201,6 +199,53 @@ fn main() -> Result<(), tgui::TguiError> {
         .run()
 }
 ```
+
+## Core Concepts
+
+Most `tgui` applications follow the same flow:
+
+1. Build an [`Application`](https://docs.rs/tgui/latest/tgui/struct.Application.html) for window, theme, and font setup.
+2. Create state inside a `ViewModel` with `ViewModelContext`.
+3. Store mutable UI state in `Observable<T>`.
+4. Expose render-ready values with `Binding<T>`.
+5. Connect events back to the view model with `Command` or `ValueCommand`.
+6. Return a widget tree from `root_view(...)`.
+
+Use each primitive for a specific job:
+
+- `Observable<T>`: regular reactive state such as counters, text input, filters, selection, and toggles.
+- `Binding<T>`: derived values for text, colors, spacing, size, visibility, and window-level properties.
+- `Binding::animated(...)`: declarative transitions for values that should interpolate automatically.
+- `AnimatedValue<T>`: imperative animation targets driven by a controller or timeline.
+- `Command` / `ValueCommand`: event handlers for clicks, focus changes, pointer movement, and input updates.
+
+The framework does not require a separate message loop or reducer layer. State changes on `Observable<T>` automatically invalidate the UI and trigger recomposition of the affected bindings during the next frame.
+
+## Recommended App Structure
+
+For medium-sized apps, this shape tends to work well:
+
+```rust
+struct AppVm {
+    title: tgui::Observable<String>,
+    count: tgui::Observable<u32>,
+    // other screen state...
+}
+
+impl AppVm {
+    fn new(ctx: &tgui::ViewModelContext) -> Self { /* ... */ unimplemented!() }
+    fn title(&self) -> tgui::Binding<String> { /* ... */ unimplemented!() }
+    fn view(&self) -> tgui::Element<Self> { /* ... */ unimplemented!() }
+}
+```
+
+Practical guidance:
+
+- Keep source-of-truth state in `Observable<T>`.
+- Keep formatting logic in `Binding::map(...)`.
+- Keep side-effect-free rendering in `view(...)`.
+- Keep mutations in small view-model methods, then wrap them with `Command::new(...)`.
+- Prefer binding window title, clear color, and theme mode instead of pushing those updates manually.
 
 ## Declarative Animation
 
@@ -505,8 +550,6 @@ OHOS support is feature-gated:
 ```toml
 [dependencies]
 tgui = { path = "../..", features = ["ohos"] }
-winit-core = "0.31.0-beta.2"
-winit-ohos = { path = "../support/winit_ohos_shim" }
 
 [lib]
 crate-type = ["staticlib", "rlib"]
@@ -514,6 +557,9 @@ crate-type = ["staticlib", "rlib"]
 
 The current OHOS path targets ArkUI `NativeXComponent` through `tgui-winit-ohos`. For direct
 backend types and macros, import them from `tgui::platform::ohos`.
+
+When packaging with `cargo ohos-app`, adding `tgui` with the `ohos` feature is enough for the
+packager to discover the backend through `tgui-winit-ohos`.
 
 ### Minimal OHOS Runtime Export
 
@@ -609,9 +655,8 @@ Package the OHOS example with:
 cargo ohos-app package --manifest-path examples/ohos_basic_window/Cargo.toml
 ```
 
-The OHOS example already enables `tgui`'s `ohos` feature and includes a direct `winit-ohos`
-support crate for `cargo ohos-app`, so the packager can generate the `XComponent` shell
-automatically.
+The OHOS example already enables `tgui`'s `ohos` feature, and `cargo ohos-app` can detect
+`tgui-winit-ohos` transitively to generate the `XComponent` shell automatically.
 
 ## Development
 

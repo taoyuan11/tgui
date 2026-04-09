@@ -2,6 +2,7 @@ use crate::foundation::color::Color;
 use crate::platform::window::Theme as WindowTheme;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// High-level theme mode selection for the application runtime.
 pub enum ThemeMode {
     Light,
     Dark,
@@ -9,6 +10,7 @@ pub enum ThemeMode {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Complete theme definition used by widgets and the runtime.
 pub struct Theme {
     pub palette: Palette,
     pub spacing: Spacing,
@@ -22,6 +24,7 @@ impl Default for Theme {
 }
 
 impl Theme {
+    /// Creates the built-in light theme.
     pub fn light() -> Self {
         Self {
             palette: Palette::light(),
@@ -30,6 +33,7 @@ impl Theme {
         }
     }
 
+    /// Creates the built-in dark theme.
     pub fn dark() -> Self {
         Self {
             palette: Palette::dark(),
@@ -38,6 +42,7 @@ impl Theme {
         }
     }
 
+    /// Resolves a concrete theme from a requested mode and the platform theme when needed.
     pub fn from_mode(mode: ThemeMode, system_theme: Option<WindowTheme>) -> Self {
         match mode {
             ThemeMode::Light => Self::light(),
@@ -55,6 +60,7 @@ impl Theme {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Color palette used by the built-in widgets.
 pub struct Palette {
     pub window_background: Color,
     pub surface: Color,
@@ -72,6 +78,7 @@ impl Default for Palette {
 }
 
 impl Palette {
+    /// Returns the built-in light palette.
     pub fn light() -> Self {
         Self {
             window_background: Color::hexa(0xF5F7FBFF),
@@ -84,6 +91,7 @@ impl Palette {
         }
     }
 
+    /// Returns the built-in dark palette.
     pub fn dark() -> Self {
         Self {
             window_background: Color::hexa(0x14171CFF),
@@ -98,6 +106,7 @@ impl Palette {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Spacing scale shared by widgets and layout helpers.
 pub struct Spacing {
     pub xs: f32,
     pub sm: f32,
@@ -117,6 +126,7 @@ impl Default for Spacing {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Default typography settings shared by built-in text widgets.
 pub struct Typography {
     pub font_family: Option<String>,
     pub font_size: f32,

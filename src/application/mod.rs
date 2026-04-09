@@ -31,6 +31,21 @@ impl ThemeSelection {
 }
 
 #[derive(Debug, Clone)]
+/// Entry point for configuring and launching a `tgui` application.
+///
+/// Use `Application` directly for a simple window, or call
+/// [`Application::with_view_model`] to move into the MVVM builder flow.
+///
+/// ```no_run
+/// use tgui::Application;
+///
+/// fn main() -> Result<(), tgui::TguiError> {
+///     Application::new()
+///         .title("Demo")
+///         .window_size(1024, 768)
+///         .run()
+/// }
+/// ```
 pub struct Application {
     title: String,
     width: u32,
@@ -42,6 +57,8 @@ pub struct Application {
 }
 
 impl Application {
+    /// Creates an application with default title, window size, dark theme colors,
+    /// and an empty font catalog.
     pub fn new() -> Self {
         Self {
             title: "tgui".to_string(),
@@ -54,28 +71,35 @@ impl Application {
         }
     }
 
+    /// Sets the initial window title.
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = title.into();
         self
     }
 
+    /// Sets the initial window size in logical pixels.
+    ///
+    /// Values are clamped to at least `1x1`.
     pub fn window_size(mut self, width: u32, height: u32) -> Self {
         self.width = width.max(1);
         self.height = height.max(1);
         self
     }
 
+    /// Overrides the window clear color used by the renderer.
     pub fn clear_color(mut self, clear_color: Color) -> Self {
         self.clear_color = clear_color;
         self.clear_color_overridden = true;
         self
     }
 
+    /// Registers an in-memory font blob under a logical family name.
     pub fn font(mut self, name: impl Into<String>, bytes: &'static [u8]) -> Self {
         self.fonts.register_font(name, bytes);
         self
     }
 
+    /// Registers a font file from disk under a logical family name.
     pub fn font_file(
         mut self,
         name: impl Into<String>,
@@ -85,11 +109,16 @@ impl Application {
         self
     }
 
+    /// Sets the logical font family that widgets use when they do not specify one.
     pub fn default_font(mut self, name: impl Into<String>) -> Self {
         self.fonts.set_default_font(name);
         self
     }
 
+    /// Applies a fixed theme for the whole application.
+    ///
+    /// If no clear color override has been set, the theme's window background is
+    /// also used as the renderer clear color.
     pub fn theme(mut self, theme: Theme) -> Self {
         if !self.clear_color_overridden {
             self.clear_color = theme.palette.window_background;
@@ -98,6 +127,7 @@ impl Application {
         self
     }
 
+    /// Runs the application without a view model.
     pub fn run(self) -> Result<(), TguiError> {
         Runtime::new(self.config())?.run()
     }
@@ -117,6 +147,10 @@ impl Application {
         Runtime::handler(self.config())
     }
 
+    /// Starts the MVVM builder flow for applications backed by a view model.
+    ///
+    /// The factory receives a [`ViewModelContext`] that can create observables,
+    /// animated values, and timeline controllers.
     pub fn with_view_model<VM, F>(self, factory: F) -> ApplicationBuilder<VM, F>
     where
         VM: ViewModel,
@@ -189,6 +223,7 @@ where
         }
     }
 
+    /// Binds the window title to view-model state.
     pub fn bind_title(
         mut self,
         binding: impl Fn(&VM) -> Binding<String> + Send + Sync + 'static,
@@ -197,6 +232,7 @@ where
         self
     }
 
+    /// Binds the window clear color to view-model state.
     pub fn bind_clear_color(
         mut self,
         binding: impl Fn(&VM) -> Binding<Color> + Send + Sync + 'static,
@@ -205,6 +241,9 @@ where
         self
     }
 
+    /// Binds the active theme mode to view-model state.
+    ///
+    /// Runtime theme changes are animated automatically.
     pub fn bind_theme_mode(
         mut self,
         binding: impl Fn(&VM) -> Binding<ThemeMode> + Send + Sync + 'static,
@@ -213,11 +252,13 @@ where
         self
     }
 
+    /// Registers a global input binding on the application window.
     pub fn on_input(mut self, trigger: InputTrigger, command: Command<VM>) -> Self {
         self.commands.push(WindowCommand { trigger, command });
         self
     }
 
+    /// Registers the root widget tree factory for the application.
     pub fn root_view(
         mut self,
         root_view: impl Fn(&VM) -> Element<VM> + Send + Sync + 'static,
@@ -226,6 +267,7 @@ where
         self
     }
 
+    /// Builds the runtime and starts the application event loop.
     pub fn run(self) -> Result<(), TguiError> {
         let (
             config,
