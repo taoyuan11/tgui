@@ -26,16 +26,29 @@ android = []
 [dependencies]
 bytemuck = { version = "1.24", features = ["derive"] }
 cosmic-text = "0.18"
+dpi = "0.1.2"
 pollster = "0.4"
 taffy = "0.10"
 unicode-segmentation = "1.12"
-winit = "0.30"
+winit-core = "0.31.0-beta.2"
 wgpu = { version = "29", features = ["wgsl"] }
 
-[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+[target.'cfg(target_os = "windows")'.dependencies]
 arboard = "3.6"
 log = "0.4.29"
+winit-win32 = "0.31.0-beta.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+arboard = "3.6"
+log = "0.4.29"
+winit-appkit = "0.31.0-beta.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+arboard = "3.6"
+log = "0.4.29"
+winit-wayland = "0.31.0-beta.2"
+winit-x11 = "0.31.0-beta.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
-winit = { version = "0.30", features = ["android-native-activity"] }
+winit-android = { version = "0.31.0-beta.2", features = ["native-activity"] }

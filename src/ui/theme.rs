@@ -1,5 +1,5 @@
 use crate::foundation::color::Color;
-use winit::window::Theme as WindowTheme;
+use crate::platform::window::Theme as WindowTheme;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeMode {

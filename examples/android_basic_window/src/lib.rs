@@ -4,7 +4,7 @@ use tgui::{
     Justify, Observable, Stack, Text, TguiError, Theme, ThemeMode, ViewModelContext,
 };
 #[cfg(target_os = "android")]
-use winit::platform::android::activity::AndroidApp;
+use tgui::platform::android::activity::AndroidApp;
 
 #[cfg(target_os = "android")]
 fn themed_app() -> Application {

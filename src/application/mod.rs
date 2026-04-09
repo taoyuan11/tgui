@@ -1,6 +1,6 @@
-use winit::dpi::LogicalSize;
 #[cfg(all(target_os = "android", feature = "android"))]
-use winit::platform::android::activity::AndroidApp;
+use crate::platform::android::activity::AndroidApp;
+use crate::platform::dpi::LogicalSize;
 
 use crate::animation::AnimationCoordinator;
 use crate::foundation::binding::{Binding, InvalidationSignal, ViewModelContext};

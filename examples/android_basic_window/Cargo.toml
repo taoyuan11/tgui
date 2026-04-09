@@ -7,9 +7,6 @@ publish = false
 [dependencies]
 tgui = { path = "../..", features = ["android"] }
 
-[target.'cfg(target_os = "android")'.dependencies]
-winit = { version = "0.30", features = ["android-native-activity"] }
-
 [package.metadata.android]
 strip = "strip"
 

@@ -2,7 +2,7 @@ use tgui::{
     Align, Application, Binding, Button, Color, Column, Command, InputTrigger, Insets, Justify,
     Observable, Row, Stack, Text, TguiError, ViewModelContext,
 };
-use winit::keyboard::KeyCode;
+use tgui::platform::keyboard::KeyCode;
 
 struct CounterVm {
     count: Observable<i32>,

@@ -1,6 +1,6 @@
 # tgui
 
-`tgui` is a modern, GPU-accelerated Rust GUI framework built on top of `wgpu`, `winit`, `cosmic-text`, and `taffy`.
+`tgui` is a modern, GPU-accelerated Rust GUI framework built on top of `wgpu`, `winit-core`, platform backends, `cosmic-text`, and `taffy`.
 
 It is designed around a small MVVM-style API:
 
@@ -100,11 +100,12 @@ For Android targets, enable the `android` feature:
 tgui = { version = "0.0.5", features = ["android"] }
 ```
 
-If you create an Android NativeActivity app directly, `winit` also needs its Android activity feature:
+If you create an Android NativeActivity app directly, add the matching modular backend crates:
 
 ```toml
 [target.'cfg(target_os = "android")'.dependencies]
-winit = { version = "0.30", features = ["android-native-activity"] }
+winit-core = "0.31.0-beta.2"
+winit-android = { version = "0.31.0-beta.2", features = ["native-activity"] }
 ```
 
 ## Quick Start
@@ -375,9 +376,15 @@ Android support is feature-gated:
 ```toml
 [dependencies]
 tgui = { path = "../..", features = ["android"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit-core = "0.31.0-beta.2"
+winit-android = { version = "0.31.0-beta.2", features = ["native-activity"] }
 ```
 
 The current Android path is based on `NativeActivity`. `ThemeMode::System`, touch interaction, system font discovery, and background-to-foreground resume are supported in the runtime.
+
+For direct window-system types, prefer importing them from `tgui::platform` instead of depending on the old aggregate `winit` crate.
 
 ### Minimal Android Project Setup
 
@@ -413,7 +420,7 @@ The Rust entry point should export `android_main`:
 #[cfg(target_os = "android")]
 use tgui::{Application, TguiError};
 #[cfg(target_os = "android")]
-use winit::platform::android::activity::AndroidApp;
+use tgui::platform::android::activity::AndroidApp;
 
 #[cfg(target_os = "android")]
 fn run_android_entry(app: AndroidApp) -> Result<(), TguiError> {

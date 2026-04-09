@@ -1,6 +1,7 @@
 mod animation;
 mod application;
 mod foundation;
+pub mod platform;
 mod rendering;
 mod runtime;
 mod text;

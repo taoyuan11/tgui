@@ -36,11 +36,7 @@ impl FontCatalog {
         });
     }
 
-    pub(crate) fn register_font_file(
-        &mut self,
-        name: impl Into<String>,
-        path: impl Into<PathBuf>,
-    ) {
+    pub(crate) fn register_font_file(&mut self, name: impl Into<String>, path: impl Into<PathBuf>) {
         self.named_fonts.push(NamedFont {
             name: name.into(),
             source: FontSource::File(path.into()),
@@ -301,7 +297,12 @@ fn load_android_system_fonts(database: &mut cosmic_text::fontdb::Database) {
 
     let monospace_family = first_matching_family(
         database,
-        &["Droid Sans Mono", "Cutive Mono", "Roboto Mono", "Noto Sans Mono"],
+        &[
+            "Droid Sans Mono",
+            "Cutive Mono",
+            "Roboto Mono",
+            "Noto Sans Mono",
+        ],
     )
     .or_else(|| sans_family.clone());
 

@@ -3,8 +3,9 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum TguiError {
-    EventLoop(winit::error::EventLoopError),
-    Os(winit::error::OsError),
+    EventLoop(crate::platform::error::EventLoopError),
+    Os(crate::platform::error::OsError),
+    Request(crate::platform::error::RequestError),
     CreateSurface(wgpu::CreateSurfaceError),
     RequestAdapter(wgpu::RequestAdapterError),
     RequestDevice(wgpu::RequestDeviceError),
@@ -17,6 +18,7 @@ impl Display for TguiError {
         match self {
             Self::EventLoop(error) => write!(f, "failed to create or run event loop: {error}"),
             Self::Os(error) => write!(f, "window system error: {error}"),
+            Self::Request(error) => write!(f, "window request failed: {error}"),
             Self::CreateSurface(error) => write!(f, "failed to create rendering surface: {error}"),
             Self::RequestAdapter(error) => write!(f, "failed to acquire GPU adapter: {error}"),
             Self::RequestDevice(error) => write!(f, "failed to create GPU device: {error}"),
@@ -30,15 +32,21 @@ impl Display for TguiError {
 
 impl Error for TguiError {}
 
-impl From<winit::error::EventLoopError> for TguiError {
-    fn from(value: winit::error::EventLoopError) -> Self {
+impl From<crate::platform::error::EventLoopError> for TguiError {
+    fn from(value: crate::platform::error::EventLoopError) -> Self {
         Self::EventLoop(value)
     }
 }
 
-impl From<winit::error::OsError> for TguiError {
-    fn from(value: winit::error::OsError) -> Self {
+impl From<crate::platform::error::OsError> for TguiError {
+    fn from(value: crate::platform::error::OsError) -> Self {
         Self::Os(value)
+    }
+}
+
+impl From<crate::platform::error::RequestError> for TguiError {
+    fn from(value: crate::platform::error::RequestError) -> Self {
+        Self::Request(value)
     }
 }
 

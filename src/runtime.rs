@@ -6,31 +6,27 @@ use crate::animation::{
     default_theme_transition, AnimationCoordinator, AnimationEngine, AnimationKey, Transition,
     WindowProperty,
 };
-#[cfg(all(target_os = "android", feature = "android"))]
-use jni::{
-    JavaVM, JValue, jni_sig, jni_str,
-    objects::JObject,
-};
-use winit::application::ApplicationHandler;
-use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
-#[cfg(all(target_os = "android", feature = "android"))]
-use winit::platform::android::activity::AndroidApp;
-#[cfg(all(target_os = "android", feature = "android"))]
-use winit::platform::android::activity::ndk::configuration::UiModeNight;
-#[cfg(all(target_os = "android", feature = "android"))]
-use winit::platform::android::EventLoopBuilderExtAndroid;
-use winit::window::{
-    Cursor, CursorIcon, ImePurpose, Theme as WindowTheme, Window, WindowAttributes, WindowId,
-};
-
 use crate::application::{ApplicationConfig, ThemeSelection};
 use crate::foundation::binding::{Binding, InvalidationSignal};
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, ViewModel};
+#[cfg(all(target_os = "android", feature = "android"))]
+use crate::platform::android::activity::ndk::configuration::UiModeNight;
+#[cfg(all(target_os = "android", feature = "android"))]
+use crate::platform::android::activity::AndroidApp;
+use crate::platform::backend::application::ApplicationHandler;
+use crate::platform::backend::event_loop::{ActiveEventLoop, ControlFlow};
+use crate::platform::backend::window::Window;
+use crate::platform::backend::EventLoop;
+use crate::platform::cursor::{Cursor, CursorIcon};
+use crate::platform::dpi::{PhysicalPosition, PhysicalSize};
+use crate::platform::event::{
+    ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
+};
+use crate::platform::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+use crate::platform::window::{ImePurpose, Theme as WindowTheme, WindowAttributes, WindowId};
 use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::FontManager;
 use crate::ui::theme::{Theme, ThemeMode};
@@ -38,6 +34,8 @@ use crate::ui::widget::{
     HitInteraction, InputEditState, InputSnapshot, Point, Rect, RenderedWidgetScene,
     ScenePrimitives, ScrollbarAxis, ScrollbarHandle, WidgetId, WidgetTree,
 };
+#[cfg(all(target_os = "android", feature = "android"))]
+use jni::{jni_sig, jni_str, objects::JObject, JValue, JavaVM};
 use unicode_segmentation::UnicodeSegmentation;
 
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
@@ -64,7 +62,7 @@ impl SystemBarStyle {
 }
 
 pub struct Runtime {
-    event_loop: EventLoop<()>,
+    event_loop: EventLoop,
     config: ApplicationConfig,
     #[cfg(all(target_os = "android", feature = "android"))]
     android_app: Option<AndroidApp>,
@@ -97,7 +95,8 @@ impl Runtime {
             #[cfg(all(target_os = "android", feature = "android"))]
             self.android_app,
         );
-        self.event_loop.run_app(&mut handler)?;
+        let mut event_loop = self.event_loop;
+        event_loop.run_app_on_demand(&mut handler)?;
 
         if let Some(error) = handler.error {
             return Err(error);
@@ -108,7 +107,7 @@ impl Runtime {
 }
 
 pub struct BoundRuntime<VM> {
-    event_loop: EventLoop<()>,
+    event_loop: EventLoop,
     config: ApplicationConfig,
     view_model: VM,
     window_bindings: WindowBindings,
@@ -182,7 +181,8 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             #[cfg(all(target_os = "android", feature = "android"))]
             self.android_app,
         );
-        self.event_loop.run_app(&mut handler)?;
+        let mut event_loop = self.event_loop;
+        event_loop.run_app_on_demand(&mut handler)?;
 
         if let Some(error) = handler.error {
             return Err(error);
@@ -192,7 +192,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
     }
 }
 
-fn build_event_loop(control_flow: ControlFlow) -> Result<EventLoop<()>, TguiError> {
+fn build_event_loop(control_flow: ControlFlow) -> Result<EventLoop, TguiError> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(control_flow);
     Ok(event_loop)
@@ -202,10 +202,8 @@ fn build_event_loop(control_flow: ControlFlow) -> Result<EventLoop<()>, TguiErro
 fn build_event_loop_with_android_app(
     control_flow: ControlFlow,
     app: AndroidApp,
-) -> Result<EventLoop<()>, TguiError> {
-    let mut builder = EventLoop::builder();
-    builder.with_android_app(app);
-    let event_loop = builder.build()?;
+) -> Result<EventLoop, TguiError> {
+    let event_loop = EventLoop::with_android_app(app)?;
     event_loop.set_control_flow(control_flow);
     Ok(event_loop)
 }
@@ -224,7 +222,7 @@ pub struct WindowCommand<VM> {
 
 struct RuntimeHandler {
     config: ApplicationConfig,
-    window: Option<Arc<Window>>,
+    window: Option<Arc<dyn Window>>,
     renderer: Option<Renderer>,
     window_id: Option<WindowId>,
     error: Option<TguiError>,
@@ -252,12 +250,12 @@ impl RuntimeHandler {
         }
     }
 
-    fn fail(&mut self, event_loop: &ActiveEventLoop, error: TguiError) {
+    fn fail(&mut self, event_loop: &dyn ActiveEventLoop, error: TguiError) {
         self.error = Some(error);
         event_loop.exit();
     }
 
-    fn resolved_theme(&self, window: &Window) -> Theme {
+    fn resolved_theme(&self, window: &dyn Window) -> Theme {
         resolve_theme(
             &self.config.theme,
             resolve_window_theme(
@@ -286,7 +284,7 @@ impl RuntimeHandler {
         self.system_bar_style = Some(style);
     }
 
-    fn render_hidden_frame(&mut self, event_loop: &ActiveEventLoop) -> bool {
+    fn render_hidden_frame(&mut self, event_loop: &dyn ActiveEventLoop) -> bool {
         let Some(renderer) = self.renderer.as_mut() else {
             return true;
         };
@@ -311,7 +309,7 @@ impl RuntimeHandler {
         }
     }
 
-    fn resume_existing_window(&mut self, event_loop: &ActiveEventLoop) {
+    fn resume_existing_window(&mut self, event_loop: &dyn ActiveEventLoop) {
         let Some(window) = self.window.clone() else {
             return;
         };
@@ -319,7 +317,9 @@ impl RuntimeHandler {
         let clear_color = if self.config.clear_color_overridden {
             self.config.clear_color
         } else {
-            self.resolved_theme(&window).palette.window_background
+            self.resolved_theme(window.as_ref())
+                .palette
+                .window_background
         };
 
         match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
@@ -332,7 +332,7 @@ impl RuntimeHandler {
 
         #[cfg(all(target_os = "android", feature = "android"))]
         {
-            let theme = self.resolved_theme(&window);
+            let theme = self.resolved_theme(window.as_ref());
             self.sync_system_bar_style(&theme);
         }
 
@@ -352,7 +352,7 @@ impl RuntimeHandler {
         }
     }
 
-    fn handle_runtime_redraw(&mut self, event_loop: &ActiveEventLoop) {
+    fn handle_runtime_redraw(&mut self, event_loop: &dyn ActiveEventLoop) {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -398,7 +398,7 @@ struct BoundRuntimeHandler<VM> {
     cached_scene: Option<CachedScene>,
     scroll_states: HashMap<WidgetId, Point>,
     scroll_epoch: u64,
-    window: Option<Arc<Window>>,
+    window: Option<Arc<dyn Window>>,
     renderer: Option<Renderer>,
     window_id: Option<WindowId>,
     error: Option<TguiError>,
@@ -535,7 +535,7 @@ impl<VM> BoundRuntimeHandler<VM> {
         }
     }
 
-    fn fail(&mut self, event_loop: &ActiveEventLoop, error: TguiError) {
+    fn fail(&mut self, event_loop: &dyn ActiveEventLoop, error: TguiError) {
         self.error = Some(error);
         event_loop.exit();
     }
@@ -698,7 +698,7 @@ impl<VM> BoundRuntimeHandler<VM> {
         let size = self
             .window
             .as_ref()
-            .map(|window| window.inner_size())
+            .map(|window| window.surface_size())
             .unwrap_or(self.config.size.to_physical::<u32>(1.0));
         Rect::new(0.0, 0.0, size.width as f32, size.height as f32)
     }
@@ -708,18 +708,16 @@ impl<VM> BoundRuntimeHandler<VM> {
     }
 
     fn should_dispatch_widget_event(event: &WindowEvent) -> bool {
-        matches!(
-            event,
-            WindowEvent::CursorMoved { .. }
-                | WindowEvent::MouseWheel { .. }
-                | WindowEvent::Touch(_)
-                | WindowEvent::MouseInput {
-                    state: ElementState::Pressed,
-                    button: MouseButton::Left,
-                    ..
-                }
-                | WindowEvent::KeyboardInput { .. }
-        )
+        match event {
+            WindowEvent::PointerMoved { .. } | WindowEvent::MouseWheel { .. } => true,
+            WindowEvent::PointerButton {
+                state: ElementState::Pressed,
+                button,
+                ..
+            } => button.clone().mouse_button() == Some(MouseButton::Left),
+            WindowEvent::KeyboardInput { .. } => true,
+            _ => false,
+        }
     }
 
     fn render_current_frame(&mut self) -> Result<RenderStatus, TguiError> {
@@ -733,11 +731,12 @@ impl<VM> BoundRuntimeHandler<VM> {
         let rendered = self.render_primitives();
         if let (Some(window), Some(caret_rect)) = (self.window.as_ref(), rendered.ime_cursor_area) {
             window.set_ime_cursor_area(
-                winit::dpi::PhysicalPosition::new(caret_rect.x as i32, caret_rect.y as i32),
-                winit::dpi::PhysicalSize::new(
+                PhysicalPosition::new(caret_rect.x as i32, caret_rect.y as i32).into(),
+                PhysicalSize::new(
                     caret_rect.width.ceil().max(1.0) as u32,
                     caret_rect.height.ceil().max(1.0) as u32,
-                ),
+                )
+                .into(),
             );
         }
         let renderer = self
@@ -748,7 +747,7 @@ impl<VM> BoundRuntimeHandler<VM> {
     }
 
     #[cfg(all(target_os = "android", feature = "android"))]
-    fn render_immediately(&mut self, event_loop: &ActiveEventLoop) {
+    fn render_immediately(&mut self, event_loop: &dyn ActiveEventLoop) {
         if self.window.is_none() || self.renderer.is_none() {
             return;
         }
@@ -769,7 +768,7 @@ impl<VM> BoundRuntimeHandler<VM> {
         }
     }
 
-    fn set_pointer_position(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
+    fn set_pointer_position(&mut self, position: PhysicalPosition<f64>) {
         self.cursor_position = Some(Point {
             x: position.x as f32,
             y: position.y as f32,
@@ -789,7 +788,7 @@ impl<VM> BoundRuntimeHandler<VM> {
         self.update_cursor_icon();
     }
 
-    fn drive_animations(&mut self, event_loop: &ActiveEventLoop, now: Instant) -> bool {
+    fn drive_animations(&mut self, event_loop: &dyn ActiveEventLoop, now: Instant) -> bool {
         self.flush_pending_click_if_due(now);
 
         let mut frame_advanced = false;
@@ -831,7 +830,7 @@ impl<VM> BoundRuntimeHandler<VM> {
         frame_advanced
     }
 
-    fn render_hidden_frame(&mut self, event_loop: &ActiveEventLoop) -> bool {
+    fn render_hidden_frame(&mut self, event_loop: &dyn ActiveEventLoop) -> bool {
         let status = match self.render_current_frame() {
             Ok(status) => status,
             Err(error) => {
@@ -854,7 +853,7 @@ impl<VM> BoundRuntimeHandler<VM> {
         true
     }
 
-    fn resume_existing_window(&mut self, event_loop: &ActiveEventLoop) {
+    fn resume_existing_window(&mut self, event_loop: &dyn ActiveEventLoop) {
         let Some(window) = self.window.clone() else {
             return;
         };
@@ -1194,10 +1193,11 @@ impl<VM> BoundRuntimeHandler<VM> {
             Ime::Disabled => {
                 self.clear_input_composition(snapshot.id, &current_text);
             }
+            Ime::DeleteSurrounding { .. } => {}
         }
     }
 
-    fn handle_input_keyboard_event(&mut self, event: &winit::event::KeyEvent) {
+    fn handle_input_keyboard_event(&mut self, event: &KeyEvent) {
         let Some(snapshot) = self.focused_input_snapshot() else {
             return;
         };
@@ -1780,7 +1780,7 @@ impl<VM> BoundRuntimeHandler<VM> {
 }
 
 impl ApplicationHandler for RuntimeHandler {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
         if self.window.is_some() {
             self.resume_existing_window(event_loop);
             return;
@@ -1789,11 +1789,11 @@ impl ApplicationHandler for RuntimeHandler {
         let attributes = WindowAttributes::default()
             .with_transparent(true)
             .with_title(self.config.title.clone())
-            .with_inner_size(self.config.size)
+            .with_surface_size(self.config.size)
             .with_visible(false);
 
-        let window = match event_loop.create_window(attributes) {
-            Ok(window) => Arc::new(window),
+        let window: Arc<dyn Window> = match event_loop.create_window(attributes) {
+            Ok(window) => Arc::from(window),
             Err(error) => {
                 self.fail(event_loop, error.into());
                 return;
@@ -1803,11 +1803,13 @@ impl ApplicationHandler for RuntimeHandler {
         let clear_color = if self.config.clear_color_overridden {
             self.config.clear_color
         } else {
-            self.resolved_theme(&window).palette.window_background
+            self.resolved_theme(window.as_ref())
+                .palette
+                .window_background
         };
         #[cfg(all(target_os = "android", feature = "android"))]
         {
-            let theme = self.resolved_theme(&window);
+            let theme = self.resolved_theme(window.as_ref());
             self.sync_system_bar_style(&theme);
         }
 
@@ -1835,7 +1837,7 @@ impl ApplicationHandler for RuntimeHandler {
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &dyn ActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent,
     ) {
@@ -1850,7 +1852,7 @@ impl ApplicationHandler for RuntimeHandler {
                     let resolved_theme = self
                         .window
                         .as_ref()
-                        .map(|window| self.resolved_theme(window));
+                        .map(|window| self.resolved_theme(window.as_ref()));
                     let clear_color = resolved_theme
                         .as_ref()
                         .map(|theme| theme.palette.window_background)
@@ -1870,20 +1872,20 @@ impl ApplicationHandler for RuntimeHandler {
             WindowEvent::ScaleFactorChanged { .. } => {
                 if let Some(window) = self.window.clone() {
                     if !self.config.clear_color_overridden {
-                        let theme = self.resolved_theme(&window);
+                        let theme = self.resolved_theme(window.as_ref());
                         if let Some(renderer) = self.renderer.as_mut() {
                             renderer.set_clear_color(theme.palette.window_background);
-                            renderer.resize(window.inner_size());
+                            renderer.resize(window.surface_size());
                         }
                         #[cfg(all(target_os = "android", feature = "android"))]
                         self.sync_system_bar_style(&theme);
                     } else if let Some(renderer) = self.renderer.as_mut() {
-                        renderer.resize(window.inner_size());
+                        renderer.resize(window.surface_size());
                     }
                     window.request_redraw();
                 }
             }
-            WindowEvent::Resized(size) => {
+            WindowEvent::SurfaceResized(size) => {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.resize(size);
                 }
@@ -1893,19 +1895,19 @@ impl ApplicationHandler for RuntimeHandler {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, _event_loop: &dyn ActiveEventLoop) {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
     }
 
-    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+    fn suspended(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.suspend();
     }
 }
 
 impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
         if self.window.is_some() {
             self.resume_existing_window(event_loop);
             return;
@@ -1914,11 +1916,11 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
         let attributes = WindowAttributes::default()
             .with_transparent(true)
             .with_title(self.config.title.clone())
-            .with_inner_size(self.config.size)
+            .with_surface_size(self.config.size)
             .with_visible(false);
 
-        let window = match event_loop.create_window(attributes) {
-            Ok(window) => Arc::new(window),
+        let window: Arc<dyn Window> = match event_loop.create_window(attributes) {
+            Ok(window) => Arc::from(window),
             Err(error) => {
                 self.fail(event_loop, error.into());
                 return;
@@ -1928,7 +1930,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
         self.theme = resolve_theme(
             &self.active_theme_selection(),
             resolve_window_theme(
-                Some(&window),
+                Some(window.as_ref()),
                 #[cfg(all(target_os = "android", feature = "android"))]
                 self.android_app.as_ref(),
             ),
@@ -1969,7 +1971,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &dyn ActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent,
     ) {
@@ -1977,19 +1979,15 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
             return;
         }
 
-        if let WindowEvent::CursorMoved { position, .. } = &event {
+        if let WindowEvent::PointerMoved { position, .. } = &event {
             self.set_pointer_position(*position);
-        }
-
-        if let WindowEvent::Touch(touch) = &event {
-            self.set_pointer_position(touch.location);
         }
 
         if let WindowEvent::ModifiersChanged(modifiers) = &event {
             self.modifiers = modifiers.state();
         }
 
-        if matches!(event, WindowEvent::CursorLeft { .. }) {
+        if matches!(event, WindowEvent::PointerLeft { .. }) {
             self.clear_pointer_position();
         }
 
@@ -1998,7 +1996,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
             let previous_focus = self.focused_input;
 
             match &event {
-                WindowEvent::CursorMoved { .. } => {
+                WindowEvent::PointerMoved { .. } => {
                     if self.active_scrollbar_drag.is_some() {
                         self.handle_scrollbar_drag();
                         self.sync_scrollbar_hover();
@@ -2010,34 +2008,19 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
                 WindowEvent::MouseWheel { delta, .. } => {
                     self.handle_mouse_wheel(*delta);
                 }
-                WindowEvent::Touch(touch) => match touch.phase {
-                    TouchPhase::Started => {
+                WindowEvent::PointerButton {
+                    state: ElementState::Pressed,
+                    position,
+                    button,
+                    ..
+                } => {
+                    if button.clone().mouse_button() == Some(MouseButton::Left) {
+                        self.set_pointer_position(*position);
                         if !self.begin_scrollbar_drag() {
                             self.handle_mouse_press(viewport, Instant::now());
                         } else {
                             self.update_cursor_icon();
                         }
-                    }
-                    TouchPhase::Moved => {
-                        if self.active_scrollbar_drag.is_some() {
-                            self.handle_scrollbar_drag();
-                            self.sync_scrollbar_hover();
-                            self.update_cursor_icon();
-                        } else {
-                            self.handle_hover(viewport);
-                        }
-                    }
-                    TouchPhase::Ended | TouchPhase::Cancelled => {}
-                },
-                WindowEvent::MouseInput {
-                    state: ElementState::Pressed,
-                    button: MouseButton::Left,
-                    ..
-                } => {
-                    if !self.begin_scrollbar_drag() {
-                        self.handle_mouse_press(viewport, Instant::now());
-                    } else {
-                        self.update_cursor_icon();
                     }
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
@@ -2086,7 +2069,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
                 self.invalidate_scene();
                 if let Some(window) = self.window.as_ref() {
                     if let Some(renderer) = self.renderer.as_mut() {
-                        renderer.resize(window.inner_size());
+                        renderer.resize(window.surface_size());
                     }
                     window.request_redraw();
                 }
@@ -2094,26 +2077,21 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
             WindowEvent::Ime(ime) => {
                 self.handle_input_ime(ime);
             }
-            WindowEvent::MouseInput {
+            WindowEvent::PointerButton {
                 state: ElementState::Released,
-                button: MouseButton::Left,
+                position,
+                button,
                 ..
             } => {
-                self.end_scrollbar_drag();
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
+                if button.clone().mouse_button() == Some(MouseButton::Left) {
+                    self.set_pointer_position(position);
+                    self.end_scrollbar_drag();
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
                 }
             }
-            WindowEvent::Touch(touch)
-                if matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled) =>
-            {
-                self.end_scrollbar_drag();
-                self.clear_pointer_position();
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
-            }
-            WindowEvent::Resized(size) => {
+            WindowEvent::SurfaceResized(size) => {
                 self.invalidate_scene();
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.resize(size);
@@ -2123,8 +2101,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
                     window.request_redraw();
                 }
             }
-            WindowEvent::RedrawRequested => {
-                match self.render_current_frame() {
+            WindowEvent::RedrawRequested => match self.render_current_frame() {
                 Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
                 Ok(RenderStatus::ReconfigureSurface) => {
                     if let Some(renderer) = self.renderer.as_mut() {
@@ -2137,13 +2114,12 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
                     }
                 }
                 Err(error) => self.fail(event_loop, error),
-                }
-            }
+            },
             _ => {}
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
         let now = Instant::now();
         let theme_changed = self.refresh_platform_theme();
         if theme_changed {
@@ -2163,7 +2139,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
         }
     }
 
-    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+    fn suspended(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.suspend();
     }
 }
@@ -2261,7 +2237,7 @@ fn resolve_theme(selection: &ThemeSelection, window_theme: Option<WindowTheme>) 
 }
 
 fn resolve_window_theme(
-    window: Option<&Window>,
+    window: Option<&dyn Window>,
     #[cfg(all(target_os = "android", feature = "android"))] android_app: Option<&AndroidApp>,
 ) -> Option<WindowTheme> {
     #[cfg(all(target_os = "android", feature = "android"))]
@@ -2391,10 +2367,7 @@ fn resolve_android_window_theme_from_java(app: &AndroidApp) -> Option<WindowThem
 }
 
 #[cfg(all(target_os = "android", feature = "android"))]
-fn apply_android_system_bar_style(
-    app: &AndroidApp,
-    style: SystemBarStyle,
-) -> Result<(), String> {
+fn apply_android_system_bar_style(app: &AndroidApp, style: SystemBarStyle) -> Result<(), String> {
     let scheduler_app = app.clone();
     let callback_app = scheduler_app.clone();
     scheduler_app.run_on_java_main_thread(Box::new(move || {

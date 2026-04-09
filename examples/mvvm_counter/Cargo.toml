@@ -6,4 +6,3 @@ publish = false
 
 [dependencies]
 tgui = { path = "../.." }
-winit = "0.30"

@@ -3,11 +3,11 @@ use std::sync::Arc;
 use bytemuck::{Pod, Zeroable};
 use cosmic_text::{Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache, Weight};
 use wgpu::util::DeviceExt;
-use winit::dpi::PhysicalSize;
-use winit::window::Window;
 
 use crate::foundation::color::Color as TguiColor;
 use crate::foundation::error::TguiError;
+use crate::platform::backend::window::Window;
+use crate::platform::dpi::PhysicalSize;
 use crate::text::font::{FontCatalog, FontWeight};
 use crate::ui::widget::{Rect, RenderPrimitive, ScenePrimitives, TextPrimitive};
 
@@ -18,7 +18,7 @@ pub enum RenderStatus {
 }
 
 pub struct Renderer {
-    window: Arc<Window>,
+    window: Arc<dyn Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -65,7 +65,7 @@ struct TextCacheKey {
 
 impl Renderer {
     pub fn new(
-        window: Arc<Window>,
+        window: Arc<dyn Window>,
         clear_color: TguiColor,
         fonts: &FontCatalog,
     ) -> Result<Self, TguiError> {
@@ -73,11 +73,11 @@ impl Renderer {
     }
 
     async fn new_async(
-        window: Arc<Window>,
+        window: Arc<dyn Window>,
         clear_color: TguiColor,
         fonts: &FontCatalog,
     ) -> Result<Self, TguiError> {
-        let size = window.inner_size();
+        let size = window.surface_size();
         let instance = wgpu::Instance::new(instance_descriptor(clear_color));
         let surface = instance.create_surface(window.clone())?;
         let adapter = instance

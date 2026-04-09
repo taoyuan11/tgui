@@ -1,5 +1,5 @@
-use winit::event::{ElementState, MouseButton, WindowEvent};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use crate::platform::event::{ElementState, MouseButton, WindowEvent};
+use crate::platform::keyboard::{KeyCode, PhysicalKey};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputTrigger {
@@ -14,20 +14,20 @@ impl InputTrigger {
         match (self, event) {
             (
                 Self::MousePressed(expected_button),
-                WindowEvent::MouseInput {
+                WindowEvent::PointerButton {
                     state: ElementState::Pressed,
                     button,
                     ..
                 },
-            ) => *button == expected_button,
+            ) => button.clone().mouse_button() == Some(expected_button),
             (
                 Self::MouseReleased(expected_button),
-                WindowEvent::MouseInput {
+                WindowEvent::PointerButton {
                     state: ElementState::Released,
                     button,
                     ..
                 },
-            ) => *button == expected_button,
+            ) => button.clone().mouse_button() == Some(expected_button),
             (Self::KeyPressed(expected_code), WindowEvent::KeyboardInput { event, .. }) => {
                 event.state == ElementState::Pressed
                     && matches!(event.physical_key, PhysicalKey::Code(code) if code == expected_code)
