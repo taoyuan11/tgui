@@ -76,7 +76,7 @@ mod ui;
 /// ```rust
 /// use tgui::{children, Column, Text};
 ///
-/// let _column = Column::<()>::new().children(children![
+/// let _column = Column::<()>::new().child(children![
 ///     Text::new("First"),
 ///     Text::new("Second"),
 /// ]);
