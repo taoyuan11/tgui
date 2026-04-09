@@ -22,6 +22,7 @@ exclude = [
 [features]
 default = []
 android = []
+ohos = []
 
 [dependencies]
 bytemuck = { version = "1.24", features = ["derive"] }
@@ -43,7 +44,7 @@ arboard = "3.6"
 log = "0.4.29"
 winit-appkit = "0.31.0-beta.2"
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 arboard = "3.6"
 log = "0.4.29"
 winit-wayland = "0.31.0-beta.2"
@@ -52,3 +53,7 @@ winit-x11 = "0.31.0-beta.2"
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
 winit-android = { version = "0.31.0-beta.2", features = ["native-activity"] }
+
+[target.'cfg(target_env = "ohos")'.dependencies]
+raw-window-handle = "0.6"
+tgui-winit-ohos = "0.31.0-beta.2"

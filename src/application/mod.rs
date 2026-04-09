@@ -1,5 +1,7 @@
 #[cfg(all(target_os = "android", feature = "android"))]
 use crate::platform::android::activity::AndroidApp;
+#[cfg(all(target_env = "ohos", feature = "ohos"))]
+use crate::platform::ohos::OhosApp;
 use crate::platform::dpi::LogicalSize;
 
 use crate::animation::AnimationCoordinator;
@@ -103,6 +105,16 @@ impl Application {
     #[cfg(all(target_os = "android", feature = "android"))]
     pub fn run_android(self, app: AndroidApp) -> Result<(), TguiError> {
         Runtime::new_android(self.config(), app)?.run()
+    }
+
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    pub fn run_ohos(self, app: OhosApp) -> Result<(), TguiError> {
+        Runtime::new_ohos(self.config(), app)?.run()
+    }
+
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    pub fn into_ohos_handler(self) -> impl winit_core::application::ApplicationHandler + Send {
+        Runtime::handler(self.config())
     }
 
     pub fn with_view_model<VM, F>(self, factory: F) -> ApplicationBuilder<VM, F>
@@ -215,25 +227,22 @@ where
     }
 
     pub fn run(self) -> Result<(), TguiError> {
-        let invalidation = InvalidationSignal::new();
-        let animations = AnimationCoordinator::default();
-        let context = ViewModelContext::new(invalidation.clone(), animations.clone());
-        let view_model = (self.factory)(&context);
-        let window_bindings = WindowBindings {
-            title: self.title_binding.map(|binding| binding(&view_model)),
-            clear_color: self.clear_color_binding.map(|binding| binding(&view_model)),
-            theme_mode: self.theme_mode_binding.map(|binding| binding(&view_model)),
-        };
-        let widget_tree = self
-            .root_view
-            .map(|root_view| WidgetTree::new(root_view(&view_model)));
-
-        BoundRuntime::new(
-            self.app.config(),
+        let (
+            config,
             view_model,
             window_bindings,
             widget_tree,
-            self.commands,
+            commands,
+            invalidation,
+            animations,
+        ) = self.into_runtime_parts();
+
+        BoundRuntime::new(
+            config,
+            view_model,
+            window_bindings,
+            widget_tree,
+            commands,
             invalidation,
             animations,
         )?
@@ -242,6 +251,91 @@ where
 
     #[cfg(all(target_os = "android", feature = "android"))]
     pub fn run_android(self, app: AndroidApp) -> Result<(), TguiError> {
+        let (
+            config,
+            view_model,
+            window_bindings,
+            widget_tree,
+            commands,
+            invalidation,
+            animations,
+        ) = self.into_runtime_parts();
+
+        BoundRuntime::new_android(
+            config,
+            view_model,
+            window_bindings,
+            widget_tree,
+            commands,
+            invalidation,
+            animations,
+            app,
+        )?
+        .run()
+    }
+
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    pub fn run_ohos(self, app: OhosApp) -> Result<(), TguiError> {
+        let (
+            config,
+            view_model,
+            window_bindings,
+            widget_tree,
+            commands,
+            invalidation,
+            animations,
+        ) = self.into_runtime_parts();
+
+        BoundRuntime::new_ohos(
+            config,
+            view_model,
+            window_bindings,
+            widget_tree,
+            commands,
+            invalidation,
+            animations,
+            app,
+        )?
+        .run()
+    }
+
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    pub fn into_ohos_handler(self) -> impl winit_core::application::ApplicationHandler + Send
+    where
+        VM: Send,
+    {
+        let (
+            config,
+            view_model,
+            window_bindings,
+            widget_tree,
+            commands,
+            invalidation,
+            animations,
+        ) = self.into_runtime_parts();
+
+        BoundRuntime::handler(
+            config,
+            view_model,
+            window_bindings,
+            widget_tree,
+            commands,
+            invalidation,
+            animations,
+        )
+    }
+
+    fn into_runtime_parts(
+        self,
+    ) -> (
+        ApplicationConfig,
+        VM,
+        WindowBindings,
+        Option<WidgetTree<VM>>,
+        Vec<WindowCommand<VM>>,
+        InvalidationSignal,
+        AnimationCoordinator,
+    ) {
         let invalidation = InvalidationSignal::new();
         let animations = AnimationCoordinator::default();
         let context = ViewModelContext::new(invalidation.clone(), animations.clone());
@@ -254,8 +348,7 @@ where
         let widget_tree = self
             .root_view
             .map(|root_view| WidgetTree::new(root_view(&view_model)));
-
-        BoundRuntime::new_android(
+        (
             self.app.config(),
             view_model,
             window_bindings,
@@ -263,8 +356,6 @@ where
             self.commands,
             invalidation,
             animations,
-            app,
-        )?
-        .run()
+        )
     }
 }

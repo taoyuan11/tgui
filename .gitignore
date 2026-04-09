@@ -1,4 +1,5 @@
 /target
 examples/**/target
 examples/**/Cargo.lock
+examples/**/ohos-app
 .idea

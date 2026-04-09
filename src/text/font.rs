@@ -51,8 +51,8 @@ impl FontCatalog {
         &self,
         font_system: &mut FontSystem,
     ) -> Vec<(String, String)> {
-        #[cfg(target_os = "android")]
-        load_android_system_fonts(font_system.db_mut());
+        #[cfg(any(target_os = "android", target_env = "ohos"))]
+        load_mobile_system_fonts(font_system.db_mut());
 
         let mut aliases = Vec::with_capacity(self.named_fonts.len());
         for font in &self.named_fonts {
@@ -253,14 +253,9 @@ impl FontManager {
     }
 }
 
-#[cfg(target_os = "android")]
-fn load_android_system_fonts(database: &mut cosmic_text::fontdb::Database) {
-    for path in [
-        "/system/fonts",
-        "/system_ext/fonts",
-        "/product/fonts",
-        "/vendor/fonts",
-    ] {
+#[cfg(any(target_os = "android", target_env = "ohos"))]
+fn load_mobile_system_fonts(database: &mut cosmic_text::fontdb::Database) {
+    for path in mobile_font_dirs() {
         let path = std::path::Path::new(path);
         if path.exists() {
             database.load_fonts_dir(path);
@@ -269,40 +264,19 @@ fn load_android_system_fonts(database: &mut cosmic_text::fontdb::Database) {
 
     let sans_family = first_matching_family(
         database,
-        &[
-            "Roboto",
-            "Roboto Static",
-            "Roboto Flex",
-            "Droid Sans",
-            "Noto Sans CJK SC",
-            "Noto Sans CJK TC",
-            "Noto Sans CJK JP",
-            "Noto Sans CJK KR",
-            "Noto Sans",
-        ],
+        mobile_sans_candidates(),
     )
     .or_else(|| first_loaded_family(database));
 
     let serif_family = first_matching_family(
         database,
-        &[
-            "Noto Serif",
-            "Noto Serif CJK SC",
-            "Noto Serif CJK TC",
-            "Noto Serif CJK JP",
-            "Noto Serif CJK KR",
-        ],
+        mobile_serif_candidates(),
     )
     .or_else(|| sans_family.clone());
 
     let monospace_family = first_matching_family(
         database,
-        &[
-            "Droid Sans Mono",
-            "Cutive Mono",
-            "Roboto Mono",
-            "Noto Sans Mono",
-        ],
+        mobile_monospace_candidates(),
     )
     .or_else(|| sans_family.clone());
 
@@ -320,6 +294,93 @@ fn load_android_system_fonts(database: &mut cosmic_text::fontdb::Database) {
 }
 
 #[cfg(target_os = "android")]
+fn mobile_font_dirs() -> &'static [&'static str] {
+    &[
+        "/system/fonts",
+        "/system_ext/fonts",
+        "/product/fonts",
+        "/vendor/fonts",
+    ]
+}
+
+#[cfg(target_env = "ohos")]
+fn mobile_font_dirs() -> &'static [&'static str] {
+    &[
+        "/system/fonts",
+        "/system/etc/fonts",
+        "/system/fonts/visibility",
+        "/data/service/el1/public/font",
+    ]
+}
+
+#[cfg(target_os = "android")]
+fn mobile_sans_candidates() -> &'static [&'static str] {
+    &[
+        "Roboto",
+        "Roboto Static",
+        "Roboto Flex",
+        "Droid Sans",
+        "Noto Sans CJK SC",
+        "Noto Sans CJK TC",
+        "Noto Sans CJK JP",
+        "Noto Sans CJK KR",
+        "Noto Sans",
+    ]
+}
+
+#[cfg(target_env = "ohos")]
+fn mobile_sans_candidates() -> &'static [&'static str] {
+    &[
+        "HarmonyOS Sans SC",
+        "HarmonyOS Sans",
+        "Noto Sans CJK SC",
+        "Noto Sans SC",
+        "Noto Sans",
+    ]
+}
+
+#[cfg(target_os = "android")]
+fn mobile_serif_candidates() -> &'static [&'static str] {
+    &[
+        "Noto Serif",
+        "Noto Serif CJK SC",
+        "Noto Serif CJK TC",
+        "Noto Serif CJK JP",
+        "Noto Serif CJK KR",
+    ]
+}
+
+#[cfg(target_env = "ohos")]
+fn mobile_serif_candidates() -> &'static [&'static str] {
+    &[
+        "Noto Serif CJK SC",
+        "Noto Serif SC",
+        "Noto Serif",
+        "HarmonyOS Sans SC",
+    ]
+}
+
+#[cfg(target_os = "android")]
+fn mobile_monospace_candidates() -> &'static [&'static str] {
+    &[
+        "Droid Sans Mono",
+        "Cutive Mono",
+        "Roboto Mono",
+        "Noto Sans Mono",
+    ]
+}
+
+#[cfg(target_env = "ohos")]
+fn mobile_monospace_candidates() -> &'static [&'static str] {
+    &[
+        "HarmonyOS Sans Mono",
+        "Roboto Mono",
+        "Noto Sans Mono",
+        "HarmonyOS Sans SC",
+    ]
+}
+
+#[cfg(any(target_os = "android", target_env = "ohos"))]
 fn first_matching_family(
     database: &cosmic_text::fontdb::Database,
     candidates: &[&str],
@@ -334,7 +395,7 @@ fn first_matching_family(
     })
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_env = "ohos"))]
 fn first_loaded_family(database: &cosmic_text::fontdb::Database) -> Option<String> {
     database
         .faces()

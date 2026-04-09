@@ -76,6 +76,11 @@ This project is under active development.
   - `ThemeMode::System` integration
   - Android system font discovery
   - foreground / background surface recovery
+- OHOS support behind the `ohos` feature:
+  - ArkUI `NativeXComponent` backend via `tgui-winit-ohos`
+  - `cargo ohos-app` packaging flow
+  - touch, mouse, keyboard, and surface lifecycle integration
+  - OHOS system font discovery
 
 ## Installation
 
@@ -106,6 +111,26 @@ If you create an Android NativeActivity app directly, add the matching modular b
 [target.'cfg(target_os = "android")'.dependencies]
 winit-core = "0.31.0-beta.2"
 winit-android = { version = "0.31.0-beta.2", features = ["native-activity"] }
+```
+
+For OHOS targets, enable the `ohos` feature:
+
+```toml
+[dependencies]
+tgui = { version = "0.0.5", features = ["ohos"] }
+```
+
+If you package an OHOS app with `cargo ohos-app`, make sure the application crate exposes a direct
+dependency named `winit-ohos`. In this repository the OHOS example does that through a tiny shim
+crate under `examples/support/winit_ohos_shim`, which re-exports `tgui-winit-ohos` for the
+packager's template detection.
+
+A minimal dependency setup looks like this:
+
+```toml
+[dependencies]
+winit-core = "0.31.0-beta.2"
+tgui-winit-ohos = "0.31.0-beta.2"
 ```
 
 ## Quick Start
@@ -473,6 +498,68 @@ adb shell am start -n rust.android_basic_window/android.app.NativeActivity
 
 The example manifest package is currently `rust.android_basic_window`, so the launch command above matches the generated APK.
 
+## OHOS
+
+OHOS support is feature-gated:
+
+```toml
+[dependencies]
+tgui = { path = "../..", features = ["ohos"] }
+winit-core = "0.31.0-beta.2"
+winit-ohos = { path = "../support/winit_ohos_shim" }
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+```
+
+The current OHOS path targets ArkUI `NativeXComponent` through `tgui-winit-ohos`. For direct
+backend types and macros, import them from `tgui::platform::ohos`.
+
+### Minimal OHOS Runtime Export
+
+```rust
+#[cfg(target_env = "ohos")]
+use tgui::platform::ohos::export_ohos_winit_app;
+#[cfg(target_env = "ohos")]
+use tgui::Application;
+#[cfg(target_env = "ohos")]
+use winit_core::application::ApplicationHandler;
+
+#[cfg(target_env = "ohos")]
+fn create_ohos_app() -> impl ApplicationHandler + Send {
+    Application::new()
+        .title("tgui ohos")
+        .into_ohos_handler()
+}
+
+#[cfg(target_env = "ohos")]
+export_ohos_winit_app!(create_ohos_app);
+```
+
+### Build And Package
+
+1. Install the cargo subcommand:
+
+```bash
+cargo install cargo-ohos-app
+```
+
+2. Generate the OHOS shell project if needed:
+
+```bash
+cargo ohos-app init --manifest-path examples/ohos_basic_window/Cargo.toml
+```
+
+3. Package the example as a `.hap`:
+
+```bash
+cargo ohos-app package --manifest-path examples/ohos_basic_window/Cargo.toml
+```
+
+The bundled example defaults to `x86_64-unknown-linux-ohos` in
+`examples/ohos_basic_window/ohos-app.toml`, which is convenient for simulator runs. For a device
+build, pass `--abi arm64-v8a` or override `target` in that file.
+
 ## Examples
 
 Available examples in this repository:
@@ -488,6 +575,7 @@ Available examples in this repository:
 - `layout_theme_showcase`
 - `widgets_showcase`
 - `android_basic_window`
+- `ohos_basic_window`
 
 All runnable examples now live in their own Cargo projects under `examples/<name>/`.
 `examples/static` is a shared assets folder, not a standalone example project.
@@ -514,6 +602,16 @@ cargo apk build --manifest-path examples/android_basic_window/Cargo.toml --targe
 ```
 
 The Android example already enables `tgui`'s `android` feature in its own `Cargo.toml`, so you do not need to pass `--features android` on the command line.
+
+Package the OHOS example with:
+
+```bash
+cargo ohos-app package --manifest-path examples/ohos_basic_window/Cargo.toml
+```
+
+The OHOS example already enables `tgui`'s `ohos` feature and includes a direct `winit-ohos`
+support crate for `cargo ohos-app`, so the packager can generate the `XComponent` shell
+automatically.
 
 ## Development
 

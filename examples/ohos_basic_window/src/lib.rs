@@ -1,0 +1,93 @@
+#[cfg(target_env = "ohos")]
+use tgui::platform::ohos::export_ohos_winit_app;
+#[cfg(target_env = "ohos")]
+use tgui::{
+    children, Align, Application, Binding, Button, Color, Column, Command, Element, Insets,
+    Justify, Observable, Stack, Text, Theme, ThemeMode, ViewModelContext,
+};
+#[cfg(target_env = "ohos")]
+use winit_core::application::ApplicationHandler;
+
+#[cfg(target_env = "ohos")]
+fn themed_app() -> Application {
+    let mut theme = Theme::dark();
+    theme.palette.window_background = Color::hexa(0x07111EFF);
+    theme.palette.surface = Color::hexa(0x13263BFF);
+    theme.palette.surface_muted = Color::hexa(0x1A3658FF);
+    theme.palette.accent = Color::hexa(0x5ED0FAFF);
+
+    Application::new().title("tgui ohos").theme(theme)
+}
+
+#[cfg(target_env = "ohos")]
+struct OhosApplication {
+    current_theme: Observable<String>,
+    theme: Observable<ThemeMode>,
+}
+
+#[cfg(target_env = "ohos")]
+impl OhosApplication {
+    fn new(context: &ViewModelContext) -> Self {
+        Self {
+            current_theme: context.observable("System".to_string()),
+            theme: context.observable(ThemeMode::System),
+        }
+    }
+
+    fn theme_mode(&self) -> Binding<ThemeMode> {
+        self.theme.binding()
+    }
+
+    fn toggle_theme(&mut self) {
+        let next = match self.theme.get() {
+            ThemeMode::System => ThemeMode::Light,
+            ThemeMode::Light => ThemeMode::Dark,
+            ThemeMode::Dark => ThemeMode::System,
+        };
+        let label = match next {
+            ThemeMode::System => "System",
+            ThemeMode::Light => "Light",
+            ThemeMode::Dark => "Dark",
+        };
+        self.theme.set(next);
+        self.current_theme.set(label.to_string());
+    }
+
+    fn view(&self) -> Element<Self> {
+        Stack::new()
+            .fill_size()
+            .padding(Insets::all(24.0))
+            .align(Align::Center)
+            .justify(Justify::Center)
+            .child(
+                Column::new()
+                    .fill_width()
+                    .padding(Insets::all(24.0))
+                    .gap(12.0)
+                    .background(Color::hex(0x1188DD))
+                    .border_radius(28.0)
+                    .child(children![
+                        Text::new("当前主题 / Current Theme").font_size(28.0),
+                        Text::new(self.current_theme.binding()),
+                        Button::new(Text::new("toggle theme"))
+                            .on_click(Command::new(Self::toggle_theme))
+                    ]),
+            )
+            .into()
+    }
+}
+
+#[cfg(target_env = "ohos")]
+fn create_ohos_app() -> impl ApplicationHandler + Send {
+    themed_app()
+        .with_view_model(OhosApplication::new)
+        .root_view(OhosApplication::view)
+        .bind_theme_mode(OhosApplication::theme_mode)
+        .into_ohos_handler()
+}
+
+#[cfg(target_env = "ohos")]
+export_ohos_winit_app!(create_ohos_app);
+
+#[cfg(not(target_env = "ohos"))]
+pub fn host_build_placeholder() {}

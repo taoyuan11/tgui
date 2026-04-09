@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use cosmic_text::{Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache, Weight};
+#[cfg(all(target_env = "ohos", feature = "ohos"))]
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use wgpu::util::DeviceExt;
 
 use crate::foundation::color::Color as TguiColor;
@@ -78,21 +80,22 @@ impl Renderer {
         fonts: &FontCatalog,
     ) -> Result<Self, TguiError> {
         let size = window.surface_size();
-        let instance = wgpu::Instance::new(instance_descriptor(clear_color));
-        let surface = instance.create_surface(window.clone())?;
+        let instance = create_instance(clear_color);
+        let surface = create_surface(&instance, window.clone())?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
+                power_preference: adapter_power_preference(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })
             .await?;
+        let required_limits = required_device_limits(&adapter);
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("tgui-device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_limits,
                 memory_hints: wgpu::MemoryHints::Performance,
                 experimental_features: Default::default(),
                 trace: Default::default(),
@@ -108,14 +111,14 @@ impl Renderer {
             .or_else(|| caps.formats.first().copied())
             .ok_or(TguiError::NoSurfaceFormat)?;
 
-        let alpha_mode = transparent_alpha_mode(&caps.alpha_modes);
+        let alpha_mode = surface_alpha_mode(&caps.alpha_modes);
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: size.width.max(1),
             height: size.height.max(1),
-            present_mode: wgpu::PresentMode::AutoNoVsync,
+            present_mode: surface_present_mode(&caps.present_modes),
             alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -815,6 +818,63 @@ fn instance_descriptor(clear_color: TguiColor) -> wgpu::InstanceDescriptor {
     descriptor
 }
 
+fn create_instance(clear_color: TguiColor) -> wgpu::Instance {
+    let descriptor = instance_descriptor(clear_color);
+    wgpu::Instance::new(descriptor)
+}
+
+fn create_surface(
+    instance: &wgpu::Instance,
+    window: Arc<dyn Window>,
+) -> Result<wgpu::Surface<'static>, TguiError> {
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    {
+        let raw_display_handle = window
+            .display_handle()
+            .map_err(|error| TguiError::TextRender(format!("display handle unavailable: {error}")))?;
+        let raw_window_handle = window
+            .window_handle()
+            .map_err(|error| TguiError::TextRender(format!("window handle unavailable: {error}")))?;
+
+        return Ok(unsafe {
+            instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                raw_display_handle: Some(raw_display_handle.as_raw()),
+                raw_window_handle: raw_window_handle.as_raw(),
+            })?
+        });
+    }
+
+    #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
+    {
+        instance.create_surface(window).map_err(Into::into)
+    }
+}
+
+fn adapter_power_preference() -> wgpu::PowerPreference {
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    {
+        return wgpu::PowerPreference::HighPerformance;
+    }
+
+    #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
+    {
+        wgpu::PowerPreference::default()
+    }
+}
+
+fn required_device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    {
+        return adapter.limits();
+    }
+
+    #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
+    {
+        let _ = adapter;
+        wgpu::Limits::default()
+    }
+}
+
 fn instance_backends(_clear_color: TguiColor) -> wgpu::Backends {
     #[cfg(target_os = "windows")]
     {
@@ -848,7 +908,7 @@ fn default_backends() -> wgpu::Backends {
 
     #[cfg(any(
         target_os = "windows",
-        target_os = "linux",
+        all(target_os = "linux", not(target_env = "ohos")),
         all(
             target_os = "android",
             feature = "android",
@@ -863,12 +923,63 @@ fn default_backends() -> wgpu::Backends {
     wgpu::Backends::all()
 }
 
-fn transparent_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::CompositeAlphaMode {
-    modes
-        .iter()
-        .copied()
-        .find(|mode| *mode != wgpu::CompositeAlphaMode::Opaque)
-        .unwrap_or(wgpu::CompositeAlphaMode::Auto)
+fn surface_present_mode(modes: &[wgpu::PresentMode]) -> wgpu::PresentMode {
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    {
+        return modes
+            .iter()
+            .copied()
+            .find(|mode| *mode == wgpu::PresentMode::Fifo)
+            .or_else(|| {
+                modes
+                    .iter()
+                    .copied()
+                    .find(|mode| *mode == wgpu::PresentMode::AutoVsync)
+            })
+            .or_else(|| {
+                modes
+                    .iter()
+                    .copied()
+                    .find(|mode| *mode == wgpu::PresentMode::AutoNoVsync)
+            })
+            .unwrap_or(wgpu::PresentMode::Fifo);
+    }
+
+    #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
+    {
+        modes
+            .iter()
+            .copied()
+            .find(|mode| *mode == wgpu::PresentMode::AutoNoVsync)
+            .or_else(|| {
+                modes
+                    .iter()
+                    .copied()
+                    .find(|mode| *mode == wgpu::PresentMode::AutoVsync)
+            })
+            .or_else(|| modes.iter().copied().find(|mode| *mode == wgpu::PresentMode::Fifo))
+            .unwrap_or(wgpu::PresentMode::Fifo)
+    }
+}
+
+fn surface_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::CompositeAlphaMode {
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    {
+        return modes
+            .iter()
+            .copied()
+            .find(|mode| *mode == wgpu::CompositeAlphaMode::Opaque)
+            .unwrap_or(wgpu::CompositeAlphaMode::Auto);
+    }
+
+    #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
+    {
+        modes
+            .iter()
+            .copied()
+            .find(|mode| *mode != wgpu::CompositeAlphaMode::Opaque)
+            .unwrap_or(wgpu::CompositeAlphaMode::Auto)
+    }
 }
 
 fn surface_clear_color(color: TguiColor) -> wgpu::Color {

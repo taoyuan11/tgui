@@ -1,0 +1,13 @@
+[package]
+name = "ohos_basic_window"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+tgui = { path = "../..", features = ["ohos"] }
+winit-core = "0.31.0-beta.2"
+tgui-winit-ohos = "0.31.0-beta.2"
+
+[lib]
+crate-type = ["staticlib", "rlib"]

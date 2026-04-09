@@ -16,6 +16,8 @@ use crate::foundation::view_model::{Command, ViewModel};
 use crate::platform::android::activity::ndk::configuration::UiModeNight;
 #[cfg(all(target_os = "android", feature = "android"))]
 use crate::platform::android::activity::AndroidApp;
+#[cfg(all(target_env = "ohos", feature = "ohos"))]
+use crate::platform::ohos::OhosApp;
 use crate::platform::backend::application::ApplicationHandler;
 use crate::platform::backend::event_loop::{ActiveEventLoop, ControlFlow};
 use crate::platform::backend::window::Window;
@@ -89,13 +91,19 @@ impl Runtime {
         })
     }
 
-    pub fn run(self) -> Result<(), TguiError> {
-        let mut handler = RuntimeHandler::new(
-            self.config,
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    pub fn new_ohos(config: ApplicationConfig, app: OhosApp) -> Result<Self, TguiError> {
+        let event_loop = build_event_loop_with_ohos_app(ControlFlow::Poll, app)?;
+        Ok(Self {
+            event_loop,
+            config,
             #[cfg(all(target_os = "android", feature = "android"))]
-            self.android_app,
-        );
-        let mut event_loop = self.event_loop;
+            android_app: None,
+        })
+    }
+
+    pub fn run(self) -> Result<(), TguiError> {
+        let (mut event_loop, mut handler) = self.into_parts();
         event_loop.run_app_on_demand(&mut handler)?;
 
         if let Some(error) = handler.error {
@@ -103,6 +111,24 @@ impl Runtime {
         }
 
         Ok(())
+    }
+
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    pub(crate) fn handler(config: ApplicationConfig) -> RuntimeHandler {
+        RuntimeHandler::new(
+            config,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            None,
+        )
+    }
+
+    fn into_parts(self) -> (EventLoop, RuntimeHandler) {
+        let handler = RuntimeHandler::new(
+            self.config,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            self.android_app,
+        );
+        (self.event_loop, handler)
     }
 }
 
@@ -169,8 +195,68 @@ impl<VM: ViewModel> BoundRuntime<VM> {
         })
     }
 
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    pub fn new_ohos(
+        config: ApplicationConfig,
+        view_model: VM,
+        window_bindings: WindowBindings,
+        widget_tree: Option<WidgetTree<VM>>,
+        commands: Vec<WindowCommand<VM>>,
+        invalidation: InvalidationSignal,
+        animations: AnimationCoordinator,
+        app: OhosApp,
+    ) -> Result<Self, TguiError> {
+        let event_loop = build_event_loop_with_ohos_app(ControlFlow::Wait, app)?;
+        Ok(Self {
+            event_loop,
+            config,
+            view_model,
+            window_bindings,
+            widget_tree,
+            commands,
+            invalidation,
+            animations,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            android_app: None,
+        })
+    }
+
     pub fn run(self) -> Result<(), TguiError> {
-        let mut handler = BoundRuntimeHandler::new(
+        let (mut event_loop, mut handler) = self.into_parts();
+        event_loop.run_app_on_demand(&mut handler)?;
+
+        if let Some(error) = handler.error {
+            return Err(error);
+        }
+
+        Ok(())
+    }
+
+    #[cfg(all(target_env = "ohos", feature = "ohos"))]
+    pub(crate) fn handler(
+        config: ApplicationConfig,
+        view_model: VM,
+        window_bindings: WindowBindings,
+        widget_tree: Option<WidgetTree<VM>>,
+        commands: Vec<WindowCommand<VM>>,
+        invalidation: InvalidationSignal,
+        animations: AnimationCoordinator,
+    ) -> BoundRuntimeHandler<VM> {
+        BoundRuntimeHandler::new(
+            config,
+            view_model,
+            window_bindings,
+            widget_tree,
+            commands,
+            invalidation,
+            animations,
+            #[cfg(all(target_os = "android", feature = "android"))]
+            None,
+        )
+    }
+
+    fn into_parts(self) -> (EventLoop, BoundRuntimeHandler<VM>) {
+        let handler = BoundRuntimeHandler::new(
             self.config,
             self.view_model,
             self.window_bindings,
@@ -181,14 +267,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             #[cfg(all(target_os = "android", feature = "android"))]
             self.android_app,
         );
-        let mut event_loop = self.event_loop;
-        event_loop.run_app_on_demand(&mut handler)?;
-
-        if let Some(error) = handler.error {
-            return Err(error);
-        }
-
-        Ok(())
+        (self.event_loop, handler)
     }
 }
 
@@ -208,6 +287,16 @@ fn build_event_loop_with_android_app(
     Ok(event_loop)
 }
 
+#[cfg(all(target_env = "ohos", feature = "ohos"))]
+fn build_event_loop_with_ohos_app(
+    control_flow: ControlFlow,
+    app: OhosApp,
+) -> Result<EventLoop, TguiError> {
+    let event_loop = EventLoop::with_ohos_app(app)?;
+    event_loop.set_control_flow(control_flow);
+    Ok(event_loop)
+}
+
 #[derive(Default)]
 pub struct WindowBindings {
     pub(crate) title: Option<Binding<String>>,
@@ -220,7 +309,8 @@ pub struct WindowCommand<VM> {
     pub(crate) command: Command<VM>,
 }
 
-struct RuntimeHandler {
+#[doc(hidden)]
+pub struct RuntimeHandler {
     config: ApplicationConfig,
     window: Option<Arc<dyn Window>>,
     renderer: Option<Renderer>,
@@ -251,6 +341,7 @@ impl RuntimeHandler {
     }
 
     fn fail(&mut self, event_loop: &dyn ActiveEventLoop, error: TguiError) {
+        eprintln!("tgui runtime failed: {error}");
         self.error = Some(error);
         event_loop.exit();
     }
@@ -285,10 +376,18 @@ impl RuntimeHandler {
     }
 
     fn render_hidden_frame(&mut self, event_loop: &dyn ActiveEventLoop) -> bool {
+        #[cfg(all(target_env = "ohos", feature = "ohos"))]
+        {
+            let _ = event_loop;
+            return true;
+        }
+
+        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
         let Some(renderer) = self.renderer.as_mut() else {
             return true;
         };
 
+        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
         match renderer.render(&ScenePrimitives::default()) {
             Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => true,
             Ok(RenderStatus::ReconfigureSurface) => {
@@ -372,7 +471,8 @@ impl RuntimeHandler {
     }
 }
 
-struct BoundRuntimeHandler<VM> {
+#[doc(hidden)]
+pub struct BoundRuntimeHandler<VM> {
     config: ApplicationConfig,
     font_manager: FontManager,
     theme: Theme,
@@ -448,13 +548,21 @@ struct ScrollbarDrag {
 
 #[derive(Default)]
 struct ClipboardService {
-    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    ))]
     inner: Option<arboard::Clipboard>,
 }
 
 impl ClipboardService {
     fn get_text(&mut self) -> Option<String> {
-        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+        #[cfg(any(
+            target_os = "windows",
+            target_os = "macos",
+            all(target_os = "linux", not(target_env = "ohos"))
+        ))]
         {
             if self.inner.is_none() {
                 self.inner = arboard::Clipboard::new().ok();
@@ -470,7 +578,11 @@ impl ClipboardService {
     }
 
     fn set_text(&mut self, _text: String) {
-        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+        #[cfg(any(
+            target_os = "windows",
+            target_os = "macos",
+            all(target_os = "linux", not(target_env = "ohos"))
+        ))]
         {
             if self.inner.is_none() {
                 self.inner = arboard::Clipboard::new().ok();
@@ -536,6 +648,7 @@ impl<VM> BoundRuntimeHandler<VM> {
     }
 
     fn fail(&mut self, event_loop: &dyn ActiveEventLoop, error: TguiError) {
+        eprintln!("tgui bound runtime failed: {error}");
         self.error = Some(error);
         event_loop.exit();
     }
@@ -831,6 +944,13 @@ impl<VM> BoundRuntimeHandler<VM> {
     }
 
     fn render_hidden_frame(&mut self, event_loop: &dyn ActiveEventLoop) -> bool {
+        #[cfg(all(target_env = "ohos", feature = "ohos"))]
+        {
+            let _ = event_loop;
+            return true;
+        }
+
+        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
         let status = match self.render_current_frame() {
             Ok(status) => status,
             Err(error) => {
@@ -839,6 +959,7 @@ impl<VM> BoundRuntimeHandler<VM> {
             }
         };
 
+        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
         if matches!(status, RenderStatus::ReconfigureSurface) {
             if let Some(renderer) = self.renderer.as_mut() {
                 renderer.reconfigure();
@@ -850,6 +971,7 @@ impl<VM> BoundRuntimeHandler<VM> {
             }
         }
 
+        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
         true
     }
 
@@ -1787,7 +1909,7 @@ impl ApplicationHandler for RuntimeHandler {
         }
 
         let attributes = WindowAttributes::default()
-            .with_transparent(true)
+            .with_transparent(!cfg!(all(target_env = "ohos", feature = "ohos")))
             .with_title(self.config.title.clone())
             .with_surface_size(self.config.size)
             .with_visible(false);
@@ -1914,7 +2036,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
         }
 
         let attributes = WindowAttributes::default()
-            .with_transparent(true)
+            .with_transparent(!cfg!(all(target_env = "ohos", feature = "ohos")))
             .with_title(self.config.title.clone())
             .with_surface_size(self.config.size)
             .with_visible(false);
