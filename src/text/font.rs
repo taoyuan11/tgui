@@ -262,23 +262,14 @@ fn load_mobile_system_fonts(database: &mut cosmic_text::fontdb::Database) {
         }
     }
 
-    let sans_family = first_matching_family(
-        database,
-        mobile_sans_candidates(),
-    )
-    .or_else(|| first_loaded_family(database));
+    let sans_family = first_matching_family(database, mobile_sans_candidates())
+        .or_else(|| first_loaded_family(database));
 
-    let serif_family = first_matching_family(
-        database,
-        mobile_serif_candidates(),
-    )
-    .or_else(|| sans_family.clone());
+    let serif_family =
+        first_matching_family(database, mobile_serif_candidates()).or_else(|| sans_family.clone());
 
-    let monospace_family = first_matching_family(
-        database,
-        mobile_monospace_candidates(),
-    )
-    .or_else(|| sans_family.clone());
+    let monospace_family = first_matching_family(database, mobile_monospace_candidates())
+        .or_else(|| sans_family.clone());
 
     if let Some(family) = sans_family {
         database.set_sans_serif_family(family.clone());

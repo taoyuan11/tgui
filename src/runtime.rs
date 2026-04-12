@@ -15,6 +15,7 @@ use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
+use crate::media::{MediaManager, VideoPlaybackStatus};
 #[cfg(all(target_os = "android", feature = "android"))]
 use crate::platform::android::activity::ndk::configuration::UiModeNight;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -39,8 +40,9 @@ use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::FontManager;
 use crate::ui::theme::{Theme, ThemeMode};
 use crate::ui::widget::{
-    HitInteraction, InputEditState, InputSnapshot, Point, Rect, RenderedWidgetScene,
-    ScenePrimitives, ScrollbarAxis, ScrollbarHandle, WidgetId, WidgetTree,
+    video_status_transition_phase, HitInteraction, InputEditState, InputSnapshot, MediaEventPhase,
+    MediaEventState, Point, Rect, RenderedWidgetScene, ScenePrimitives, ScrollbarAxis,
+    ScrollbarHandle, WidgetId, WidgetTree,
 };
 #[cfg(all(target_os = "android", feature = "android"))]
 use jni::{jni_sig, jni_str, objects::JObject, JValue, JavaVM};
@@ -172,7 +174,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             view_model: Arc::new(Mutex::new(view_model)),
             windows: Some(windows),
             single_window: None,
-            invalidation,
+            invalidation: invalidation.clone(),
             animations,
             #[cfg(all(target_os = "android", feature = "android"))]
             android_app: None,
@@ -202,7 +204,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
                 widget_tree,
                 commands,
             }),
-            invalidation,
+            invalidation: invalidation.clone(),
             animations,
             android_app: Some(app),
         })
@@ -231,7 +233,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
                 widget_tree,
                 commands,
             }),
-            invalidation,
+            invalidation: invalidation.clone(),
             animations,
             #[cfg(all(target_os = "android", feature = "android"))]
             android_app: None,
@@ -565,6 +567,8 @@ pub struct BoundRuntimeHandler<VM> {
     cached_scene: Option<CachedScene>,
     scroll_states: HashMap<WidgetId, Point>,
     scroll_epoch: u64,
+    media_event_states: HashMap<WidgetId, DispatchedMediaState>,
+    media_manager: MediaManager,
     window: Option<Arc<dyn Window>>,
     renderer: Option<Renderer>,
     window_id: Option<WindowId>,
@@ -613,6 +617,84 @@ struct ScrollbarDrag {
     track: Rect,
     thumb: Rect,
     max_offset: f32,
+}
+
+enum PendingMediaEvent<VM> {
+    Command(Command<VM>),
+    Error(ValueCommand<VM, String>, String),
+}
+
+#[derive(Clone, Default)]
+struct DispatchedMediaState {
+    phase: Option<MediaEventPhase>,
+    video_status: Option<VideoPlaybackStatus>,
+    seek_generation: Option<u64>,
+}
+
+fn collect_pending_media_event<VM>(
+    state: &MediaEventState<VM>,
+    previous: Option<&DispatchedMediaState>,
+    pending: &mut Vec<PendingMediaEvent<VM>>,
+) {
+    if previous.and_then(|value| value.phase.as_ref()) != state.media_phase.as_ref() {
+        match state.media_phase.as_ref() {
+            Some(MediaEventPhase::Loading) => {
+                if let Some(command) = state.handlers.on_loading.clone() {
+                    pending.push(PendingMediaEvent::Command(command));
+                }
+            }
+            Some(MediaEventPhase::Success) => {
+                if let Some(command) = state.handlers.on_success.clone() {
+                    pending.push(PendingMediaEvent::Command(command));
+                }
+            }
+            Some(MediaEventPhase::Error(error)) => {
+                if let Some(command) = state.handlers.on_error.clone() {
+                    pending.push(PendingMediaEvent::Error(command, error.clone()));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(status) = state.video_status.as_ref() {
+        if let Some(phase) = video_status_transition_phase(
+            previous.and_then(|value| value.video_status.as_ref()),
+            status,
+        ) {
+            match phase {
+                MediaEventPhase::Play => {
+                    if let Some(command) = state.handlers.on_play.clone() {
+                        pending.push(PendingMediaEvent::Command(command));
+                    }
+                }
+                MediaEventPhase::Pause => {
+                    if let Some(command) = state.handlers.on_pause.clone() {
+                        pending.push(PendingMediaEvent::Command(command));
+                    }
+                }
+                MediaEventPhase::Resume => {
+                    if let Some(command) = state.handlers.on_resume.clone() {
+                        pending.push(PendingMediaEvent::Command(command));
+                    }
+                }
+                MediaEventPhase::End => {
+                    if let Some(command) = state.handlers.on_end.clone() {
+                        pending.push(PendingMediaEvent::Command(command));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if previous.and_then(|value| value.seek_generation) != state.seek_generation {
+        if previous.is_some() {
+            if let Some(command) = state.handlers.on_seek.clone() {
+                pending.push(PendingMediaEvent::Command(command));
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -696,7 +778,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             widget_tree,
             commands,
             close_policy: WindowClosePolicy::Close,
-            invalidation,
+            invalidation: invalidation.clone(),
             last_invalidation_revision: 0,
             animations,
             animation_engine: AnimationEngine::default(),
@@ -715,6 +797,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             cached_scene: None,
             scroll_states: HashMap::new(),
             scroll_epoch: 0,
+            media_event_states: HashMap::new(),
+            media_manager: MediaManager::new(invalidation.clone()),
             window: None,
             renderer: None,
             window_id: None,
@@ -805,6 +889,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.window_bindings = window_bindings;
         self.commands = commands;
         self.close_policy = close_policy;
+        self.media_event_states.clear();
         self.invalidate_scene();
     }
 
@@ -949,14 +1034,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .focused_input
             .and_then(|id| self.focused_input_state(id))
             .cloned();
-        if let Some(cached) = self.cached_scene.as_ref() {
-            if cached.viewport == viewport
-                && cached.focused_input == self.focused_input
-                && cached.caret_visible == caret_visible
-                && cached.animation_epoch == self.animation_epoch
-                && cached.scroll_epoch == self.scroll_epoch
-            {
-                return cached.rendered.clone();
+        if !self.media_manager.has_active_video() {
+            if let Some(cached) = self.cached_scene.as_ref() {
+                if cached.viewport == viewport
+                    && cached.focused_input == self.focused_input
+                    && cached.caret_visible == caret_visible
+                    && cached.animation_epoch == self.animation_epoch
+                    && cached.scroll_epoch == self.scroll_epoch
+                {
+                    return cached.rendered.clone();
+                }
             }
         }
 
@@ -965,6 +1052,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             Some(tree) => tree.render_output(
                 &self.font_manager,
                 &theme,
+                &self.media_manager,
                 &mut self.animation_engine,
                 self.hovered_scrollbar,
                 self.active_scrollbar_drag.map(|drag| drag.handle),
@@ -985,6 +1073,49 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             rendered: rendered.clone(),
         });
         rendered
+    }
+
+    fn dispatch_media_events(&mut self) {
+        let Some(tree) = self.widget_tree.as_ref() else {
+            self.media_event_states.clear();
+            return;
+        };
+
+        let states = tree.media_event_states(&self.media_manager);
+        let current_ids: HashSet<_> = states.iter().map(|state| state.widget_id).collect();
+        self.media_event_states
+            .retain(|widget_id, _| current_ids.contains(widget_id));
+
+        let mut pending = Vec::new();
+        for state in states {
+            let previous = self.media_event_states.get(&state.widget_id);
+            collect_pending_media_event(&state, previous, &mut pending);
+            self.media_event_states.insert(
+                state.widget_id,
+                DispatchedMediaState {
+                    phase: state.media_phase.clone(),
+                    video_status: state.video_status.clone(),
+                    seek_generation: state.seek_generation,
+                },
+            );
+        }
+
+        if pending.is_empty() {
+            return;
+        }
+
+        for event in pending {
+            match event {
+                PendingMediaEvent::Command(command) => self.execute_command(&command),
+                PendingMediaEvent::Error(command, error) => {
+                    self.execute_value_command(&command, error);
+                }
+            }
+        }
+
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
     }
 
     fn viewport_rect(&self) -> Rect {
@@ -1022,6 +1153,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         self.sync_bindings(Instant::now());
         let rendered = self.render_primitives();
+        self.dispatch_media_events();
         if let (Some(window), Some(caret_rect)) = (self.window.as_ref(), rendered.ime_cursor_area) {
             let _ = window.request_ime_update(ImeRequest::Update(Self::ime_cursor_request_data(
                 caret_rect,
@@ -1187,6 +1319,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn suspend(&mut self) {
         self.renderer = None;
         self.cached_scene = None;
+        self.media_event_states.clear();
         #[cfg(all(target_os = "android", feature = "android"))]
         {
             self.system_bar_style = None;
@@ -1257,11 +1390,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let controller_deadline = self.animations.next_frame_deadline(now);
         let caret_deadline = self.next_caret_blink_deadline(now);
         let click_deadline = self.pending_click.as_ref().map(|pending| pending.deadline);
+        let media_deadline = self.media_manager.next_frame_deadline(now);
         [
             animation_deadline,
             controller_deadline,
             caret_deadline,
             click_deadline,
+            media_deadline,
         ]
         .into_iter()
         .flatten()
@@ -1640,6 +1775,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.widget_tree.as_ref()?.hit_test(
             &self.font_manager,
             &self.theme,
+            &self.media_manager,
             &mut self.animation_engine,
             self.hovered_scrollbar,
             self.active_scrollbar_drag.map(|drag| drag.handle),
@@ -1657,6 +1793,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 tree.hit_path(
                     &self.font_manager,
                     &self.theme,
+                    &self.media_manager,
                     &mut self.animation_engine,
                     self.hovered_scrollbar,
                     self.active_scrollbar_drag.map(|drag| drag.handle),
@@ -2315,6 +2452,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let animation_frame_advanced = self.drive_animations(event_loop, now);
         #[cfg(not(all(target_os = "android", feature = "android")))]
         self.drive_animations(event_loop, now);
+        if self.media_manager.has_active_video() {
+            self.invalidate_scene();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
         #[cfg(all(target_os = "android", feature = "android"))]
         if theme_changed || animation_frame_advanced {
             self.render_immediately(event_loop);

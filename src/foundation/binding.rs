@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::animation::{
     AnimatedValue, AnimationControllerBuilder, AnimationCoordinator, Transition,
 };
+use crate::media::VideoControllerHandle;
 
 #[derive(Clone, Default)]
 pub(crate) struct InvalidationSignal {
@@ -57,6 +58,11 @@ impl ViewModelContext {
     /// Starts building a timeline controller that can drive one or more animated values.
     pub fn timeline(&self) -> AnimationControllerBuilder {
         AnimationControllerBuilder::new(self.animations.clone(), self.invalidation.clone())
+    }
+
+    /// Creates a controller that can drive a [`crate::Video`] widget imperatively.
+    pub fn video_controller(&self) -> VideoControllerHandle {
+        VideoControllerHandle::new(self.invalidation.clone())
     }
 }
 

@@ -48,9 +48,9 @@ pub(crate) mod backend {
     pub use winit_core::window;
 
     pub(crate) use winit_core::error::EventLoopError;
-    pub(crate) use winit_core::event_loop::ControlFlow;
     #[cfg(all(target_env = "ohos", feature = "ohos"))]
     use winit_core::event_loop::run_on_demand::EventLoopExtRunOnDemand;
+    pub(crate) use winit_core::event_loop::ControlFlow;
 
     pub(crate) enum EventLoop {
         #[cfg(target_os = "windows")]
@@ -140,9 +140,7 @@ pub(crate) mod backend {
                     event_loop.window_target().set_control_flow(control_flow)
                 }
                 #[cfg(all(target_env = "ohos", feature = "ohos"))]
-                Self::Ohos(event_loop) => {
-                    event_loop.window_target().set_control_flow(control_flow)
-                }
+                Self::Ohos(event_loop) => event_loop.window_target().set_control_flow(control_flow),
             }
         }
 

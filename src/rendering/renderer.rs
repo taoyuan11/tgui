@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
@@ -8,6 +9,7 @@ use wgpu::util::DeviceExt;
 
 use crate::foundation::color::Color as TguiColor;
 use crate::foundation::error::TguiError;
+use crate::media::TextureFrame;
 use crate::platform::backend::window::Window;
 use crate::platform::dpi::PhysicalSize;
 use crate::text::font::{FontCatalog, FontWeight};
@@ -33,6 +35,7 @@ pub struct Renderer {
     clear_color: TguiColor,
     text_system: TextSystem,
     text_cache: Vec<TextCacheEntry>,
+    texture_cache: Vec<TextureCacheEntry>,
 }
 
 struct TextSystem {
@@ -41,6 +44,12 @@ struct TextSystem {
 }
 
 struct TextSprite {
+    bind_group: wgpu::BindGroup,
+    vertices: [TextVertex; 6],
+    clip_rect: Option<Rect>,
+}
+
+struct TextureSprite {
     bind_group: wgpu::BindGroup,
     vertices: [TextVertex; 6],
     clip_rect: Option<Rect>,
@@ -59,6 +68,13 @@ struct TextBatch {
 
 struct TextCacheEntry {
     key: TextCacheKey,
+    bind_group: wgpu::BindGroup,
+    _texture: wgpu::Texture,
+}
+
+struct TextureCacheEntry {
+    id: u64,
+    revision: u64,
     bind_group: wgpu::BindGroup,
     _texture: wgpu::Texture,
 }
@@ -280,6 +296,7 @@ impl Renderer {
                 swash_cache: SwashCache::new(),
             },
             text_cache: Vec::new(),
+            texture_cache: Vec::new(),
         })
     }
 
@@ -299,6 +316,14 @@ impl Renderer {
         if self.config.width == 0 || self.config.height == 0 {
             return Ok(RenderStatus::SkipFrame);
         }
+
+        let active_texture_keys: HashSet<_> = scene
+            .textures
+            .iter()
+            .map(|texture| (texture.texture.id(), texture.texture.revision()))
+            .collect();
+        self.texture_cache
+            .retain(|entry| active_texture_keys.contains(&(entry.id, entry.revision)));
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
@@ -321,6 +346,46 @@ impl Renderer {
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("tgui-rect-vertices"),
                     contents: bytemuck::cast_slice(&shape_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+        });
+
+        let texture_sprites = scene
+            .textures
+            .iter()
+            .map(|texture| {
+                self.texture_bind_group_for(&texture.texture)
+                    .map(|bind_group| {
+                        bind_group.map(|bind_group| TextureSprite {
+                            bind_group,
+                            vertices: TextVertex::quad(
+                                texture.frame,
+                                self.config.width as f32,
+                                self.config.height as f32,
+                            ),
+                            clip_rect: texture.clip_rect,
+                        })
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut texture_vertices = Vec::with_capacity(texture_sprites.len() * 6);
+        let mut texture_batches = Vec::with_capacity(texture_sprites.len());
+        for sprite in texture_sprites.into_iter().flatten() {
+            let start = texture_vertices.len() as u32;
+            texture_vertices.extend_from_slice(&sprite.vertices);
+            let end = texture_vertices.len() as u32;
+            texture_batches.push(TextBatch {
+                bind_group: sprite.bind_group,
+                clip_rect: sprite.clip_rect,
+                vertex_range: start..end,
+            });
+        }
+        let texture_vertex_buffer = (!texture_vertices.is_empty()).then(|| {
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tgui-texture-vertices"),
+                    contents: bytemuck::cast_slice(&texture_vertices),
                     usage: wgpu::BufferUsages::VERTEX,
                 })
         });
@@ -376,6 +441,47 @@ impl Renderer {
                 })
         });
 
+        let overlay_text_sprites = scene
+            .overlay_texts
+            .iter()
+            .filter_map(|text| {
+                self.text_bind_group_for(text)
+                    .transpose()
+                    .map(|bind_group| {
+                        bind_group.map(|bind_group| TextSprite {
+                            bind_group,
+                            vertices: TextVertex::quad(
+                                text.frame,
+                                self.config.width as f32,
+                                self.config.height as f32,
+                            ),
+                            clip_rect: text.clip_rect,
+                        })
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut overlay_text_vertices = Vec::with_capacity(overlay_text_sprites.len() * 6);
+        let mut overlay_text_batches = Vec::with_capacity(overlay_text_sprites.len());
+        for sprite in overlay_text_sprites {
+            let start = overlay_text_vertices.len() as u32;
+            overlay_text_vertices.extend_from_slice(&sprite.vertices);
+            let end = overlay_text_vertices.len() as u32;
+            overlay_text_batches.push(TextBatch {
+                bind_group: sprite.bind_group,
+                clip_rect: sprite.clip_rect,
+                vertex_range: start..end,
+            });
+        }
+        let overlay_text_vertex_buffer = (!overlay_text_vertices.is_empty()).then(|| {
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tgui-overlay-text-vertices"),
+                    contents: bytemuck::cast_slice(&overlay_text_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+        });
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -403,6 +509,20 @@ impl Renderer {
             pass.set_pipeline(&self.rect_pipeline);
             self.draw_rect_batches(&mut pass, shape_vertex_buffer.as_ref(), &shape_batches);
 
+            if !texture_batches.is_empty() {
+                pass.set_pipeline(&self.text_pipeline);
+                if let Some(vertex_buffer) = texture_vertex_buffer.as_ref() {
+                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                }
+                for batch in &texture_batches {
+                    if !self.apply_scissor(&mut pass, batch.clip_rect) {
+                        continue;
+                    }
+                    pass.set_bind_group(0, &batch.bind_group, &[]);
+                    pass.draw(batch.vertex_range.clone(), 0..1);
+                }
+            }
+
             if !text_batches.is_empty() {
                 pass.set_pipeline(&self.text_pipeline);
                 if let Some(vertex_buffer) = text_vertex_buffer.as_ref() {
@@ -419,6 +539,20 @@ impl Renderer {
 
             pass.set_pipeline(&self.rect_pipeline);
             self.draw_rect_batches(&mut pass, overlay_vertex_buffer.as_ref(), &overlay_batches);
+
+            if !overlay_text_batches.is_empty() {
+                pass.set_pipeline(&self.text_pipeline);
+                if let Some(vertex_buffer) = overlay_text_vertex_buffer.as_ref() {
+                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                }
+                for batch in &overlay_text_batches {
+                    if !self.apply_scissor(&mut pass, batch.clip_rect) {
+                        continue;
+                    }
+                    pass.set_bind_group(0, &batch.bind_group, &[]);
+                    pass.draw(batch.vertex_range.clone(), 0..1);
+                }
+            }
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -448,7 +582,10 @@ impl Renderer {
         }
     }
 
-    fn rect_batches_for(&self, primitives: &[RenderPrimitive]) -> (Vec<RectVertex>, Vec<PrimitiveBatch>) {
+    fn rect_batches_for(
+        &self,
+        primitives: &[RenderPrimitive],
+    ) -> (Vec<RectVertex>, Vec<PrimitiveBatch>) {
         let mut vertices = Vec::with_capacity(primitives.len() * 6);
         let mut batches = Vec::with_capacity(primitives.len());
 
@@ -683,6 +820,82 @@ impl Renderer {
 
         Ok(Some((texture, bind_group)))
     }
+
+    fn texture_bind_group_for(
+        &mut self,
+        texture_frame: &TextureFrame,
+    ) -> Result<Option<wgpu::BindGroup>, TguiError> {
+        if let Some(entry) = self.texture_cache.iter().find(|entry| {
+            entry.id == texture_frame.id() && entry.revision == texture_frame.revision()
+        }) {
+            return Ok(Some(entry.bind_group.clone()));
+        }
+
+        let (width, height) = texture_frame.size();
+        if width == 0 || height == 0 {
+            return Ok(None);
+        }
+
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("tgui-media-texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            texture_frame.pixels(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui-media-bind-group"),
+            layout: &self.text_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.text_sampler),
+                },
+            ],
+        });
+
+        self.texture_cache.push(TextureCacheEntry {
+            id: texture_frame.id(),
+            revision: texture_frame.revision(),
+            bind_group: bind_group.clone(),
+            _texture: texture,
+        });
+
+        Ok(Some(bind_group))
+    }
 }
 
 fn attrs_for_text(text: &TextPrimitive) -> Attrs<'_> {
@@ -891,12 +1104,12 @@ fn create_surface(
 ) -> Result<wgpu::Surface<'static>, TguiError> {
     #[cfg(all(target_env = "ohos", feature = "ohos"))]
     {
-        let raw_display_handle = window
-            .display_handle()
-            .map_err(|error| TguiError::TextRender(format!("display handle unavailable: {error}")))?;
-        let raw_window_handle = window
-            .window_handle()
-            .map_err(|error| TguiError::TextRender(format!("window handle unavailable: {error}")))?;
+        let raw_display_handle = window.display_handle().map_err(|error| {
+            TguiError::TextRender(format!("display handle unavailable: {error}"))
+        })?;
+        let raw_window_handle = window.window_handle().map_err(|error| {
+            TguiError::TextRender(format!("window handle unavailable: {error}"))
+        })?;
 
         return Ok(unsafe {
             instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
@@ -1019,7 +1232,12 @@ fn surface_present_mode(modes: &[wgpu::PresentMode]) -> wgpu::PresentMode {
                     .copied()
                     .find(|mode| *mode == wgpu::PresentMode::AutoVsync)
             })
-            .or_else(|| modes.iter().copied().find(|mode| *mode == wgpu::PresentMode::Fifo))
+            .or_else(|| {
+                modes
+                    .iter()
+                    .copied()
+                    .find(|mode| *mode == wgpu::PresentMode::Fifo)
+            })
             .unwrap_or(wgpu::PresentMode::Fifo)
     }
 }

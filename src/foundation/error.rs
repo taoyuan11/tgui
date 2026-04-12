@@ -12,6 +12,7 @@ pub enum TguiError {
     NoSurfaceFormat,
     Unsupported(String),
     TextRender(String),
+    Media(String),
 }
 
 impl Display for TguiError {
@@ -28,6 +29,7 @@ impl Display for TguiError {
             }
             Self::Unsupported(message) => write!(f, "{message}"),
             Self::TextRender(error) => write!(f, "failed to render text: {error}"),
+            Self::Media(error) => write!(f, "{error}"),
         }
     }
 }

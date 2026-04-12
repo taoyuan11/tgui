@@ -1,6 +1,6 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::text::font::FontWeight;
+use crate::media::{ContentFit, MediaSource};
 use crate::ui::layout::{Insets, LayoutStyle, Value};
 
 use super::common::{
@@ -9,33 +9,75 @@ use super::common::{
 use super::core::Element;
 
 #[derive(Clone)]
-pub struct Text {
+pub struct Image {
     pub(crate) layout: LayoutStyle,
     pub(crate) visual: VisualStyle,
-    pub(crate) content: Value<String>,
-    pub(crate) font_family: Option<String>,
+    pub(crate) source: Value<MediaSource>,
     pub(crate) background: Option<Value<Color>>,
-    pub(crate) color: Option<Value<Color>>,
-    pub(crate) font_size: Option<f32>,
-    pub(crate) font_weight: FontWeight,
-    pub(crate) letter_spacing: f32,
+    pub(crate) fit: ContentFit,
+    pub(crate) aspect_ratio: Option<f32>,
     pub(crate) cursor_style: Option<CursorStyle>,
 }
 
-impl Text {
-    pub fn new(content: impl Into<Value<String>>) -> Self {
+impl Image {
+    pub fn new(source: impl Into<Value<MediaSource>>) -> Self {
         Self {
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
-            content: content.into(),
-            font_family: None,
+            source: source.into(),
             background: None,
-            color: None,
-            font_size: None,
-            font_weight: FontWeight::NORMAL,
-            letter_spacing: 0.0,
+            fit: ContentFit::Contain,
+            aspect_ratio: None,
             cursor_style: None,
         }
+    }
+
+    pub fn from_path(path: impl Into<std::path::PathBuf>) -> Self {
+        Self::new(MediaSource::Path(path.into()))
+    }
+
+    pub fn from_url(url: impl Into<String>) -> Self {
+        Self::new(MediaSource::Url(url.into()))
+    }
+
+    pub fn size(mut self, width: impl Into<Value<f32>>, height: impl Into<Value<f32>>) -> Self {
+        self.layout.width = Some(width.into());
+        self.layout.height = Some(height.into());
+        self.layout.fill_width = false;
+        self.layout.fill_height = false;
+        self
+    }
+
+    pub fn width(mut self, width: impl Into<Value<f32>>) -> Self {
+        self.layout.width = Some(width.into());
+        self.layout.fill_width = false;
+        self
+    }
+
+    pub fn height(mut self, height: impl Into<Value<f32>>) -> Self {
+        self.layout.height = Some(height.into());
+        self.layout.fill_height = false;
+        self
+    }
+
+    pub fn fill_width(mut self) -> Self {
+        self.layout.fill_width = true;
+        self.layout.width = None;
+        self
+    }
+
+    pub fn fill_height(mut self) -> Self {
+        self.layout.fill_height = true;
+        self.layout.height = None;
+        self
+    }
+
+    pub fn fill_size(mut self) -> Self {
+        self.layout.fill_width = true;
+        self.layout.fill_height = true;
+        self.layout.width = None;
+        self.layout.height = None;
+        self
     }
 
     pub fn margin(mut self, insets: impl Into<Value<Insets>>) -> Self {
@@ -43,13 +85,14 @@ impl Text {
         self
     }
 
-    pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
-        self.layout.padding = insets.into();
+    pub fn fit(mut self, fit: ContentFit) -> Self {
+        self.fit = fit;
         self
     }
 
-    pub fn font(mut self, font_family: impl Into<String>) -> Self {
-        self.font_family = Some(font_family.into());
+    pub fn aspect_ratio(mut self, aspect_ratio: f32) -> Self {
+        self.aspect_ratio =
+            (aspect_ratio.is_finite() && aspect_ratio > 0.0).then_some(aspect_ratio);
         self
     }
 
@@ -76,26 +119,6 @@ impl Text {
 
     pub fn border_width(mut self, width: impl Into<Value<f32>>) -> Self {
         self.visual.border_width = width.into();
-        self
-    }
-
-    pub fn color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.color = Some(color.into());
-        self
-    }
-
-    pub fn font_size(mut self, size: f32) -> Self {
-        self.font_size = Some(size.max(1.0));
-        self
-    }
-
-    pub fn font_weight(mut self, weight: FontWeight) -> Self {
-        self.font_weight = weight;
-        self
-    }
-
-    pub fn letter_spacing(mut self, spacing: f32) -> Self {
-        self.letter_spacing = spacing;
         self
     }
 
@@ -144,6 +167,27 @@ impl Text {
         })
     }
 
+    pub fn on_loading<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_media_events(MediaEventHandlers {
+            on_loading: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_success<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_media_events(MediaEventHandlers {
+            on_success: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_error<VM>(self, command: ValueCommand<VM, String>) -> Element<VM> {
+        self.into_element_with_media_events(MediaEventHandlers {
+            on_error: Some(command),
+            ..Default::default()
+        })
+    }
+
     pub fn cursor(mut self, cursor: CursorStyle) -> Self {
         self.cursor_style = Some(cursor);
         self
@@ -153,38 +197,50 @@ impl Text {
         self,
         mut interactions: InteractionHandlers<VM>,
     ) -> Element<VM> {
-        let background = self.background.clone();
-        let layout = self.layout.clone();
-        let visual = self.visual.clone();
         interactions.cursor_style = self.cursor_style;
         Element {
             id: WidgetId::next(),
-            layout,
-            visual,
+            layout: self.layout.clone(),
+            visual: self.visual.clone(),
             interactions,
             media_events: MediaEventHandlers::default(),
-            background,
-            kind: WidgetKind::Text { text: self },
+            background: self.background.clone(),
+            kind: WidgetKind::Image { image: self },
+        }
+    }
+
+    fn into_element_with_media_events<VM>(
+        self,
+        media_events: MediaEventHandlers<VM>,
+    ) -> Element<VM> {
+        Element {
+            id: WidgetId::next(),
+            layout: self.layout.clone(),
+            visual: self.visual.clone(),
+            interactions: InteractionHandlers {
+                cursor_style: self.cursor_style,
+                ..Default::default()
+            },
+            media_events,
+            background: self.background.clone(),
+            kind: WidgetKind::Image { image: self },
         }
     }
 }
 
-impl<VM> From<Text> for Element<VM> {
-    fn from(value: Text) -> Self {
-        let background = value.background.clone();
-        let layout = value.layout.clone();
-        let visual = value.visual.clone();
+impl<VM> From<Image> for Element<VM> {
+    fn from(value: Image) -> Self {
         Element {
             id: WidgetId::next(),
-            layout,
-            visual,
+            layout: value.layout.clone(),
+            visual: value.visual.clone(),
             interactions: InteractionHandlers {
                 cursor_style: value.cursor_style,
-                ..InteractionHandlers::default()
+                ..Default::default()
             },
             media_events: MediaEventHandlers::default(),
-            background,
-            kind: WidgetKind::Text { text: value },
+            background: value.background.clone(),
+            kind: WidgetKind::Image { image: value },
         }
     }
 }

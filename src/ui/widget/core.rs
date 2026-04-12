@@ -10,15 +10,20 @@ use taffy::Size as TaffySize;
 use crate::animation::{AnimationEngine, WidgetProperty};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
+use crate::media::{
+    media_placeholder_color, media_placeholder_label, resolve_media_rect, ContentFit,
+    ImageSnapshot, IntrinsicSize, MediaManager, VideoPlaybackStatus,
+};
 use crate::text::font::{FontManager, TextFontRequest};
 use crate::ui::layout::{Align, Axis, Insets, Justify, LayoutStyle, Overflow, Value, Wrap};
 use crate::ui::theme::Theme;
 
 use super::common::{
     ComputedScene, ContainerKind, ContainerLayout, HitInteraction, HitRegion, InputEditState,
-    InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext, Point, Rect, RenderPrimitive,
-    RenderedWidgetScene, ScenePrimitives, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    TextPrimitive, VisualStyle, WidgetId, WidgetKind,
+    InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext, MediaEventHandlers,
+    MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive, RenderedWidgetScene,
+    ScenePrimitives, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextPrimitive, TexturePrimitive,
+    VisualStyle, WidgetId, WidgetKind,
 };
 use super::text::Text;
 
@@ -27,14 +32,43 @@ pub struct Element<VM> {
     pub(crate) layout: LayoutStyle,
     pub(crate) visual: VisualStyle,
     pub(crate) interactions: InteractionHandlers<VM>,
+    pub(crate) media_events: MediaEventHandlers<VM>,
     pub(crate) background: Option<Value<Color>>,
     pub(crate) kind: WidgetKind<VM>,
+}
+
+impl<VM> Element<VM> {
+    pub fn on_play(mut self, command: Command<VM>) -> Self {
+        self.media_events.on_play = Some(command);
+        self
+    }
+
+    pub fn on_pause(mut self, command: Command<VM>) -> Self {
+        self.media_events.on_pause = Some(command);
+        self
+    }
+
+    pub fn on_resume(mut self, command: Command<VM>) -> Self {
+        self.media_events.on_resume = Some(command);
+        self
+    }
+
+    pub fn on_end(mut self, command: Command<VM>) -> Self {
+        self.media_events.on_end = Some(command);
+        self
+    }
+
+    pub fn on_seek(mut self, command: Command<VM>) -> Self {
+        self.media_events.on_seek = Some(command);
+        self
+    }
 }
 
 struct CollectContext<'a, 'b> {
     taffy: &'a TaffyTree<MeasureContext>,
     font_manager: &'a FontManager,
     theme: &'a Theme,
+    media: &'a MediaManager,
     focused_input: Option<WidgetId>,
     focused_input_state: Option<&'a InputEditState>,
     caret_visible: bool,
@@ -99,16 +133,36 @@ impl<VM> Element<VM> {
         self
     }
 
+    pub fn on_loading(mut self, command: Command<VM>) -> Self {
+        self.media_events.on_loading = Some(command);
+        self
+    }
+
+    pub fn on_success(mut self, command: Command<VM>) -> Self {
+        self.media_events.on_success = Some(command);
+        self
+    }
+
+    pub fn on_error(mut self, command: ValueCommand<VM, String>) -> Self {
+        self.media_events.on_error = Some(command);
+        self
+    }
+
     fn measure_context(&self) -> MeasureContext {
         match &self.kind {
             WidgetKind::Container { .. } => MeasureContext::None,
             WidgetKind::Text { text } => MeasureContext::Text(text.clone()),
+            WidgetKind::Image { image } => MeasureContext::Image(image.clone()),
             WidgetKind::Button { label, .. } => MeasureContext::Button(label.clone()),
             WidgetKind::Input {
                 text, placeholder, ..
             } => MeasureContext::Input {
                 text: text.clone(),
                 placeholder: placeholder.clone(),
+            },
+            WidgetKind::Video { video } => MeasureContext::Video {
+                id: self.id,
+                video: video.clone(),
             },
         }
     }
@@ -481,6 +535,22 @@ impl<VM> Element<VM> {
                     primitive_clip,
                 );
             }
+            WidgetKind::Image { image } => {
+                let source = image.source.resolve();
+                let snapshot = context.media.image_snapshot(&source);
+                push_media_texture_or_placeholder(
+                    self.id,
+                    &snapshot,
+                    image.fit,
+                    frame,
+                    background_frame,
+                    primitive_clip,
+                    opacity,
+                    context,
+                    computed,
+                    "image",
+                );
+            }
             WidgetKind::Button { label } => {
                 let padding = self.layout.padding.resolve_widget(
                     context.animations,
@@ -549,6 +619,26 @@ impl<VM> Element<VM> {
                     },
                 });
             }
+            WidgetKind::Video { video } => {
+                let source = video.source.resolve();
+                let snapshot = context.media.video_snapshot(
+                    self.id,
+                    &source,
+                    video.config(),
+                    video.controller.as_ref(),
+                );
+                push_video_primitives(
+                    self.id,
+                    video.fit,
+                    frame,
+                    background_frame,
+                    primitive_clip,
+                    opacity,
+                    &snapshot,
+                    context,
+                    computed,
+                );
+            }
         }
     }
 
@@ -566,6 +656,86 @@ impl<VM> Element<VM> {
             }),
             _ => None,
         }
+    }
+
+    fn collect_media_event_states(
+        &self,
+        media: &MediaManager,
+        states: &mut Vec<MediaEventState<VM>>,
+    ) {
+        match &self.kind {
+            WidgetKind::Container { children, .. } => {
+                for child in children {
+                    child.collect_media_event_states(media, states);
+                }
+            }
+            WidgetKind::Image { image } => {
+                if !self.media_events.has_any() {
+                    return;
+                }
+                let source = image.source.resolve();
+                let snapshot = media.image_snapshot(&source);
+                if let Some(phase) = media_event_phase(snapshot.loading, snapshot.error.as_deref())
+                {
+                    states.push(MediaEventState {
+                        widget_id: self.id,
+                        media_phase: Some(phase),
+                        video_status: None,
+                        seek_generation: None,
+                        handlers: self.media_events.clone(),
+                    });
+                }
+            }
+            WidgetKind::Video { video } => {
+                if !self.media_events.has_any() {
+                    return;
+                }
+                let source = video.source.resolve();
+                let snapshot = media.video_snapshot(
+                    self.id,
+                    &source,
+                    video.config(),
+                    video.controller.as_ref(),
+                );
+                states.push(MediaEventState {
+                    widget_id: self.id,
+                    media_phase: media_event_phase(snapshot.loading, snapshot.error.as_deref()),
+                    video_status: Some(snapshot.playback.status.clone()),
+                    seek_generation: Some(snapshot.seek_generation),
+                    handlers: self.media_events.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+pub(crate) fn video_status_transition_phase(
+    previous: Option<&VideoPlaybackStatus>,
+    current: &VideoPlaybackStatus,
+) -> Option<MediaEventPhase> {
+    match current {
+        VideoPlaybackStatus::Playing => match previous {
+            Some(VideoPlaybackStatus::Paused) => Some(MediaEventPhase::Resume),
+            Some(VideoPlaybackStatus::Playing) => None,
+            _ => Some(MediaEventPhase::Play),
+        },
+        VideoPlaybackStatus::Paused => (!matches!(previous, Some(VideoPlaybackStatus::Paused)))
+            .then_some(MediaEventPhase::Pause),
+        VideoPlaybackStatus::Ended => {
+            (!matches!(previous, Some(VideoPlaybackStatus::Ended))).then_some(MediaEventPhase::End)
+        }
+        _ => None,
+    }
+}
+
+fn media_event_phase(loading: bool, error: Option<&str>) -> Option<MediaEventPhase> {
+    if loading {
+        Some(MediaEventPhase::Loading)
+    } else if let Some(error) = error {
+        Some(MediaEventPhase::Error(error.to_string()))
+    } else {
+        Some(MediaEventPhase::Success)
     }
 }
 
@@ -951,9 +1121,18 @@ fn measure_node(
     known_dimensions: TaffySize<Option<f32>>,
     font_manager: &FontManager,
     theme: &Theme,
+    media: &MediaManager,
 ) -> TaffySize<f32> {
     let measured = match node_context {
         Some(MeasureContext::Text(text)) => measure_text_content(text, font_manager, theme),
+        Some(MeasureContext::Image(image)) => {
+            let snapshot = media.image_snapshot(&image.source.resolve());
+            measure_media_content(
+                known_dimensions,
+                image.aspect_ratio,
+                snapshot.intrinsic_size,
+            )
+        }
         Some(MeasureContext::Button(label)) => measure_text_content(label, font_manager, theme),
         Some(MeasureContext::Input { text, placeholder }) => {
             let text_size = measure_text_content(text, font_manager, theme);
@@ -961,6 +1140,19 @@ fn measure_node(
             (
                 text_size.0.max(placeholder_size.0),
                 text_size.1.max(placeholder_size.1),
+            )
+        }
+        Some(MeasureContext::Video { id, video }) => {
+            let snapshot = media.video_snapshot(
+                *id,
+                &video.source.resolve(),
+                video.config(),
+                video.controller.as_ref(),
+            );
+            measure_media_content(
+                known_dimensions,
+                video.aspect_ratio,
+                snapshot.intrinsic_size,
             )
         }
         Some(MeasureContext::None) | None => (0.0, 0.0),
@@ -990,6 +1182,136 @@ fn measure_text_content(text: &Text, font_manager: &FontManager, theme: &Theme) 
         line_height,
         text.letter_spacing,
     )
+}
+
+fn measure_media_content(
+    known_dimensions: TaffySize<Option<f32>>,
+    aspect_ratio: Option<f32>,
+    intrinsic_size: IntrinsicSize,
+) -> (f32, f32) {
+    let ratio = aspect_ratio
+        .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+        .or_else(|| intrinsic_size.aspect_ratio());
+
+    match (known_dimensions.width, known_dimensions.height, ratio) {
+        (Some(width), Some(height), _) => (width, height),
+        (Some(width), None, Some(ratio)) => (width, width / ratio),
+        (None, Some(height), Some(ratio)) => (height * ratio, height),
+        (Some(width), None, None) => (width, intrinsic_size.height),
+        (None, Some(height), None) => (intrinsic_size.width, height),
+        (None, None, _) => (intrinsic_size.width, intrinsic_size.height),
+    }
+}
+
+fn push_media_texture_or_placeholder<VM>(
+    widget_id: WidgetId,
+    snapshot: &ImageSnapshot,
+    fit: ContentFit,
+    frame: Rect,
+    content_frame: Rect,
+    clip_rect: Option<Rect>,
+    opacity: f32,
+    context: &mut CollectContext<'_, '_>,
+    computed: &mut ComputedScene<VM>,
+    kind: &str,
+) {
+    if let Some(texture) = snapshot.texture.as_ref() {
+        computed.scene.textures.push(TexturePrimitive {
+            texture: texture.clone(),
+            frame: resolve_media_rect(content_frame, snapshot.intrinsic_size, fit),
+            clip_rect,
+        });
+        return;
+    }
+
+    push_media_placeholder(
+        frame,
+        content_frame,
+        clip_rect,
+        opacity,
+        context,
+        &mut computed.scene,
+        widget_id,
+        kind,
+        snapshot.loading,
+        snapshot.error.as_deref(),
+    );
+}
+
+fn push_video_primitives<VM>(
+    widget_id: WidgetId,
+    fit: ContentFit,
+    frame: Rect,
+    content_frame: Rect,
+    clip_rect: Option<Rect>,
+    opacity: f32,
+    snapshot: &crate::media::VideoSnapshot,
+    context: &mut CollectContext<'_, '_>,
+    computed: &mut ComputedScene<VM>,
+) {
+    if let Some(texture) = snapshot.texture.as_ref() {
+        computed.scene.textures.push(TexturePrimitive {
+            texture: texture.clone(),
+            frame: resolve_media_rect(content_frame, snapshot.intrinsic_size, fit),
+            clip_rect,
+        });
+    } else {
+        push_media_placeholder(
+            frame,
+            content_frame,
+            clip_rect,
+            opacity,
+            context,
+            &mut computed.scene,
+            widget_id,
+            "video",
+            snapshot.loading,
+            snapshot.error.as_deref(),
+        );
+    }
+}
+
+fn push_media_placeholder(
+    frame: Rect,
+    content_frame: Rect,
+    clip_rect: Option<Rect>,
+    opacity: f32,
+    context: &mut CollectContext<'_, '_>,
+    scene: &mut ScenePrimitives,
+    widget_id: WidgetId,
+    kind: &str,
+    loading: bool,
+    error: Option<&str>,
+) {
+    let placeholder = media_placeholder_color(loading, error.is_some()).with_alpha_factor(opacity);
+    if content_frame.width > 0.0 && content_frame.height > 0.0 {
+        scene.overlay_shapes.push(RenderPrimitive {
+            rect: content_frame,
+            color: placeholder,
+            corner_radius: 0.0,
+            stroke_width: 0.0,
+            clip_rect,
+        });
+    }
+
+    let label = media_placeholder_label(loading, error, kind);
+    let text = Text::new(label).font_size((context.theme.typography.font_size - 1.0).max(12.0));
+    push_text_primitives(
+        &text,
+        frame,
+        context.font_manager,
+        context.theme,
+        context.animations,
+        context.now,
+        scene,
+        false,
+        Insets::all(12.0),
+        None,
+        Color::hexa(0xE5E7EBFF),
+        opacity,
+        widget_id,
+        clip_rect,
+    );
 }
 
 fn push_text_primitives(
@@ -1506,6 +1828,7 @@ impl<VM> WidgetTree<VM> {
         &self,
         font_manager: &FontManager,
         theme: &Theme,
+        media: &MediaManager,
         animations: &mut AnimationEngine,
         hovered_scrollbar: Option<ScrollbarHandle>,
         active_scrollbar: Option<ScrollbarHandle>,
@@ -1529,7 +1852,7 @@ impl<VM> WidgetTree<VM> {
                     height: AvailableSpace::Definite(viewport.height),
                 },
                 |known_dimensions, _, _, node_context, _| {
-                    measure_node(node_context, known_dimensions, font_manager, theme)
+                    measure_node(node_context, known_dimensions, font_manager, theme, media)
                 },
             )
             .expect("widget tree layout should compute");
@@ -1539,6 +1862,7 @@ impl<VM> WidgetTree<VM> {
             taffy: &taffy,
             font_manager,
             theme,
+            media,
             focused_input,
             focused_input_state,
             caret_visible,
@@ -1568,6 +1892,7 @@ impl<VM> WidgetTree<VM> {
         &self,
         font_manager: &FontManager,
         theme: &Theme,
+        media: &MediaManager,
         animations: &mut AnimationEngine,
         hovered_scrollbar: Option<ScrollbarHandle>,
         active_scrollbar: Option<ScrollbarHandle>,
@@ -1580,6 +1905,7 @@ impl<VM> WidgetTree<VM> {
         let computed = self.compute_scene(
             font_manager,
             theme,
+            media,
             animations,
             hovered_scrollbar,
             active_scrollbar,
@@ -1629,6 +1955,7 @@ impl<VM> WidgetTree<VM> {
         &self,
         font_manager: &FontManager,
         theme: &Theme,
+        media: &MediaManager,
         animations: &mut AnimationEngine,
         hovered_scrollbar: Option<ScrollbarHandle>,
         active_scrollbar: Option<ScrollbarHandle>,
@@ -1640,6 +1967,7 @@ impl<VM> WidgetTree<VM> {
         self.hit_path(
             font_manager,
             theme,
+            media,
             animations,
             hovered_scrollbar,
             active_scrollbar,
@@ -1655,6 +1983,7 @@ impl<VM> WidgetTree<VM> {
         &self,
         font_manager: &FontManager,
         theme: &Theme,
+        media: &MediaManager,
         animations: &mut AnimationEngine,
         hovered_scrollbar: Option<ScrollbarHandle>,
         active_scrollbar: Option<ScrollbarHandle>,
@@ -1669,6 +1998,7 @@ impl<VM> WidgetTree<VM> {
         let computed = self.compute_scene(
             font_manager,
             theme,
+            media,
             animations,
             hovered_scrollbar,
             active_scrollbar,
@@ -1684,6 +2014,12 @@ impl<VM> WidgetTree<VM> {
     pub(crate) fn input_snapshot(&self, id: WidgetId) -> Option<InputSnapshot<VM>> {
         self.root.input_snapshot(id)
     }
+
+    pub(crate) fn media_event_states(&self, media: &MediaManager) -> Vec<MediaEventState<VM>> {
+        let mut states = Vec::new();
+        self.root.collect_media_event_states(media, &mut states);
+        states
+    }
 }
 
 #[cfg(test)]
@@ -1692,7 +2028,9 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::animation::AnimationEngine;
+    use crate::foundation::binding::InvalidationSignal;
     use crate::foundation::view_model::Command;
+    use crate::media::MediaManager;
     use crate::text::font::{FontCatalog, FontManager};
     use crate::ui::layout::Overflow;
     use crate::ui::theme::Theme;
@@ -1710,10 +2048,15 @@ mod tests {
         assert_eq!(frame.height, 18.0);
     }
 
+    fn test_media() -> MediaManager {
+        MediaManager::new(InvalidationSignal::new())
+    }
+
     #[test]
     fn clipped_children_keep_clip_rect_and_do_not_hit_outside_parent() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
         let mut animations = AnimationEngine::default();
         let tree = WidgetTree::new(
             Stack::new().child(
@@ -1733,6 +2076,7 @@ mod tests {
         let rendered = tree.render_output(
             &font_manager,
             &theme,
+            &media,
             &mut animations,
             None,
             None,
@@ -1755,6 +2099,7 @@ mod tests {
         let hit = tree.hit_test(
             &font_manager,
             &theme,
+            &media,
             &mut animations,
             None,
             None,
@@ -1770,6 +2115,7 @@ mod tests {
     fn scroll_offsets_are_clamped_to_content_bounds() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
         let mut animations = AnimationEngine::default();
         let scroller: super::Element<()> = Stack::new()
             .size(100.0, 100.0)
@@ -1790,6 +2136,7 @@ mod tests {
         let rendered = tree.render_output(
             &font_manager,
             &theme,
+            &media,
             &mut animations,
             None,
             None,
@@ -1814,6 +2161,7 @@ mod tests {
     fn overflow_clips_children_to_inside_of_border() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
         let mut animations = AnimationEngine::default();
         let tree = WidgetTree::new(
             Stack::<()>::new()
@@ -1830,6 +2178,7 @@ mod tests {
         let rendered = tree.render_output(
             &font_manager,
             &theme,
+            &media,
             &mut animations,
             None,
             None,
@@ -1853,6 +2202,7 @@ mod tests {
     fn scroll_containers_render_scrollbar_track_and_thumb() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
         let mut animations = AnimationEngine::default();
         let scroller: super::Element<()> = Stack::new()
             .size(120.0, 120.0)
@@ -1873,6 +2223,7 @@ mod tests {
         let rendered = tree.render_output(
             &font_manager,
             &theme,
+            &media,
             &mut animations,
             None,
             None,
@@ -1894,6 +2245,7 @@ mod tests {
         let hovered = tree.render_output(
             &font_manager,
             &theme,
+            &media,
             &mut animations,
             Some(ScrollbarHandle {
                 id: scroller_id,
@@ -1915,6 +2267,7 @@ mod tests {
         let active = tree.render_output(
             &font_manager,
             &theme,
+            &media,
             &mut animations,
             Some(ScrollbarHandle {
                 id: scroller_id,

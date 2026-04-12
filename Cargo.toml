@@ -23,19 +23,25 @@ exclude = [
 default = []
 android = []
 ohos = []
+video-ffmpeg = ["dep:ffmpeg-next"]
 
 [dependencies]
 bytemuck = { version = "1.24", features = ["derive"] }
 cosmic-text = "0.18"
+crossbeam-channel = "0.5"
 dpi = "0.1.2"
+image = { version = "0.25", default-features = true, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 pollster = "0.4"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
 taffy = "0.10"
 unicode-segmentation = "1.12"
 winit-core = "0.31.0-beta.2"
 wgpu = { version = "29", features = ["wgsl"] }
+ffmpeg-next = { version = "8.1.0", features = ["static"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 arboard = "3.6"
+cpal = "0.17.1"
 log = "0.4.29"
 raw-window-handle = "0.6"
 rfd = "0.17"
@@ -43,6 +49,7 @@ winit-win32 = "0.31.0-beta.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 arboard = "3.6"
+cpal = "0.17.1"
 log = "0.4.29"
 raw-window-handle = "0.6"
 rfd = "0.17"
@@ -50,6 +57,7 @@ winit-appkit = "0.31.0-beta.2"
 
 [target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 arboard = "3.6"
+cpal = "0.17.1"
 log = "0.4.29"
 raw-window-handle = "0.6"
 rfd = "0.17"

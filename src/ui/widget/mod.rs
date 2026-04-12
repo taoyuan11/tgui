@@ -2,18 +2,23 @@ mod button;
 mod common;
 mod container;
 mod core;
+mod image;
 mod input;
 mod text;
+mod video;
 
 pub use button::Button;
 pub(crate) use common::{
-    CompositionState, HitInteraction, InputEditState, InputSnapshot, RenderedWidgetScene,
-    ScrollbarAxis, ScrollbarHandle,
+    CompositionState, HitInteraction, InputEditState, InputSnapshot, MediaEventPhase,
+    MediaEventState, RenderedWidgetScene, ScrollbarAxis, ScrollbarHandle,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,
 };
 pub use container::{Column, Container, Flex, Grid, Row, Stack};
+pub(crate) use core::video_status_transition_phase;
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
+pub use image::Image;
 pub use input::Input;
 pub use text::Text;
+pub use video::Video;

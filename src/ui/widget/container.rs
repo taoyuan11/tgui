@@ -5,8 +5,8 @@ use crate::ui::layout::{
 };
 
 use super::common::{
-    ContainerKind, ContainerLayout, CursorStyle, InteractionHandlers, Point, VisualStyle, WidgetId,
-    WidgetKind,
+    ContainerKind, ContainerLayout, CursorStyle, InteractionHandlers, MediaEventHandlers, Point,
+    VisualStyle, WidgetId, WidgetKind,
 };
 use super::core::Element;
 
@@ -51,6 +51,7 @@ impl<VM> Container<VM> {
                 layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
                 interactions: InteractionHandlers::default(),
+                media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::Container {
                     layout,

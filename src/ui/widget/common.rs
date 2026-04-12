@@ -1,7 +1,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::animation::{AnimationEngine, AnimationKey, WidgetProperty};
+use crate::media::{TextureFrame, VideoPlaybackStatus};
 use taffy::NodeId as TaffyNodeId;
 
 use crate::foundation::color::Color;
@@ -10,6 +12,7 @@ use crate::text::font::FontWeight;
 use crate::ui::layout::{Align, Axis, Insets, Justify, Overflow, ScrollbarStyle, Value, Wrap};
 
 use super::text::Text;
+use super::{image::Image, video::Video};
 
 static NEXT_WIDGET_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -145,6 +148,112 @@ pub(crate) struct InteractionHandlers<VM> {
     pub on_mouse_leave: Option<Command<VM>>,
     pub on_mouse_move: Option<ValueCommand<VM, Point>>,
     pub cursor_style: Option<CursorStyle>,
+}
+
+pub(crate) enum MediaEventPhase {
+    Loading,
+    Success,
+    Error(String),
+    Play,
+    Pause,
+    Resume,
+    End,
+    Seek,
+}
+
+impl Clone for MediaEventPhase {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Loading => Self::Loading,
+            Self::Success => Self::Success,
+            Self::Error(error) => Self::Error(error.clone()),
+            Self::Play => Self::Play,
+            Self::Pause => Self::Pause,
+            Self::Resume => Self::Resume,
+            Self::End => Self::End,
+            Self::Seek => Self::Seek,
+        }
+    }
+}
+
+impl PartialEq for MediaEventPhase {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Loading, Self::Loading) | (Self::Success, Self::Success) => true,
+            (Self::Play, Self::Play)
+            | (Self::Pause, Self::Pause)
+            | (Self::Resume, Self::Resume)
+            | (Self::End, Self::End)
+            | (Self::Seek, Self::Seek) => true,
+            (Self::Error(left), Self::Error(right)) => left == right,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for MediaEventPhase {}
+
+pub(crate) struct MediaEventHandlers<VM> {
+    pub on_loading: Option<Command<VM>>,
+    pub on_success: Option<Command<VM>>,
+    pub on_error: Option<ValueCommand<VM, String>>,
+    pub on_play: Option<Command<VM>>,
+    pub on_pause: Option<Command<VM>>,
+    pub on_resume: Option<Command<VM>>,
+    pub on_end: Option<Command<VM>>,
+    pub on_seek: Option<Command<VM>>,
+}
+
+impl<VM> Clone for MediaEventHandlers<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            on_loading: self.on_loading.clone(),
+            on_success: self.on_success.clone(),
+            on_error: self.on_error.clone(),
+            on_play: self.on_play.clone(),
+            on_pause: self.on_pause.clone(),
+            on_resume: self.on_resume.clone(),
+            on_end: self.on_end.clone(),
+            on_seek: self.on_seek.clone(),
+        }
+    }
+}
+
+impl<VM> Default for MediaEventHandlers<VM> {
+    fn default() -> Self {
+        Self {
+            on_loading: None,
+            on_success: None,
+            on_error: None,
+            on_play: None,
+            on_pause: None,
+            on_resume: None,
+            on_end: None,
+            on_seek: None,
+        }
+    }
+}
+
+impl<VM> MediaEventHandlers<VM> {
+    pub(crate) fn has_any(&self) -> bool {
+        self.on_loading.is_some()
+            || self.on_success.is_some()
+            || self.on_error.is_some()
+            || self.on_play.is_some()
+            || self.on_pause.is_some()
+            || self.on_resume.is_some()
+            || self.on_end.is_some()
+            || self.on_seek.is_some()
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct MediaEventState<VM> {
+    pub widget_id: WidgetId,
+    pub media_phase: Option<MediaEventPhase>,
+    pub video_status: Option<VideoPlaybackStatus>,
+    pub seek_generation: Option<u64>,
+    pub handlers: MediaEventHandlers<VM>,
 }
 
 impl<VM> Clone for InteractionHandlers<VM> {
@@ -305,11 +414,20 @@ pub struct TextPrimitive {
     pub clip_rect: Option<Rect>,
 }
 
+#[derive(Clone)]
+pub struct TexturePrimitive {
+    pub texture: Arc<TextureFrame>,
+    pub frame: Rect,
+    pub clip_rect: Option<Rect>,
+}
+
 #[derive(Clone, Default)]
 pub struct ScenePrimitives {
     pub shapes: Vec<RenderPrimitive>,
+    pub textures: Vec<TexturePrimitive>,
     pub texts: Vec<TextPrimitive>,
     pub overlay_shapes: Vec<RenderPrimitive>,
+    pub overlay_texts: Vec<TextPrimitive>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -361,6 +479,9 @@ pub(crate) enum WidgetKind<VM> {
     Text {
         text: Text,
     },
+    Image {
+        image: Image,
+    },
     Button {
         label: Text,
     },
@@ -369,14 +490,19 @@ pub(crate) enum WidgetKind<VM> {
         placeholder: Text,
         on_change: Option<ValueCommand<VM, String>>,
     },
+    Video {
+        video: Video,
+    },
 }
 
 #[derive(Clone)]
 pub(crate) enum MeasureContext {
     None,
     Text(Text),
+    Image(Image),
     Button(Text),
     Input { text: Text, placeholder: Text },
+    Video { id: WidgetId, video: Video },
 }
 
 pub(crate) struct LayoutNode {

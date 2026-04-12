@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 #[cfg(all(target_os = "android", feature = "android"))]
 use crate::platform::android::activity::AndroidApp;
+use crate::platform::dpi::LogicalSize;
 #[cfg(all(target_env = "ohos", feature = "ohos"))]
 use crate::platform::ohos::OhosApp;
-use crate::platform::dpi::LogicalSize;
 
 use crate::animation::AnimationCoordinator;
 use crate::foundation::binding::{Binding, InvalidationSignal, ViewModelContext};
@@ -360,12 +360,18 @@ impl<VM> WindowSpec<VM> {
 
     pub(crate) fn build_window_bindings(&self, view_model: &VM) -> WindowBindings {
         WindowBindings {
-            title: self.title_binding.as_ref().map(|binding| binding(view_model)),
+            title: self
+                .title_binding
+                .as_ref()
+                .map(|binding| binding(view_model)),
             clear_color: self
                 .clear_color_binding
                 .as_ref()
                 .map(|binding| binding(view_model)),
-            theme_mode: self.theme_mode_binding.as_ref().map(|binding| binding(view_model)),
+            theme_mode: self
+                .theme_mode_binding
+                .as_ref()
+                .map(|binding| binding(view_model)),
         }
     }
 
@@ -470,26 +476,14 @@ where
 
     /// Builds the runtime and starts the application event loop.
     pub fn run(self) -> Result<(), TguiError> {
-        let (
-            config,
-            view_model,
-            windows,
-            invalidation,
-            animations,
-        ) = self.into_runtime_parts();
+        let (config, view_model, windows, invalidation, animations) = self.into_runtime_parts();
 
         BoundRuntime::new(config, view_model, windows, invalidation, animations)?.run()
     }
 
     #[cfg(all(target_os = "android", feature = "android"))]
     pub fn run_android(self, app: AndroidApp) -> Result<(), TguiError> {
-        let (
-            config,
-            view_model,
-            windows,
-            invalidation,
-            animations,
-        ) = self.into_runtime_parts();
+        let (config, view_model, windows, invalidation, animations) = self.into_runtime_parts();
 
         if windows.explicit_windows {
             return Err(TguiError::Unsupported(
@@ -520,13 +514,7 @@ where
 
     #[cfg(all(target_env = "ohos", feature = "ohos"))]
     pub fn run_ohos(self, app: OhosApp) -> Result<(), TguiError> {
-        let (
-            config,
-            view_model,
-            windows,
-            invalidation,
-            animations,
-        ) = self.into_runtime_parts();
+        let (config, view_model, windows, invalidation, animations) = self.into_runtime_parts();
 
         if windows.explicit_windows {
             return Err(TguiError::Unsupported(
@@ -560,13 +548,7 @@ where
     where
         VM: Send,
     {
-        let (
-            config,
-            view_model,
-            windows,
-            invalidation,
-            animations,
-        ) = self.into_runtime_parts();
+        let (config, view_model, windows, invalidation, animations) = self.into_runtime_parts();
 
         if windows.explicit_windows {
             panic!("multi-window applications are not supported on OHOS yet");
@@ -635,12 +617,6 @@ where
                 explicit_windows: false,
             }
         };
-        (
-            config,
-            view_model,
-            windows,
-            invalidation,
-            animations,
-        )
+        (config, view_model, windows, invalidation, animations)
     }
 }

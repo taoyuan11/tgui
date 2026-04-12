@@ -2,7 +2,9 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::{Insets, LayoutStyle, Value};
 
-use super::common::{CursorStyle, InteractionHandlers, Point, VisualStyle, WidgetId, WidgetKind};
+use super::common::{
+    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
+};
 use super::core::Element;
 use super::text::Text;
 
@@ -21,6 +23,7 @@ impl<VM> Input<VM> {
                 },
                 visual: VisualStyle::default(),
                 interactions: InteractionHandlers::default(),
+                media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::Input {
                     text,
