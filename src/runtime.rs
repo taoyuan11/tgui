@@ -1,7 +1,3 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-
 use crate::animation::{
     default_theme_transition, AnimationCoordinator, AnimationEngine, AnimationKey, Transition,
     WindowProperty,
@@ -44,9 +40,14 @@ use crate::ui::widget::{
     MediaEventState, Point, Rect, RenderedWidgetScene, ScenePrimitives, ScrollbarAxis,
     ScrollbarHandle, WidgetId, WidgetTree,
 };
+use image::GenericImageView;
 #[cfg(all(target_os = "android", feature = "android"))]
 use jni::{jni_sig, jni_str, objects::JObject, JValue, JavaVM};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation;
+use winit_core::icon::{Icon, RgbaIcon};
 
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
@@ -2236,11 +2237,35 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         }
 
-        let attributes = WindowAttributes::default()
+        let mut attributes = WindowAttributes::default()
             .with_transparent(!cfg!(all(target_env = "ohos", feature = "ohos")))
             .with_title(self.config.title.clone())
             .with_surface_size(self.config.size)
             .with_visible(false);
+
+
+        if let Some(icon_bytes) = self.config.window_icon {
+            match image::load_from_memory(icon_bytes) {
+                Ok(image) => {
+                    let (w, h) = image.dimensions();
+                    let rgba = image.into_rgba8().into_raw();
+
+                    match RgbaIcon::new(rgba, w, h) {
+                        Ok(ok) => {
+                            let icon = Icon::from(ok);
+                            attributes = attributes.with_window_icon(Some(icon));
+                        }
+                        Err(err) => {
+                            self.fail(event_loop, TguiError::Icon(err.to_string()));
+                        }
+                    }
+                }
+                Err(err) => {
+                    self.fail(event_loop, TguiError::Icon(err.to_string()));
+                }
+            }
+        }
+
 
         let window: Arc<dyn Window> = match event_loop.create_window(attributes) {
             Ok(window) => Arc::from(window),

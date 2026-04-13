@@ -57,6 +57,7 @@ pub struct Application {
     close_children_with_main: bool,
     fonts: FontCatalog,
     theme: ThemeSelection,
+    window_icon: Option<&'static [u8]>
 }
 
 impl Application {
@@ -72,6 +73,7 @@ impl Application {
             close_children_with_main: true,
             fonts: FontCatalog::default(),
             theme: ThemeSelection::System,
+            window_icon: None
         }
     }
 
@@ -105,8 +107,16 @@ impl Application {
         self
     }
 
+    /// Set window icon and status bar icon
+    ///
+    /// Defaults to `None`.
+    pub fn window_icon(mut self, icon: &'static [u8]) -> Self {
+        self.window_icon = Some(icon);
+        self
+    }
+
     /// Registers an in-memory font blob under a logical family name.
-    pub fn font(mut self, name: impl Into<String>, bytes: &'static [u8]) -> Self {
+    pub fn font_bytes(mut self, name: impl Into<String>, bytes: &'static [u8]) -> Self {
         self.fonts.register_font(name, bytes);
         self
     }
@@ -180,6 +190,7 @@ impl Application {
             close_children_with_main: self.close_children_with_main,
             fonts: self.fonts.clone(),
             theme: self.theme.clone(),
+            window_icon: self.window_icon,
         }
     }
 }
@@ -199,6 +210,7 @@ pub(crate) struct ApplicationConfig {
     pub(crate) close_children_with_main: bool,
     pub(crate) fonts: FontCatalog,
     pub(crate) theme: ThemeSelection,
+    pub(crate) window_icon: Option<&'static [u8]>
 }
 
 type TitleBinding<VM> = Arc<dyn Fn(&VM) -> Binding<String> + Send + Sync>;

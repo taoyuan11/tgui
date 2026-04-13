@@ -1866,7 +1866,7 @@ mod legacy_ffmpeg_impl {
         }
 
         let sample_count = frame_samples * output_channels as usize;
-        let byte_count = sample_count * std::mem::size_of::<f32>();
+        let byte_count = sample_count * size_of::<f32>();
         let bytes = frame.data(0);
         if bytes.len() < byte_count {
             return Vec::new();
@@ -2265,7 +2265,7 @@ mod legacy_ffmpeg_impl {
     }
 
     fn av_time_from_duration(value: Duration) -> i64 {
-        (value.as_secs_f64() * f64::from(ffmpeg::ffi::AV_TIME_BASE)).round() as i64
+        (value.as_secs_f64() * f64::from(ffmpeg::ffi::AV_TIME_BASE_Q)).round() as i64
     }
 
     fn set_video_loading_state(
@@ -2542,7 +2542,6 @@ pub(crate) fn media_placeholder_label(loading: bool, error: Option<&str>, kind: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
 
     #[test]
     fn playback_snapshot_reports_ready_paused_playing_and_ended() {

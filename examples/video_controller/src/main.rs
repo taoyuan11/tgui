@@ -137,6 +137,7 @@ impl VideoControllerVm {
                     ),
             )
             .child(
+                //TODO: Bugs -> 播放到最后几秒时卡住，并且状态依然时 playing
                 Video::from_url(
                     "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
                 )
