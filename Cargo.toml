@@ -1,6 +1,6 @@
 [package]
 name = "tgui"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["a2542209451@gmail.com"]
 edition = "2021"
 description = "A modern, GPU-accelerated Rust GUI framework with MVVM, Taffy layout, and wgpu rendering."
@@ -32,7 +32,8 @@ crossbeam-channel = "0.5"
 dpi = "0.1.2"
 image = { version = "0.25", default-features = true, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 pollster = "0.4"
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 taffy = "0.10"
 unicode-segmentation = "1.12"
 winit-core = "0.31.0-beta.2"

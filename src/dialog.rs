@@ -562,6 +562,17 @@ struct DialogParentHandles {
     window: RawWindowHandle,
 }
 
+#[cfg(target_env = "ohos")]
+#[derive(Clone, Debug)]
+struct DialogParentHandles;
+
+#[cfg(target_env = "ohos")]
+impl DialogParentHandles {
+    fn from_window(_window: &dyn Window) -> Option<Self> {
+        None
+    }
+}
+
 #[cfg(any(
     target_os = "windows",
     target_os = "macos",

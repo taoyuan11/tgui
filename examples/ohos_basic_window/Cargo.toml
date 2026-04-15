@@ -11,3 +11,15 @@ tgui-winit-ohos = "0.31.0-beta.2"
 
 [lib]
 crate-type = ["staticlib", "rlib"]
+
+[package.metadata.ohos-app.default]
+deveco_studio_dir = "D:\\Apps\\code\\DevEco Studio"
+ohpm_path = "D:\\Apps\\code\\DevEco Studio\\tools\\ohpm\\bin\\ohpm.bat"
+sdk_root = "C:\\Users\\25422\\AppData\\Local\\OpenHarmony\\Sdk"
+app_name = "Demo App"
+app_icon_path = "C:\\Users\\25422\\Downloads\\wlop.jpg"
+start_icon_path = "C:\\Users\\25422\\Downloads\\juequling_shushu.jpg"
+bundle_name = "com.sctianji.banzhumanager"
+module_name = "entry"
+target = "x86_64"
+output_dir = "ohos-app"

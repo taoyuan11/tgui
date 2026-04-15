@@ -1,4 +1,0 @@
-bundle_name = "com.example.ohosbasicwindow"
-module_name = "entry"
-target = "x86_64-unknown-linux-ohos"
-output_dir = "ohos-app"
