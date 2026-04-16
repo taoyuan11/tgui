@@ -16,7 +16,7 @@ pub struct Image {
     pub(crate) background: Option<Value<Color>>,
     pub(crate) fit: ContentFit,
     pub(crate) aspect_ratio: Option<f32>,
-    pub(crate) cursor_style: Option<CursorStyle>,
+    pub(crate) cursor_style: Option<Value<CursorStyle>>,
 }
 
 impl Image {
@@ -188,8 +188,8 @@ impl Image {
         })
     }
 
-    pub fn cursor(mut self, cursor: CursorStyle) -> Self {
-        self.cursor_style = Some(cursor);
+    pub fn cursor(mut self, cursor: impl Into<Value<CursorStyle>>) -> Self {
+        self.cursor_style = Some(cursor.into());
         self
     }
 
@@ -197,7 +197,7 @@ impl Image {
         self,
         mut interactions: InteractionHandlers<VM>,
     ) -> Element<VM> {
-        interactions.cursor_style = self.cursor_style;
+        interactions.cursor_style = self.cursor_style.clone();
         Element {
             id: WidgetId::next(),
             layout: self.layout.clone(),
@@ -218,7 +218,7 @@ impl Image {
             layout: self.layout.clone(),
             visual: self.visual.clone(),
             interactions: InteractionHandlers {
-                cursor_style: self.cursor_style,
+                cursor_style: self.cursor_style.clone(),
                 ..Default::default()
             },
             media_events,
@@ -235,7 +235,7 @@ impl<VM> From<Image> for Element<VM> {
             layout: value.layout.clone(),
             visual: value.visual.clone(),
             interactions: InteractionHandlers {
-                cursor_style: value.cursor_style,
+                cursor_style: value.cursor_style.clone(),
                 ..Default::default()
             },
             media_events: MediaEventHandlers::default(),

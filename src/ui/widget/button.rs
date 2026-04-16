@@ -156,8 +156,8 @@ impl<VM> Button<VM> {
         self
     }
 
-    pub fn cursor(mut self, cursor: CursorStyle) -> Self {
-        self.element.interactions.cursor_style = Some(cursor);
+    pub fn cursor(mut self, cursor: impl Into<Value<CursorStyle>>) -> Self {
+        self.element.interactions.cursor_style = Some(cursor.into());
         self
     }
 }

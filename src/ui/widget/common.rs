@@ -147,7 +147,7 @@ pub(crate) struct InteractionHandlers<VM> {
     pub on_mouse_enter: Option<Command<VM>>,
     pub on_mouse_leave: Option<Command<VM>>,
     pub on_mouse_move: Option<ValueCommand<VM, Point>>,
-    pub cursor_style: Option<CursorStyle>,
+    pub cursor_style: Option<Value<CursorStyle>>,
 }
 
 pub(crate) enum MediaEventPhase {
@@ -266,7 +266,7 @@ impl<VM> Clone for InteractionHandlers<VM> {
             on_mouse_enter: self.on_mouse_enter.clone(),
             on_mouse_leave: self.on_mouse_leave.clone(),
             on_mouse_move: self.on_mouse_move.clone(),
-            cursor_style: self.cursor_style,
+            cursor_style: self.cursor_style.clone(),
         }
     }
 }

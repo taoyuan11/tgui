@@ -122,8 +122,8 @@ impl<VM> Container<VM> {
         self
     }
 
-    pub fn cursor(mut self, cursor: CursorStyle) -> Self {
-        self.element.interactions.cursor_style = Some(cursor);
+    pub fn cursor(mut self, cursor: impl Into<Value<CursorStyle>>) -> Self {
+        self.element.interactions.cursor_style = Some(cursor.into());
         self
     }
 
@@ -391,7 +391,7 @@ macro_rules! impl_layout_container {
                 Self(self.0.on_mouse_move(command))
             }
 
-            pub fn cursor(self, cursor: CursorStyle) -> Self {
+            pub fn cursor(self, cursor: impl Into<Value<CursorStyle>>) -> Self {
                 Self(self.0.cursor(cursor))
             }
 
@@ -644,7 +644,7 @@ mod tests {
     fn cursor_helper_sets_cursor_style() {
         let container = Container::<()>::new().cursor(CursorStyle::Pointer);
         assert_eq!(
-            container.element.interactions.cursor_style,
+            container.element.interactions.cursor_style.map(|style| style.resolve()),
             Some(CursorStyle::Pointer)
         );
     }

@@ -1809,7 +1809,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         id, interactions, ..
                     } => HoveredWidget {
                         widget_id: id,
-                        cursor_style: interactions.cursor_style,
+                        cursor_style: interactions.cursor_style.map(|c| c.resolve()),
                         on_mouse_enter: interactions.on_mouse_enter,
                         on_mouse_leave: interactions.on_mouse_leave,
                         on_mouse_move: interactions.on_mouse_move,
@@ -1820,6 +1820,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         widget_id: id,
                         cursor_style: interactions
                             .cursor_style
+                            .map(|c| c.resolve())
                             .or(Some(crate::ui::widget::CursorStyle::Text)),
                         on_mouse_enter: interactions.on_mouse_enter,
                         on_mouse_leave: interactions.on_mouse_leave,

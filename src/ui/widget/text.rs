@@ -19,7 +19,7 @@ pub struct Text {
     pub(crate) font_size: Option<f32>,
     pub(crate) font_weight: FontWeight,
     pub(crate) letter_spacing: f32,
-    pub(crate) cursor_style: Option<CursorStyle>,
+    pub(crate) cursor_style: Option<Value<CursorStyle>>,
 }
 
 impl Text {
@@ -144,8 +144,8 @@ impl Text {
         })
     }
 
-    pub fn cursor(mut self, cursor: CursorStyle) -> Self {
-        self.cursor_style = Some(cursor);
+    pub fn cursor(mut self, cursor: impl Into<Value<CursorStyle>>) -> Self {
+        self.cursor_style = Some(cursor.into());
         self
     }
 
@@ -156,7 +156,7 @@ impl Text {
         let background = self.background.clone();
         let layout = self.layout.clone();
         let visual = self.visual.clone();
-        interactions.cursor_style = self.cursor_style;
+        interactions.cursor_style = self.cursor_style.clone();
         Element {
             id: WidgetId::next(),
             layout,
@@ -179,7 +179,7 @@ impl<VM> From<Text> for Element<VM> {
             layout,
             visual,
             interactions: InteractionHandlers {
-                cursor_style: value.cursor_style,
+                cursor_style: value.cursor_style.clone(),
                 ..InteractionHandlers::default()
             },
             media_events: MediaEventHandlers::default(),

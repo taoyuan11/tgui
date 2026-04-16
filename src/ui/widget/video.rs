@@ -21,7 +21,7 @@ pub struct Video {
     pub(crate) muted: bool,
     pub(crate) volume: f32,
     pub(crate) controller: Option<VideoControllerHandle>,
-    pub(crate) cursor_style: Option<CursorStyle>,
+    pub(crate) cursor_style: Option<Value<CursorStyle>>,
 }
 
 impl Video {
@@ -267,8 +267,8 @@ impl Video {
         })
     }
 
-    pub fn cursor(mut self, cursor: CursorStyle) -> Self {
-        self.cursor_style = Some(cursor);
+    pub fn cursor(mut self, cursor: impl Into<Value<CursorStyle>>) -> Self {
+        self.cursor_style = Some(cursor.into());
         self
     }
 
@@ -276,7 +276,7 @@ impl Video {
         self,
         mut interactions: InteractionHandlers<VM>,
     ) -> Element<VM> {
-        interactions.cursor_style = self.cursor_style;
+        interactions.cursor_style = self.cursor_style.clone();
         Element {
             id: WidgetId::next(),
             layout: self.layout.clone(),
@@ -297,7 +297,7 @@ impl Video {
             layout: self.layout.clone(),
             visual: self.visual.clone(),
             interactions: InteractionHandlers {
-                cursor_style: self.cursor_style,
+                cursor_style: self.cursor_style.clone(),
                 ..Default::default()
             },
             media_events,
@@ -314,7 +314,7 @@ impl<VM> From<Video> for Element<VM> {
             layout: value.layout.clone(),
             visual: value.visual.clone(),
             interactions: InteractionHandlers {
-                cursor_style: value.cursor_style,
+                cursor_style: value.cursor_style.clone(),
                 ..Default::default()
             },
             media_events: MediaEventHandlers::default(),
