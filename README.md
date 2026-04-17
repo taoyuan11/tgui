@@ -48,7 +48,8 @@ This project is under active development.
 - GPU rendering powered by `wgpu`
 - Text shaping and rasterization powered by `cosmic-text`
 - Media loading:
-  - `Image` supports local files plus `http/https` sources on all current targets
+  - `Image` supports local files, embedded bytes, and `http/https` sources on all current targets
+  - raster formats plus static SVG render through the same `Image` API
 - Public visual styling APIs:
   - `background(...)`
   - `border(...)`
@@ -225,8 +226,16 @@ fn main() -> Result<(), tgui::TguiError> {
                 .padding(Insets::all(24.0))
                 .gap(16.0)
                 .child(
+                    Image::from_bytes(include_bytes!("static/logo.svg"))
+                        .size(220.0, 220.0)
+                        .fit(ContentFit::Contain)
+                        .on_loading(Command::new(|_| println!("svg loading")))
+                        .on_success(Command::new(|_| println!("svg ready")))
+                        .on_error(ValueCommand::new(|_, error| eprintln!("{error}"))),
+                )
+                .child(
                     Image::from_url("https://example.com/cover.jpg")
-                        .height(220.0)
+                        .height(180.0)
                         .fill_width()
                         .fit(ContentFit::Cover)
                         .on_loading(Command::new(|_| println!("image loading")))
@@ -242,6 +251,10 @@ fn main() -> Result<(), tgui::TguiError> {
 When you want layout to stay stable before media finishes loading, set an
 explicit size or `aspect_ratio(...)`. `Image` exposes
 `on_loading(...)`, `on_success(...)`, and `on_error(...)`.
+For SVG sources, `Image::from_path(...)`, `Image::from_url(...)`, and
+`Image::from_bytes(...)` all work transparently. Embedded SVG bytes support
+`data:` and absolute `http/https` image references; local relative references
+still require `Image::from_path(...)`.
 
 ### Desktop Multi-Window
 

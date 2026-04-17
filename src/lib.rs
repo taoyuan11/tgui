@@ -104,7 +104,7 @@ pub use foundation::color::Color;
 pub use foundation::error::TguiError;
 pub use foundation::event::InputTrigger;
 pub use foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
-pub use media::{ContentFit, MediaSource};
+pub use media::{ContentFit, MediaBytes, MediaSource};
 pub use text::font::FontWeight;
 pub use ui::layout::{
     Align, Axis, Insets, Justify, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap,

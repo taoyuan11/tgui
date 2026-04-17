@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use taffy::prelude::{
     auto, evenly_sized_tracks, length, line, percent, AlignItems as TaffyAlignItems,
@@ -12,7 +13,7 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{
     media_placeholder_color, media_placeholder_label, resolve_media_rect, ContentFit,
-    ImageSnapshot, IntrinsicSize, MediaManager,
+    IntrinsicSize, MediaManager, RasterRequest,
 };
 use crate::text::font::{FontManager, TextFontRequest};
 use crate::ui::layout::{Align, Axis, Insets, Justify, LayoutStyle, Overflow, Value, Wrap};
@@ -605,15 +606,27 @@ impl<VM> ResolvedElement<VM> {
             }
             ResolvedWidgetKind::Image { image } => {
                 let source = image.source.resolve();
-                let snapshot = context.media.image_snapshot(&source);
+                let loading_background = image
+                    .background
+                    .as_ref()
+                    .map(|background| {
+                        background.resolve_widget(
+                            context.animations,
+                            self.id,
+                            WidgetProperty::Background,
+                            context.now,
+                        )
+                    })
+                    .unwrap_or(Color::rgba(255, 255, 255, 0));
                 push_media_texture_or_placeholder(
                     self.id,
-                    &snapshot,
+                    &source,
                     image.fit,
                     frame,
                     background_frame,
                     primitive_clip,
                     opacity,
+                    loading_background,
                     context,
                     computed,
                     "image",
@@ -732,7 +745,7 @@ impl<VM> ResolvedElement<VM> {
                     return;
                 }
                 let source = image.source.resolve();
-                let snapshot = media.image_snapshot(&source);
+                let snapshot = media.image_snapshot(&source, None);
                 if let Some(phase) = media_event_phase(snapshot.loading, snapshot.error.as_deref())
                 {
                     states.push(MediaEventState {
@@ -1144,7 +1157,7 @@ fn measure_node(
     let measured = match node_context {
         Some(MeasureContext::Text(text)) => measure_text_content(text, font_manager, theme),
         Some(MeasureContext::Image(image)) => {
-            let snapshot = media.image_snapshot(&image.source.resolve());
+            let snapshot = media.image_snapshot(&image.source.resolve(), None);
             measure_media_content(
                 known_dimensions,
                 image.aspect_ratio,
@@ -1210,20 +1223,29 @@ fn measure_media_content(
 
 fn push_media_texture_or_placeholder<VM>(
     widget_id: WidgetId,
-    snapshot: &ImageSnapshot,
+    source: &crate::media::MediaSource,
     fit: ContentFit,
     frame: Rect,
     content_frame: Rect,
     clip_rect: Option<Rect>,
     opacity: f32,
+    loading_background: Color,
     context: &mut CollectContext<'_, '_>,
     computed: &mut ComputedScene<VM>,
     kind: &str,
 ) {
+    let metadata = context.media.image_snapshot(source, None);
+    let target_frame = resolve_media_rect(content_frame, metadata.intrinsic_size, fit);
+    let snapshot = if let Some(raster_request) = RasterRequest::from_frame(target_frame) {
+        context.media.image_snapshot(source, Some(raster_request))
+    } else {
+        metadata
+    };
+
     if let Some(texture) = snapshot.texture.as_ref() {
         computed.scene.textures.push(TexturePrimitive {
-            texture: texture.clone(),
-            frame: resolve_media_rect(content_frame, snapshot.intrinsic_size, fit),
+            texture: Arc::clone(texture),
+            frame: target_frame,
             clip_rect,
         });
         return;
@@ -1240,6 +1262,7 @@ fn push_media_texture_or_placeholder<VM>(
         kind,
         snapshot.loading,
         snapshot.error.as_deref(),
+        loading_background,
     );
 }
 
@@ -1254,8 +1277,10 @@ fn push_media_placeholder(
     kind: &str,
     loading: bool,
     error: Option<&str>,
+    loading_background: Color,
 ) {
-    let placeholder = media_placeholder_color(loading, error).with_alpha_factor(opacity);
+    let placeholder = media_loading_fill_color(loading, error, loading_background)
+        .with_alpha_factor(opacity);
     if content_frame.width > 0.0 && content_frame.height > 0.0 {
         scene.overlay_shapes.push(RenderPrimitive {
             rect: content_frame,
@@ -1284,6 +1309,14 @@ fn push_media_placeholder(
         widget_id,
         clip_rect,
     );
+}
+
+fn media_loading_fill_color(loading: bool, error: Option<&str>, loading_background: Color) -> Color {
+    if loading {
+        loading_background
+    } else {
+        media_placeholder_color(loading, error)
+    }
 }
 
 fn push_text_primitives(
@@ -2002,6 +2035,7 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::animation::{AnimationCoordinator, AnimationEngine};
+    use crate::foundation::color::Color;
     use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
     use crate::foundation::view_model::Command;
     use crate::media::MediaManager;
@@ -2022,6 +2056,32 @@ mod tests {
         assert_eq!(frame.y, 11.0);
         assert_eq!(frame.width, 56.0);
         assert_eq!(frame.height, 18.0);
+    }
+
+    #[test]
+    fn image_loading_placeholder_uses_image_background() {
+        let background = Color::hexa(0x11223344);
+
+        assert_eq!(
+            super::media_loading_fill_color(true, None, background),
+            background
+        );
+    }
+
+    #[test]
+    fn image_loading_placeholder_defaults_to_transparent_white() {
+        assert_eq!(
+            super::media_loading_fill_color(true, None, Color::rgba(255, 255, 255, 0)),
+            Color::rgba(255, 255, 255, 0)
+        );
+    }
+
+    #[test]
+    fn image_error_placeholder_keeps_error_color() {
+        assert_eq!(
+            super::media_loading_fill_color(false, Some("boom"), Color::WHITE),
+            crate::media::media_placeholder_color(false, Some("boom"))
+        );
     }
 
     fn test_media() -> MediaManager {

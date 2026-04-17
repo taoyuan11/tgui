@@ -32,9 +32,11 @@ dpi = "0.1.2"
 image = { version = "0.25", default-features = true, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 pollster = "0.4"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider"] }
+resvg = "0.47"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 taffy = "0.10"
 unicode-segmentation = "1.12"
+usvg-remote-resolvers = { version = "0.2", features = ["reqwest_blocking"] }
 winit-core = "0.31.0-beta.2"
 wgpu = { version = "29", features = ["wgsl"] }
 

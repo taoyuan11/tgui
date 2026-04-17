@@ -1,6 +1,7 @@
 use crate::foundation::color::Color;
+use crate::foundation::binding::Binding;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::media::{ContentFit, MediaSource};
+use crate::media::{ContentFit, MediaBytes, MediaSource};
 use crate::ui::layout::{Insets, LayoutStyle, Value};
 
 use super::common::{
@@ -19,6 +20,95 @@ pub struct Image {
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
 }
 
+pub trait IntoImagePathSource {
+    fn into_image_path_source(self) -> Value<MediaSource>;
+}
+
+pub trait IntoImageUrlSource {
+    fn into_image_url_source(self) -> Value<MediaSource>;
+}
+
+impl IntoImagePathSource for std::path::PathBuf {
+    fn into_image_path_source(self) -> Value<MediaSource> {
+        MediaSource::Path(self).into()
+    }
+}
+
+impl IntoImagePathSource for &std::path::Path {
+    fn into_image_path_source(self) -> Value<MediaSource> {
+        MediaSource::Path(self.to_path_buf()).into()
+    }
+}
+
+impl IntoImagePathSource for String {
+    fn into_image_path_source(self) -> Value<MediaSource> {
+        MediaSource::Path(self.into()).into()
+    }
+}
+
+impl IntoImagePathSource for &str {
+    fn into_image_path_source(self) -> Value<MediaSource> {
+        MediaSource::Path(self.into()).into()
+    }
+}
+
+impl IntoImagePathSource for Binding<std::path::PathBuf> {
+    fn into_image_path_source(self) -> Value<MediaSource> {
+        self.map(MediaSource::Path).into()
+    }
+}
+
+impl IntoImagePathSource for Binding<String> {
+    fn into_image_path_source(self) -> Value<MediaSource> {
+        self.map(|path| MediaSource::Path(path.into())).into()
+    }
+}
+
+impl IntoImagePathSource for Value<std::path::PathBuf> {
+    fn into_image_path_source(self) -> Value<MediaSource> {
+        match self {
+            Value::Static(path) => MediaSource::Path(path).into(),
+            Value::Bound(binding) => binding.map(MediaSource::Path).into(),
+        }
+    }
+}
+
+impl IntoImagePathSource for Value<String> {
+    fn into_image_path_source(self) -> Value<MediaSource> {
+        match self {
+            Value::Static(path) => MediaSource::Path(path.into()).into(),
+            Value::Bound(binding) => binding.map(|path| MediaSource::Path(path.into())).into(),
+        }
+    }
+}
+
+impl IntoImageUrlSource for String {
+    fn into_image_url_source(self) -> Value<MediaSource> {
+        MediaSource::Url(self).into()
+    }
+}
+
+impl IntoImageUrlSource for &str {
+    fn into_image_url_source(self) -> Value<MediaSource> {
+        MediaSource::Url(self.into()).into()
+    }
+}
+
+impl IntoImageUrlSource for Binding<String> {
+    fn into_image_url_source(self) -> Value<MediaSource> {
+        self.map(MediaSource::Url).into()
+    }
+}
+
+impl IntoImageUrlSource for Value<String> {
+    fn into_image_url_source(self) -> Value<MediaSource> {
+        match self {
+            Value::Static(url) => MediaSource::Url(url).into(),
+            Value::Bound(binding) => binding.map(MediaSource::Url).into(),
+        }
+    }
+}
+
 impl Image {
     pub fn new(source: impl Into<Value<MediaSource>>) -> Self {
         Self {
@@ -32,12 +122,16 @@ impl Image {
         }
     }
 
-    pub fn from_path(path: impl Into<std::path::PathBuf>) -> Self {
-        Self::new(MediaSource::Path(path.into()))
+    pub fn from_path(path: impl IntoImagePathSource) -> Self {
+        Self::new(path.into_image_path_source())
     }
 
-    pub fn from_url(url: impl Into<String>) -> Self {
-        Self::new(MediaSource::Url(url.into()))
+    pub fn from_url(url: impl IntoImageUrlSource) -> Self {
+        Self::new(url.into_image_url_source())
+    }
+
+    pub fn from_bytes(bytes: impl Into<MediaBytes>) -> Self {
+        Self::new(MediaSource::Bytes(bytes.into()))
     }
 
     pub fn size(mut self, width: impl Into<Value<f32>>, height: impl Into<Value<f32>>) -> Self {
@@ -241,6 +335,56 @@ impl<VM> From<Image> for Element<VM> {
             media_events: MediaEventHandlers::default(),
             background: value.background.clone(),
             kind: WidgetKind::Image { image: value },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::foundation::binding::Binding;
+
+    use super::Image;
+    use crate::media::MediaSource;
+    use crate::ui::layout::Value;
+
+    #[test]
+    fn from_path_accepts_binding_pathbuf() {
+        let image = Image::from_path(Binding::new(|| PathBuf::from("static/logo.svg")));
+
+        match image.source {
+            Value::Bound(binding) => {
+                assert_eq!(binding.get(), MediaSource::Path(PathBuf::from("static/logo.svg")));
+            }
+            Value::Static(_) => panic!("expected bound source"),
+        }
+    }
+
+    #[test]
+    fn from_path_accepts_value_string() {
+        let image = Image::from_path(Value::Bound(Binding::new(|| "static/logo.svg".to_string())));
+
+        match image.source {
+            Value::Bound(binding) => {
+                assert_eq!(binding.get(), MediaSource::Path(PathBuf::from("static/logo.svg")));
+            }
+            Value::Static(_) => panic!("expected bound source"),
+        }
+    }
+
+    #[test]
+    fn from_url_accepts_binding_string() {
+        let image = Image::from_url(Binding::new(|| "https://example.com/logo.svg".to_string()));
+
+        match image.source {
+            Value::Bound(binding) => {
+                assert_eq!(
+                    binding.get(),
+                    MediaSource::Url("https://example.com/logo.svg".to_string())
+                );
+            }
+            Value::Static(_) => panic!("expected bound source"),
         }
     }
 }
