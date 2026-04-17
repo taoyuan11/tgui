@@ -1,3 +1,4 @@
+use crate::foundation::binding::Binding;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::{
@@ -5,33 +6,84 @@ use crate::ui::layout::{
 };
 
 use super::common::{
-    ContainerKind, ContainerLayout, CursorStyle, InteractionHandlers, MediaEventHandlers, Point,
-    VisualStyle, WidgetId, WidgetKind,
+    ChildSource, ContainerKind, ContainerLayout, CursorStyle, InteractionHandlers,
+    MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::core::Element;
 
+trait IntoChildGroup<VM> {
+    fn into_elements(self) -> Vec<Element<VM>>;
+}
+
+impl<VM, T> IntoChildGroup<VM> for T
+where
+    T: Into<Element<VM>>,
+{
+    fn into_elements(self) -> Vec<Element<VM>> {
+        vec![self.into()]
+    }
+}
+
+impl<VM, T, const N: usize> IntoChildGroup<VM> for [T; N]
+where
+    T: Into<Element<VM>>,
+{
+    fn into_elements(self) -> Vec<Element<VM>> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
+impl<VM, T> IntoChildGroup<VM> for Vec<T>
+where
+    T: Into<Element<VM>>,
+{
+    fn into_elements(self) -> Vec<Element<VM>> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
 pub trait IntoChildren<VM> {
-    fn into_children(self) -> Vec<Element<VM>>;
+    #[allow(private_interfaces)]
+    fn into_child_source(self) -> ChildSource<VM>;
 }
 
 impl<VM, T> IntoChildren<VM> for T
 where
     T: Into<Element<VM>>,
 {
-    fn into_children(self) -> Vec<Element<VM>> {
-        vec![self.into()]
+    #[allow(private_interfaces)]
+    fn into_child_source(self) -> ChildSource<VM> {
+        ChildSource::Static(vec![self.into()])
     }
 }
 
-impl<VM, const N: usize> IntoChildren<VM> for [Element<VM>; N] {
-    fn into_children(self) -> Vec<Element<VM>> {
-        self.into_iter().collect()
+impl<VM, T, const N: usize> IntoChildren<VM> for [T; N]
+where
+    T: Into<Element<VM>>,
+{
+    #[allow(private_interfaces)]
+    fn into_child_source(self) -> ChildSource<VM> {
+        ChildSource::Static(self.into_elements())
     }
 }
 
-impl<VM> IntoChildren<VM> for Vec<Element<VM>> {
-    fn into_children(self) -> Vec<Element<VM>> {
-        self
+impl<VM, T> IntoChildren<VM> for Vec<T>
+where
+    T: Into<Element<VM>>,
+{
+    #[allow(private_interfaces)]
+    fn into_child_source(self) -> ChildSource<VM> {
+        ChildSource::Static(self.into_elements())
+    }
+}
+
+impl<VM, T> IntoChildren<VM> for Binding<T>
+where
+    T: IntoChildGroup<VM> + Send + Sync + 'static,
+{
+    #[allow(private_interfaces)]
+    fn into_child_source(self) -> ChildSource<VM> {
+        ChildSource::Dynamic(std::sync::Arc::new(move || self.get().into_elements()))
     }
 }
 
@@ -129,7 +181,7 @@ impl<VM> Container<VM> {
 
     pub fn child(mut self, child: impl IntoChildren<VM>) -> Self {
         if let WidgetKind::Container { children, .. } = &mut self.element.kind {
-            children.extend(child.into_children());
+            children.push(child.into_child_source());
         }
         self
     }
@@ -567,6 +619,28 @@ impl_layout_container!(Flex);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::animation::AnimationCoordinator;
+    use crate::foundation::binding::InvalidationSignal;
+    use crate::foundation::binding::ViewModelContext;
+    use crate::Text;
+
+    fn child_sources(container: &Container<()>) -> &Vec<ChildSource<()>> {
+        let WidgetKind::Container { children, .. } = &container.element.kind else {
+            panic!("expected container widget");
+        };
+        children
+    }
+
+    fn resolved_child_count(container: &Container<()>) -> usize {
+        child_sources(container)
+            .iter()
+            .map(|child| child.resolve().len())
+            .sum()
+    }
+
+    fn test_context() -> ViewModelContext {
+        ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
+    }
 
     #[test]
     fn container_overflow_defaults_to_hidden() {
@@ -644,8 +718,74 @@ mod tests {
     fn cursor_helper_sets_cursor_style() {
         let container = Container::<()>::new().cursor(CursorStyle::Pointer);
         assert_eq!(
-            container.element.interactions.cursor_style.map(|style| style.resolve()),
+            container
+                .element
+                .interactions
+                .cursor_style
+                .map(|style| style.resolve()),
             Some(CursorStyle::Pointer)
         );
+    }
+
+    #[test]
+    fn child_accepts_empty_array() {
+        let empty: [Element<()>; 0] = [];
+        let container = Container::<()>::new().child(empty);
+
+        assert_eq!(child_sources(&container).len(), 1);
+        assert_eq!(resolved_child_count(&container), 0);
+    }
+
+    #[test]
+    fn child_accepts_single_and_multiple_arrays() {
+        let single = Container::<()>::new().child([Element::from(Text::new("one"))]);
+        assert_eq!(child_sources(&single).len(), 1);
+        assert_eq!(resolved_child_count(&single), 1);
+
+        let multiple = Container::<()>::new().child([
+            Element::from(Text::new("one")),
+            Element::from(Text::new("two")),
+        ]);
+        assert_eq!(child_sources(&multiple).len(), 1);
+        assert_eq!(resolved_child_count(&multiple), 2);
+    }
+
+    #[test]
+    fn child_accepts_vec_groups() {
+        let container = Container::<()>::new().child(vec![
+            Element::from(Text::new("one")),
+            Element::from(Text::new("two")),
+        ]);
+
+        assert_eq!(child_sources(&container).len(), 1);
+        assert_eq!(resolved_child_count(&container), 2);
+    }
+
+    #[test]
+    fn child_accepts_binding_for_single_and_multiple_children() {
+        let context = test_context();
+        let enabled = context.observable(false);
+
+        let single = Container::<()>::new().child(enabled.binding().map(|value| {
+            if value {
+                Text::new("enabled")
+            } else {
+                Text::new("disabled")
+            }
+        }));
+        assert_eq!(resolved_child_count(&single), 1);
+        enabled.set(true);
+        assert_eq!(resolved_child_count(&single), 1);
+
+        let multiple = Container::<()>::new().child(enabled.binding().map(|value| {
+            if value {
+                vec![Text::new("a").into(), Text::new("b").into()]
+            } else {
+                Vec::<Element<()>>::new()
+            }
+        }));
+        assert_eq!(resolved_child_count(&multiple), 2);
+        enabled.set(false);
+        assert_eq!(resolved_child_count(&multiple), 0);
     }
 }

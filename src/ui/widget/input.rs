@@ -29,6 +29,7 @@ impl<VM> Input<VM> {
                     text,
                     placeholder: Text::new(String::new()),
                     on_change: None,
+                    disabled: Value::Static(false),
                 },
             },
         }
@@ -186,6 +187,13 @@ impl<VM> Input<VM> {
 
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.element.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    pub fn disable(mut self, disable: impl Into<Value<bool>>) -> Self {
+        if let WidgetKind::Input { disabled, .. } = &mut self.element.kind {
+            *disabled = disable.into();
+        }
         self
     }
 

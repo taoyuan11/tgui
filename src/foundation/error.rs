@@ -13,7 +13,7 @@ pub enum TguiError {
     Unsupported(String),
     TextRender(String),
     Media(String),
-    Icon(String)
+    Icon(String),
 }
 
 impl Display for TguiError {

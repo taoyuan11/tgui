@@ -70,22 +70,22 @@ mod text;
 mod ui;
 
 #[macro_export]
-/// Collects multiple widgets into a `Vec<Element<_>>`.
+/// Collects one or more widgets into a `Vec<Element<_>>`.
 ///
-/// This is mainly useful when an API expects a vector of children and you want
-/// to keep the call site compact.
+/// This is useful when a container child list mixes different widget types and
+/// you want a compact call site.
 ///
 /// ```rust
-/// use tgui::{children, Column, Text};
+/// use tgui::{el, Column, Text};
 ///
-/// let _column = Column::<()>::new().child(children![
+/// let _column = Column::<()>::new().child(el![
 ///     Text::new("First"),
 ///     Text::new("Second"),
 /// ]);
 /// ```
-macro_rules! children {
+macro_rules! el {
     ($($child:expr),* $(,)?) => {
-        ::std::vec![$(::core::convert::Into::into($child)),*]
+        ::std::vec![$($crate::Element::from($child)),*]
     };
 }
 
@@ -104,9 +104,7 @@ pub use foundation::color::Color;
 pub use foundation::error::TguiError;
 pub use foundation::event::InputTrigger;
 pub use foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
-pub use media::{
-    ContentFit, MediaSource, VideoControllerHandle, VideoPlaybackSnapshot, VideoPlaybackStatus,
-};
+pub use media::{ContentFit, MediaSource};
 pub use text::font::FontWeight;
 pub use ui::layout::{
     Align, Axis, Insets, Justify, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap,
@@ -114,5 +112,5 @@ pub use ui::layout::{
 pub use ui::theme::{Theme, ThemeMode};
 pub use ui::widget::{
     rect, Button, Column, Container, CursorStyle, Element, Flex, Grid, Image, Input, Point, Rect,
-    Row, Stack, Text, Video, WidgetCommand, WidgetEventResult, WidgetId, WidgetTree,
+    Row, Stack, Text, WidgetCommand, WidgetEventResult, WidgetId, WidgetTree,
 };

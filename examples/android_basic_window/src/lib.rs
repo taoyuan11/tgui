@@ -1,7 +1,7 @@
 #[cfg(target_os = "android")]
 use tgui::{
-    children, Align, Application, Binding, Button, Color, Column, Command, Element, Insets,
-    Justify, Observable, Stack, Text, TguiError, Theme, ThemeMode, ViewModelContext,
+    el, Align, Application, Binding, Button, Color, Column, Command, Element, Insets, Justify,
+    Observable, Stack, Text, TguiError, Theme, ThemeMode, ViewModelContext,
 };
 #[cfg(target_os = "android")]
 use tgui::platform::android::activity::AndroidApp;
@@ -74,10 +74,10 @@ impl AndroidApplication {
                     .gap(12.0)
                     .background(Color::hex(0x0099FF))
                     .border_radius(28.0)
-                    .child(children![
+                    .child(el![
                         title,
                         text,
-                        button
+                        button,
                     ])
             )
             .into()

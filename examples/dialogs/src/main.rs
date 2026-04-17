@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use tgui::{
-    children, Application, Button, Column, Command, DialogError, Element, FileDialogOptions,
+    Application, Button, Column, Command, DialogError, Element, FileDialogOptions,
     MessageDialogButtons, MessageDialogLevel, MessageDialogOptions, MessageDialogResult,
-    Observable, Text, ValueCommand, ViewModelContext,
+    Observable, Text, ValueCommand, ViewModelContext, el,
 };
 
 struct App {
@@ -48,7 +48,8 @@ impl App {
                 .level(MessageDialogLevel::Warning)
                 .buttons(MessageDialogButtons::YesNo),
         );
-        self.message_status.set(Self::describe_message_result(result));
+        self.message_status
+            .set(Self::describe_message_result(result));
     }
 
     fn show_message_async(ctx: &tgui::CommandContext<Self>) {
@@ -71,12 +72,11 @@ impl App {
             .set(format!("异步结果: {}", Self::describe_file_result(result)));
     }
 
-    fn apply_async_message_result(
-        &mut self,
-        result: Result<MessageDialogResult, DialogError>,
-    ) {
-        self.message_status
-            .set(format!("异步结果: {}", Self::describe_message_result(result)));
+    fn apply_async_message_result(&mut self, result: Result<MessageDialogResult, DialogError>) {
+        self.message_status.set(format!(
+            "异步结果: {}",
+            Self::describe_message_result(result)
+        ));
     }
 
     fn describe_file_result(result: Result<Option<PathBuf>, DialogError>) -> String {
@@ -95,9 +95,9 @@ impl App {
     }
 
     fn view(&self) -> Element<Self> {
-        let open_sync = Button::new(Text::new("同步文件选择")).on_click(
-            Command::new_with_context(|app: &mut App, ctx| app.open_file_sync(ctx)),
-        );
+        let open_sync = Button::new(Text::new("同步文件选择")).on_click(Command::new_with_context(
+            |app: &mut App, ctx| app.open_file_sync(ctx),
+        ));
 
         let open_async = Button::new(Text::new("异步文件选择")).on_click(
             Command::new_with_context(|_: &mut App, ctx| Self::open_file_async(ctx)),
@@ -120,7 +120,7 @@ impl App {
 
         Column::new()
             .fill_size()
-            .child(children![
+            .child(el![
                 open_sync,
                 open_async,
                 message_sync,

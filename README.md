@@ -38,7 +38,6 @@ This project is under active development.
   - `Button`
   - `Input`
   - `Image`
-  - `Video`
   - `Container`
   - `Row`
   - `Column`
@@ -50,8 +49,6 @@ This project is under active development.
 - Text shaping and rasterization powered by `cosmic-text`
 - Media loading:
   - `Image` supports local files plus `http/https` sources on all current targets
-  - `Video` supports local files plus `http/https` sources on desktop behind the `video-ffmpeg` feature
-  - `VideoControllerHandle` exposes play, pause, resume, replay, seek, volume, mute, and bindable playback state
 - Public visual styling APIs:
   - `background(...)`
   - `border(...)`
@@ -134,17 +131,6 @@ For OHOS targets, enable the `ohos` feature:
 [dependencies]
 tgui = { version = "0.1.2", features = ["ohos"] }
 ```
-
-To enable desktop video support:
-
-```toml
-[dependencies]
-tgui = { version = "0.1.2", features = ["video-ffmpeg"] }
-```
-
-`video-ffmpeg` depends on FFmpeg development libraries being visible to your
-toolchain. On Windows this usually means installing FFmpeg for your compiler
-environment and making the headers and libraries discoverable before building.
 
 If you package an OHOS app with `cargo ohos-app`, the packager can now detect
 `tgui-winit-ohos` directly, so a separate `winit-ohos` shim dependency is no longer required.
@@ -229,7 +215,7 @@ fn main() -> Result<(), tgui::TguiError> {
 ### Media Widgets
 
 ```rust
-use tgui::{Application, Column, Command, ContentFit, Image, Insets, ValueCommand, Video};
+use tgui::{Application, Column, Command, ContentFit, Image, Insets, ValueCommand};
 
 fn main() -> Result<(), tgui::TguiError> {
     Application::new()
@@ -242,17 +228,9 @@ fn main() -> Result<(), tgui::TguiError> {
                     Image::from_url("https://example.com/cover.jpg")
                         .height(220.0)
                         .fill_width()
-                        .fit(ContentFit::Cover),
-                )
-                .child(
-                    Video::from_path("./assets/demo.mp4")
-                        .height(280.0)
-                        .fill_width()
-                        .fit(ContentFit::Contain)
-                        .aspect_ratio(16.0 / 9.0)
-                        .autoplay(true)
-                        .on_loading(Command::new(|_| println!("video loading")))
-                        .on_success(Command::new(|_| println!("video ready")))
+                        .fit(ContentFit::Cover)
+                        .on_loading(Command::new(|_| println!("image loading")))
+                        .on_success(Command::new(|_| println!("image ready")))
                         .on_error(ValueCommand::new(|_, error| eprintln!("{error}"))),
                 )
                 .into()
@@ -262,60 +240,8 @@ fn main() -> Result<(), tgui::TguiError> {
 ```
 
 When you want layout to stay stable before media finishes loading, set an
-explicit size or `aspect_ratio(...)`. `Image` and `Video` both expose
+explicit size or `aspect_ratio(...)`. `Image` exposes
 `on_loading(...)`, `on_success(...)`, and `on_error(...)`.
-
-For interactive playback controls, create a controller from the view-model context:
-
-```rust
-use tgui::{Application, Button, Column, Command, Text, Video, ViewModelContext};
-
-struct AppVm {
-    controller: tgui::VideoControllerHandle,
-}
-
-impl AppVm {
-    fn new(ctx: &ViewModelContext) -> Self {
-        Self {
-            controller: ctx.video_controller(),
-        }
-    }
-
-    fn play(&mut self) {
-        self.controller.play();
-    }
-
-    fn pause(&mut self) {
-        self.controller.pause();
-    }
-
-    fn view(&self) -> tgui::Element<Self> {
-        Column::new()
-            .child(Button::new(Text::new("Play")).on_click(Command::new(Self::play)))
-            .child(Button::new(Text::new("Pause")).on_click(Command::new(Self::pause)))
-            .child(Text::new(
-                self.controller
-                    .progress_binding()
-                    .map(|value| format!("Progress: {:.0}%", value * 100.0)),
-            ))
-            .child(
-                Video::from_path("./assets/demo.mp4")
-                    .controller(self.controller.clone())
-                    .on_end(Command::new(|_| println!("video ended"))),
-            )
-            .into()
-    }
-}
-
-fn main() -> Result<(), tgui::TguiError> {
-    Application::new()
-        .with_view_model(AppVm::new)
-        .root_view(AppVm::view)
-        .run()
-}
-```
-
-Use controller bindings for progress, duration, and status display instead of per-frame callbacks.
 
 ### Desktop Multi-Window
 
@@ -874,7 +800,6 @@ Available examples in this repository:
 - `layout_theme_showcase`
 - `widgets_showcase`
 - `media_showcase`
-- `video_controller`
 - `multi_window`
 - `android_basic_window`
 - `ohos_basic_window`
@@ -896,7 +821,6 @@ cargo run --manifest-path examples/scroll/Cargo.toml
 cargo run --manifest-path examples/layout_theme_showcase/Cargo.toml
 cargo run --manifest-path examples/widgets_showcase/Cargo.toml
 cargo run --manifest-path examples/media_showcase/Cargo.toml
-cargo run --manifest-path examples/video_controller/Cargo.toml
 cargo run --manifest-path examples/multi_window/Cargo.toml
 ```
 

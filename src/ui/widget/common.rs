@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::animation::{AnimationEngine, AnimationKey, WidgetProperty};
-use crate::media::{TextureFrame, VideoPlaybackStatus};
+use crate::media::TextureFrame;
 use taffy::NodeId as TaffyNodeId;
 
 use crate::foundation::color::Color;
@@ -11,8 +11,8 @@ use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
 use crate::ui::layout::{Align, Axis, Insets, Justify, Overflow, ScrollbarStyle, Value, Wrap};
 
+use super::image::Image;
 use super::text::Text;
-use super::{image::Image, video::Video};
 
 static NEXT_WIDGET_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -150,58 +150,17 @@ pub(crate) struct InteractionHandlers<VM> {
     pub cursor_style: Option<Value<CursorStyle>>,
 }
 
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum MediaEventPhase {
     Loading,
     Success,
     Error(String),
-    Play,
-    Pause,
-    Resume,
-    End,
-    Seek,
 }
-
-impl Clone for MediaEventPhase {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Loading => Self::Loading,
-            Self::Success => Self::Success,
-            Self::Error(error) => Self::Error(error.clone()),
-            Self::Play => Self::Play,
-            Self::Pause => Self::Pause,
-            Self::Resume => Self::Resume,
-            Self::End => Self::End,
-            Self::Seek => Self::Seek,
-        }
-    }
-}
-
-impl PartialEq for MediaEventPhase {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Loading, Self::Loading) | (Self::Success, Self::Success) => true,
-            (Self::Play, Self::Play)
-            | (Self::Pause, Self::Pause)
-            | (Self::Resume, Self::Resume)
-            | (Self::End, Self::End)
-            | (Self::Seek, Self::Seek) => true,
-            (Self::Error(left), Self::Error(right)) => left == right,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for MediaEventPhase {}
 
 pub(crate) struct MediaEventHandlers<VM> {
     pub on_loading: Option<Command<VM>>,
     pub on_success: Option<Command<VM>>,
     pub on_error: Option<ValueCommand<VM, String>>,
-    pub on_play: Option<Command<VM>>,
-    pub on_pause: Option<Command<VM>>,
-    pub on_resume: Option<Command<VM>>,
-    pub on_end: Option<Command<VM>>,
-    pub on_seek: Option<Command<VM>>,
 }
 
 impl<VM> Clone for MediaEventHandlers<VM> {
@@ -210,11 +169,6 @@ impl<VM> Clone for MediaEventHandlers<VM> {
             on_loading: self.on_loading.clone(),
             on_success: self.on_success.clone(),
             on_error: self.on_error.clone(),
-            on_play: self.on_play.clone(),
-            on_pause: self.on_pause.clone(),
-            on_resume: self.on_resume.clone(),
-            on_end: self.on_end.clone(),
-            on_seek: self.on_seek.clone(),
         }
     }
 }
@@ -225,25 +179,13 @@ impl<VM> Default for MediaEventHandlers<VM> {
             on_loading: None,
             on_success: None,
             on_error: None,
-            on_play: None,
-            on_pause: None,
-            on_resume: None,
-            on_end: None,
-            on_seek: None,
         }
     }
 }
 
 impl<VM> MediaEventHandlers<VM> {
     pub(crate) fn has_any(&self) -> bool {
-        self.on_loading.is_some()
-            || self.on_success.is_some()
-            || self.on_error.is_some()
-            || self.on_play.is_some()
-            || self.on_pause.is_some()
-            || self.on_resume.is_some()
-            || self.on_end.is_some()
-            || self.on_seek.is_some()
+        self.on_loading.is_some() || self.on_success.is_some() || self.on_error.is_some()
     }
 }
 
@@ -251,8 +193,6 @@ impl<VM> MediaEventHandlers<VM> {
 pub(crate) struct MediaEventState<VM> {
     pub widget_id: WidgetId,
     pub media_phase: Option<MediaEventPhase>,
-    pub video_status: Option<VideoPlaybackStatus>,
-    pub seek_generation: Option<u64>,
     pub handlers: MediaEventHandlers<VM>,
 }
 
@@ -471,10 +411,33 @@ impl ContainerLayout {
     }
 }
 
+pub(crate) enum ChildSource<VM> {
+    Static(Vec<super::core::Element<VM>>),
+    Dynamic(Arc<dyn Fn() -> Vec<super::core::Element<VM>> + Send + Sync>),
+}
+
+impl<VM> ChildSource<VM> {
+    pub(crate) fn resolve(&self) -> Vec<super::core::Element<VM>> {
+        match self {
+            Self::Static(children) => children.clone(),
+            Self::Dynamic(resolver) => resolver(),
+        }
+    }
+}
+
+impl<VM> Clone for ChildSource<VM> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Static(children) => Self::Static(children.clone()),
+            Self::Dynamic(resolver) => Self::Dynamic(resolver.clone()),
+        }
+    }
+}
+
 pub(crate) enum WidgetKind<VM> {
     Container {
         layout: ContainerLayout,
-        children: Vec<super::core::Element<VM>>,
+        children: Vec<ChildSource<VM>>,
     },
     Text {
         text: Text,
@@ -484,15 +447,44 @@ pub(crate) enum WidgetKind<VM> {
     },
     Button {
         label: Text,
+        disabled: Value<bool>,
     },
     Input {
         text: Text,
         placeholder: Text,
         on_change: Option<ValueCommand<VM, String>>,
+        disabled: Value<bool>,
     },
-    Video {
-        video: Video,
-    },
+}
+
+impl<VM> Clone for WidgetKind<VM> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Container { layout, children } => Self::Container {
+                layout: layout.clone(),
+                children: children.clone(),
+            },
+            Self::Text { text } => Self::Text { text: text.clone() },
+            Self::Image { image } => Self::Image {
+                image: image.clone(),
+            },
+            Self::Button { label, disabled } => Self::Button {
+                label: label.clone(),
+                disabled: disabled.clone(),
+            },
+            Self::Input {
+                text,
+                placeholder,
+                on_change,
+                disabled,
+            } => Self::Input {
+                text: text.clone(),
+                placeholder: placeholder.clone(),
+                on_change: on_change.clone(),
+                disabled: disabled.clone(),
+            },
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -502,7 +494,6 @@ pub(crate) enum MeasureContext {
     Image(Image),
     Button(Text),
     Input { text: Text, placeholder: Text },
-    Video { id: WidgetId, video: Video },
 }
 
 pub(crate) struct LayoutNode {

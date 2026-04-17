@@ -23,7 +23,6 @@ exclude = [
 default = []
 android = []
 ohos = []
-video-ffmpeg = ["dep:ffmpeg-next"]
 
 [dependencies]
 bytemuck = { version = "1.24", features = ["derive"] }
@@ -38,7 +37,6 @@ taffy = "0.10"
 unicode-segmentation = "1.12"
 winit-core = "0.31.0-beta.2"
 wgpu = { version = "29", features = ["wgsl"] }
-ffmpeg-next = { version = "8.1.0", features = ["static"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 arboard = "3.6"

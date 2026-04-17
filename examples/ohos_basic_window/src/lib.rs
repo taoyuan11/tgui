@@ -2,8 +2,8 @@
 use tgui::platform::ohos::export_ohos_winit_app;
 #[cfg(target_env = "ohos")]
 use tgui::{
-    children, Align, Application, Binding, Button, Color, Column, Command, Element, Insets,
-    Justify, Observable, Stack, Text, Theme, ThemeMode, ViewModelContext,
+    el, Align, Application, Binding, Button, Color, Column, Command, Element, Insets, Justify,
+    Observable, Stack, Text, Theme, ThemeMode, ViewModelContext,
 };
 #[cfg(target_env = "ohos")]
 use winit_core::application::ApplicationHandler;
@@ -66,11 +66,11 @@ impl OhosApplication {
                     .gap(12.0)
                     .background(Color::hex(0x1188DD))
                     .border_radius(28.0)
-                    .child(children![
+                    .child(el![
                         Text::new("当前主题 / Current Theme").font_size(28.0),
                         Text::new(self.current_theme.binding()),
                         Button::new(Text::new("toggle theme"))
-                            .on_click(Command::new(Self::toggle_theme))
+                            .on_click(Command::new(Self::toggle_theme)),
                     ]),
             )
             .into()

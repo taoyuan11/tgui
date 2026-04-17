@@ -25,7 +25,10 @@ impl<VM> Button<VM> {
                 interactions: InteractionHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
-                kind: WidgetKind::Button { label },
+                kind: WidgetKind::Button {
+                    label,
+                    disabled: Value::Static(false),
+                },
             },
         }
     }
@@ -153,6 +156,13 @@ impl<VM> Button<VM> {
 
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.element.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    pub fn disable(mut self, disable: impl Into<Value<bool>>) -> Self {
+        if let WidgetKind::Button { disabled, .. } = &mut self.element.kind {
+            *disabled = disable.into();
+        }
         self
     }
 

@@ -57,7 +57,7 @@ pub struct Application {
     close_children_with_main: bool,
     fonts: FontCatalog,
     theme: ThemeSelection,
-    window_icon: Option<&'static [u8]>
+    window_icon: Option<&'static [u8]>,
 }
 
 impl Application {
@@ -73,7 +73,7 @@ impl Application {
             close_children_with_main: true,
             fonts: FontCatalog::default(),
             theme: ThemeSelection::System,
-            window_icon: None
+            window_icon: None,
         }
     }
 
@@ -210,7 +210,7 @@ pub(crate) struct ApplicationConfig {
     pub(crate) close_children_with_main: bool,
     pub(crate) fonts: FontCatalog,
     pub(crate) theme: ThemeSelection,
-    pub(crate) window_icon: Option<&'static [u8]>
+    pub(crate) window_icon: Option<&'static [u8]>,
 }
 
 type TitleBinding<VM> = Arc<dyn Fn(&VM) -> Binding<String> + Send + Sync>;
