@@ -1,0 +1,7 @@
+[package]
+name = "video_surface"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tgui = { path = "../..", features = ["video"] }

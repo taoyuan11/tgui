@@ -4,25 +4,44 @@ use std::sync::{Arc, Mutex};
 use crate::animation::{
     AnimatedValue, AnimationControllerBuilder, AnimationCoordinator, Transition,
 };
+use crate::platform::backend::event_loop::EventLoopProxy;
 
 #[derive(Clone, Default)]
 pub(crate) struct InvalidationSignal {
     revision: Arc<AtomicU64>,
+    proxy: Arc<Mutex<Option<EventLoopProxy>>>,
 }
 
 impl InvalidationSignal {
     pub(crate) fn new() -> Self {
         Self {
             revision: Arc::new(AtomicU64::new(1)),
+            proxy: Arc::new(Mutex::new(None)),
         }
     }
 
     pub(crate) fn mark_dirty(&self) {
         self.revision.fetch_add(1, Ordering::SeqCst);
+        if let Some(proxy) = self
+            .proxy
+            .lock()
+            .expect("invalidation proxy lock poisoned")
+            .as_ref()
+            .cloned()
+        {
+            proxy.wake_up();
+        }
     }
 
     pub(crate) fn revision(&self) -> u64 {
         self.revision.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn set_proxy(&self, proxy: EventLoopProxy) {
+        *self
+            .proxy
+            .lock()
+            .expect("invalidation proxy lock poisoned") = Some(proxy);
     }
 }
 

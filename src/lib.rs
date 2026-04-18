@@ -68,6 +68,8 @@ mod rendering;
 mod runtime;
 mod text;
 mod ui;
+#[cfg(feature = "video")]
+pub mod video;
 
 #[macro_export]
 /// Collects one or more widgets into a `Vec<Element<_>>`.
@@ -113,4 +115,8 @@ pub use ui::theme::{Theme, ThemeMode};
 pub use ui::widget::{
     rect, Button, Column, Container, CursorStyle, Element, Flex, Grid, Image, Input, Point, Rect,
     Row, Stack, Text, WidgetCommand, WidgetEventResult, WidgetId, WidgetTree,
+};
+#[cfg(feature = "video")]
+pub use video::{
+    PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
 };

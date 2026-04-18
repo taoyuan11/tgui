@@ -1,5 +1,5 @@
-use crate::foundation::color::Color;
 use crate::foundation::binding::Binding;
+use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{ContentFit, MediaBytes, MediaSource};
 use crate::ui::layout::{Insets, LayoutStyle, Value};
@@ -355,7 +355,10 @@ mod tests {
 
         match image.source {
             Value::Bound(binding) => {
-                assert_eq!(binding.get(), MediaSource::Path(PathBuf::from("static/logo.svg")));
+                assert_eq!(
+                    binding.get(),
+                    MediaSource::Path(PathBuf::from("static/logo.svg"))
+                );
             }
             Value::Static(_) => panic!("expected bound source"),
         }
@@ -367,7 +370,10 @@ mod tests {
 
         match image.source {
             Value::Bound(binding) => {
-                assert_eq!(binding.get(), MediaSource::Path(PathBuf::from("static/logo.svg")));
+                assert_eq!(
+                    binding.get(),
+                    MediaSource::Path(PathBuf::from("static/logo.svg"))
+                );
             }
             Value::Static(_) => panic!("expected bound source"),
         }

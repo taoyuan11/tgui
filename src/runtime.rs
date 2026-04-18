@@ -787,6 +787,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn set_dialog_proxy(&self, event_loop: &dyn ActiveEventLoop) {
         self.dialog_dispatcher.set_proxy(event_loop.create_proxy());
+        self.invalidation.set_proxy(event_loop.create_proxy());
     }
 
     fn execute_command(&mut self, command: &Command<VM>) {
@@ -2505,6 +2506,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
 
     fn set_dialog_proxy(&self, event_loop: &dyn ActiveEventLoop) {
         self.dialog_dispatcher.set_proxy(event_loop.create_proxy());
+        self.invalidation.set_proxy(event_loop.create_proxy());
     }
 
     fn drain_dialog_completions(&mut self) {

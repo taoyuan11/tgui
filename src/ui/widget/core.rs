@@ -18,6 +18,8 @@ use crate::media::{
 use crate::text::font::{FontManager, TextFontRequest};
 use crate::ui::layout::{Align, Axis, Insets, Justify, LayoutStyle, Overflow, Value, Wrap};
 use crate::ui::theme::Theme;
+#[cfg(feature = "video")]
+use crate::video::VideoSurface as PublicVideoSurface;
 
 use super::common::{
     ComputedScene, ContainerKind, ContainerLayout, HitInteraction, HitRegion, InputEditState,
@@ -74,6 +76,10 @@ enum ResolvedWidgetKind<VM> {
     },
     Image {
         image: super::image::Image,
+    },
+    #[cfg(feature = "video")]
+    VideoSurface {
+        video: PublicVideoSurface,
     },
     Button {
         label: Text,
@@ -185,6 +191,10 @@ impl<VM> Element<VM> {
             WidgetKind::Image { image } => ResolvedWidgetKind::Image {
                 image: image.clone(),
             },
+            #[cfg(feature = "video")]
+            WidgetKind::VideoSurface { video } => ResolvedWidgetKind::VideoSurface {
+                video: video.clone(),
+            },
             WidgetKind::Button { label, disabled } => ResolvedWidgetKind::Button {
                 label: label.clone(),
                 disabled: disabled.clone(),
@@ -220,6 +230,10 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Container { .. } => MeasureContext::None,
             ResolvedWidgetKind::Text { text } => MeasureContext::Text(text.clone()),
             ResolvedWidgetKind::Image { image } => MeasureContext::Image(image.clone()),
+            #[cfg(feature = "video")]
+            ResolvedWidgetKind::VideoSurface { video } => {
+                MeasureContext::VideoSurface(video.clone())
+            }
             ResolvedWidgetKind::Button { label, .. } => MeasureContext::Button(label.clone()),
             ResolvedWidgetKind::Input {
                 text, placeholder, ..
@@ -632,6 +646,32 @@ impl<VM> ResolvedElement<VM> {
                     "image",
                 );
             }
+            #[cfg(feature = "video")]
+            ResolvedWidgetKind::VideoSurface { video } => {
+                let loading_background = video
+                    .background
+                    .as_ref()
+                    .map(|background| {
+                        background.resolve_widget(
+                            context.animations,
+                            self.id,
+                            WidgetProperty::Background,
+                            context.now,
+                        )
+                    })
+                    .unwrap_or(Color::rgba(255, 255, 255, 0));
+                push_video_texture_or_placeholder(
+                    self.id,
+                    video,
+                    frame,
+                    background_frame,
+                    primitive_clip,
+                    opacity,
+                    loading_background,
+                    context,
+                    computed,
+                );
+            }
             ResolvedWidgetKind::Button { label, .. } => {
                 let padding = self.layout.padding.resolve_widget(
                     context.animations,
@@ -746,6 +786,21 @@ impl<VM> ResolvedElement<VM> {
                 }
                 let source = image.source.resolve();
                 let snapshot = media.image_snapshot(&source, None);
+                if let Some(phase) = media_event_phase(snapshot.loading, snapshot.error.as_deref())
+                {
+                    states.push(MediaEventState {
+                        widget_id: self.id,
+                        media_phase: Some(phase),
+                        handlers: self.media_events.clone(),
+                    });
+                }
+            }
+            #[cfg(feature = "video")]
+            ResolvedWidgetKind::VideoSurface { video } => {
+                if !self.media_events.has_any() {
+                    return;
+                }
+                let snapshot = video.controller.surface_snapshot();
                 if let Some(phase) = media_event_phase(snapshot.loading, snapshot.error.as_deref())
                 {
                     states.push(MediaEventState {
@@ -1164,6 +1219,15 @@ fn measure_node(
                 snapshot.intrinsic_size,
             )
         }
+        #[cfg(feature = "video")]
+        Some(MeasureContext::VideoSurface(video)) => {
+            let snapshot = video.controller.surface_snapshot();
+            measure_media_content(
+                known_dimensions,
+                video.aspect_ratio,
+                snapshot.intrinsic_size,
+            )
+        }
         Some(MeasureContext::Button(label)) => measure_text_content(label, font_manager, theme),
         Some(MeasureContext::Input { text, placeholder }) => {
             let text_size = measure_text_content(text, font_manager, theme);
@@ -1266,6 +1330,45 @@ fn push_media_texture_or_placeholder<VM>(
     );
 }
 
+#[cfg(feature = "video")]
+fn push_video_texture_or_placeholder<VM>(
+    widget_id: WidgetId,
+    video: &PublicVideoSurface,
+    frame: Rect,
+    content_frame: Rect,
+    clip_rect: Option<Rect>,
+    opacity: f32,
+    loading_background: Color,
+    context: &mut CollectContext<'_, '_>,
+    computed: &mut ComputedScene<VM>,
+) {
+    let snapshot = video.controller.surface_snapshot();
+    let target_frame = resolve_media_rect(content_frame, snapshot.intrinsic_size, video.fit);
+
+    if let Some(texture) = snapshot.texture.as_ref() {
+        computed.scene.textures.push(TexturePrimitive {
+            texture: Arc::clone(texture),
+            frame: target_frame,
+            clip_rect,
+        });
+        return;
+    }
+
+    push_media_placeholder(
+        frame,
+        content_frame,
+        clip_rect,
+        opacity,
+        context,
+        &mut computed.scene,
+        widget_id,
+        "video",
+        snapshot.loading,
+        snapshot.error.as_deref(),
+        loading_background,
+    );
+}
+
 fn push_media_placeholder(
     frame: Rect,
     content_frame: Rect,
@@ -1279,8 +1382,8 @@ fn push_media_placeholder(
     error: Option<&str>,
     loading_background: Color,
 ) {
-    let placeholder = media_loading_fill_color(loading, error, loading_background)
-        .with_alpha_factor(opacity);
+    let placeholder =
+        media_loading_fill_color(loading, error, loading_background).with_alpha_factor(opacity);
     if content_frame.width > 0.0 && content_frame.height > 0.0 {
         scene.overlay_shapes.push(RenderPrimitive {
             rect: content_frame,
@@ -1311,7 +1414,11 @@ fn push_media_placeholder(
     );
 }
 
-fn media_loading_fill_color(loading: bool, error: Option<&str>, loading_background: Color) -> Color {
+fn media_loading_fill_color(
+    loading: bool,
+    error: Option<&str>,
+    loading_background: Color,
+) -> Color {
     if loading {
         loading_background
     } else {
@@ -2035,8 +2142,8 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::animation::{AnimationCoordinator, AnimationEngine};
-    use crate::foundation::color::Color;
     use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
+    use crate::foundation::color::Color;
     use crate::foundation::view_model::Command;
     use crate::media::MediaManager;
     use crate::text::font::{FontCatalog, FontManager};
@@ -2046,6 +2153,10 @@ mod tests {
     use crate::ui::widget::{
         Element, Image, Input, Point, ScrollbarAxis, ScrollbarHandle, Stack, Text, WidgetTree,
     };
+    #[cfg(feature = "video")]
+    use crate::video::backend::{BackendSharedState, VideoBackend};
+    #[cfg(feature = "video")]
+    use crate::video::{PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSurface};
 
     #[test]
     fn centers_text_using_actual_render_height() {
@@ -2090,6 +2201,48 @@ mod tests {
 
     fn test_context() -> ViewModelContext {
         ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
+    }
+
+    #[cfg(feature = "video")]
+    fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoController {
+        struct StaticVideoBackend;
+
+        impl VideoBackend for StaticVideoBackend {
+            fn load(&self, _source: crate::video::VideoSource) -> Result<(), crate::TguiError> {
+                Ok(())
+            }
+
+            fn play(&self) {}
+            fn pause(&self) {}
+            fn seek(&self, _position: std::time::Duration) {}
+            fn set_volume(&self, _volume: f32) {}
+            fn set_muted(&self, _muted: bool) {}
+            fn current_frame(&self) -> Option<std::sync::Arc<crate::media::TextureFrame>> {
+                None
+            }
+            fn shutdown(&self) {}
+        }
+
+        let ctx = test_context();
+        let shared = BackendSharedState {
+            playback_state: ctx.observable(PlaybackState::Ready),
+            metrics: ctx.observable(VideoMetrics {
+                duration: Some(std::time::Duration::from_secs(30)),
+                position: std::time::Duration::ZERO,
+                buffered: Some(std::time::Duration::from_secs(30)),
+                video_width: snapshot.intrinsic_size.width as u32,
+                video_height: snapshot.intrinsic_size.height as u32,
+            }),
+            volume: ctx.observable(1.0),
+            muted: ctx.observable(false),
+            video_size: ctx.observable(VideoSize {
+                width: snapshot.intrinsic_size.width as u32,
+                height: snapshot.intrinsic_size.height as u32,
+            }),
+            error: ctx.observable(snapshot.error.clone()),
+            surface: ctx.observable(snapshot),
+        };
+        VideoController::from_parts(shared, std::sync::Arc::new(StaticVideoBackend))
     }
 
     #[test]
@@ -2473,6 +2626,86 @@ mod tests {
         assert_eq!(media_tree.media_event_states(&media).len(), 1);
         show_media.set(false);
         assert_eq!(media_tree.media_event_states(&media).len(), 0);
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn video_surface_renders_placeholder_without_frame() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let controller = test_video_controller(crate::video::VideoSurfaceSnapshot {
+            intrinsic_size: crate::media::IntrinsicSize::from_pixels(16, 9),
+            texture: None,
+            loading: true,
+            error: None,
+        });
+        let tree: WidgetTree<()> = WidgetTree::new(VideoSurface::new(controller).size(160.0, 90.0));
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 90.0),
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered.primitives.textures.is_empty());
+        assert!(rendered
+            .primitives
+            .texts
+            .iter()
+            .any(|text| text.content.contains("loading video")));
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn video_surface_renders_texture_when_frame_exists() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let texture = std::sync::Arc::new(crate::media::TextureFrame::new(
+            32,
+            18,
+            vec![255; 32 * 18 * 4],
+        ));
+        let controller = test_video_controller(crate::video::VideoSurfaceSnapshot {
+            intrinsic_size: crate::media::IntrinsicSize::from_pixels(32, 18),
+            texture: Some(texture),
+            loading: false,
+            error: None,
+        });
+        let tree: WidgetTree<()> = WidgetTree::new(
+            VideoSurface::new(controller)
+                .width(160.0)
+                .aspect_ratio(32.0 / 18.0),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 90.0),
+            None,
+            None,
+            false,
+        );
+
+        assert_eq!(rendered.primitives.textures.len(), 1);
+        assert_eq!(rendered.primitives.textures[0].frame.width, 160.0);
+        assert_eq!(rendered.primitives.textures[0].frame.height, 90.0);
     }
 
     #[test]

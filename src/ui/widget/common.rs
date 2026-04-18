@@ -10,6 +10,8 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
 use crate::ui::layout::{Align, Axis, Insets, Justify, Overflow, ScrollbarStyle, Value, Wrap};
+#[cfg(feature = "video")]
+use crate::video::VideoSurface;
 
 use super::image::Image;
 use super::text::Text;
@@ -445,6 +447,10 @@ pub(crate) enum WidgetKind<VM> {
     Image {
         image: Image,
     },
+    #[cfg(feature = "video")]
+    VideoSurface {
+        video: VideoSurface,
+    },
     Button {
         label: Text,
         disabled: Value<bool>,
@@ -467,6 +473,10 @@ impl<VM> Clone for WidgetKind<VM> {
             Self::Text { text } => Self::Text { text: text.clone() },
             Self::Image { image } => Self::Image {
                 image: image.clone(),
+            },
+            #[cfg(feature = "video")]
+            Self::VideoSurface { video } => Self::VideoSurface {
+                video: video.clone(),
             },
             Self::Button { label, disabled } => Self::Button {
                 label: label.clone(),
@@ -492,8 +502,13 @@ pub(crate) enum MeasureContext {
     None,
     Text(Text),
     Image(Image),
+    #[cfg(feature = "video")]
+    VideoSurface(VideoSurface),
     Button(Text),
-    Input { text: Text, placeholder: Text },
+    Input {
+        text: Text,
+        placeholder: Text,
+    },
 }
 
 pub(crate) struct LayoutNode {

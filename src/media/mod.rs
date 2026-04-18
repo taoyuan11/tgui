@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use reqwest::Url;
 use reqwest::header::CONTENT_TYPE;
+use reqwest::Url;
 use resvg::{self, tiny_skia, usvg};
 use usvg_remote_resolvers::HrefStringResolver;
 
@@ -497,17 +497,9 @@ struct SvgRasterEntry {
 type ExternalErrorSlot = Arc<Mutex<Option<String>>>;
 
 enum LoadedSource<'a> {
-    File {
-        bytes: Cow<'a, [u8]>,
-        path: PathBuf,
-    },
-    Url {
-        bytes: Cow<'a, [u8]>,
-        url: Url,
-    },
-    Embedded {
-        bytes: Cow<'a, [u8]>,
-    },
+    File { bytes: Cow<'a, [u8]>, path: PathBuf },
+    Url { bytes: Cow<'a, [u8]>, url: Url },
+    Embedded { bytes: Cow<'a, [u8]> },
 }
 
 impl<'a> LoadedSource<'a> {
@@ -639,9 +631,7 @@ fn load_media_source(source: &MediaSource) -> Result<LoadedSource<'_>, TguiError
                 .bytes()
                 .map(|bytes| bytes.to_vec())
                 .map_err(|error| {
-                    TguiError::Media(format!(
-                        "failed to read image body {parsed_url}: {error}"
-                    ))
+                    TguiError::Media(format!("failed to read image body {parsed_url}: {error}"))
                 })?;
             Ok(LoadedSource::Url {
                 bytes: Cow::Owned(bytes),
@@ -943,9 +933,7 @@ pub(crate) fn media_placeholder_label(kind: &str, loading: bool, error: Option<&
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DocumentContent, MediaManager, MediaSource, RasterRequest, load_media_document,
-    };
+    use super::{load_media_document, DocumentContent, MediaManager, MediaSource, RasterRequest};
     use crate::foundation::binding::InvalidationSignal;
     use std::collections::HashMap;
     use std::fs;
@@ -957,9 +945,9 @@ mod tests {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     const ONE_BY_ONE_GIF: &[u8] = &[
-        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
-        0x00, 0x02, 0x01, 0x4C, 0x00, 0x3B,
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0xFF, 0xFF, 0xFF, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02,
+        0x01, 0x4C, 0x00, 0x3B,
     ];
     const SIMPLE_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20"><rect width="10" height="20" fill="#22c55e"/></svg>"##;
 
@@ -1071,8 +1059,9 @@ mod tests {
             ),
         ]));
 
-        let document = load_media_document(&MediaSource::url(format!("{}/doc.svg", server.base_url)))
-            .expect("SVG with relative HTTP image should decode");
+        let document =
+            load_media_document(&MediaSource::url(format!("{}/doc.svg", server.base_url)))
+                .expect("SVG with relative HTTP image should decode");
         assert_eq!(document.intrinsic_size.width, 8.0);
         assert_eq!(document.intrinsic_size.height, 8.0);
     }
@@ -1086,7 +1075,9 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(error.to_string().contains("unsupported SVG image reference"));
+        assert!(error
+            .to_string()
+            .contains("unsupported SVG image reference"));
     }
 
     #[test]
@@ -1099,11 +1090,14 @@ mod tests {
             ),
         )]));
 
-        let error = match load_media_document(&MediaSource::url(format!("{}/doc.svg", server.base_url))) {
-            Ok(_) => panic!("missing external image should fail the SVG"),
-            Err(error) => error,
-        };
-        assert!(error.to_string().contains("failed to fetch SVG image reference"));
+        let error =
+            match load_media_document(&MediaSource::url(format!("{}/doc.svg", server.base_url))) {
+                Ok(_) => panic!("missing external image should fail the SVG"),
+                Err(error) => error,
+            };
+        assert!(error
+            .to_string()
+            .contains("failed to fetch SVG image reference"));
     }
 
     #[test]
@@ -1138,7 +1132,7 @@ mod tests {
         source: &MediaSource,
         raster_request: Option<RasterRequest>,
     ) -> super::ImageSnapshot {
-        for _ in 0..50 {
+        for _ in 0..150 {
             let snapshot = media.image_snapshot(source, raster_request);
             if !snapshot.loading {
                 return snapshot;
