@@ -1936,7 +1936,7 @@ impl<VM> WidgetTree<VM> {
         Self { root: root.into() }
     }
 
-    fn compute_scene(
+    pub(crate) fn compute_scene(
         &self,
         font_manager: &FontManager,
         theme: &Theme,
@@ -2000,6 +2000,7 @@ impl<VM> WidgetTree<VM> {
         computed
     }
 
+    #[allow(dead_code)]
     pub(crate) fn render_output(
         &self,
         font_manager: &FontManager,
@@ -2027,14 +2028,10 @@ impl<VM> WidgetTree<VM> {
             focused_input_state,
             caret_visible,
         );
-        RenderedWidgetScene {
-            primitives: computed.scene,
-            scroll_regions: computed.scroll_regions,
-            ime_cursor_area: computed.ime_cursor_area,
-        }
+        computed.rendered()
     }
 
-    fn hit_path_from_computed(
+    pub(crate) fn hit_path_from_computed(
         computed: &ComputedScene<VM>,
         point: Point,
     ) -> Vec<HitInteraction<VM>> {
@@ -2063,6 +2060,7 @@ impl<VM> WidgetTree<VM> {
         path
     }
 
+    #[allow(dead_code)]
     pub(crate) fn hit_test(
         &self,
         font_manager: &FontManager,
@@ -2091,6 +2089,7 @@ impl<VM> WidgetTree<VM> {
         .pop()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn hit_path(
         &self,
         font_manager: &FontManager,

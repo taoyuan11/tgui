@@ -608,6 +608,7 @@ pub(crate) struct ScrollbarHandle {
     pub axis: ScrollbarAxis,
 }
 
+#[derive(Clone)]
 pub(crate) struct ComputedScene<VM> {
     pub scene: ScenePrimitives,
     pub hit_regions: Vec<HitRegion<VM>>,
@@ -622,6 +623,16 @@ impl<VM> Default for ComputedScene<VM> {
             hit_regions: Vec::new(),
             scroll_regions: Vec::new(),
             ime_cursor_area: None,
+        }
+    }
+}
+
+impl<VM> ComputedScene<VM> {
+    pub(crate) fn rendered(&self) -> RenderedWidgetScene {
+        RenderedWidgetScene {
+            primitives: self.scene.clone(),
+            scroll_regions: self.scroll_regions.clone(),
+            ime_cursor_area: self.ime_cursor_area,
         }
     }
 }

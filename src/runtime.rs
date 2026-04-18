@@ -36,8 +36,9 @@ use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::FontManager;
 use crate::ui::theme::{Theme, ThemeMode};
 use crate::ui::widget::{
-    HitInteraction, InputEditState, InputSnapshot, MediaEventPhase, MediaEventState, Point, Rect,
-    RenderedWidgetScene, ScenePrimitives, ScrollbarAxis, ScrollbarHandle, WidgetId, WidgetTree,
+    ComputedScene, HitInteraction, InputEditState, InputSnapshot, MediaEventPhase, MediaEventState,
+    Point, Rect, RenderedWidgetScene, ScenePrimitives, ScrollbarAxis, ScrollbarHandle, WidgetId,
+    WidgetTree,
 };
 use image::GenericImageView;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -564,7 +565,8 @@ pub struct BoundRuntimeHandler<VM> {
     focused_input: Option<WidgetId>,
     input_states: HashMap<WidgetId, InputEditState>,
     clipboard: ClipboardService,
-    cached_scene: Option<CachedScene>,
+    cached_scene: Option<CachedScene<VM>>,
+    cursor_icon: Option<CursorIcon>,
     scroll_states: HashMap<WidgetId, Point>,
     scroll_epoch: u64,
     media_event_states: HashMap<WidgetId, DispatchedMediaState>,
@@ -581,13 +583,15 @@ pub struct BoundRuntimeHandler<VM> {
     system_bar_style: Option<SystemBarStyle>,
 }
 
-struct CachedScene {
+struct CachedScene<VM> {
     viewport: Rect,
     focused_input: Option<WidgetId>,
     caret_visible: bool,
     animation_epoch: u64,
     scroll_epoch: u64,
-    rendered: RenderedWidgetScene,
+    hovered_scrollbar: Option<ScrollbarHandle>,
+    active_scrollbar: Option<ScrollbarHandle>,
+    computed: ComputedScene<VM>,
 }
 
 struct PendingClick<VM> {
@@ -754,6 +758,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             input_states: HashMap::new(),
             clipboard: ClipboardService::default(),
             cached_scene: None,
+            cursor_icon: None,
             scroll_states: HashMap::new(),
             scroll_epoch: 0,
             media_event_states: HashMap::new(),
@@ -987,50 +992,78 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
-    fn render_primitives(&mut self) -> RenderedWidgetScene {
+    fn scene_cache_matches(
+        &self,
+        cached: &CachedScene<VM>,
+        viewport: Rect,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+    ) -> bool {
+        cached.viewport == viewport
+            && cached.focused_input == self.focused_input
+            && cached.caret_visible == caret_visible
+            && cached.animation_epoch == self.animation_epoch
+            && cached.scroll_epoch == self.scroll_epoch
+            && cached.hovered_scrollbar == self.hovered_scrollbar
+            && cached.active_scrollbar == active_scrollbar
+    }
+
+    fn computed_scene(&mut self) -> &ComputedScene<VM> {
         let viewport = self.viewport_rect();
         let caret_visible = self.input_caret_visible(Instant::now());
+        let active_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
         let focused_input_state = self
             .focused_input
             .and_then(|id| self.focused_input_state(id))
             .cloned();
-        if let Some(cached) = self.cached_scene.as_ref() {
-            if cached.viewport == viewport
-                && cached.focused_input == self.focused_input
-                && cached.caret_visible == caret_visible
-                && cached.animation_epoch == self.animation_epoch
-                && cached.scroll_epoch == self.scroll_epoch
-            {
-                return cached.rendered.clone();
-            }
+
+        let cache_valid = self
+            .cached_scene
+            .as_ref()
+            .map(|cached| {
+                self.scene_cache_matches(cached, viewport, caret_visible, active_scrollbar)
+            })
+            .unwrap_or(false);
+
+        if !cache_valid {
+            let theme = self.animated_theme(Instant::now());
+            let computed = match self.widget_tree.as_ref() {
+                Some(tree) => tree.compute_scene(
+                    &self.font_manager,
+                    &theme,
+                    &self.media_manager,
+                    &mut self.animation_engine,
+                    self.hovered_scrollbar,
+                    active_scrollbar,
+                    &self.scroll_states,
+                    viewport,
+                    self.focused_input,
+                    focused_input_state.as_ref(),
+                    caret_visible,
+                ),
+                None => ComputedScene::default(),
+            };
+            self.cached_scene = Some(CachedScene {
+                viewport,
+                focused_input: self.focused_input,
+                caret_visible,
+                animation_epoch: self.animation_epoch,
+                scroll_epoch: self.scroll_epoch,
+                hovered_scrollbar: self.hovered_scrollbar,
+                active_scrollbar,
+                computed,
+            });
         }
 
-        let theme = self.animated_theme(Instant::now());
-        let rendered = match self.widget_tree.as_ref() {
-            Some(tree) => tree.render_output(
-                &self.font_manager,
-                &theme,
-                &self.media_manager,
-                &mut self.animation_engine,
-                self.hovered_scrollbar,
-                self.active_scrollbar_drag.map(|drag| drag.handle),
-                &self.scroll_states,
-                viewport,
-                self.focused_input,
-                focused_input_state.as_ref(),
-                caret_visible,
-            ),
-            None => RenderedWidgetScene::default(),
-        };
-        self.cached_scene = Some(CachedScene {
-            viewport,
-            focused_input: self.focused_input,
-            caret_visible,
-            animation_epoch: self.animation_epoch,
-            scroll_epoch: self.scroll_epoch,
-            rendered: rendered.clone(),
-        });
-        rendered
+        &self
+            .cached_scene
+            .as_ref()
+            .expect("computed scene cache should exist")
+            .computed
+    }
+
+    fn render_primitives(&mut self) -> RenderedWidgetScene {
+        self.computed_scene().rendered()
     }
 
     fn dispatch_media_events(&mut self) {
@@ -1725,69 +1758,54 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
-    fn hit_test(&mut self, viewport: Rect) -> Option<HitInteraction<VM>> {
-        self.widget_tree.as_ref()?.hit_test(
-            &self.font_manager,
-            &self.theme,
-            &self.media_manager,
-            &mut self.animation_engine,
-            self.hovered_scrollbar,
-            self.active_scrollbar_drag.map(|drag| drag.handle),
-            &self.scroll_states,
-            viewport,
-            self.cursor_position,
-            self.focused_input,
-        )
+    fn hit_test(&mut self, _viewport: Rect) -> Option<HitInteraction<VM>> {
+        let point = self.cursor_position?;
+        WidgetTree::hit_path_from_computed(self.computed_scene(), point).pop()
     }
 
-    fn hover_path(&mut self, viewport: Rect) -> Vec<HoveredWidget<VM>> {
-        self.widget_tree
-            .as_ref()
-            .map(|tree| {
-                tree.hit_path(
-                    &self.font_manager,
-                    &self.theme,
-                    &self.media_manager,
-                    &mut self.animation_engine,
-                    self.hovered_scrollbar,
-                    self.active_scrollbar_drag.map(|drag| drag.handle),
-                    &self.scroll_states,
-                    viewport,
-                    self.cursor_position,
-                    self.focused_input,
-                )
-                .into_iter()
-                .map(|interaction| match interaction {
-                    HitInteraction::Widget {
-                        id, interactions, ..
-                    } => HoveredWidget {
-                        widget_id: id,
-                        cursor_style: interactions.cursor_style.map(|c| c.resolve()),
-                        on_mouse_enter: interactions.on_mouse_enter,
-                        on_mouse_leave: interactions.on_mouse_leave,
-                        on_mouse_move: interactions.on_mouse_move,
-                    },
-                    HitInteraction::FocusInput {
-                        id, interactions, ..
-                    } => HoveredWidget {
-                        widget_id: id,
-                        cursor_style: interactions
-                            .cursor_style
-                            .map(|c| c.resolve())
-                            .or(Some(crate::ui::widget::CursorStyle::Text)),
-                        on_mouse_enter: interactions.on_mouse_enter,
-                        on_mouse_leave: interactions.on_mouse_leave,
-                        on_mouse_move: interactions.on_mouse_move,
-                    },
-                })
-                .collect()
+    fn hover_path(&mut self, _viewport: Rect) -> Vec<HoveredWidget<VM>> {
+        let Some(point) = self.cursor_position else {
+            return Vec::new();
+        };
+
+        WidgetTree::hit_path_from_computed(self.computed_scene(), point)
+            .into_iter()
+            .map(|interaction| match interaction {
+                HitInteraction::Widget {
+                    id, interactions, ..
+                } => HoveredWidget {
+                    widget_id: id,
+                    cursor_style: interactions.cursor_style.map(|c| c.resolve()),
+                    on_mouse_enter: interactions.on_mouse_enter,
+                    on_mouse_leave: interactions.on_mouse_leave,
+                    on_mouse_move: interactions.on_mouse_move,
+                },
+                HitInteraction::FocusInput {
+                    id, interactions, ..
+                } => HoveredWidget {
+                    widget_id: id,
+                    cursor_style: interactions
+                        .cursor_style
+                        .map(|c| c.resolve())
+                        .or(Some(crate::ui::widget::CursorStyle::Text)),
+                    on_mouse_enter: interactions.on_mouse_enter,
+                    on_mouse_leave: interactions.on_mouse_leave,
+                    on_mouse_move: interactions.on_mouse_move,
+                },
             })
-            .unwrap_or_default()
+            .collect()
     }
 
-    fn handle_hover(&mut self, viewport: Rect) {
+    fn handle_hover(&mut self, viewport: Rect) -> bool {
+        let revision_before = self.invalidation.revision();
         let cursor_position = self.cursor_position;
         let next_hovered = self.hover_path(viewport);
+        let hover_path_changed = self.hovered_widgets.len() != next_hovered.len()
+            || self
+                .hovered_widgets
+                .iter()
+                .zip(next_hovered.iter())
+                .any(|(previous, next)| previous.widget_id != next.widget_id);
         let mut prefix_len = 0usize;
         while prefix_len < self.hovered_widgets.len()
             && prefix_len < next_hovered.len()
@@ -1818,8 +1836,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         self.hovered_widgets = next_hovered;
-        self.sync_scrollbar_hover();
-        self.update_cursor_icon();
+        let scrollbar_changed = self.sync_scrollbar_hover();
+        let cursor_changed = self.update_cursor_icon();
+        hover_path_changed
+            || scrollbar_changed
+            || cursor_changed
+            || self.invalidation.revision() != revision_before
     }
 
     fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) -> bool {
@@ -1862,7 +1884,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         false
     }
 
-    fn sync_scrollbar_hover(&mut self) {
+    fn sync_scrollbar_hover(&mut self) -> bool {
         let next_hovered = if let Some(drag) = self.active_scrollbar_drag {
             Some(drag.handle)
         } else {
@@ -1872,7 +1894,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if self.hovered_scrollbar != next_hovered {
             self.hovered_scrollbar = next_hovered;
             self.invalidate_scene();
+            return true;
         }
+
+        false
     }
 
     fn scrollbar_thumb_hit(&mut self) -> Option<ScrollbarHandle> {
@@ -2011,23 +2036,29 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
-    fn update_cursor_icon(&self) {
-        if let Some(window) = self.window.as_ref() {
-            let cursor = if self.active_scrollbar_drag.is_some() {
-                Cursor::Icon(CursorIcon::Pointer)
-            } else if self.hovered_scrollbar.is_some() {
-                Cursor::Icon(CursorIcon::Pointer)
-            } else if let Some(cursor_style) = self
-                .hovered_widgets
-                .last()
-                .and_then(|hovered| hovered.cursor_style)
-            {
-                Cursor::Icon(cursor_icon(cursor_style))
-            } else {
-                Cursor::Icon(CursorIcon::Default)
-            };
-            window.set_cursor(cursor);
+    fn update_cursor_icon(&mut self) -> bool {
+        let next_icon = if self.active_scrollbar_drag.is_some() || self.hovered_scrollbar.is_some()
+        {
+            CursorIcon::Pointer
+        } else if let Some(cursor_style) = self
+            .hovered_widgets
+            .last()
+            .and_then(|hovered| hovered.cursor_style)
+        {
+            cursor_icon(cursor_style)
+        } else {
+            CursorIcon::Default
+        };
+
+        if self.cursor_icon == Some(next_icon) {
+            return false;
         }
+
+        self.cursor_icon = Some(next_icon);
+        if let Some(window) = self.window.as_ref() {
+            window.set_cursor(Cursor::Icon(next_icon));
+        }
+        true
     }
 
     fn set_scroll_offset(&mut self, widget_id: WidgetId, offset: Point) {
@@ -2289,19 +2320,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if Self::should_dispatch_widget_event(&event) {
             let viewport = self.viewport_rect();
             let previous_focus = self.focused_input;
+            let revision_before = self.invalidation.revision();
+            let mut needs_redraw = !matches!(event, WindowEvent::PointerMoved { .. });
 
             match &event {
                 WindowEvent::PointerMoved { .. } => {
                     if self.active_scrollbar_drag.is_some() {
-                        self.handle_scrollbar_drag();
-                        self.sync_scrollbar_hover();
-                        self.update_cursor_icon();
+                        needs_redraw |= self.handle_scrollbar_drag();
+                        needs_redraw |= self.sync_scrollbar_hover();
+                        needs_redraw |= self.update_cursor_icon();
                     } else {
-                        self.handle_hover(viewport);
+                        needs_redraw |= self.handle_hover(viewport);
                     }
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
-                    self.handle_mouse_wheel(*delta);
+                    needs_redraw |= self.handle_mouse_wheel(*delta);
                 }
                 WindowEvent::PointerButton {
                     state: ElementState::Pressed,
@@ -2314,7 +2347,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         if !self.begin_scrollbar_drag() {
                             self.handle_mouse_press(viewport, Instant::now());
                         } else {
-                            self.update_cursor_icon();
+                            needs_redraw = true;
+                            needs_redraw |= self.update_cursor_icon();
                         }
                     }
                 }
@@ -2326,10 +2360,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
             if self.focused_input != previous_focus {
                 self.invalidate_scene();
+                needs_redraw = true;
             }
 
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
+            if self.invalidation.revision() != revision_before {
+                needs_redraw = true;
+            }
+
+            if needs_redraw {
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
         }
 
@@ -2340,6 +2381,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .cloned()
         {
             self.execute_command(&window_command.command);
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
         }
 
         match event {
@@ -3362,7 +3406,72 @@ fn is_light_color(color: Color) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{next_grapheme_boundary, normalize_single_line_text, previous_grapheme_boundary};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use crate::animation::AnimationCoordinator;
+    use crate::application::{ApplicationConfig, ThemeSelection, WindowRole};
+    use crate::dialog::async_dialog_channel;
+    use crate::foundation::binding::{Binding, InvalidationSignal, ViewModelContext};
+    use crate::foundation::color::Color;
+    use crate::platform::dpi::LogicalSize;
+    use crate::text::font::FontCatalog;
+    use crate::ui::widget::{Column, CursorStyle, Point, Text, WidgetTree};
+    use std::time::Duration;
+
+    use super::{
+        next_grapheme_boundary, normalize_single_line_text, previous_grapheme_boundary,
+        BoundRuntimeHandler, WindowBindings,
+    };
+
+    #[cfg(feature = "video")]
+    use crate::media::TextureFrame;
+    #[cfg(feature = "video")]
+    use crate::video::backend::{BackendSharedState, VideoBackend};
+    #[cfg(feature = "video")]
+    use crate::video::{
+        PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
+        VideoSurfaceSnapshot,
+    };
+
+    #[derive(Default)]
+    struct TestVm;
+
+    fn test_config() -> ApplicationConfig {
+        ApplicationConfig {
+            title: "test".to_string(),
+            size: LogicalSize::new(200.0, 120.0),
+            clear_color: Color::BLACK,
+            clear_color_overridden: true,
+            close_children_with_main: true,
+            fonts: FontCatalog::default(),
+            theme: ThemeSelection::System,
+            window_icon: None,
+        }
+    }
+
+    fn test_handler(
+        widget_tree: Option<WidgetTree<TestVm>>,
+        invalidation: InvalidationSignal,
+    ) -> BoundRuntimeHandler<TestVm> {
+        let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
+        BoundRuntimeHandler::new(
+            "test".to_string(),
+            1,
+            WindowRole::Main,
+            test_config(),
+            Arc::new(Mutex::new(TestVm)),
+            WindowBindings::default(),
+            widget_tree,
+            Vec::new(),
+            invalidation,
+            AnimationCoordinator::default(),
+            dialog_dispatcher,
+            Some(dialog_receiver),
+            #[cfg(all(target_os = "android", feature = "android"))]
+            None,
+        )
+    }
 
     #[test]
     fn grapheme_navigation_keeps_emoji_cluster_intact() {
@@ -3380,5 +3489,86 @@ mod tests {
             normalize_single_line_text("hello\r\nworld\t!"),
             "hello  world!"
         );
+    }
+
+    #[test]
+    fn hover_path_reuses_cached_computed_scene() {
+        let invalidation = InvalidationSignal::new();
+        let resolve_count = Arc::new(AtomicUsize::new(0));
+        let child = {
+            let resolve_count = resolve_count.clone();
+            Binding::new(move || {
+                resolve_count.fetch_add(1, Ordering::SeqCst);
+                Text::new("hover").cursor(CursorStyle::Pointer)
+            })
+        };
+        let tree = WidgetTree::new(Column::new().child(child));
+        let mut handler = test_handler(Some(tree), invalidation);
+        handler.cursor_position = Some(Point { x: 10.0, y: 10.0 });
+
+        let viewport = handler.viewport_rect();
+        assert_eq!(handler.hover_path(viewport).len(), 1);
+        assert_eq!(resolve_count.load(Ordering::SeqCst), 1);
+
+        assert_eq!(handler.hover_path(viewport).len(), 1);
+        assert_eq!(resolve_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[cfg(feature = "video")]
+    struct MockVideoBackend;
+
+    #[cfg(feature = "video")]
+    impl VideoBackend for MockVideoBackend {
+        fn load(&self, _source: VideoSource) -> Result<(), crate::TguiError> {
+            Ok(())
+        }
+
+        fn play(&self) {}
+
+        fn pause(&self) {}
+
+        fn seek(&self, _position: Duration) {}
+
+        fn set_volume(&self, _volume: f32) {}
+
+        fn set_muted(&self, _muted: bool) {}
+
+        fn current_frame(&self) -> Option<Arc<TextureFrame>> {
+            None
+        }
+
+        fn shutdown(&self) {}
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn hover_path_keeps_video_surface_hit_testing_when_scene_is_cached() {
+        let invalidation = InvalidationSignal::new();
+        let animations = AnimationCoordinator::default();
+        let ctx = ViewModelContext::new(invalidation.clone(), animations.clone());
+        let shared = BackendSharedState {
+            playback_state: ctx.observable(PlaybackState::Ready),
+            metrics: ctx.observable(VideoMetrics::default()),
+            volume: ctx.observable(1.0),
+            muted: ctx.observable(false),
+            video_size: ctx.observable(VideoSize {
+                width: 160,
+                height: 90,
+            }),
+            error: ctx.observable(None),
+            surface: ctx.observable(VideoSurfaceSnapshot::default()),
+        };
+        let controller = VideoController::from_parts(shared, Arc::new(MockVideoBackend));
+        let tree = WidgetTree::new(
+            VideoSurface::new(controller)
+                .size(160.0, 90.0)
+                .cursor(CursorStyle::Pointer),
+        );
+        let mut handler = test_handler(Some(tree), invalidation);
+        handler.cursor_position = Some(Point { x: 10.0, y: 10.0 });
+
+        let viewport = handler.viewport_rect();
+        assert_eq!(handler.hover_path(viewport).len(), 1);
+        assert_eq!(handler.hover_path(viewport).len(), 1);
     }
 }

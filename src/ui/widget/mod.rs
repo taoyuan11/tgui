@@ -10,8 +10,8 @@ mod video;
 
 pub use button::Button;
 pub(crate) use common::{
-    CompositionState, HitInteraction, InputEditState, InputSnapshot, MediaEventPhase,
-    MediaEventState, RenderedWidgetScene, ScrollbarAxis, ScrollbarHandle,
+    CompositionState, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
+    MediaEventPhase, MediaEventState, RenderedWidgetScene, ScrollbarAxis, ScrollbarHandle,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,

@@ -38,10 +38,7 @@ impl InvalidationSignal {
     }
 
     pub(crate) fn set_proxy(&self, proxy: EventLoopProxy) {
-        *self
-            .proxy
-            .lock()
-            .expect("invalidation proxy lock poisoned") = Some(proxy);
+        *self.proxy.lock().expect("invalidation proxy lock poisoned") = Some(proxy);
     }
 }
 

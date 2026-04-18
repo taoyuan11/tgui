@@ -28,13 +28,14 @@ const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 // 本地文件模式下，视频队列的软上限。
 // 使用“时间”而不是“帧数”衡量，避免 60/120fps 视频下缓存变得过浅。
-const LOCAL_VIDEO_QUEUE_HIGH_WATER: Duration = Duration::from_secs(5);
+const LOCAL_VIDEO_QUEUE_HIGH_WATER: Duration = Duration::from_secs(3);
 // 本地文件模式下，视频队列的硬上限。
 // 达到后必须暂停 demux/解码，避免继续累积过多待显示帧。
-const LOCAL_VIDEO_QUEUE_HARD_WATER: Duration = Duration::from_secs(6);
+const LOCAL_VIDEO_QUEUE_HARD_WATER: Duration = Duration::from_secs(4);
 // 本地文件模式下，视频队列允许保留的最大帧数保险丝。
 // 这个值不是主要策略，只用于防止异常时间戳或损坏源导致无限堆帧。
-const LOCAL_VIDEO_MAX_FRAME_COUNT: usize = 120;
+const LOCAL_VIDEO_MAX_PACKET_COUNT: usize = 120;
+const LOCAL_READY_VIDEO_FRAME_COUNT: usize = 4;
 // 本地文件模式下，音频缓冲的软上限。
 // 正常播放时达到该值后，可暂缓继续读包，避免音频缓存过深。
 const LOCAL_AUDIO_QUEUE_HIGH_WATER: Duration = Duration::from_millis(1500);
@@ -50,7 +51,8 @@ const NETWORK_VIDEO_QUEUE_HIGH_WATER: Duration = Duration::from_secs(5);
 const NETWORK_VIDEO_QUEUE_HARD_WATER: Duration = Duration::from_secs(6);
 // 网络流模式下，视频队列允许保留的最大帧数保险丝。
 // 只做安全兜底，不参与正常的时间水位调度。
-const NETWORK_VIDEO_MAX_FRAME_COUNT: usize = 300;
+const NETWORK_VIDEO_MAX_PACKET_COUNT: usize = 300;
+const NETWORK_READY_VIDEO_FRAME_COUNT: usize = 8;
 // 网络流模式下，音频缓冲的软上限。
 // 设得更深，尽量减少网络短抖动引发的反复 Buffering。
 const NETWORK_AUDIO_QUEUE_HIGH_WATER: Duration = Duration::from_millis(4000);
@@ -69,9 +71,9 @@ const NETWORK_START_BUFFER_TARGET: Duration = Duration::from_millis(2500);
 const NETWORK_REBUFFER_TARGET: Duration = Duration::from_millis(2000);
 
 // 本地文件首次播放时，视频队列至少要领先当前播放位置这么久。
-const LOCAL_VIDEO_START_BUFFER_TARGET: Duration = Duration::from_secs(5);
+const LOCAL_VIDEO_START_BUFFER_TARGET: Duration = Duration::from_millis(1500);
 // 本地文件从 Buffering 恢复时，视频队列至少要领先当前播放位置这么久。
-const LOCAL_VIDEO_RESUME_BUFFER_TARGET: Duration = Duration::from_secs(5);
+const LOCAL_VIDEO_RESUME_BUFFER_TARGET: Duration = Duration::from_millis(800);
 // 网络流首次播放时，视频侧需要的最小前置缓存。
 const NETWORK_VIDEO_START_BUFFER_TARGET: Duration = Duration::from_secs(5);
 // 网络流从 Buffering 恢复时，视频侧需要的最小前置缓存。
@@ -435,7 +437,8 @@ enum ReceiveVideoOutcome {
 struct BufferingProfile {
     video_queue_high_water: Duration,
     video_queue_hard_water: Duration,
-    video_max_frame_count: usize,
+    video_max_packet_count: usize,
+    ready_video_frame_count: usize,
     audio_queue_high_water: Duration,
     audio_queue_hard_water: Duration,
     start_buffer_target: Duration,
@@ -448,7 +451,8 @@ struct BufferingProfile {
 const LOCAL_BUFFERING_PROFILE: BufferingProfile = BufferingProfile {
     video_queue_high_water: LOCAL_VIDEO_QUEUE_HIGH_WATER,
     video_queue_hard_water: LOCAL_VIDEO_QUEUE_HARD_WATER,
-    video_max_frame_count: LOCAL_VIDEO_MAX_FRAME_COUNT,
+    video_max_packet_count: LOCAL_VIDEO_MAX_PACKET_COUNT,
+    ready_video_frame_count: LOCAL_READY_VIDEO_FRAME_COUNT,
     audio_queue_high_water: LOCAL_AUDIO_QUEUE_HIGH_WATER,
     audio_queue_hard_water: LOCAL_AUDIO_QUEUE_HARD_WATER,
     start_buffer_target: LOCAL_START_BUFFER_TARGET,
@@ -461,7 +465,8 @@ const LOCAL_BUFFERING_PROFILE: BufferingProfile = BufferingProfile {
 const NETWORK_BUFFERING_PROFILE: BufferingProfile = BufferingProfile {
     video_queue_high_water: NETWORK_VIDEO_QUEUE_HIGH_WATER,
     video_queue_hard_water: NETWORK_VIDEO_QUEUE_HARD_WATER,
-    video_max_frame_count: NETWORK_VIDEO_MAX_FRAME_COUNT,
+    video_max_packet_count: NETWORK_VIDEO_MAX_PACKET_COUNT,
+    ready_video_frame_count: NETWORK_READY_VIDEO_FRAME_COUNT,
     audio_queue_high_water: NETWORK_AUDIO_QUEUE_HIGH_WATER,
     audio_queue_hard_water: NETWORK_AUDIO_QUEUE_HARD_WATER,
     start_buffer_target: NETWORK_START_BUFFER_TARGET,
@@ -470,6 +475,12 @@ const NETWORK_BUFFERING_PROFILE: BufferingProfile = BufferingProfile {
     video_resume_buffer_target: NETWORK_VIDEO_RESUME_BUFFER_TARGET,
     audio_starving_threshold: NETWORK_AUDIO_STARVING_THRESHOLD,
 };
+
+struct QueuedVideoPacket {
+    packet: ffmpeg::Packet,
+    position: Duration,
+    end_position: Duration,
+}
 
 struct QueuedVideoFrame {
     position: Duration,
@@ -492,7 +503,8 @@ struct PlaybackSession {
     audio_time_base: Option<ffmpeg::Rational>,
     audio_output: Option<AudioOutput>,
     latest_frame: Arc<Mutex<Option<Arc<TextureFrame>>>>,
-    pending_video_frames: VecDeque<QueuedVideoFrame>,
+    pending_video_packets: VecDeque<QueuedVideoPacket>,
+    ready_video_frames: VecDeque<QueuedVideoFrame>,
     buffering_profile: BufferingProfile,
     paused_position: Duration,
     last_presented_position: Duration,
@@ -556,8 +568,8 @@ impl PlaybackSession {
         });
 
         let duration = stream_duration(video_stream.duration(), video_time_base);
-        let video_frame_duration = stream_frame_duration(&video_stream)
-            .unwrap_or(Duration::from_millis(33));
+        let video_frame_duration =
+            stream_frame_duration(&video_stream).unwrap_or(Duration::from_millis(33));
         let audio_stream = input.streams().best(media::Type::Audio);
         let (audio_stream_index, audio_decoder, audio_time_base, resampler, audio_output) =
             if let Some(audio_stream) = audio_stream {
@@ -621,7 +633,8 @@ impl PlaybackSession {
             audio_time_base,
             audio_output,
             latest_frame: latest_frame.clone(),
-            pending_video_frames: VecDeque::new(),
+            pending_video_packets: VecDeque::new(),
+            ready_video_frames: VecDeque::new(),
             buffering_profile,
             paused_position: start_position,
             last_presented_position: start_position,
@@ -658,11 +671,13 @@ impl PlaybackSession {
     fn update_buffered_metrics(&self, shared: &BackendSharedState) {
         let current = self.playback_position();
 
-        let audio_buffer_end = self.audio_output.as_ref()
+        let audio_buffer_end = self
+            .audio_output
+            .as_ref()
             .map(|output| current.saturating_add(output.buffered_duration()));
 
-        let video_buffer_end = self.pending_video_frames.back()
-            .map(|frame| frame.end_position);
+        let video_buffer_end =
+            furthest_video_buffer_end(&self.ready_video_frames, &self.pending_video_packets);
 
         let buffered = match (audio_buffer_end, video_buffer_end) {
             (Some(a), Some(v)) => Some(a.min(v)),
@@ -683,38 +698,155 @@ impl PlaybackSession {
         let audio_soft_full = self
             .audio_output
             .as_ref()
-            .map(|output| output.buffered_duration() >= self.buffering_profile.audio_queue_high_water)
+            .map(|output| {
+                output.buffered_duration() >= self.buffering_profile.audio_queue_high_water
+            })
             .unwrap_or(false);
 
         let audio_hard_full = self
             .audio_output
             .as_ref()
-            .map(|output| output.buffered_duration() >= self.buffering_profile.audio_queue_hard_water)
+            .map(|output| {
+                output.buffered_duration() >= self.buffering_profile.audio_queue_hard_water
+            })
             .unwrap_or(false);
 
         let video_buffered = self.video_buffered_duration();
         let video_soft_full = video_buffered >= self.buffering_profile.video_queue_high_water;
         let video_hard_full = video_buffered >= self.buffering_profile.video_queue_hard_water
-            || self.pending_video_frames.len() >= self.buffering_profile.video_max_frame_count;
+            || self.pending_video_packets.len() >= self.buffering_profile.video_max_packet_count;
 
         match shared.playback_state.get() {
             PlaybackState::Buffering => {
                 // Buffering 期间不要被软阈值卡住
                 audio_hard_full && video_hard_full
             }
-            _ => {
-                should_throttle_demux(
-                    audio_soft_full,
-                    audio_hard_full,
-                    video_soft_full,
-                    video_hard_full,
-                )
+            _ => should_throttle_demux(
+                audio_soft_full,
+                audio_hard_full,
+                video_soft_full,
+                video_hard_full,
+            ),
+        }
+    }
+
+    fn queued_video_tail_position(&self) -> Option<Duration> {
+        self.pending_video_packets
+            .back()
+            .map(|packet| packet.end_position)
+            .or_else(|| {
+                self.ready_video_frames
+                    .back()
+                    .map(|frame| frame.end_position)
+            })
+            .or(Some(self.last_presented_position))
+    }
+
+    fn decoded_video_tail_position(&self) -> Option<Duration> {
+        self.ready_video_frames
+            .back()
+            .map(|frame| frame.end_position)
+            .or(Some(self.last_presented_position))
+    }
+
+    fn queue_video_packet(&mut self, packet: ffmpeg::Packet) {
+        let position = packet
+            .pts()
+            .or_else(|| packet.dts())
+            .and_then(|timestamp| pts_to_duration(Some(timestamp), self.video_time_base))
+            .unwrap_or_else(|| {
+                self.queued_video_tail_position()
+                    .unwrap_or(self.start_position)
+            });
+        let duration = packet_duration(packet.duration(), self.video_time_base)
+            .unwrap_or(self.video_frame_duration);
+        self.pending_video_packets.push_back(QueuedVideoPacket {
+            packet,
+            position,
+            end_position: position.saturating_add(duration),
+        });
+    }
+
+    fn fill_ready_video_frames(
+        &mut self,
+        shared: &BackendSharedState,
+        command_rx: Option<&Receiver<BackendCommand>>,
+    ) -> Result<ReceiveVideoOutcome, TguiError> {
+        let mut last_position = None;
+
+        loop {
+            while self.ready_video_frames.len() < self.buffering_profile.ready_video_frame_count {
+                let Some(queued_packet) = self.pending_video_packets.pop_front() else {
+                    break;
+                };
+
+                if let Some(receiver) = command_rx {
+                    let mut command_position = queued_packet.position;
+                    if let Some(outcome) =
+                        self.process_commands(shared, receiver, &mut command_position)
+                    {
+                        match outcome {
+                            StepOutcome::Restart(_)
+                            | StepOutcome::Reload { .. }
+                            | StepOutcome::Paused(_)
+                            | StepOutcome::Ended(_)
+                            | StepOutcome::Shutdown => {
+                                self.pending_video_packets.push_front(queued_packet);
+                                return Ok(ReceiveVideoOutcome::Command(outcome));
+                            }
+                            StepOutcome::Continue => {}
+                            StepOutcome::Error(error) => return Err(TguiError::Media(error)),
+                        }
+                    }
+                }
+
+                self.video_decoder
+                    .send_packet(&queued_packet.packet)
+                    .map_err(|error| {
+                        TguiError::Media(format!("failed to send video packet: {error}"))
+                    })?;
+                match self.receive_video_frames(shared, command_rx)? {
+                    ReceiveVideoOutcome::Position(Some(position)) => last_position = Some(position),
+                    ReceiveVideoOutcome::Position(None) => {}
+                    ReceiveVideoOutcome::Command(outcome) => {
+                        return Ok(ReceiveVideoOutcome::Command(outcome));
+                    }
+                }
+            }
+
+            if self.ready_video_frames.len() >= self.buffering_profile.ready_video_frame_count
+                || !self.pending_video_packets.is_empty()
+            {
+                break;
+            }
+
+            if !self.eof_sent {
+                break;
+            }
+
+            match self.receive_video_frames(shared, command_rx)? {
+                ReceiveVideoOutcome::Position(Some(position)) => last_position = Some(position),
+                ReceiveVideoOutcome::Position(None) => break,
+                ReceiveVideoOutcome::Command(outcome) => {
+                    return Ok(ReceiveVideoOutcome::Command(outcome));
+                }
             }
         }
+
+        Ok(ReceiveVideoOutcome::Position(last_position))
     }
 
     fn prime_first_frame(&mut self, shared: &BackendSharedState) -> Result<Duration, TguiError> {
         loop {
+            match self.fill_ready_video_frames(shared, None)? {
+                ReceiveVideoOutcome::Position(_) => {
+                    if let Some(position) = self.present_next_video_frame(shared) {
+                        return Ok(position);
+                    }
+                }
+                ReceiveVideoOutcome::Command(_) => {}
+            }
+
             let next_packet = {
                 let mut packets = self.input.packets();
                 packets
@@ -722,6 +854,18 @@ impl PlaybackSession {
                     .map(|(stream, packet)| (stream.index(), packet))
             };
             let Some((stream_index, packet)) = next_packet else {
+                self.eof_sent = true;
+                self.video_decoder.send_eof().map_err(|error| {
+                    TguiError::Media(format!("failed to flush preview decoder: {error}"))
+                })?;
+                match self.fill_ready_video_frames(shared, None)? {
+                    ReceiveVideoOutcome::Position(_) => {
+                        if let Some(position) = self.present_next_video_frame(shared) {
+                            return Ok(position);
+                        }
+                    }
+                    ReceiveVideoOutcome::Command(_) => {}
+                }
                 break;
             };
 
@@ -729,31 +873,7 @@ impl PlaybackSession {
                 continue;
             }
 
-            self.video_decoder.send_packet(&packet).map_err(|error| {
-                TguiError::Media(format!("failed to decode preview frame: {error}"))
-            })?;
-            match self.receive_video_frames(shared, None)? {
-                ReceiveVideoOutcome::Position(Some(_)) => {
-                    if let Some(position) = self.present_next_video_frame(shared) {
-                        return Ok(position);
-                    }
-                }
-                ReceiveVideoOutcome::Position(None) => {}
-                ReceiveVideoOutcome::Command(_) => {}
-            }
-        }
-
-        self.video_decoder.send_eof().map_err(|error| {
-            TguiError::Media(format!("failed to flush preview decoder: {error}"))
-        })?;
-        match self.receive_video_frames(shared, None)? {
-            ReceiveVideoOutcome::Position(Some(_)) => {
-                if let Some(position) = self.present_next_video_frame(shared) {
-                    return Ok(position);
-                }
-            }
-            ReceiveVideoOutcome::Position(None) => {}
-            ReceiveVideoOutcome::Command(_) => {}
+            self.queue_video_packet(packet);
         }
 
         Err(TguiError::Media(
@@ -818,8 +938,12 @@ impl PlaybackSession {
     }
 
     fn should_buffer(&self) -> bool {
-        let audio_starving = self.audio_output.as_ref()
-            .map(|output| output.buffered_duration() < self.buffering_profile.audio_starving_threshold)
+        let audio_starving = self
+            .audio_output
+            .as_ref()
+            .map(|output| {
+                output.buffered_duration() < self.buffering_profile.audio_starving_threshold
+            })
             .unwrap_or(false);
 
         let video_starving = should_buffer_video(
@@ -832,7 +956,7 @@ impl PlaybackSession {
     }
 
     fn present_next_video_frame(&mut self, shared: &BackendSharedState) -> Option<Duration> {
-        let frame = self.pending_video_frames.pop_front()?;
+        let frame = self.ready_video_frames.pop_front()?;
         let position = frame.position;
         let texture = frame.texture;
         *self.latest_frame.lock().expect("video frame lock poisoned") = Some(texture.clone());
@@ -860,7 +984,7 @@ impl PlaybackSession {
 
     fn present_due_video_frames(&mut self, shared: &BackendSharedState) -> Option<Duration> {
         let mut last_position = None;
-        while let Some(frame) = self.pending_video_frames.front() {
+        while let Some(frame) = self.ready_video_frames.front() {
             if !self.is_frame_due(frame.position) {
                 break;
             }
@@ -889,9 +1013,8 @@ impl PlaybackSession {
     }
 
     fn video_buffered_duration_from(&self, baseline: Duration) -> Duration {
-        self.pending_video_frames
-            .back()
-            .map(|last| last.end_position.saturating_sub(baseline))
+        furthest_video_buffer_end(&self.ready_video_frames, &self.pending_video_packets)
+            .map(|end| end.saturating_sub(baseline))
             .unwrap_or(Duration::ZERO)
     }
 
@@ -905,12 +1028,13 @@ impl PlaybackSession {
             self.video_buffered_duration(),
             target,
             self.remaining_duration(),
-            self.pending_video_frames.len() >= self.buffering_profile.video_max_frame_count,
+            self.pending_video_packets.len() >= self.buffering_profile.video_max_packet_count,
         )
     }
 
     fn has_pending_media(&self) -> bool {
-        !self.pending_video_frames.is_empty()
+        !self.ready_video_frames.is_empty()
+            || !self.pending_video_packets.is_empty()
             || self
                 .audio_output
                 .as_ref()
@@ -928,23 +1052,6 @@ impl PlaybackSession {
         command_rx: &Receiver<BackendCommand>,
         current_position: &mut Duration,
     ) -> StepOutcome {
-
-        eprintln!(
-            "[video] state={:?} audio_buf={:?} video_q={} underflow={} can_resume={} pos={:?}",
-            shared.playback_state.get(),
-            self.audio_output
-                .as_ref()
-                .map(|o| o.buffered_duration())
-                .unwrap_or(Duration::ZERO),
-            self.pending_video_frames.len(),
-            self.audio_output
-                .as_ref()
-                .map(|o| o.is_underflowing())
-                .unwrap_or(false),
-            self.can_resume_playback(),
-            self.playback_position(),
-        );
-
         self.update_buffered_metrics(shared);
 
         let draining_eof = self.should_keep_draining_eof();
@@ -954,11 +1061,23 @@ impl PlaybackSession {
             if !matches!(shared.playback_state.get(), PlaybackState::Buffering) {
                 shared.playback_state.set(PlaybackState::Buffering);
             }
-        } else if matches!(shared.playback_state.get(), PlaybackState::Buffering | PlaybackState::Ready)
-            && (self.can_resume_playback() || draining_eof)
+        } else if matches!(
+            shared.playback_state.get(),
+            PlaybackState::Buffering | PlaybackState::Ready
+        ) && (self.can_resume_playback() || draining_eof)
         {
             self.set_playing(true);
             shared.playback_state.set(PlaybackState::Playing);
+        }
+
+        if let Some(position) = self.present_due_video_frames(shared) {
+            *current_position = position;
+        }
+
+        match self.fill_ready_video_frames(shared, Some(command_rx)) {
+            Ok(ReceiveVideoOutcome::Position(_)) => {}
+            Ok(ReceiveVideoOutcome::Command(outcome)) => return outcome,
+            Err(error) => return StepOutcome::Error(error.to_string()),
         }
 
         if let Some(position) = self.present_due_video_frames(shared) {
@@ -975,9 +1094,10 @@ impl PlaybackSession {
 
         let next_packet = {
             let mut packets = self.input.packets();
-            packets.next().map(|(stream, packet)| (stream.index(), packet))
+            packets
+                .next()
+                .map(|(stream, packet)| (stream.index(), packet))
         };
-
 
         match next_packet {
             Some((stream_index, packet)) => {
@@ -986,12 +1106,9 @@ impl PlaybackSession {
                 }
 
                 if stream_index == self.video_stream_index {
-                    if let Err(error) = self.video_decoder.send_packet(&packet) {
-                        return StepOutcome::Error(format!("failed to send video packet: {error}"));
-                    }
-                    match self.receive_video_frames(shared, Some(command_rx)) {
-                        Ok(ReceiveVideoOutcome::Position(Some(_))) => {}
-                        Ok(ReceiveVideoOutcome::Position(None)) => {}
+                    self.queue_video_packet(packet);
+                    match self.fill_ready_video_frames(shared, Some(command_rx)) {
+                        Ok(ReceiveVideoOutcome::Position(_)) => {}
                         Ok(ReceiveVideoOutcome::Command(outcome)) => return outcome,
                         Err(error) => return StepOutcome::Error(error.to_string()),
                     }
@@ -1035,7 +1152,13 @@ impl PlaybackSession {
             }
             None => {
                 if self.eof_sent {
-                    if self.pending_video_frames.is_empty()
+                    match self.fill_ready_video_frames(shared, Some(command_rx)) {
+                        Ok(ReceiveVideoOutcome::Position(_)) => {}
+                        Ok(ReceiveVideoOutcome::Command(outcome)) => return outcome,
+                        Err(error) => return StepOutcome::Error(error.to_string()),
+                    }
+                    if self.pending_video_packets.is_empty()
+                        && self.ready_video_frames.is_empty()
                         && self
                             .audio_output
                             .as_ref()
@@ -1052,13 +1175,25 @@ impl PlaybackSession {
                     return StepOutcome::Continue;
                 }
 
+                if !self.pending_video_packets.is_empty() {
+                    match self.fill_ready_video_frames(shared, Some(command_rx)) {
+                        Ok(ReceiveVideoOutcome::Position(_)) => {}
+                        Ok(ReceiveVideoOutcome::Command(outcome)) => return outcome,
+                        Err(error) => return StepOutcome::Error(error.to_string()),
+                    }
+                    if let Some(position) = self.present_due_video_frames(shared) {
+                        *current_position = position;
+                    }
+                    self.maybe_enter_buffering(shared);
+                    return StepOutcome::Continue;
+                }
+
                 self.eof_sent = true;
                 if let Err(error) = self.video_decoder.send_eof() {
                     return StepOutcome::Error(format!("failed to flush video decoder: {error}"));
                 }
-                match self.receive_video_frames(shared, Some(command_rx)) {
-                    Ok(ReceiveVideoOutcome::Position(Some(_))) => {}
-                    Ok(ReceiveVideoOutcome::Position(None)) => {}
+                match self.fill_ready_video_frames(shared, Some(command_rx)) {
+                    Ok(ReceiveVideoOutcome::Position(_)) => {}
                     Ok(ReceiveVideoOutcome::Command(outcome)) => return outcome,
                     Err(error) => return StepOutcome::Error(error.to_string()),
                 }
@@ -1142,12 +1277,14 @@ impl PlaybackSession {
         let mut decoded = VideoFrame::empty();
         let mut last_position = None;
 
-        while self.pending_video_frames.len() < self.buffering_profile.video_max_frame_count
-            && self.video_buffered_duration() < self.buffering_profile.video_queue_hard_water
+        while self.ready_video_frames.len() < self.buffering_profile.ready_video_frame_count
             && self.video_decoder.receive_frame(&mut decoded).is_ok()
         {
             let position = pts_to_duration(decoded.timestamp(), self.video_time_base)
-                .unwrap_or(self.start_position);
+                .unwrap_or_else(|| {
+                    self.decoded_video_tail_position()
+                        .unwrap_or(self.start_position)
+                });
 
             if let Some(receiver) = command_rx {
                 let mut command_position = position;
@@ -1172,7 +1309,7 @@ impl PlaybackSession {
                 continue;
             }
 
-            if let Some(previous) = self.pending_video_frames.back_mut() {
+            if let Some(previous) = self.ready_video_frames.back_mut() {
                 if position > previous.position {
                     previous.end_position = position;
                     self.video_frame_duration = position.saturating_sub(previous.position);
@@ -1180,12 +1317,11 @@ impl PlaybackSession {
             }
 
             let texture = Arc::new(video_frame_to_texture(&mut self.scaler, &decoded)?);
-            self.pending_video_frames
-                .push_back(QueuedVideoFrame {
-                    position,
-                    end_position: position.saturating_add(self.video_frame_duration),
-                    texture,
-                });
+            self.ready_video_frames.push_back(QueuedVideoFrame {
+                position,
+                end_position: position.saturating_add(self.video_frame_duration),
+                texture,
+            });
 
             last_position = Some(position);
         }
@@ -1208,18 +1344,16 @@ impl PlaybackSession {
     fn can_start_playback(&self) -> bool {
         let audio_ok = self.audio_output.is_none()
             || self.audio_buffered_duration() >= self.buffering_profile.start_buffer_target;
-        let video_ok = self.video_buffer_target_satisfied(
-            self.buffering_profile.video_start_buffer_target,
-        );
+        let video_ok =
+            self.video_buffer_target_satisfied(self.buffering_profile.video_start_buffer_target);
         audio_ok && video_ok
     }
 
     fn can_resume_playback(&self) -> bool {
         let audio_ok = self.audio_output.is_none()
             || self.audio_buffered_duration() >= self.buffering_profile.rebuffer_target;
-        let video_ok = self.video_buffer_target_satisfied(
-            self.buffering_profile.video_resume_buffer_target,
-        );
+        let video_ok =
+            self.video_buffer_target_satisfied(self.buffering_profile.video_resume_buffer_target);
         audio_ok && video_ok
     }
 }
@@ -1243,7 +1377,9 @@ fn rational_frame_duration(rate: ffmpeg::Rational) -> Option<Duration> {
         return None;
     }
 
-    Some(Duration::from_secs_f64(denominator as f64 / numerator as f64))
+    Some(Duration::from_secs_f64(
+        denominator as f64 / numerator as f64,
+    ))
 }
 
 fn http_input_options() -> ffmpeg::Dictionary<'static> {
@@ -1260,7 +1396,10 @@ fn http_input_options() -> ffmpeg::Dictionary<'static> {
     options
 }
 
-fn open_input(source: &VideoSource, source_url: &str) -> Result<format::context::Input, ffmpeg::Error> {
+fn open_input(
+    source: &VideoSource,
+    source_url: &str,
+) -> Result<format::context::Input, ffmpeg::Error> {
     match source {
         VideoSource::File(_) => format::input(&source_url),
         VideoSource::Url(_) => format::input_with_dictionary(&source_url, http_input_options()),
@@ -1401,6 +1540,12 @@ fn pts_to_duration(timestamp: Option<i64>, time_base: ffmpeg::Rational) -> Optio
     Some(Duration::from_secs_f64(seconds.max(0.0)))
 }
 
+fn packet_duration(duration: i64, time_base: ffmpeg::Rational) -> Option<Duration> {
+    (duration > 0)
+        .then_some(duration)
+        .and_then(|duration| pts_to_duration(Some(duration), time_base))
+}
+
 fn stream_duration(duration: i64, time_base: ffmpeg::Rational) -> Option<Duration> {
     (duration > 0)
         .then_some(duration)
@@ -1518,6 +1663,7 @@ impl AudioOutput {
         self.shared.played_frames.load(Ordering::SeqCst) > 0
     }
 
+    #[allow(dead_code)]
     fn is_underflowing(&self) -> bool {
         self.shared.underflowing.load(Ordering::SeqCst)
     }
@@ -1623,6 +1769,17 @@ fn should_throttle_demux(
     video_hard_full: bool,
 ) -> bool {
     audio_hard_full || video_hard_full || (audio_soft_full && video_soft_full)
+}
+
+fn furthest_video_buffer_end(
+    ready_frames: &VecDeque<QueuedVideoFrame>,
+    pending_packets: &VecDeque<QueuedVideoPacket>,
+) -> Option<Duration> {
+    ready_frames
+        .iter()
+        .map(|frame| frame.end_position)
+        .chain(pending_packets.iter().map(|packet| packet.end_position))
+        .max()
 }
 
 fn video_buffer_target_satisfied(
@@ -1737,14 +1894,54 @@ mod tests {
 
     #[test]
     fn url_sources_use_deeper_buffer_profile() {
-        let profile = buffering_profile_for_source(&VideoSource::Url("https://example.com/demo.mp4".to_string()));
+        let profile = buffering_profile_for_source(&VideoSource::Url(
+            "https://example.com/demo.mp4".to_string(),
+        ));
         assert_eq!(profile, NETWORK_BUFFERING_PROFILE);
         assert_eq!(profile.video_start_buffer_target, Duration::from_secs(5));
         assert_eq!(profile.video_resume_buffer_target, Duration::from_secs(5));
         assert_eq!(profile.video_queue_high_water, Duration::from_secs(5));
         assert_eq!(profile.video_queue_hard_water, Duration::from_secs(6));
         assert!(profile.audio_queue_hard_water > LOCAL_BUFFERING_PROFILE.audio_queue_hard_water);
-        assert!(profile.audio_starving_threshold > LOCAL_BUFFERING_PROFILE.audio_starving_threshold);
+        assert!(
+            profile.audio_starving_threshold > LOCAL_BUFFERING_PROFILE.audio_starving_threshold
+        );
+    }
+
+    #[test]
+    fn local_sources_use_shallower_video_startup_targets() {
+        let profile = buffering_profile_for_source(&VideoSource::File("demo.mp4".into()));
+        assert_eq!(profile, LOCAL_BUFFERING_PROFILE);
+        assert_eq!(
+            profile.video_start_buffer_target,
+            Duration::from_millis(1500)
+        );
+        assert_eq!(
+            profile.video_resume_buffer_target,
+            Duration::from_millis(800)
+        );
+        assert_eq!(profile.video_queue_high_water, Duration::from_secs(3));
+        assert_eq!(profile.video_queue_hard_water, Duration::from_secs(4));
+        assert_eq!(profile.ready_video_frame_count, 4);
+    }
+
+    #[test]
+    fn furthest_video_buffer_end_prefers_compressed_tail_over_small_ready_queue() {
+        let ready_frames = VecDeque::from([QueuedVideoFrame {
+            position: Duration::from_millis(900),
+            end_position: Duration::from_millis(1200),
+            texture: Arc::new(TextureFrame::new(1, 1, vec![255; 4])),
+        }]);
+        let pending_packets = VecDeque::from([QueuedVideoPacket {
+            packet: ffmpeg::Packet::empty(),
+            position: Duration::from_millis(1200),
+            end_position: Duration::from_millis(2600),
+        }]);
+
+        assert_eq!(
+            furthest_video_buffer_end(&ready_frames, &pending_packets),
+            Some(Duration::from_millis(2600))
+        );
     }
 
     #[test]
