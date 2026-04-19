@@ -94,6 +94,8 @@ This project is under active development.
   - `cargo ohos-app` packaging flow
   - touch, mouse, keyboard, and surface lifecycle integration
   - OHOS system font discovery
+- Desktop video playback behind the `video` feature, with optional static FFmpeg
+  linking behind `video-static`
 
 ## Installation
 
@@ -132,6 +134,25 @@ For OHOS targets, enable the `ohos` feature:
 [dependencies]
 tgui = { version = "0.1.2", features = ["ohos"] }
 ```
+
+For desktop video playback, enable the `video` feature:
+
+```toml
+[dependencies]
+tgui = { version = "0.1.2", features = ["video"] }
+```
+
+If you want FFmpeg to be linked statically so the FFmpeg libraries are folded
+into the final executable instead of being shipped as separate dynamic
+libraries, enable `video-static`:
+
+```toml
+[dependencies]
+tgui = { version = "0.1.2", features = ["video-static"] }
+```
+
+`video-static` forwards to `ffmpeg-next/static`, so your build environment still
+needs the FFmpeg static libraries and headers to be available to Cargo.
 
 If you package an OHOS app with `cargo ohos-app`, the packager can now detect
 `tgui-winit-ohos` directly, so a separate `winit-ohos` shim dependency is no longer required.

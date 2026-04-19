@@ -610,7 +610,7 @@ struct HoveredWidget<VM> {
     cursor_style: Option<crate::ui::widget::CursorStyle>,
     on_mouse_enter: Option<Command<VM>>,
     on_mouse_leave: Option<Command<VM>>,
-    on_mouse_move: Option<crate::foundation::view_model::ValueCommand<VM, Point>>,
+    on_mouse_move: Option<ValueCommand<VM, Point>>,
 }
 
 #[derive(Clone, Copy)]
@@ -3408,16 +3408,16 @@ fn is_light_color(color: Color) -> bool {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
-
+    use std::time::Duration;
     use crate::animation::AnimationCoordinator;
     use crate::application::{ApplicationConfig, ThemeSelection, WindowRole};
     use crate::dialog::async_dialog_channel;
-    use crate::foundation::binding::{Binding, InvalidationSignal, ViewModelContext};
+    use crate::foundation::binding::{Binding, InvalidationSignal};
     use crate::foundation::color::Color;
     use crate::platform::dpi::LogicalSize;
     use crate::text::font::FontCatalog;
     use crate::ui::widget::{Column, CursorStyle, Point, Text, WidgetTree};
-    use std::time::Duration;
+
 
     use super::{
         next_grapheme_boundary, normalize_single_line_text, previous_grapheme_boundary,
@@ -3433,6 +3433,7 @@ mod tests {
         PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
         VideoSurfaceSnapshot,
     };
+    use crate::ViewModelContext;
 
     #[derive(Default)]
     struct TestVm;

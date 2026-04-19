@@ -1,26 +1,21 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::path::PathBuf;
 
 use tgui::{
-    Application, Color, Column, Command, Insets, Row, Stack, Text, VideoController, VideoSource,
-    VideoSurface, ViewModelContext,
+    el, Application, Button, Color, Column, Command, Input, Insets, Observable, Row, Stack, Text,
+    ValueCommand, VideoController, VideoSource, VideoSurface, ViewModelContext,
 };
 
 struct VideoVm {
     controller: VideoController,
-    source_label: String,
+    source: Observable<String>,
 }
 
 impl VideoVm {
     fn new(ctx: &ViewModelContext) -> Self {
-        let controller = VideoController::new(ctx);
-        // let source = parse_video_source("D:\\CloudMusic\\MV\\郭顶 - 凄美地.mp4".to_string());
-        let source = parse_video_source("http://47.109.31.100:19900/%E9%83%AD%E9%A1%B6%20-%20%E5%87%84%E7%BE%8E%E5%9C%B0.mp4".to_string());
-        let source_label = source_label(&source);
-        let _ = controller.load(source);
-
         Self {
-            controller,
-            source_label,
+            controller: VideoController::new(ctx),
+            source: ctx.observable(String::new()),
         }
     }
 
@@ -48,7 +43,10 @@ impl VideoVm {
     }
 
     fn view(&self) -> tgui::Element<Self> {
-        let status = self.controller.playback_state().map(|state| format!("{state:?}"));
+        let status = self
+            .controller
+            .playback_state()
+            .map(|state| format!("{state:?}"));
         let position = self
             .controller
             .position()
@@ -64,9 +62,13 @@ impl VideoVm {
             .gap(12.0)
             .background(Color::hexa(0x0F172AFF))
             .child(
-                Text::new(format!("Source: {}", self.source_label))
-                    .font_size(14.0)
-                    .color(Color::WHITE),
+                Text::new(
+                    self.source
+                        .binding()
+                        .map(|source| format!("Source: {}", source)),
+                )
+                .font_size(14.0)
+                .color(Color::WHITE),
             )
             .child(
                 VideoSurface::new(self.controller.clone())
@@ -76,26 +78,19 @@ impl VideoVm {
                     .border_radius(12.0)
                     .border(1.0, Color::hexa(0x334155FF)),
             )
-            .child(
-                Row::new()
-                    .gap(8.0)
-                    .child(
+            .child(Row::new().gap(8.0).child(el![
                         Stack::new()
                             .padding(Insets::symmetric(12.0, 8.0))
                             .background(Color::hexa(0x2563EBFF))
                             .border_radius(8.0)
                             .child(Text::new("Play").color(Color::WHITE))
                             .on_click(Command::new(Self::play)),
-                    )
-                    .child(
                         Stack::new()
                             .padding(Insets::symmetric(12.0, 8.0))
                             .background(Color::hexa(0x475569FF))
                             .border_radius(8.0)
                             .child(Text::new("Pause").color(Color::WHITE))
                             .on_click(Command::new(Self::pause)),
-                    )
-                    .child(
                         Stack::new()
                             .padding(Insets::symmetric(12.0, 8.0))
                             .background(Color::hexa(0xEA580CFF))
@@ -104,24 +99,19 @@ impl VideoVm {
                             .on_click(Command::new(|video_vm: &mut VideoVm|{
                                 video_vm.set_progress(0.95)
                             })),
-                    )
-                    .child(
                         Stack::new()
                             .padding(Insets::symmetric(12.0, 8.0))
                             .background(Color::hexa(0x7C3AEDFF))
                             .border_radius(8.0)
                             .child(Text::new("Mute").color(Color::WHITE))
                             .on_click(Command::new(Self::mute)),
-                    )
-                    .child(
                         Stack::new()
                             .padding(Insets::symmetric(12.0, 8.0))
                             .background(Color::hexa(0x0F766EFF))
                             .border_radius(8.0)
                             .child(Text::new("Unmute").color(Color::WHITE))
                             .on_click(Command::new(Self::unmute)),
-                    )
-            )
+                    ]))
             .child(
                 Row::new()
                     .gap(12.0)
@@ -130,23 +120,33 @@ impl VideoVm {
                     .child(Text::new("/").color(Color::hexa(0x64748BFF)))
                     .child(Text::new(duration).color(Color::hexa(0xCBD5E1FF))),
             )
+            .child(
+                Row::new().fill_width().gap(10.0).child(el![
+                    Input::new(Text::new(self.source.binding()))
+                        .fill_width()
+                        .placeholder_with_str("请输入视频源路径")
+                        .on_change(ValueCommand::new(
+                            |video_vm: &mut VideoVm, value: String| { video_vm.source.set(value) }
+                        )),
+                    Button::new(Text::new("切换源并播放")).on_click(Command::new(
+                        |video_vm: &mut VideoVm| {
+                            let _ = video_vm
+                                .controller
+                                .load(parse_video_source(video_vm.source.get().clone()));
+                            video_vm.play()
+                        }
+                    ))
+                ]),
+            )
             .into()
     }
 }
-
 
 fn parse_video_source(value: String) -> VideoSource {
     if value.starts_with("http://") || value.starts_with("https://") {
         VideoSource::Url(value)
     } else {
         VideoSource::File(PathBuf::from(value))
-    }
-}
-
-fn source_label(source: &VideoSource) -> String {
-    match source {
-        VideoSource::File(path) => path.display().to_string(),
-        VideoSource::Url(url) => url.clone()
     }
 }
 

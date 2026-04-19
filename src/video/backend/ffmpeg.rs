@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Once};
+use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -98,6 +98,30 @@ const VIDEO_PRESENT_TOLERANCE: Duration = Duration::from_millis(8);
 const STEP_IDLE_SLEEP: Duration = Duration::from_millis(4);
 
 static FFMPEG_INIT: Once = Once::new();
+
+static VIDEO_DEBUG_ENABLED: OnceLock<bool> = OnceLock::new();
+
+macro_rules! video_debug {
+    ($($arg:tt)*) => {
+        if video_debug_enabled() {
+            eprintln!("[tgui-video] {}", format_args!($($arg)*));
+        }
+    };
+}
+
+fn video_debug_enabled() -> bool {
+    *VIDEO_DEBUG_ENABLED.get_or_init(|| {
+        std::env::var("TGUI_VIDEO_DEBUG")
+            .map(|value| {
+                let value = value.trim();
+                value == "1"
+                    || value.eq_ignore_ascii_case("true")
+                    || value.eq_ignore_ascii_case("yes")
+                    || value.eq_ignore_ascii_case("on")
+            })
+            .unwrap_or(false)
+    })
+}
 
 enum BackendCommand {
     Load(VideoSource),
@@ -206,6 +230,7 @@ fn worker_main(
             Ok(command) => match command {
                 BackendCommand::Shutdown => break,
                 BackendCommand::Load(source) => {
+                    video_debug!("command load source={:?}", source);
                     current_position = Duration::ZERO;
                     should_play = false;
                     current_source = Some(source.clone());
@@ -227,6 +252,7 @@ fn worker_main(
                     );
                 }
                 BackendCommand::Play => {
+                    video_debug!("command play pos={:?}", current_position);
                     should_play = true;
                     if let Some(session) = current_session.as_mut() {
                         session.set_playing(false);
@@ -239,6 +265,7 @@ fn worker_main(
                     }
                 }
                 BackendCommand::Pause => {
+                    video_debug!("command pause");
                     should_play = false;
                     if let Some(session) = current_session.as_mut() {
                         session.set_playing(false);
@@ -249,6 +276,7 @@ fn worker_main(
                     }
                 }
                 BackendCommand::Seek(position) => {
+                    video_debug!("command seek target={:?}", position);
                     current_position = position;
                     if let Some(source) = current_source.clone() {
                         if let Some(existing) = current_session.as_mut() {
@@ -292,12 +320,14 @@ fn worker_main(
                 }
                 BackendCommand::SetVolume(volume) => {
                     let volume = volume.clamp(0.0, 1.0);
+                    video_debug!("command volume {}", volume);
                     shared.volume.set(volume);
                     if let Some(session) = current_session.as_mut() {
                         session.set_volume(volume);
                     }
                 }
                 BackendCommand::SetMuted(muted) => {
+                    video_debug!("command muted {}", muted);
                     shared.muted.set(muted);
                     if let Some(session) = current_session.as_mut() {
                         session.set_muted(muted);
@@ -320,6 +350,7 @@ fn worker_main(
         match step_outcome {
             StepOutcome::Continue => {}
             StepOutcome::Restart(position) => {
+                video_debug!("step restart pos={:?}", position);
                 current_position = position;
                 if let Some(source) = current_source.clone() {
                     shared.playback_state.set(PlaybackState::Loading);
@@ -359,6 +390,7 @@ fn worker_main(
                 }
             }
             StepOutcome::Reload { source, position } => {
+                video_debug!("step reload source={:?} pos={:?}", source, position);
                 current_source = Some(source.clone());
                 current_position = position;
                 should_play = false;
@@ -379,6 +411,7 @@ fn worker_main(
                 );
             }
             StepOutcome::Paused(position) => {
+                video_debug!("step paused pos={:?}", position);
                 current_position = position;
                 should_play = false;
                 if let Some(session) = current_session.as_mut() {
@@ -387,6 +420,7 @@ fn worker_main(
                 shared.playback_state.set(PlaybackState::Paused);
             }
             StepOutcome::Ended(position) => {
+                video_debug!("step ended pos={:?}", position);
                 current_position = position;
                 should_play = false;
                 if let Some(session) = current_session.as_mut() {
@@ -399,6 +433,7 @@ fn worker_main(
                 shared.playback_state.set(PlaybackState::Ended);
             }
             StepOutcome::Error(error) => {
+                video_debug!("step error {}", error);
                 should_play = false;
                 if let Some(session) = current_session.as_mut() {
                     session.set_playing(false);
@@ -407,6 +442,21 @@ fn worker_main(
                 shared.set_error(error);
             }
             StepOutcome::Shutdown => break,
+        }
+    }
+}
+
+fn debug_log_due(last: &mut Option<Instant>, interval: Duration) -> bool {
+    if !video_debug_enabled() {
+        return false;
+    }
+
+    let now = Instant::now();
+    match last {
+        Some(previous) if now.duration_since(*previous) < interval => false,
+        _ => {
+            *last = Some(now);
+            true
         }
     }
 }
@@ -488,6 +538,12 @@ struct QueuedVideoFrame {
     texture: Arc<TextureFrame>,
 }
 
+struct OpenedVideoDecoder {
+    decoder: ffmpeg::decoder::Video,
+    codec_id: codec::Id,
+    decoder_name: String,
+}
+
 struct PlaybackSession {
     start_position: Duration,
     duration: Option<Duration>,
@@ -496,6 +552,8 @@ struct PlaybackSession {
     video_stream_index: usize,
     audio_stream_index: Option<usize>,
     video_decoder: ffmpeg::decoder::Video,
+    video_codec_id: codec::Id,
+    video_decoder_name: String,
     audio_decoder: Option<ffmpeg::decoder::Audio>,
     scaler: Scaler,
     resampler: Option<Resampler>,
@@ -510,6 +568,9 @@ struct PlaybackSession {
     last_presented_position: Duration,
     play_started_at: Option<Instant>,
     eof_sent: bool,
+    last_debug_state_log_at: Option<Instant>,
+    last_debug_wait_log_at: Option<Instant>,
+    last_debug_empty_ready_log_at: Option<Instant>,
 }
 
 impl PlaybackSession {
@@ -526,6 +587,11 @@ impl PlaybackSession {
                 .to_string(),
             VideoSource::Url(url) => url.clone(),
         };
+        video_debug!(
+            "open source={:?} start_position={:?}",
+            source,
+            start_position
+        );
         let buffering_profile = buffering_profile_for_source(&source);
 
         let mut input = open_input(&source, &source_url)
@@ -544,11 +610,8 @@ impl PlaybackSession {
             .ok_or_else(|| TguiError::Media("video stream not found".to_string()))?;
         let video_stream_index = video_stream.index();
         let video_time_base = video_stream.time_base();
-        let video_context = codec::context::Context::from_parameters(video_stream.parameters())
-            .map_err(|error| TguiError::Media(format!("failed to open video codec: {error}")))?;
-        let video_decoder = video_context.decoder().video().map_err(|error| {
-            TguiError::Media(format!("failed to create video decoder: {error}"))
-        })?;
+        let opened_video_decoder = open_video_decoder(&video_stream)?;
+        let video_decoder = opened_video_decoder.decoder;
         let scaler = Scaler::get(
             video_decoder.format(),
             video_decoder.width(),
@@ -626,6 +689,8 @@ impl PlaybackSession {
             video_stream_index,
             audio_stream_index,
             video_decoder,
+            video_codec_id: opened_video_decoder.codec_id,
+            video_decoder_name: opened_video_decoder.decoder_name,
             audio_decoder,
             scaler,
             resampler,
@@ -640,9 +705,23 @@ impl PlaybackSession {
             last_presented_position: start_position,
             play_started_at: None,
             eof_sent: false,
+            last_debug_state_log_at: None,
+            last_debug_wait_log_at: None,
+            last_debug_empty_ready_log_at: None,
         };
 
         let preview_position = session.prime_first_frame(shared)?;
+
+        video_debug!(
+            "open ready preview_position={:?} duration={:?} video_size={}x{} ready={} packets={}",
+            preview_position,
+            duration,
+            intrinsic_size.width as u32,
+            intrinsic_size.height as u32,
+            session.ready_video_frames.len(),
+            session.pending_video_packets.len()
+        );
+
         session.paused_position = preview_position;
         session.last_presented_position = preview_position;
         let mut metrics = shared.metrics.get();
@@ -692,6 +771,65 @@ impl PlaybackSession {
         metrics.video_width = self.video_decoder.width();
         metrics.video_height = self.video_decoder.height();
         shared.metrics.set(metrics);
+    }
+
+    fn maybe_log_state(&mut self, shared: &BackendSharedState, label: &str) {
+        if !debug_log_due(
+            &mut self.last_debug_state_log_at,
+            Duration::from_millis(500),
+        ) {
+            return;
+        }
+
+        let playback_position = self.playback_position();
+        let audio_buffered = self
+            .audio_output
+            .as_ref()
+            .map(|output| output.buffered_duration())
+            .unwrap_or(Duration::ZERO);
+        let audio_clock = self
+            .audio_output
+            .as_ref()
+            .map(|output| output.position())
+            .unwrap_or(Duration::ZERO);
+        let audio_started_clock = self
+            .audio_output
+            .as_ref()
+            .map(|output| output.has_started_clock())
+            .unwrap_or(self.play_started_at.is_some());
+        let next_ready = self.ready_video_frames.front().map(|frame| frame.position);
+        let next_gap = next_ready.map(|position| position.saturating_sub(playback_position));
+
+        video_debug!(
+            "{} state={:?} pos={:?} audio_clock={:?} audio_buf={:?} video_buf={:?} ready={} packets={} next_ready={:?} next_gap={:?} eof_sent={} can_resume={}",
+            label,
+            shared.playback_state.get(),
+            playback_position,
+            audio_clock,
+            audio_buffered,
+            self.video_buffered_duration(),
+            self.ready_video_frames.len(),
+            self.pending_video_packets.len(),
+            next_ready,
+            next_gap,
+            self.eof_sent,
+            self.can_resume_playback()
+        );
+
+        if self.ready_video_frames.is_empty()
+            && !self.pending_video_packets.is_empty()
+            && debug_log_due(
+                &mut self.last_debug_empty_ready_log_at,
+                Duration::from_millis(300),
+            )
+        {
+            video_debug!(
+                "{} ready queue empty while packets pending packets={} audio_started_clock={}",
+                label,
+                self.pending_video_packets.len(),
+                audio_started_clock
+            );
+        }
     }
 
     fn should_throttle_demux(&self, shared: &BackendSharedState) -> bool {
@@ -760,11 +898,22 @@ impl PlaybackSession {
             });
         let duration = packet_duration(packet.duration(), self.video_time_base)
             .unwrap_or(self.video_frame_duration);
+        let is_key = packet.is_key();
         self.pending_video_packets.push_back(QueuedVideoPacket {
             packet,
             position,
             end_position: position.saturating_add(duration),
         });
+        if video_debug_enabled() && (self.pending_video_packets.len() == 1 || is_key) {
+            video_debug!(
+                "queue packet pos={:?} end={:?} key={} packets={} ready={}",
+                position,
+                position.saturating_add(duration),
+                is_key,
+                self.pending_video_packets.len(),
+                self.ready_video_frames.len()
+            );
+        }
     }
 
     fn fill_ready_video_frames(
@@ -773,6 +922,8 @@ impl PlaybackSession {
         command_rx: Option<&Receiver<BackendCommand>>,
     ) -> Result<ReceiveVideoOutcome, TguiError> {
         let mut last_position = None;
+        let initial_packets = self.pending_video_packets.len();
+        let initial_ready = self.ready_video_frames.len();
 
         loop {
             while self.ready_video_frames.len() < self.buffering_profile.ready_video_frame_count {
@@ -802,9 +953,7 @@ impl PlaybackSession {
 
                 self.video_decoder
                     .send_packet(&queued_packet.packet)
-                    .map_err(|error| {
-                        TguiError::Media(format!("failed to send video packet: {error}"))
-                    })?;
+                    .map_err(|error| self.video_packet_send_error(error))?;
                 match self.receive_video_frames(shared, command_rx)? {
                     ReceiveVideoOutcome::Position(Some(position)) => last_position = Some(position),
                     ReceiveVideoOutcome::Position(None) => {}
@@ -830,6 +979,22 @@ impl PlaybackSession {
                 ReceiveVideoOutcome::Command(outcome) => {
                     return Ok(ReceiveVideoOutcome::Command(outcome));
                 }
+            }
+        }
+
+        if video_debug_enabled() {
+            let decoded_frames = self.ready_video_frames.len().saturating_sub(initial_ready);
+            let consumed_packets = initial_packets.saturating_sub(self.pending_video_packets.len());
+            if consumed_packets > 0 || decoded_frames > 0 {
+                video_debug!(
+                    "fill ready consumed_packets={} decoded_frames={} ready={} packets={} last_position={:?} eof_sent={}",
+                    consumed_packets,
+                    decoded_frames,
+                    self.ready_video_frames.len(),
+                    self.pending_video_packets.len(),
+                    last_position,
+                    self.eof_sent
+                );
             }
         }
 
@@ -882,6 +1047,11 @@ impl PlaybackSession {
     }
 
     fn set_playing(&mut self, playing: bool) {
+        let was_playing = self
+            .audio_output
+            .as_ref()
+            .map(|output| output.playing())
+            .unwrap_or(self.play_started_at.is_some());
         if let Some(audio_output) = self.audio_output.as_ref() {
             audio_output.set_playing(playing);
         }
@@ -893,6 +1063,17 @@ impl PlaybackSession {
             } else if let Some(started_at) = self.play_started_at.take() {
                 self.paused_position = self.paused_position.saturating_add(started_at.elapsed());
             }
+        }
+        if video_debug_enabled() && was_playing != playing {
+            video_debug!(
+                "set_playing {} pos={:?} audio_buf={:?} video_buf={:?} ready={} packets={}",
+                playing,
+                self.playback_position(),
+                self.audio_buffered_duration(),
+                self.video_buffered_duration(),
+                self.ready_video_frames.len(),
+                self.pending_video_packets.len()
+            );
         }
     }
 
@@ -933,6 +1114,14 @@ impl PlaybackSession {
             return;
         }
         if !matches!(&shared.playback_state.get(), PlaybackState::Buffering) {
+            video_debug!(
+                "enter buffering pos={:?} audio_buf={:?} video_buf={:?} ready={} packets={}",
+                self.playback_position(),
+                self.audio_buffered_duration(),
+                self.video_buffered_duration(),
+                self.ready_video_frames.len(),
+                self.pending_video_packets.len()
+            );
             shared.playback_state.set(PlaybackState::Buffering);
         }
     }
@@ -984,12 +1173,52 @@ impl PlaybackSession {
 
     fn present_due_video_frames(&mut self, shared: &BackendSharedState) -> Option<Duration> {
         let mut last_position = None;
+        let mut present_count = 0usize;
+        let playback_before = self.playback_position();
         while let Some(frame) = self.ready_video_frames.front() {
             if !self.is_frame_due(frame.position) {
                 break;
             }
+            present_count += 1;
             last_position = self.present_next_video_frame(shared);
         }
+
+        if video_debug_enabled() {
+            if present_count > 1 {
+                video_debug!(
+                    "present burst count={} playback_before={:?} last_position={:?} ready_left={} packets_left={}",
+                    present_count,
+                    playback_before,
+                    last_position,
+                    self.ready_video_frames.len(),
+                    self.pending_video_packets.len()
+                );
+            } else if present_count == 0 {
+                if let Some(next_frame) = self.ready_video_frames.front() {
+                    let delta = next_frame.position.saturating_sub(playback_before);
+                    if delta > Duration::from_millis(100)
+                        && debug_log_due(
+                            &mut self.last_debug_wait_log_at,
+                            Duration::from_millis(250),
+                        )
+                    {
+                        video_debug!(
+                            "waiting next frame playback={:?} next_frame={:?} delta={:?} ready={} packets={} audio_started_clock={}",
+                            playback_before,
+                            next_frame.position,
+                            delta,
+                            self.ready_video_frames.len(),
+                            self.pending_video_packets.len(),
+                            self.audio_output
+                                .as_ref()
+                                .map(|output| output.has_started_clock())
+                                .unwrap_or(self.play_started_at.is_some())
+                        );
+                    }
+                }
+            }
+        }
+
         last_position
     }
 
@@ -1054,11 +1283,21 @@ impl PlaybackSession {
     ) -> StepOutcome {
         self.update_buffered_metrics(shared);
 
+        self.maybe_log_state(shared, "step");
+
         let draining_eof = self.should_keep_draining_eof();
 
         if self.should_buffer() && !draining_eof {
             self.set_playing(false);
             if !matches!(shared.playback_state.get(), PlaybackState::Buffering) {
+                video_debug!(
+                    "step transition -> Buffering pos={:?} audio_buf={:?} video_buf={:?} ready={} packets={}",
+                    self.playback_position(),
+                    self.audio_buffered_duration(),
+                    self.video_buffered_duration(),
+                    self.ready_video_frames.len(),
+                    self.pending_video_packets.len()
+                );
                 shared.playback_state.set(PlaybackState::Buffering);
             }
         } else if matches!(
@@ -1067,6 +1306,17 @@ impl PlaybackSession {
         ) && (self.can_resume_playback() || draining_eof)
         {
             self.set_playing(true);
+
+            video_debug!(
+                "step transition -> Playing pos={:?} audio_buf={:?} video_buf={:?} ready={} packets={} draining_eof={}",
+                self.playback_position(),
+                self.audio_buffered_duration(),
+                self.video_buffered_duration(),
+                self.ready_video_frames.len(),
+                self.pending_video_packets.len(),
+                draining_eof
+            );
+
             shared.playback_state.set(PlaybackState::Playing);
         }
 
@@ -1243,21 +1493,47 @@ impl PlaybackSession {
                 BackendCommand::Play => {
                     if self.can_resume_playback() || self.should_keep_draining_eof() {
                         self.set_playing(true);
+
+                        video_debug!(
+                            "process play -> Playing pos={:?} audio_buf={:?} video_buf={:?} ready={} packets={}",
+                            self.playback_position(),
+                            self.audio_buffered_duration(),
+                            self.video_buffered_duration(),
+                            self.ready_video_frames.len(),
+                            self.pending_video_packets.len()
+                        );
+
                         shared.playback_state.set(PlaybackState::Playing);
                     } else {
                         self.set_playing(false);
+
+                        video_debug!(
+                            "process play -> Buffering pos={:?} audio_buf={:?} video_buf={:?} ready={} packets={}",
+                            self.playback_position(),
+                            self.audio_buffered_duration(),
+                            self.video_buffered_duration(),
+                            self.ready_video_frames.len(),
+                            self.pending_video_packets.len()
+                        );
+
                         shared.playback_state.set(PlaybackState::Buffering);
                     }
                 }
                 BackendCommand::Pause => {
                     let position = self.playback_position();
+                    video_debug!("process pause pos={:?}", position);
                     *current_position = position;
                     return Some(StepOutcome::Paused(position));
                 }
-                BackendCommand::Seek(position) => return Some(StepOutcome::Restart(position)),
+                BackendCommand::Seek(position) => {
+                    video_debug!("process seek restart target={:?}", position);
+                    return Some(StepOutcome::Restart(position));
+                }
                 BackendCommand::SetVolume(volume) => self.set_volume(volume.clamp(0.0, 1.0)),
                 BackendCommand::SetMuted(muted) => self.set_muted(muted),
                 BackendCommand::Load(source) => {
+                    video_debug!("process load reload source={:?}", source);
+                    video_debug!("process load reload source={:?}", source);
                     return Some(StepOutcome::Reload {
                         source,
                         position: Duration::ZERO,
@@ -1356,6 +1632,24 @@ impl PlaybackSession {
             self.video_buffer_target_satisfied(self.buffering_profile.video_resume_buffer_target);
         audio_ok && video_ok
     }
+
+    fn video_packet_send_error(&self, error: ffmpeg::Error) -> TguiError {
+        if self.video_codec_id == codec::Id::AV1
+            && matches!(
+                error,
+                ffmpeg::Error::Other {
+                    errno: ffmpeg::error::ENOSYS
+                }
+            )
+        {
+            return TguiError::Media(format!(
+                "AV1 is not supported by the linked FFmpeg build. The current decoder `{}` cannot decode this file on this platform. Rebuild/install FFmpeg with the `dav1d` or `aom` feature enabled in vcpkg.",
+                self.video_decoder_name
+            ));
+        }
+
+        TguiError::Media(format!("failed to send video packet: {error}"))
+    }
 }
 
 fn buffering_profile_for_source(source: &VideoSource) -> BufferingProfile {
@@ -1404,6 +1698,75 @@ fn open_input(
         VideoSource::File(_) => format::input(&source_url),
         VideoSource::Url(_) => format::input_with_dictionary(&source_url, http_input_options()),
     }
+}
+
+fn open_video_decoder(
+    stream: &format::stream::Stream<'_>,
+) -> Result<OpenedVideoDecoder, TguiError> {
+    let parameters = stream.parameters();
+    let codec_id = parameters.id();
+
+    if codec_id == codec::Id::AV1 {
+        for decoder_name in ["libdav1d", "libaom-av1", "av1"] {
+            let Some(codec) = codec::decoder::find_by_name(decoder_name) else {
+                continue;
+            };
+            if !codec.is_video() || codec.id() != codec_id {
+                continue;
+            }
+
+            match codec::context::Context::from_parameters(parameters.clone())
+                .and_then(|context| context.decoder().open_as(codec))
+                .and_then(|opened| opened.video())
+            {
+                Ok(decoder) => {
+                    video_debug!(
+                        "selected AV1 decoder name={} description={}",
+                        codec.name(),
+                        codec.description()
+                    );
+                    return Ok(OpenedVideoDecoder {
+                        decoder,
+                        codec_id,
+                        decoder_name: codec.name().to_string(),
+                    });
+                }
+                Err(error) => {
+                    video_debug!(
+                        "failed to open AV1 decoder name={} error={}",
+                        codec.name(),
+                        error
+                    );
+                }
+            }
+        }
+    }
+
+    let video_context = codec::context::Context::from_parameters(parameters)
+        .map_err(|error| TguiError::Media(format!("failed to open video codec: {error}")))?;
+    let video_decoder = video_context
+        .decoder()
+        .video()
+        .map_err(|error| TguiError::Media(format!("failed to create video decoder: {error}")))?;
+
+    if let Some(codec) = video_decoder.codec() {
+        video_debug!(
+            "selected video decoder name={} description={}",
+            codec.name(),
+            codec.description()
+        );
+        return Ok(OpenedVideoDecoder {
+            decoder: video_decoder,
+            codec_id,
+            decoder_name: codec.name().to_string(),
+        });
+    }
+
+    Ok(OpenedVideoDecoder {
+        decoder: video_decoder,
+        codec_id,
+        decoder_name: codec_id.name().to_string(),
+    })
 }
 
 fn receive_audio_frames(
@@ -1615,6 +1978,10 @@ impl AudioOutput {
         if !playing {
             self.shared.underflowing.store(false, Ordering::SeqCst);
         }
+    }
+
+    fn playing(&self) -> bool {
+        self.shared.playing.load(Ordering::SeqCst)
     }
 
     fn set_volume(&self, volume: f32) {

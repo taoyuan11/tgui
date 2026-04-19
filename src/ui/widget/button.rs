@@ -14,6 +14,8 @@ pub struct Button<VM> {
 
 impl<VM> Button<VM> {
     pub fn new(label: Text) -> Self {
+        let mut interactions = InteractionHandlers::default();
+        interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
         Self {
             element: Element {
                 id: WidgetId::next(),
@@ -22,7 +24,7 @@ impl<VM> Button<VM> {
                     ..LayoutStyle::default()
                 },
                 visual: VisualStyle::default(),
-                interactions: InteractionHandlers::default(),
+                interactions,
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::Button {
