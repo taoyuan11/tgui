@@ -2153,7 +2153,9 @@ mod tests {
         Element, Image, Input, Point, ScrollbarAxis, ScrollbarHandle, Stack, Text, WidgetTree,
     };
     #[cfg(feature = "video")]
-    use crate::video::backend::{BackendSharedState, VideoBackend};
+    use crate::video::backend::{
+        BackendSharedState, VideoBackend, DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
+    };
     #[cfg(feature = "video")]
     use crate::video::{PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSurface};
 
@@ -2216,6 +2218,7 @@ mod tests {
             fn seek(&self, _position: std::time::Duration) {}
             fn set_volume(&self, _volume: f32) {}
             fn set_muted(&self, _muted: bool) {}
+            fn set_buffer_memory_limit_bytes(&self, _bytes: u64) {}
             fn current_frame(&self) -> Option<std::sync::Arc<crate::media::TextureFrame>> {
                 None
             }
@@ -2234,6 +2237,7 @@ mod tests {
             }),
             volume: ctx.observable(1.0),
             muted: ctx.observable(false),
+            buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
             video_size: ctx.observable(VideoSize {
                 width: snapshot.intrinsic_size.width as u32,
                 height: snapshot.intrinsic_size.height as u32,

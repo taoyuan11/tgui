@@ -130,6 +130,7 @@ enum BackendCommand {
     Seek(Duration),
     SetVolume(f32),
     SetMuted(bool),
+    SetBufferMemoryLimitBytes(u64),
     Shutdown,
 }
 
@@ -184,6 +185,12 @@ impl VideoBackend for FfmpegVideoBackend {
 
     fn set_muted(&self, muted: bool) {
         let _ = self.command_tx.send(BackendCommand::SetMuted(muted));
+    }
+
+    fn set_buffer_memory_limit_bytes(&self, bytes: u64) {
+        let _ = self
+            .command_tx
+            .send(BackendCommand::SetBufferMemoryLimitBytes(bytes));
     }
 
     fn current_frame(&self) -> Option<Arc<TextureFrame>> {
@@ -331,6 +338,13 @@ fn worker_main(
                     shared.muted.set(muted);
                     if let Some(session) = current_session.as_mut() {
                         session.set_muted(muted);
+                    }
+                }
+                BackendCommand::SetBufferMemoryLimitBytes(bytes) => {
+                    video_debug!("command buffer memory limit {} MB", bytes / 1024 / 1024);
+                    shared.buffer_memory_limit_bytes.set(bytes);
+                    if let Some(session) = current_session.as_mut() {
+                        session.set_buffer_memory_limit_bytes(bytes);
                     }
                 }
             },
@@ -536,6 +550,7 @@ struct QueuedVideoFrame {
     position: Duration,
     end_position: Duration,
     texture: Arc<TextureFrame>,
+    compressed_bytes: u64,
 }
 
 struct OpenedVideoDecoder {
@@ -564,6 +579,9 @@ struct PlaybackSession {
     pending_video_packets: VecDeque<QueuedVideoPacket>,
     ready_video_frames: VecDeque<QueuedVideoFrame>,
     buffering_profile: BufferingProfile,
+    buffer_memory_limit_bytes: u64,
+    pending_video_compressed_bytes: u64,
+    pending_audio_compressed_bytes: u64,
     paused_position: Duration,
     last_presented_position: Duration,
     play_started_at: Option<Instant>,
@@ -701,6 +719,9 @@ impl PlaybackSession {
             pending_video_packets: VecDeque::new(),
             ready_video_frames: VecDeque::new(),
             buffering_profile,
+            buffer_memory_limit_bytes: shared.buffer_memory_limit_bytes.get(),
+            pending_video_compressed_bytes: 0,
+            pending_audio_compressed_bytes: 0,
             paused_position: start_position,
             last_presented_position: start_position,
             play_started_at: None,
@@ -799,15 +820,30 @@ impl PlaybackSession {
             .unwrap_or(self.play_started_at.is_some());
         let next_ready = self.ready_video_frames.front().map(|frame| frame.position);
         let next_gap = next_ready.map(|position| position.saturating_sub(playback_position));
+        let pending_packet_memory = self.pending_video_packet_memory_bytes();
+        let ready_frame_memory = self.ready_video_frame_memory_bytes();
+        let audio_memory = self.audio_buffered_memory_bytes();
+        let total_memory =
+            total_buffered_memory_bytes(pending_packet_memory, ready_frame_memory, audio_memory);
 
         video_debug!(
-            "{} state={:?} pos={:?} audio_clock={:?} audio_buf={:?} video_buf={:?} ready={} packets={} next_ready={:?} next_gap={:?} eof_sent={} can_resume={}",
+            "{} state={:?} pos={:?} audio_clock={:?} audio_buf={:?} video_buf={:?} compressed_buf={} ({:.2} MiB, packets={} / {:.2} MiB, frames={} / {:.2} MiB, audio={} / {:.2} MiB) compressed_limit={} ({:.2} MiB) ready={} packets={} next_ready={:?} next_gap={:?} eof_sent={} can_resume={}",
             label,
             shared.playback_state.get(),
             playback_position,
             audio_clock,
             audio_buffered,
             self.video_buffered_duration(),
+            total_memory,
+            bytes_to_mib(total_memory),
+            pending_packet_memory,
+            bytes_to_mib(pending_packet_memory),
+            ready_frame_memory,
+            bytes_to_mib(ready_frame_memory),
+            audio_memory,
+            bytes_to_mib(audio_memory),
+            self.buffer_memory_limit_bytes,
+            bytes_to_mib(self.buffer_memory_limit_bytes),
             self.ready_video_frames.len(),
             self.pending_video_packets.len(),
             next_ready,
@@ -832,40 +868,74 @@ impl PlaybackSession {
         }
     }
 
-    fn should_throttle_demux(&self, shared: &BackendSharedState) -> bool {
-        let audio_soft_full = self
-            .audio_output
+    fn should_throttle_demux(&self) -> bool {
+        should_throttle_demux(
+            self.total_buffered_memory_bytes() >= self.buffer_memory_limit_bytes,
+            self.audio_buffered_duration() >= self.buffering_profile.audio_queue_hard_water,
+            self.ready_video_buffered_duration() >= self.buffering_profile.video_queue_hard_water,
+            self.pending_video_packets.len() >= self.buffering_profile.video_max_packet_count,
+        )
+    }
+
+    fn pending_video_packet_memory_bytes(&self) -> u64 {
+        pending_video_packet_memory_bytes(&self.pending_video_packets)
+    }
+
+    fn ready_video_frame_memory_bytes(&self) -> u64 {
+        ready_video_frame_memory_bytes(&self.ready_video_frames)
+    }
+
+    fn audio_buffered_memory_bytes(&self) -> u64 {
+        self.audio_output
             .as_ref()
-            .map(|output| {
-                output.buffered_duration() >= self.buffering_profile.audio_queue_high_water
+            .map(|output| output.buffered_memory_bytes())
+            .unwrap_or(0)
+    }
+
+    fn total_buffered_memory_bytes(&self) -> u64 {
+        total_buffered_memory_bytes(
+            self.pending_video_packet_memory_bytes(),
+            self.ready_video_frame_memory_bytes(),
+            self.audio_buffered_memory_bytes(),
+        )
+    }
+
+    fn buffer_memory_limit_reached(&self) -> bool {
+        self.total_buffered_memory_bytes() >= self.buffer_memory_limit_bytes
+    }
+
+    fn estimated_next_video_frame_memory_bytes(&self) -> u64 {
+        self.ready_video_frames
+            .front()
+            .map(|frame| frame.compressed_bytes)
+            .filter(|bytes| *bytes > 0)
+            .or_else(|| {
+                let (sum, count) = self
+                    .ready_video_frames
+                    .iter()
+                    .map(|frame| frame.compressed_bytes)
+                    .filter(|bytes| *bytes > 0)
+                    .fold((0u64, 0u64), |(sum, count), bytes| {
+                        (sum.saturating_add(bytes), count + 1)
+                    });
+                (count > 0).then(|| sum / count)
             })
-            .unwrap_or(false);
-
-        let audio_hard_full = self
-            .audio_output
-            .as_ref()
-            .map(|output| {
-                output.buffered_duration() >= self.buffering_profile.audio_queue_hard_water
+            .or_else(|| {
+                self.pending_video_packets
+                    .front()
+                    .map(|packet| packet.packet.size() as u64)
             })
-            .unwrap_or(false);
+            .unwrap_or_else(|| {
+                self.pending_video_compressed_bytes
+            })
+    }
 
-        let video_buffered = self.video_buffered_duration();
-        let video_soft_full = video_buffered >= self.buffering_profile.video_queue_high_water;
-        let video_hard_full = video_buffered >= self.buffering_profile.video_queue_hard_water
-            || self.pending_video_packets.len() >= self.buffering_profile.video_max_packet_count;
-
-        match shared.playback_state.get() {
-            PlaybackState::Buffering => {
-                // Buffering 期间不要被软阈值卡住
-                audio_hard_full && video_hard_full
-            }
-            _ => should_throttle_demux(
-                audio_soft_full,
-                audio_hard_full,
-                video_soft_full,
-                video_hard_full,
-            ),
-        }
+    fn buffering_constrained_by_memory_limit(&self) -> bool {
+        buffering_constrained_by_memory_limit(
+            self.total_buffered_memory_bytes(),
+            self.buffer_memory_limit_bytes,
+            self.estimated_next_video_frame_memory_bytes(),
+        )
     }
 
     fn queued_video_tail_position(&self) -> Option<Duration> {
@@ -920,64 +990,80 @@ impl PlaybackSession {
         &mut self,
         shared: &BackendSharedState,
         command_rx: Option<&Receiver<BackendCommand>>,
+        respect_buffer_memory_limit: bool,
     ) -> Result<ReceiveVideoOutcome, TguiError> {
         let mut last_position = None;
         let initial_packets = self.pending_video_packets.len();
         let initial_ready = self.ready_video_frames.len();
+        let mut decode_budget = self.buffering_profile.ready_video_frame_count;
 
-        loop {
-            while self.ready_video_frames.len() < self.buffering_profile.ready_video_frame_count {
-                let Some(queued_packet) = self.pending_video_packets.pop_front() else {
-                    break;
-                };
+        while decode_budget > 0 && (!respect_buffer_memory_limit || !self.buffer_memory_limit_reached())
+        {
+            let Some(queued_packet) = self.pending_video_packets.pop_front() else {
+                break;
+            };
 
-                if let Some(receiver) = command_rx {
-                    let mut command_position = queued_packet.position;
-                    if let Some(outcome) =
-                        self.process_commands(shared, receiver, &mut command_position)
-                    {
-                        match outcome {
-                            StepOutcome::Restart(_)
-                            | StepOutcome::Reload { .. }
-                            | StepOutcome::Paused(_)
-                            | StepOutcome::Ended(_)
-                            | StepOutcome::Shutdown => {
-                                self.pending_video_packets.push_front(queued_packet);
-                                return Ok(ReceiveVideoOutcome::Command(outcome));
-                            }
-                            StepOutcome::Continue => {}
-                            StepOutcome::Error(error) => return Err(TguiError::Media(error)),
+            if let Some(receiver) = command_rx {
+                let mut command_position = queued_packet.position;
+                if let Some(outcome) = self.process_commands(shared, receiver, &mut command_position)
+                {
+                    match outcome {
+                        StepOutcome::Restart(_)
+                        | StepOutcome::Reload { .. }
+                        | StepOutcome::Paused(_)
+                        | StepOutcome::Ended(_)
+                        | StepOutcome::Shutdown => {
+                            self.pending_video_packets.push_front(queued_packet);
+                            return Ok(ReceiveVideoOutcome::Command(outcome));
                         }
+                        StepOutcome::Continue => {}
+                        StepOutcome::Error(error) => return Err(TguiError::Media(error)),
                     }
                 }
+            }
 
                 self.video_decoder
                     .send_packet(&queued_packet.packet)
                     .map_err(|error| self.video_packet_send_error(error))?;
-                match self.receive_video_frames(shared, command_rx)? {
+                self.pending_video_compressed_bytes = self
+                    .pending_video_compressed_bytes
+                    .saturating_add(queued_packet.packet.size() as u64);
+                match self.receive_video_frames(
+                    shared,
+                    command_rx,
+                respect_buffer_memory_limit,
+                &mut decode_budget,
+            )? {
+                ReceiveVideoOutcome::Position(Some(position)) => last_position = Some(position),
+                ReceiveVideoOutcome::Position(None) => {}
+                ReceiveVideoOutcome::Command(outcome) => {
+                    return Ok(ReceiveVideoOutcome::Command(outcome));
+                }
+            }
+        }
+
+        if decode_budget > 0
+            && self.pending_video_packets.is_empty()
+            && self.eof_sent
+            && (!respect_buffer_memory_limit || !self.buffer_memory_limit_reached())
+        {
+            loop {
+                match self.receive_video_frames(
+                    shared,
+                    command_rx,
+                    respect_buffer_memory_limit,
+                    &mut decode_budget,
+                )? {
                     ReceiveVideoOutcome::Position(Some(position)) => last_position = Some(position),
-                    ReceiveVideoOutcome::Position(None) => {}
+                    ReceiveVideoOutcome::Position(None) => break,
                     ReceiveVideoOutcome::Command(outcome) => {
                         return Ok(ReceiveVideoOutcome::Command(outcome));
                     }
                 }
-            }
-
-            if self.ready_video_frames.len() >= self.buffering_profile.ready_video_frame_count
-                || !self.pending_video_packets.is_empty()
-            {
-                break;
-            }
-
-            if !self.eof_sent {
-                break;
-            }
-
-            match self.receive_video_frames(shared, command_rx)? {
-                ReceiveVideoOutcome::Position(Some(position)) => last_position = Some(position),
-                ReceiveVideoOutcome::Position(None) => break,
-                ReceiveVideoOutcome::Command(outcome) => {
-                    return Ok(ReceiveVideoOutcome::Command(outcome));
+                if decode_budget == 0
+                    || (respect_buffer_memory_limit && self.buffer_memory_limit_reached())
+                {
+                    break;
                 }
             }
         }
@@ -986,12 +1072,28 @@ impl PlaybackSession {
             let decoded_frames = self.ready_video_frames.len().saturating_sub(initial_ready);
             let consumed_packets = initial_packets.saturating_sub(self.pending_video_packets.len());
             if consumed_packets > 0 || decoded_frames > 0 {
+                let pending_packet_memory = self.pending_video_packet_memory_bytes();
+                let ready_frame_memory = self.ready_video_frame_memory_bytes();
+                let audio_memory = self.audio_buffered_memory_bytes();
+                let total_memory = total_buffered_memory_bytes(
+                    pending_packet_memory,
+                    ready_frame_memory,
+                    audio_memory,
+                );
                 video_debug!(
-                    "fill ready consumed_packets={} decoded_frames={} ready={} packets={} last_position={:?} eof_sent={}",
+                    "fill ready consumed_packets={} decoded_frames={} ready={} packets={} compressed_buf={} ({:.2} MiB, packets={} / {:.2} MiB, frames={} / {:.2} MiB, audio={} / {:.2} MiB) last_position={:?} eof_sent={}",
                     consumed_packets,
                     decoded_frames,
                     self.ready_video_frames.len(),
                     self.pending_video_packets.len(),
+                    total_memory,
+                    bytes_to_mib(total_memory),
+                    pending_packet_memory,
+                    bytes_to_mib(pending_packet_memory),
+                    ready_frame_memory,
+                    bytes_to_mib(ready_frame_memory),
+                    audio_memory,
+                    bytes_to_mib(audio_memory),
                     last_position,
                     self.eof_sent
                 );
@@ -1003,7 +1105,7 @@ impl PlaybackSession {
 
     fn prime_first_frame(&mut self, shared: &BackendSharedState) -> Result<Duration, TguiError> {
         loop {
-            match self.fill_ready_video_frames(shared, None)? {
+            match self.fill_ready_video_frames(shared, None, false)? {
                 ReceiveVideoOutcome::Position(_) => {
                     if let Some(position) = self.present_next_video_frame(shared) {
                         return Ok(position);
@@ -1023,14 +1125,14 @@ impl PlaybackSession {
                 self.video_decoder.send_eof().map_err(|error| {
                     TguiError::Media(format!("failed to flush preview decoder: {error}"))
                 })?;
-                match self.fill_ready_video_frames(shared, None)? {
+                match self.fill_ready_video_frames(shared, None, false)? {
                     ReceiveVideoOutcome::Position(_) => {
                         if let Some(position) = self.present_next_video_frame(shared) {
                             return Ok(position);
                         }
                     }
                     ReceiveVideoOutcome::Command(_) => {}
-                }
+                };
                 break;
             };
 
@@ -1095,6 +1197,10 @@ impl PlaybackSession {
         }
     }
 
+    fn set_buffer_memory_limit_bytes(&mut self, bytes: u64) {
+        self.buffer_memory_limit_bytes = bytes;
+    }
+
     fn playback_position(&self) -> Duration {
         if let Some(audio_output) = self.audio_output.as_ref() {
             let elapsed = audio_output.position();
@@ -1141,7 +1247,11 @@ impl PlaybackSession {
             self.remaining_duration(),
         );
 
-        audio_starving || video_starving
+        should_buffer_for_rebuffer(
+            audio_starving,
+            video_starving,
+            self.buffering_constrained_by_memory_limit(),
+        )
     }
 
     fn present_next_video_frame(&mut self, shared: &BackendSharedState) -> Option<Duration> {
@@ -1185,13 +1295,29 @@ impl PlaybackSession {
 
         if video_debug_enabled() {
             if present_count > 1 {
+                let pending_packet_memory = self.pending_video_packet_memory_bytes();
+                let ready_frame_memory = self.ready_video_frame_memory_bytes();
+                let audio_memory = self.audio_buffered_memory_bytes();
+                let total_memory = total_buffered_memory_bytes(
+                    pending_packet_memory,
+                    ready_frame_memory,
+                    audio_memory,
+                );
                 video_debug!(
-                    "present burst count={} playback_before={:?} last_position={:?} ready_left={} packets_left={}",
+                    "present burst count={} playback_before={:?} last_position={:?} ready_left={} packets_left={} compressed_buf={} ({:.2} MiB, packets={} / {:.2} MiB, frames={} / {:.2} MiB, audio={} / {:.2} MiB)",
                     present_count,
                     playback_before,
                     last_position,
                     self.ready_video_frames.len(),
-                    self.pending_video_packets.len()
+                    self.pending_video_packets.len(),
+                    total_memory,
+                    bytes_to_mib(total_memory),
+                    pending_packet_memory,
+                    bytes_to_mib(pending_packet_memory),
+                    ready_frame_memory,
+                    bytes_to_mib(ready_frame_memory),
+                    audio_memory,
+                    bytes_to_mib(audio_memory)
                 );
             } else if present_count == 0 {
                 if let Some(next_frame) = self.ready_video_frames.front() {
@@ -1244,6 +1370,14 @@ impl PlaybackSession {
     fn video_buffered_duration_from(&self, baseline: Duration) -> Duration {
         furthest_video_buffer_end(&self.ready_video_frames, &self.pending_video_packets)
             .map(|end| end.saturating_sub(baseline))
+            .unwrap_or(Duration::ZERO)
+    }
+
+    fn ready_video_buffered_duration(&self) -> Duration {
+        let baseline = std::cmp::max(self.last_presented_position, self.playback_position());
+        self.ready_video_frames
+            .back()
+            .map(|frame| frame.end_position.saturating_sub(baseline))
             .unwrap_or(Duration::ZERO)
     }
 
@@ -1324,7 +1458,7 @@ impl PlaybackSession {
             *current_position = position;
         }
 
-        match self.fill_ready_video_frames(shared, Some(command_rx)) {
+        match self.fill_ready_video_frames(shared, Some(command_rx), true) {
             Ok(ReceiveVideoOutcome::Position(_)) => {}
             Ok(ReceiveVideoOutcome::Command(outcome)) => return outcome,
             Err(error) => return StepOutcome::Error(error.to_string()),
@@ -1334,7 +1468,7 @@ impl PlaybackSession {
             *current_position = position;
         }
 
-        if self.should_throttle_demux(shared) {
+        if self.should_throttle_demux() {
             if let Some(outcome) = self.process_commands(shared, command_rx, current_position) {
                 return outcome;
             }
@@ -1357,7 +1491,7 @@ impl PlaybackSession {
 
                 if stream_index == self.video_stream_index {
                     self.queue_video_packet(packet);
-                    match self.fill_ready_video_frames(shared, Some(command_rx)) {
+                    match self.fill_ready_video_frames(shared, Some(command_rx), true) {
                         Ok(ReceiveVideoOutcome::Position(_)) => {}
                         Ok(ReceiveVideoOutcome::Command(outcome)) => return outcome,
                         Err(error) => return StepOutcome::Error(error.to_string()),
@@ -1379,11 +1513,15 @@ impl PlaybackSession {
                                 "failed to send audio packet: {error}"
                             ));
                         }
+                        self.pending_audio_compressed_bytes = self
+                            .pending_audio_compressed_bytes
+                            .saturating_add(packet.size() as u64);
                         if let Err(error) = receive_audio_frames(
                             audio_decoder,
                             resampler,
                             audio_time_base,
                             audio_output,
+                            &mut self.pending_audio_compressed_bytes,
                         ) {
                             return StepOutcome::Error(error.to_string());
                         }
@@ -1402,7 +1540,7 @@ impl PlaybackSession {
             }
             None => {
                 if self.eof_sent {
-                    match self.fill_ready_video_frames(shared, Some(command_rx)) {
+                    match self.fill_ready_video_frames(shared, Some(command_rx), true) {
                         Ok(ReceiveVideoOutcome::Position(_)) => {}
                         Ok(ReceiveVideoOutcome::Command(outcome)) => return outcome,
                         Err(error) => return StepOutcome::Error(error.to_string()),
@@ -1426,7 +1564,7 @@ impl PlaybackSession {
                 }
 
                 if !self.pending_video_packets.is_empty() {
-                    match self.fill_ready_video_frames(shared, Some(command_rx)) {
+                    match self.fill_ready_video_frames(shared, Some(command_rx), true) {
                         Ok(ReceiveVideoOutcome::Position(_)) => {}
                         Ok(ReceiveVideoOutcome::Command(outcome)) => return outcome,
                         Err(error) => return StepOutcome::Error(error.to_string()),
@@ -1442,7 +1580,7 @@ impl PlaybackSession {
                 if let Err(error) = self.video_decoder.send_eof() {
                     return StepOutcome::Error(format!("failed to flush video decoder: {error}"));
                 }
-                match self.fill_ready_video_frames(shared, Some(command_rx)) {
+                match self.fill_ready_video_frames(shared, Some(command_rx), true) {
                     Ok(ReceiveVideoOutcome::Position(_)) => {}
                     Ok(ReceiveVideoOutcome::Command(outcome)) => return outcome,
                     Err(error) => return StepOutcome::Error(error.to_string()),
@@ -1465,10 +1603,15 @@ impl PlaybackSession {
                         resampler,
                         audio_time_base,
                         audio_output,
+                        &mut self.pending_audio_compressed_bytes,
                     ) {
                         return StepOutcome::Error(error.to_string());
                     }
-                    if let Err(error) = flush_audio_resampler(resampler, audio_output) {
+                    if let Err(error) = flush_audio_resampler(
+                        resampler,
+                        audio_output,
+                        &mut self.pending_audio_compressed_bytes,
+                    ) {
                         return StepOutcome::Error(error.to_string());
                     }
                 }
@@ -1531,6 +1674,9 @@ impl PlaybackSession {
                 }
                 BackendCommand::SetVolume(volume) => self.set_volume(volume.clamp(0.0, 1.0)),
                 BackendCommand::SetMuted(muted) => self.set_muted(muted),
+                BackendCommand::SetBufferMemoryLimitBytes(bytes) => {
+                    self.set_buffer_memory_limit_bytes(bytes)
+                }
                 BackendCommand::Load(source) => {
                     video_debug!("process load reload source={:?}", source);
                     video_debug!("process load reload source={:?}", source);
@@ -1549,11 +1695,15 @@ impl PlaybackSession {
         &mut self,
         shared: &BackendSharedState,
         command_rx: Option<&Receiver<BackendCommand>>,
+        respect_buffer_memory_limit: bool,
+        decode_budget: &mut usize,
     ) -> Result<ReceiveVideoOutcome, TguiError> {
         let mut decoded = VideoFrame::empty();
         let mut last_position = None;
+        let mut newly_decoded: Vec<QueuedVideoFrame> = Vec::new();
 
-        while self.ready_video_frames.len() < self.buffering_profile.ready_video_frame_count
+        while *decode_budget > 0
+            && (!respect_buffer_memory_limit || !self.buffer_memory_limit_reached())
             && self.video_decoder.receive_frame(&mut decoded).is_ok()
         {
             let position = pts_to_duration(decoded.timestamp(), self.video_time_base)
@@ -1585,7 +1735,12 @@ impl PlaybackSession {
                 continue;
             }
 
-            if let Some(previous) = self.ready_video_frames.back_mut() {
+            if let Some(previous) = newly_decoded.last_mut() {
+                if position > previous.position {
+                    previous.end_position = position;
+                    self.video_frame_duration = position.saturating_sub(previous.position);
+                }
+            } else if let Some(previous) = self.ready_video_frames.back_mut() {
                 if position > previous.position {
                     previous.end_position = position;
                     self.video_frame_duration = position.saturating_sub(previous.position);
@@ -1593,13 +1748,21 @@ impl PlaybackSession {
             }
 
             let texture = Arc::new(video_frame_to_texture(&mut self.scaler, &decoded)?);
-            self.ready_video_frames.push_back(QueuedVideoFrame {
+            newly_decoded.push(QueuedVideoFrame {
                 position,
                 end_position: position.saturating_add(self.video_frame_duration),
                 texture,
+                compressed_bytes: 0,
             });
+            *decode_budget = (*decode_budget).saturating_sub(1);
 
             last_position = Some(position);
+        }
+
+        if !newly_decoded.is_empty() {
+            let compressed_bytes = std::mem::take(&mut self.pending_video_compressed_bytes);
+            distribute_video_compressed_bytes(&mut newly_decoded, compressed_bytes);
+            self.ready_video_frames.extend(newly_decoded);
         }
 
         Ok(ReceiveVideoOutcome::Position(last_position))
@@ -1617,12 +1780,21 @@ impl PlaybackSession {
         self.video_buffered_duration_from(baseline)
     }
 
+    fn startup_playback_blocked_by_memory_limit(&self) -> bool {
+        startup_playback_blocked_by_memory_limit(
+            self.buffering_constrained_by_memory_limit(),
+            !self.ready_video_frames.is_empty(),
+            self.audio_output.is_some(),
+            self.audio_buffered_duration(),
+        )
+    }
+
     fn can_start_playback(&self) -> bool {
         let audio_ok = self.audio_output.is_none()
             || self.audio_buffered_duration() >= self.buffering_profile.start_buffer_target;
         let video_ok =
             self.video_buffer_target_satisfied(self.buffering_profile.video_start_buffer_target);
-        audio_ok && video_ok
+        (audio_ok && video_ok) || self.startup_playback_blocked_by_memory_limit()
     }
 
     fn can_resume_playback(&self) -> bool {
@@ -1630,7 +1802,7 @@ impl PlaybackSession {
             || self.audio_buffered_duration() >= self.buffering_profile.rebuffer_target;
         let video_ok =
             self.video_buffer_target_satisfied(self.buffering_profile.video_resume_buffer_target);
-        audio_ok && video_ok
+        (audio_ok && video_ok) || self.startup_playback_blocked_by_memory_limit()
     }
 
     fn video_packet_send_error(&self, error: ffmpeg::Error) -> TguiError {
@@ -1774,32 +1946,44 @@ fn receive_audio_frames(
     resampler: &mut Resampler,
     _time_base: ffmpeg::Rational,
     audio_output: &AudioOutput,
+    pending_compressed_bytes: &mut u64,
 ) -> Result<(), TguiError> {
     let mut decoded = AudioFrame::empty();
+    let mut chunks = Vec::new();
     while decoder.receive_frame(&mut decoded).is_ok() {
         let mut resampled = allocate_resampled_audio_frame(resampler, &decoded);
         resampler.run(&decoded, &mut resampled).map_err(|error| {
             TguiError::Media(format!("failed to resample audio frame: {error}"))
         })?;
-        queue_audio_frame(audio_output, &resampled);
+        if let Some(samples) = audio_frame_to_f32_if_any(&resampled) {
+            chunks.push(samples);
+        }
     }
+    queue_audio_chunks(audio_output, chunks, pending_compressed_bytes);
     Ok(())
 }
 
 fn flush_audio_resampler(
     resampler: &mut Resampler,
     audio_output: &AudioOutput,
+    pending_compressed_bytes: &mut u64,
 ) -> Result<(), TguiError> {
+    let mut chunks = Vec::new();
     loop {
         let mut resampled = allocate_flush_audio_frame(resampler);
         match resampler
             .flush(&mut resampled)
             .map_err(|error| TguiError::Media(format!("failed to flush resampler: {error}")))?
         {
-            Some(_) => queue_audio_frame(audio_output, &resampled),
+            Some(_) => {
+                if let Some(samples) = audio_frame_to_f32_if_any(&resampled) {
+                    chunks.push(samples);
+                }
+            }
             None => break,
         }
     }
+    queue_audio_chunks(audio_output, chunks, pending_compressed_bytes);
     Ok(())
 }
 
@@ -1845,25 +2029,44 @@ fn allocate_flush_audio_frame(resampler: &Resampler) -> AudioFrame {
     frame
 }
 
-fn queue_audio_frame(audio_output: &AudioOutput, frame: &AudioFrame) {
-    if frame.samples() == 0 {
+fn queue_audio_chunks(
+    audio_output: &AudioOutput,
+    chunks: Vec<Vec<f32>>,
+    pending_compressed_bytes: &mut u64,
+) {
+    if chunks.is_empty() {
         return;
     }
-    let samples = audio_frame_to_f32(frame);
-    if !samples.is_empty() {
-        audio_output.push_samples(&samples);
+    let total_compressed_bytes = std::mem::take(pending_compressed_bytes);
+    let total_samples = chunks.iter().map(|samples| samples.len() as u64).sum::<u64>().max(1);
+    let mut remaining_bytes = total_compressed_bytes;
+    let mut remaining_samples = total_samples;
+
+    for samples in chunks {
+        let sample_count = samples.len() as u64;
+        let chunk_bytes = if remaining_samples == sample_count {
+            remaining_bytes
+        } else {
+            total_compressed_bytes.saturating_mul(sample_count) / total_samples
+        };
+        remaining_bytes = remaining_bytes.saturating_sub(chunk_bytes);
+        remaining_samples = remaining_samples.saturating_sub(sample_count);
+        audio_output.push_samples(&samples, chunk_bytes);
     }
 }
 
-fn audio_frame_to_f32(frame: &AudioFrame) -> Vec<f32> {
+fn audio_frame_to_f32_if_any(frame: &AudioFrame) -> Option<Vec<f32>> {
+    if frame.samples() == 0 {
+        return None;
+    }
     if !frame.is_packed() {
-        return Vec::new();
+        return None;
     }
 
     unsafe {
         let len = frame.samples() * frame.channels() as usize;
         let slice = std::slice::from_raw_parts((*frame.as_ptr()).data[0] as *const f32, len);
-        slice.to_vec()
+        Some(slice.to_vec())
     }
 }
 
@@ -1924,12 +2127,18 @@ struct AudioOutput {
 
 struct SharedAudioOutput {
     queue: Mutex<VecDeque<f32>>,
+    compressed_chunks: Mutex<VecDeque<CompressedAudioChunk>>,
     playing: AtomicBool,
     muted: AtomicBool,
     volume_bits: AtomicU32,
     played_frames: AtomicU64,
     channels: u16,
     underflowing: AtomicBool,
+}
+
+struct CompressedAudioChunk {
+    sample_count: usize,
+    compressed_bytes: u64,
 }
 
 impl AudioOutput {
@@ -1944,6 +2153,7 @@ impl AudioOutput {
 
         let shared = Arc::new(SharedAudioOutput {
             queue: Mutex::new(VecDeque::new()),
+            compressed_chunks: Mutex::new(VecDeque::new()),
             playing: AtomicBool::new(false),
             muted: AtomicBool::new(muted),
             volume_bits: AtomicU32::new(volume.to_bits()),
@@ -2000,13 +2210,29 @@ impl AudioOutput {
             .lock()
             .expect("audio queue lock poisoned")
             .clear();
+        self.shared
+            .compressed_chunks
+            .lock()
+            .expect("audio compressed queue lock poisoned")
+            .clear();
         self.shared.played_frames.store(0, Ordering::SeqCst);
         self.shared.underflowing.store(false, Ordering::SeqCst);
     }
 
-    fn push_samples(&self, samples: &[f32]) {
+    fn push_samples(&self, samples: &[f32], compressed_bytes: u64) {
         let mut queue = self.shared.queue.lock().expect("audio queue lock poisoned");
         queue.extend(samples.iter().copied());
+        drop(queue);
+        if !samples.is_empty() {
+            self.shared
+                .compressed_chunks
+                .lock()
+                .expect("audio compressed queue lock poisoned")
+                .push_back(CompressedAudioChunk {
+                    sample_count: samples.len(),
+                    compressed_bytes,
+                });
+        }
         self.shared.underflowing.store(false, Ordering::SeqCst);
     }
 
@@ -2024,6 +2250,16 @@ impl AudioOutput {
             .len();
         let buffered_frames = buffered_samples / self.channels as usize;
         Duration::from_secs_f64(buffered_frames as f64 / self.sample_rate as f64)
+    }
+
+    fn buffered_memory_bytes(&self) -> u64 {
+        self.shared
+            .compressed_chunks
+            .lock()
+            .expect("audio compressed queue lock poisoned")
+            .iter()
+            .map(|chunk| chunk.compressed_bytes)
+            .sum()
     }
 
     fn has_started_clock(&self) -> bool {
@@ -2117,6 +2353,7 @@ where
     }
 
     drop(queue);
+    consume_audio_compressed_bytes(shared, consumed_samples);
 
     if playing && consumed_samples > 0 {
         let consumed_frames = (consumed_samples / shared.channels as usize) as u64;
@@ -2130,12 +2367,114 @@ where
 }
 
 fn should_throttle_demux(
-    audio_soft_full: bool,
+    compressed_buffer_limit_reached: bool,
     audio_hard_full: bool,
-    video_soft_full: bool,
-    video_hard_full: bool,
+    decoded_video_hard_full: bool,
+    video_packet_fuse_tripped: bool,
 ) -> bool {
-    audio_hard_full || video_hard_full || (audio_soft_full && video_soft_full)
+    compressed_buffer_limit_reached
+        || audio_hard_full
+        || decoded_video_hard_full
+        || video_packet_fuse_tripped
+}
+
+fn pending_video_packet_memory_bytes(pending_packets: &VecDeque<QueuedVideoPacket>) -> u64 {
+    pending_packets
+        .iter()
+        .map(|packet| packet.packet.size() as u64)
+        .sum()
+}
+
+fn ready_video_frame_memory_bytes(ready_frames: &VecDeque<QueuedVideoFrame>) -> u64 {
+    ready_frames
+        .iter()
+        .map(|frame| frame.compressed_bytes)
+        .sum()
+}
+
+fn total_buffered_memory_bytes(
+    pending_video_packet_bytes: u64,
+    ready_video_frame_bytes: u64,
+    audio_buffered_bytes: u64,
+) -> u64 {
+    pending_video_packet_bytes
+        .saturating_add(ready_video_frame_bytes)
+        .saturating_add(audio_buffered_bytes)
+}
+
+fn bytes_to_mib(bytes: u64) -> f64 {
+    bytes as f64 / (1024.0 * 1024.0)
+}
+
+fn startup_playback_blocked_by_memory_limit(
+    buffering_constrained_by_memory_limit: bool,
+    has_ready_video_frames: bool,
+    has_audio_output: bool,
+    audio_buffered_duration: Duration,
+) -> bool {
+    buffering_constrained_by_memory_limit
+        && has_ready_video_frames
+        && (!has_audio_output || !audio_buffered_duration.is_zero())
+}
+
+fn should_buffer_for_rebuffer(
+    audio_starving: bool,
+    video_starving: bool,
+    buffering_constrained_by_memory_limit: bool,
+) -> bool {
+    audio_starving || (video_starving && !buffering_constrained_by_memory_limit)
+}
+
+fn buffering_constrained_by_memory_limit(
+    total_buffered_memory_bytes: u64,
+    buffer_memory_limit_bytes: u64,
+    next_video_frame_memory_bytes: u64,
+) -> bool {
+    total_buffered_memory_bytes
+        .saturating_add(next_video_frame_memory_bytes)
+        > buffer_memory_limit_bytes
+}
+
+fn distribute_video_compressed_bytes(frames: &mut [QueuedVideoFrame], compressed_bytes: u64) {
+    if frames.is_empty() {
+        return;
+    }
+    let base = compressed_bytes / frames.len() as u64;
+    let remainder = compressed_bytes % frames.len() as u64;
+    for (index, frame) in frames.iter_mut().enumerate() {
+        frame.compressed_bytes = base + u64::from(index < remainder as usize);
+    }
+}
+
+fn consume_audio_compressed_bytes(shared: &Arc<SharedAudioOutput>, consumed_samples: usize) {
+    if consumed_samples == 0 {
+        return;
+    }
+
+    let mut remaining_samples = consumed_samples;
+    let mut chunks = shared
+        .compressed_chunks
+        .lock()
+        .expect("audio compressed queue lock poisoned");
+
+    while remaining_samples > 0 {
+        let Some(front) = chunks.front_mut() else {
+            break;
+        };
+
+        if front.sample_count <= remaining_samples {
+            remaining_samples -= front.sample_count;
+            chunks.pop_front();
+            continue;
+        }
+
+        let bytes_to_consume =
+            ((front.compressed_bytes as u128 * remaining_samples as u128) / front.sample_count as u128)
+                as u64;
+        front.sample_count -= remaining_samples;
+        front.compressed_bytes = front.compressed_bytes.saturating_sub(bytes_to_consume);
+        remaining_samples = 0;
+    }
 }
 
 fn furthest_video_buffer_end(
@@ -2181,6 +2520,7 @@ mod tests {
     fn muted_audio_still_advances_clock() {
         let shared = Arc::new(SharedAudioOutput {
             queue: Mutex::new(VecDeque::from(vec![0.25, -0.25, 0.5, -0.5])),
+            compressed_chunks: Mutex::new(VecDeque::new()),
             playing: AtomicBool::new(true),
             muted: AtomicBool::new(true),
             volume_bits: AtomicU32::new(1.0f32.to_bits()),
@@ -2198,19 +2538,121 @@ mod tests {
     }
 
     #[test]
-    fn demux_keeps_running_when_only_video_reaches_soft_limit() {
-        assert!(!should_throttle_demux(false, false, true, false));
+    fn demux_keeps_running_below_memory_limit() {
+        assert!(!should_throttle_demux(false, false, false, false));
     }
 
     #[test]
-    fn demux_throttles_once_both_soft_limits_are_full() {
-        assert!(should_throttle_demux(true, false, true, false));
+    fn demux_throttles_at_memory_limit() {
+        assert!(should_throttle_demux(true, false, false, false));
     }
 
     #[test]
-    fn demux_throttles_immediately_on_any_hard_limit() {
-        assert!(should_throttle_demux(false, true, false, false));
+    fn demux_throttles_when_video_packet_fuse_trips() {
         assert!(should_throttle_demux(false, false, false, true));
+    }
+
+    #[test]
+    fn demux_throttles_when_decoded_video_queue_is_too_deep() {
+        assert!(should_throttle_demux(false, false, true, false));
+    }
+
+    #[test]
+    fn demux_throttles_when_audio_queue_is_too_deep() {
+        assert!(should_throttle_demux(false, true, false, false));
+    }
+
+    #[test]
+    fn total_buffered_memory_counts_packets_frames_and_audio_samples() {
+        let ready_frames = VecDeque::from([QueuedVideoFrame {
+            position: Duration::from_millis(900),
+            end_position: Duration::from_millis(1200),
+            texture: Arc::new(TextureFrame::new(2, 2, vec![255; 16])),
+            compressed_bytes: 16,
+        }]);
+        let mut packet = ffmpeg::Packet::copy(b"hello");
+        packet.set_pts(Some(0));
+        let pending_packets = VecDeque::from([QueuedVideoPacket {
+            packet,
+            position: Duration::ZERO,
+            end_position: Duration::from_millis(33),
+        }]);
+
+        let total = total_buffered_memory_bytes(
+            pending_video_packet_memory_bytes(&pending_packets),
+            ready_video_frame_memory_bytes(&ready_frames),
+            6,
+        );
+
+        assert_eq!(total, 27);
+    }
+
+    #[test]
+    fn startup_playback_can_fall_back_when_memory_limit_prevents_more_buffering() {
+        assert!(startup_playback_blocked_by_memory_limit(
+            true,
+            true,
+            true,
+            Duration::from_millis(1),
+        ));
+    }
+
+    #[test]
+    fn startup_playback_memory_fallback_requires_actual_playable_media() {
+        assert!(!startup_playback_blocked_by_memory_limit(
+            true,
+            false,
+            true,
+            Duration::from_secs(1),
+        ));
+        assert!(!startup_playback_blocked_by_memory_limit(
+            true,
+            true,
+            true,
+            Duration::ZERO,
+        ));
+    }
+
+    #[test]
+    fn rebuffer_check_does_not_override_memory_limit_playback_fallback() {
+        assert!(should_buffer_for_rebuffer(true, true, true));
+        assert!(should_buffer_for_rebuffer(true, false, false));
+        assert!(should_buffer_for_rebuffer(false, true, false));
+        assert!(!should_buffer_for_rebuffer(false, true, true));
+    }
+
+    #[test]
+    fn buffering_is_constrained_when_next_frame_would_overrun_limit() {
+        assert!(buffering_constrained_by_memory_limit(
+            165_888_000,
+            167_772_160,
+            3_686_400,
+        ));
+        assert!(!buffering_constrained_by_memory_limit(
+            120_000_000,
+            167_772_160,
+            3_686_400,
+        ));
+    }
+
+    #[test]
+    fn then_like_estimate_fallback_does_not_divide_when_no_ready_frame_bytes_exist() {
+        let ready_frames = VecDeque::from([QueuedVideoFrame {
+            position: Duration::ZERO,
+            end_position: Duration::from_millis(33),
+            texture: Arc::new(TextureFrame::new(1, 1, vec![255; 4])),
+            compressed_bytes: 0,
+        }]);
+
+        let (sum, count) = ready_frames
+            .iter()
+            .map(|frame| frame.compressed_bytes)
+            .filter(|bytes| *bytes > 0)
+            .fold((0u64, 0u64), |(sum, count), bytes| {
+                (sum.saturating_add(bytes), count + 1)
+            });
+
+        assert_eq!((count > 0).then(|| sum / count), None);
     }
 
     #[test]
@@ -2298,6 +2740,7 @@ mod tests {
             position: Duration::from_millis(900),
             end_position: Duration::from_millis(1200),
             texture: Arc::new(TextureFrame::new(1, 1, vec![255; 4])),
+            compressed_bytes: 4,
         }]);
         let pending_packets = VecDeque::from([QueuedVideoPacket {
             packet: ffmpeg::Packet::empty(),

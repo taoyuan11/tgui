@@ -3406,9 +3406,6 @@ fn is_light_color(color: Color) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
-    use std::time::Duration;
     use crate::animation::AnimationCoordinator;
     use crate::application::{ApplicationConfig, ThemeSelection, WindowRole};
     use crate::dialog::async_dialog_channel;
@@ -3417,7 +3414,9 @@ mod tests {
     use crate::platform::dpi::LogicalSize;
     use crate::text::font::FontCatalog;
     use crate::ui::widget::{Column, CursorStyle, Point, Text, WidgetTree};
-
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use super::{
         next_grapheme_boundary, normalize_single_line_text, previous_grapheme_boundary,
@@ -3427,7 +3426,9 @@ mod tests {
     #[cfg(feature = "video")]
     use crate::media::TextureFrame;
     #[cfg(feature = "video")]
-    use crate::video::backend::{BackendSharedState, VideoBackend};
+    use crate::video::backend::{
+        BackendSharedState, VideoBackend, DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
+    };
     #[cfg(feature = "video")]
     use crate::video::{
         PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
@@ -3534,6 +3535,8 @@ mod tests {
 
         fn set_muted(&self, _muted: bool) {}
 
+        fn set_buffer_memory_limit_bytes(&self, _bytes: u64) {}
+
         fn current_frame(&self) -> Option<Arc<TextureFrame>> {
             None
         }
@@ -3552,6 +3555,7 @@ mod tests {
             metrics: ctx.observable(VideoMetrics::default()),
             volume: ctx.observable(1.0),
             muted: ctx.observable(false),
+            buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
             video_size: ctx.observable(VideoSize {
                 width: 160,
                 height: 90,

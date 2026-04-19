@@ -154,6 +154,19 @@ tgui = { version = "0.1.2", features = ["video-static"] }
 `video-static` forwards to `ffmpeg-next/static`, so your build environment still
 needs the FFmpeg static libraries and headers to be available to Cargo.
 
+Video playback starts once the stream reaches its playable buffer target, but
+background buffering keeps running until it reaches the controller's memory
+limit. The default limit is `100 MiB` (`104_857_600` bytes), and you can raise
+or lower it through `VideoController`:
+
+```rust
+let controller = tgui::VideoController::new(ctx);
+controller.set_buffer_memory_limit_bytes(160 * 1024 * 1024);
+```
+
+The playable buffer target decides when playback can begin or resume. The
+memory limit decides when future buffering stops growing.
+
 If you package an OHOS app with `cargo ohos-app`, the packager can now detect
 `tgui-winit-ohos` directly, so a separate `winit-ohos` shim dependency is no longer required.
 

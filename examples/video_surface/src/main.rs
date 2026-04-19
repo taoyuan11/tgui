@@ -13,12 +13,14 @@ struct VideoVm {
 
 impl VideoVm {
     fn new(ctx: &ViewModelContext) -> Self {
+        let controller = VideoController::new(ctx);
+        controller.set_buffer_memory_limit_bytes(160 * 1024 * 1024);
         Self {
-            controller: VideoController::new(ctx),
+            controller,
             source: ctx.observable(String::new()),
         }
     }
-
+// D:\CloudMusic\MV\郭顶 - 凄美地.mp4
     fn play(&mut self) {
         self.controller.play();
     }
@@ -84,7 +86,10 @@ impl VideoVm {
                             .background(Color::hexa(0x2563EBFF))
                             .border_radius(8.0)
                             .child(Text::new("Play").color(Color::WHITE))
-                            .on_click(Command::new(Self::play)),
+                            .on_click(Command::new(|vm: &mut VideoVm| {
+                    eprintln!("[vm] play clicked");
+                    vm.play()
+                })),
                         Stack::new()
                             .padding(Insets::symmetric(12.0, 8.0))
                             .background(Color::hexa(0x475569FF))
@@ -120,24 +125,21 @@ impl VideoVm {
                     .child(Text::new("/").color(Color::hexa(0x64748BFF)))
                     .child(Text::new(duration).color(Color::hexa(0xCBD5E1FF))),
             )
-            .child(
-                Row::new().fill_width().gap(10.0).child(el![
+            .child(Row::new().fill_width().gap(10.0).child(el![
                     Input::new(Text::new(self.source.binding()))
                         .fill_width()
                         .placeholder_with_str("请输入视频源路径")
                         .on_change(ValueCommand::new(
                             |video_vm: &mut VideoVm, value: String| { video_vm.source.set(value) }
                         )),
-                    Button::new(Text::new("切换源并播放")).on_click(Command::new(
+                    Button::new(Text::new("change source")).on_click(Command::new(
                         |video_vm: &mut VideoVm| {
                             let _ = video_vm
                                 .controller
                                 .load(parse_video_source(video_vm.source.get().clone()));
-                            video_vm.play()
                         }
                     ))
-                ]),
-            )
+                ]))
             .into()
     }
 }

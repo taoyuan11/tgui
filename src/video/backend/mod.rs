@@ -8,12 +8,15 @@ use super::types::{PlaybackState, VideoMetrics, VideoSize, VideoSource, VideoSur
 
 pub(crate) mod ffmpeg;
 
+pub(crate) const DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES: u64 = 100 * 1024 * 1024;
+
 #[derive(Clone)]
 pub(crate) struct BackendSharedState {
     pub playback_state: Observable<PlaybackState>,
     pub metrics: Observable<VideoMetrics>,
     pub volume: Observable<f32>,
     pub muted: Observable<bool>,
+    pub buffer_memory_limit_bytes: Observable<u64>,
     pub video_size: Observable<VideoSize>,
     pub error: Observable<Option<String>>,
     pub surface: Observable<VideoSurfaceSnapshot>,
@@ -54,6 +57,7 @@ pub(crate) trait VideoBackend: Send + Sync {
     fn seek(&self, position: std::time::Duration);
     fn set_volume(&self, volume: f32);
     fn set_muted(&self, muted: bool);
+    fn set_buffer_memory_limit_bytes(&self, bytes: u64);
     fn current_frame(&self) -> Option<Arc<TextureFrame>>;
     fn shutdown(&self);
 

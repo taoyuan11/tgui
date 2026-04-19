@@ -4,7 +4,10 @@ use std::time::Duration;
 use crate::foundation::binding::{Binding, ViewModelContext};
 use crate::TguiError;
 
-use super::backend::{ffmpeg::FfmpegVideoBackend, BackendSharedState, VideoBackend};
+use super::backend::{
+    ffmpeg::FfmpegVideoBackend, BackendSharedState, VideoBackend,
+    DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
+};
 use super::types::{PlaybackState, VideoMetrics, VideoSize, VideoSource, VideoSurfaceSnapshot};
 
 #[derive(Clone)]
@@ -24,6 +27,7 @@ impl VideoController {
             metrics: ctx.observable(VideoMetrics::default()),
             volume: ctx.observable(1.0),
             muted: ctx.observable(false),
+            buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
             video_size: ctx.observable(VideoSize::default()),
             error: ctx.observable(None),
             surface: ctx.observable(VideoSurfaceSnapshot::default()),
@@ -64,6 +68,11 @@ impl VideoController {
     pub fn set_muted(&self, muted: bool) {
         self.inner.shared.muted.set(muted);
         self.inner.backend.set_muted(muted);
+    }
+
+    pub fn set_buffer_memory_limit_bytes(&self, bytes: u64) {
+        self.inner.shared.buffer_memory_limit_bytes.set(bytes);
+        self.inner.backend.set_buffer_memory_limit_bytes(bytes);
     }
 
     pub fn playback_state(&self) -> Binding<PlaybackState> {
@@ -139,6 +148,7 @@ mod tests {
         seeks: Vec<Duration>,
         volumes: Vec<f32>,
         muteds: Vec<bool>,
+        buffer_memory_limits: Vec<u64>,
     }
 
     struct MockBackend {
@@ -203,6 +213,14 @@ mod tests {
                 .push(muted);
         }
 
+        fn set_buffer_memory_limit_bytes(&self, bytes: u64) {
+            self.commands
+                .lock()
+                .expect("commands lock poisoned")
+                .buffer_memory_limits
+                .push(bytes);
+        }
+
         fn current_frame(&self) -> Option<Arc<TextureFrame>> {
             self.frame.lock().expect("frame lock poisoned").clone()
         }
@@ -220,6 +238,7 @@ mod tests {
             metrics: ctx.observable(VideoMetrics::default()),
             volume: ctx.observable(1.0),
             muted: ctx.observable(false),
+            buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
             video_size: ctx.observable(VideoSize::default()),
             error: ctx.observable(None),
             surface: ctx.observable(VideoSurfaceSnapshot::default()),
@@ -242,6 +261,7 @@ mod tests {
         controller.seek(Duration::from_secs(9));
         controller.set_volume(0.25);
         controller.set_muted(true);
+        controller.set_buffer_memory_limit_bytes(32 * 1024 * 1024);
 
         let commands = commands.lock().expect("commands lock poisoned");
         assert_eq!(commands.loads, vec![VideoSource::File("demo.mp4".into())]);
@@ -250,6 +270,7 @@ mod tests {
         assert_eq!(commands.seeks, vec![Duration::from_secs(9)]);
         assert_eq!(commands.volumes, vec![0.25]);
         assert_eq!(commands.muteds, vec![true]);
+        assert_eq!(commands.buffer_memory_limits, vec![32 * 1024 * 1024]);
     }
 
     #[test]
@@ -297,6 +318,17 @@ mod tests {
                 .expect("backend frame should backfill snapshot")
                 .size(),
             (8, 4)
+        );
+    }
+
+    #[test]
+    fn controller_defaults_buffer_memory_limit_to_100_mib() {
+        let ctx = test_context();
+        let controller = VideoController::new(&ctx);
+
+        assert_eq!(
+            controller.inner.shared.buffer_memory_limit_bytes.get(),
+            DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES
         );
     }
 }
