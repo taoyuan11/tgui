@@ -20,6 +20,7 @@ pub struct Text {
     pub(crate) font_weight: FontWeight,
     pub(crate) letter_spacing: f32,
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
+    pub(crate) user_select: bool,
 }
 
 impl Text {
@@ -33,8 +34,9 @@ impl Text {
             color: None,
             font_size: None,
             font_weight: FontWeight::NORMAL,
-            letter_spacing: 0.0,
+            letter_spacing: 1.0,
             cursor_style: None,
+            user_select: false,
         }
     }
 
@@ -94,7 +96,7 @@ impl Text {
         self
     }
 
-    pub fn letter_spacing(mut self, spacing: f32) -> Self {
+    pub fn character_spacing(mut self, spacing: f32) -> Self {
         self.letter_spacing = spacing;
         self
     }
@@ -149,6 +151,18 @@ impl Text {
         self
     }
 
+    pub fn user_select(mut self, user_select: bool) -> Self {
+        self.user_select = user_select;
+        self
+    }
+
+    fn resolved_cursor_style(&self) -> Option<Value<CursorStyle>> {
+        self.cursor_style.clone().or_else(|| {
+            self.user_select
+                .then_some(Value::Static(CursorStyle::Text))
+        })
+    }
+
     fn into_element_with_interactions<VM>(
         self,
         mut interactions: InteractionHandlers<VM>,
@@ -156,7 +170,7 @@ impl Text {
         let background = self.background.clone();
         let layout = self.layout.clone();
         let visual = self.visual.clone();
-        interactions.cursor_style = self.cursor_style.clone();
+        interactions.cursor_style = self.resolved_cursor_style();
         Element {
             id: WidgetId::next(),
             layout,
@@ -179,12 +193,23 @@ impl<VM> From<Text> for Element<VM> {
             layout,
             visual,
             interactions: InteractionHandlers {
-                cursor_style: value.cursor_style.clone(),
+                cursor_style: value.resolved_cursor_style(),
                 ..InteractionHandlers::default()
             },
             media_events: MediaEventHandlers::default(),
             background,
             kind: WidgetKind::Text { text: value },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Text;
+
+    #[test]
+    fn character_spacing_updates_letter_spacing() {
+        let text = Text::new("hello").character_spacing(2.5);
+        assert_eq!(text.letter_spacing, 2.5);
     }
 }

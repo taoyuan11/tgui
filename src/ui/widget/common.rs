@@ -524,8 +524,19 @@ pub(crate) enum HitInteraction<VM> {
     },
     FocusInput {
         id: WidgetId,
+        frame: Rect,
+        padding: Insets,
         interactions: InteractionHandlers<VM>,
         on_change: Option<ValueCommand<VM, String>>,
+        text_style: Text,
+        text: String,
+    },
+    SelectableText {
+        id: WidgetId,
+        frame: Rect,
+        padding: Insets,
+        interactions: InteractionHandlers<VM>,
+        text_style: Text,
         text: String,
     },
 }
@@ -544,13 +555,34 @@ impl<VM> Clone for HitInteraction<VM> {
             },
             Self::FocusInput {
                 id,
+                frame,
+                padding,
                 interactions,
                 on_change,
+                text_style,
                 text,
             } => Self::FocusInput {
                 id: *id,
+                frame: *frame,
+                padding: *padding,
                 interactions: interactions.clone(),
                 on_change: on_change.clone(),
+                text_style: text_style.clone(),
+                text: text.clone(),
+            },
+            Self::SelectableText {
+                id,
+                frame,
+                padding,
+                interactions,
+                text_style,
+                text,
+            } => Self::SelectableText {
+                id: *id,
+                frame: *frame,
+                padding: *padding,
+                interactions: interactions.clone(),
+                text_style: text_style.clone(),
                 text: text.clone(),
             },
         }
@@ -641,7 +673,7 @@ impl Point {
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct InputEditState {
     pub cursor: usize,
     pub anchor: usize,
@@ -679,7 +711,7 @@ impl InputEditState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompositionState {
     pub replace_range: (usize, usize),
     pub text: String,

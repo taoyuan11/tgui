@@ -33,12 +33,12 @@ use crate::platform::window::{
     Theme as WindowTheme, WindowAttributes, WindowId,
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
-use crate::text::font::FontManager;
+use crate::text::font::{FontManager, TextFontRequest};
 use crate::ui::theme::{Theme, ThemeMode};
 use crate::ui::widget::{
     ComputedScene, HitInteraction, InputEditState, InputSnapshot, MediaEventPhase, MediaEventState,
-    Point, Rect, RenderedWidgetScene, ScenePrimitives, ScrollbarAxis, ScrollbarHandle, WidgetId,
-    WidgetTree,
+    Point, Rect, RenderedWidgetScene, ScenePrimitives, ScrollbarAxis, ScrollbarHandle, Text,
+    WidgetId, WidgetTree,
 };
 use image::GenericImageView;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -564,6 +564,10 @@ pub struct BoundRuntimeHandler<VM> {
     focused_widget: Option<FocusedWidget<VM>>,
     focused_input: Option<WidgetId>,
     input_states: HashMap<WidgetId, InputEditState>,
+    selected_text: Option<WidgetId>,
+    selected_text_states: HashMap<WidgetId, InputEditState>,
+    active_input_selection: Option<TextSelectionDrag>,
+    active_text_selection: Option<TextSelectionDrag>,
     clipboard: ClipboardService,
     cached_scene: Option<CachedScene<VM>>,
     cursor_icon: Option<CursorIcon>,
@@ -586,6 +590,7 @@ pub struct BoundRuntimeHandler<VM> {
 struct CachedScene<VM> {
     viewport: Rect,
     focused_input: Option<WidgetId>,
+    selected_text: Option<WidgetId>,
     caret_visible: bool,
     animation_epoch: u64,
     scroll_epoch: u64,
@@ -621,6 +626,15 @@ struct ScrollbarDrag {
     track: Rect,
     thumb: Rect,
     max_offset: f32,
+}
+
+#[derive(Clone)]
+struct TextSelectionDrag {
+    widget_id: WidgetId,
+    frame: Rect,
+    padding: crate::ui::layout::Insets,
+    text_style: Text,
+    text: String,
 }
 
 enum PendingMediaEvent<VM> {
@@ -756,6 +770,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             focused_widget: None,
             focused_input: None,
             input_states: HashMap::new(),
+            selected_text: None,
+            selected_text_states: HashMap::new(),
+            active_input_selection: None,
+            active_text_selection: None,
             clipboard: ClipboardService::default(),
             cached_scene: None,
             cursor_icon: None,
@@ -1001,6 +1019,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) -> bool {
         cached.viewport == viewport
             && cached.focused_input == self.focused_input
+            && cached.selected_text == self.selected_text
             && cached.caret_visible == caret_visible
             && cached.animation_epoch == self.animation_epoch
             && cached.scroll_epoch == self.scroll_epoch
@@ -1015,6 +1034,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let focused_input_state = self
             .focused_input
             .and_then(|id| self.focused_input_state(id))
+            .cloned();
+        let selected_text_state = self
+            .selected_text
+            .and_then(|id| self.selected_text_state(id))
             .cloned();
 
         let cache_valid = self
@@ -1039,6 +1062,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     viewport,
                     self.focused_input,
                     focused_input_state.as_ref(),
+                    self.selected_text,
+                    selected_text_state.as_ref(),
                     caret_visible,
                 ),
                 None => ComputedScene::default(),
@@ -1046,6 +1071,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.cached_scene = Some(CachedScene {
                 viewport,
                 focused_input: self.focused_input,
+                selected_text: self.selected_text,
                 caret_visible,
                 animation_epoch: self.animation_epoch,
                 scroll_epoch: self.scroll_epoch,
@@ -1443,9 +1469,198 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.input_states.get(&id)
     }
 
+    fn selected_text_state(&self, id: WidgetId) -> Option<&InputEditState> {
+        self.selected_text_states.get(&id)
+    }
+
     fn focused_input_snapshot(&self) -> Option<InputSnapshot<VM>> {
         let id = self.focused_input?;
         self.widget_tree.as_ref()?.input_snapshot(id)
+    }
+
+    fn update_selected_text_state(
+        &mut self,
+        widget_id: WidgetId,
+        text: &str,
+        update: impl FnOnce(&mut InputEditState),
+    ) -> bool {
+        let state = self
+            .selected_text_states
+            .entry(widget_id)
+            .and_modify(|state| *state = state.clone().clamped_to(text))
+            .or_insert_with(|| InputEditState::caret_at(text));
+        let before = state.clone();
+        update(state);
+        *state = state.clone().clamped_to(text);
+        if *state == before {
+            return false;
+        }
+        self.invalidate_scene();
+        true
+    }
+
+    fn selected_text_content(&mut self, widget_id: WidgetId) -> Option<String> {
+        self.computed_scene()
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::SelectableText { id, text, .. } if *id == widget_id => {
+                    Some(text.clone())
+                }
+                _ => None,
+            })
+    }
+
+    fn selected_text_for_copy(&mut self) -> Option<String> {
+        let Some(widget_id) = self.selected_text else {
+            return None;
+        };
+        let Some(text) = self.selected_text_content(widget_id) else {
+            return None;
+        };
+        let Some((start, end)) = self
+            .selected_text_state(widget_id)
+            .cloned()
+            .unwrap_or_else(|| InputEditState::caret_at(&text))
+            .clamped_to(&text)
+            .selection_range()
+        else {
+            return None;
+        };
+        Some(text[start..end].to_string())
+    }
+
+    fn copy_selected_text_to_clipboard(&mut self) -> bool {
+        let Some(text) = self.selected_text_for_copy() else {
+            return false;
+        };
+        self.clipboard.set_text(text);
+        true
+    }
+
+    fn clear_selected_text(&mut self) -> bool {
+        let had_selection = self.selected_text.take().is_some();
+        let was_dragging = self.active_text_selection.take().is_some();
+        if had_selection || was_dragging {
+            self.invalidate_scene();
+            return true;
+        }
+        false
+    }
+
+    fn begin_input_selection(
+        &mut self,
+        widget_id: WidgetId,
+        frame: Rect,
+        padding: crate::ui::layout::Insets,
+        text_style: Text,
+        text: String,
+        cursor: usize,
+    ) {
+        self.active_input_selection = Some(TextSelectionDrag {
+            widget_id,
+            frame,
+            padding,
+            text_style,
+            text: text.clone(),
+        });
+        self.update_input_state(widget_id, &text, |state| {
+            state.cursor = cursor;
+            state.anchor = cursor;
+            state.composition = None;
+        });
+    }
+
+    fn handle_input_selection_drag(&mut self) -> bool {
+        let Some(drag) = self.active_input_selection.clone() else {
+            return false;
+        };
+        let Some(point) = self.cursor_position else {
+            return false;
+        };
+
+        let cursor = input_cursor_index_at_point(
+            &self.font_manager,
+            &self.theme,
+            drag.frame,
+            drag.padding,
+            &drag.text_style,
+            &drag.text,
+            point,
+        );
+        let before = self.focused_input_state(drag.widget_id).cloned();
+        if before.as_ref().map(|state| state.cursor) == Some(cursor) {
+            return false;
+        }
+        self.update_input_state(drag.widget_id, &drag.text, |state| {
+            state.cursor = cursor;
+            state.composition = None;
+        });
+        self.focused_input_state(drag.widget_id).cloned() != before
+    }
+
+    fn end_input_selection_drag(&mut self) -> bool {
+        if self.active_input_selection.take().is_some() {
+            self.invalidate_scene();
+            return true;
+        }
+        false
+    }
+
+    fn begin_text_selection(
+        &mut self,
+        widget_id: WidgetId,
+        frame: Rect,
+        padding: crate::ui::layout::Insets,
+        text_style: Text,
+        text: String,
+        cursor: usize,
+    ) {
+        self.selected_text = Some(widget_id);
+        self.active_text_selection = Some(TextSelectionDrag {
+            widget_id,
+            frame,
+            padding,
+            text_style,
+            text: text.clone(),
+        });
+        self.update_selected_text_state(widget_id, &text, |state| {
+            state.cursor = cursor;
+            state.anchor = cursor;
+            state.composition = None;
+        });
+    }
+
+    fn handle_text_selection_drag(&mut self) -> bool {
+        let Some(drag) = self.active_text_selection.clone() else {
+            return false;
+        };
+        let Some(point) = self.cursor_position else {
+            return false;
+        };
+
+        let cursor = text_cursor_index_at_point(
+            &self.font_manager,
+            &self.theme,
+            drag.frame,
+            drag.padding,
+            &drag.text_style,
+            &drag.text,
+            point,
+        );
+        self.selected_text = Some(drag.widget_id);
+        self.update_selected_text_state(drag.widget_id, &drag.text, |state| {
+            state.cursor = cursor;
+            state.composition = None;
+        })
+    }
+
+    fn end_text_selection_drag(&mut self) -> bool {
+        if self.active_text_selection.take().is_some() {
+            self.invalidate_scene();
+            return true;
+        }
+        false
     }
 
     fn ime_cursor_request_data(caret_rect: Rect) -> ImeRequestData {
@@ -1635,6 +1850,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
+    fn handle_selected_text_keyboard_event(&mut self, event: &KeyEvent) -> bool {
+        if event.state != ElementState::Pressed || !is_primary_shortcut_modifier(self.modifiers) {
+            return false;
+        }
+
+        match event.physical_key {
+            PhysicalKey::Code(KeyCode::KeyC) => self.copy_selected_text_to_clipboard(),
+            _ => false,
+        }
+    }
+
     fn handle_input_keyboard_event(&mut self, event: &KeyEvent) {
         let Some(snapshot) = self.focused_input_snapshot() else {
             return;
@@ -1781,6 +2007,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     on_mouse_move: interactions.on_mouse_move,
                 },
                 HitInteraction::FocusInput {
+                    id, interactions, ..
+                } => HoveredWidget {
+                    widget_id: id,
+                    cursor_style: interactions
+                        .cursor_style
+                        .map(|c| c.resolve())
+                        .or(Some(crate::ui::widget::CursorStyle::Text)),
+                    on_mouse_enter: interactions.on_mouse_enter,
+                    on_mouse_leave: interactions.on_mouse_leave,
+                    on_mouse_move: interactions.on_mouse_move,
+                },
+                HitInteraction::SelectableText {
                     id, interactions, ..
                 } => HoveredWidget {
                     widget_id: id,
@@ -2040,6 +2278,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let next_icon = if self.active_scrollbar_drag.is_some() || self.hovered_scrollbar.is_some()
         {
             CursorIcon::Pointer
+        } else if self.active_input_selection.is_some() {
+            CursorIcon::Text
+        } else if self.active_text_selection.is_some() {
+            CursorIcon::Text
         } else if let Some(cursor_style) = self
             .hovered_widgets
             .last()
@@ -2135,39 +2377,111 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let hit = self.hit_test(viewport);
         let Some(hit) = hit else {
+            self.end_input_selection_drag();
+            self.clear_selected_text();
             self.update_focus(None, None, None, None);
             self.pending_click = None;
             return;
         };
 
-        let (widget_id, interactions, focus_target, focus_input, focus_command, input_text) =
-            match hit {
-                HitInteraction::Widget {
-                    id,
-                    interactions,
-                    focusable,
-                } => (
-                    id,
-                    interactions.clone(),
-                    focusable.then_some(id),
-                    None,
-                    focusable.then_some(interactions.on_focus.clone()).flatten(),
-                    None,
-                ),
-                HitInteraction::FocusInput {
-                    id,
-                    interactions,
-                    text,
-                    ..
-                } => (
+        let pointer_position = self.cursor_position;
+        let (
+            widget_id,
+            interactions,
+            focus_target,
+            focus_input,
+            focus_command,
+            input_text,
+            input_cursor,
+            input_selection,
+            selectable_text,
+        ) = match hit {
+            HitInteraction::Widget {
+                id,
+                interactions,
+                focusable,
+            } => (
+                id,
+                interactions.clone(),
+                focusable.then_some(id),
+                None,
+                focusable.then_some(interactions.on_focus.clone()).flatten(),
+                None,
+                None,
+                None,
+                None,
+            ),
+            HitInteraction::FocusInput {
+                id,
+                frame,
+                padding,
+                interactions,
+                text_style,
+                text,
+                ..
+            } => {
+                let cursor = pointer_position.map(|point| {
+                    input_cursor_index_at_point(
+                        &self.font_manager,
+                        &self.theme,
+                        frame,
+                        padding,
+                        &text_style,
+                        &text,
+                        point,
+                    )
+                });
+                (
                     id,
                     interactions.clone(),
                     Some(id),
                     Some(id),
                     interactions.on_focus.clone(),
-                    Some(text),
-                ),
-            };
+                    Some(text.clone()),
+                    cursor,
+                    cursor.map(|cursor| (id, frame, padding, text_style, text, cursor)),
+                    None,
+                )
+            }
+            HitInteraction::SelectableText {
+                id,
+                frame,
+                padding,
+                interactions,
+                text_style,
+                text,
+            } => {
+                let cursor = pointer_position.map(|point| {
+                    text_cursor_index_at_point(
+                        &self.font_manager,
+                        &self.theme,
+                        frame,
+                        padding,
+                        &text_style,
+                        &text,
+                        point,
+                    )
+                });
+                (
+                    id,
+                    interactions.clone(),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    cursor.map(|cursor| (id, frame, padding, text_style, text, cursor)),
+                )
+            }
+        };
+
+        if input_selection.is_none() {
+            self.end_input_selection_drag();
+        }
+        if selectable_text.is_none() {
+            self.clear_selected_text();
+        }
 
         self.update_focus(
             focus_target.map(|id| FocusedWidget {
@@ -2178,6 +2492,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             focus_command,
             input_text.as_deref(),
         );
+
+        if input_selection.is_none() {
+            if let (Some(input_id), Some(text), Some(cursor)) =
+                (focus_input, input_text.as_deref(), input_cursor)
+            {
+                self.update_input_state(input_id, text, |state| {
+                    state.cursor = cursor;
+                    state.anchor = cursor;
+                    state.composition = None;
+                });
+            }
+        }
+
+        if let Some((widget_id, frame, padding, text_style, text, cursor)) = input_selection {
+            self.begin_input_selection(widget_id, frame, padding, text_style, text, cursor);
+        }
+
+        if let Some((widget_id, frame, padding, text_style, text, cursor)) = selectable_text {
+            self.begin_text_selection(widget_id, frame, padding, text_style, text, cursor);
+        }
 
         let is_double_click = self
             .pending_click
@@ -2329,6 +2663,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         needs_redraw |= self.handle_scrollbar_drag();
                         needs_redraw |= self.sync_scrollbar_hover();
                         needs_redraw |= self.update_cursor_icon();
+                    } else if self.active_input_selection.is_some() {
+                        needs_redraw |= self.handle_input_selection_drag();
+                        needs_redraw |= self.handle_hover(viewport);
+                    } else if self.active_text_selection.is_some() {
+                        needs_redraw |= self.handle_text_selection_drag();
+                        needs_redraw |= self.handle_hover(viewport);
                     } else {
                         needs_redraw |= self.handle_hover(viewport);
                     }
@@ -2353,7 +2693,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     }
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
-                    self.handle_input_keyboard_event(event);
+                    if self.focused_input.is_some() {
+                        self.handle_input_keyboard_event(event);
+                    } else {
+                        self.handle_selected_text_keyboard_event(event);
+                    }
                 }
                 _ => {}
             }
@@ -2424,6 +2768,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 if button.clone().mouse_button() == Some(MouseButton::Left) {
                     self.set_pointer_position(position);
                     self.end_scrollbar_drag();
+                    self.end_input_selection_drag();
+                    self.end_text_selection_drag();
+                    self.handle_hover(self.viewport_rect());
+                    self.update_cursor_icon();
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
                     }
@@ -3074,6 +3422,72 @@ fn move_cursor(state: &mut InputEditState, next: usize, extend_selection: bool) 
     state.composition = None;
 }
 
+fn text_cursor_index_at_point(
+    font_manager: &FontManager,
+    theme: &Theme,
+    frame: Rect,
+    padding: crate::ui::layout::Insets,
+    text_style: &Text,
+    current_text: &str,
+    point: Point,
+) -> usize {
+    if current_text.is_empty() {
+        return 0;
+    }
+
+    let font_size = text_style
+        .font_size
+        .unwrap_or(theme.typography.font_size.max(1.0));
+    let line_height = (font_size * 1.25).max(font_size + 4.0);
+    let text_request = TextFontRequest {
+        preferred_font: text_style
+            .font_family
+            .as_deref()
+            .or(theme.typography.font_family.as_deref()),
+        weight: text_style.font_weight,
+    };
+    let inner = frame.inset(padding);
+    let layout = font_manager.measure_text_layout(
+        current_text,
+        text_request,
+        font_size,
+        line_height,
+        text_style.letter_spacing,
+    );
+    let content_height = inner
+        .height
+        .min(layout.height.max(line_height))
+        .max(line_height);
+    let content_frame = Rect::new(
+        inner.x,
+        inner.y + ((inner.height - content_height).max(0.0) * 0.5),
+        inner.width.min(layout.width).max(0.0),
+        content_height,
+    );
+    let local_x = (point.x - content_frame.x).max(0.0);
+    layout.index_for_x(local_x)
+}
+
+fn input_cursor_index_at_point(
+    font_manager: &FontManager,
+    theme: &Theme,
+    frame: Rect,
+    padding: crate::ui::layout::Insets,
+    text_style: &Text,
+    current_text: &str,
+    point: Point,
+) -> usize {
+    text_cursor_index_at_point(
+        font_manager,
+        theme,
+        frame,
+        padding,
+        text_style,
+        current_text,
+        point,
+    )
+}
+
 fn grapheme_boundaries(text: &str) -> Vec<usize> {
     let mut boundaries = vec![0];
     for (index, grapheme) in text.grapheme_indices(true) {
@@ -3412,15 +3826,19 @@ mod tests {
     use crate::foundation::binding::{Binding, InvalidationSignal};
     use crate::foundation::color::Color;
     use crate::platform::dpi::LogicalSize;
-    use crate::text::font::FontCatalog;
-    use crate::ui::widget::{Column, CursorStyle, Point, Text, WidgetTree};
+    use crate::text::font::{FontCatalog, TextFontRequest};
+    use crate::ui::widget::{
+        Column, CursorStyle, HitInteraction, Input, InputEditState, Point, Text, WidgetTree,
+    };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+    #[cfg(feature = "video")]
     use std::time::Duration;
+    use std::time::Instant;
 
     use super::{
         next_grapheme_boundary, normalize_single_line_text, previous_grapheme_boundary,
-        BoundRuntimeHandler, WindowBindings,
+        text_cursor_index_at_point, BoundRuntimeHandler, WindowBindings,
     };
 
     #[cfg(feature = "video")]
@@ -3434,6 +3852,7 @@ mod tests {
         PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
         VideoSurfaceSnapshot,
     };
+    #[cfg(feature = "video")]
     use crate::ViewModelContext;
 
     #[derive(Default)]
@@ -3514,6 +3933,293 @@ mod tests {
 
         assert_eq!(handler.hover_path(viewport).len(), 1);
         assert_eq!(resolve_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn user_select_text_defaults_to_text_cursor() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(Text::new("hover").user_select(true));
+        let mut handler = test_handler(Some(tree), invalidation);
+        handler.cursor_position = Some(Point { x: 10.0, y: 10.0 });
+
+        let viewport = handler.viewport_rect();
+        let hovered = handler.hover_path(viewport);
+        assert_eq!(
+            hovered.last().and_then(|hovered| hovered.cursor_style),
+            Some(CursorStyle::Text)
+        );
+    }
+
+    #[test]
+    fn dragging_selectable_text_updates_selection_range() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(Text::new("hello").user_select(true));
+        let mut handler = test_handler(Some(tree), invalidation);
+        let viewport = handler.viewport_rect();
+
+        let (text_id, frame, padding, text_style, text) = {
+            let computed = handler.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::SelectableText {
+                        id,
+                        frame,
+                        padding,
+                        text_style,
+                        text,
+                        ..
+                    } => Some((*id, *frame, *padding, text_style.clone(), text.clone())),
+                    _ => None,
+                })
+                .expect("selectable text hit region should exist")
+        };
+
+        handler.cursor_position = Some(Point {
+            x: frame.x + 1.0,
+            y: frame.y + (frame.height * 0.5),
+        });
+        handler.handle_mouse_press(viewport, Instant::now());
+
+        handler.cursor_position = Some(Point {
+            x: frame.x + frame.width - 1.0,
+            y: frame.y + (frame.height * 0.5),
+        });
+        assert!(handler.handle_text_selection_drag());
+        assert_eq!(handler.selected_text, Some(text_id));
+
+        let state = handler
+            .selected_text_states
+            .get(&text_id)
+            .expect("text selection state should be recorded");
+        assert_eq!(state.selection_range(), Some((0, text.len())));
+        assert_eq!(state.anchor, 0);
+        assert_eq!(
+            state.cursor,
+            text_cursor_index_at_point(
+                &handler.font_manager,
+                &handler.theme,
+                frame,
+                padding,
+                &text_style,
+                &text,
+                Point {
+                    x: frame.x + frame.width - 1.0,
+                    y: frame.y + (frame.height * 0.5),
+                },
+            )
+        );
+    }
+
+    #[test]
+    fn selectable_text_can_provide_selected_content_for_copy() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(Text::new("hello world").user_select(true));
+        let mut handler = test_handler(Some(tree), invalidation);
+        let text_id = {
+            let computed = handler.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::SelectableText { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .expect("selectable text hit region should exist")
+        };
+
+        handler.selected_text = Some(text_id);
+        handler.selected_text_states.insert(
+            text_id,
+            InputEditState {
+                cursor: 11,
+                anchor: 6,
+                composition: None,
+            },
+        );
+
+        assert_eq!(
+            handler.selected_text_for_copy().as_deref(),
+            Some("world")
+        );
+    }
+
+    #[test]
+    fn clicking_input_moves_caret_to_pointer_position() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(Input::new(Text::new("hello")).width(220.0));
+        let mut handler = test_handler(Some(tree), invalidation);
+        let viewport = handler.viewport_rect();
+
+        let (frame, padding, text_style, content) = {
+            let computed = handler.computed_scene();
+            let region = computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::FocusInput {
+                        frame,
+                        padding,
+                        text_style,
+                        text,
+                        ..
+                    } => Some((*frame, *padding, text_style.clone(), text.clone())),
+                    _ => None,
+                })
+                .expect("input hit region should exist");
+            region
+        };
+        let font_size = text_style
+            .font_size
+            .unwrap_or(handler.theme.typography.font_size.max(1.0));
+        let line_height = (font_size * 1.25).max(font_size + 4.0);
+        let request = TextFontRequest {
+            preferred_font: text_style
+                .font_family
+                .as_deref()
+                .or(handler.theme.typography.font_family.as_deref()),
+            weight: text_style.font_weight,
+        };
+        let left = frame.x + padding.left;
+        let before_target = handler
+            .font_manager
+            .measure_text_raw(
+                &content[..2],
+                request.clone(),
+                font_size,
+                line_height,
+                text_style.letter_spacing,
+            )
+            .0;
+        let after_target = handler
+            .font_manager
+            .measure_text_raw(
+                &content[..3],
+                request,
+                font_size,
+                line_height,
+                text_style.letter_spacing,
+            )
+            .0;
+
+        handler.cursor_position = Some(Point {
+            x: left + before_target + ((after_target - before_target) * 0.25),
+            y: frame.y + (frame.height * 0.5),
+        });
+        handler.handle_mouse_press(viewport, Instant::now());
+
+        let input_id = handler.focused_input.expect("input should be focused");
+        let state = handler
+            .input_states
+            .get(&input_id)
+            .expect("input state should be recorded");
+        assert_eq!(state.cursor, 2);
+        assert_eq!(state.anchor, 2);
+    }
+
+    #[test]
+    fn dragging_input_updates_selection_range() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(Input::new(Text::new("hello")).width(220.0));
+        let mut handler = test_handler(Some(tree), invalidation);
+        let viewport = handler.viewport_rect();
+
+        let (input_id, frame, padding, text_style, content) = {
+            let computed = handler.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::FocusInput {
+                        id,
+                        frame,
+                        padding,
+                        text_style,
+                        text,
+                        ..
+                    } => Some((*id, *frame, *padding, text_style.clone(), text.clone())),
+                    _ => None,
+                })
+                .expect("input hit region should exist")
+        };
+        let font_size = text_style
+            .font_size
+            .unwrap_or(handler.theme.typography.font_size.max(1.0));
+        let line_height = (font_size * 1.25).max(font_size + 4.0);
+        let request = TextFontRequest {
+            preferred_font: text_style
+                .font_family
+                .as_deref()
+                .or(handler.theme.typography.font_family.as_deref()),
+            weight: text_style.font_weight,
+        };
+        let left = frame.x + padding.left;
+        let before_start = handler
+            .font_manager
+            .measure_text_raw(
+                &content[..2],
+                request.clone(),
+                font_size,
+                line_height,
+                text_style.letter_spacing,
+            )
+            .0;
+        let after_start = handler
+            .font_manager
+            .measure_text_raw(
+                &content[..3],
+                request.clone(),
+                font_size,
+                line_height,
+                text_style.letter_spacing,
+            )
+            .0;
+        let before_end = handler
+            .font_manager
+            .measure_text_raw(
+                &content[..4],
+                request.clone(),
+                font_size,
+                line_height,
+                text_style.letter_spacing,
+            )
+            .0;
+        let after_end = handler
+            .font_manager
+            .measure_text_raw(
+                &content[..5],
+                request,
+                font_size,
+                line_height,
+                text_style.letter_spacing,
+            )
+            .0;
+
+        handler.cursor_position = Some(Point {
+            x: left + before_start + ((after_start - before_start) * 0.25),
+            y: frame.y + (frame.height * 0.5),
+        });
+        handler.handle_mouse_press(viewport, Instant::now());
+
+        handler.cursor_position = Some(Point {
+            x: left + before_end + ((after_end - before_end) * 0.25),
+            y: frame.y + (frame.height * 0.5),
+        });
+        assert!(handler.handle_input_selection_drag());
+        assert_eq!(
+            handler.focused_input,
+            Some(input_id),
+            "input should stay focused while selecting"
+        );
+
+        let state = handler
+            .input_states
+            .get(&input_id)
+            .expect("input state should be recorded");
+        assert_eq!(state.anchor, 2);
+        assert_eq!(state.cursor, 4);
+        assert_eq!(state.selection_range(), Some((2, 4)));
     }
 
     #[cfg(feature = "video")]

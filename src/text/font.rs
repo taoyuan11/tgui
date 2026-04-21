@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use cosmic_text::fontdb::{Family, Query, Stretch, Style, Weight, ID};
 use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping, Wrap};
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FontWeight(pub u16);
@@ -88,6 +89,56 @@ enum FontSource {
 #[derive(Debug, Clone)]
 pub struct ResolvedText {
     pub primary_font: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TextLayoutInfo {
+    pub width: f32,
+    pub height: f32,
+    boundaries: Vec<TextBoundary>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TextBoundary {
+    index: usize,
+    x: f32,
+}
+
+impl TextLayoutInfo {
+    pub(crate) fn x_for_index(&self, index: usize) -> f32 {
+        if self.boundaries.is_empty() {
+            return 0.0;
+        }
+
+        let mut x = 0.0;
+        for boundary in &self.boundaries {
+            if boundary.index > index {
+                break;
+            }
+            x = boundary.x;
+        }
+        x
+    }
+
+    pub(crate) fn index_for_x(&self, x: f32) -> usize {
+        if self.boundaries.len() <= 1 {
+            return 0;
+        }
+
+        let local_x = x.max(0.0);
+        for pair in self.boundaries.windows(2) {
+            let start = pair[0];
+            let end = pair[1];
+            if local_x <= (start.x + end.x) * 0.5 {
+                return start.index;
+            }
+        }
+
+        self.boundaries
+            .last()
+            .map(|boundary| boundary.index)
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -180,6 +231,87 @@ impl FontManager {
             return *cached;
         }
 
+        let layout = self.measure_text_layout(text, request, font_size, line_height, letter_spacing);
+        let measured = (layout.width.max(0.0).ceil(), layout.height.max(line_height).ceil());
+        let mut cache = self.measure_cache.borrow_mut();
+        if cache.len() > 4096 {
+            cache.clear();
+        }
+        cache.insert(cache_key, measured);
+        measured
+    }
+
+    pub(crate) fn measure_text_layout(
+        &self,
+        text: &str,
+        request: TextFontRequest<'_>,
+        font_size: f32,
+        line_height: f32,
+        letter_spacing: f32,
+    ) -> TextLayoutInfo {
+        if text.is_empty() {
+            return TextLayoutInfo {
+                width: 0.0,
+                height: line_height,
+                boundaries: vec![TextBoundary { index: 0, x: 0.0 }],
+            };
+        }
+
+        self.with_text_buffer(
+            text,
+            request,
+            font_size,
+            line_height,
+            letter_spacing,
+            |buffer| {
+                let mut width: f32 = 0.0;
+                let mut height: f32 = 0.0;
+                for run in buffer.layout_runs() {
+                    width = width.max(run.line_w);
+                    height = height.max(run.line_top + run.line_height);
+                }
+
+                let mut boundaries = vec![TextBoundary { index: 0, x: 0.0 }];
+                if let Some(run) = buffer.layout_runs().next() {
+                    for glyph in run.glyphs {
+                        push_boundary(&mut boundaries, glyph.start, glyph.x.max(0.0));
+
+                        let cluster = &run.text[glyph.start..glyph.end];
+                        let grapheme_count = cluster.graphemes(true).count().max(1);
+                        let grapheme_width = glyph.w / grapheme_count as f32;
+                        let mut grapheme_x = glyph.x;
+
+                        for (offset, grapheme) in cluster.grapheme_indices(true) {
+                            grapheme_x += grapheme_width;
+                            push_boundary(
+                                &mut boundaries,
+                                glyph.start + offset + grapheme.len(),
+                                grapheme_x.max(0.0),
+                            );
+                        }
+                    }
+                }
+
+                push_boundary(&mut boundaries, text.len(), width.max(0.0));
+
+                TextLayoutInfo {
+                    width: width.max(0.0),
+                    height: height.max(line_height),
+                    boundaries,
+                }
+            },
+        )
+    }
+
+    fn with_text_buffer<T>(
+        &self,
+        text: &str,
+        request: TextFontRequest<'_>,
+        font_size: f32,
+        line_height: f32,
+        letter_spacing: f32,
+        compute: impl FnOnce(&Buffer) -> T,
+    ) -> T {
         let resolved = self.resolve_text(text, request.clone());
         let mut font_system = self.font_system.borrow_mut();
         let mut buffer = Buffer::new(&mut font_system, Metrics::new(font_size, line_height));
@@ -191,21 +323,7 @@ impl FontManager {
             .letter_spacing(letter_spacing / font_size.max(1.0));
         buffer.set_text(&mut font_system, text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut font_system, false);
-
-        let mut width: f32 = 0.0;
-        let mut height: f32 = 0.0;
-        for run in buffer.layout_runs() {
-            width = width.max(run.line_w);
-            height = height.max(run.line_top + run.line_height);
-        }
-
-        let measured = (width.max(0.0).ceil(), height.max(line_height).ceil());
-        let mut cache = self.measure_cache.borrow_mut();
-        if cache.len() > 4096 {
-            cache.clear();
-        }
-        cache.insert(cache_key, measured);
-        measured
+        compute(&buffer)
     }
 
     fn resolve_family_name(&self, name: &str, weight: FontWeight) -> Option<String> {
@@ -250,6 +368,61 @@ impl FontManager {
             .db()
             .query(&query)
             .and_then(|id| face_family_name(self.font_system.borrow().db(), id))
+    }
+}
+
+fn push_boundary(boundaries: &mut Vec<TextBoundary>, index: usize, x: f32) {
+    let x = x.max(0.0);
+    if let Some(last) = boundaries.last_mut() {
+        if last.index == index {
+            last.x = x;
+            return;
+        }
+    }
+
+    boundaries.push(TextBoundary { index, x });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FontCatalog, FontManager, FontWeight, TextFontRequest};
+    use unicode_segmentation::UnicodeSegmentation;
+
+    #[test]
+    fn mixed_text_layout_round_trips_cursor_boundaries() {
+        let manager = FontManager::new(&FontCatalog::default());
+        let text = "A中-文!B，c";
+        let font_size = 16.0;
+        let line_height = 24.0;
+        let layout = manager.measure_text_layout(
+            text,
+            TextFontRequest {
+                preferred_font: None,
+                weight: FontWeight::NORMAL,
+            },
+            font_size,
+            line_height,
+            0.0,
+        );
+
+        let mut indices = vec![0];
+        for (offset, grapheme) in text.grapheme_indices(true) {
+            indices.push(offset + grapheme.len());
+        }
+
+        for pair in indices.windows(2) {
+            let start = pair[0];
+            let end = pair[1];
+            let start_x = layout.x_for_index(start);
+            let end_x = layout.x_for_index(end);
+            assert!(end_x >= start_x, "cursor positions should be monotonic");
+
+            let delta = end_x - start_x;
+            if delta > 0.0 {
+                assert_eq!(layout.index_for_x(start_x + delta * 0.25), start);
+                assert_eq!(layout.index_for_x(start_x + delta * 0.75), end);
+            }
+        }
     }
 }
 

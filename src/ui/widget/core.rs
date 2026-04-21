@@ -30,6 +30,19 @@ use super::common::{
 };
 use super::text::Text;
 
+
+/// Caret width in logical pixels.
+/// 光标的像素宽度
+const CARET_WIDTH: f32 = 2.0;
+
+/// Caret end gap in logical pixels.
+/// 光标末尾间隔
+const CARET_END_GAP: f32 = 1.0;
+
+/// Caret width in logical pixels when input is empty.
+/// 当输入为空时光标像素宽度
+const INPUT_EMPTY_CARET_INSET: f32 = 1.0;
+
 pub struct Element<VM> {
     pub(crate) id: WidgetId,
     pub(crate) layout: LayoutStyle,
@@ -100,6 +113,8 @@ struct CollectContext<'a, 'b> {
     media: &'a MediaManager,
     focused_input: Option<WidgetId>,
     focused_input_state: Option<&'a InputEditState>,
+    selected_text: Option<WidgetId>,
+    selected_text_state: Option<&'a InputEditState>,
     caret_visible: bool,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar: Option<ScrollbarHandle>,
@@ -503,7 +518,10 @@ impl<VM> ResolvedElement<VM> {
             primitive_clip,
         );
 
-        if self.interactions.has_any() && !disabled {
+        if self.interactions.has_any()
+            && !disabled
+            && !matches!(&self.kind, ResolvedWidgetKind::Text { text } if text.user_select)
+        {
             computed.hit_regions.push(HitRegion {
                 rect: frame,
                 clip_rect: primitive_clip,
@@ -612,11 +630,28 @@ impl<VM> ResolvedElement<VM> {
                     false,
                     padding,
                     None,
+                    (text.user_select && context.selected_text == Some(self.id))
+                        .then_some(context.selected_text_state)
+                        .flatten(),
                     context.theme.palette.text,
                     opacity,
                     self.id,
                     primitive_clip,
                 );
+                if text.user_select && !disabled {
+                    computed.hit_regions.push(HitRegion {
+                        rect: frame,
+                        clip_rect: primitive_clip,
+                        interaction: HitInteraction::SelectableText {
+                            id: self.id,
+                            frame,
+                            padding,
+                            interactions: self.interactions.clone(),
+                            text_style: text.clone(),
+                            text: text.content.resolve(),
+                        },
+                    });
+                }
             }
             ResolvedWidgetKind::Image { image } => {
                 let source = image.source.resolve();
@@ -690,6 +725,7 @@ impl<VM> ResolvedElement<VM> {
                     false,
                     padding,
                     None,
+                    None,
                     if disabled {
                         context.theme.palette.text_muted
                     } else {
@@ -740,8 +776,11 @@ impl<VM> ResolvedElement<VM> {
                         clip_rect: primitive_clip,
                         interaction: HitInteraction::FocusInput {
                             id: self.id,
+                            frame,
+                            padding,
                             interactions: self.interactions.clone(),
                             on_change: on_change.clone(),
+                            text_style: text.clone(),
                             text: current_text,
                         },
                     });
@@ -1407,6 +1446,7 @@ fn push_media_placeholder(
         false,
         Insets::all(12.0),
         None,
+        None,
         Color::hexa(0xE5E7EBFF),
         opacity,
         widget_id,
@@ -1437,6 +1477,7 @@ fn push_text_primitives(
     show_caret: bool,
     padding: Insets,
     caret_content: Option<&str>,
+    selection_state: Option<&InputEditState>,
     fallback_color: Color,
     opacity: f32,
     widget_id: WidgetId,
@@ -1462,14 +1503,46 @@ fn push_text_primitives(
         .unwrap_or(theme.typography.font_size.max(1.0));
     let line_height = (font_size * 1.25).max(font_size + 4.0);
     let inner = frame.inset(padding);
-    let (measured_width, measured_height) = font_manager.measure_text_raw(
+    let current_layout = font_manager.measure_text_layout(
         &content,
         text_request.clone(),
         font_size,
         line_height,
         text.letter_spacing,
     );
-    let content_frame = centered_text_frame(inner, measured_width, measured_height, line_height);
+    let content_frame = centered_text_frame(
+        inner,
+        current_layout.width,
+        current_layout.height,
+        line_height,
+    );
+
+    if let Some((selection_start, selection_end)) = selection_state
+        .cloned()
+        .unwrap_or_else(|| InputEditState::caret_at(&content))
+        .clamped_to(&content)
+        .selection_range()
+    {
+        let selection_start = selection_start.min(content.len());
+        let selection_end = selection_end.min(content.len());
+        let selection_start_x = current_layout.x_for_index(selection_start);
+        let selection_end_x = current_layout.x_for_index(selection_end);
+        let selection_width = (selection_end_x - selection_start_x).max(0.0);
+        if selection_width > 0.0 {
+            scene.shapes.push(RenderPrimitive {
+                rect: Rect::new(
+                    content_frame.x + selection_start_x,
+                    content_frame.y,
+                    selection_width,
+                    content_frame.height.max(line_height),
+                ),
+                color: theme.palette.accent.with_alpha_factor(0.35 * opacity),
+                corner_radius: 4.0,
+                stroke_width: 0.0,
+                clip_rect,
+            });
+        }
+    }
 
     scene.texts.push(TextPrimitive {
         content: content.clone(),
@@ -1484,24 +1557,24 @@ fn push_text_primitives(
     });
 
     if show_caret {
-        let caret_text = caret_content.unwrap_or(content.as_str());
-        let (caret_width, _) = if caret_text.is_empty() {
-            (0.0, line_height)
-        } else {
-            font_manager.measure_text_raw(
-                caret_text,
-                text_request,
-                font_size,
-                line_height,
-                text.letter_spacing,
-            )
-        };
-        let caret_x = (inner.x + inner.width.min(caret_width) + 2.0).max(inner.x);
+        let caret_width = caret_content
+            .map(|caret_text| {
+                font_manager.measure_text_raw(
+                    caret_text,
+                    text_request,
+                    font_size,
+                    line_height,
+                    text.letter_spacing,
+                )
+                .0
+            })
+            .unwrap_or(current_layout.width);
+        let caret_x = (inner.x + inner.width.min(caret_width) + CARET_END_GAP).max(inner.x);
         scene.overlay_shapes.push(RenderPrimitive {
             rect: Rect::new(
                 caret_x,
                 content_frame.y,
-                2.0,
+                CARET_WIDTH,
                 content_frame.height.max(line_height),
             ),
             color: theme.palette.text.with_alpha_factor(opacity),
@@ -1601,9 +1674,9 @@ fn push_input_primitives(
         });
 
         let caret_rect = Rect::new(
-            inner.x + 1.0,
+            inner.x + INPUT_EMPTY_CARET_INSET,
             content_frame.y,
-            2.0,
+            CARET_WIDTH,
             content_frame.height.max(placeholder_line_height),
         );
         if show_caret {
@@ -1655,6 +1728,15 @@ fn push_input_primitives(
     let preedit_color = theme.palette.text_muted.with_alpha_factor(opacity);
     let resolved = font_manager.resolve_text(current_text, text_request.clone());
 
+    let current_layout = composition.is_none().then(|| {
+        font_manager.measure_text_layout(
+            current_text,
+            text_request.clone(),
+            font_size,
+            line_height,
+            text.letter_spacing,
+        )
+    });
     let prefix_width = measure_segment(
         font_manager,
         prefix_text,
@@ -1671,35 +1753,34 @@ fn push_input_primitives(
         line_height,
         text.letter_spacing,
     );
-    let full_text_width = measure_segment(
-        font_manager,
-        current_text,
-        text_request.clone(),
-        font_size,
-        line_height,
-        text.letter_spacing,
-    );
-
-    if composition.is_none() {
-        if let Some((selection_start, selection_end)) = state.selection_range() {
-            let selection_x = content_frame.x
-                + measure_segment(
-                    font_manager,
-                    &current_text[..selection_start.min(current_text.len())],
-                    text_request.clone(),
-                    font_size,
-                    line_height,
-                    text.letter_spacing,
-                );
-            let selection_width = measure_segment(
+    let full_text_width = current_layout
+        .as_ref()
+        .map(|layout| layout.width)
+        .unwrap_or_else(|| {
+            measure_segment(
                 font_manager,
-                &current_text[selection_start.min(current_text.len())
-                    ..selection_end.min(current_text.len())],
+                current_text,
                 text_request.clone(),
                 font_size,
                 line_height,
                 text.letter_spacing,
-            );
+            )
+        });
+
+    if composition.is_none() {
+        if let Some((selection_start, selection_end)) = state.selection_range() {
+            let selection_start = selection_start.min(current_text.len());
+            let selection_end = selection_end.min(current_text.len());
+            let selection_start_x = current_layout
+                .as_ref()
+                .map(|layout| layout.x_for_index(selection_start))
+                .unwrap_or(0.0);
+            let selection_end_x = current_layout
+                .as_ref()
+                .map(|layout| layout.x_for_index(selection_end))
+                .unwrap_or(selection_start_x);
+            let selection_x = content_frame.x + selection_start_x;
+            let selection_width = (selection_end_x - selection_start_x).max(0.0);
             if selection_width > 0.0 {
                 scene.shapes.push(RenderPrimitive {
                     rect: Rect::new(
@@ -1717,74 +1798,13 @@ fn push_input_primitives(
         }
     }
 
-    let mut cursor_x = content_frame.x;
-    if !prefix_text.is_empty() {
+    if composition.is_none() {
         scene.texts.push(TextPrimitive {
-            content: prefix_text.to_string(),
+            content: current_text.to_string(),
             frame: Rect::new(
-                cursor_x,
+                content_frame.x,
                 content_frame.y,
-                prefix_width,
-                content_frame.height,
-            ),
-            color: base_color,
-            font_family: Some(resolved.primary_font.clone()),
-            font_size,
-            font_weight: text.font_weight,
-            line_height,
-            letter_spacing: text.letter_spacing,
-            clip_rect,
-        });
-        cursor_x += prefix_width;
-    }
-
-    if !preedit_text.is_empty() {
-        scene.texts.push(TextPrimitive {
-            content: preedit_text.to_string(),
-            frame: Rect::new(
-                cursor_x,
-                content_frame.y,
-                preedit_width,
-                content_frame.height,
-            ),
-            color: preedit_color,
-            font_family: Some(resolved.primary_font.clone()),
-            font_size,
-            font_weight: text.font_weight,
-            line_height,
-            letter_spacing: text.letter_spacing,
-            clip_rect,
-        });
-        scene.overlay_shapes.push(RenderPrimitive {
-            rect: Rect::new(
-                cursor_x,
-                (content_frame.y + content_frame.height - 1.0).max(content_frame.y),
-                preedit_width.max(1.0),
-                1.0,
-            ),
-            color: preedit_color,
-            corner_radius: 0.0,
-            stroke_width: 0.0,
-            clip_rect,
-        });
-        cursor_x += preedit_width;
-    }
-
-    if !suffix_text.is_empty() {
-        let suffix_width = measure_segment(
-            font_manager,
-            suffix_text,
-            text_request.clone(),
-            font_size,
-            line_height,
-            text.letter_spacing,
-        );
-        scene.texts.push(TextPrimitive {
-            content: suffix_text.to_string(),
-            frame: Rect::new(
-                cursor_x,
-                content_frame.y,
-                suffix_width,
+                full_text_width,
                 content_frame.height,
             ),
             color: base_color,
@@ -1795,6 +1815,86 @@ fn push_input_primitives(
             letter_spacing: text.letter_spacing,
             clip_rect,
         });
+    } else {
+        let mut cursor_x = content_frame.x;
+        if !prefix_text.is_empty() {
+            scene.texts.push(TextPrimitive {
+                content: prefix_text.to_string(),
+                frame: Rect::new(
+                    cursor_x,
+                    content_frame.y,
+                    prefix_width,
+                    content_frame.height,
+                ),
+                color: base_color,
+                font_family: Some(resolved.primary_font.clone()),
+                font_size,
+                font_weight: text.font_weight,
+                line_height,
+                letter_spacing: text.letter_spacing,
+                clip_rect,
+            });
+            cursor_x += prefix_width;
+        }
+
+        if !preedit_text.is_empty() {
+            scene.texts.push(TextPrimitive {
+                content: preedit_text.to_string(),
+                frame: Rect::new(
+                    cursor_x,
+                    content_frame.y,
+                    preedit_width,
+                    content_frame.height,
+                ),
+                color: preedit_color,
+                font_family: Some(resolved.primary_font.clone()),
+                font_size,
+                font_weight: text.font_weight,
+                line_height,
+                letter_spacing: text.letter_spacing,
+                clip_rect,
+            });
+            scene.overlay_shapes.push(RenderPrimitive {
+                rect: Rect::new(
+                    cursor_x,
+                    (content_frame.y + content_frame.height - 1.0).max(content_frame.y),
+                    preedit_width.max(1.0),
+                    1.0,
+                ),
+                color: preedit_color,
+                corner_radius: 0.0,
+                stroke_width: 0.0,
+                clip_rect,
+            });
+            cursor_x += preedit_width;
+        }
+
+        if !suffix_text.is_empty() {
+            let suffix_width = measure_segment(
+                font_manager,
+                suffix_text,
+                text_request.clone(),
+                font_size,
+                line_height,
+                text.letter_spacing,
+            );
+            scene.texts.push(TextPrimitive {
+                content: suffix_text.to_string(),
+                frame: Rect::new(
+                    cursor_x,
+                    content_frame.y,
+                    suffix_width,
+                    content_frame.height,
+                ),
+                color: base_color,
+                font_family: Some(resolved.primary_font),
+                font_size,
+                font_weight: text.font_weight,
+                line_height,
+                letter_spacing: text.letter_spacing,
+                clip_rect,
+            });
+        }
     }
 
     let caret_boundary = composition
@@ -1815,24 +1915,20 @@ fn push_input_primitives(
                 )
         })
         .unwrap_or_else(|| {
-            measure_segment(
-                font_manager,
-                &current_text[..state.cursor.min(current_text.len())],
-                text_request,
-                font_size,
-                line_height,
-                text.letter_spacing,
-            )
+            current_layout
+                .as_ref()
+                .map(|layout| layout.x_for_index(state.cursor.min(current_text.len())))
+                .unwrap_or(0.0)
         });
     let caret_padding = if composition.is_none() && state.cursor >= current_text.len() {
-        2.0
+        CARET_END_GAP
     } else {
-        0.0
+        CARET_WIDTH - CARET_WIDTH - CARET_WIDTH
     };
     let caret_rect = Rect::new(
         (content_frame.x + caret_boundary + caret_padding).max(inner.x),
         content_frame.y,
-        2.0,
+        CARET_WIDTH,
         content_frame.height.max(line_height),
     );
 
@@ -1854,9 +1950,9 @@ fn push_input_primitives(
         caret_rect
     } else {
         Rect::new(
-            inner.x + 2.0,
+            inner.x + CARET_END_GAP,
             content_frame.y,
-            2.0,
+            CARET_WIDTH,
             content_frame.height.max(line_height),
         )
     })
@@ -1948,6 +2044,8 @@ impl<VM> WidgetTree<VM> {
         viewport: Rect,
         focused_input: Option<WidgetId>,
         focused_input_state: Option<&InputEditState>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&InputEditState>,
         caret_visible: bool,
     ) -> ComputedScene<VM> {
         let mut taffy = TaffyTree::new();
@@ -1977,6 +2075,8 @@ impl<VM> WidgetTree<VM> {
             media,
             focused_input,
             focused_input_state,
+            selected_text,
+            selected_text_state,
             caret_visible,
             hovered_scrollbar,
             active_scrollbar,
@@ -2013,6 +2113,8 @@ impl<VM> WidgetTree<VM> {
         viewport: Rect,
         focused_input: Option<WidgetId>,
         focused_input_state: Option<&InputEditState>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&InputEditState>,
         caret_visible: bool,
     ) -> RenderedWidgetScene {
         let computed = self.compute_scene(
@@ -2026,6 +2128,8 @@ impl<VM> WidgetTree<VM> {
             viewport,
             focused_input,
             focused_input_state,
+            selected_text,
+            selected_text_state,
             caret_visible,
         );
         computed.rendered()
@@ -2046,7 +2150,9 @@ impl<VM> WidgetTree<VM> {
                     .unwrap_or(true)
         }) {
             let id = match &hit.interaction {
-                HitInteraction::Widget { id, .. } | HitInteraction::FocusInput { id, .. } => *id,
+                HitInteraction::Widget { id, .. }
+                | HitInteraction::FocusInput { id, .. }
+                | HitInteraction::SelectableText { id, .. } => *id,
             };
 
             if let Some(index) = ids.iter().position(|existing| *existing == id) {
@@ -2117,6 +2223,8 @@ impl<VM> WidgetTree<VM> {
             viewport,
             focused_input,
             None,
+            None,
+            None,
             false,
         );
         Self::hit_path_from_computed(&computed, point)
@@ -2150,7 +2258,8 @@ mod tests {
     use crate::ui::theme::Theme;
     use crate::ui::widget::common::Rect;
     use crate::ui::widget::{
-        Element, Image, Input, Point, ScrollbarAxis, ScrollbarHandle, Stack, Text, WidgetTree,
+        Element, Image, Input, InputEditState, Point, ScrollbarAxis, ScrollbarHandle, Stack,
+        Text, WidgetTree,
     };
     #[cfg(feature = "video")]
     use crate::video::backend::{
@@ -2280,6 +2389,8 @@ mod tests {
             Rect::new(0.0, 0.0, 100.0, 100.0),
             None,
             None,
+            None,
+            None,
             false,
         );
 
@@ -2340,6 +2451,8 @@ mod tests {
             Rect::new(0.0, 0.0, 100.0, 100.0),
             None,
             None,
+            None,
+            None,
             false,
         );
 
@@ -2380,6 +2493,8 @@ mod tests {
             None,
             &HashMap::new(),
             Rect::new(0.0, 0.0, 100.0, 100.0),
+            None,
+            None,
             None,
             None,
             false,
@@ -2427,6 +2542,8 @@ mod tests {
             Rect::new(0.0, 0.0, 120.0, 120.0),
             None,
             None,
+            None,
+            None,
             false,
         );
 
@@ -2452,6 +2569,8 @@ mod tests {
             Rect::new(0.0, 0.0, 120.0, 120.0),
             None,
             None,
+            None,
+            None,
             false,
         );
         assert!(hovered
@@ -2475,6 +2594,8 @@ mod tests {
             }),
             &HashMap::new(),
             Rect::new(0.0, 0.0, 120.0, 120.0),
+            None,
+            None,
             None,
             None,
             false,
@@ -2516,6 +2637,8 @@ mod tests {
             Rect::new(0.0, 0.0, 200.0, 120.0),
             None,
             None,
+            None,
+            None,
             false,
         );
         assert_eq!(compact.primitives.texts.len(), 1);
@@ -2530,6 +2653,8 @@ mod tests {
             None,
             &HashMap::new(),
             Rect::new(0.0, 0.0, 200.0, 120.0),
+            None,
+            None,
             None,
             None,
             false,
@@ -2657,6 +2782,8 @@ mod tests {
             Rect::new(0.0, 0.0, 160.0, 90.0),
             None,
             None,
+            None,
+            None,
             false,
         );
 
@@ -2703,6 +2830,8 @@ mod tests {
             Rect::new(0.0, 0.0, 160.0, 90.0),
             None,
             None,
+            None,
+            None,
             false,
         );
 
@@ -2740,6 +2869,8 @@ mod tests {
             Rect::new(0.0, 0.0, 220.0, 120.0),
             None,
             None,
+            None,
+            None,
             false,
         );
         assert_eq!(text_render.primitives.shapes.len(), 0);
@@ -2754,6 +2885,8 @@ mod tests {
             None,
             &HashMap::new(),
             Rect::new(0.0, 0.0, 220.0, 120.0),
+            None,
+            None,
             None,
             None,
             false,
@@ -2813,6 +2946,80 @@ mod tests {
             None,
         );
         assert!(hit.is_none());
+    }
+
+    #[test]
+    fn selectable_text_renders_selection_highlight() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let text: Element<()> = Text::new("hello").user_select(true).into();
+        let text_id = text.id;
+        let tree = WidgetTree::new(text);
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            None,
+            None,
+            Some(text_id),
+            Some(&InputEditState {
+                cursor: 5,
+                anchor: 1,
+                composition: None,
+            }),
+            false,
+        );
+
+        assert!(rendered.primitives.shapes.iter().any(|primitive| {
+            primitive.color == theme.palette.accent.with_alpha_factor(0.35)
+        }));
+    }
+
+    #[test]
+    fn focused_input_renders_plain_text_as_single_primitive() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let input: Element<()> = Input::new(Text::new("hello")).width(160.0).into();
+        let input_id = input.id;
+        let tree = WidgetTree::new(input);
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            Some(input_id),
+            Some(&InputEditState {
+                cursor: 2,
+                anchor: 2,
+                composition: None,
+            }),
+            None,
+            None,
+            true,
+        );
+
+        let texts: Vec<_> = rendered
+            .primitives
+            .texts
+            .iter()
+            .filter(|primitive| primitive.content == "hello")
+            .collect();
+        assert_eq!(texts.len(), 1);
     }
 }
 
