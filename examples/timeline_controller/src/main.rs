@@ -2,15 +2,15 @@ use std::time::Duration;
 
 use tgui::{
     AnimatedValue, AnimationControllerHandle, AnimationCurve, AnimationSpec, Application, Button,
-    Color, Column, Command, Insets, Keyframes, Observable, Playback, PlaybackDirection, Point, Row,
-    Text, TguiError, ViewModelContext,
+    Color, Column, Command, Dp, Insets, Keyframes, Observable, Playback, PlaybackDirection, Point,
+    Row, Text, TguiError, ViewModelContext, dp, sp,
 };
 
 struct TimelineVm {
     status: Observable<String>,
     card_color: AnimatedValue<Color>,
     card_offset: AnimatedValue<Point>,
-    card_width: AnimatedValue<f32>,
+    card_width: AnimatedValue<Dp>,
     card_padding: AnimatedValue<Insets>,
     card_opacity: AnimatedValue<f32>,
     timeline: AnimationControllerHandle,
@@ -20,9 +20,9 @@ impl TimelineVm {
     fn new(ctx: &ViewModelContext) -> Self {
         let status = ctx.observable("Idle".to_string());
         let card_color = ctx.animated_value(Color::hexa(0x2563EBFF));
-        let card_offset = ctx.animated_value(Point { x: 0.0, y: 0.0 });
-        let card_width = ctx.animated_value(280.0);
-        let card_padding = ctx.animated_value(Insets::symmetric(18.0, 14.0));
+        let card_offset = ctx.animated_value(Point::new(dp(0.0), dp(0.0)));
+        let card_width = ctx.animated_value(dp(280.0));
+        let card_padding = ctx.animated_value(Insets::symmetric(dp(18.0), dp(14.0)));
         let card_opacity = ctx.animated_value(1.0);
 
         let on_start = status.clone();
@@ -53,9 +53,9 @@ impl TimelineVm {
                 AnimationSpec::from(
                     Keyframes::timed(Duration::from_millis(1200))
                         .curve(AnimationCurve::EaseInOutCubic)
-                        .at(Duration::ZERO, Point { x: 0.0, y: 0.0 })
-                        .at(Duration::from_millis(400), Point { x: 0.0, y: 18.0 })
-                        .at(Duration::from_millis(1200), Point { x: 0.0, y: -12.0 }),
+                        .at(Duration::ZERO, Point::new(dp(0.0), dp(0.0)))
+                        .at(Duration::from_millis(400), Point::new(dp(0.0), dp(18.0)))
+                        .at(Duration::from_millis(1200), Point::new(dp(0.0), dp(-12.0))),
                 ),
             )
             .track(
@@ -63,9 +63,9 @@ impl TimelineVm {
                 AnimationSpec::from(
                     Keyframes::timed(Duration::from_millis(1200))
                         .curve(AnimationCurve::EaseInOutCubic)
-                        .at(Duration::ZERO, 280.0)
-                        .at(Duration::from_millis(600), 440.0)
-                        .at(Duration::from_millis(1200), 340.0),
+                        .at(Duration::ZERO, dp(280.0))
+                        .at(Duration::from_millis(600), dp(440.0))
+                        .at(Duration::from_millis(1200), dp(340.0)),
                 ),
             )
             .track(
@@ -73,9 +73,9 @@ impl TimelineVm {
                 AnimationSpec::from(
                     Keyframes::timed(Duration::from_millis(1200))
                         .curve(AnimationCurve::EaseInOutCubic)
-                        .at(Duration::ZERO, Insets::symmetric(18.0, 14.0))
-                        .at(Duration::from_millis(520), Insets::symmetric(30.0, 22.0))
-                        .at(Duration::from_millis(1200), Insets::symmetric(22.0, 16.0)),
+                        .at(Duration::ZERO, Insets::symmetric(dp(18.0), dp(14.0)))
+                        .at(Duration::from_millis(520), Insets::symmetric(dp(30.0), dp(22.0)))
+                        .at(Duration::from_millis(1200), Insets::symmetric(dp(22.0), dp(16.0))),
                 ),
             )
             .track(
@@ -137,11 +137,11 @@ impl TimelineVm {
     fn view(&self) -> tgui::Element<Self> {
         Column::new()
             .fill_size()
-            .padding(Insets::all(24.0))
-            .gap(16.0)
+            .padding(Insets::all(dp(24.0)))
+            .gap(dp(16.0))
             .child(
                 Text::new("Timeline controller")
-                    .font_size(28.0)
+                    .font_size(sp(28.0))
                     .color(Color::hexa(0xF8FAFCFF)),
             )
             .child(
@@ -150,12 +150,12 @@ impl TimelineVm {
                         .binding()
                         .map(|status| format!("Status: {status}")),
                 )
-                .font_size(16.0)
+                .font_size(sp(16.0))
                 .color(Color::hexa(0xCBD5E1FF)),
             )
             .child(
                 Row::new()
-                    .gap(10.0)
+                    .gap(dp(10.0))
                     .child(Button::new(Text::new("Play")).on_click(Command::new(Self::play)))
                     .child(Button::new(Text::new("Pause")).on_click(Command::new(Self::pause)))
                     .child(Button::new(Text::new("Resume")).on_click(Command::new(Self::resume)))
@@ -171,7 +171,7 @@ impl TimelineVm {
                     .width(self.card_width.binding())
                     .padding(self.card_padding.binding())
                     .background(self.card_color.binding())
-                    .border_radius(18.0)
+                    .border_radius(dp(18.0))
                     .opacity(self.card_opacity.binding())
                     .offset(self.card_offset.binding()),
             )
@@ -182,7 +182,7 @@ impl TimelineVm {
 fn main() -> Result<(), TguiError> {
     Application::new()
         .title("tgui timeline controller")
-        .window_size(1080, 720)
+        .window_size(dp(1080.0), dp(720.0))
         .with_view_model(TimelineVm::new)
         .root_view(TimelineVm::view)
         .run()

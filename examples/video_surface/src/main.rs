@@ -1,10 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::path::PathBuf;
 
-use tgui::{
-    el, Application, Button, Color, Column, Command, Input, Insets, Observable, Row, Stack, Text,
-    ValueCommand, VideoController, VideoSource, VideoSurface, ViewModelContext,
-};
+use tgui::{dp, el, sp, Application, Button, Color, Column, Command, Input, Insets, Observable, Row, Stack, Text, ValueCommand, VideoController, VideoSource, VideoSurface, ViewModelContext};
 
 struct VideoVm {
     controller: VideoController,
@@ -60,8 +57,8 @@ impl VideoVm {
         });
 
         Column::new()
-            .padding(Insets::all(20.0))
-            .gap(12.0)
+            .padding(Insets::all(dp(20.0)))
+            .gap(dp(12.0))
             .background(Color::hexa(0x0F172AFF))
             .child(el![
                 Text::new(
@@ -69,58 +66,58 @@ impl VideoVm {
                         .binding()
                         .map(|source| format!("Source: {}", source)),
                 )
-                .font_size(14.0)
+                .font_size(sp(14.0))
                 .color(Color::WHITE),
                 VideoSurface::new(self.controller.clone())
                     .fill_width()
-                    .height(360.0)
+                    .height(dp(360.0))
                     .background(Color::hexa(0x020617FF))
-                    .border_radius(12.0)
-                    .border(1.0, Color::hexa(0x334155FF)),
-                Row::new().gap(8.0).child(el![
+                    .border_radius(dp(12.0))
+                    .border(dp(1.0), Color::hexa(0x334155FF)),
+                Row::new().gap(dp(8.0)).child(el![
                     Stack::new()
-                        .padding(Insets::symmetric(12.0, 8.0))
+                        .padding(Insets::symmetric(dp(12.0), dp(8.0)))
                         .background(Color::hexa(0x2563EBFF))
-                        .border_radius(8.0)
+                        .border_radius(dp(8.0))
                         .child(Text::new("Play").color(Color::WHITE))
                         .on_click(Command::new(|vm: &mut VideoVm| {
                             eprintln!("[vm] play clicked");
                             vm.play()
                         })),
                     Stack::new()
-                        .padding(Insets::symmetric(12.0, 8.0))
+                        .padding(Insets::symmetric(dp(12.0), dp(8.0)))
                         .background(Color::hexa(0x475569FF))
-                        .border_radius(8.0)
+                        .border_radius(dp(8.0))
                         .child(Text::new("Pause").color(Color::WHITE))
                         .on_click(Command::new(Self::pause)),
                     Stack::new()
-                        .padding(Insets::symmetric(12.0, 8.0))
+                        .padding(Insets::symmetric(dp(12.0), dp(8.0)))
                         .background(Color::hexa(0xEA580CFF))
-                        .border_radius(8.0)
+                        .border_radius(dp(8.0))
                         .child(Text::new("to 95%").color(Color::WHITE))
                         .on_click(Command::new(|video_vm: &mut VideoVm| {
                             video_vm.set_progress(0.95)
                         })),
                     Stack::new()
-                        .padding(Insets::symmetric(12.0, 8.0))
+                        .padding(Insets::symmetric(dp(12.0), dp(8.0)))
                         .background(Color::hexa(0x7C3AEDFF))
-                        .border_radius(8.0)
+                        .border_radius(dp(8.0))
                         .child(Text::new("Mute").color(Color::WHITE))
                         .on_click(Command::new(Self::mute)),
                     Stack::new()
-                        .padding(Insets::symmetric(12.0, 8.0))
+                        .padding(Insets::symmetric(dp(12.0), dp(8.0)))
                         .background(Color::hexa(0x0F766EFF))
-                        .border_radius(8.0)
+                        .border_radius(dp(8.0))
                         .child(Text::new("Unmute").color(Color::WHITE))
                         .on_click(Command::new(Self::unmute)),
                 ]),
-                Row::new().gap(12.0).child(el![
+                Row::new().gap(dp(12.0)).child(el![
                     Text::new(status).color(Color::hexa(0xE2E8F0FF)),
                     Text::new(position).color(Color::hexa(0xCBD5E1FF)),
                     Text::new("/").color(Color::hexa(0x64748BFF)),
                     Text::new(duration).color(Color::hexa(0xCBD5E1FF))
                 ]),
-                Row::new().fill_width().gap(10.0).child(el![
+                Row::new().fill_width().gap(dp(10.0)).child(el![
                     Input::new(Text::new(self.source.binding()))
                         .fill_width()
                         .placeholder_with_str("PleaseEnterTheVideoSourcePath")
@@ -158,7 +155,7 @@ fn format_duration(duration: std::time::Duration) -> String {
 fn main() -> Result<(), tgui::TguiError> {
     Application::new()
         .title("tgui VideoSurface")
-        .window_size(960, 640)
+        .window_size(dp(960.0), dp(640.0))
         .with_view_model(VideoVm::new)
         .root_view(VideoVm::view)
         .run()

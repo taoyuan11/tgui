@@ -1,4 +1,4 @@
-use tgui::{Align, Application, Color, Column, Insets, Justify, Stack, Text, TguiError, Theme};
+use tgui::{Align, Application, Color, Column, Insets, Justify, Stack, Text, TguiError, Theme, dp, sp};
 
 fn main() -> Result<(), TguiError> {
     let mut theme = Theme::dark();
@@ -9,40 +9,40 @@ fn main() -> Result<(), TguiError> {
 
     Application::new()
         .title("tgui basic window")
-        .window_size(960, 640)
+        .window_size(dp(960.0), dp(640.0))
         .theme(theme)
         .with_view_model(|_| ())
         .root_view(|_| {
             Stack::new()
                 .fill_size()
-                .padding(Insets::all(36.0))
+                .padding(Insets::all(dp(36.0)))
                 .align(Align::Center)
                 .justify(Justify::Center)
                 .child(
                     Column::new()
-                        .width(460.0)
-                        .padding(Insets::all(28.0))
-                        .gap(14.0)
+                        .width(dp(460.0))
+                        .padding(Insets::all(dp(28.0)))
+                        .gap(dp(14.0))
                         .background(Color::hexa(0x16233AFF))
-                        .border(1.0, Color::hexa(0x33507DFF))
-                        .border_radius(20.0)
+                        .border(dp(1.0), Color::hexa(0x33507DFF))
+                        .border_radius(dp(20.0))
                         .child(
                             Text::new("Hello, tgui")
-                                .font_size(28.0)
+                                .font_size(sp(28.0))
                                 .color(Color::hexa(0xF7FAFFFF)),
                         )
                         .child(
                             Text::new(
                                 "This example keeps things intentionally simple: one window, one card, and a small static widget tree.",
                             )
-                            .font_size(16.0)
+                            .font_size(sp(16.0))
                             .color(Color::hexa(0xC2D3F1FF)),
                         )
                         .child(
                             Text::new(
                                 "Use it as the smallest complete starting point before moving on to MVVM, input, theming, and animation examples.",
                             )
-                            .font_size(15.0)
+                            .font_size(sp(15.0))
                             .color(Color::hexa(0x9AB3D9FF)),
                         ),
                 )

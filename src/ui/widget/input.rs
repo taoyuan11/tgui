@@ -1,6 +1,7 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::{Insets, LayoutStyle, Value};
+use crate::ui::unit::{dp, Dp};
 
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
@@ -18,7 +19,7 @@ impl<VM> Input<VM> {
             element: Element {
                 id: WidgetId::next(),
                 layout: LayoutStyle {
-                    padding: Value::Static(Insets::symmetric(12.0, 8.0)),
+                    padding: Value::Static(Insets::symmetric(dp(12.0), dp(8.0))),
                     ..LayoutStyle::default()
                 },
                 visual: VisualStyle::default(),
@@ -35,7 +36,7 @@ impl<VM> Input<VM> {
         }
     }
 
-    pub fn size(mut self, width: impl Into<Value<f32>>, height: impl Into<Value<f32>>) -> Self {
+    pub fn size(mut self, width: impl Into<Value<Dp>>, height: impl Into<Value<Dp>>) -> Self {
         self.element.layout.width = Some(width.into());
         self.element.layout.height = Some(height.into());
         self.element.layout.fill_width = false;
@@ -43,13 +44,13 @@ impl<VM> Input<VM> {
         self
     }
 
-    pub fn width(mut self, width: impl Into<Value<f32>>) -> Self {
+    pub fn width(mut self, width: impl Into<Value<Dp>>) -> Self {
         self.element.layout.width = Some(width.into());
         self.element.layout.fill_width = false;
         self
     }
 
-    pub fn height(mut self, height: impl Into<Value<f32>>) -> Self {
+    pub fn height(mut self, height: impl Into<Value<Dp>>) -> Self {
         self.element.layout.height = Some(height.into());
         self.element.layout.fill_height = false;
         self
@@ -117,7 +118,7 @@ impl<VM> Input<VM> {
         self
     }
 
-    pub fn border(mut self, width: impl Into<Value<f32>>, color: impl Into<Value<Color>>) -> Self {
+    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
         self.element.visual.border_width = width.into();
         self.element.visual.border_color = color.into();
         self
@@ -128,12 +129,12 @@ impl<VM> Input<VM> {
         self
     }
 
-    pub fn border_radius(mut self, radius: impl Into<Value<f32>>) -> Self {
+    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
         self.element.visual.border_radius = radius.into();
         self
     }
 
-    pub fn border_width(mut self, width: impl Into<Value<f32>>) -> Self {
+    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
         self.element.visual.border_width = width.into();
         self
     }

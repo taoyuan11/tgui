@@ -11,12 +11,12 @@
 //! A minimal app looks like this:
 //!
 //! ```no_run
-//! use tgui::Application;
+//! use tgui::{dp, Application};
 //!
 //! fn main() -> Result<(), tgui::TguiError> {
 //!     Application::new()
 //!         .title("Hello tgui")
-//!         .window_size(960, 640)
+//!         .window_size(dp(960.0), dp(640.0))
 //!         .run()
 //! }
 //! ```
@@ -112,6 +112,7 @@ pub use ui::layout::{
     Align, Axis, Insets, Justify, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap,
 };
 pub use ui::theme::{Theme, ThemeMode};
+pub use ui::unit::{dp, sp, Dp, Sp};
 pub use ui::widget::{
     rect, Button, Column, Container, CursorStyle, Element, Flex, Grid, Image, Input, Point, Rect,
     Row, Stack, Text, WidgetCommand, WidgetEventResult, WidgetId, WidgetTree,

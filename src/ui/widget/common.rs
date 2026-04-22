@@ -10,6 +10,7 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
 use crate::ui::layout::{Align, Axis, Insets, Justify, Overflow, ScrollbarStyle, Value, Wrap};
+use crate::ui::unit::{Dp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface;
 
@@ -49,25 +50,30 @@ impl WidgetId {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point {
-    pub x: f32,
-    pub y: f32,
+    pub x: Dp,
+    pub y: Dp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
+    pub x: Dp,
+    pub y: Dp,
+    pub width: Dp,
+    pub height: Dp,
 }
 
 impl Rect {
-    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+    pub fn new(
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+        width: impl Into<Dp>,
+        height: impl Into<Dp>,
+    ) -> Self {
         Self {
-            x,
-            y,
-            width,
-            height,
+            x: x.into(),
+            y: y.into(),
+            width: width.into(),
+            height: height.into(),
         }
     }
 
@@ -79,8 +85,8 @@ impl Rect {
     }
 
     pub(crate) fn inset(self, insets: Insets) -> Self {
-        let width = (self.width - insets.left - insets.right).max(0.0);
-        let height = (self.height - insets.top - insets.bottom).max(0.0);
+        let width = (self.width - insets.left - insets.right).max(Dp::ZERO);
+        let height = (self.height - insets.top - insets.bottom).max(Dp::ZERO);
         Self {
             x: self.x + insets.left,
             y: self.y + insets.top,
@@ -89,16 +95,16 @@ impl Rect {
         }
     }
 
-    pub(crate) fn right(self) -> f32 {
+    pub(crate) fn right(self) -> Dp {
         self.x + self.width
     }
 
-    pub(crate) fn bottom(self) -> f32 {
+    pub(crate) fn bottom(self) -> Dp {
         self.y + self.height
     }
 
     pub(crate) fn is_empty(self) -> bool {
-        self.width <= 0.0 || self.height <= 0.0
+        self.width <= Dp::ZERO || self.height <= Dp::ZERO
     }
 
     pub(crate) fn intersect(self, other: Self) -> Option<Self> {
@@ -108,7 +114,7 @@ impl Rect {
         let bottom = self.bottom().min(other.bottom());
         let width = right - x;
         let height = bottom - y;
-        (width > 0.0 && height > 0.0).then_some(Self::new(x, y, width, height))
+        (width > Dp::ZERO && height > Dp::ZERO).then_some(Self::new(x, y, width, height))
     }
 
     pub(crate) fn union(self, other: Self) -> Self {
@@ -123,8 +129,8 @@ impl Rect {
 #[derive(Clone)]
 pub struct VisualStyle {
     pub border_color: Value<Color>,
-    pub border_radius: Value<f32>,
-    pub border_width: Value<f32>,
+    pub border_radius: Value<Dp>,
+    pub border_width: Value<Dp>,
     pub opacity: Value<f32>,
     pub offset: Value<Point>,
 }
@@ -133,8 +139,8 @@ impl Default for VisualStyle {
     fn default() -> Self {
         Self {
             border_color: Value::Static(Color::TRANSPARENT),
-            border_radius: Value::Static(0.0),
-            border_width: Value::Static(0.0),
+            border_radius: Value::Static(Dp::ZERO),
+            border_width: Value::Static(Dp::ZERO),
             opacity: Value::Static(1.0),
             offset: Value::Static(Point::ZERO),
         }
@@ -294,6 +300,37 @@ impl Value<f32> {
     }
 }
 
+impl Value<Dp> {
+    pub(crate) fn resolve_widget(
+        &self,
+        animations: &mut AnimationEngine,
+        widget_id: WidgetId,
+        property: WidgetProperty,
+        now: Instant,
+    ) -> Dp {
+        animations.resolve_dp(
+            AnimationKey::Widget {
+                id: widget_id.raw(),
+                property,
+            },
+            self.resolve(),
+            self.transition(),
+            now,
+        )
+    }
+
+    pub(crate) fn resolve_widget_to_logical(
+        &self,
+        animations: &mut AnimationEngine,
+        widget_id: WidgetId,
+        property: WidgetProperty,
+        now: Instant,
+        units: UnitContext,
+    ) -> f32 {
+        units.resolve_dp(self.resolve_widget(animations, widget_id, property, now))
+    }
+}
+
 impl Value<Point> {
     pub(crate) fn resolve_widget(
         &self,
@@ -386,7 +423,7 @@ pub(crate) enum ContainerKind {
 pub(crate) struct ContainerLayout {
     pub kind: ContainerKind,
     pub padding: Value<Insets>,
-    pub gap: Value<f32>,
+    pub gap: Value<Dp>,
     pub justify: Justify,
     pub align: Align,
     pub align_x: Option<Align>,
@@ -401,7 +438,7 @@ impl ContainerLayout {
         Self {
             kind: ContainerKind::Flow,
             padding: Value::Static(Insets::ZERO),
-            gap: Value::Static(0.0),
+            gap: Value::Static(Dp::ZERO),
             justify: Justify::Start,
             align: Align::Start,
             align_x: None,
@@ -620,11 +657,11 @@ impl ScrollRegion {
     }
 
     pub(crate) fn can_scroll_x(self) -> bool {
-        self.overflow_x == Overflow::Scroll && self.max_offset().x > 0.0
+        self.overflow_x == Overflow::Scroll && self.max_offset().x > Dp::ZERO
     }
 
     pub(crate) fn can_scroll_y(self) -> bool {
-        self.overflow_y == Overflow::Scroll && self.max_offset().y > 0.0
+        self.overflow_y == Overflow::Scroll && self.max_offset().y > Dp::ZERO
     }
 }
 
@@ -670,7 +707,17 @@ impl<VM> ComputedScene<VM> {
 }
 
 impl Point {
-    pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
+    pub const ZERO: Self = Self {
+        x: Dp::ZERO,
+        y: Dp::ZERO,
+    };
+
+    pub fn new(x: impl Into<Dp>, y: impl Into<Dp>) -> Self {
+        Self {
+            x: x.into(),
+            y: y.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

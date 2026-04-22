@@ -1,14 +1,12 @@
 #[cfg(target_env = "ohos")]
 use tgui::platform::ohos::export_ohos_winit_app;
-#[cfg(target_env = "ohos")]
 use tgui::{
     el, Align, Application, Binding, Button, Color, Column, Command, Element, Insets, Justify,
-    Observable, Stack, Text, Theme, ThemeMode, ViewModelContext,
+    Observable, Stack, Text, Theme, ThemeMode, ViewModelContext, dp, sp,
 };
 #[cfg(target_env = "ohos")]
 use winit_core::application::ApplicationHandler;
 
-#[cfg(target_env = "ohos")]
 fn themed_app() -> Application {
     let mut theme = Theme::dark();
     theme.palette.window_background = Color::hexa(0x07111EFF);
@@ -19,13 +17,11 @@ fn themed_app() -> Application {
     Application::new().title("tgui ohos").theme(theme)
 }
 
-#[cfg(target_env = "ohos")]
 struct OhosApplication {
     current_theme: Observable<String>,
     theme: Observable<ThemeMode>,
 }
 
-#[cfg(target_env = "ohos")]
 impl OhosApplication {
     fn new(context: &ViewModelContext) -> Self {
         Self {
@@ -56,18 +52,18 @@ impl OhosApplication {
     fn view(&self) -> Element<Self> {
         Stack::new()
             .fill_size()
-            .padding(Insets::all(24.0))
+            .padding(Insets::all(dp(24.0)))
             .align(Align::Center)
             .justify(Justify::Center)
             .child(
                 Column::new()
                     .fill_width()
-                    .padding(Insets::all(24.0))
-                    .gap(12.0)
+                    .padding(Insets::all(dp(24.0)))
+                    .gap(dp(12.0))
                     .background(Color::hex(0x1188DD))
-                    .border_radius(28.0)
+                    .border_radius(dp(28.0))
                     .child(el![
-                        Text::new("当前主题 / Current Theme").font_size(28.0),
+                        Text::new("当前主题 / Current Theme").font_size(sp(28.0)),
                         Text::new(self.current_theme.binding()),
                         Button::new(Text::new("toggle theme"))
                             .on_click(Command::new(Self::toggle_theme)),

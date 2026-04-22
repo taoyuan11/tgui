@@ -1,7 +1,4 @@
-use tgui::{
-    Align, Application, Binding, Button, Color, Column, Command, Input, Insets, Observable, Row,
-    Stack, Text, TguiError, ThemeMode, ValueCommand, ViewModelContext,
-};
+use tgui::{dp, sp, Align, Application, Binding, Button, Color, Column, Command, Input, Insets, Observable, Row, Stack, Text, TguiError, ThemeMode, ValueCommand, ViewModelContext};
 
 struct ThemeDemoVm {
     mode: Observable<ThemeMode>,
@@ -45,12 +42,11 @@ impl ThemeDemoVm {
     fn view(&self) -> tgui::Element<Self> {
         Column::new()
             .fill_size()
-            .padding(Insets::all(24.0))
-            .gap(18.0)
+            .padding(Insets::all(dp(24.0)))
+            .gap(dp(18.0))
             .child(
                 Text::new("Theme mode binding")
-                    .font_size(28.0)
-                    .color(Color::hexa(0xF8FAFCFF)),
+                    .font_size(sp(28.0)),
             )
             .child(
                 Text::new(
@@ -58,77 +54,74 @@ impl ThemeDemoVm {
                         .binding()
                         .map(|mode| format!("Current mode: {}", mode_label(mode))),
                 )
-                .font_size(16.0)
-                .color(Color::hexa(0xCBD5E1FF)),
+                .font_size(sp(16.0)),
             )
             .child(
                 Row::new()
-                    .gap(10.0)
+                    .gap(dp(10.0))
                     .child(
                         Button::new(Text::new("Light"))
                             .grow(1.0)
-                            .border_radius(12.0)
+                            .border_radius(dp(12.0))
                             .on_click(Command::new(Self::set_light)),
                     )
                     .child(
                         Button::new(Text::new("Dark"))
                             .grow(1.0)
-                            .border_radius(12.0)
+                            .border_radius(dp(12.0))
                             .on_click(Command::new(Self::set_dark)),
                     )
                     .child(
                         Button::new(Text::new("System"))
                             .grow(1.0)
-                            .border_radius(12.0)
+                            .border_radius(dp(12.0))
                             .on_click(Command::new(Self::set_system)),
                     ),
             )
             .child(
                 Row::new()
-                    .gap(18.0)
+                    .gap(dp(18.0))
                     .child(
                         Column::new()
                             .grow(1.0)
-                            .padding(Insets::all(18.0))
-                            .gap(12.0)
+                            .padding(Insets::all(dp(18.0)))
+                            .gap(dp(12.0))
                             .background(Color::hexa(0x0F172A88))
-                            .border(1.0, Color::hexa(0x334155FF))
-                            .border_radius(16.0)
+                            .border(dp(1.0), Color::hexa(0x334155FF))
+                            .border_radius(dp(16.0))
                             .child(
                                 Text::new("Surface preview")
-                                    .font_size(20.0)
+                                    .font_size(sp(20.0))
                                     .color(Color::hexa(0xF8FAFCFF)),
                             )
                             .child(
                                 Text::new("Switch the runtime theme and watch the window palette animate.")
-                                    .font_size(15.0)
-                                    .color(Color::hexa(0xCBD5E1FF)),
+                                    .font_size(sp(15.0)),
                             )
                             .child(
                                 Input::new(Text::new(self.search.binding()))
                                     .fill_width()
-                                    .border_radius(12.0)
+                                    .border_radius(dp(12.0))
                                     .placeholder_with_str("Type anything here")
                                     .on_change(ValueCommand::new(Self::set_search)),
                             )
                             .child(
                                 Button::new(Text::new("Sample action"))
                                     .fill_width()
-                                    .border_radius(12.0),
+                                    .border_radius(dp(12.0)),
                             ),
                     )
                     .child(
                         Stack::new()
                             .grow(1.0)
-                            .padding(Insets::all(18.0))
+                            .padding(Insets::all(dp(18.0)))
                             .background(Color::hexa(0x111827AA))
-                            .border(1.0, Color::hexa(0x475569FF))
-                            .border_radius(16.0)
+                            .border(dp(1.0), Color::hexa(0x475569FF))
+                            .border_radius(dp(16.0))
                             .align(Align::Center)
                             .child(
                                 Text::new("Theme transitions are handled by the runtime.")
-                                    .font_size(18.0)
-                                    .color(Color::hexa(0xE2E8F0FF)),
+                                    .font_size(sp(18.0)),
                             ),
                     ),
             )
@@ -146,7 +139,7 @@ fn mode_label(mode: ThemeMode) -> &'static str {
 
 fn main() -> Result<(), TguiError> {
     Application::new()
-        .window_size(980, 700)
+        .window_size(dp(980.0), dp(700.0))
         .with_view_model(ThemeDemoVm::new)
         .bind_title(ThemeDemoVm::title)
         .bind_theme_mode(ThemeDemoVm::theme_mode)

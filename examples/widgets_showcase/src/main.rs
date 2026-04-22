@@ -1,6 +1,6 @@
 use tgui::{
     Align, Application, Axis, Binding, Button, Color, Column, Command, Flex, Grid, Input, Insets,
-    Observable, Point, Row, Stack, Text, TguiError, ValueCommand, ViewModelContext, Wrap,
+    Observable, Point, Row, Stack, Text, TguiError, ValueCommand, ViewModelContext, Wrap, dp, sp,
 };
 
 struct WidgetsVm {
@@ -57,99 +57,99 @@ impl WidgetsVm {
     fn view(&self) -> tgui::Element<Self> {
         Column::new()
             .fill_size()
-            .padding(Insets::all(24.0))
-            .gap(18.0)
+            .padding(Insets::all(dp(24.0)))
+            .gap(dp(18.0))
             .background(Color::hexa(0x0F172AFF))
             .child(
                 Stack::new()
-                    .height(180.0)
-                    .padding(Insets::all(24.0))
+                    .height(dp(180.0))
+                    .padding(Insets::all(dp(24.0)))
                     .background(Color::hexa(0x1D4ED8FF))
-                    .border_radius(20.0)
+                    .border_radius(dp(20.0))
                     .on_mouse_move(ValueCommand::new(Self::remember_pointer))
                     .child(
                         Column::new()
-                            .gap(12.0)
+                            .gap(dp(12.0))
                             .child(
                                 Text::new("Widgets showcase")
-                                    .font_size(30.0)
+                                    .font_size(sp(30.0))
                                     .color(Color::hexa(0xF8FAFCFF)),
                             )
                             .child(
                                 Text::new("This example mixes text, buttons, input, layout containers, and pointer events in one compact screen.")
-                                    .font_size(16.0)
+                                    .font_size(sp(16.0))
                                     .color(Color::hexa(0xDBEAFEFF)),
                             ),
                     ),
             )
             .child(
                 Row::new()
-                    .gap(18.0)
+                    .gap(dp(18.0))
                     .child(
                         Column::new()
                             .grow(1.0)
-                            .padding(Insets::all(18.0))
-                            .gap(12.0)
+                            .padding(Insets::all(dp(18.0)))
+                            .gap(dp(12.0))
                             .background(Color::hexa(0x111827FF))
-                            .border(1.0, Color::hexa(0x334155FF))
-                            .border_radius(16.0)
+                            .border(dp(1.0), Color::hexa(0x334155FF))
+                            .border_radius(dp(16.0))
                             .child(
                                 Text::new("Interactive widgets")
-                                    .font_size(20.0)
+                                    .font_size(sp(20.0))
                                     .color(Color::hexa(0xF8FAFCFF)),
                             )
                             .child(
                                 Input::new(Text::new(self.draft.binding()))
                                     .fill_width()
                                     .background(Color::hexa(0x1E293BFF))
-                                    .border(1.0, Color::hexa(0x475569FF))
-                                    .border_radius(12.0)
+                                    .border(dp(1.0), Color::hexa(0x475569FF))
+                                    .border_radius(dp(12.0))
                                     .placeholder_with_str("Write a short task")
                                     .on_change(ValueCommand::new(Self::set_draft)),
                             )
                             .child(
                                 Row::new()
-                                    .gap(10.0)
+                                    .gap(dp(10.0))
                                     .child(
                                         Button::new(Text::new("Click me"))
                                             .grow(1.0)
                                             .background(Color::hexa(0x0F766EFF))
-                                            .border_radius(12.0)
+                                            .border_radius(dp(12.0))
                                             .on_click(Command::new(Self::increment)),
                                     )
                                     .child(
                                         Button::new(Text::new("Reset"))
                                             .grow(1.0)
                                             .background(Color::hexa(0x7C2D12FF))
-                                            .border_radius(12.0)
+                                            .border_radius(dp(12.0))
                                             .on_click(Command::new(Self::reset)),
                                     ),
                             )
                             .child(
                                 Text::new(self.summary())
-                                    .padding(Insets::all(14.0))
+                                    .padding(Insets::all(dp(14.0)))
                                     .background(Color::hexa(0x0B1120FF))
-                                    .border(1.0, Color::hexa(0x1D4ED8FF))
-                                    .border_radius(12.0)
+                                    .border(dp(1.0), Color::hexa(0x1D4ED8FF))
+                                    .border_radius(dp(12.0))
                                     .color(Color::hexa(0xDBEAFEFF)),
                             ),
                     )
                     .child(
                         Column::new()
                             .grow(1.0)
-                            .padding(Insets::all(18.0))
-                            .gap(12.0)
+                            .padding(Insets::all(dp(18.0)))
+                            .gap(dp(12.0))
                             .background(Color::hexa(0x111827FF))
-                            .border(1.0, Color::hexa(0x334155FF))
-                            .border_radius(16.0)
+                            .border(dp(1.0), Color::hexa(0x334155FF))
+                            .border_radius(dp(16.0))
                             .child(
                                 Text::new("Container widgets")
-                                    .font_size(20.0)
+                                    .font_size(sp(20.0))
                                     .color(Color::hexa(0xF8FAFCFF)),
                             )
                             .child(
                                 Grid::new(2)
-                                    .gap(10.0)
+                                    .gap(dp(10.0))
                                     .child(stat_card("Buttons", "Action surfaces"))
                                     .child(stat_card("Input", "Editable state"))
                                     .child(stat_card("Text", "Read-only content"))
@@ -157,7 +157,7 @@ impl WidgetsVm {
                             )
                             .child(
                                 Flex::new(Axis::Horizontal)
-                                    .gap(10.0)
+                                    .gap(dp(10.0))
                                     .wrap(Wrap::Wrap)
                                     .child(tag("Observable"))
                                     .child(tag("Binding"))
@@ -174,18 +174,18 @@ impl WidgetsVm {
 
 fn stat_card(title: &str, subtitle: &str) -> tgui::Element<WidgetsVm> {
     Stack::new()
-        .height(88.0)
-        .padding(Insets::all(14.0))
+        .height(dp(88.0))
+        .padding(Insets::all(dp(14.0)))
         .background(Color::hexa(0x1E293BFF))
-        .border_radius(14.0)
+        .border_radius(dp(14.0))
         .child(
             Column::new()
-                .gap(6.0)
+                .gap(dp(6.0))
                 .align(Align::Start)
-                .child(Text::new(title).font_size(16.0).color(Color::WHITE))
+                .child(Text::new(title).font_size(sp(16.0)).color(Color::WHITE))
                 .child(
                     Text::new(subtitle)
-                        .font_size(13.0)
+                        .font_size(sp(13.0))
                         .color(Color::hexa(0xCBD5E1FF)),
                 ),
         )
@@ -194,16 +194,16 @@ fn stat_card(title: &str, subtitle: &str) -> tgui::Element<WidgetsVm> {
 
 fn tag(label: &str) -> tgui::Element<WidgetsVm> {
     Stack::new()
-        .padding(Insets::symmetric(12.0, 8.0))
+        .padding(Insets::symmetric(dp(12.0), dp(8.0)))
         .background(Color::hexa(0x1D4ED8FF))
-        .border_radius(999.0)
+        .border_radius(dp(999.0))
         .child(Text::new(label).color(Color::WHITE))
         .into()
 }
 
 fn main() -> Result<(), TguiError> {
     Application::new()
-        .window_size(1120, 820)
+        .window_size(dp(1120.0), dp(820.0))
         .with_view_model(WidgetsVm::new)
         .bind_title(WidgetsVm::title)
         .root_view(WidgetsVm::view)

@@ -252,8 +252,8 @@ impl RasterRequest {
             return None;
         }
 
-        let width = frame.width.round().max(1.0) as u32;
-        let height = frame.height.round().max(1.0) as u32;
+        let width = frame.width.round().max(1.0).get() as u32;
+        let height = frame.height.round().max(1.0).get() as u32;
         Some(clamp_raster_request(width, height))
     }
 }

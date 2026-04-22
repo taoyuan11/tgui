@@ -1,6 +1,6 @@
 use tgui::{
     Align, Application, Binding, Button, Color, Column, Command, Insets, Justify, Observable,
-    Row, Stack, Text, TguiError, ViewModelContext, WindowSpec,
+    Row, Stack, Text, TguiError, ViewModelContext, WindowSpec, dp, sp,
 };
 
 struct MultiWindowVm {
@@ -69,56 +69,56 @@ impl MultiWindowVm {
     fn main_view(&self) -> tgui::Element<Self> {
         Stack::new()
             .fill_size()
-            .padding(Insets::all(28.0))
+            .padding(Insets::all(dp(28.0)))
             .align(Align::Center)
             .justify(Justify::Center)
             .child(
                 Column::new()
-                    .width(620.0)
-                    .padding(Insets::all(24.0))
-                    .gap(14.0)
+                    .width(dp(620.0))
+                    .padding(Insets::all(dp(24.0)))
+                    .gap(dp(14.0))
                     .background(Color::hexa(0x162033F0))
-                    .border(1.0, Color::hexa(0x2E4262FF))
-                    .border_radius(18.0)
+                    .border(dp(1.0), Color::hexa(0x2E4262FF))
+                    .border_radius(dp(18.0))
                     .child(
                         Text::new("Multi-window runtime")
-                            .font_size(28.0)
+                            .font_size(sp(28.0))
                             .color(Color::hexa(0xF8FAFCFF)),
                     )
                     .child(
                         Text::new(
                             "This example keeps one shared view model while dynamically reconciling a main window, an optional inspector, and multiple document windows.",
                         )
-                        .font_size(15.0)
+                        .font_size(sp(15.0))
                         .color(Color::hexa(0xCBD5E1FF)),
                     )
                     .child(
                         Text::new(self.document_summary())
-                            .font_size(15.0)
+                            .font_size(sp(15.0))
                             .color(Color::hexa(0x7DD3FCFF)),
                     )
                     .child(
                         Row::new()
-                            .gap(10.0)
+                            .gap(dp(10.0))
                             .child(
                                 Button::new(Text::new("Toggle inspector"))
                                     .grow(1.0)
                                     .background(Color::hexa(0x0F766EFF))
-                                    .border_radius(12.0)
+                                    .border_radius(dp(12.0))
                                     .on_click(Command::new(Self::toggle_inspector)),
                             )
                             .child(
                                 Button::new(Text::new("Spawn document"))
                                     .grow(1.0)
                                     .background(Color::hexa(0x1D4ED8FF))
-                                    .border_radius(12.0)
+                                    .border_radius(dp(12.0))
                                     .on_click(Command::new(Self::open_document)),
                             )
                             .child(
                                 Button::new(Text::new("Remove last"))
                                     .grow(1.0)
                                     .background(Color::hexa(0x7C2D12FF))
-                                    .border_radius(12.0)
+                                    .border_radius(dp(12.0))
                                     .on_click(Command::new(Self::close_last_document)),
                             ),
                     ),
@@ -129,25 +129,25 @@ impl MultiWindowVm {
     fn inspector_view(&self) -> tgui::Element<Self> {
         Stack::new()
             .fill_size()
-            .padding(Insets::all(18.0))
+            .padding(Insets::all(dp(18.0)))
             .child(
                 Column::new()
-                    .gap(10.0)
+                    .gap(dp(10.0))
                     .child(
                         Text::new("Inspector")
-                            .font_size(24.0)
+                            .font_size(sp(24.0))
                             .color(Color::hexa(0xE2E8F0FF)),
                     )
                     .child(
                         Text::new(self.document_summary())
-                            .font_size(15.0)
+                            .font_size(sp(15.0))
                             .color(Color::hexa(0x93C5FDFF)),
                     )
                     .child(
                         Text::new(
                             "Close this window from the button in the main window, or use the native close button to hide just this instance.",
                         )
-                        .font_size(14.0)
+                        .font_size(sp(14.0))
                         .color(Color::hexa(0xCBD5E1FF)),
                     ),
             )
@@ -157,13 +157,13 @@ impl MultiWindowVm {
     fn document_view(&self, id: u32) -> tgui::Element<Self> {
         Stack::new()
             .fill_size()
-            .padding(Insets::all(20.0))
+            .padding(Insets::all(dp(20.0)))
             .child(
                 Column::new()
-                    .gap(12.0)
+                    .gap(dp(12.0))
                     .child(
                         Text::new(self.document_title(id))
-                            .font_size(26.0)
+                            .font_size(sp(26.0))
                             .color(Color::hexa(0xF8FAFCFF)),
                     )
                     .child(
@@ -172,14 +172,14 @@ impl MultiWindowVm {
                                 .binding()
                                 .map(move |documents| format!("Shared registry size: {}", documents.len())),
                         )
-                        .font_size(15.0)
+                        .font_size(sp(15.0))
                         .color(Color::hexa(0x93C5FDFF)),
                     )
                     .child(
                         Text::new(
                             "Each document window owns its own renderer, focus state, scroll state, and animation state, but still reads from the same shared view model.",
                         )
-                        .font_size(14.0)
+                        .font_size(sp(14.0))
                         .color(Color::hexa(0xCBD5E1FF)),
                     ),
             )
@@ -190,7 +190,7 @@ impl MultiWindowVm {
         let mut windows = vec![
             WindowSpec::main("main")
                 .title("tgui multi-window")
-                .window_size(980, 700)
+                .window_size(dp(980.0), dp(700.0))
                 .bind_title(Self::main_title)
                 .root_view(Self::main_view),
         ];
@@ -199,7 +199,7 @@ impl MultiWindowVm {
             windows.push(
                 WindowSpec::child("inspector")
                     .title("Inspector")
-                    .window_size(420, 320)
+                    .window_size(dp(420.0), dp(320.0))
                     .bind_title(Self::inspector_title)
                     .root_view(Self::inspector_view),
             );
@@ -209,7 +209,7 @@ impl MultiWindowVm {
             windows.push(
                 WindowSpec::child(format!("document-{id}"))
                     .title(format!("Document {id}"))
-                    .window_size(540, 360)
+                    .window_size(dp(540.0), dp(360.0))
                     .bind_title(move |vm: &Self| vm.document_title(id))
                     .root_view(move |vm: &Self| vm.document_view(id)),
             );

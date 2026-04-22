@@ -1,12 +1,10 @@
-#[cfg(target_os = "android")]
 use tgui::{
     el, Align, Application, Binding, Button, Color, Column, Command, Element, Insets, Justify,
-    Observable, Stack, Text, TguiError, Theme, ThemeMode, ViewModelContext,
+    Observable, Stack, Text, TguiError, Theme, ThemeMode, ViewModelContext, dp, sp,
 };
 #[cfg(target_os = "android")]
 use tgui::platform::android::activity::AndroidApp;
 
-#[cfg(target_os = "android")]
 fn themed_app() -> Application {
     let mut theme = Theme::dark();
     theme.palette.window_background = Color::hexa(0x09111EFF);
@@ -19,13 +17,11 @@ fn themed_app() -> Application {
         .theme(theme)
 }
 
-#[cfg(target_os = "android")]
 struct AndroidApplication {
     current_theme: Observable<String>,
     theme: Observable<ThemeMode>
 }
 
-#[cfg(target_os = "android")]
 impl AndroidApplication {
     fn new(context: &ViewModelContext) -> Self {
         Self {
@@ -54,7 +50,7 @@ impl AndroidApplication {
 
     fn view(&self) -> Element<Self> {
         let title = Text::new("当前主题/CurrentTheme")
-            .font_size(30.0);
+            .font_size(sp(30.0));
 
         let text = Text::new(self.current_theme.binding());
 
@@ -64,16 +60,16 @@ impl AndroidApplication {
 
         Stack::new()
             .fill_size()
-            .padding(Insets::all(24.0))
+            .padding(Insets::all(dp(24.0)))
             .align(Align::Center)
             .justify(Justify::Center)
             .child(
                 Column::new()
                     .fill_width()
-                    .padding(Insets::all(24.0))
-                    .gap(12.0)
+                    .padding(Insets::all(dp(24.0)))
+                    .gap(dp(12.0))
                     .background(Color::hex(0x0099FF))
-                    .border_radius(28.0)
+                    .border_radius(dp(28.0))
                     .child(el![
                         title,
                         text,

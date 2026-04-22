@@ -4,6 +4,7 @@ use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap,
 };
+use crate::ui::unit::Dp;
 
 use super::common::{
     ChildSource, ContainerKind, ContainerLayout, CursorStyle, InteractionHandlers,
@@ -118,7 +119,7 @@ impl<VM> Container<VM> {
         self
     }
 
-    pub fn border(mut self, width: impl Into<Value<f32>>, color: impl Into<Value<Color>>) -> Self {
+    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
         self.element.visual.border_width = width.into();
         self.element.visual.border_color = color.into();
         self
@@ -129,12 +130,12 @@ impl<VM> Container<VM> {
         self
     }
 
-    pub fn border_radius(mut self, radius: impl Into<Value<f32>>) -> Self {
+    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
         self.element.visual.border_radius = radius.into();
         self
     }
 
-    pub fn border_width(mut self, width: impl Into<Value<f32>>) -> Self {
+    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
         self.element.visual.border_width = width.into();
         self
     }
@@ -193,7 +194,7 @@ impl<VM> Container<VM> {
         self
     }
 
-    pub fn gap(mut self, gap: impl Into<Value<f32>>) -> Self {
+    pub fn gap(mut self, gap: impl Into<Value<Dp>>) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
             layout.gap = gap.into();
         }
@@ -287,14 +288,14 @@ impl<VM> Container<VM> {
         self
     }
 
-    pub fn scrollbar_thickness(mut self, thickness: f32) -> Self {
+    pub fn scrollbar_thickness(mut self, thickness: Dp) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
             layout.scrollbar_style.thickness = thickness;
         }
         self
     }
 
-    pub fn scrollbar_radius(mut self, radius: f32) -> Self {
+    pub fn scrollbar_radius(mut self, radius: Dp) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
             layout.scrollbar_style.radius = radius;
         }
@@ -308,7 +309,7 @@ impl<VM> Container<VM> {
         self
     }
 
-    pub fn scrollbar_min_thumb_length(mut self, min_thumb_length: f32) -> Self {
+    pub fn scrollbar_min_thumb_length(mut self, min_thumb_length: Dp) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
             layout.scrollbar_style.min_thumb_length = min_thumb_length;
         }
@@ -339,8 +340,8 @@ macro_rules! impl_layout_container {
         impl<VM> $name<VM> {
             pub fn size(
                 mut self,
-                width: impl Into<Value<f32>>,
-                height: impl Into<Value<f32>>,
+                width: impl Into<Value<Dp>>,
+                height: impl Into<Value<Dp>>,
             ) -> Self {
                 self.0.element.layout.width = Some(width.into());
                 self.0.element.layout.height = Some(height.into());
@@ -349,13 +350,13 @@ macro_rules! impl_layout_container {
                 self
             }
 
-            pub fn width(mut self, width: impl Into<Value<f32>>) -> Self {
+            pub fn width(mut self, width: impl Into<Value<Dp>>) -> Self {
                 self.0.element.layout.width = Some(width.into());
                 self.0.element.layout.fill_width = false;
                 self
             }
 
-            pub fn height(mut self, height: impl Into<Value<f32>>) -> Self {
+            pub fn height(mut self, height: impl Into<Value<Dp>>) -> Self {
                 self.0.element.layout.height = Some(height.into());
                 self.0.element.layout.fill_height = false;
                 self
@@ -397,7 +398,7 @@ macro_rules! impl_layout_container {
 
             pub fn border(
                 self,
-                width: impl Into<Value<f32>>,
+                width: impl Into<Value<Dp>>,
                 color: impl Into<Value<Color>>,
             ) -> Self {
                 Self(self.0.border(width, color))
@@ -407,11 +408,11 @@ macro_rules! impl_layout_container {
                 Self(self.0.border_color(color))
             }
 
-            pub fn border_radius(self, radius: impl Into<Value<f32>>) -> Self {
+            pub fn border_radius(self, radius: impl Into<Value<Dp>>) -> Self {
                 Self(self.0.border_radius(radius))
             }
 
-            pub fn border_width(self, width: impl Into<Value<f32>>) -> Self {
+            pub fn border_width(self, width: impl Into<Value<Dp>>) -> Self {
                 Self(self.0.border_width(width))
             }
 
@@ -455,7 +456,7 @@ macro_rules! impl_layout_container {
                 Self(self.0.padding(padding))
             }
 
-            pub fn gap(self, gap: impl Into<Value<f32>>) -> Self {
+            pub fn gap(self, gap: impl Into<Value<Dp>>) -> Self {
                 Self(self.0.gap(gap))
             }
 
@@ -507,11 +508,11 @@ macro_rules! impl_layout_container {
                 Self(self.0.scrollbar_active_thumb_color(color))
             }
 
-            pub fn scrollbar_thickness(self, thickness: f32) -> Self {
+            pub fn scrollbar_thickness(self, thickness: Dp) -> Self {
                 Self(self.0.scrollbar_thickness(thickness))
             }
 
-            pub fn scrollbar_radius(self, radius: f32) -> Self {
+            pub fn scrollbar_radius(self, radius: Dp) -> Self {
                 Self(self.0.scrollbar_radius(radius))
             }
 
@@ -519,7 +520,7 @@ macro_rules! impl_layout_container {
                 Self(self.0.scrollbar_insets(insets))
             }
 
-            pub fn scrollbar_min_thumb_length(self, min_thumb_length: f32) -> Self {
+            pub fn scrollbar_min_thumb_length(self, min_thumb_length: Dp) -> Self {
                 Self(self.0.scrollbar_min_thumb_length(min_thumb_length))
             }
         }
@@ -622,6 +623,7 @@ mod tests {
     use crate::animation::AnimationCoordinator;
     use crate::foundation::binding::InvalidationSignal;
     use crate::foundation::binding::ViewModelContext;
+    use crate::ui::unit::dp;
     use crate::Text;
 
     fn child_sources(container: &Container<()>) -> &Vec<ChildSource<()>> {
@@ -680,20 +682,20 @@ mod tests {
     #[test]
     fn scrollbar_style_helpers_update_layout_style() {
         let container = Container::<()>::new()
-            .scrollbar_thickness(14.0)
-            .scrollbar_radius(6.0)
-            .scrollbar_insets(Insets::symmetric(3.0, 5.0))
-            .scrollbar_min_thumb_length(40.0)
+            .scrollbar_thickness(dp(14.0))
+            .scrollbar_radius(dp(6.0))
+            .scrollbar_insets(Insets::symmetric(dp(3.0), dp(5.0)))
+            .scrollbar_min_thumb_length(dp(40.0))
             .scrollbar_thumb_color(Color::BLACK)
             .scrollbar_track_color(Color::WHITE);
         let WidgetKind::Container { layout, .. } = &container.element.kind else {
             panic!("expected container widget");
         };
 
-        assert_eq!(layout.scrollbar_style.thickness, 14.0);
-        assert_eq!(layout.scrollbar_style.radius, 6.0);
-        assert_eq!(layout.scrollbar_style.insets, Insets::symmetric(3.0, 5.0));
-        assert_eq!(layout.scrollbar_style.min_thumb_length, 40.0);
+        assert_eq!(layout.scrollbar_style.thickness, dp(14.0));
+        assert_eq!(layout.scrollbar_style.radius, dp(6.0));
+        assert_eq!(layout.scrollbar_style.insets, Insets::symmetric(dp(3.0), dp(5.0)));
+        assert_eq!(layout.scrollbar_style.min_thumb_length, dp(40.0));
         assert_eq!(layout.scrollbar_style.thumb_color, Color::BLACK);
         assert_eq!(layout.scrollbar_style.track_color, Color::WHITE);
 

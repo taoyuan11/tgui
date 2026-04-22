@@ -15,6 +15,7 @@ use crate::foundation::view_model::{Command, ViewModel};
 use crate::runtime::{BoundRuntime, Runtime, WindowBindings, WindowCommand};
 use crate::text::font::FontCatalog;
 use crate::ui::theme::{Theme, ThemeMode};
+use crate::ui::unit::Dp;
 use crate::ui::widget::{Element, WidgetTree};
 
 #[derive(Debug, Clone)]
@@ -39,19 +40,19 @@ impl ThemeSelection {
 /// [`Application::with_view_model`] to move into the MVVM builder flow.
 ///
 /// ```no_run
-/// use tgui::Application;
+/// use tgui::{dp, Application};
 ///
 /// fn main() -> Result<(), tgui::TguiError> {
 ///     Application::new()
 ///         .title("Demo")
-///         .window_size(1024, 768)
+///         .window_size(dp(1024.0), dp(768.0))
 ///         .run()
 /// }
 /// ```
 pub struct Application {
     title: String,
-    width: u32,
-    height: u32,
+    width: Dp,
+    height: Dp,
     clear_color: Color,
     clear_color_overridden: bool,
     close_children_with_main: bool,
@@ -66,8 +67,8 @@ impl Application {
     pub fn new() -> Self {
         Self {
             title: "tgui".to_string(),
-            width: 800,
-            height: 600,
+            width: Dp::new(800.0),
+            height: Dp::new(600.0),
             clear_color: Theme::default().palette.window_background,
             clear_color_overridden: false,
             close_children_with_main: true,
@@ -86,9 +87,9 @@ impl Application {
     /// Sets the initial window size in logical pixels.
     ///
     /// Values are clamped to at least `1x1`.
-    pub fn window_size(mut self, width: u32, height: u32) -> Self {
-        self.width = width.max(1);
-        self.height = height.max(1);
+    pub fn window_size(mut self, width: Dp, height: Dp) -> Self {
+        self.width = width.max(Dp::new(1.0));
+        self.height = height.max(Dp::new(1.0));
         self
     }
 
@@ -184,7 +185,7 @@ impl Application {
     pub(crate) fn config(&self) -> ApplicationConfig {
         ApplicationConfig {
             title: self.title.clone(),
-            size: LogicalSize::new(self.width as f64, self.height as f64),
+            size: LogicalSize::new(self.width.get() as f64, self.height.get() as f64),
             clear_color: self.clear_color,
             clear_color_overridden: self.clear_color_overridden,
             close_children_with_main: self.close_children_with_main,
@@ -295,8 +296,11 @@ impl<VM> WindowSpec<VM> {
     }
 
     /// Sets the initial native window size in logical pixels.
-    pub fn window_size(mut self, width: u32, height: u32) -> Self {
-        self.size = Some(LogicalSize::new(width.max(1) as f64, height.max(1) as f64));
+    pub fn window_size(mut self, width: Dp, height: Dp) -> Self {
+        self.size = Some(LogicalSize::new(
+            width.max(Dp::new(1.0)).get() as f64,
+            height.max(Dp::new(1.0)).get() as f64,
+        ));
         self
     }
 

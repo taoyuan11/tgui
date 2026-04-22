@@ -2,6 +2,7 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
 use crate::ui::layout::{Insets, LayoutStyle, Value};
+use crate::ui::unit::{Dp, Sp};
 
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
@@ -16,9 +17,9 @@ pub struct Text {
     pub(crate) font_family: Option<String>,
     pub(crate) background: Option<Value<Color>>,
     pub(crate) color: Option<Value<Color>>,
-    pub(crate) font_size: Option<f32>,
+    pub(crate) font_size: Option<Sp>,
     pub(crate) font_weight: FontWeight,
-    pub(crate) letter_spacing: f32,
+    pub(crate) letter_spacing: Sp,
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
     pub(crate) user_select: bool,
 }
@@ -34,7 +35,7 @@ impl Text {
             color: None,
             font_size: None,
             font_weight: FontWeight::NORMAL,
-            letter_spacing: 1.0,
+            letter_spacing: Sp::new(1.0),
             cursor_style: None,
             user_select: false,
         }
@@ -60,7 +61,7 @@ impl Text {
         self
     }
 
-    pub fn border(mut self, width: impl Into<Value<f32>>, color: impl Into<Value<Color>>) -> Self {
+    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
         self.visual.border_width = width.into();
         self.visual.border_color = color.into();
         self
@@ -71,12 +72,12 @@ impl Text {
         self
     }
 
-    pub fn border_radius(mut self, radius: impl Into<Value<f32>>) -> Self {
+    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
         self.visual.border_radius = radius.into();
         self
     }
 
-    pub fn border_width(mut self, width: impl Into<Value<f32>>) -> Self {
+    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
         self.visual.border_width = width.into();
         self
     }
@@ -86,8 +87,8 @@ impl Text {
         self
     }
 
-    pub fn font_size(mut self, size: f32) -> Self {
-        self.font_size = Some(size.max(1.0));
+    pub fn font_size(mut self, size: Sp) -> Self {
+        self.font_size = Some(size.max(Sp::new(1.0)));
         self
     }
 
@@ -96,7 +97,7 @@ impl Text {
         self
     }
 
-    pub fn character_spacing(mut self, spacing: f32) -> Self {
+    pub fn character_spacing(mut self, spacing: Sp) -> Self {
         self.letter_spacing = spacing;
         self
     }
@@ -206,10 +207,11 @@ impl<VM> From<Text> for Element<VM> {
 #[cfg(test)]
 mod tests {
     use super::Text;
+    use crate::Sp;
 
     #[test]
     fn character_spacing_updates_letter_spacing() {
-        let text = Text::new("hello").character_spacing(2.5);
-        assert_eq!(text.letter_spacing, 2.5);
+        let text = Text::new("hello").character_spacing(Sp::new(2.5));
+        assert_eq!(text.letter_spacing, Sp::new(2.5));
     }
 }

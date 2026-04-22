@@ -1,4 +1,4 @@
-use tgui::{el, Align, Application, Button, Color, Command, Element, Image, Observable, Row, Text, TguiError, ViewModelContext};
+use tgui::{el, Align, Application, Button, Color, Command, Element, Image, Observable, Row, Text, TguiError, ViewModelContext, dp};
 
 struct App {
     image_source: Observable<String>
@@ -17,7 +17,7 @@ impl App {
             // Image::from_bytes(include_bytes!("static/juequling_shushu.jpg"))
         Image::from_url("http://47.109.31.100:19900/juequling_shushu.jpg")
             .background(Color::WHITE)
-            .size(200.0, 200.0);
+            .size(dp(200.0), dp(200.0));
         // let image2 =
         //     // Image::from_bytes(include_bytes!("static/wlop.jpg"))
         // Image::from_url("http://47.109.31.100:19900/wlop.jpg")
@@ -27,12 +27,12 @@ impl App {
             // Image::from_bytes(include_bytes!("static/vvv.svg"))
         Image::from_url("http://47.109.31.100:19900/test.svg")
             .background(Color::rgba(255, 255, 255, 0))
-            .size(200.0, 200.0);
+            .size(dp(200.0), dp(200.0));
 
         let image4 =
             Image::from_url(self.image_source.binding())
                 .background(Color::WHITE)
-                .size(200.0, 200.0);
+                .size(dp(200.0), dp(200.0));
 
 
         let btn = Button::new(
@@ -44,7 +44,7 @@ impl App {
 
         Row::new()
             .align(Align::Center)
-            .gap(20.0)
+            .gap(dp(20.0))
             .child(el![image1, image3, image4, btn])
             .into()
     }

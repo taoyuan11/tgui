@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use crate::foundation::binding::{Binding, InvalidationSignal};
 use crate::foundation::color::Color;
 use crate::ui::layout::Insets;
+use crate::ui::unit::{Dp, Sp};
 use crate::ui::widget::Point;
 
 const DEFAULT_DURATION_MS: u64 = 180;
@@ -1124,11 +1125,23 @@ impl Animatable for f32 {
     }
 }
 
+impl Animatable for Dp {
+    fn interpolate(from: &Self, to: &Self, progress: f32) -> Self {
+        Self(f32::interpolate(&from.0, &to.0, progress))
+    }
+}
+
+impl Animatable for Sp {
+    fn interpolate(from: &Self, to: &Self, progress: f32) -> Self {
+        Self(f32::interpolate(&from.0, &to.0, progress))
+    }
+}
+
 impl Animatable for Point {
     fn interpolate(from: &Self, to: &Self, progress: f32) -> Self {
         Self {
-            x: f32::interpolate(&from.x, &to.x, progress),
-            y: f32::interpolate(&from.y, &to.y, progress),
+            x: Dp::interpolate(&from.x, &to.x, progress),
+            y: Dp::interpolate(&from.y, &to.y, progress),
         }
     }
 }
@@ -1136,10 +1149,10 @@ impl Animatable for Point {
 impl Animatable for Insets {
     fn interpolate(from: &Self, to: &Self, progress: f32) -> Self {
         Self {
-            left: f32::interpolate(&from.left, &to.left, progress),
-            top: f32::interpolate(&from.top, &to.top, progress),
-            right: f32::interpolate(&from.right, &to.right, progress),
-            bottom: f32::interpolate(&from.bottom, &to.bottom, progress),
+            left: Dp::interpolate(&from.left, &to.left, progress),
+            top: Dp::interpolate(&from.top, &to.top, progress),
+            right: Dp::interpolate(&from.right, &to.right, progress),
+            bottom: Dp::interpolate(&from.bottom, &to.bottom, progress),
         }
     }
 }
@@ -1308,6 +1321,7 @@ impl<T: Animatable> AnimationStore<T> {
 pub(crate) struct AnimationEngine {
     colors: AnimationStore<Color>,
     floats: AnimationStore<f32>,
+    dps: AnimationStore<Dp>,
     points: AnimationStore<Point>,
     insets: AnimationStore<Insets>,
 }
@@ -1333,6 +1347,16 @@ impl AnimationEngine {
         self.floats.resolve(key, target, transition, now)
     }
 
+    pub(crate) fn resolve_dp(
+        &mut self,
+        key: AnimationKey,
+        target: Dp,
+        transition: Option<Transition>,
+        now: Instant,
+    ) -> Dp {
+        self.dps.resolve(key, target, transition, now)
+    }
+
     pub(crate) fn resolve_point(
         &mut self,
         key: AnimationKey,
@@ -1356,6 +1380,7 @@ impl AnimationEngine {
     pub(crate) fn refresh(&mut self, now: Instant) -> bool {
         self.colors.refresh(now)
             || self.floats.refresh(now)
+            || self.dps.refresh(now)
             || self.points.refresh(now)
             || self.insets.refresh(now)
     }
@@ -1363,6 +1388,7 @@ impl AnimationEngine {
     pub(crate) fn has_active_animations(&self) -> bool {
         self.colors.has_active()
             || self.floats.has_active()
+            || self.dps.has_active()
             || self.points.has_active()
             || self.insets.has_active()
     }
@@ -1389,6 +1415,7 @@ mod tests {
     use crate::foundation::binding::InvalidationSignal;
     use crate::foundation::color::Color;
     use crate::ui::layout::Insets;
+    use crate::ui::unit::dp;
     use crate::ui::widget::Point;
 
     fn key(property: WidgetProperty) -> AnimationKey {
@@ -1408,17 +1435,17 @@ mod tests {
     #[test]
     fn point_interpolation_blends_coordinates() {
         let interpolated = Point::interpolate(
-            &Point { x: 0.0, y: 10.0 },
-            &Point { x: 20.0, y: 30.0 },
+            &Point::new(dp(0.0), dp(10.0)),
+            &Point::new(dp(20.0), dp(30.0)),
             0.25,
         );
-        assert_eq!(interpolated, Point { x: 5.0, y: 15.0 });
+        assert_eq!(interpolated, Point::new(dp(5.0), dp(15.0)));
     }
 
     #[test]
     fn insets_interpolation_blends_edges() {
-        let interpolated = Insets::interpolate(&Insets::all(0.0), &Insets::all(20.0), 0.5);
-        assert_eq!(interpolated, Insets::all(10.0));
+        let interpolated = Insets::interpolate(&Insets::all(dp(0.0)), &Insets::all(dp(20.0)), 0.5);
+        assert_eq!(interpolated, Insets::all(dp(10.0)));
     }
 
     #[test]
@@ -1500,13 +1527,13 @@ mod tests {
 
         engine.resolve_point(
             key(WidgetProperty::Offset),
-            Point { x: 0.0, y: 0.0 },
+            Point::new(dp(0.0), dp(0.0)),
             Some(transition),
             start,
         );
         engine.resolve_point(
             key(WidgetProperty::Offset),
-            Point { x: 20.0, y: 0.0 },
+            Point::new(dp(20.0), dp(0.0)),
             Some(transition),
             start + Duration::from_millis(1),
         );

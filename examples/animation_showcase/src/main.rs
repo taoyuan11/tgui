@@ -1,9 +1,6 @@
 use std::time::Duration;
 
-use tgui::{
-    Align, Application, Binding, Button, Color, Column, Command, Insets, Justify, Observable,
-    Point, Stack, Text, TguiError, Transition, ViewModelContext,
-};
+use tgui::{Align, Application, Binding, Button, Color, Column, Command, Insets, Justify, Observable, Point, Stack, Text, TguiError, Transition, ViewModelContext, dp, sp, Dp};
 
 struct AnimationVm {
     expanded: Observable<bool>,
@@ -39,10 +36,10 @@ impl AnimationVm {
             .animated(Transition::ease_in_out(Duration::from_millis(340)))
     }
 
-    fn card_width(&self) -> Binding<f32> {
+    fn card_width(&self) -> Binding<Dp> {
         self.expanded
             .binding()
-            .map(|expanded| if expanded { 520.0 } else { 320.0 })
+            .map(|expanded| if expanded { dp(520.0) } else { dp(320.0) })
             .animated(Transition::ease_in_out(Duration::from_millis(320)))
     }
 
@@ -51,18 +48,18 @@ impl AnimationVm {
             .binding()
             .map(|expanded| {
                 if expanded {
-                    Insets::symmetric(28.0, 22.0)
+                    Insets::symmetric(dp(28.0), dp(22.0))
                 } else {
-                    Insets::symmetric(18.0, 14.0)
+                    Insets::symmetric(dp(18.0), dp(14.0))
                 }
             })
             .animated(Transition::ease_in_out(Duration::from_millis(300)))
     }
 
-    fn card_radius(&self) -> Binding<f32> {
+    fn card_radius(&self) -> Binding<Dp> {
         self.expanded
             .binding()
-            .map(|expanded| if expanded { 24.0 } else { 14.0 })
+            .map(|expanded| if expanded { dp(24.0) } else { dp(14.0) })
             .animated(Transition::ease_out(Duration::from_millis(260)))
     }
 
@@ -84,9 +81,9 @@ impl AnimationVm {
             .binding()
             .map(|expanded| {
                 if expanded {
-                    Point { x: 0.0, y: 0.0 }
+                    Point::new(dp(0.0), dp(0.0))
                 } else {
-                    Point { x: 0.0, y: 28.0 }
+                    Point::new(dp(0.0), dp(28.0))
                 }
             })
             .animated(Transition::ease_in_out(Duration::from_millis(280)))
@@ -116,26 +113,26 @@ impl AnimationVm {
     fn view(&self) -> tgui::Element<Self> {
         Stack::new()
             .fill_size()
-            .padding(Insets::all(24.0))
+            .padding(Insets::all(dp(24.0)))
             .align(Align::Center)
             .justify(Justify::Center)
             .child(
                 Column::new()
                     .width(self.card_width())
                     .padding(self.card_padding())
-                    .gap(16.0)
+                    .gap(dp(16.0))
                     .background(self.card_background())
-                    .border(1.0, Color::hexa(0xE2E8F055))
+                    .border(dp(1.0), Color::hexa(0xE2E8F055))
                     .border_radius(self.card_radius())
                     .offset(self.card_offset())
                     .child(
                         Text::new("Declarative transitions")
-                            .font_size(26.0)
+                            .font_size(sp(26.0))
                             .color(Color::hexa(0xF8FAFCFF)),
                     )
                     .child(
                         Text::new("This single boolean drives animated width, padding, radius, color, offset, opacity, and window clear color.")
-                            .font_size(15.0)
+                            .font_size(sp(15.0))
                             .opacity(self.body_opacity())
                             .color(Color::hexa(0xECFEFFFF)),
                     )
@@ -143,7 +140,7 @@ impl AnimationVm {
                         Button::new(Text::new(self.action_label()))
                             .fill_width()
                             .background(Color::hexa(0x0F172AFF))
-                            .border_radius(12.0)
+                            .border_radius(dp(12.0))
                             .on_click(Command::new(Self::toggle)),
                     ),
             )
@@ -153,7 +150,7 @@ impl AnimationVm {
 
 fn main() -> Result<(), TguiError> {
     Application::new()
-        .window_size(980, 680)
+        .window_size(dp(980.0), dp(680.0))
         .with_view_model(AnimationVm::new)
         .bind_title(AnimationVm::title)
         .bind_clear_color(AnimationVm::clear_color)

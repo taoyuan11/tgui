@@ -2,6 +2,7 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::ContentFit;
 use crate::ui::layout::{Insets, LayoutStyle, Value};
+use crate::ui::unit::Dp;
 use crate::video::VideoController;
 
 use super::common::{
@@ -33,7 +34,7 @@ impl VideoSurface {
         }
     }
 
-    pub fn size(mut self, width: impl Into<Value<f32>>, height: impl Into<Value<f32>>) -> Self {
+    pub fn size(mut self, width: impl Into<Value<Dp>>, height: impl Into<Value<Dp>>) -> Self {
         self.layout.width = Some(width.into());
         self.layout.height = Some(height.into());
         self.layout.fill_width = false;
@@ -41,13 +42,13 @@ impl VideoSurface {
         self
     }
 
-    pub fn width(mut self, width: impl Into<Value<f32>>) -> Self {
+    pub fn width(mut self, width: impl Into<Value<Dp>>) -> Self {
         self.layout.width = Some(width.into());
         self.layout.fill_width = false;
         self
     }
 
-    pub fn height(mut self, height: impl Into<Value<f32>>) -> Self {
+    pub fn height(mut self, height: impl Into<Value<Dp>>) -> Self {
         self.layout.height = Some(height.into());
         self.layout.fill_height = false;
         self
@@ -94,7 +95,7 @@ impl VideoSurface {
         self
     }
 
-    pub fn border(mut self, width: impl Into<Value<f32>>, color: impl Into<Value<Color>>) -> Self {
+    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
         self.visual.border_width = width.into();
         self.visual.border_color = color.into();
         self
@@ -105,12 +106,12 @@ impl VideoSurface {
         self
     }
 
-    pub fn border_radius(mut self, radius: impl Into<Value<f32>>) -> Self {
+    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
         self.visual.border_radius = radius.into();
         self
     }
 
-    pub fn border_width(mut self, width: impl Into<Value<f32>>) -> Self {
+    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
         self.visual.border_width = width.into();
         self
     }

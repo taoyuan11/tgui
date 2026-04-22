@@ -183,12 +183,12 @@ tgui-winit-ohos = "0.31.0-beta.2"
 ### Basic Window
 
 ```rust
-use tgui::Application;
+use tgui::{dp, Application};
 
 fn main() -> Result<(), tgui::TguiError> {
     Application::new()
         .title("tgui")
-        .window_size(960, 640)
+        .window_size(dp(960.0), dp(640.0))
         .run()
 }
 ```
@@ -197,7 +197,7 @@ fn main() -> Result<(), tgui::TguiError> {
 
 ```rust
 use tgui::{
-    Application, Binding, Button, Column, Command, Insets, Text, ViewModelContext,
+    dp, Application, Binding, Button, Column, Command, Insets, Text, ViewModelContext,
 };
 
 struct CounterVm {
@@ -223,8 +223,8 @@ impl CounterVm {
 
     fn view(&self) -> tgui::Element<Self> {
         Column::new()
-            .padding(Insets::all(24.0))
-            .gap(12.0)
+            .padding(Insets::all(dp(24.0)))
+            .gap(dp(12.0))
             .child(Text::new(
                 self.count
                     .binding()
@@ -250,18 +250,18 @@ fn main() -> Result<(), tgui::TguiError> {
 ### Media Widgets
 
 ```rust
-use tgui::{Application, Column, Command, ContentFit, Image, Insets, ValueCommand};
+use tgui::{dp, Application, Column, Command, ContentFit, Image, Insets, ValueCommand};
 
 fn main() -> Result<(), tgui::TguiError> {
     Application::new()
         .with_view_model(|_| ())
         .root_view(|_| {
             Column::new()
-                .padding(Insets::all(24.0))
-                .gap(16.0)
+                .padding(Insets::all(dp(24.0)))
+                .gap(dp(16.0))
                 .child(
                     Image::from_bytes(include_bytes!("static/logo.svg"))
-                        .size(220.0, 220.0)
+                        .size(dp(220.0), dp(220.0))
                         .fit(ContentFit::Contain)
                         .on_loading(Command::new(|_| println!("svg loading")))
                         .on_success(Command::new(|_| println!("svg ready")))
@@ -269,7 +269,7 @@ fn main() -> Result<(), tgui::TguiError> {
                 )
                 .child(
                     Image::from_url("https://example.com/cover.jpg")
-                        .height(180.0)
+                        .height(dp(180.0))
                         .fill_width()
                         .fit(ContentFit::Cover)
                         .on_loading(Command::new(|_| println!("image loading")))
@@ -295,7 +295,7 @@ still require `Image::from_path(...)`.
 On desktop targets, one shared view model can reconcile one main window plus multiple child windows:
 
 ```rust
-use tgui::{Application, Text, ViewModelContext, WindowSpec};
+use tgui::{dp, Application, Text, ViewModelContext, WindowSpec};
 
 struct AppVm;
 
@@ -308,11 +308,11 @@ impl AppVm {
         vec![
             WindowSpec::main("main")
                 .title("Main")
-                .window_size(960, 640)
+                .window_size(dp(960.0), dp(640.0))
                 .root_view(|_| Text::new("Main window").into()),
             WindowSpec::child("inspector")
                 .title("Inspector")
-                .window_size(420, 320)
+                .window_size(dp(420.0), dp(320.0))
                 .root_view(|_| Text::new("Inspector").into()),
         ]
     }
@@ -479,7 +479,7 @@ Bindings can opt into advanced transitions directly:
 
 ```rust
 use std::time::Duration;
-use tgui::{Color, Insets, Point, Transition};
+use tgui::{dp, Color, Insets, Point, Transition};
 
 let color = expanded
     .binding()
@@ -496,9 +496,9 @@ let offset = expanded
     .binding()
     .map(|value| {
         if value {
-            Point { x: 0.0, y: 0.0 }
+            Point::new(dp(0.0), dp(0.0))
         } else {
-            Point { x: 0.0, y: 24.0 }
+            Point::new(dp(0.0), dp(24.0))
         }
     })
     .animated(Transition::ease_in_out(Duration::from_millis(260)));
@@ -507,9 +507,9 @@ let padding = expanded
     .binding()
     .map(|value| {
         if value {
-            Insets::symmetric(28.0, 18.0)
+            Insets::symmetric(dp(28.0), dp(18.0))
         } else {
-            Insets::symmetric(16.0, 12.0)
+            Insets::symmetric(dp(16.0), dp(12.0))
         }
     })
     .animated(
@@ -538,11 +538,11 @@ For command-style animation, create `AnimatedValue<T>` instances and drive them 
 ```rust
 use std::time::Duration;
 use tgui::{
-    AnimationCurve, AnimationSpec, Keyframes, Playback, PlaybackDirection, Point,
+    dp, AnimationCurve, AnimationSpec, Keyframes, Playback, PlaybackDirection, Point,
     ViewModelContext,
 };
 
-let offset = ctx.animated_value(Point { x: 0.0, y: 0.0 });
+let offset = ctx.animated_value(Point::new(dp(0.0), dp(0.0)));
 let timeline = ctx
     .timeline()
     .playback(
@@ -555,9 +555,9 @@ let timeline = ctx
         AnimationSpec::from(
             Keyframes::timed(Duration::from_millis(800))
                 .curve(AnimationCurve::EaseInOutCubic)
-                .at(Duration::ZERO, Point { x: 0.0, y: 0.0 })
-                .at(Duration::from_millis(400), Point { x: 0.0, y: 24.0 })
-                .at(Duration::from_millis(800), Point { x: 0.0, y: -12.0 }),
+                .at(Duration::ZERO, Point::new(dp(0.0), dp(0.0)))
+                .at(Duration::from_millis(400), Point::new(dp(0.0), dp(24.0)))
+                .at(Duration::from_millis(800), Point::new(dp(0.0), dp(-12.0))),
         ),
     )
     .build();
@@ -574,18 +574,18 @@ timeline.reverse();
 All core widgets and layout containers support the same style-oriented builder pattern:
 
 ```rust
-use tgui::{Color, Command, Point, Stack, ValueCommand};
+use tgui::{dp, Color, Command, Point, Stack, ValueCommand};
 
 let card = Stack::new()
-    .size(200.0, 200.0)
+    .size(dp(200.0), dp(200.0))
     .background(Color::rgb(255, 255, 255))
-    .border(2.0, Color::rgb(0, 0, 0))
-    .border_radius(24.0)
+    .border(dp(2.0), Color::rgb(0, 0, 0))
+    .border_radius(dp(24.0))
     .opacity(0.96)
-    .offset(Point { x: 0.0, y: 8.0 })
+    .offset(Point::new(dp(0.0), dp(8.0)))
     .on_click(Command::new(|_| {}))
     .on_mouse_move(ValueCommand::new(|_, point| {
-        let _ = (point.x, point.y);
+        let _ = (point.x.get(), point.y.get());
     }));
 ```
 
@@ -594,17 +594,17 @@ Mouse interaction APIs are available on layout widgets as well, not only on butt
 Containers clip overflow by default. Opt into visibility or scrolling per axis:
 
 ```rust
-use tgui::{Column, Overflow, ScrollbarStyle};
+use tgui::{dp, Column, Overflow, ScrollbarStyle};
 
 let list = Column::new()
-    .height(320.0)
+    .height(dp(320.0))
     .overflow_y(Overflow::Scroll)
     .scrollbar_style(
         ScrollbarStyle::default()
-            .thickness(10.0)
+            .thickness(dp(10.0))
             .hover_thumb_color(tgui::Color::hexa(0x67E8F9F2))
             .active_thumb_color(tgui::Color::WHITE)
-            .min_thumb_length(36.0),
+            .min_thumb_length(dp(36.0)),
     );
 ```
 
@@ -649,18 +649,18 @@ Register custom fonts and optionally choose a default font:
 
 ```rust
 Application::new()
-    .font("ui", include_bytes!("./assets/YourFont.ttf"))
+    .font_bytes("ui", include_bytes!("./assets/YourFont.ttf"))
     .default_font("ui");
 ```
 
 Use a specific font on a `Text` widget:
 
 ```rust
-use tgui::Text;
+use tgui::{sp, Text};
 
 let title = Text::new("Hello tgui")
     .font("ui")
-    .font_size(24.0);
+    .font_size(sp(24.0));
 ```
 
 On Android, `tgui` also loads system fonts automatically, so a manually registered default font is not required just to make the app start or render text.

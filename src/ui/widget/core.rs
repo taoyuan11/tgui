@@ -18,6 +18,7 @@ use crate::media::{
 use crate::text::font::{FontManager, TextFontRequest};
 use crate::ui::layout::{Align, Axis, Insets, Justify, LayoutStyle, Overflow, Value, Wrap};
 use crate::ui::theme::Theme;
+use crate::ui::unit::{dp, sp, Dp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface as PublicVideoSurface;
 
@@ -119,6 +120,7 @@ struct CollectContext<'a, 'b> {
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar: Option<ScrollbarHandle>,
     scroll_offsets: &'a HashMap<WidgetId, Point>,
+    units: UnitContext,
     animations: &'b mut AnimationEngine,
     now: std::time::Instant,
 }
@@ -131,7 +133,7 @@ struct VisualContext {
 }
 
 impl<VM> Element<VM> {
-    pub fn border(mut self, width: impl Into<Value<f32>>, color: impl Into<Value<Color>>) -> Self {
+    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
         self.visual.border_width = width.into();
         self.visual.border_color = color.into();
         self
@@ -142,12 +144,12 @@ impl<VM> Element<VM> {
         self
     }
 
-    pub fn border_radius(mut self, radius: impl Into<Value<f32>>) -> Self {
+    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
         self.visual.border_radius = radius.into();
         self
     }
 
-    pub fn border_width(mut self, width: impl Into<Value<f32>>) -> Self {
+    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
         self.visual.border_width = width.into();
         self
     }
@@ -263,6 +265,7 @@ impl<VM> ResolvedElement<VM> {
         &self,
         taffy: &mut TaffyTree<MeasureContext>,
         animations: &mut AnimationEngine,
+        units: UnitContext,
         parent_kind: Option<ContainerKind>,
         viewport: Rect,
         is_root: bool,
@@ -275,6 +278,7 @@ impl<VM> ResolvedElement<VM> {
                 child_layouts.push(child.build_layout_tree(
                     taffy,
                     animations,
+                    units,
                     Some(layout.kind),
                     viewport,
                     false,
@@ -283,7 +287,7 @@ impl<VM> ResolvedElement<VM> {
             }
         }
 
-        let style = self.taffy_style(parent_kind, viewport, is_root, animations, now);
+        let style = self.taffy_style(parent_kind, viewport, is_root, animations, units, now);
         let node = if child_layouts.is_empty() {
             taffy.new_leaf_with_context(style, self.measure_context())?
         } else {
@@ -306,6 +310,7 @@ impl<VM> ResolvedElement<VM> {
         viewport: Rect,
         is_root: bool,
         animations: &mut AnimationEngine,
+        units: UnitContext,
         now: std::time::Instant,
     ) -> TaffyStyle {
         let mut style = TaffyStyle {
@@ -319,11 +324,12 @@ impl<VM> ResolvedElement<VM> {
                         .width
                         .as_ref()
                         .map(|value| {
-                            length(value.resolve_widget(
+                            length(value.resolve_widget_to_logical(
                                 animations,
                                 self.id,
                                 WidgetProperty::Width,
                                 now,
+                                units,
                             ))
                         })
                         .unwrap_or_else(auto)
@@ -337,11 +343,12 @@ impl<VM> ResolvedElement<VM> {
                         .height
                         .as_ref()
                         .map(|value| {
-                            length(value.resolve_widget(
+                            length(value.resolve_widget_to_logical(
                                 animations,
                                 self.id,
                                 WidgetProperty::Height,
                                 now,
+                                units,
                             ))
                         })
                         .unwrap_or_else(auto)
@@ -352,13 +359,13 @@ impl<VM> ResolvedElement<VM> {
                 self.id,
                 WidgetProperty::Margin,
                 now,
-            )),
+            ), units),
             padding: to_taffy_rect(self.layout.padding.resolve_widget(
                 animations,
                 self.id,
                 WidgetProperty::Padding,
                 now,
-            )),
+            ), units),
             flex_grow: self
                 .layout
                 .grow
@@ -373,7 +380,7 @@ impl<VM> ResolvedElement<VM> {
         }
 
         if let ResolvedWidgetKind::Container { layout, .. } = &self.kind {
-            apply_container_style(&mut style, layout, animations, self.id, now);
+            apply_container_style(&mut style, layout, animations, self.id, units, now);
         }
 
         style
@@ -426,21 +433,23 @@ impl<VM> ResolvedElement<VM> {
         let border_width = self
             .visual
             .border_width
-            .resolve_widget(
+            .resolve_widget_to_logical(
                 context.animations,
                 self.id,
                 WidgetProperty::BorderWidth,
                 context.now,
+                context.units,
             )
             .max(0.0);
         let border_radius = self
             .visual
             .border_radius
-            .resolve_widget(
+            .resolve_widget_to_logical(
                 context.animations,
                 self.id,
                 WidgetProperty::BorderRadius,
                 context.now,
+                context.units,
             )
             .max(0.0);
         let border_color = self
@@ -494,12 +503,15 @@ impl<VM> ResolvedElement<VM> {
         }
         .with_alpha_factor(opacity);
 
-        let background_inset = border_width.min(frame.width * 0.5).min(frame.height * 0.5);
-        let background_frame = frame.inset(Insets::all(background_inset));
+        let background_inset = border_width.min((frame.width * 0.5).get()).min((frame.height * 0.5).get());
+        let background_frame = frame.inset(Insets::all(Dp::new(background_inset)));
         let background_radius = (border_radius - background_inset).max(0.0);
         let primitive_clip = Some(visual_context.clip_rect);
 
-        if background.a > 0 && background_frame.width > 0.0 && background_frame.height > 0.0 {
+        if background.a > 0
+            && background_frame.width > Dp::ZERO
+            && background_frame.height > Dp::ZERO
+        {
             computed.scene.shapes.push(RenderPrimitive {
                 rect: background_frame,
                 color: background,
@@ -550,12 +562,12 @@ impl<VM> ResolvedElement<VM> {
                     x: if layout.overflow_x == Overflow::Scroll {
                         requested_scroll.x.clamp(0.0, max_scroll.x)
                     } else {
-                        0.0
+                        Dp::ZERO
                     },
                     y: if layout.overflow_y == Overflow::Scroll {
                         requested_scroll.y.clamp(0.0, max_scroll.y)
                     } else {
-                        0.0
+                        Dp::ZERO
                     },
                 };
                 let child_clip_rect = apply_overflow_clip(
@@ -569,6 +581,7 @@ impl<VM> ResolvedElement<VM> {
                     content_bounds,
                     scroll_offset,
                     layout,
+                    context.units,
                 );
                 let visible_frame = frame
                     .intersect(visual_context.clip_rect)
@@ -624,6 +637,7 @@ impl<VM> ResolvedElement<VM> {
                     frame,
                     context.font_manager,
                     context.theme,
+                    context.units,
                     context.animations,
                     context.now,
                     &mut computed.scene,
@@ -719,6 +733,7 @@ impl<VM> ResolvedElement<VM> {
                     frame,
                     context.font_manager,
                     context.theme,
+                    context.units,
                     context.animations,
                     context.now,
                     &mut computed.scene,
@@ -757,6 +772,7 @@ impl<VM> ResolvedElement<VM> {
                     &current_text,
                     context.font_manager,
                     context.theme,
+                    context.units,
                     context.animations,
                     context.now,
                     &mut computed.scene,
@@ -869,6 +885,7 @@ fn apply_container_style(
     layout: &ContainerLayout,
     animations: &mut AnimationEngine,
     widget_id: WidgetId,
+    units: UnitContext,
     now: std::time::Instant,
 ) {
     style.padding = to_taffy_rect(layout.padding.resolve_widget(
@@ -876,10 +893,10 @@ fn apply_container_style(
         widget_id,
         WidgetProperty::Padding,
         now,
-    ));
+    ), units);
     let gap = layout
         .gap
-        .resolve_widget(animations, widget_id, WidgetProperty::Gap, now)
+        .resolve_widget_to_logical(animations, widget_id, WidgetProperty::Gap, now, units)
         .max(0.0);
     style.gap = TaffySize {
         width: length(gap),
@@ -1026,6 +1043,7 @@ fn compute_scrollbar_geometry(
     content_bounds: Rect,
     scroll_offset: Point,
     layout: &ContainerLayout,
+    units: UnitContext,
 ) -> ScrollbarGeometry {
     let can_scroll_x =
         layout.overflow_x == Overflow::Scroll && content_bounds.right() > viewport.right();
@@ -1036,7 +1054,7 @@ fn compute_scrollbar_geometry(
     }
 
     let style = layout.scrollbar_style;
-    let thickness = style.thickness.max(2.0);
+    let thickness = units.resolve_dp(style.thickness.max(dp(2.0)));
     let inset_bounds = viewport.inset(style.insets);
     if inset_bounds.is_empty() {
         return ScrollbarGeometry::default();
@@ -1046,7 +1064,7 @@ fn compute_scrollbar_geometry(
         Rect::new(
             (inset_bounds.right() - thickness).max(inset_bounds.x),
             inset_bounds.y,
-            thickness.min(inset_bounds.width),
+            Dp::new(thickness).min(inset_bounds.width),
             (inset_bounds.height - if can_scroll_x { thickness } else { 0.0 }).max(0.0),
         )
     });
@@ -1055,7 +1073,7 @@ fn compute_scrollbar_geometry(
             inset_bounds.x,
             (inset_bounds.bottom() - thickness).max(inset_bounds.y),
             (inset_bounds.width - if can_scroll_y { thickness } else { 0.0 }).max(0.0),
-            thickness.min(inset_bounds.height),
+            Dp::new(thickness).min(inset_bounds.height),
         )
     });
 
@@ -1065,10 +1083,10 @@ fn compute_scrollbar_geometry(
             .map(|track| {
                 scrollbar_thumb_rect(
                     track,
-                    viewport.width,
-                    scroll_offset.x,
-                    (content_bounds.right() - viewport.x).max(viewport.width),
-                    style.min_thumb_length.max(thickness),
+                    viewport.width.get(),
+                    scroll_offset.x.get(),
+                    (content_bounds.right() - viewport.x).max(viewport.width).get(),
+                    units.resolve_dp(style.min_thumb_length.max(Dp::new(thickness))),
                     Axis::Horizontal,
                 )
             }),
@@ -1077,10 +1095,10 @@ fn compute_scrollbar_geometry(
             .map(|track| {
                 scrollbar_thumb_rect(
                     track,
-                    viewport.height,
-                    scroll_offset.y,
-                    (content_bounds.bottom() - viewport.y).max(viewport.height),
-                    style.min_thumb_length.max(thickness),
+                    viewport.height.get(),
+                    scroll_offset.y.get(),
+                    (content_bounds.bottom() - viewport.y).max(viewport.height).get(),
+                    units.resolve_dp(style.min_thumb_length.max(Dp::new(thickness))),
                     Axis::Vertical,
                 )
             }),
@@ -1119,8 +1137,12 @@ fn push_scrollbar_primitives(
             style.thumb_color.with_alpha_factor(opacity)
         }
     };
-    let thickness = style.thickness.max(2.0);
-    let radius = style.radius.max(0.0).min(thickness * 0.5);
+    let thickness = style.thickness.max(dp(2.0)).get();
+    let radius = style
+        .radius
+        .max(Dp::ZERO)
+        .min(Dp::new(thickness * 0.5))
+        .get();
 
     if let Some(track) = geometry.vertical_track {
         scene.overlay_shapes.push(RenderPrimitive {
@@ -1175,7 +1197,8 @@ fn scrollbar_thumb_rect(
         Axis::Horizontal => track.width,
         Axis::Vertical => track.height,
     }
-    .max(0.0);
+    .max(0.0)
+    .get();
     let max_offset = (content_extent - viewport_extent).max(0.0);
     let mut thumb_extent = if content_extent <= 0.0 {
         track_extent
@@ -1223,21 +1246,27 @@ fn map_axis_align_content(align: Align) -> TaffyJustifyContent {
     }
 }
 
-fn to_taffy_rect(insets: Insets) -> taffy::prelude::Rect<taffy::style::LengthPercentage> {
+fn to_taffy_rect(
+    insets: Insets,
+    units: UnitContext,
+) -> taffy::prelude::Rect<taffy::style::LengthPercentage> {
     taffy::prelude::Rect {
-        left: length(insets.left),
-        right: length(insets.right),
-        top: length(insets.top),
-        bottom: length(insets.bottom),
+        left: length(units.resolve_dp(insets.left)),
+        right: length(units.resolve_dp(insets.right)),
+        top: length(units.resolve_dp(insets.top)),
+        bottom: length(units.resolve_dp(insets.bottom)),
     }
 }
 
-fn to_taffy_rect_auto(insets: Insets) -> taffy::prelude::Rect<taffy::style::LengthPercentageAuto> {
+fn to_taffy_rect_auto(
+    insets: Insets,
+    units: UnitContext,
+) -> taffy::prelude::Rect<taffy::style::LengthPercentageAuto> {
     taffy::prelude::Rect {
-        left: length(insets.left),
-        right: length(insets.right),
-        top: length(insets.top),
-        bottom: length(insets.bottom),
+        left: length(units.resolve_dp(insets.left)),
+        right: length(units.resolve_dp(insets.right)),
+        top: length(units.resolve_dp(insets.top)),
+        bottom: length(units.resolve_dp(insets.bottom)),
     }
 }
 
@@ -1247,9 +1276,10 @@ fn measure_node(
     font_manager: &FontManager,
     theme: &Theme,
     media: &MediaManager,
+    units: UnitContext,
 ) -> TaffySize<f32> {
     let measured = match node_context {
-        Some(MeasureContext::Text(text)) => measure_text_content(text, font_manager, theme),
+        Some(MeasureContext::Text(text)) => measure_text_content(text, font_manager, theme, units),
         Some(MeasureContext::Image(image)) => {
             let snapshot = media.image_snapshot(&image.source.resolve(), None);
             measure_media_content(
@@ -1267,10 +1297,12 @@ fn measure_node(
                 snapshot.intrinsic_size,
             )
         }
-        Some(MeasureContext::Button(label)) => measure_text_content(label, font_manager, theme),
+        Some(MeasureContext::Button(label)) => {
+            measure_text_content(label, font_manager, theme, units)
+        }
         Some(MeasureContext::Input { text, placeholder }) => {
-            let text_size = measure_text_content(text, font_manager, theme);
-            let placeholder_size = measure_text_content(placeholder, font_manager, theme);
+            let text_size = measure_text_content(text, font_manager, theme, units);
+            let placeholder_size = measure_text_content(placeholder, font_manager, theme, units);
             (
                 text_size.0.max(placeholder_size.0),
                 text_size.1.max(placeholder_size.1),
@@ -1285,11 +1317,13 @@ fn measure_node(
     }
 }
 
-fn measure_text_content(text: &Text, font_manager: &FontManager, theme: &Theme) -> (f32, f32) {
-    let font_size = text
-        .font_size
-        .unwrap_or(theme.typography.font_size.max(1.0));
-    let line_height = (font_size * 1.25).max(font_size + 4.0);
+fn measure_text_content(
+    text: &Text,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+) -> (f32, f32) {
+    let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
     font_manager.measure_text(
         &text.content.resolve(),
         TextFontRequest {
@@ -1301,8 +1335,18 @@ fn measure_text_content(text: &Text, font_manager: &FontManager, theme: &Theme) 
         },
         font_size,
         line_height,
-        text.letter_spacing,
+        letter_spacing,
     )
+}
+
+fn resolved_text_metrics(text: &Text, theme: &Theme, units: UnitContext) -> (f32, f32, f32) {
+    let font_size = units.resolve_sp(
+        text.font_size
+            .unwrap_or(theme.typography.font_size.max(sp(1.0))),
+    );
+    let line_height = (font_size * 1.25).max(font_size + 4.0);
+    let letter_spacing = units.resolve_sp(text.letter_spacing);
+    (font_size, line_height, letter_spacing)
 }
 
 fn measure_media_content(
@@ -1423,7 +1467,7 @@ fn push_media_placeholder(
 ) {
     let placeholder =
         media_loading_fill_color(loading, error, loading_background).with_alpha_factor(opacity);
-    if content_frame.width > 0.0 && content_frame.height > 0.0 {
+    if content_frame.width > Dp::ZERO && content_frame.height > Dp::ZERO {
         scene.overlay_shapes.push(RenderPrimitive {
             rect: content_frame,
             color: placeholder,
@@ -1434,17 +1478,19 @@ fn push_media_placeholder(
     }
 
     let label = media_placeholder_label(kind, loading, error);
-    let text = Text::new(label).font_size((context.theme.typography.font_size - 1.0).max(12.0));
+    let text = Text::new(label)
+        .font_size((context.theme.typography.font_size - sp(1.0)).max(sp(12.0)));
     push_text_primitives(
         &text,
         frame,
         context.font_manager,
         context.theme,
+        context.units,
         context.animations,
         context.now,
         scene,
         false,
-        Insets::all(12.0),
+        Insets::all(dp(12.0)),
         None,
         None,
         Color::hexa(0xE5E7EBFF),
@@ -1471,6 +1517,7 @@ fn push_text_primitives(
     frame: Rect,
     font_manager: &FontManager,
     theme: &Theme,
+    units: UnitContext,
     animations: &mut AnimationEngine,
     now: std::time::Instant,
     scene: &mut ScenePrimitives,
@@ -1498,17 +1545,14 @@ fn push_text_primitives(
         .as_ref()
         .map(|color| color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now))
         .unwrap_or(fallback_color);
-    let font_size = text
-        .font_size
-        .unwrap_or(theme.typography.font_size.max(1.0));
-    let line_height = (font_size * 1.25).max(font_size + 4.0);
+    let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
     let inner = frame.inset(padding);
     let current_layout = font_manager.measure_text_layout(
         &content,
         text_request.clone(),
         font_size,
         line_height,
-        text.letter_spacing,
+        letter_spacing,
     );
     let content_frame = centered_text_frame(
         inner,
@@ -1534,7 +1578,7 @@ fn push_text_primitives(
                     content_frame.x + selection_start_x,
                     content_frame.y,
                     selection_width,
-                    content_frame.height.max(line_height),
+                    content_frame.height.max(Dp::new(line_height)),
                 ),
                 color: theme.palette.accent.with_alpha_factor(0.35 * opacity),
                 corner_radius: 4.0,
@@ -1552,7 +1596,7 @@ fn push_text_primitives(
         font_size,
         font_weight: text.font_weight,
         line_height,
-        letter_spacing: text.letter_spacing,
+        letter_spacing,
         clip_rect,
     });
 
@@ -1564,7 +1608,7 @@ fn push_text_primitives(
                     text_request,
                     font_size,
                     line_height,
-                    text.letter_spacing,
+                    letter_spacing,
                 )
                 .0
             })
@@ -1575,7 +1619,7 @@ fn push_text_primitives(
                 caret_x,
                 content_frame.y,
                 CARET_WIDTH,
-                content_frame.height.max(line_height),
+                content_frame.height.max(Dp::new(line_height)),
             ),
             color: theme.palette.text.with_alpha_factor(opacity),
             corner_radius: 0.0,
@@ -1592,6 +1636,7 @@ fn push_input_primitives(
     current_text: &str,
     font_manager: &FontManager,
     theme: &Theme,
+    units: UnitContext,
     animations: &mut AnimationEngine,
     now: std::time::Instant,
     scene: &mut ScenePrimitives,
@@ -1602,10 +1647,7 @@ fn push_input_primitives(
     show_caret: bool,
     clip_rect: Option<Rect>,
 ) -> Option<Rect> {
-    let font_size = text
-        .font_size
-        .unwrap_or(theme.typography.font_size.max(1.0));
-    let line_height = (font_size * 1.25).max(font_size + 4.0);
+    let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
     let text_request = TextFontRequest {
         preferred_font: text
             .font_family
@@ -1644,16 +1686,14 @@ fn push_input_primitives(
         };
         let placeholder_content = placeholder.content.resolve();
         let resolved = font_manager.resolve_text(&placeholder_content, placeholder_request.clone());
-        let placeholder_size = placeholder
-            .font_size
-            .unwrap_or(theme.typography.font_size.max(1.0));
-        let placeholder_line_height = (placeholder_size * 1.25).max(placeholder_size + 4.0);
+        let (placeholder_size, placeholder_line_height, placeholder_letter_spacing) =
+            resolved_text_metrics(placeholder, theme, units);
         let (measured_width, measured_height) = font_manager.measure_text_raw(
             &placeholder_content,
             placeholder_request,
             placeholder_size,
             placeholder_line_height,
-            placeholder.letter_spacing,
+            placeholder_letter_spacing,
         );
         let content_frame = centered_text_frame(
             inner,
@@ -1669,7 +1709,7 @@ fn push_input_primitives(
             font_size: placeholder_size,
             font_weight: placeholder.font_weight,
             line_height: placeholder_line_height,
-            letter_spacing: placeholder.letter_spacing,
+            letter_spacing: placeholder_letter_spacing,
             clip_rect,
         });
 
@@ -1677,7 +1717,7 @@ fn push_input_primitives(
             inner.x + INPUT_EMPTY_CARET_INSET,
             content_frame.y,
             CARET_WIDTH,
-            content_frame.height.max(placeholder_line_height),
+            content_frame.height.max(Dp::new(placeholder_line_height)),
         );
         if show_caret {
             scene.overlay_shapes.push(RenderPrimitive {
@@ -1715,7 +1755,7 @@ fn push_input_primitives(
         text_request.clone(),
         font_size,
         line_height,
-        text.letter_spacing,
+        letter_spacing,
     );
     let content_frame = centered_text_frame(inner, display_width, display_height, line_height);
 
@@ -1734,7 +1774,7 @@ fn push_input_primitives(
             text_request.clone(),
             font_size,
             line_height,
-            text.letter_spacing,
+            letter_spacing,
         )
     });
     let prefix_width = measure_segment(
@@ -1743,7 +1783,7 @@ fn push_input_primitives(
         text_request.clone(),
         font_size,
         line_height,
-        text.letter_spacing,
+        letter_spacing,
     );
     let preedit_width = measure_segment(
         font_manager,
@@ -1751,7 +1791,7 @@ fn push_input_primitives(
         text_request.clone(),
         font_size,
         line_height,
-        text.letter_spacing,
+        letter_spacing,
     );
     let full_text_width = current_layout
         .as_ref()
@@ -1763,7 +1803,7 @@ fn push_input_primitives(
                 text_request.clone(),
                 font_size,
                 line_height,
-                text.letter_spacing,
+                letter_spacing,
             )
         });
 
@@ -1787,7 +1827,7 @@ fn push_input_primitives(
                         selection_x,
                         content_frame.y,
                         selection_width,
-                        content_frame.height.max(line_height),
+                        content_frame.height.max(Dp::new(line_height)),
                     ),
                     color: theme.palette.accent.with_alpha_factor(0.35 * opacity),
                     corner_radius: 4.0,
@@ -1812,7 +1852,7 @@ fn push_input_primitives(
             font_size,
             font_weight: text.font_weight,
             line_height,
-            letter_spacing: text.letter_spacing,
+            letter_spacing,
             clip_rect,
         });
     } else {
@@ -1831,7 +1871,7 @@ fn push_input_primitives(
                 font_size,
                 font_weight: text.font_weight,
                 line_height,
-                letter_spacing: text.letter_spacing,
+                letter_spacing,
                 clip_rect,
             });
             cursor_x += prefix_width;
@@ -1851,7 +1891,7 @@ fn push_input_primitives(
                 font_size,
                 font_weight: text.font_weight,
                 line_height,
-                letter_spacing: text.letter_spacing,
+                letter_spacing,
                 clip_rect,
             });
             scene.overlay_shapes.push(RenderPrimitive {
@@ -1876,7 +1916,7 @@ fn push_input_primitives(
                 text_request.clone(),
                 font_size,
                 line_height,
-                text.letter_spacing,
+                letter_spacing,
             );
             scene.texts.push(TextPrimitive {
                 content: suffix_text.to_string(),
@@ -1891,7 +1931,7 @@ fn push_input_primitives(
                 font_size,
                 font_weight: text.font_weight,
                 line_height,
-                letter_spacing: text.letter_spacing,
+                letter_spacing,
                 clip_rect,
             });
         }
@@ -1911,7 +1951,7 @@ fn push_input_primitives(
                     text_request.clone(),
                     font_size,
                     line_height,
-                    text.letter_spacing,
+                    letter_spacing,
                 )
         })
         .unwrap_or_else(|| {
@@ -1929,7 +1969,7 @@ fn push_input_primitives(
         (content_frame.x + caret_boundary + caret_padding).max(inner.x),
         content_frame.y,
         CARET_WIDTH,
-        content_frame.height.max(line_height),
+        content_frame.height.max(Dp::new(line_height)),
     );
 
     let hide_caret = composition
@@ -1953,7 +1993,7 @@ fn push_input_primitives(
             inner.x + CARET_END_GAP,
             content_frame.y,
             CARET_WIDTH,
-            content_frame.height.max(line_height),
+            content_frame.height.max(Dp::new(line_height)),
         )
     })
 }
@@ -1984,7 +2024,7 @@ fn centered_text_frame(
     let content_height = inner
         .height
         .min(measured_height.max(line_height))
-        .max(line_height);
+        .max(Dp::new(line_height));
 
     Rect::new(
         inner.x,
@@ -2007,8 +2047,8 @@ fn push_border_primitives(
     }
 
     let thickness = border_width
-        .min(frame.width * 0.5)
-        .min(frame.height * 0.5)
+        .min((frame.width * 0.5).get())
+        .min((frame.height * 0.5).get())
         .max(0.0);
     if thickness <= 0.0 {
         return;
@@ -2048,21 +2088,56 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&InputEditState>,
         caret_visible: bool,
     ) -> ComputedScene<VM> {
+        self.compute_scene_with_units(
+            font_manager,
+            theme,
+            media,
+            UnitContext::default(),
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            scroll_offsets,
+            viewport,
+            focused_input,
+            focused_input_state,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+        )
+    }
+
+    pub(crate) fn compute_scene_with_units(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        units: UnitContext,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_input_state: Option<&InputEditState>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&InputEditState>,
+        caret_visible: bool,
+    ) -> ComputedScene<VM> {
         let mut taffy = TaffyTree::new();
         let now = std::time::Instant::now();
         let resolved_root = self.root.resolve();
         let root_layout = resolved_root
-            .build_layout_tree(&mut taffy, animations, None, viewport, true, now)
+            .build_layout_tree(&mut taffy, animations, units, None, viewport, true, now)
             .expect("widget tree layout should build");
         taffy
             .compute_layout_with_measure(
                 root_layout.node,
                 TaffySize {
-                    width: AvailableSpace::Definite(viewport.width),
-                    height: AvailableSpace::Definite(viewport.height),
+                    width: AvailableSpace::Definite(viewport.width.get()),
+                    height: AvailableSpace::Definite(viewport.height.get()),
                 },
                 |known_dimensions, _, _, node_context, _| {
-                    measure_node(node_context, known_dimensions, font_manager, theme, media)
+                    measure_node(node_context, known_dimensions, font_manager, theme, media, units)
                 },
             )
             .expect("widget tree layout should compute");
@@ -2081,6 +2156,7 @@ impl<VM> WidgetTree<VM> {
             hovered_scrollbar,
             active_scrollbar,
             scroll_offsets,
+            units,
             animations,
             now,
         };
@@ -2117,10 +2193,46 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&InputEditState>,
         caret_visible: bool,
     ) -> RenderedWidgetScene {
-        let computed = self.compute_scene(
+        self.render_output_with_units(
             font_manager,
             theme,
             media,
+            UnitContext::default(),
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            scroll_offsets,
+            viewport,
+            focused_input,
+            focused_input_state,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+        )
+    }
+
+    pub(crate) fn render_output_with_units(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        units: UnitContext,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_input_state: Option<&InputEditState>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&InputEditState>,
+        caret_visible: bool,
+    ) -> RenderedWidgetScene {
+        let computed = self.compute_scene_with_units(
+            font_manager,
+            theme,
+            media,
+            units,
             animations,
             hovered_scrollbar,
             active_scrollbar,
@@ -2256,6 +2368,7 @@ mod tests {
     use crate::text::font::{FontCatalog, FontManager};
     use crate::ui::layout::Overflow;
     use crate::ui::theme::Theme;
+    use crate::ui::unit::dp;
     use crate::ui::widget::common::Rect;
     use crate::ui::widget::{
         Element, Image, Input, InputEditState, Point, ScrollbarAxis, ScrollbarHandle, Stack,
@@ -2366,12 +2479,12 @@ mod tests {
         let tree = WidgetTree::new(
             Stack::new().child(
                 Stack::new()
-                    .size(100.0, 100.0)
+                    .size(dp(100.0), dp(100.0))
                     .background(crate::foundation::color::Color::hexa(0x1E293BFF))
                     .child(
                         Stack::new()
-                            .size(80.0, 80.0)
-                            .offset(Point { x: 60.0, y: 0.0 })
+                            .size(dp(80.0), dp(80.0))
+                            .offset(Point::new(dp(60.0), dp(0.0)))
                             .background(crate::foundation::color::Color::hexa(0x38BDF8FF))
                             .on_click(Command::new(|_: &mut ()| {})),
                     ),
@@ -2412,7 +2525,7 @@ mod tests {
             None,
             &HashMap::new(),
             Rect::new(0.0, 0.0, 100.0, 100.0),
-            Some(Point { x: 120.0, y: 20.0 }),
+            Some(Point::new(dp(120.0), dp(20.0))),
             None,
         );
         assert!(hit.is_none());
@@ -2425,13 +2538,13 @@ mod tests {
         let media = test_media();
         let mut animations = AnimationEngine::default();
         let scroller: super::Element<()> = Stack::new()
-            .size(100.0, 100.0)
-            .border(4.0, crate::foundation::color::Color::WHITE)
+            .size(dp(100.0), dp(100.0))
+            .border(dp(4.0), crate::foundation::color::Color::WHITE)
             .overflow_y(Overflow::Scroll)
             .background(crate::foundation::color::Color::hexa(0x111827FF))
             .child(
                 Stack::new()
-                    .size(100.0, 300.0)
+                    .size(dp(100.0), dp(300.0))
                     .background(crate::foundation::color::Color::hexa(0x22C55EFF)),
             )
             .into();
@@ -2439,7 +2552,7 @@ mod tests {
         let tree = WidgetTree::new(Stack::new().child(scroller));
 
         let mut scroll_offsets = HashMap::new();
-        scroll_offsets.insert(scroller_id, Point { x: 0.0, y: 500.0 });
+        scroll_offsets.insert(scroller_id, Point::new(dp(0.0), dp(500.0)));
         let rendered = tree.render_output(
             &font_manager,
             &theme,
@@ -2474,12 +2587,12 @@ mod tests {
         let mut animations = AnimationEngine::default();
         let tree = WidgetTree::new(
             Stack::<()>::new()
-                .size(100.0, 100.0)
-                .border(4.0, crate::foundation::color::Color::WHITE)
+                .size(dp(100.0), dp(100.0))
+                .border(dp(4.0), crate::foundation::color::Color::WHITE)
                 .overflow(Overflow::Hidden)
                 .child(
                     Stack::new()
-                        .size(100.0, 100.0)
+                        .size(dp(100.0), dp(100.0))
                         .background(crate::foundation::color::Color::BLACK),
                 ),
         );
@@ -2516,7 +2629,7 @@ mod tests {
         let media = test_media();
         let mut animations = AnimationEngine::default();
         let scroller: super::Element<()> = Stack::new()
-            .size(120.0, 120.0)
+            .size(dp(120.0), dp(120.0))
             .overflow_y(Overflow::Scroll)
             .scrollbar_thumb_color(crate::foundation::color::Color::BLACK)
             .scrollbar_track_color(crate::foundation::color::Color::WHITE)
@@ -2524,7 +2637,7 @@ mod tests {
             .scrollbar_active_thumb_color(crate::foundation::color::Color::hexa(0x445566FF))
             .child(
                 Stack::new()
-                    .size(120.0, 260.0)
+                    .size(dp(120.0), dp(260.0))
                     .background(crate::foundation::color::Color::hexa(0x1D4ED8FF)),
             )
             .into();
@@ -2670,11 +2783,11 @@ mod tests {
         let context = test_context();
         let visible = context.observable(true);
         let clickable: Element<()> = Stack::new()
-            .size(40.0, 40.0)
+            .size(dp(40.0), dp(40.0))
             .background(crate::foundation::color::Color::WHITE)
             .on_click(Command::new(|_: &mut ()| {}))
             .into();
-        let tree = WidgetTree::new(Stack::<()>::new().size(100.0, 100.0).child(
+        let tree = WidgetTree::new(Stack::<()>::new().size(dp(100.0), dp(100.0)).child(
             visible.binding().map(move |value| {
                 if value {
                     vec![clickable.clone()]
@@ -2694,7 +2807,7 @@ mod tests {
             None,
             &HashMap::new(),
             Rect::new(0.0, 0.0, 100.0, 100.0),
-            Some(Point { x: 10.0, y: 10.0 }),
+            Some(Point::new(dp(10.0), dp(10.0))),
             None,
         );
         assert!(matches!(hit, Some(super::HitInteraction::Widget { .. })));
@@ -2709,7 +2822,7 @@ mod tests {
             None,
             &HashMap::new(),
             Rect::new(0.0, 0.0, 100.0, 100.0),
-            Some(Point { x: 10.0, y: 10.0 }),
+            Some(Point::new(dp(10.0), dp(10.0))),
             None,
         );
         assert!(hit.is_none());
@@ -2769,7 +2882,8 @@ mod tests {
             loading: true,
             error: None,
         });
-        let tree: WidgetTree<()> = WidgetTree::new(VideoSurface::new(controller).size(160.0, 90.0));
+        let tree: WidgetTree<()> =
+            WidgetTree::new(VideoSurface::new(controller).size(dp(160.0), dp(90.0)));
 
         let rendered = tree.render_output(
             &font_manager,
@@ -2815,7 +2929,7 @@ mod tests {
         });
         let tree: WidgetTree<()> = WidgetTree::new(
             VideoSurface::new(controller)
-                .width(160.0)
+                .width(dp(160.0))
                 .aspect_ratio(32.0 / 18.0),
         );
 
@@ -2903,7 +3017,7 @@ mod tests {
         let tree: WidgetTree<()> = WidgetTree::new(
             crate::ui::widget::Button::new(Text::new("disabled"))
                 .disable(true)
-                .size(120.0, 40.0),
+                .size(dp(120.0), dp(40.0)),
         );
 
         let hit = tree.hit_test(
@@ -2915,7 +3029,7 @@ mod tests {
             None,
             &HashMap::new(),
             Rect::new(0.0, 0.0, 120.0, 40.0),
-            Some(Point { x: 10.0, y: 10.0 }),
+            Some(Point::new(dp(10.0), dp(10.0))),
             None,
         );
         assert!(hit.is_none());
@@ -2942,7 +3056,7 @@ mod tests {
             None,
             &HashMap::new(),
             Rect::new(0.0, 0.0, 160.0, 40.0),
-            Some(Point { x: 10.0, y: 10.0 }),
+            Some(Point::new(dp(10.0), dp(10.0))),
             None,
         );
         assert!(hit.is_none());
@@ -2989,7 +3103,7 @@ mod tests {
         let font_manager = FontManager::new(&FontCatalog::default());
         let media = test_media();
         let mut animations = AnimationEngine::default();
-        let input: Element<()> = Input::new(Text::new("hello")).width(160.0).into();
+        let input: Element<()> = Input::new(Text::new("hello")).width(dp(160.0)).into();
         let input_id = input.id;
         let tree = WidgetTree::new(input);
 
@@ -3034,6 +3148,6 @@ pub struct WidgetEventResult<VM> {
     pub request_redraw: bool,
 }
 
-pub fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
+pub fn rect(x: Dp, y: Dp, width: Dp, height: Dp) -> Rect {
     Rect::new(x, y, width, height)
 }

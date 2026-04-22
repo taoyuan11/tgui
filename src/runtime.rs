@@ -35,6 +35,7 @@ use crate::platform::window::{
 use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::{FontManager, TextFontRequest};
 use crate::ui::theme::{Theme, ThemeMode};
+use crate::ui::unit::{dp, sp, Dp, UnitContext};
 use crate::ui::widget::{
     ComputedScene, HitInteraction, InputEditState, InputSnapshot, MediaEventPhase, MediaEventState,
     Point, Rect, RenderedWidgetScene, ScenePrimitives, ScrollbarAxis, ScrollbarHandle, Text,
@@ -625,7 +626,7 @@ struct ScrollbarDrag {
     start_scroll_offset: Point,
     track: Rect,
     thumb: Rect,
-    max_offset: f32,
+    max_offset: Dp,
 }
 
 #[derive(Clone)]
@@ -1029,6 +1030,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn computed_scene(&mut self) -> &ComputedScene<VM> {
         let viewport = self.viewport_rect();
+        let units = self.unit_context();
         let caret_visible = self.input_caret_visible(Instant::now());
         let active_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
         let focused_input_state = self
@@ -1051,10 +1053,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if !cache_valid {
             let theme = self.animated_theme(Instant::now());
             let computed = match self.widget_tree.as_ref() {
-                Some(tree) => tree.compute_scene(
+                Some(tree) => tree.compute_scene_with_units(
                     &self.font_manager,
                     &theme,
                     &self.media_manager,
+                    units,
                     &mut self.animation_engine,
                     self.hovered_scrollbar,
                     active_scrollbar,
@@ -1137,9 +1140,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let size = self
             .window
             .as_ref()
-            .map(|window| window.surface_size())
-            .unwrap_or(self.config.size.to_physical::<u32>(1.0));
-        Rect::new(0.0, 0.0, size.width as f32, size.height as f32)
+            .map(|window| {
+                window
+                    .surface_size()
+                    .to_logical::<f32>(window.scale_factor())
+            })
+            .unwrap_or(crate::platform::dpi::LogicalSize::new(
+                self.config.size.width as f32,
+                self.config.size.height as f32,
+            ));
+        Rect::new(0.0, 0.0, size.width, size.height)
     }
 
     fn invalidate_scene(&mut self) {
@@ -1172,6 +1182,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if let (Some(window), Some(caret_rect)) = (self.window.as_ref(), rendered.ime_cursor_area) {
             let _ = window.request_ime_update(ImeRequest::Update(Self::ime_cursor_request_data(
                 caret_rect,
+                self.unit_context(),
             )));
         }
         let renderer = self
@@ -1204,10 +1215,41 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn set_pointer_position(&mut self, position: PhysicalPosition<f64>) {
+        let logical = self
+            .window
+            .as_ref()
+            .map(|window| position.to_logical::<f32>(window.scale_factor()))
+            .unwrap_or_else(|| position.to_logical::<f32>(1.0));
         self.cursor_position = Some(Point {
-            x: position.x as f32,
-            y: position.y as f32,
+            x: dp(logical.x),
+            y: dp(logical.y),
         });
+    }
+
+    fn unit_context(&self) -> UnitContext {
+        let scale_factor = self
+            .window
+            .as_ref()
+            .map(|window| window.scale_factor() as f32)
+            .unwrap_or(1.0);
+        let font_scale = self.platform_font_scale();
+        UnitContext::new(scale_factor, font_scale)
+    }
+
+    fn platform_font_scale(&self) -> f32 {
+        #[cfg(all(target_os = "android", feature = "android"))]
+        {
+            if let Some(scale) = android_font_scale(self.android_app.as_ref()) {
+                return scale;
+            }
+        }
+        #[cfg(all(target_env = "ohos", feature = "ohos"))]
+        {
+            if let Some(scale) = ohos_font_scale() {
+                return scale;
+            }
+        }
+        1.0
     }
 
     fn clear_pointer_position(&mut self) {
@@ -1642,6 +1684,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let cursor = text_cursor_index_at_point(
             &self.font_manager,
             &self.theme,
+            self.unit_context(),
             drag.frame,
             drag.padding,
             &drag.text_style,
@@ -1663,20 +1706,27 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         false
     }
 
-    fn ime_cursor_request_data(caret_rect: Rect) -> ImeRequestData {
+    fn ime_cursor_request_data(caret_rect: Rect, units: UnitContext) -> ImeRequestData {
         ImeRequestData::default().with_cursor_area(
-            PhysicalPosition::new(caret_rect.x as i32, caret_rect.y as i32).into(),
+            PhysicalPosition::new(
+                units.logical_to_physical(caret_rect.x.get()).round() as i32,
+                units.logical_to_physical(caret_rect.y.get()).round() as i32,
+            )
+            .into(),
             PhysicalSize::new(
-                caret_rect.width.ceil().max(1.0) as u32,
-                caret_rect.height.ceil().max(1.0) as u32,
+                units.logical_to_physical(caret_rect.width.get()).ceil().max(1.0) as u32,
+                units.logical_to_physical(caret_rect.height.get()).ceil().max(1.0) as u32,
             )
             .into(),
         )
     }
 
     fn ime_enable_request(&mut self) -> Option<ImeEnableRequest> {
-        let request_data = Self::ime_cursor_request_data(self.render_primitives().ime_cursor_area?)
-            .with_hint_and_purpose(ImeHint::NONE, ImePurpose::Normal);
+        let request_data = Self::ime_cursor_request_data(
+            self.render_primitives().ime_cursor_area?,
+            self.unit_context(),
+        )
+        .with_hint_and_purpose(ImeHint::NONE, ImePurpose::Normal);
         ImeEnableRequest::new(
             ImeCapabilities::new()
                 .with_cursor_area()
@@ -2090,7 +2140,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let mut scroll_delta = mouse_scroll_delta(delta);
         if scroll_delta.x.abs() <= f32::EPSILON && self.modifiers.shift_key() {
             scroll_delta.x = scroll_delta.y;
-            scroll_delta.y = 0.0;
+            scroll_delta.y = Dp::ZERO;
         }
         if scroll_delta.x.abs() <= f32::EPSILON && scroll_delta.y.abs() <= f32::EPSILON {
             return false;
@@ -2236,7 +2286,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let mut next_offset = drag.start_scroll_offset;
         let axis_offset = if travel <= 0.0 || drag.max_offset <= 0.0 {
-            0.0
+            Dp::ZERO
         } else {
             (delta / travel) * drag.max_offset
         };
@@ -2455,6 +2505,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     text_cursor_index_at_point(
                         &self.font_manager,
                         &self.theme,
+                        self.unit_context(),
                         frame,
                         padding,
                         &text_style,
@@ -2751,7 +2802,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.invalidate_scene();
                 if let Some(window) = self.window.as_ref() {
                     if let Some(renderer) = self.renderer.as_mut() {
-                        renderer.resize(window.surface_size());
+                        renderer.resize(window.surface_size(), window.scale_factor() as f32);
                     }
                     window.request_redraw();
                 }
@@ -2780,7 +2831,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             WindowEvent::SurfaceResized(size) => {
                 self.invalidate_scene();
                 if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.resize(size);
+                    let scale_factor = self
+                        .window
+                        .as_ref()
+                        .map(|window| window.scale_factor() as f32)
+                        .unwrap_or(1.0);
+                    renderer.resize(size, scale_factor);
                 }
 
                 if let Some(window) = self.window.as_ref() {
@@ -3295,19 +3351,24 @@ impl ApplicationHandler for RuntimeHandler {
                         let theme = self.resolved_theme(window.as_ref());
                         if let Some(renderer) = self.renderer.as_mut() {
                             renderer.set_clear_color(theme.palette.window_background);
-                            renderer.resize(window.surface_size());
+                            renderer.resize(window.surface_size(), window.scale_factor() as f32);
                         }
                         #[cfg(all(target_os = "android", feature = "android"))]
                         self.sync_system_bar_style(&theme);
                     } else if let Some(renderer) = self.renderer.as_mut() {
-                        renderer.resize(window.surface_size());
+                        renderer.resize(window.surface_size(), window.scale_factor() as f32);
                     }
                     window.request_redraw();
                 }
             }
             WindowEvent::SurfaceResized(size) => {
                 if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.resize(size);
+                    let scale_factor = self
+                        .window
+                        .as_ref()
+                        .map(|window| window.scale_factor() as f32)
+                        .unwrap_or(1.0);
+                    renderer.resize(size, scale_factor);
                 }
             }
             WindowEvent::RedrawRequested => self.handle_runtime_redraw(event_loop),
@@ -3386,14 +3447,10 @@ fn mouse_scroll_delta(delta: MouseScrollDelta) -> Point {
     const LINE_SCROLL_STEP: f32 = 40.0;
 
     match delta {
-        MouseScrollDelta::LineDelta(x, y) => Point {
-            x: x * LINE_SCROLL_STEP,
-            y: y * LINE_SCROLL_STEP,
-        },
-        MouseScrollDelta::PixelDelta(position) => Point {
-            x: position.x as f32,
-            y: position.y as f32,
-        },
+        MouseScrollDelta::LineDelta(x, y) => Point::new(x * LINE_SCROLL_STEP, y * LINE_SCROLL_STEP),
+        MouseScrollDelta::PixelDelta(position) => {
+            Point::new(position.x as f32, position.y as f32)
+        }
     }
 }
 
@@ -3425,6 +3482,7 @@ fn move_cursor(state: &mut InputEditState, next: usize, extend_selection: bool) 
 fn text_cursor_index_at_point(
     font_manager: &FontManager,
     theme: &Theme,
+    units: UnitContext,
     frame: Rect,
     padding: crate::ui::layout::Insets,
     text_style: &Text,
@@ -3435,10 +3493,13 @@ fn text_cursor_index_at_point(
         return 0;
     }
 
-    let font_size = text_style
-        .font_size
-        .unwrap_or(theme.typography.font_size.max(1.0));
+    let font_size = units.resolve_sp(
+        text_style
+            .font_size
+            .unwrap_or(theme.typography.font_size.max(sp(1.0))),
+    );
     let line_height = (font_size * 1.25).max(font_size + 4.0);
+    let letter_spacing = units.resolve_sp(text_style.letter_spacing);
     let text_request = TextFontRequest {
         preferred_font: text_style
             .font_family
@@ -3452,12 +3513,12 @@ fn text_cursor_index_at_point(
         text_request,
         font_size,
         line_height,
-        text_style.letter_spacing,
+        letter_spacing,
     );
     let content_height = inner
         .height
         .min(layout.height.max(line_height))
-        .max(line_height);
+        .max(Dp::new(line_height));
     let content_frame = Rect::new(
         inner.x,
         inner.y + ((inner.height - content_height).max(0.0) * 0.5),
@@ -3465,7 +3526,7 @@ fn text_cursor_index_at_point(
         content_height,
     );
     let local_x = (point.x - content_frame.x).max(0.0);
-    layout.index_for_x(local_x)
+    layout.index_for_x(local_x.get())
 }
 
 fn input_cursor_index_at_point(
@@ -3480,6 +3541,7 @@ fn input_cursor_index_at_point(
     text_cursor_index_at_point(
         font_manager,
         theme,
+        UnitContext::default(),
         frame,
         padding,
         text_style,
@@ -3827,6 +3889,7 @@ mod tests {
     use crate::foundation::color::Color;
     use crate::platform::dpi::LogicalSize;
     use crate::text::font::{FontCatalog, TextFontRequest};
+    use crate::ui::unit::{dp, sp};
     use crate::ui::widget::{
         Column, CursorStyle, HitInteraction, Input, InputEditState, Point, Text, WidgetTree,
     };
@@ -3925,7 +3988,7 @@ mod tests {
         };
         let tree = WidgetTree::new(Column::new().child(child));
         let mut handler = test_handler(Some(tree), invalidation);
-        handler.cursor_position = Some(Point { x: 10.0, y: 10.0 });
+        handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
 
         let viewport = handler.viewport_rect();
         assert_eq!(handler.hover_path(viewport).len(), 1);
@@ -3940,7 +4003,7 @@ mod tests {
         let invalidation = InvalidationSignal::new();
         let tree = WidgetTree::new(Text::new("hover").user_select(true));
         let mut handler = test_handler(Some(tree), invalidation);
-        handler.cursor_position = Some(Point { x: 10.0, y: 10.0 });
+        handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
 
         let viewport = handler.viewport_rect();
         let hovered = handler.hover_path(viewport);
@@ -4000,6 +4063,7 @@ mod tests {
             text_cursor_index_at_point(
                 &handler.font_manager,
                 &handler.theme,
+                handler.unit_context(),
                 frame,
                 padding,
                 &text_style,
@@ -4048,7 +4112,7 @@ mod tests {
     #[test]
     fn clicking_input_moves_caret_to_pointer_position() {
         let invalidation = InvalidationSignal::new();
-        let tree = WidgetTree::new(Input::new(Text::new("hello")).width(220.0));
+        let tree = WidgetTree::new(Input::new(Text::new("hello")).width(dp(220.0)));
         let mut handler = test_handler(Some(tree), invalidation);
         let viewport = handler.viewport_rect();
 
@@ -4070,10 +4134,14 @@ mod tests {
                 .expect("input hit region should exist");
             region
         };
-        let font_size = text_style
-            .font_size
-            .unwrap_or(handler.theme.typography.font_size.max(1.0));
+        let units = handler.unit_context();
+        let font_size = units.resolve_sp(
+            text_style
+                .font_size
+                .unwrap_or(handler.theme.typography.font_size.max(sp(1.0))),
+        );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
+        let letter_spacing = units.resolve_sp(text_style.letter_spacing);
         let request = TextFontRequest {
             preferred_font: text_style
                 .font_family
@@ -4081,7 +4149,7 @@ mod tests {
                 .or(handler.theme.typography.font_family.as_deref()),
             weight: text_style.font_weight,
         };
-        let left = frame.x + padding.left;
+        let left = frame.x + padding.left.get();
         let before_target = handler
             .font_manager
             .measure_text_raw(
@@ -4089,7 +4157,7 @@ mod tests {
                 request.clone(),
                 font_size,
                 line_height,
-                text_style.letter_spacing,
+                letter_spacing,
             )
             .0;
         let after_target = handler
@@ -4099,7 +4167,7 @@ mod tests {
                 request,
                 font_size,
                 line_height,
-                text_style.letter_spacing,
+                letter_spacing,
             )
             .0;
 
@@ -4121,7 +4189,7 @@ mod tests {
     #[test]
     fn dragging_input_updates_selection_range() {
         let invalidation = InvalidationSignal::new();
-        let tree = WidgetTree::new(Input::new(Text::new("hello")).width(220.0));
+        let tree = WidgetTree::new(Input::new(Text::new("hello")).width(dp(220.0)));
         let mut handler = test_handler(Some(tree), invalidation);
         let viewport = handler.viewport_rect();
 
@@ -4143,10 +4211,14 @@ mod tests {
                 })
                 .expect("input hit region should exist")
         };
-        let font_size = text_style
-            .font_size
-            .unwrap_or(handler.theme.typography.font_size.max(1.0));
+        let units = handler.unit_context();
+        let font_size = units.resolve_sp(
+            text_style
+                .font_size
+                .unwrap_or(handler.theme.typography.font_size.max(sp(1.0))),
+        );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
+        let letter_spacing = units.resolve_sp(text_style.letter_spacing);
         let request = TextFontRequest {
             preferred_font: text_style
                 .font_family
@@ -4154,7 +4226,7 @@ mod tests {
                 .or(handler.theme.typography.font_family.as_deref()),
             weight: text_style.font_weight,
         };
-        let left = frame.x + padding.left;
+        let left = frame.x + padding.left.get();
         let before_start = handler
             .font_manager
             .measure_text_raw(
@@ -4162,7 +4234,7 @@ mod tests {
                 request.clone(),
                 font_size,
                 line_height,
-                text_style.letter_spacing,
+                letter_spacing,
             )
             .0;
         let after_start = handler
@@ -4172,7 +4244,7 @@ mod tests {
                 request.clone(),
                 font_size,
                 line_height,
-                text_style.letter_spacing,
+                letter_spacing,
             )
             .0;
         let before_end = handler
@@ -4182,7 +4254,7 @@ mod tests {
                 request.clone(),
                 font_size,
                 line_height,
-                text_style.letter_spacing,
+                letter_spacing,
             )
             .0;
         let after_end = handler
@@ -4192,7 +4264,7 @@ mod tests {
                 request,
                 font_size,
                 line_height,
-                text_style.letter_spacing,
+                letter_spacing,
             )
             .0;
 
@@ -4272,11 +4344,11 @@ mod tests {
         let controller = VideoController::from_parts(shared, Arc::new(MockVideoBackend));
         let tree = WidgetTree::new(
             VideoSurface::new(controller)
-                .size(160.0, 90.0)
+                .size(dp(160.0), dp(90.0))
                 .cursor(CursorStyle::Pointer),
         );
         let mut handler = test_handler(Some(tree), invalidation);
-        handler.cursor_position = Some(Point { x: 10.0, y: 10.0 });
+        handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
 
         let viewport = handler.viewport_rect();
         assert_eq!(handler.hover_path(viewport).len(), 1);

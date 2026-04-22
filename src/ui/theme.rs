@@ -1,5 +1,6 @@
 use crate::foundation::color::Color;
 use crate::platform::window::Theme as WindowTheme;
+use crate::ui::unit::{dp, sp, Dp, Sp};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// High-level theme mode selection for the application runtime.
@@ -108,19 +109,19 @@ impl Palette {
 #[derive(Clone, Debug, PartialEq)]
 /// Spacing scale shared by widgets and layout helpers.
 pub struct Spacing {
-    pub xs: f32,
-    pub sm: f32,
-    pub md: f32,
-    pub lg: f32,
+    pub xs: Dp,
+    pub sm: Dp,
+    pub md: Dp,
+    pub lg: Dp,
 }
 
 impl Default for Spacing {
     fn default() -> Self {
         Self {
-            xs: 4.0,
-            sm: 8.0,
-            md: 16.0,
-            lg: 24.0,
+            xs: dp(4.0),
+            sm: dp(8.0),
+            md: dp(16.0),
+            lg: dp(24.0),
         }
     }
 }
@@ -129,14 +130,14 @@ impl Default for Spacing {
 /// Default typography settings shared by built-in text widgets.
 pub struct Typography {
     pub font_family: Option<String>,
-    pub font_size: f32,
+    pub font_size: Sp,
 }
 
 impl Default for Typography {
     fn default() -> Self {
         Self {
             font_family: None,
-            font_size: 16.0,
+            font_size: sp(16.0),
         }
     }
 }

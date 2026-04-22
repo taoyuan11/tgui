@@ -13,6 +13,7 @@ use crate::media::TextureFrame;
 use crate::platform::backend::window::Window;
 use crate::platform::dpi::PhysicalSize;
 use crate::text::font::{FontCatalog, FontWeight};
+use crate::ui::unit::Dp;
 use crate::ui::widget::{Rect, RenderPrimitive, ScenePrimitives, TextPrimitive};
 
 pub enum RenderStatus {
@@ -32,6 +33,7 @@ pub struct Renderer {
     text_bind_group_layout: wgpu::BindGroupLayout,
     text_sampler: wgpu::Sampler,
     size: PhysicalSize<u32>,
+    scale_factor: f32,
     clear_color: TguiColor,
     text_system: TextSystem,
     text_cache: Vec<TextCacheEntry>,
@@ -276,6 +278,7 @@ impl Renderer {
 
         let mut font_system = FontSystem::new();
         let _ = fonts.configure_font_system(&mut font_system);
+        let scale_factor = 1.0_f32.max(window.scale_factor() as f32);
 
         surface.configure(&device, &config);
 
@@ -290,6 +293,7 @@ impl Renderer {
             text_bind_group_layout,
             text_sampler,
             size,
+            scale_factor,
             clear_color,
             text_system: TextSystem {
                 font_system,
@@ -300,13 +304,15 @@ impl Renderer {
         })
     }
 
-    pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
+    pub fn resize(&mut self, new_size: PhysicalSize<u32>, scale_factor: f32) {
         if new_size.width == 0 || new_size.height == 0 {
             self.size = new_size;
+            self.scale_factor = scale_factor.max(1.0 / 64.0);
             return;
         }
 
         self.size = new_size;
+        self.scale_factor = scale_factor.max(1.0 / 64.0);
         self.config.width = new_size.width;
         self.config.height = new_size.height;
         self.surface.configure(&self.device, &self.config);
@@ -316,6 +322,7 @@ impl Renderer {
         if self.config.width == 0 || self.config.height == 0 {
             return Ok(RenderStatus::SkipFrame);
         }
+        let (logical_width, logical_height) = self.logical_viewport_size();
 
         let active_texture_keys: HashSet<_> = scene
             .textures
@@ -360,8 +367,8 @@ impl Renderer {
                             bind_group,
                             vertices: TextVertex::quad(
                                 texture.frame,
-                                self.config.width as f32,
-                                self.config.height as f32,
+                                logical_width,
+                                logical_height,
                             ),
                             clip_rect: texture.clip_rect,
                         })
@@ -401,8 +408,8 @@ impl Renderer {
                             bind_group,
                             vertices: TextVertex::quad(
                                 text.frame,
-                                self.config.width as f32,
-                                self.config.height as f32,
+                                logical_width,
+                                logical_height,
                             ),
                             clip_rect: text.clip_rect,
                         })
@@ -452,8 +459,8 @@ impl Renderer {
                             bind_group,
                             vertices: TextVertex::quad(
                                 text.frame,
-                                self.config.width as f32,
-                                self.config.height as f32,
+                                logical_width,
+                                logical_height,
                             ),
                             clip_rect: text.clip_rect,
                         })
@@ -588,17 +595,18 @@ impl Renderer {
     ) -> (Vec<RectVertex>, Vec<PrimitiveBatch>) {
         let mut vertices = Vec::with_capacity(primitives.len() * 6);
         let mut batches = Vec::with_capacity(primitives.len());
+        let (logical_width, logical_height) = self.logical_viewport_size();
 
         for primitive in primitives {
-            if primitive.rect.width <= 0.0 || primitive.rect.height <= 0.0 {
+            if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
                 continue;
             }
 
             let start = vertices.len() as u32;
             vertices.extend_from_slice(&RectVertex::from_primitive(
                 *primitive,
-                self.config.width as f32,
-                self.config.height as f32,
+                logical_width,
+                logical_height,
             ));
             let end = vertices.len() as u32;
             batches.push(PrimitiveBatch {
@@ -623,27 +631,47 @@ impl Renderer {
     }
 
     fn scissor_rect(&self, clip_rect: Option<Rect>) -> Option<(u32, u32, u32, u32)> {
+        let (logical_width, logical_height) = self.logical_viewport_size();
         let clip_rect = clip_rect.unwrap_or(Rect::new(
             0.0,
             0.0,
-            self.config.width as f32,
-            self.config.height as f32,
+            logical_width,
+            logical_height,
         ));
-        let x = clip_rect.x.max(0.0).floor() as u32;
-        let y = clip_rect.y.max(0.0).floor() as u32;
+        let x = self
+            .logical_to_physical(clip_rect.x.max(0.0).get())
+            .floor() as u32;
+        let y = self
+            .logical_to_physical(clip_rect.y.max(0.0).get())
+            .floor() as u32;
         let right = clip_rect
             .right()
-            .min(self.config.width as f32)
-            .ceil()
-            .max(x as f32) as u32;
+            .min(logical_width);
         let bottom = clip_rect
             .bottom()
-            .min(self.config.height as f32)
+            .min(logical_height);
+        let right = self
+            .logical_to_physical(right.get())
+            .ceil()
+            .max(x as f32) as u32;
+        let bottom = self
+            .logical_to_physical(bottom.get())
             .ceil()
             .max(y as f32) as u32;
         let width = right.saturating_sub(x);
         let height = bottom.saturating_sub(y);
         (width > 0 && height > 0).then_some((x, y, width, height))
+    }
+
+    fn logical_viewport_size(&self) -> (f32, f32) {
+        (
+            self.config.width as f32 / self.scale_factor,
+            self.config.height as f32 / self.scale_factor,
+        )
+    }
+
+    fn logical_to_physical(&self, value: f32) -> f32 {
+        value * self.scale_factor
     }
 
     pub fn set_clear_color(&mut self, clear_color: TguiColor) {
@@ -658,12 +686,22 @@ impl Renderer {
         self.surface.configure(&self.device, &self.config);
     }
 
-    fn text_cache_key(text: &TextPrimitive) -> Option<TextCacheKey> {
-        let width = text.frame.width.ceil().max(1.0) as u32;
-        let height = text.frame.height.ceil().max(1.0) as u32;
+    fn text_cache_key(&self, text: &TextPrimitive) -> Option<TextCacheKey> {
+        let width = self
+            .logical_to_physical(text.frame.width.get())
+            .ceil()
+            .max(1.0) as u32;
+        let height = self
+            .logical_to_physical(text.frame.height.get())
+            .ceil()
+            .max(1.0) as u32;
         if width == 0 || height == 0 || text.content.is_empty() {
             return None;
         }
+
+        let font_size = self.logical_to_physical(text.font_size);
+        let line_height = self.logical_to_physical(text.line_height);
+        let letter_spacing = self.logical_to_physical(text.letter_spacing);
 
         Some(TextCacheKey {
             content: text.content.clone(),
@@ -671,9 +709,9 @@ impl Renderer {
             width,
             height,
             color: text.color.to_rgba8(),
-            font_size_bits: text.font_size.to_bits(),
-            line_height_bits: text.line_height.to_bits(),
-            letter_spacing_bits: text.letter_spacing.to_bits(),
+            font_size_bits: font_size.to_bits(),
+            line_height_bits: line_height.to_bits(),
+            letter_spacing_bits: letter_spacing.to_bits(),
             font_weight: text.font_weight.0,
         })
     }
@@ -682,7 +720,7 @@ impl Renderer {
         &mut self,
         text: &TextPrimitive,
     ) -> Result<Option<wgpu::BindGroup>, TguiError> {
-        let Some(key) = Self::text_cache_key(text) else {
+        let Some(key) = self.text_cache_key(text) else {
             return Ok(None);
         };
 
@@ -709,15 +747,24 @@ impl Renderer {
         &mut self,
         text: &TextPrimitive,
     ) -> Result<Option<(wgpu::Texture, wgpu::BindGroup)>, TguiError> {
-        let width = text.frame.width.ceil().max(1.0) as u32;
-        let height = text.frame.height.ceil().max(1.0) as u32;
+        let width = self
+            .logical_to_physical(text.frame.width.get())
+            .ceil()
+            .max(1.0) as u32;
+        let height = self
+            .logical_to_physical(text.frame.height.get())
+            .ceil()
+            .max(1.0) as u32;
         if width == 0 || height == 0 || text.content.is_empty() {
             return Ok(None);
         }
+        let font_size = self.logical_to_physical(text.font_size);
+        let line_height = self.logical_to_physical(text.line_height);
+        let letter_spacing = self.logical_to_physical(text.letter_spacing);
 
         let mut buffer = Buffer::new(
             &mut self.text_system.font_system,
-            Metrics::new(text.font_size, text.line_height),
+            Metrics::new(font_size, line_height),
         );
         buffer.set_size(
             &mut self.text_system.font_system,
@@ -728,7 +775,7 @@ impl Renderer {
             &mut self.text_system.font_system,
             cosmic_text::Wrap::WordOrGlyph,
         );
-        let attrs = attrs_for_text(text);
+        let attrs = attrs_for_text(text, font_size, letter_spacing);
         buffer.set_text(
             &mut self.text_system.font_system,
             &text.content,
@@ -898,7 +945,7 @@ impl Renderer {
     }
 }
 
-fn attrs_for_text(text: &TextPrimitive) -> Attrs<'_> {
+fn attrs_for_text(text: &TextPrimitive, font_size: f32, letter_spacing: f32) -> Attrs<'_> {
     let family = text
         .font_family
         .as_deref()
@@ -909,7 +956,7 @@ fn attrs_for_text(text: &TextPrimitive) -> Attrs<'_> {
     Attrs::new()
         .family(family)
         .weight(text_weight(text.font_weight))
-        .letter_spacing(text.letter_spacing / text.font_size.max(1.0))
+        .letter_spacing(letter_spacing / font_size.max(1.0))
 }
 
 fn text_weight(weight: FontWeight) -> Weight {
@@ -1004,20 +1051,21 @@ impl RectVertex {
     }
 
     fn from_primitive(primitive: RenderPrimitive, width: f32, height: f32) -> [Self; 6] {
-        let x0 = primitive.rect.x / width * 2.0 - 1.0;
-        let x1 = (primitive.rect.x + primitive.rect.width) / width * 2.0 - 1.0;
-        let y0 = 1.0 - primitive.rect.y / height * 2.0;
-        let y1 = 1.0 - (primitive.rect.y + primitive.rect.height) / height * 2.0;
+        let rect_x = primitive.rect.x.get();
+        let rect_y = primitive.rect.y.get();
+        let rect_width = primitive.rect.width.max(0.0).get();
+        let rect_height = primitive.rect.height.max(0.0).get();
+        let x0 = rect_x / width * 2.0 - 1.0;
+        let x1 = (rect_x + rect_width) / width * 2.0 - 1.0;
+        let y0 = 1.0 - rect_y / height * 2.0;
+        let y1 = 1.0 - (rect_y + rect_height) / height * 2.0;
         let color = [
             primitive.color.r as f32 / 255.0,
             primitive.color.g as f32 / 255.0,
             primitive.color.b as f32 / 255.0,
             primitive.color.a as f32 / 255.0,
         ];
-        let rect_size = [
-            primitive.rect.width.max(0.0),
-            primitive.rect.height.max(0.0),
-        ];
+        let rect_size = [rect_width, rect_height];
         let radius = primitive
             .corner_radius
             .max(0.0)
@@ -1300,10 +1348,14 @@ impl TextVertex {
     }
 
     fn quad(rect: crate::ui::widget::Rect, width: f32, height: f32) -> [Self; 6] {
-        let x0 = rect.x / width * 2.0 - 1.0;
-        let x1 = (rect.x + rect.width) / width * 2.0 - 1.0;
-        let y0 = 1.0 - rect.y / height * 2.0;
-        let y1 = 1.0 - (rect.y + rect.height) / height * 2.0;
+        let rect_x = rect.x.get();
+        let rect_y = rect.y.get();
+        let rect_width = rect.width.get();
+        let rect_height = rect.height.get();
+        let x0 = rect_x / width * 2.0 - 1.0;
+        let x1 = (rect_x + rect_width) / width * 2.0 - 1.0;
+        let y0 = 1.0 - rect_y / height * 2.0;
+        let y1 = 1.0 - (rect_y + rect_height) / height * 2.0;
 
         [
             Self {
