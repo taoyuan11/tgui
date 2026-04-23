@@ -31,7 +31,6 @@ use super::common::{
 };
 use super::text::Text;
 
-
 /// Caret width in logical pixels.
 /// 光标的像素宽度
 const CARET_WIDTH: f32 = 2.0;
@@ -354,18 +353,21 @@ impl<VM> ResolvedElement<VM> {
                         .unwrap_or_else(auto)
                 },
             },
-            margin: to_taffy_rect_auto(self.layout.margin.resolve_widget(
-                animations,
-                self.id,
-                WidgetProperty::Margin,
-                now,
-            ), units),
-            padding: to_taffy_rect(self.layout.padding.resolve_widget(
-                animations,
-                self.id,
-                WidgetProperty::Padding,
-                now,
-            ), units),
+            margin: to_taffy_rect_auto(
+                self.layout
+                    .margin
+                    .resolve_widget(animations, self.id, WidgetProperty::Margin, now),
+                units,
+            ),
+            padding: to_taffy_rect(
+                self.layout.padding.resolve_widget(
+                    animations,
+                    self.id,
+                    WidgetProperty::Padding,
+                    now,
+                ),
+                units,
+            ),
             flex_grow: self
                 .layout
                 .grow
@@ -503,7 +505,9 @@ impl<VM> ResolvedElement<VM> {
         }
         .with_alpha_factor(opacity);
 
-        let background_inset = border_width.min((frame.width * 0.5).get()).min((frame.height * 0.5).get());
+        let background_inset = border_width
+            .min((frame.width * 0.5).get())
+            .min((frame.height * 0.5).get());
         let background_frame = frame.inset(Insets::all(Dp::new(background_inset)));
         let background_radius = (border_radius - background_inset).max(0.0);
         let primitive_clip = Some(visual_context.clip_rect);
@@ -888,12 +892,12 @@ fn apply_container_style(
     units: UnitContext,
     now: std::time::Instant,
 ) {
-    style.padding = to_taffy_rect(layout.padding.resolve_widget(
-        animations,
-        widget_id,
-        WidgetProperty::Padding,
-        now,
-    ), units);
+    style.padding = to_taffy_rect(
+        layout
+            .padding
+            .resolve_widget(animations, widget_id, WidgetProperty::Padding, now),
+        units,
+    );
     let gap = layout
         .gap
         .resolve_widget_to_logical(animations, widget_id, WidgetProperty::Gap, now, units)
@@ -1085,7 +1089,9 @@ fn compute_scrollbar_geometry(
                     track,
                     viewport.width.get(),
                     scroll_offset.x.get(),
-                    (content_bounds.right() - viewport.x).max(viewport.width).get(),
+                    (content_bounds.right() - viewport.x)
+                        .max(viewport.width)
+                        .get(),
                     units.resolve_dp(style.min_thumb_length.max(Dp::new(thickness))),
                     Axis::Horizontal,
                 )
@@ -1097,7 +1103,9 @@ fn compute_scrollbar_geometry(
                     track,
                     viewport.height.get(),
                     scroll_offset.y.get(),
-                    (content_bounds.bottom() - viewport.y).max(viewport.height).get(),
+                    (content_bounds.bottom() - viewport.y)
+                        .max(viewport.height)
+                        .get(),
                     units.resolve_dp(style.min_thumb_length.max(Dp::new(thickness))),
                     Axis::Vertical,
                 )
@@ -1478,8 +1486,8 @@ fn push_media_placeholder(
     }
 
     let label = media_placeholder_label(kind, loading, error);
-    let text = Text::new(label)
-        .font_size((context.theme.typography.font_size - sp(1.0)).max(sp(12.0)));
+    let text =
+        Text::new(label).font_size((context.theme.typography.font_size - sp(1.0)).max(sp(12.0)));
     push_text_primitives(
         &text,
         frame,
@@ -1603,14 +1611,15 @@ fn push_text_primitives(
     if show_caret {
         let caret_width = caret_content
             .map(|caret_text| {
-                font_manager.measure_text_raw(
-                    caret_text,
-                    text_request,
-                    font_size,
-                    line_height,
-                    letter_spacing,
-                )
-                .0
+                font_manager
+                    .measure_text_raw(
+                        caret_text,
+                        text_request,
+                        font_size,
+                        line_height,
+                        letter_spacing,
+                    )
+                    .0
             })
             .unwrap_or(current_layout.width);
         let caret_x = (inner.x + inner.width.min(caret_width) + CARET_END_GAP).max(inner.x);
@@ -2137,7 +2146,14 @@ impl<VM> WidgetTree<VM> {
                     height: AvailableSpace::Definite(viewport.height.get()),
                 },
                 |known_dimensions, _, _, node_context, _| {
-                    measure_node(node_context, known_dimensions, font_manager, theme, media, units)
+                    measure_node(
+                        node_context,
+                        known_dimensions,
+                        font_manager,
+                        theme,
+                        media,
+                        units,
+                    )
                 },
             )
             .expect("widget tree layout should compute");
@@ -2371,8 +2387,8 @@ mod tests {
     use crate::ui::unit::dp;
     use crate::ui::widget::common::Rect;
     use crate::ui::widget::{
-        Element, Image, Input, InputEditState, Point, ScrollbarAxis, ScrollbarHandle, Stack,
-        Text, WidgetTree,
+        Element, Image, Input, InputEditState, Point, ScrollbarAxis, ScrollbarHandle, Stack, Text,
+        WidgetTree,
     };
     #[cfg(feature = "video")]
     use crate::video::backend::{
@@ -3092,9 +3108,11 @@ mod tests {
             false,
         );
 
-        assert!(rendered.primitives.shapes.iter().any(|primitive| {
-            primitive.color == theme.palette.accent.with_alpha_factor(0.35)
-        }));
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|primitive| { primitive.color == theme.palette.accent.with_alpha_factor(0.35) }));
     }
 
     #[test]

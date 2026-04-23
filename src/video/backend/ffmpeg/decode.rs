@@ -283,7 +283,8 @@ impl DecodeSession {
         )
         .map_err(|error| TguiError::Media(format!("failed to create video scaler: {error}")))?;
 
-        let intrinsic_size = IntrinsicSize::from_pixels(video_decoder.width(), video_decoder.height());
+        let intrinsic_size =
+            IntrinsicSize::from_pixels(video_decoder.width(), video_decoder.height());
         let duration = stream_duration(video_stream.duration(), video_time_base);
         let video_frame_duration =
             stream_frame_duration(&video_stream).unwrap_or(Duration::from_millis(33));
@@ -310,8 +311,9 @@ impl DecodeSession {
                     ));
                 }
 
-                let audio_output = AudioOutput::new(volume, muted)
-                    .map_err(|error| TguiError::Media(format!("failed to create audio output: {error}")))?;
+                let audio_output = AudioOutput::new(volume, muted).map_err(|error| {
+                    TguiError::Media(format!("failed to create audio output: {error}"))
+                })?;
                 let audio_clock = audio_output.clock_handle();
                 let resampler = Resampler::get(
                     audio_decoder.format(),
@@ -387,17 +389,18 @@ impl DecodeSession {
     fn prime_first_frame(&mut self) -> Result<Duration, TguiError> {
         loop {
             if self.shared_queue.has_frames(self.generation) {
-                return Ok(
-                    self.shared_queue
-                        .front(self.generation)
-                        .map(|frame| frame.position)
-                        .unwrap_or(self.start_position),
-                );
+                return Ok(self
+                    .shared_queue
+                    .front(self.generation)
+                    .map(|frame| frame.position)
+                    .unwrap_or(self.start_position));
             }
 
             let next_packet = {
                 let mut packets = self.input.packets();
-                packets.next().map(|(stream, packet)| (stream.index(), packet))
+                packets
+                    .next()
+                    .map(|(stream, packet)| (stream.index(), packet))
             };
             let Some((stream_index, packet)) = next_packet else {
                 self.eof_sent = true;
@@ -438,7 +441,9 @@ impl DecodeSession {
 
         let next_packet = {
             let mut packets = self.input.packets();
-            packets.next().map(|(stream, packet)| (stream.index(), packet))
+            packets
+                .next()
+                .map(|(stream, packet)| (stream.index(), packet))
         };
 
         match next_packet {
@@ -672,7 +677,10 @@ impl DecodeSession {
             .pts()
             .or_else(|| packet.dts())
             .and_then(|timestamp| pts_to_duration(Some(timestamp), self.video_time_base))
-            .unwrap_or_else(|| self.queued_video_tail_position().unwrap_or(self.start_position));
+            .unwrap_or_else(|| {
+                self.queued_video_tail_position()
+                    .unwrap_or(self.start_position)
+            });
         let duration = packet_duration(packet.duration(), self.video_time_base)
             .unwrap_or(self.video_frame_duration);
         self.pending_video_packets.push_back(QueuedVideoPacket {
@@ -681,7 +689,10 @@ impl DecodeSession {
         });
     }
 
-    fn fill_ready_video_frames(&mut self, respect_buffer_memory_limit: bool) -> Result<bool, TguiError> {
+    fn fill_ready_video_frames(
+        &mut self,
+        respect_buffer_memory_limit: bool,
+    ) -> Result<bool, TguiError> {
         let mut decoded_any = false;
         let mut decode_budget = self.buffering_profile.ready_video_frame_count;
 
@@ -707,7 +718,10 @@ impl DecodeSession {
                 && self.video_decoder.receive_frame(&mut decoded).is_ok()
             {
                 let position = pts_to_duration(decoded.timestamp(), self.video_time_base)
-                    .unwrap_or_else(|| self.queued_video_tail_position().unwrap_or(self.start_position));
+                    .unwrap_or_else(|| {
+                        self.queued_video_tail_position()
+                            .unwrap_or(self.start_position)
+                    });
 
                 if self.should_drop_video_preroll_frame(position) {
                     continue;
@@ -746,7 +760,10 @@ impl DecodeSession {
                 && (!respect_buffer_memory_limit || !self.buffering_constrained_by_memory_limit())
             {
                 let position = pts_to_duration(decoded.timestamp(), self.video_time_base)
-                    .unwrap_or_else(|| self.queued_video_tail_position().unwrap_or(self.start_position));
+                    .unwrap_or_else(|| {
+                        self.queued_video_tail_position()
+                            .unwrap_or(self.start_position)
+                    });
                 if self.should_drop_video_preroll_frame(position) {
                     continue;
                 }

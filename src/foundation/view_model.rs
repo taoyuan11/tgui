@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::dialog::Dialogs;
+use crate::log::Log;
 
 /// Marker trait for types that can back a `tgui` application.
 ///
@@ -12,12 +13,14 @@ impl<T> ViewModel for T where T: Send + 'static {}
 
 pub struct CommandContext<T> {
     dialogs: Dialogs<T>,
+    log: Log,
 }
 
 impl<T> Clone for CommandContext<T> {
     fn clone(&self) -> Self {
         Self {
             dialogs: self.dialogs.clone(),
+            log: self.log.clone(),
         }
     }
 }
@@ -27,12 +30,16 @@ impl<T: 'static> CommandContext<T> {
         self.dialogs.clone()
     }
 
-    pub(crate) fn new(dialogs: Dialogs<T>) -> Self {
-        Self { dialogs }
+    pub fn log(&self) -> Log {
+        self.log.clone()
+    }
+
+    pub(crate) fn new(dialogs: Dialogs<T>, log: Log) -> Self {
+        Self { dialogs, log }
     }
 
     pub(crate) fn detached() -> Self {
-        Self::new(Dialogs::detached())
+        Self::new(Dialogs::detached(), Log::default())
     }
 }
 
@@ -70,7 +77,7 @@ impl<T: 'static> Command<T> {
         }
     }
 
-    /// Creates a command that can access runtime services such as dialogs.
+    /// Creates a command that can access runtime services such as dialogs and logging.
     pub fn new_with_context(
         handler: impl Fn(&mut T, &CommandContext<T>) + Send + Sync + 'static,
     ) -> Self {

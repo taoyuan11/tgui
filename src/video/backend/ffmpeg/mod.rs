@@ -93,7 +93,7 @@ static VIDEO_DEBUG_ENABLED: OnceLock<bool> = OnceLock::new();
 macro_rules! video_debug {
     ($($arg:tt)*) => {
         if crate::video::backend::ffmpeg::video_debug_enabled() {
-            eprintln!("[tgui-video] {}", format_args!($($arg)*));
+            crate::Log::with_tag("tgui-video").debug(format_args!($($arg)*));
         }
     };
 }
@@ -420,9 +420,11 @@ impl SharedVideoQueue {
 
         let mut state = self.state.lock().expect("video queue lock poisoned");
         let accepted_generation = self.accepted_generation();
-        state
-            .frames
-            .extend(frames.into_iter().filter(|frame| frame.generation == accepted_generation));
+        state.frames.extend(
+            frames
+                .into_iter()
+                .filter(|frame| frame.generation == accepted_generation),
+        );
         drop(state);
         self.condvar.notify_all();
     }
@@ -521,7 +523,8 @@ fn buffering_profile_for_source(source: &VideoSource) -> BufferingProfile {
 }
 
 fn stream_frame_duration(stream: &format::stream::Stream<'_>) -> Option<Duration> {
-    rational_frame_duration(stream.avg_frame_rate()).or_else(|| rational_frame_duration(stream.rate()))
+    rational_frame_duration(stream.avg_frame_rate())
+        .or_else(|| rational_frame_duration(stream.rate()))
 }
 
 fn rational_frame_duration(rate: ffmpeg::Rational) -> Option<Duration> {
@@ -560,7 +563,9 @@ fn open_input(
     }
 }
 
-fn open_video_decoder(stream: &format::stream::Stream<'_>) -> Result<OpenedVideoDecoder, TguiError> {
+fn open_video_decoder(
+    stream: &format::stream::Stream<'_>,
+) -> Result<OpenedVideoDecoder, TguiError> {
     let parameters = stream.parameters();
     let codec_id = parameters.id();
 
@@ -637,9 +642,9 @@ fn receive_audio_frames(
     let mut chunks = Vec::new();
     while decoder.receive_frame(&mut decoded).is_ok() {
         let mut resampled = allocate_resampled_audio_frame(resampler, &decoded);
-        resampler
-            .run(&decoded, &mut resampled)
-            .map_err(|error| TguiError::Media(format!("failed to resample audio frame: {error}")))?;
+        resampler.run(&decoded, &mut resampled).map_err(|error| {
+            TguiError::Media(format!("failed to resample audio frame: {error}"))
+        })?;
         if let Some(samples) = audio_frame_to_f32_if_any(&resampled) {
             chunks.push(samples);
         }
@@ -724,7 +729,11 @@ fn queue_audio_chunks(
     }
 
     let total_compressed_bytes = std::mem::take(pending_compressed_bytes);
-    let total_samples = chunks.iter().map(|samples| samples.len() as u64).sum::<u64>().max(1);
+    let total_samples = chunks
+        .iter()
+        .map(|samples| samples.len() as u64)
+        .sum::<u64>()
+        .max(1);
     let mut remaining_bytes = total_compressed_bytes;
     let mut remaining_samples = total_samples;
 
@@ -904,8 +913,9 @@ mod tests {
 
     #[test]
     fn url_sources_use_deeper_buffer_profile() {
-        let profile =
-            buffering_profile_for_source(&VideoSource::Url("https://example.com/demo.mp4".to_string()));
+        let profile = buffering_profile_for_source(&VideoSource::Url(
+            "https://example.com/demo.mp4".to_string(),
+        ));
         assert_eq!(profile, NETWORK_BUFFERING_PROFILE);
         assert_eq!(profile.video_start_buffer_target, Duration::from_secs(5));
     }
@@ -914,7 +924,10 @@ mod tests {
     fn local_sources_use_shallower_video_startup_targets() {
         let profile = buffering_profile_for_source(&VideoSource::File("demo.mp4".into()));
         assert_eq!(profile, LOCAL_BUFFERING_PROFILE);
-        assert_eq!(profile.video_start_buffer_target, Duration::from_millis(1500));
+        assert_eq!(
+            profile.video_start_buffer_target,
+            Duration::from_millis(1500)
+        );
         assert_eq!(profile.ready_video_frame_count, 4);
     }
 

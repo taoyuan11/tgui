@@ -158,10 +158,9 @@ impl Text {
     }
 
     fn resolved_cursor_style(&self) -> Option<Value<CursorStyle>> {
-        self.cursor_style.clone().or_else(|| {
-            self.user_select
-                .then_some(Value::Static(CursorStyle::Text))
-        })
+        self.cursor_style
+            .clone()
+            .or_else(|| self.user_select.then_some(Value::Static(CursorStyle::Text)))
     }
 
     fn into_element_with_interactions<VM>(

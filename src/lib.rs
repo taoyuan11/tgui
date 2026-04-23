@@ -62,6 +62,7 @@ mod animation;
 mod application;
 mod dialog;
 mod foundation;
+mod log;
 mod media;
 pub mod platform;
 mod rendering;
@@ -91,6 +92,7 @@ macro_rules! el {
     };
 }
 
+pub use crate::log::{Log, LogLevel};
 pub use animation::{
     AnimatedValue, AnimationControllerBuilder, AnimationControllerHandle, AnimationCurve,
     AnimationSpec, AnimationStatus, Easing, FillMode, Keyframe, Keyframes, Playback,

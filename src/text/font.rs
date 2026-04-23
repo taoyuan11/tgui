@@ -231,8 +231,12 @@ impl FontManager {
             return *cached;
         }
 
-        let layout = self.measure_text_layout(text, request, font_size, line_height, letter_spacing);
-        let measured = (layout.width.max(0.0).ceil(), layout.height.max(line_height).ceil());
+        let layout =
+            self.measure_text_layout(text, request, font_size, line_height, letter_spacing);
+        let measured = (
+            layout.width.max(0.0).ceil(),
+            layout.height.max(line_height).ceil(),
+        );
         let mut cache = self.measure_cache.borrow_mut();
         if cache.len() > 4096 {
             cache.clear();

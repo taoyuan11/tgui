@@ -74,6 +74,9 @@ This project is under active development.
 - Built-in desktop message dialogs:
   - synchronous and asynchronous alert/confirm style dialogs
   - owner-bound to the current runtime window automatically
+- Built-in cross-platform logging:
+  - `tgui::Log` for direct logging with per-platform output adaptation
+  - `CommandContext::log()` for command callbacks that need runtime-scoped logging
 - Advanced animation APIs:
   - declarative `Binding::animated(...)` with `Transition` or `AnimationSpec<T>`
   - command-style `AnimatedValue<T>` + `ViewModelContext::timeline()`
@@ -330,7 +333,7 @@ fn main() -> Result<(), tgui::TguiError> {
 ### Built-in File Dialogs
 
 Use `Command::new_with_context(...)` when a handler needs runtime services such
-as desktop dialogs:
+as desktop dialogs and logging:
 
 ```rust
 use tgui::{Application, Button, Column, Command, FileDialogOptions, Text, ViewModelContext};
@@ -351,6 +354,7 @@ impl AppVm {
             .child(
                 Button::new(Text::new("Open file"))
                     .on_click(Command::new_with_context(|vm, ctx| {
+                        ctx.log().info("open file clicked");
                         if let Ok(Some(path)) = ctx.dialogs().open_file(
                             FileDialogOptions::new().add_filter("Text", &["txt", "md"]),
                         ) {
@@ -359,6 +363,42 @@ impl AppVm {
                     })),
             )
             .child(Text::new(self.selected.binding()))
+            .into()
+    }
+}
+
+fn main() -> Result<(), tgui::TguiError> {
+    Application::new()
+        .with_view_model(AppVm::new)
+        .root_view(AppVm::view)
+        .run()
+}
+```
+
+### Built-in Logging
+
+Use `Log` directly when you want a simple cross-platform logger, or access the
+same utility through `CommandContext::log()` inside command callbacks:
+
+```rust
+use tgui::{Application, Button, Column, Command, Log, Text, ViewModelContext};
+
+struct AppVm;
+
+impl AppVm {
+    fn new(_: &ViewModelContext) -> Self {
+        Log::with_tag("demo").info("application created");
+        Self
+    }
+
+    fn view(&self) -> tgui::Element<Self> {
+        Column::new()
+            .child(
+                Button::new(Text::new("Log"))
+                    .on_click(Command::new_with_context(|_, ctx| {
+                        ctx.log().scoped("demo").warn("button clicked");
+                    })),
+            )
             .into()
     }
 }
@@ -443,7 +483,7 @@ Use each primitive for a specific job:
 - `Binding::animated(...)`: declarative transitions for values that should interpolate automatically.
 - `AnimatedValue<T>`: imperative animation targets driven by a controller or timeline.
 - `Command` / `ValueCommand`: event handlers for clicks, focus changes, pointer movement, and input updates.
-- `CommandContext`: runtime services passed into `Command::new_with_context(...)` and `ValueCommand::new_with_context(...)`.
+- `CommandContext`: runtime services passed into `Command::new_with_context(...)` and `ValueCommand::new_with_context(...)`, including dialogs and logging.
 
 The framework does not require a separate message loop or reducer layer. State changes on `Observable<T>` automatically invalidate the UI and trigger recomposition of the affected bindings during the next frame.
 

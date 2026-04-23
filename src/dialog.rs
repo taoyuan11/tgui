@@ -360,6 +360,7 @@ impl<VM: 'static> Dialogs<VM> {
 
         #[cfg(any(target_os = "android", all(target_env = "ohos", feature = "ohos")))]
         {
+            let _ = options;
             return runtime.dispatcher.dispatch(PendingDialogCompletion {
                 window_key: runtime.window_key,
                 window_instance_id: runtime.window_instance_id,
@@ -457,6 +458,7 @@ impl<VM: 'static> Dialogs<VM> {
 
         #[cfg(any(target_os = "android", all(target_env = "ohos", feature = "ohos")))]
         {
+            let _ = (request, options);
             return runtime.dispatcher.dispatch(PendingDialogCompletion {
                 window_key: runtime.window_key,
                 window_instance_id: runtime.window_instance_id,
@@ -504,6 +506,7 @@ impl<VM: 'static> Dialogs<VM> {
 
         #[cfg(any(target_os = "android", all(target_env = "ohos", feature = "ohos")))]
         {
+            let _ = (request, options);
             return runtime.dispatcher.dispatch(PendingDialogCompletion {
                 window_key: runtime.window_key,
                 window_instance_id: runtime.window_instance_id,
@@ -562,11 +565,11 @@ struct DialogParentHandles {
     window: RawWindowHandle,
 }
 
-#[cfg(target_env = "ohos")]
+#[cfg(any(target_os = "android", target_env = "ohos"))]
 #[derive(Clone, Debug)]
 struct DialogParentHandles;
 
-#[cfg(target_env = "ohos")]
+#[cfg(any(target_os = "android", target_env = "ohos"))]
 impl DialogParentHandles {
     fn from_window(_window: &dyn Window) -> Option<Self> {
         None

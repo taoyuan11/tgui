@@ -141,7 +141,8 @@ impl PresentWorker {
                 self.software_play_started_at = None;
                 self.playback_ended = false;
                 self.playback_clock.set_position(Duration::ZERO);
-                self.shared_queue.replace_generation(self.current_generation);
+                self.shared_queue
+                    .replace_generation(self.current_generation);
                 self.set_decode_playing(false);
                 clear_latest_frame(&self.latest_frame);
                 self.shared.reset_for_load();
@@ -185,7 +186,8 @@ impl PresentWorker {
                 self.software_play_started_at = None;
                 self.playback_ended = false;
                 self.playback_clock.set_position(position);
-                self.shared_queue.replace_generation(self.current_generation);
+                self.shared_queue
+                    .replace_generation(self.current_generation);
                 self.set_decode_playing(false);
                 self.shared.playback_state.set(PlaybackState::Loading);
                 self.shared.error.set(None);
@@ -321,11 +323,15 @@ impl PresentWorker {
 
     fn playback_position(&self) -> Duration {
         if let Some(audio_clock) = self.current_audio_clock.as_ref() {
-            return self.current_start_position.saturating_add(audio_clock.position());
+            return self
+                .current_start_position
+                .saturating_add(audio_clock.position());
         }
 
         match self.software_play_started_at {
-            Some(started_at) => self.software_paused_position.saturating_add(started_at.elapsed()),
+            Some(started_at) => self
+                .software_paused_position
+                .saturating_add(started_at.elapsed()),
             None => self.software_paused_position,
         }
     }
@@ -375,13 +381,12 @@ impl PresentWorker {
     }
 
     fn present_next_frame(&mut self) -> Option<Duration> {
-        let frame = self.shared_queue.pop_front_matching(self.current_generation)?;
+        let frame = self
+            .shared_queue
+            .pop_front_matching(self.current_generation)?;
         let position = frame.position;
         let texture = frame.texture;
-        *self
-            .latest_frame
-            .lock()
-            .expect("video frame lock poisoned") = Some(texture.clone());
+        *self.latest_frame.lock().expect("video frame lock poisoned") = Some(texture.clone());
         self.shared.surface.set(VideoSurfaceSnapshot {
             intrinsic_size: self.current_intrinsic_size,
             texture: Some(texture),
@@ -414,7 +419,9 @@ impl PresentWorker {
             if !audio_clock.has_started_clock() {
                 return false;
             }
-            let playback = self.current_start_position.saturating_add(audio_clock.position());
+            let playback = self
+                .current_start_position
+                .saturating_add(audio_clock.position());
             return playback.saturating_add(VIDEO_PRESENT_TOLERANCE) >= position;
         }
 
@@ -501,9 +508,7 @@ impl PresentWorker {
     }
 
     fn video_buffered_duration(&self) -> Duration {
-        let baseline = self
-            .last_presented_position
-            .max(self.playback_position());
+        let baseline = self.last_presented_position.max(self.playback_position());
         self.shared_queue
             .tail_end_position(self.current_generation)
             .map(|end| end.saturating_sub(baseline))
@@ -549,9 +554,13 @@ impl PresentWorker {
     }
 
     fn should_buffer(&self) -> bool {
-        let audio_starving = self.current_audio_clock.as_ref().map(|clock| {
-            clock.buffered_duration() < self.current_buffering_profile.audio_starving_threshold
-        }).unwrap_or(false);
+        let audio_starving = self
+            .current_audio_clock
+            .as_ref()
+            .map(|clock| {
+                clock.buffered_duration() < self.current_buffering_profile.audio_starving_threshold
+            })
+            .unwrap_or(false);
         let video_starving = should_buffer_video(
             self.video_buffered_duration(),
             VIDEO_REBUFFER_ENTER_THRESHOLD,

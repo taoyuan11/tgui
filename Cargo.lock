@@ -1206,6 +1206,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
+name = "hilog-sys"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96b1d492766a538e49020f97af3e91e0acb718b3b008ed4ab6d39374f42b3e83"
+
+[[package]]
 name = "http"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3265,6 +3271,7 @@ dependencies = [
  "crossbeam-channel",
  "dpi",
  "ffmpeg-next",
+ "hilog-sys",
  "image",
  "jni 0.22.4",
  "log",
@@ -3289,9 +3296,9 @@ dependencies = [
 
 [[package]]
 name = "tgui-winit-ohos"
-version = "0.31.0-beta.2"
+version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d7c57354d03361daa60f1447657025fe0a81b263ea1a14ec995fc41d2585268"
+checksum = "5af92abcbd0be886ac0ccadcfefa3134dd2fc0d1524535b9d5e176d55426a7e7"
 dependencies = [
  "bitflags 2.11.0",
  "dpi",

@@ -1,5 +1,5 @@
-use std::fmt;
 use std::cmp::Ordering;
+use std::fmt;
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
 #[derive(Clone, Copy, Default, PartialEq, PartialOrd)]
@@ -362,5 +362,22 @@ impl UnitContext {
 
     pub(crate) fn logical_to_physical(self, value: f32) -> f32 {
         value * self.scale_factor
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{dp, sp, UnitContext};
+
+    #[test]
+    fn resolve_sp_applies_font_scale() {
+        let units = UnitContext::new(2.0, 1.5);
+        assert_eq!(units.resolve_sp(sp(16.0)), 24.0);
+    }
+
+    #[test]
+    fn resolve_dp_ignores_font_scale() {
+        let units = UnitContext::new(2.0, 1.5);
+        assert_eq!(units.resolve_dp(dp(16.0)), 16.0);
     }
 }

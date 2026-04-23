@@ -73,5 +73,7 @@ jni = "0.22"
 winit-android = { version = "0.31.0-beta.2", features = ["native-activity"] }
 
 [target.'cfg(target_env = "ohos")'.dependencies]
+hilog-sys = "0.1.7"
 raw-window-handle = "0.6"
-tgui-winit-ohos = "0.31.0-beta.2"
+tgui-winit-ohos = "0.4.11"
+#tgui-winit-ohos = { path = "../winit-ohos" }

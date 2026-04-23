@@ -11,6 +11,7 @@ use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
+use crate::log::{tgui_log, Log, LogLevel};
 use crate::media::MediaManager;
 #[cfg(all(target_os = "android", feature = "android"))]
 use crate::platform::android::activity::ndk::configuration::UiModeNight;
@@ -27,7 +28,7 @@ use crate::platform::event::{
 };
 use crate::platform::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 #[cfg(all(target_env = "ohos", feature = "ohos"))]
-use crate::platform::ohos::OhosApp;
+use crate::platform::ohos::{OhosApp, WindowExtOhos};
 use crate::platform::window::{
     ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeRequestData,
     Theme as WindowTheme, WindowAttributes, WindowId,
@@ -407,7 +408,7 @@ impl RuntimeHandler {
     }
 
     fn fail(&mut self, event_loop: &dyn ActiveEventLoop, error: TguiError) {
-        eprintln!("tgui runtime failed: {error}");
+        Log::with_tag("tgui-runtime").error(format!("runtime failed: {error}"));
         self.error = Some(error);
         event_loop.exit();
     }
@@ -434,7 +435,8 @@ impl RuntimeHandler {
         }
 
         if let Err(error) = apply_android_system_bar_style(app, style) {
-            eprintln!("failed to sync Android system bar style: {error}");
+            Log::with_tag("tgui-runtime")
+                .warn(format!("failed to sync Android system bar style: {error}"));
             return;
         }
 
@@ -590,6 +592,7 @@ pub struct BoundRuntimeHandler<VM> {
 
 struct CachedScene<VM> {
     viewport: Rect,
+    units: UnitContext,
     focused_input: Option<WidgetId>,
     selected_text: Option<WidgetId>,
     caret_visible: bool,
@@ -801,12 +804,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn command_context(&self) -> CommandContext<VM> {
-        CommandContext::new(Dialogs::from_runtime(
-            self.window_key.clone(),
-            self.window_instance_id,
-            self.window.as_ref(),
-            self.dialog_dispatcher.clone(),
-        ))
+        CommandContext::new(
+            Dialogs::from_runtime(
+                self.window_key.clone(),
+                self.window_instance_id,
+                self.window.as_ref(),
+                self.dialog_dispatcher.clone(),
+            ),
+            Log::default(),
+        )
     }
 
     fn set_dialog_proxy(&self, event_loop: &dyn ActiveEventLoop) {
@@ -895,7 +901,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn fail(&mut self, event_loop: &dyn ActiveEventLoop, error: TguiError) {
-        eprintln!("tgui bound runtime failed: {error}");
+        Log::with_tag("tgui-runtime").error(format!("bound runtime failed: {error}"));
         self.error = Some(error);
         event_loop.exit();
     }
@@ -911,7 +917,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         if let Err(error) = apply_android_system_bar_style(app, style) {
-            eprintln!("failed to sync Android system bar style: {error}");
+            Log::with_tag("tgui-runtime")
+                .warn(format!("failed to sync Android system bar style: {error}"));
             return;
         }
 
@@ -1015,10 +1022,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         &self,
         cached: &CachedScene<VM>,
         viewport: Rect,
+        units: UnitContext,
         caret_visible: bool,
         active_scrollbar: Option<ScrollbarHandle>,
     ) -> bool {
         cached.viewport == viewport
+            && cached.units == units
             && cached.focused_input == self.focused_input
             && cached.selected_text == self.selected_text
             && cached.caret_visible == caret_visible
@@ -1046,7 +1055,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .cached_scene
             .as_ref()
             .map(|cached| {
-                self.scene_cache_matches(cached, viewport, caret_visible, active_scrollbar)
+                self.scene_cache_matches(cached, viewport, units, caret_visible, active_scrollbar)
             })
             .unwrap_or(false);
 
@@ -1073,6 +1082,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             };
             self.cached_scene = Some(CachedScene {
                 viewport,
+                units,
                 focused_input: self.focused_input,
                 selected_text: self.selected_text,
                 caret_visible,
@@ -1237,19 +1247,54 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn platform_font_scale(&self) -> f32 {
+        #[cfg(all(target_env = "ohos", feature = "ohos"))]
+        {
+            if let Some(scale) = self
+                .window
+                .as_ref()
+                .map(|window| window.font_scale() as f32)
+                .filter(|scale| scale.is_finite() && *scale > 0.0)
+            {
+                return scale;
+            }
+        }
         #[cfg(all(target_os = "android", feature = "android"))]
         {
             if let Some(scale) = android_font_scale(self.android_app.as_ref()) {
                 return scale;
             }
         }
+        1.0
+    }
+
+    fn log_runtime_scales(&self, reason: &str) {
+        let scale_factor = self
+            .window
+            .as_ref()
+            .map(|window| window.scale_factor() as f32)
+            .unwrap_or(1.0);
+        let font_scale = self.platform_font_scale();
         #[cfg(all(target_env = "ohos", feature = "ohos"))]
         {
-            if let Some(scale) = ohos_font_scale() {
-                return scale;
-            }
+            let density_scale = self
+                .window
+                .as_ref()
+                .map(|window| window.density_scale() as f32)
+                .unwrap_or(scale_factor);
+            tgui_log(
+                LogLevel::Debug,
+                format!(
+                    "tgui scales [{reason}]: scale_factor={scale_factor:.4}, density_scale={density_scale:.4}, font_scale={font_scale:.4}"
+                ),
+            );
         }
-        1.0
+        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
+        tgui_log(
+            LogLevel::Debug,
+            format!(
+                "tgui scales [{reason}]: scale_factor={scale_factor:.4}, font_scale={font_scale:.4}"
+            ),
+        );
     }
 
     fn clear_pointer_position(&mut self) {
@@ -1624,6 +1669,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let cursor = input_cursor_index_at_point(
             &self.font_manager,
             &self.theme,
+            self.unit_context(),
             drag.frame,
             drag.padding,
             &drag.text_style,
@@ -1714,8 +1760,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             )
             .into(),
             PhysicalSize::new(
-                units.logical_to_physical(caret_rect.width.get()).ceil().max(1.0) as u32,
-                units.logical_to_physical(caret_rect.height.get()).ceil().max(1.0) as u32,
+                units
+                    .logical_to_physical(caret_rect.width.get())
+                    .ceil()
+                    .max(1.0) as u32,
+                units
+                    .logical_to_physical(caret_rect.height.get())
+                    .ceil()
+                    .max(1.0) as u32,
             )
             .into(),
         )
@@ -2474,6 +2526,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     input_cursor_index_at_point(
                         &self.font_manager,
                         &self.theme,
+                        self.unit_context(),
                         frame,
                         padding,
                         &text_style,
@@ -2798,6 +2851,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             WindowEvent::ScaleFactorChanged { .. } => {
+                self.log_runtime_scales("bound WindowEvent::ScaleFactorChanged");
                 self.apply_window_theme(None);
                 self.invalidate_scene();
                 if let Some(window) = self.window.as_ref() {
@@ -2829,6 +2883,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             WindowEvent::SurfaceResized(size) => {
+                self.log_runtime_scales("bound WindowEvent::SurfaceResized");
                 self.invalidate_scene();
                 if let Some(renderer) = self.renderer.as_mut() {
                     let scale_factor = self
@@ -2941,7 +2996,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
     }
 
     fn fail(&mut self, event_loop: &dyn ActiveEventLoop, error: TguiError) {
-        eprintln!("tgui multi-window runtime failed: {error}");
+        Log::with_tag("tgui-runtime").error(format!("multi-window runtime failed: {error}"));
         self.error = Some(error);
         event_loop.exit();
     }
@@ -3448,9 +3503,7 @@ fn mouse_scroll_delta(delta: MouseScrollDelta) -> Point {
 
     match delta {
         MouseScrollDelta::LineDelta(x, y) => Point::new(x * LINE_SCROLL_STEP, y * LINE_SCROLL_STEP),
-        MouseScrollDelta::PixelDelta(position) => {
-            Point::new(position.x as f32, position.y as f32)
-        }
+        MouseScrollDelta::PixelDelta(position) => Point::new(position.x as f32, position.y as f32),
     }
 }
 
@@ -3532,6 +3585,7 @@ fn text_cursor_index_at_point(
 fn input_cursor_index_at_point(
     font_manager: &FontManager,
     theme: &Theme,
+    units: UnitContext,
     frame: Rect,
     padding: crate::ui::layout::Insets,
     text_style: &Text,
@@ -3541,7 +3595,7 @@ fn input_cursor_index_at_point(
     text_cursor_index_at_point(
         font_manager,
         theme,
-        UnitContext::default(),
+        units,
         frame,
         padding,
         text_style,
@@ -3711,12 +3765,47 @@ fn resolve_android_window_theme_from_java(app: &AndroidApp) -> Option<WindowThem
 }
 
 #[cfg(all(target_os = "android", feature = "android"))]
+fn android_font_scale(android_app: Option<&AndroidApp>) -> Option<f32> {
+    let app = android_app?;
+    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) };
+    let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
+
+    vm.attach_current_thread(|env| -> jni::errors::Result<Option<f32>> {
+        let activity = unsafe { env.as_cast_raw::<JObject>(&activity_raw)? };
+        let resources = env
+            .call_method(
+                &activity,
+                jni_str!("getResources"),
+                jni_sig!("()Landroid/content/res/Resources;"),
+                &[],
+            )?
+            .l()?;
+        let configuration = env
+            .call_method(
+                &resources,
+                jni_str!("getConfiguration"),
+                jni_sig!("()Landroid/content/res/Configuration;"),
+                &[],
+            )?
+            .l()?;
+        let scale = env
+            .get_field(&configuration, jni_str!("fontScale"), jni_sig!("F"))?
+            .f()?;
+
+        Ok((scale.is_finite() && scale > 0.0).then_some(scale))
+    })
+    .ok()
+    .flatten()
+}
+
+#[cfg(all(target_os = "android", feature = "android"))]
 fn apply_android_system_bar_style(app: &AndroidApp, style: SystemBarStyle) -> Result<(), String> {
     let scheduler_app = app.clone();
     let callback_app = scheduler_app.clone();
     scheduler_app.run_on_java_main_thread(Box::new(move || {
         if let Err(error) = apply_android_system_bar_style_on_main_thread(&callback_app, style) {
-            eprintln!("failed to sync Android system bars: {error}");
+            Log::with_tag("tgui-runtime")
+                .warn(format!("failed to sync Android system bars: {error}"));
         }
     }));
 
@@ -3889,7 +3978,7 @@ mod tests {
     use crate::foundation::color::Color;
     use crate::platform::dpi::LogicalSize;
     use crate::text::font::{FontCatalog, TextFontRequest};
-    use crate::ui::unit::{dp, sp};
+    use crate::ui::unit::{dp, sp, UnitContext};
     use crate::ui::widget::{
         Column, CursorStyle, HitInteraction, Input, InputEditState, Point, Text, WidgetTree,
     };
@@ -3900,8 +3989,9 @@ mod tests {
     use std::time::Instant;
 
     use super::{
-        next_grapheme_boundary, normalize_single_line_text, previous_grapheme_boundary,
-        text_cursor_index_at_point, BoundRuntimeHandler, WindowBindings,
+        input_cursor_index_at_point, next_grapheme_boundary, normalize_single_line_text,
+        previous_grapheme_boundary, text_cursor_index_at_point, BoundRuntimeHandler, CachedScene,
+        WindowBindings,
     };
 
     #[cfg(feature = "video")]
@@ -3996,6 +4086,33 @@ mod tests {
 
         assert_eq!(handler.hover_path(viewport).len(), 1);
         assert_eq!(resolve_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn scene_cache_invalidates_when_units_change() {
+        let invalidation = InvalidationSignal::new();
+        let handler = test_handler(None, invalidation);
+        let viewport = handler.viewport_rect();
+        let cached = CachedScene::<TestVm> {
+            viewport,
+            units: UnitContext::new(1.0, 1.0),
+            focused_input: None,
+            selected_text: None,
+            caret_visible: false,
+            animation_epoch: 0,
+            scroll_epoch: 0,
+            hovered_scrollbar: None,
+            active_scrollbar: None,
+            computed: Default::default(),
+        };
+
+        assert!(!handler.scene_cache_matches(
+            &cached,
+            viewport,
+            UnitContext::new(1.0, 1.25),
+            false,
+            None,
+        ));
     }
 
     #[test]
@@ -4103,10 +4220,7 @@ mod tests {
             },
         );
 
-        assert_eq!(
-            handler.selected_text_for_copy().as_deref(),
-            Some("world")
-        );
+        assert_eq!(handler.selected_text_for_copy().as_deref(), Some("world"));
     }
 
     #[test]
@@ -4143,10 +4257,11 @@ mod tests {
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(text_style.letter_spacing);
         let request = TextFontRequest {
-            preferred_font: text_style
+            preferred_font: text_style.font_family.as_deref().or(handler
+                .theme
+                .typography
                 .font_family
-                .as_deref()
-                .or(handler.theme.typography.font_family.as_deref()),
+                .as_deref()),
             weight: text_style.font_weight,
         };
         let left = frame.x + padding.left.get();
@@ -4187,6 +4302,86 @@ mod tests {
     }
 
     #[test]
+    fn input_cursor_hit_testing_respects_font_scale() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(Input::new(Text::new("hello")).width(dp(220.0)));
+        let mut handler = test_handler(Some(tree), invalidation);
+
+        let (frame, padding, text_style, content) = {
+            let computed = handler.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::FocusInput {
+                        frame,
+                        padding,
+                        text_style,
+                        text,
+                        ..
+                    } => Some((*frame, *padding, text_style.clone(), text.clone())),
+                    _ => None,
+                })
+                .expect("input hit region should exist")
+        };
+        let units = UnitContext::new(1.0, 1.5);
+        let font_size = units.resolve_sp(
+            text_style
+                .font_size
+                .unwrap_or(handler.theme.typography.font_size.max(sp(1.0))),
+        );
+        let line_height = (font_size * 1.25).max(font_size + 4.0);
+        let letter_spacing = units.resolve_sp(text_style.letter_spacing);
+        let request = TextFontRequest {
+            preferred_font: text_style.font_family.as_deref().or(handler
+                .theme
+                .typography
+                .font_family
+                .as_deref()),
+            weight: text_style.font_weight,
+        };
+        let left = frame.x + padding.left.get();
+        let before_target = handler
+            .font_manager
+            .measure_text_raw(
+                &content[..2],
+                request.clone(),
+                font_size,
+                line_height,
+                letter_spacing,
+            )
+            .0;
+        let after_target = handler
+            .font_manager
+            .measure_text_raw(
+                &content[..3],
+                request,
+                font_size,
+                line_height,
+                letter_spacing,
+            )
+            .0;
+        let point = Point {
+            x: left + before_target + ((after_target - before_target) * 0.25),
+            y: frame.y + (frame.height * 0.5),
+        };
+
+        assert_eq!(
+            input_cursor_index_at_point(
+                &handler.font_manager,
+                &handler.theme,
+                units,
+                frame,
+                padding,
+                &text_style,
+                &content,
+                point,
+            ),
+            2
+        );
+    }
+
+    #[test]
     fn dragging_input_updates_selection_range() {
         let invalidation = InvalidationSignal::new();
         let tree = WidgetTree::new(Input::new(Text::new("hello")).width(dp(220.0)));
@@ -4220,10 +4415,11 @@ mod tests {
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(text_style.letter_spacing);
         let request = TextFontRequest {
-            preferred_font: text_style
+            preferred_font: text_style.font_family.as_deref().or(handler
+                .theme
+                .typography
                 .font_family
-                .as_deref()
-                .or(handler.theme.typography.font_family.as_deref()),
+                .as_deref()),
             weight: text_style.font_weight,
         };
         let left = frame.x + padding.left.get();

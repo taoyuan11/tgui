@@ -1,4 +1,4 @@
-use tgui::{Align, Application, Color, Column, Insets, Justify, Stack, Text, TguiError, Theme, dp, sp};
+use tgui::{Align, Application, Color, Column, Insets, Justify, Stack, Text, TguiError, Theme, dp, sp, Command, LogLevel};
 
 fn main() -> Result<(), TguiError> {
     let mut theme = Theme::dark();
@@ -26,6 +26,11 @@ fn main() -> Result<(), TguiError> {
                         .background(Color::hexa(0x16233AFF))
                         .border(dp(1.0), Color::hexa(0x33507DFF))
                         .border_radius(dp(20.0))
+                        .on_click(Command::new_with_context(|_, context| {
+                            context
+                                .log()
+                                .log(LogLevel::Debug, "11111111111111111111111111111111");
+                        }))
                         .child(
                             Text::new("Hello, tgui")
                                 .font_size(sp(28.0))

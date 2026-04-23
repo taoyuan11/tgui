@@ -170,7 +170,8 @@ fn build_output_stream(
     config: &SupportedStreamConfig,
     shared: Arc<SharedAudioOutput>,
 ) -> Result<Stream, TguiError> {
-    let error_callback = |error| eprintln!("tgui video audio stream error: {error}");
+    let error_callback =
+        |error| crate::Log::with_tag("tgui-video").error(format!("audio stream error: {error}"));
     let stream_config = config.config();
 
     match config.sample_format() {
@@ -281,9 +282,8 @@ fn consume_audio_compressed_bytes(shared: &Arc<SharedAudioOutput>, consumed_samp
             continue;
         }
 
-        let bytes_to_consume =
-            ((front.compressed_bytes as u128 * remaining_samples as u128) / front.sample_count as u128)
-                as u64;
+        let bytes_to_consume = ((front.compressed_bytes as u128 * remaining_samples as u128)
+            / front.sample_count as u128) as u64;
         front.sample_count -= remaining_samples;
         front.compressed_bytes = front.compressed_bytes.saturating_sub(bytes_to_consume);
         remaining_samples = 0;

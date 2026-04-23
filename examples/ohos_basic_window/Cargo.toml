@@ -7,7 +7,10 @@ publish = false
 [dependencies]
 tgui = { path = "../..", features = ["ohos"] }
 winit-core = "0.31.0-beta.2"
-tgui-winit-ohos = "0.31.0-beta.2"
+tgui-winit-ohos = "0.4.11"
+
+#tgui-winit-ohos = { path = "../../../winit-ohos" }
+
 
 [lib]
 crate-type = ["staticlib", "rlib"]

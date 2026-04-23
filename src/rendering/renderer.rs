@@ -406,11 +406,7 @@ impl Renderer {
                     .map(|bind_group| {
                         bind_group.map(|bind_group| TextSprite {
                             bind_group,
-                            vertices: TextVertex::quad(
-                                text.frame,
-                                logical_width,
-                                logical_height,
-                            ),
+                            vertices: TextVertex::quad(text.frame, logical_width, logical_height),
                             clip_rect: text.clip_rect,
                         })
                     })
@@ -457,11 +453,7 @@ impl Renderer {
                     .map(|bind_group| {
                         bind_group.map(|bind_group| TextSprite {
                             bind_group,
-                            vertices: TextVertex::quad(
-                                text.frame,
-                                logical_width,
-                                logical_height,
-                            ),
+                            vertices: TextVertex::quad(text.frame, logical_width, logical_height),
                             clip_rect: text.clip_rect,
                         })
                     })
@@ -632,32 +624,13 @@ impl Renderer {
 
     fn scissor_rect(&self, clip_rect: Option<Rect>) -> Option<(u32, u32, u32, u32)> {
         let (logical_width, logical_height) = self.logical_viewport_size();
-        let clip_rect = clip_rect.unwrap_or(Rect::new(
-            0.0,
-            0.0,
-            logical_width,
-            logical_height,
-        ));
-        let x = self
-            .logical_to_physical(clip_rect.x.max(0.0).get())
-            .floor() as u32;
-        let y = self
-            .logical_to_physical(clip_rect.y.max(0.0).get())
-            .floor() as u32;
-        let right = clip_rect
-            .right()
-            .min(logical_width);
-        let bottom = clip_rect
-            .bottom()
-            .min(logical_height);
-        let right = self
-            .logical_to_physical(right.get())
-            .ceil()
-            .max(x as f32) as u32;
-        let bottom = self
-            .logical_to_physical(bottom.get())
-            .ceil()
-            .max(y as f32) as u32;
+        let clip_rect = clip_rect.unwrap_or(Rect::new(0.0, 0.0, logical_width, logical_height));
+        let x = self.logical_to_physical(clip_rect.x.max(0.0).get()).floor() as u32;
+        let y = self.logical_to_physical(clip_rect.y.max(0.0).get()).floor() as u32;
+        let right = clip_rect.right().min(logical_width);
+        let bottom = clip_rect.bottom().min(logical_height);
+        let right = self.logical_to_physical(right.get()).ceil().max(x as f32) as u32;
+        let bottom = self.logical_to_physical(bottom.get()).ceil().max(y as f32) as u32;
         let width = right.saturating_sub(x);
         let height = bottom.saturating_sub(y);
         (width > 0 && height > 0).then_some((x, y, width, height))

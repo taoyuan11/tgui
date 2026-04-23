@@ -694,7 +694,10 @@ mod tests {
 
         assert_eq!(layout.scrollbar_style.thickness, dp(14.0));
         assert_eq!(layout.scrollbar_style.radius, dp(6.0));
-        assert_eq!(layout.scrollbar_style.insets, Insets::symmetric(dp(3.0), dp(5.0)));
+        assert_eq!(
+            layout.scrollbar_style.insets,
+            Insets::symmetric(dp(3.0), dp(5.0))
+        );
         assert_eq!(layout.scrollbar_style.min_thumb_length, dp(40.0));
         assert_eq!(layout.scrollbar_style.thumb_color, Color::BLACK);
         assert_eq!(layout.scrollbar_style.track_color, Color::WHITE);
