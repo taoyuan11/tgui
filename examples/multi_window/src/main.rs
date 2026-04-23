@@ -1,5 +1,5 @@
 use tgui::{
-    Align, Application, Binding, Button, Color, Column, Command, Insets, Justify, Observable,
+    Align, Application, Binding, Button, Color, Column, Command, Insets, Observable,
     Row, Stack, Text, TguiError, ViewModelContext, WindowSpec, dp, sp,
 };
 
@@ -71,7 +71,6 @@ impl MultiWindowVm {
             .fill_size()
             .padding(Insets::all(dp(28.0)))
             .align(Align::Center)
-            .justify(Justify::Center)
             .child(
                 Column::new()
                     .width(dp(620.0))

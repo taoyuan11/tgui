@@ -16,18 +16,19 @@ use crate::media::{
     IntrinsicSize, MediaManager, RasterRequest,
 };
 use crate::text::font::{FontManager, TextFontRequest};
-use crate::ui::layout::{Align, Axis, Insets, Justify, LayoutStyle, Overflow, Value, Wrap};
+use crate::ui::layout::{Align, Axis, Insets, LayoutStyle, Overflow, Value, Wrap};
 use crate::ui::theme::Theme;
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface as PublicVideoSurface;
 
+use super::canvas::{canvas_bounds, CanvasItem};
 use super::common::{
-    ComputedScene, ContainerKind, ContainerLayout, HitInteraction, HitRegion, InputEditState,
-    InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext, MediaEventHandlers,
-    MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive, RenderedWidgetScene,
-    ScenePrimitives, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextPrimitive, TexturePrimitive,
-    VisualStyle, WidgetId, WidgetKind,
+    ComputedScene, ContainerKind, ContainerLayout, HitGeometry, HitInteraction, HitRegion,
+    InputEditState, InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext,
+    MediaEventHandlers, MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive,
+    RenderedWidgetScene, ScenePrimitives, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
+    TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
 };
 use super::text::Text;
 
@@ -89,6 +90,10 @@ enum ResolvedWidgetKind<VM> {
     },
     Image {
         image: super::image::Image,
+    },
+    Canvas {
+        items: Vec<CanvasItem>,
+        item_interactions: super::common::CanvasItemInteractionHandlers<VM>,
     },
     #[cfg(feature = "video")]
     VideoSurface {
@@ -207,6 +212,13 @@ impl<VM> Element<VM> {
             WidgetKind::Image { image } => ResolvedWidgetKind::Image {
                 image: image.clone(),
             },
+            WidgetKind::Canvas {
+                items,
+                item_interactions,
+            } => ResolvedWidgetKind::Canvas {
+                items: items.resolve(),
+                item_interactions: item_interactions.clone(),
+            },
             #[cfg(feature = "video")]
             WidgetKind::VideoSurface { video } => ResolvedWidgetKind::VideoSurface {
                 video: video.clone(),
@@ -246,6 +258,7 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Container { .. } => MeasureContext::None,
             ResolvedWidgetKind::Text { text } => MeasureContext::Text(text.clone()),
             ResolvedWidgetKind::Image { image } => MeasureContext::Image(image.clone()),
+            ResolvedWidgetKind::Canvas { items, .. } => MeasureContext::Canvas(items.clone()),
             #[cfg(feature = "video")]
             ResolvedWidgetKind::VideoSurface { video } => {
                 MeasureContext::VideoSurface(video.clone())
@@ -516,7 +529,7 @@ impl<VM> ResolvedElement<VM> {
             && background_frame.width > Dp::ZERO
             && background_frame.height > Dp::ZERO
         {
-            computed.scene.shapes.push(RenderPrimitive {
+            computed.scene.push_shape(RenderPrimitive {
                 rect: background_frame,
                 color: background,
                 corner_radius: background_radius,
@@ -541,6 +554,7 @@ impl<VM> ResolvedElement<VM> {
             computed.hit_regions.push(HitRegion {
                 rect: frame,
                 clip_rect: primitive_clip,
+                geometry: HitGeometry::Rect,
                 interaction: HitInteraction::Widget {
                     id: self.id,
                     interactions: self.interactions.clone(),
@@ -660,6 +674,7 @@ impl<VM> ResolvedElement<VM> {
                     computed.hit_regions.push(HitRegion {
                         rect: frame,
                         clip_rect: primitive_clip,
+                        geometry: HitGeometry::Rect,
                         interaction: HitInteraction::SelectableText {
                             id: self.id,
                             frame,
@@ -698,6 +713,60 @@ impl<VM> ResolvedElement<VM> {
                     computed,
                     "image",
                 );
+            }
+            ResolvedWidgetKind::Canvas {
+                items,
+                item_interactions,
+            } => {
+                let padding = self.layout.padding.resolve_widget(
+                    context.animations,
+                    self.id,
+                    WidgetProperty::Padding,
+                    context.now,
+                );
+                let canvas_frame = background_frame.inset(padding);
+                let canvas_clip = primitive_clip.and_then(|clip| clip.intersect(canvas_frame));
+                let canvas_origin = Point::new(canvas_frame.x, canvas_frame.y);
+
+                if canvas_frame.width > Dp::ZERO && canvas_frame.height > Dp::ZERO {
+                    for item in items {
+                        let meshes = item.tessellate(canvas_origin, opacity, canvas_clip);
+                        for mesh in &meshes {
+                            computed.scene.push_mesh(mesh.clone());
+                        }
+
+                        if item_interactions.has_any() {
+                            if let Some(bounds) = item.bounds() {
+                                let triangles = meshes
+                                    .iter()
+                                    .flat_map(|mesh| mesh.triangles.iter().copied())
+                                    .collect::<Vec<_>>();
+                                if !triangles.is_empty() {
+                                    computed.hit_regions.push(HitRegion {
+                                        rect: Rect::new(
+                                            canvas_frame.x + bounds.min_x,
+                                            canvas_frame.y + bounds.min_y,
+                                            bounds.width(),
+                                            bounds.height(),
+                                        ),
+                                        clip_rect: canvas_clip,
+                                        geometry: HitGeometry::Triangles(Arc::from(triangles)),
+                                        interaction: HitInteraction::CanvasItem {
+                                            id: self.id,
+                                            item_id: item.id(),
+                                            item_interactions: item_interactions.clone(),
+                                            canvas_origin,
+                                            item_origin: Point::new(
+                                                canvas_frame.x + bounds.min_x,
+                                                canvas_frame.y + bounds.min_y,
+                                            ),
+                                        },
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
             }
             #[cfg(feature = "video")]
             ResolvedWidgetKind::VideoSurface { video } => {
@@ -794,6 +863,7 @@ impl<VM> ResolvedElement<VM> {
                     computed.hit_regions.push(HitRegion {
                         rect: frame,
                         clip_rect: primitive_clip,
+                        geometry: HitGeometry::Rect,
                         interaction: HitInteraction::FocusInput {
                             id: self.id,
                             frame,
@@ -911,19 +981,17 @@ fn apply_container_style(
         ContainerKind::Flow | ContainerKind::Column => {
             style.display = Display::Flex;
             style.flex_direction = FlexDirection::Column;
-            style.justify_content = layout
-                .align_y
-                .map(map_axis_align_content)
-                .or_else(|| map_justify_content(layout.justify));
+            style.justify_content = Some(map_axis_align_content(
+                layout.align_y.unwrap_or(layout.align),
+            ));
             style.align_items = map_align_items(layout.align_x.unwrap_or(layout.align));
         }
         ContainerKind::Row => {
             style.display = Display::Flex;
             style.flex_direction = FlexDirection::Row;
-            style.justify_content = layout
-                .align_x
-                .map(map_axis_align_content)
-                .or_else(|| map_justify_content(layout.justify));
+            style.justify_content = Some(map_axis_align_content(
+                layout.align_x.unwrap_or(layout.align),
+            ));
             style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
         }
         ContainerKind::Flex { direction, wrap } => {
@@ -938,17 +1006,15 @@ fn apply_container_style(
             };
             match direction {
                 Axis::Horizontal => {
-                    style.justify_content = layout
-                        .align_x
-                        .map(map_axis_align_content)
-                        .or_else(|| map_justify_content(layout.justify));
+                    style.justify_content = Some(map_axis_align_content(
+                        layout.align_x.unwrap_or(layout.align),
+                    ));
                     style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
                 }
                 Axis::Vertical => {
-                    style.justify_content = layout
-                        .align_y
-                        .map(map_axis_align_content)
-                        .or_else(|| map_justify_content(layout.justify));
+                    style.justify_content = Some(map_axis_align_content(
+                        layout.align_y.unwrap_or(layout.align),
+                    ));
                     style.align_items = map_align_items(layout.align_x.unwrap_or(layout.align));
                 }
             }
@@ -1153,7 +1219,7 @@ fn push_scrollbar_primitives(
         .get();
 
     if let Some(track) = geometry.vertical_track {
-        scene.overlay_shapes.push(RenderPrimitive {
+        scene.push_overlay_shape(RenderPrimitive {
             rect: track,
             color: track_color,
             corner_radius: radius,
@@ -1163,7 +1229,7 @@ fn push_scrollbar_primitives(
         let thumb = geometry
             .vertical_thumb
             .expect("vertical thumb should exist with vertical track");
-        scene.overlay_shapes.push(RenderPrimitive {
+        scene.push_overlay_shape(RenderPrimitive {
             rect: thumb,
             color: thumb_color_for(ScrollbarAxis::Vertical),
             corner_radius: radius,
@@ -1173,7 +1239,7 @@ fn push_scrollbar_primitives(
     }
 
     if let Some(track) = geometry.horizontal_track {
-        scene.overlay_shapes.push(RenderPrimitive {
+        scene.push_overlay_shape(RenderPrimitive {
             rect: track,
             color: track_color,
             corner_radius: radius,
@@ -1183,7 +1249,7 @@ fn push_scrollbar_primitives(
         let thumb = geometry
             .horizontal_thumb
             .expect("horizontal thumb should exist with horizontal track");
-        scene.overlay_shapes.push(RenderPrimitive {
+        scene.push_overlay_shape(RenderPrimitive {
             rect: thumb,
             color: thumb_color_for(ScrollbarAxis::Horizontal),
             corner_radius: radius,
@@ -1232,16 +1298,8 @@ fn map_align_items(align: Align) -> Option<TaffyAlignItems> {
         Align::Start => TaffyAlignItems::Start,
         Align::Center => TaffyAlignItems::Center,
         Align::End => TaffyAlignItems::End,
+        Align::SpaceBetween => TaffyAlignItems::Start,
         Align::Stretch => TaffyAlignItems::Stretch,
-    })
-}
-
-fn map_justify_content(justify: Justify) -> Option<TaffyJustifyContent> {
-    Some(match justify {
-        Justify::Start => TaffyJustifyContent::Start,
-        Justify::Center => TaffyJustifyContent::Center,
-        Justify::End => TaffyJustifyContent::End,
-        Justify::SpaceBetween => TaffyJustifyContent::SpaceBetween,
     })
 }
 
@@ -1250,6 +1308,7 @@ fn map_axis_align_content(align: Align) -> TaffyJustifyContent {
         Align::Start => TaffyJustifyContent::Start,
         Align::Center => TaffyJustifyContent::Center,
         Align::End => TaffyJustifyContent::End,
+        Align::SpaceBetween => TaffyJustifyContent::SpaceBetween,
         Align::Stretch => TaffyJustifyContent::Start,
     }
 }
@@ -1296,6 +1355,9 @@ fn measure_node(
                 snapshot.intrinsic_size,
             )
         }
+        Some(MeasureContext::Canvas(items)) => canvas_bounds(items)
+            .map(|bounds| (bounds.width(), bounds.height()))
+            .unwrap_or((0.0, 0.0)),
         #[cfg(feature = "video")]
         Some(MeasureContext::VideoSurface(video)) => {
             let snapshot = video.controller.surface_snapshot();
@@ -1398,7 +1460,7 @@ fn push_media_texture_or_placeholder<VM>(
     };
 
     if let Some(texture) = snapshot.texture.as_ref() {
-        computed.scene.textures.push(TexturePrimitive {
+        computed.scene.push_texture(TexturePrimitive {
             texture: Arc::clone(texture),
             frame: target_frame,
             clip_rect,
@@ -1437,7 +1499,7 @@ fn push_video_texture_or_placeholder<VM>(
     let target_frame = resolve_media_rect(content_frame, snapshot.intrinsic_size, video.fit);
 
     if let Some(texture) = snapshot.texture.as_ref() {
-        computed.scene.textures.push(TexturePrimitive {
+        computed.scene.push_texture(TexturePrimitive {
             texture: Arc::clone(texture),
             frame: target_frame,
             clip_rect,
@@ -1476,7 +1538,7 @@ fn push_media_placeholder(
     let placeholder =
         media_loading_fill_color(loading, error, loading_background).with_alpha_factor(opacity);
     if content_frame.width > Dp::ZERO && content_frame.height > Dp::ZERO {
-        scene.overlay_shapes.push(RenderPrimitive {
+        scene.push_overlay_shape(RenderPrimitive {
             rect: content_frame,
             color: placeholder,
             corner_radius: 0.0,
@@ -1581,7 +1643,7 @@ fn push_text_primitives(
         let selection_end_x = current_layout.x_for_index(selection_end);
         let selection_width = (selection_end_x - selection_start_x).max(0.0);
         if selection_width > 0.0 {
-            scene.shapes.push(RenderPrimitive {
+            scene.push_shape(RenderPrimitive {
                 rect: Rect::new(
                     content_frame.x + selection_start_x,
                     content_frame.y,
@@ -1596,7 +1658,7 @@ fn push_text_primitives(
         }
     }
 
-    scene.texts.push(TextPrimitive {
+    scene.push_text(TextPrimitive {
         content: content.clone(),
         frame: content_frame,
         color: color.with_alpha_factor(opacity),
@@ -1623,7 +1685,7 @@ fn push_text_primitives(
             })
             .unwrap_or(current_layout.width);
         let caret_x = (inner.x + inner.width.min(caret_width) + CARET_END_GAP).max(inner.x);
-        scene.overlay_shapes.push(RenderPrimitive {
+        scene.push_overlay_shape(RenderPrimitive {
             rect: Rect::new(
                 caret_x,
                 content_frame.y,
@@ -1710,7 +1772,7 @@ fn push_input_primitives(
             measured_height,
             placeholder_line_height,
         );
-        scene.texts.push(TextPrimitive {
+        scene.push_text(TextPrimitive {
             content: placeholder_content,
             frame: content_frame,
             color: placeholder_color,
@@ -1729,7 +1791,7 @@ fn push_input_primitives(
             content_frame.height.max(Dp::new(placeholder_line_height)),
         );
         if show_caret {
-            scene.overlay_shapes.push(RenderPrimitive {
+            scene.push_overlay_shape(RenderPrimitive {
                 rect: caret_rect,
                 color: theme.palette.text.with_alpha_factor(opacity),
                 corner_radius: 0.0,
@@ -1831,7 +1893,7 @@ fn push_input_primitives(
             let selection_x = content_frame.x + selection_start_x;
             let selection_width = (selection_end_x - selection_start_x).max(0.0);
             if selection_width > 0.0 {
-                scene.shapes.push(RenderPrimitive {
+                scene.push_shape(RenderPrimitive {
                     rect: Rect::new(
                         selection_x,
                         content_frame.y,
@@ -1848,7 +1910,7 @@ fn push_input_primitives(
     }
 
     if composition.is_none() {
-        scene.texts.push(TextPrimitive {
+        scene.push_text(TextPrimitive {
             content: current_text.to_string(),
             frame: Rect::new(
                 content_frame.x,
@@ -1867,7 +1929,7 @@ fn push_input_primitives(
     } else {
         let mut cursor_x = content_frame.x;
         if !prefix_text.is_empty() {
-            scene.texts.push(TextPrimitive {
+            scene.push_text(TextPrimitive {
                 content: prefix_text.to_string(),
                 frame: Rect::new(
                     cursor_x,
@@ -1887,7 +1949,7 @@ fn push_input_primitives(
         }
 
         if !preedit_text.is_empty() {
-            scene.texts.push(TextPrimitive {
+            scene.push_text(TextPrimitive {
                 content: preedit_text.to_string(),
                 frame: Rect::new(
                     cursor_x,
@@ -1903,7 +1965,7 @@ fn push_input_primitives(
                 letter_spacing,
                 clip_rect,
             });
-            scene.overlay_shapes.push(RenderPrimitive {
+            scene.push_overlay_shape(RenderPrimitive {
                 rect: Rect::new(
                     cursor_x,
                     (content_frame.y + content_frame.height - 1.0).max(content_frame.y),
@@ -1927,7 +1989,7 @@ fn push_input_primitives(
                 line_height,
                 letter_spacing,
             );
-            scene.texts.push(TextPrimitive {
+            scene.push_text(TextPrimitive {
                 content: suffix_text.to_string(),
                 frame: Rect::new(
                     cursor_x,
@@ -1986,7 +2048,7 @@ fn push_input_primitives(
         .map(|composition| composition.cursor.is_none())
         .unwrap_or(false);
     if show_caret && !hide_caret {
-        scene.overlay_shapes.push(RenderPrimitive {
+        scene.push_overlay_shape(RenderPrimitive {
             rect: caret_rect,
             color: theme.palette.text.with_alpha_factor(opacity),
             corner_radius: 0.0,
@@ -2063,7 +2125,7 @@ fn push_border_primitives(
         return;
     }
 
-    scene.shapes.push(RenderPrimitive {
+    scene.push_shape(RenderPrimitive {
         rect: frame,
         color: border_color,
         corner_radius: border_radius,
@@ -2276,12 +2338,9 @@ impl<VM> WidgetTree<VM> {
                     .clip_rect
                     .map(|clip_rect| clip_rect.contains(point))
                     .unwrap_or(true)
+                && hit.geometry.contains(point)
         }) {
-            let id = match &hit.interaction {
-                HitInteraction::Widget { id, .. }
-                | HitInteraction::FocusInput { id, .. }
-                | HitInteraction::SelectableText { id, .. } => *id,
-            };
+            let id = hit.interaction.target_id();
 
             if let Some(index) = ids.iter().position(|existing| *existing == id) {
                 path[index] = hit.interaction.clone();
@@ -2379,7 +2438,7 @@ mod tests {
     use crate::animation::{AnimationCoordinator, AnimationEngine};
     use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
     use crate::foundation::color::Color;
-    use crate::foundation::view_model::Command;
+    use crate::foundation::view_model::{Command, ValueCommand};
     use crate::media::MediaManager;
     use crate::text::font::{FontCatalog, FontManager};
     use crate::ui::layout::Overflow;
@@ -2387,8 +2446,8 @@ mod tests {
     use crate::ui::unit::dp;
     use crate::ui::widget::common::Rect;
     use crate::ui::widget::{
-        Element, Image, Input, InputEditState, Point, ScrollbarAxis, ScrollbarHandle, Stack, Text,
-        WidgetTree,
+        Canvas, CanvasItem, CanvasPath, CanvasStroke, Element, Image, Input, InputEditState,
+        PathBuilder, Point, ScrollbarAxis, ScrollbarHandle, Stack, Text, WidgetTree,
     };
     #[cfg(feature = "video")]
     use crate::video::backend::{
@@ -2432,6 +2491,153 @@ mod tests {
             super::media_loading_fill_color(false, Some("boom"), Color::WHITE),
             crate::media::media_placeholder_color(false, Some("boom"))
         );
+    }
+
+    #[test]
+    fn canvas_without_explicit_size_uses_item_bounds_for_layout() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let canvas: Element<()> = Canvas::new(vec![CanvasItem::Path(
+            CanvasPath::new(
+                1_u64,
+                PathBuilder::new()
+                    .move_to(0.0, 0.0)
+                    .line_to(80.0, 0.0)
+                    .line_to(80.0, 30.0)
+                    .line_to(0.0, 30.0)
+                    .close(),
+            )
+            .fill(Color::WHITE),
+        )])
+        .cursor(crate::ui::widget::CursorStyle::Pointer)
+        .into();
+        let canvas_id = canvas.id;
+        let tree = WidgetTree::new(Stack::new().child(canvas));
+
+        let computed = tree.compute_scene(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 200.0, 120.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        let widget_region = computed
+            .hit_regions
+            .iter()
+            .find(|region| matches!(region.interaction, super::HitInteraction::Widget { id, .. } if id == canvas_id))
+            .expect("canvas widget region should exist");
+        assert_eq!(widget_region.rect.width, 80.0);
+        assert_eq!(widget_region.rect.height, 30.0);
+    }
+
+    #[test]
+    fn canvas_renders_fill_and_stroke_meshes() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Canvas::new(vec![CanvasItem::Path(
+                CanvasPath::new(
+                    1_u64,
+                    PathBuilder::new()
+                        .move_to(10.0, 10.0)
+                        .line_to(100.0, 10.0)
+                        .line_to(100.0, 60.0)
+                        .line_to(10.0, 60.0)
+                        .close(),
+                )
+                .fill(Color::hexa(0x22C55EFF))
+                .stroke(CanvasStroke::new(dp(4.0), Color::WHITE)),
+            )])
+            .size(dp(120.0), dp(80.0)),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 80.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert_eq!(rendered.primitives.meshes.len(), 2);
+        assert!(!rendered.primitives.commands.is_empty());
+    }
+
+    #[test]
+    fn canvas_hit_testing_prefers_topmost_item() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Canvas::new(vec![
+                CanvasItem::Path(
+                    CanvasPath::new(
+                        1_u64,
+                        PathBuilder::new()
+                            .move_to(0.0, 0.0)
+                            .line_to(80.0, 0.0)
+                            .line_to(80.0, 80.0)
+                            .line_to(0.0, 80.0)
+                            .close(),
+                    )
+                    .fill(Color::hexa(0x1D4ED8FF)),
+                ),
+                CanvasItem::Path(
+                    CanvasPath::new(
+                        2_u64,
+                        PathBuilder::new()
+                            .move_to(20.0, 20.0)
+                            .line_to(90.0, 20.0)
+                            .line_to(90.0, 90.0)
+                            .line_to(20.0, 90.0)
+                            .close(),
+                    )
+                    .fill(Color::hexa(0xF97316FF)),
+                ),
+            ])
+            .size(dp(120.0), dp(120.0))
+            .on_item_click(ValueCommand::new(|_: &mut (), _| {})),
+        );
+
+        let hit = tree.hit_test(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 120.0),
+            Some(Point::new(dp(30.0), dp(30.0))),
+            None,
+        );
+
+        assert!(matches!(
+            hit,
+            Some(super::HitInteraction::CanvasItem { item_id, .. }) if item_id == 2_u64.into()
+        ));
     }
 
     fn test_media() -> MediaManager {

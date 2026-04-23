@@ -9,7 +9,7 @@ It is designed around a small MVVM-style API:
 - `Application` for window and runtime setup
 - `Observable<T>` / `Binding<T>` for reactive state
 - `Command` / `ValueCommand` for ViewModel actions
-- a compact widget tree made of `Text`, `Button`, `Input`, and layout containers
+- a compact widget tree made of `Text`, `Button`, `Input`, `Canvas`, and layout containers
 
 ## Status
 
@@ -38,6 +38,7 @@ This project is under active development.
   - `Button`
   - `Input`
   - `Image`
+  - `Canvas`
   - `Container`
   - `Row`
   - `Column`
@@ -292,6 +293,56 @@ For SVG sources, `Image::from_path(...)`, `Image::from_url(...)`, and
 `Image::from_bytes(...)` all work transparently. Embedded SVG bytes support
 `data:` and absolute `http/https` image references; local relative references
 still require `Image::from_path(...)`.
+
+### Canvas Widgets
+
+`Canvas` is a declarative path-drawing widget for custom charts, overlays, mini-diagrams,
+and interactive vector surfaces. The first version focuses on paths only: solid fill,
+solid stroke, and item-level pointer events.
+
+```rust
+use tgui::{
+    dp, Canvas, CanvasItem, CanvasPath, CanvasPointerEvent, CanvasStroke, Color, PathBuilder,
+    ValueCommand,
+};
+
+let canvas = Canvas::new(vec![
+    CanvasItem::Path(
+        CanvasPath::new(
+            1_u64,
+            PathBuilder::new()
+                .move_to(20.0, 20.0)
+                .line_to(180.0, 20.0)
+                .line_to(180.0, 100.0)
+                .line_to(20.0, 100.0)
+                .close(),
+        )
+        .fill(Color::hexa(0x2563EBFF))
+        .stroke(CanvasStroke::new(dp(3.0), Color::WHITE)),
+    ),
+])
+.size(dp(220.0), dp(140.0))
+.on_item_mouse_move(ValueCommand::new(|_, event: CanvasPointerEvent| {
+    println!(
+        "hover item={} canvas=({}, {}) local=({}, {})",
+        event.item_id.get(),
+        event.canvas_position.x,
+        event.canvas_position.y,
+        event.local_position.x,
+        event.local_position.y
+    );
+}))
+.on_item_click(ValueCommand::new(|_, event| {
+    println!("clicked item {}", event.item_id.get());
+}));
+```
+
+Current `Canvas` notes:
+
+- Coordinates are relative to the canvas content area.
+- Items are drawn in declaration order; later items appear on top.
+- Item hit testing follows the rendered path geometry and prefers the topmost hit item.
+- v1 does not include gradients, dashed strokes, shadows, transforms, embedded text, or embedded images.
 
 ### Desktop Multi-Window
 
@@ -884,6 +935,7 @@ Available examples in this repository:
 - `input`
 - `layout`
 - `scroll`
+- `canvas`
 - `layout_theme_showcase`
 - `widgets_showcase`
 - `media_showcase`
@@ -905,6 +957,7 @@ cargo run --manifest-path examples/theme/Cargo.toml
 cargo run --manifest-path examples/input/Cargo.toml
 cargo run --manifest-path examples/layout/Cargo.toml
 cargo run --manifest-path examples/scroll/Cargo.toml
+cargo run --manifest-path examples/canvas/Cargo.toml
 cargo run --manifest-path examples/layout_theme_showcase/Cargo.toml
 cargo run --manifest-path examples/widgets_showcase/Cargo.toml
 cargo run --manifest-path examples/media_showcase/Cargo.toml

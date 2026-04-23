@@ -128,6 +128,7 @@ impl PresentWorker {
     fn handle_backend_command(&mut self, command: BackendCommand) -> bool {
         match command {
             BackendCommand::Load(source) => {
+                self.set_decode_playing(false);
                 self.current_source = Some(source.clone());
                 self.current_generation = self.current_generation.saturating_add(1);
                 self.pending_open_reason = Some(OpenReason::Load);
@@ -143,7 +144,6 @@ impl PresentWorker {
                 self.playback_clock.set_position(Duration::ZERO);
                 self.shared_queue
                     .replace_generation(self.current_generation);
-                self.set_decode_playing(false);
                 clear_latest_frame(&self.latest_frame);
                 self.shared.reset_for_load();
                 let _ = self.decode_tx.send(DecodeCommand::Load {
@@ -175,6 +175,7 @@ impl PresentWorker {
                 let Some(source) = self.current_source.clone() else {
                     return true;
                 };
+                self.set_decode_playing(false);
                 self.current_generation = self.current_generation.saturating_add(1);
                 self.pending_open_reason = Some(OpenReason::Seek);
                 self.stream_opened = false;
@@ -188,7 +189,6 @@ impl PresentWorker {
                 self.playback_clock.set_position(position);
                 self.shared_queue
                     .replace_generation(self.current_generation);
-                self.set_decode_playing(false);
                 self.shared.playback_state.set(PlaybackState::Loading);
                 self.shared.error.set(None);
                 let current_texture = self
@@ -577,5 +577,111 @@ impl PresentWorker {
         self.buffer_snapshot.eof_sent
             && (self.shared_queue.has_frames(self.current_generation)
                 || !self.audio_buffered_duration().is_zero())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use crossbeam_channel::unbounded;
+
+    use crate::animation::AnimationCoordinator;
+    use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
+    use crate::video::VideoMetrics;
+
+    use super::super::super::{BackendSharedState, DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES};
+    use super::*;
+
+    fn test_context() -> ViewModelContext {
+        ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
+    }
+
+    fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
+        BackendSharedState {
+            playback_state: ctx.observable(PlaybackState::Idle),
+            metrics: ctx.observable(VideoMetrics::default()),
+            volume: ctx.observable(1.0),
+            muted: ctx.observable(false),
+            buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+            video_size: ctx.observable(VideoSize::default()),
+            error: ctx.observable(None),
+            surface: ctx.observable(VideoSurfaceSnapshot::default()),
+        }
+    }
+
+    fn test_worker() -> (PresentWorker, crossbeam_channel::Receiver<DecodeCommand>) {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        let (backend_tx, backend_rx) = unbounded();
+        drop(backend_tx);
+        let (decode_tx, decode_rx) = unbounded();
+        let (event_tx, event_rx) = unbounded();
+        drop(event_tx);
+
+        (
+            PresentWorker::new(
+                backend_rx,
+                decode_tx,
+                event_rx,
+                shared,
+                Arc::new(Mutex::new(None)),
+                Arc::new(SharedVideoQueue::new()),
+                SharedPlaybackClock::default(),
+            ),
+            decode_rx,
+        )
+    }
+
+    #[test]
+    fn seek_pauses_previous_generation_before_reopening() {
+        let (mut worker, decode_rx) = test_worker();
+        worker.current_source = Some(VideoSource::File("demo.mp4".into()));
+        worker.current_generation = 7;
+        worker.decode_playing = true;
+
+        assert!(worker.handle_backend_command(BackendCommand::Seek(Duration::from_secs(5))));
+
+        assert!(matches!(
+            decode_rx.recv().expect("pause command should be sent first"),
+            DecodeCommand::SetPlaying {
+                generation: 7,
+                playing: false,
+            }
+        ));
+        assert!(matches!(
+            decode_rx.recv().expect("seek command should follow pause"),
+            DecodeCommand::Seek {
+                generation: 8,
+                position,
+                ..
+            } if position == Duration::from_secs(5)
+        ));
+    }
+
+    #[test]
+    fn load_pauses_previous_generation_before_reopening() {
+        let (mut worker, decode_rx) = test_worker();
+        worker.current_generation = 3;
+        worker.decode_playing = true;
+        let source = VideoSource::File("demo.mp4".into());
+
+        assert!(worker.handle_backend_command(BackendCommand::Load(source.clone())));
+
+        assert!(matches!(
+            decode_rx.recv().expect("pause command should be sent first"),
+            DecodeCommand::SetPlaying {
+                generation: 3,
+                playing: false,
+            }
+        ));
+        assert!(matches!(
+            decode_rx.recv().expect("load command should follow pause"),
+            DecodeCommand::Load {
+                generation: 4,
+                source: queued_source,
+            } if queued_source == source
+        ));
     }
 }

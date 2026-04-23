@@ -9,11 +9,12 @@ use taffy::NodeId as TaffyNodeId;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
-use crate::ui::layout::{Align, Axis, Insets, Justify, Overflow, ScrollbarStyle, Value, Wrap};
+use crate::ui::layout::{Align, Axis, Insets, Overflow, ScrollbarStyle, Value, Wrap};
 use crate::ui::unit::{Dp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface;
 
+use super::canvas::{CanvasItem, CanvasItemId, CanvasPointerEvent};
 use super::image::Image;
 use super::text::Text;
 
@@ -158,6 +159,13 @@ pub(crate) struct InteractionHandlers<VM> {
     pub cursor_style: Option<Value<CursorStyle>>,
 }
 
+pub(crate) struct CanvasItemInteractionHandlers<VM> {
+    pub on_click: Option<ValueCommand<VM, CanvasPointerEvent>>,
+    pub on_mouse_enter: Option<ValueCommand<VM, CanvasPointerEvent>>,
+    pub on_mouse_leave: Option<ValueCommand<VM, CanvasPointerEvent>>,
+    pub on_mouse_move: Option<ValueCommand<VM, CanvasPointerEvent>>,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum MediaEventPhase {
     Loading,
@@ -219,6 +227,17 @@ impl<VM> Clone for InteractionHandlers<VM> {
     }
 }
 
+impl<VM> Clone for CanvasItemInteractionHandlers<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            on_click: self.on_click.clone(),
+            on_mouse_enter: self.on_mouse_enter.clone(),
+            on_mouse_leave: self.on_mouse_leave.clone(),
+            on_mouse_move: self.on_mouse_move.clone(),
+        }
+    }
+}
+
 impl<VM> Default for InteractionHandlers<VM> {
     fn default() -> Self {
         Self {
@@ -234,6 +253,17 @@ impl<VM> Default for InteractionHandlers<VM> {
     }
 }
 
+impl<VM> Default for CanvasItemInteractionHandlers<VM> {
+    fn default() -> Self {
+        Self {
+            on_click: None,
+            on_mouse_enter: None,
+            on_mouse_leave: None,
+            on_mouse_move: None,
+        }
+    }
+}
+
 impl<VM> InteractionHandlers<VM> {
     pub(crate) fn has_any(&self) -> bool {
         self.on_click.is_some()
@@ -244,6 +274,15 @@ impl<VM> InteractionHandlers<VM> {
             || self.on_mouse_leave.is_some()
             || self.on_mouse_move.is_some()
             || self.cursor_style.is_some()
+    }
+}
+
+impl<VM> CanvasItemInteractionHandlers<VM> {
+    pub(crate) fn has_any(&self) -> bool {
+        self.on_click.is_some()
+            || self.on_mouse_enter.is_some()
+            || self.on_mouse_leave.is_some()
+            || self.on_mouse_move.is_some()
     }
 }
 
@@ -400,13 +439,79 @@ pub struct TexturePrimitive {
     pub clip_rect: Option<Rect>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MeshVertex {
+    pub position: [f32; 2],
+    pub color: Color,
+}
+
+#[derive(Clone)]
+pub struct MeshPrimitive {
+    pub vertices: Arc<[MeshVertex]>,
+    pub(crate) triangles: Arc<[[Point; 3]]>,
+    pub clip_rect: Option<Rect>,
+}
+
+#[derive(Clone)]
+pub(crate) enum RenderCommand {
+    Shape(RenderPrimitive),
+    Texture(TexturePrimitive),
+    Text(TextPrimitive),
+    Mesh(MeshPrimitive),
+}
+
 #[derive(Clone, Default)]
 pub struct ScenePrimitives {
     pub shapes: Vec<RenderPrimitive>,
+    pub meshes: Vec<MeshPrimitive>,
     pub textures: Vec<TexturePrimitive>,
     pub texts: Vec<TextPrimitive>,
     pub overlay_shapes: Vec<RenderPrimitive>,
+    #[allow(dead_code)]
+    pub overlay_meshes: Vec<MeshPrimitive>,
+    #[allow(dead_code)]
     pub overlay_texts: Vec<TextPrimitive>,
+    pub(crate) commands: Vec<RenderCommand>,
+    pub(crate) overlay_commands: Vec<RenderCommand>,
+}
+
+impl ScenePrimitives {
+    pub(crate) fn push_shape(&mut self, primitive: RenderPrimitive) {
+        self.shapes.push(primitive);
+        self.commands.push(RenderCommand::Shape(primitive));
+    }
+
+    pub(crate) fn push_mesh(&mut self, primitive: MeshPrimitive) {
+        self.meshes.push(primitive.clone());
+        self.commands.push(RenderCommand::Mesh(primitive));
+    }
+
+    pub(crate) fn push_texture(&mut self, primitive: TexturePrimitive) {
+        self.textures.push(primitive.clone());
+        self.commands.push(RenderCommand::Texture(primitive));
+    }
+
+    pub(crate) fn push_text(&mut self, primitive: TextPrimitive) {
+        self.texts.push(primitive.clone());
+        self.commands.push(RenderCommand::Text(primitive));
+    }
+
+    pub(crate) fn push_overlay_shape(&mut self, primitive: RenderPrimitive) {
+        self.overlay_shapes.push(primitive);
+        self.overlay_commands.push(RenderCommand::Shape(primitive));
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn push_overlay_mesh(&mut self, primitive: MeshPrimitive) {
+        self.overlay_meshes.push(primitive.clone());
+        self.overlay_commands.push(RenderCommand::Mesh(primitive));
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn push_overlay_text(&mut self, primitive: TextPrimitive) {
+        self.overlay_texts.push(primitive.clone());
+        self.overlay_commands.push(RenderCommand::Text(primitive));
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -424,7 +529,6 @@ pub(crate) struct ContainerLayout {
     pub kind: ContainerKind,
     pub padding: Value<Insets>,
     pub gap: Value<Dp>,
-    pub justify: Justify,
     pub align: Align,
     pub align_x: Option<Align>,
     pub align_y: Option<Align>,
@@ -439,7 +543,6 @@ impl ContainerLayout {
             kind: ContainerKind::Flow,
             padding: Value::Static(Insets::ZERO),
             gap: Value::Static(Dp::ZERO),
-            justify: Justify::Start,
             align: Align::Start,
             align_x: None,
             align_y: None,
@@ -484,6 +587,10 @@ pub(crate) enum WidgetKind<VM> {
     Image {
         image: Image,
     },
+    Canvas {
+        items: Value<Vec<CanvasItem>>,
+        item_interactions: CanvasItemInteractionHandlers<VM>,
+    },
     #[cfg(feature = "video")]
     VideoSurface {
         video: VideoSurface,
@@ -510,6 +617,13 @@ impl<VM> Clone for WidgetKind<VM> {
             Self::Text { text } => Self::Text { text: text.clone() },
             Self::Image { image } => Self::Image {
                 image: image.clone(),
+            },
+            Self::Canvas {
+                items,
+                item_interactions,
+            } => Self::Canvas {
+                items: items.clone(),
+                item_interactions: item_interactions.clone(),
             },
             #[cfg(feature = "video")]
             Self::VideoSurface { video } => Self::VideoSurface {
@@ -539,6 +653,7 @@ pub(crate) enum MeasureContext {
     None,
     Text(Text),
     Image(Image),
+    Canvas(Vec<CanvasItem>),
     #[cfg(feature = "video")]
     VideoSurface(VideoSurface),
     Button(Text),
@@ -575,6 +690,13 @@ pub(crate) enum HitInteraction<VM> {
         interactions: InteractionHandlers<VM>,
         text_style: Text,
         text: String,
+    },
+    CanvasItem {
+        id: WidgetId,
+        item_id: CanvasItemId,
+        item_interactions: CanvasItemInteractionHandlers<VM>,
+        canvas_origin: Point,
+        item_origin: Point,
     },
 }
 
@@ -622,6 +744,59 @@ impl<VM> Clone for HitInteraction<VM> {
                 text_style: text_style.clone(),
                 text: text.clone(),
             },
+            Self::CanvasItem {
+                id,
+                item_id,
+                item_interactions,
+                canvas_origin,
+                item_origin,
+            } => Self::CanvasItem {
+                id: *id,
+                item_id: *item_id,
+                item_interactions: item_interactions.clone(),
+                canvas_origin: *canvas_origin,
+                item_origin: *item_origin,
+            },
+        }
+    }
+}
+
+impl<VM> HitInteraction<VM> {
+    pub(crate) fn target_id(&self) -> HitTargetId {
+        match self {
+            Self::Widget { id, .. }
+            | Self::FocusInput { id, .. }
+            | Self::SelectableText { id, .. } => HitTargetId::Widget(*id),
+            Self::CanvasItem { id, item_id, .. } => HitTargetId::CanvasItem {
+                widget_id: *id,
+                item_id: *item_id,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum HitTargetId {
+    Widget(WidgetId),
+    CanvasItem {
+        widget_id: WidgetId,
+        item_id: CanvasItemId,
+    },
+}
+
+#[derive(Clone)]
+pub(crate) enum HitGeometry {
+    Rect,
+    Triangles(Arc<[[Point; 3]]>),
+}
+
+impl HitGeometry {
+    pub(crate) fn contains(&self, point: Point) -> bool {
+        match self {
+            Self::Rect => true,
+            Self::Triangles(triangles) => triangles
+                .iter()
+                .any(|triangle| point_in_triangle(point, triangle[0], triangle[1], triangle[2])),
         }
     }
 }
@@ -630,6 +805,7 @@ impl<VM> Clone for HitInteraction<VM> {
 pub(crate) struct HitRegion<VM> {
     pub rect: Rect,
     pub clip_rect: Option<Rect>,
+    pub geometry: HitGeometry,
     pub interaction: HitInteraction<VM>,
 }
 
@@ -718,6 +894,24 @@ impl Point {
             y: y.into(),
         }
     }
+}
+
+fn point_in_triangle(point: Point, a: Point, b: Point, c: Point) -> bool {
+    let point = (point.x.get(), point.y.get());
+    let a = (a.x.get(), a.y.get());
+    let b = (b.x.get(), b.y.get());
+    let c = (c.x.get(), c.y.get());
+
+    let sign = |p1: (f32, f32), p2: (f32, f32), p3: (f32, f32)| {
+        (p1.0 - p3.0) * (p2.1 - p3.1) - (p2.0 - p3.0) * (p1.1 - p3.1)
+    };
+
+    let d1 = sign(point, a, b);
+    let d2 = sign(point, b, c);
+    let d3 = sign(point, c, a);
+    let has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+    let has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+    !(has_neg && has_pos)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

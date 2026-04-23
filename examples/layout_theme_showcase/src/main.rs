@@ -1,5 +1,5 @@
 use tgui::{
-    Align, Application, Axis, Button, Color, Column, Flex, FontWeight, Grid, Insets, Justify, Row,
+    Align, Application, Axis, Button, Color, Column, Flex, FontWeight, Grid, Insets, Row,
     Stack, Text, TguiError, Theme, Wrap, dp, sp,
 };
 
@@ -77,7 +77,6 @@ fn hero() -> tgui::Element<()> {
                 .background(Color::hexa(0x103B43FF))
                 .border_radius(dp(20.0))
                 .align(Align::Center)
-                .justify(Justify::Center)
                 .child(
                     Text::new("Custom theme")
                         .font_size(sp(20.0))

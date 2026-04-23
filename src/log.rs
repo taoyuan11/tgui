@@ -95,7 +95,7 @@ impl Log {
     }
 }
 
-pub(crate) fn tgui_log(level: LogLevel, message: impl Display) {
+pub fn tgui_log(level: LogLevel, message: impl Display) {
     Log::default().log(level, message);
 }
 

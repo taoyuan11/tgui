@@ -14,7 +14,10 @@ use crate::platform::backend::window::Window;
 use crate::platform::dpi::PhysicalSize;
 use crate::text::font::{FontCatalog, FontWeight};
 use crate::ui::unit::Dp;
-use crate::ui::widget::{Rect, RenderPrimitive, ScenePrimitives, TextPrimitive};
+use crate::ui::widget::{
+    MeshVertex as SceneMeshVertex, Rect, RenderCommand, RenderPrimitive, ScenePrimitives,
+    TextPrimitive,
+};
 
 pub enum RenderStatus {
     Rendered,
@@ -29,11 +32,14 @@ pub struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     rect_pipeline: wgpu::RenderPipeline,
+    mesh_pipeline: wgpu::RenderPipeline,
     text_pipeline: wgpu::RenderPipeline,
     text_bind_group_layout: wgpu::BindGroupLayout,
     text_sampler: wgpu::Sampler,
     size: PhysicalSize<u32>,
     scale_factor: f32,
+    msaa_sample_count: u32,
+    msaa_target: Option<MultisampleTarget>,
     clear_color: TguiColor,
     text_system: TextSystem,
     text_cache: Vec<TextCacheEntry>,
@@ -45,19 +51,17 @@ struct TextSystem {
     swash_cache: SwashCache,
 }
 
-struct TextSprite {
-    bind_group: wgpu::BindGroup,
-    vertices: [TextVertex; 6],
-    clip_rect: Option<Rect>,
-}
-
-struct TextureSprite {
-    bind_group: wgpu::BindGroup,
-    vertices: [TextVertex; 6],
-    clip_rect: Option<Rect>,
+struct MultisampleTarget {
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
 }
 
 struct PrimitiveBatch {
+    clip_rect: Option<Rect>,
+    vertex_range: std::ops::Range<u32>,
+}
+
+struct MeshBatch {
     clip_rect: Option<Rect>,
     vertex_range: std::ops::Range<u32>,
 }
@@ -66,6 +70,19 @@ struct TextBatch {
     bind_group: wgpu::BindGroup,
     clip_rect: Option<Rect>,
     vertex_range: std::ops::Range<u32>,
+}
+
+enum DrawBatch {
+    Rect(PrimitiveBatch),
+    Mesh(MeshBatch),
+    Sprite(TextBatch),
+}
+
+struct CommandBuffers {
+    rect_vertices: Vec<RectVertex>,
+    mesh_vertices: Vec<MeshVertex>,
+    text_vertices: Vec<TextVertex>,
+    batches: Vec<DrawBatch>,
 }
 
 struct TextCacheEntry {
@@ -141,6 +158,11 @@ impl Renderer {
             .ok_or(TguiError::NoSurfaceFormat)?;
 
         let alpha_mode = surface_alpha_mode(&caps.alpha_modes);
+        let msaa_sample_count = surface_msaa_sample_count(&adapter, format);
+        let multisample_state = wgpu::MultisampleState {
+            count: msaa_sample_count,
+            ..Default::default()
+        };
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -156,6 +178,10 @@ impl Renderer {
         let rect_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tgui-rect-shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader/rect.wgsl").into()),
+        });
+        let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tgui-mesh-shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader/mesh.wgsl").into()),
         });
         let text_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tgui-text-shader"),
@@ -187,9 +213,49 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: multisample_state,
             fragment: Some(wgpu::FragmentState {
                 module: &rect_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let mesh_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("tgui-mesh-pipeline-layout"),
+            bind_group_layouts: &[],
+            immediate_size: 0,
+        });
+
+        let mesh_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("tgui-mesh-pipeline"),
+            layout: Some(&mesh_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &mesh_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[MeshVertex::layout()],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: multisample_state,
+            fragment: Some(wgpu::FragmentState {
+                module: &mesh_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -250,7 +316,7 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: multisample_state,
             fragment: Some(wgpu::FragmentState {
                 module: &text_shader,
                 entry_point: Some("fs_main"),
@@ -281,6 +347,7 @@ impl Renderer {
         let scale_factor = 1.0_f32.max(window.scale_factor() as f32);
 
         surface.configure(&device, &config);
+        let msaa_target = create_multisample_target(&device, &config, msaa_sample_count);
 
         Ok(Self {
             window,
@@ -289,11 +356,14 @@ impl Renderer {
             queue,
             config,
             rect_pipeline,
+            mesh_pipeline,
             text_pipeline,
             text_bind_group_layout,
             text_sampler,
             size,
             scale_factor,
+            msaa_sample_count,
+            msaa_target,
             clear_color,
             text_system: TextSystem {
                 font_system,
@@ -316,6 +386,7 @@ impl Renderer {
         self.config.width = new_size.width;
         self.config.height = new_size.height;
         self.surface.configure(&self.device, &self.config);
+        self.recreate_multisample_target();
     }
 
     pub fn render(&mut self, scene: &ScenePrimitives) -> Result<RenderStatus, TguiError> {
@@ -347,136 +418,63 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let (shape_vertices, shape_batches) = self.rect_batches_for(&scene.shapes);
-        let shape_vertex_buffer = (!shape_vertices.is_empty()).then(|| {
+        let command_buffers =
+            self.command_batches_for(&scene.commands, logical_width, logical_height)?;
+        let overlay_buffers =
+            self.command_batches_for(&scene.overlay_commands, logical_width, logical_height)?;
+        let color_attachment_view = self
+            .msaa_target
+            .as_ref()
+            .map(|target| &target.view)
+            .unwrap_or(&view);
+        let resolve_target = (self.msaa_sample_count > 1).then_some(&view);
+
+        let rect_vertex_buffer = (!command_buffers.rect_vertices.is_empty()).then(|| {
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("tgui-rect-vertices"),
-                    contents: bytemuck::cast_slice(&shape_vertices),
+                    contents: bytemuck::cast_slice(&command_buffers.rect_vertices),
                     usage: wgpu::BufferUsages::VERTEX,
                 })
         });
-
-        let texture_sprites = scene
-            .textures
-            .iter()
-            .map(|texture| {
-                self.texture_bind_group_for(&texture.texture)
-                    .map(|bind_group| {
-                        bind_group.map(|bind_group| TextureSprite {
-                            bind_group,
-                            vertices: TextVertex::quad(
-                                texture.frame,
-                                logical_width,
-                                logical_height,
-                            ),
-                            clip_rect: texture.clip_rect,
-                        })
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let mut texture_vertices = Vec::with_capacity(texture_sprites.len() * 6);
-        let mut texture_batches = Vec::with_capacity(texture_sprites.len());
-        for sprite in texture_sprites.into_iter().flatten() {
-            let start = texture_vertices.len() as u32;
-            texture_vertices.extend_from_slice(&sprite.vertices);
-            let end = texture_vertices.len() as u32;
-            texture_batches.push(TextBatch {
-                bind_group: sprite.bind_group,
-                clip_rect: sprite.clip_rect,
-                vertex_range: start..end,
-            });
-        }
-        let texture_vertex_buffer = (!texture_vertices.is_empty()).then(|| {
+        let mesh_vertex_buffer = (!command_buffers.mesh_vertices.is_empty()).then(|| {
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tgui-texture-vertices"),
-                    contents: bytemuck::cast_slice(&texture_vertices),
+                    label: Some("tgui-mesh-vertices"),
+                    contents: bytemuck::cast_slice(&command_buffers.mesh_vertices),
                     usage: wgpu::BufferUsages::VERTEX,
                 })
         });
-
-        let text_sprites = scene
-            .texts
-            .iter()
-            .filter_map(|text| {
-                self.text_bind_group_for(text)
-                    .transpose()
-                    .map(|bind_group| {
-                        bind_group.map(|bind_group| TextSprite {
-                            bind_group,
-                            vertices: TextVertex::quad(text.frame, logical_width, logical_height),
-                            clip_rect: text.clip_rect,
-                        })
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let mut text_vertices = Vec::with_capacity(text_sprites.len() * 6);
-        let mut text_batches = Vec::with_capacity(text_sprites.len());
-        for sprite in text_sprites {
-            let start = text_vertices.len() as u32;
-            text_vertices.extend_from_slice(&sprite.vertices);
-            let end = text_vertices.len() as u32;
-            text_batches.push(TextBatch {
-                bind_group: sprite.bind_group,
-                clip_rect: sprite.clip_rect,
-                vertex_range: start..end,
-            });
-        }
-        let text_vertex_buffer = (!text_vertices.is_empty()).then(|| {
+        let text_vertex_buffer = (!command_buffers.text_vertices.is_empty()).then(|| {
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("tgui-text-vertices"),
-                    contents: bytemuck::cast_slice(&text_vertices),
+                    contents: bytemuck::cast_slice(&command_buffers.text_vertices),
                     usage: wgpu::BufferUsages::VERTEX,
                 })
         });
 
-        let (overlay_vertices, overlay_batches) = self.rect_batches_for(&scene.overlay_shapes);
-        let overlay_vertex_buffer = (!overlay_vertices.is_empty()).then(|| {
+        let overlay_rect_vertex_buffer = (!overlay_buffers.rect_vertices.is_empty()).then(|| {
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tgui-overlay-vertices"),
-                    contents: bytemuck::cast_slice(&overlay_vertices),
+                    label: Some("tgui-overlay-rect-vertices"),
+                    contents: bytemuck::cast_slice(&overlay_buffers.rect_vertices),
                     usage: wgpu::BufferUsages::VERTEX,
                 })
         });
-
-        let overlay_text_sprites = scene
-            .overlay_texts
-            .iter()
-            .filter_map(|text| {
-                self.text_bind_group_for(text)
-                    .transpose()
-                    .map(|bind_group| {
-                        bind_group.map(|bind_group| TextSprite {
-                            bind_group,
-                            vertices: TextVertex::quad(text.frame, logical_width, logical_height),
-                            clip_rect: text.clip_rect,
-                        })
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let mut overlay_text_vertices = Vec::with_capacity(overlay_text_sprites.len() * 6);
-        let mut overlay_text_batches = Vec::with_capacity(overlay_text_sprites.len());
-        for sprite in overlay_text_sprites {
-            let start = overlay_text_vertices.len() as u32;
-            overlay_text_vertices.extend_from_slice(&sprite.vertices);
-            let end = overlay_text_vertices.len() as u32;
-            overlay_text_batches.push(TextBatch {
-                bind_group: sprite.bind_group,
-                clip_rect: sprite.clip_rect,
-                vertex_range: start..end,
-            });
-        }
-        let overlay_text_vertex_buffer = (!overlay_text_vertices.is_empty()).then(|| {
+        let overlay_mesh_vertex_buffer = (!overlay_buffers.mesh_vertices.is_empty()).then(|| {
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tgui-overlay-mesh-vertices"),
+                    contents: bytemuck::cast_slice(&overlay_buffers.mesh_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+        });
+        let overlay_text_vertex_buffer = (!overlay_buffers.text_vertices.is_empty()).then(|| {
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("tgui-overlay-text-vertices"),
-                    contents: bytemuck::cast_slice(&overlay_text_vertices),
+                    contents: bytemuck::cast_slice(&overlay_buffers.text_vertices),
                     usage: wgpu::BufferUsages::VERTEX,
                 })
         });
@@ -491,8 +489,8 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tgui-render-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
+                    view: color_attachment_view,
+                    resolve_target,
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(surface_clear_color(self.clear_color)),
@@ -505,53 +503,20 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            pass.set_pipeline(&self.rect_pipeline);
-            self.draw_rect_batches(&mut pass, shape_vertex_buffer.as_ref(), &shape_batches);
-
-            if !texture_batches.is_empty() {
-                pass.set_pipeline(&self.text_pipeline);
-                if let Some(vertex_buffer) = texture_vertex_buffer.as_ref() {
-                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                }
-                for batch in &texture_batches {
-                    if !self.apply_scissor(&mut pass, batch.clip_rect) {
-                        continue;
-                    }
-                    pass.set_bind_group(0, &batch.bind_group, &[]);
-                    pass.draw(batch.vertex_range.clone(), 0..1);
-                }
-            }
-
-            if !text_batches.is_empty() {
-                pass.set_pipeline(&self.text_pipeline);
-                if let Some(vertex_buffer) = text_vertex_buffer.as_ref() {
-                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                }
-                for batch in &text_batches {
-                    if !self.apply_scissor(&mut pass, batch.clip_rect) {
-                        continue;
-                    }
-                    pass.set_bind_group(0, &batch.bind_group, &[]);
-                    pass.draw(batch.vertex_range.clone(), 0..1);
-                }
-            }
-
-            pass.set_pipeline(&self.rect_pipeline);
-            self.draw_rect_batches(&mut pass, overlay_vertex_buffer.as_ref(), &overlay_batches);
-
-            if !overlay_text_batches.is_empty() {
-                pass.set_pipeline(&self.text_pipeline);
-                if let Some(vertex_buffer) = overlay_text_vertex_buffer.as_ref() {
-                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                }
-                for batch in &overlay_text_batches {
-                    if !self.apply_scissor(&mut pass, batch.clip_rect) {
-                        continue;
-                    }
-                    pass.set_bind_group(0, &batch.bind_group, &[]);
-                    pass.draw(batch.vertex_range.clone(), 0..1);
-                }
-            }
+            self.draw_command_batches(
+                &mut pass,
+                rect_vertex_buffer.as_ref(),
+                mesh_vertex_buffer.as_ref(),
+                text_vertex_buffer.as_ref(),
+                &command_buffers.batches,
+            );
+            self.draw_command_batches(
+                &mut pass,
+                overlay_rect_vertex_buffer.as_ref(),
+                overlay_mesh_vertex_buffer.as_ref(),
+                overlay_text_vertex_buffer.as_ref(),
+                &overlay_buffers.batches,
+            );
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -561,53 +526,138 @@ impl Renderer {
         Ok(RenderStatus::Rendered)
     }
 
-    fn draw_rect_batches<'a>(
+    fn draw_command_batches<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        vertex_buffer: Option<&'a wgpu::Buffer>,
-        batches: &[PrimitiveBatch],
+        rect_vertex_buffer: Option<&'a wgpu::Buffer>,
+        mesh_vertex_buffer: Option<&'a wgpu::Buffer>,
+        text_vertex_buffer: Option<&'a wgpu::Buffer>,
+        batches: &[DrawBatch],
     ) {
-        let Some(vertex_buffer) = vertex_buffer else {
-            return;
-        };
-
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         for batch in batches {
-            if !self.apply_scissor(pass, batch.clip_rect) {
-                continue;
+            match batch {
+                DrawBatch::Rect(batch) => {
+                    let Some(vertex_buffer) = rect_vertex_buffer else {
+                        continue;
+                    };
+                    if !self.apply_scissor(pass, batch.clip_rect) {
+                        continue;
+                    }
+                    pass.set_pipeline(&self.rect_pipeline);
+                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    pass.draw(batch.vertex_range.clone(), 0..1);
+                }
+                DrawBatch::Mesh(batch) => {
+                    let Some(vertex_buffer) = mesh_vertex_buffer else {
+                        continue;
+                    };
+                    if !self.apply_scissor(pass, batch.clip_rect) {
+                        continue;
+                    }
+                    pass.set_pipeline(&self.mesh_pipeline);
+                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    pass.draw(batch.vertex_range.clone(), 0..1);
+                }
+                DrawBatch::Sprite(batch) => {
+                    let Some(vertex_buffer) = text_vertex_buffer else {
+                        continue;
+                    };
+                    if !self.apply_scissor(pass, batch.clip_rect) {
+                        continue;
+                    }
+                    pass.set_pipeline(&self.text_pipeline);
+                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    pass.set_bind_group(0, &batch.bind_group, &[]);
+                    pass.draw(batch.vertex_range.clone(), 0..1);
+                }
             }
-
-            pass.draw(batch.vertex_range.clone(), 0..1);
         }
     }
 
-    fn rect_batches_for(
-        &self,
-        primitives: &[RenderPrimitive],
-    ) -> (Vec<RectVertex>, Vec<PrimitiveBatch>) {
-        let mut vertices = Vec::with_capacity(primitives.len() * 6);
-        let mut batches = Vec::with_capacity(primitives.len());
-        let (logical_width, logical_height) = self.logical_viewport_size();
+    fn command_batches_for(
+        &mut self,
+        commands: &[RenderCommand],
+        logical_width: f32,
+        logical_height: f32,
+    ) -> Result<CommandBuffers, TguiError> {
+        let mut rect_vertices = Vec::new();
+        let mut mesh_vertices = Vec::new();
+        let mut text_vertices = Vec::new();
+        let mut batches = Vec::new();
 
-        for primitive in primitives {
-            if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
-                continue;
+        for command in commands {
+            match command {
+                RenderCommand::Shape(primitive) => {
+                    if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
+                        continue;
+                    }
+                    let start = rect_vertices.len() as u32;
+                    rect_vertices.extend_from_slice(&RectVertex::from_primitive(
+                        *primitive,
+                        logical_width,
+                        logical_height,
+                    ));
+                    let end = rect_vertices.len() as u32;
+                    batches.push(DrawBatch::Rect(PrimitiveBatch {
+                        clip_rect: primitive.clip_rect,
+                        vertex_range: start..end,
+                    }));
+                }
+                RenderCommand::Mesh(primitive) => {
+                    if primitive.vertices.is_empty() {
+                        continue;
+                    }
+                    let start = mesh_vertices.len() as u32;
+                    mesh_vertices.extend(primitive.vertices.iter().copied().map(|vertex| {
+                        MeshVertex::from_scene_vertex(vertex, logical_width, logical_height)
+                    }));
+                    let end = mesh_vertices.len() as u32;
+                    batches.push(DrawBatch::Mesh(MeshBatch {
+                        clip_rect: primitive.clip_rect,
+                        vertex_range: start..end,
+                    }));
+                }
+                RenderCommand::Texture(texture) => {
+                    if let Some(bind_group) = self.texture_bind_group_for(&texture.texture)? {
+                        let start = text_vertices.len() as u32;
+                        text_vertices.extend_from_slice(&TextVertex::quad(
+                            texture.frame,
+                            logical_width,
+                            logical_height,
+                        ));
+                        let end = text_vertices.len() as u32;
+                        batches.push(DrawBatch::Sprite(TextBatch {
+                            bind_group,
+                            clip_rect: texture.clip_rect,
+                            vertex_range: start..end,
+                        }));
+                    }
+                }
+                RenderCommand::Text(text) => {
+                    if let Some(bind_group) = self.text_bind_group_for(text)? {
+                        let start = text_vertices.len() as u32;
+                        text_vertices.extend_from_slice(&TextVertex::quad(
+                            text.frame,
+                            logical_width,
+                            logical_height,
+                        ));
+                        let end = text_vertices.len() as u32;
+                        batches.push(DrawBatch::Sprite(TextBatch {
+                            bind_group,
+                            clip_rect: text.clip_rect,
+                            vertex_range: start..end,
+                        }));
+                    }
+                }
             }
-
-            let start = vertices.len() as u32;
-            vertices.extend_from_slice(&RectVertex::from_primitive(
-                *primitive,
-                logical_width,
-                logical_height,
-            ));
-            let end = vertices.len() as u32;
-            batches.push(PrimitiveBatch {
-                clip_rect: primitive.clip_rect,
-                vertex_range: start..end,
-            });
         }
 
-        (vertices, batches)
+        Ok(CommandBuffers {
+            rect_vertices,
+            mesh_vertices,
+            text_vertices,
+            batches,
+        })
     }
 
     fn apply_scissor<'a>(
@@ -657,6 +707,12 @@ impl Renderer {
         }
 
         self.surface.configure(&self.device, &self.config);
+        self.recreate_multisample_target();
+    }
+
+    fn recreate_multisample_target(&mut self) {
+        self.msaa_target =
+            create_multisample_target(&self.device, &self.config, self.msaa_sample_count);
     }
 
     fn text_cache_key(&self, text: &TextPrimitive) -> Option<TextCacheKey> {
@@ -1103,6 +1159,48 @@ impl RectVertex {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct MeshVertex {
+    position: [f32; 2],
+    color: [f32; 4],
+}
+
+impl MeshVertex {
+    fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: std::mem::size_of::<[f32; 2]>() as u64,
+                    shader_location: 1,
+                },
+            ],
+        }
+    }
+
+    fn from_scene_vertex(vertex: SceneMeshVertex, width: f32, height: f32) -> Self {
+        let x = vertex.position[0] / width * 2.0 - 1.0;
+        let y = 1.0 - vertex.position[1] / height * 2.0;
+        Self {
+            position: [x, y],
+            color: [
+                vertex.color.r as f32 / 255.0,
+                vertex.color.g as f32 / 255.0,
+                vertex.color.b as f32 / 255.0,
+                vertex.color.a as f32 / 255.0,
+            ],
+        }
+    }
+}
+
 fn instance_descriptor(clear_color: TguiColor) -> wgpu::InstanceDescriptor {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = instance_backends(clear_color);
@@ -1168,6 +1266,79 @@ fn required_device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
     {
         let _ = adapter;
         wgpu::Limits::default()
+    }
+}
+
+fn surface_msaa_sample_count(adapter: &wgpu::Adapter, format: wgpu::TextureFormat) -> u32 {
+    let features = adapter.get_texture_format_features(format);
+    supported_msaa_sample_count(features.flags)
+}
+
+fn supported_msaa_sample_count(flags: wgpu::TextureFormatFeatureFlags) -> u32 {
+    [4, 2]
+        .into_iter()
+        .find(|count| {
+            flags.sample_count_supported(*count)
+                && flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE)
+        })
+        .unwrap_or(1)
+}
+
+fn create_multisample_target(
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+    sample_count: u32,
+) -> Option<MultisampleTarget> {
+    if sample_count <= 1 || config.width == 0 || config.height == 0 {
+        return None;
+    }
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("tgui-msaa-color-target"),
+        size: wgpu::Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count,
+        dimension: wgpu::TextureDimension::D2,
+        format: config.format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    Some(MultisampleTarget {
+        _texture: texture,
+        view,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::supported_msaa_sample_count;
+
+    #[test]
+    fn prefers_x4_msaa_when_resolve_is_supported() {
+        let flags = wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4
+            | wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE;
+        assert_eq!(supported_msaa_sample_count(flags), 4);
+    }
+
+    #[test]
+    fn falls_back_to_x2_when_x4_is_unavailable() {
+        let flags = wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X2
+            | wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE;
+        assert_eq!(supported_msaa_sample_count(flags), 2);
+    }
+
+    #[test]
+    fn disables_msaa_without_resolve_support() {
+        assert_eq!(
+            supported_msaa_sample_count(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4),
+            1
+        );
     }
 }
 

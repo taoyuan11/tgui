@@ -1,5 +1,5 @@
 use tgui::{
-    Align, Application, Binding, Button, Color, Column, Command, InputTrigger, Insets, Justify,
+    Align, Application, Binding, Button, Color, Column, Command, InputTrigger, Insets,
     Observable, Row, Stack, Text, TguiError, ViewModelContext, dp, sp,
 };
 use tgui::platform::keyboard::KeyCode;
@@ -67,7 +67,6 @@ impl CounterVm {
             .fill_size()
             .padding(Insets::all(dp(28.0)))
             .align(Align::Center)
-            .justify(Justify::Center)
             .child(
                 Column::new()
                     .width(dp(520.0))

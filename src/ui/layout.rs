@@ -101,6 +101,7 @@ pub enum Align {
     Start,
     Center,
     End,
+    SpaceBetween,
     Stretch,
 }
 
@@ -108,15 +109,6 @@ pub enum Align {
 pub enum Axis {
     Horizontal,
     Vertical,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum Justify {
-    #[default]
-    Start,
-    Center,
-    End,
-    SpaceBetween,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]

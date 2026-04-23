@@ -1,5 +1,5 @@
 use tgui::{
-    el, Align, Application, Binding, Button, Color, Column, Command, Element, Insets, Justify,
+    el, Align, Application, Binding, Button, Color, Column, Command, Element, Insets,
     Observable, Stack, Text, TguiError, Theme, ThemeMode, ViewModelContext, dp, sp,
 };
 #[cfg(target_os = "android")]
@@ -62,7 +62,6 @@ impl AndroidApplication {
             .fill_size()
             .padding(Insets::all(dp(24.0)))
             .align(Align::Center)
-            .justify(Justify::Center)
             .child(
                 Column::new()
                     .fill_width()

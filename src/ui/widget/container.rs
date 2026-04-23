@@ -2,7 +2,7 @@ use crate::foundation::binding::Binding;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::{
-    Align, Axis, Insets, Justify, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap,
+    Align, Axis, Insets, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap,
 };
 use crate::ui::unit::Dp;
 
@@ -197,13 +197,6 @@ impl<VM> Container<VM> {
     pub fn gap(mut self, gap: impl Into<Value<Dp>>) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
             layout.gap = gap.into();
-        }
-        self
-    }
-
-    pub fn justify(mut self, justify: Justify) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.justify = justify;
         }
         self
     }
@@ -458,10 +451,6 @@ macro_rules! impl_layout_container {
 
             pub fn gap(self, gap: impl Into<Value<Dp>>) -> Self {
                 Self(self.0.gap(gap))
-            }
-
-            pub fn justify(self, justify: Justify) -> Self {
-                Self(self.0.justify(justify))
             }
 
             pub fn align(self, align: Align) -> Self {

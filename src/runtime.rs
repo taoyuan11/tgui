@@ -11,7 +11,7 @@ use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
-use crate::log::{tgui_log, Log, LogLevel};
+use crate::log::Log;
 use crate::media::MediaManager;
 #[cfg(all(target_os = "android", feature = "android"))]
 use crate::platform::android::activity::ndk::configuration::UiModeNight;
@@ -38,9 +38,9 @@ use crate::text::font::{FontManager, TextFontRequest};
 use crate::ui::theme::{Theme, ThemeMode};
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
 use crate::ui::widget::{
-    ComputedScene, HitInteraction, InputEditState, InputSnapshot, MediaEventPhase, MediaEventState,
-    Point, Rect, RenderedWidgetScene, ScenePrimitives, ScrollbarAxis, ScrollbarHandle, Text,
-    WidgetId, WidgetTree,
+    CanvasItemId, CanvasPointerEvent, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
+    InteractionHandlers, MediaEventPhase, MediaEventState, Point, Rect, RenderedWidgetScene,
+    ScenePrimitives, ScrollbarAxis, ScrollbarHandle, Text, WidgetId, WidgetTree,
 };
 use image::GenericImageView;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -603,10 +603,48 @@ struct CachedScene<VM> {
     computed: ComputedScene<VM>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HoverTargetId {
+    Widget(WidgetId),
+    CanvasItem {
+        widget_id: WidgetId,
+        item_id: CanvasItemId,
+    },
+}
+
+#[derive(Clone, Copy)]
+struct CanvasPointerContext {
+    item_id: CanvasItemId,
+    canvas_origin: Point,
+    item_origin: Point,
+}
+
+impl CanvasPointerContext {
+    fn pointer_event(self, position: Point) -> CanvasPointerEvent {
+        CanvasPointerEvent {
+            item_id: self.item_id,
+            canvas_position: Point::new(
+                position.x - self.canvas_origin.x,
+                position.y - self.canvas_origin.y,
+            ),
+            local_position: Point::new(
+                position.x - self.item_origin.x,
+                position.y - self.item_origin.y,
+            ),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum ClickHandler<VM> {
+    Command(Command<VM>),
+    Canvas(ValueCommand<VM, CanvasPointerEvent>, CanvasPointerContext),
+}
+
 struct PendingClick<VM> {
-    widget_id: WidgetId,
+    target_id: HoverTargetId,
     deadline: Instant,
-    command: Option<Command<VM>>,
+    command: Option<ClickHandler<VM>>,
 }
 
 struct FocusedWidget<VM> {
@@ -614,12 +652,24 @@ struct FocusedWidget<VM> {
     on_blur: Option<Command<VM>>,
 }
 
+#[derive(Clone)]
+enum HoverTransitionHandler<VM> {
+    Command(Command<VM>),
+    Canvas(ValueCommand<VM, CanvasPointerEvent>, CanvasPointerContext),
+}
+
+#[derive(Clone)]
+enum HoverMoveHandler<VM> {
+    Point(ValueCommand<VM, Point>),
+    Canvas(ValueCommand<VM, CanvasPointerEvent>, CanvasPointerContext),
+}
+
 struct HoveredWidget<VM> {
-    widget_id: WidgetId,
+    target_id: HoverTargetId,
     cursor_style: Option<crate::ui::widget::CursorStyle>,
-    on_mouse_enter: Option<Command<VM>>,
-    on_mouse_leave: Option<Command<VM>>,
-    on_mouse_move: Option<ValueCommand<VM, Point>>,
+    on_mouse_enter: Option<HoverTransitionHandler<VM>>,
+    on_mouse_leave: Option<HoverTransitionHandler<VM>>,
+    on_mouse_move: Option<HoverMoveHandler<VM>>,
 }
 
 #[derive(Clone, Copy)]
@@ -834,6 +884,41 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         });
         self.invalidate_scene();
         self.invalidation.mark_dirty();
+    }
+
+    fn execute_hover_transition_handler(
+        &mut self,
+        handler: &HoverTransitionHandler<VM>,
+        position: Option<Point>,
+    ) {
+        match handler {
+            HoverTransitionHandler::Command(command) => self.execute_command(command),
+            HoverTransitionHandler::Canvas(command, context) => {
+                if let Some(position) = position {
+                    self.execute_value_command(command, context.pointer_event(position));
+                }
+            }
+        }
+    }
+
+    fn execute_hover_move_handler(&mut self, handler: &HoverMoveHandler<VM>, position: Point) {
+        match handler {
+            HoverMoveHandler::Point(command) => self.execute_value_command(command, position),
+            HoverMoveHandler::Canvas(command, context) => {
+                self.execute_value_command(command, context.pointer_event(position));
+            }
+        }
+    }
+
+    fn execute_click_handler(&mut self, handler: &ClickHandler<VM>, position: Option<Point>) {
+        match handler {
+            ClickHandler::Command(command) => self.execute_command(command),
+            ClickHandler::Canvas(command, context) => {
+                if let Some(position) = position {
+                    self.execute_value_command(command, context.pointer_event(position));
+                }
+            }
+        }
     }
 
     fn drain_dialog_completions(&mut self) -> bool {
@@ -1267,41 +1352,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         1.0
     }
 
-    fn log_runtime_scales(&self, reason: &str) {
-        let scale_factor = self
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor() as f32)
-            .unwrap_or(1.0);
-        let font_scale = self.platform_font_scale();
-        #[cfg(all(target_env = "ohos", feature = "ohos"))]
-        {
-            let density_scale = self
-                .window
-                .as_ref()
-                .map(|window| window.density_scale() as f32)
-                .unwrap_or(scale_factor);
-            tgui_log(
-                LogLevel::Debug,
-                format!(
-                    "tgui scales [{reason}]: scale_factor={scale_factor:.4}, density_scale={density_scale:.4}, font_scale={font_scale:.4}"
-                ),
-            );
-        }
-        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
-        tgui_log(
-            LogLevel::Debug,
-            format!(
-                "tgui scales [{reason}]: scale_factor={scale_factor:.4}, font_scale={font_scale:.4}"
-            ),
-        );
-    }
-
     fn clear_pointer_position(&mut self) {
+        let previous_position = self.cursor_position;
         self.cursor_position = None;
         for hovered in std::mem::take(&mut self.hovered_widgets).into_iter().rev() {
             if let Some(command) = hovered.on_mouse_leave {
-                self.execute_command(&command);
+                self.execute_hover_transition_handler(&command, previous_position);
             }
         }
         self.hovered_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
@@ -1547,7 +1603,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         if let Some(pending) = self.pending_click.take() {
             if let Some(command) = pending.command {
-                self.execute_command(&command);
+                self.execute_click_handler(&command, self.cursor_position);
             }
         }
     }
@@ -2086,52 +2142,91 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
-    fn hit_test(&mut self, _viewport: Rect) -> Option<HitInteraction<VM>> {
-        let point = self.cursor_position?;
-        WidgetTree::hit_path_from_computed(self.computed_scene(), point).pop()
-    }
-
-    fn hover_path(&mut self, _viewport: Rect) -> Vec<HoveredWidget<VM>> {
+    fn hit_path(&mut self, _viewport: Rect) -> Vec<HitInteraction<VM>> {
         let Some(point) = self.cursor_position else {
             return Vec::new();
         };
-
         WidgetTree::hit_path_from_computed(self.computed_scene(), point)
+    }
+
+    fn hover_path(&mut self, _viewport: Rect) -> Vec<HoveredWidget<VM>> {
+        self.hit_path(_viewport)
             .into_iter()
             .map(|interaction| match interaction {
                 HitInteraction::Widget {
                     id, interactions, ..
                 } => HoveredWidget {
-                    widget_id: id,
+                    target_id: HoverTargetId::Widget(id),
                     cursor_style: interactions.cursor_style.map(|c| c.resolve()),
-                    on_mouse_enter: interactions.on_mouse_enter,
-                    on_mouse_leave: interactions.on_mouse_leave,
-                    on_mouse_move: interactions.on_mouse_move,
+                    on_mouse_enter: interactions
+                        .on_mouse_enter
+                        .map(HoverTransitionHandler::Command),
+                    on_mouse_leave: interactions
+                        .on_mouse_leave
+                        .map(HoverTransitionHandler::Command),
+                    on_mouse_move: interactions.on_mouse_move.map(HoverMoveHandler::Point),
                 },
                 HitInteraction::FocusInput {
                     id, interactions, ..
                 } => HoveredWidget {
-                    widget_id: id,
+                    target_id: HoverTargetId::Widget(id),
                     cursor_style: interactions
                         .cursor_style
                         .map(|c| c.resolve())
                         .or(Some(crate::ui::widget::CursorStyle::Text)),
-                    on_mouse_enter: interactions.on_mouse_enter,
-                    on_mouse_leave: interactions.on_mouse_leave,
-                    on_mouse_move: interactions.on_mouse_move,
+                    on_mouse_enter: interactions
+                        .on_mouse_enter
+                        .map(HoverTransitionHandler::Command),
+                    on_mouse_leave: interactions
+                        .on_mouse_leave
+                        .map(HoverTransitionHandler::Command),
+                    on_mouse_move: interactions.on_mouse_move.map(HoverMoveHandler::Point),
                 },
                 HitInteraction::SelectableText {
                     id, interactions, ..
                 } => HoveredWidget {
-                    widget_id: id,
+                    target_id: HoverTargetId::Widget(id),
                     cursor_style: interactions
                         .cursor_style
                         .map(|c| c.resolve())
                         .or(Some(crate::ui::widget::CursorStyle::Text)),
-                    on_mouse_enter: interactions.on_mouse_enter,
-                    on_mouse_leave: interactions.on_mouse_leave,
-                    on_mouse_move: interactions.on_mouse_move,
+                    on_mouse_enter: interactions
+                        .on_mouse_enter
+                        .map(HoverTransitionHandler::Command),
+                    on_mouse_leave: interactions
+                        .on_mouse_leave
+                        .map(HoverTransitionHandler::Command),
+                    on_mouse_move: interactions.on_mouse_move.map(HoverMoveHandler::Point),
                 },
+                HitInteraction::CanvasItem {
+                    id,
+                    item_id,
+                    item_interactions,
+                    canvas_origin,
+                    item_origin,
+                } => {
+                    let context = CanvasPointerContext {
+                        item_id,
+                        canvas_origin,
+                        item_origin,
+                    };
+                    HoveredWidget {
+                        target_id: HoverTargetId::CanvasItem {
+                            widget_id: id,
+                            item_id,
+                        },
+                        cursor_style: None,
+                        on_mouse_enter: item_interactions
+                            .on_mouse_enter
+                            .map(|command| HoverTransitionHandler::Canvas(command, context)),
+                        on_mouse_leave: item_interactions
+                            .on_mouse_leave
+                            .map(|command| HoverTransitionHandler::Canvas(command, context)),
+                        on_mouse_move: item_interactions
+                            .on_mouse_move
+                            .map(|command| HoverMoveHandler::Canvas(command, context)),
+                    }
+                }
             })
             .collect()
     }
@@ -2145,32 +2240,32 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .hovered_widgets
                 .iter()
                 .zip(next_hovered.iter())
-                .any(|(previous, next)| previous.widget_id != next.widget_id);
+                .any(|(previous, next)| previous.target_id != next.target_id);
         let mut prefix_len = 0usize;
         while prefix_len < self.hovered_widgets.len()
             && prefix_len < next_hovered.len()
-            && self.hovered_widgets[prefix_len].widget_id == next_hovered[prefix_len].widget_id
+            && self.hovered_widgets[prefix_len].target_id == next_hovered[prefix_len].target_id
         {
             prefix_len += 1;
         }
 
         let previous_hovered = std::mem::take(&mut self.hovered_widgets);
         for previous in previous_hovered[prefix_len..].iter().rev() {
-            if let Some(command) = previous.on_mouse_leave.clone() {
-                self.execute_command(&command);
+            if let Some(command) = previous.on_mouse_leave.as_ref() {
+                self.execute_hover_transition_handler(command, cursor_position);
             }
         }
 
-        for hovered in next_hovered[prefix_len..].iter() {
-            if let Some(command) = hovered.on_mouse_enter.clone() {
-                self.execute_command(&command);
+        for hovered in next_hovered[prefix_len..].iter().rev() {
+            if let Some(command) = hovered.on_mouse_enter.as_ref() {
+                self.execute_hover_transition_handler(command, cursor_position);
             }
         }
 
         if let Some(position) = cursor_position {
-            for hovered in &next_hovered {
-                if let Some(command) = hovered.on_mouse_move.clone() {
-                    self.execute_value_command(&command, position);
+            for hovered in next_hovered.iter().rev() {
+                if let Some(command) = hovered.on_mouse_move.as_ref() {
+                    self.execute_hover_move_handler(command, position);
                 }
             }
         }
@@ -2386,8 +2481,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             CursorIcon::Text
         } else if let Some(cursor_style) = self
             .hovered_widgets
-            .last()
-            .and_then(|hovered| hovered.cursor_style)
+            .iter()
+            .rev()
+            .find_map(|hovered| hovered.cursor_style)
         {
             cursor_icon(cursor_style)
         } else {
@@ -2474,17 +2570,90 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
+    fn dispatch_widget_click(
+        &mut self,
+        target_id: HoverTargetId,
+        interactions: InteractionHandlers<VM>,
+        now: Instant,
+    ) {
+        let is_double_click = self
+            .pending_click
+            .as_ref()
+            .map(|pending| pending.target_id == target_id && pending.deadline > now)
+            .unwrap_or(false);
+
+        if is_double_click {
+            self.pending_click = None;
+            if let Some(command) = interactions.on_double_click.or(interactions.on_click) {
+                self.execute_command(&command);
+            }
+            return;
+        }
+
+        if interactions.on_double_click.is_some() {
+            self.pending_click = Some(PendingClick {
+                target_id,
+                deadline: now + DOUBLE_CLICK_THRESHOLD,
+                command: interactions.on_click.map(ClickHandler::Command),
+            });
+        } else if let Some(command) = interactions.on_click {
+            self.execute_command(&command);
+        } else {
+            self.pending_click = None;
+        }
+    }
+
     fn handle_mouse_press(&mut self, viewport: Rect, now: Instant) {
         self.flush_pending_click_if_due(now);
 
-        let hit = self.hit_test(viewport);
-        let Some(hit) = hit else {
+        let hit_path = self.hit_path(viewport);
+        let Some(hit) = hit_path.last().cloned() else {
             self.end_input_selection_drag();
             self.clear_selected_text();
             self.update_focus(None, None, None, None);
             self.pending_click = None;
             return;
         };
+
+        if matches!(hit, HitInteraction::CanvasItem { .. }) {
+            self.end_input_selection_drag();
+            self.clear_selected_text();
+            self.update_focus(None, None, None, None);
+            self.pending_click = None;
+
+            for interaction in hit_path.into_iter().rev() {
+                match interaction {
+                    HitInteraction::CanvasItem {
+                        item_id,
+                        item_interactions,
+                        canvas_origin,
+                        item_origin,
+                        ..
+                    } => {
+                        if let Some(command) = item_interactions.on_click {
+                            let context = CanvasPointerContext {
+                                item_id,
+                                canvas_origin,
+                                item_origin,
+                            };
+                            self.execute_click_handler(
+                                &ClickHandler::Canvas(command, context),
+                                self.cursor_position,
+                            );
+                            return;
+                        }
+                    }
+                    HitInteraction::Widget {
+                        id, interactions, ..
+                    } => {
+                        self.dispatch_widget_click(HoverTargetId::Widget(id), interactions, now);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+            return;
+        }
 
         let pointer_position = self.cursor_position;
         let (
@@ -2578,6 +2747,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     cursor.map(|cursor| (id, frame, padding, text_style, text, cursor)),
                 )
             }
+            HitInteraction::CanvasItem { .. } => unreachable!("canvas item handled above"),
         };
 
         if input_selection.is_none() {
@@ -2617,31 +2787,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.begin_text_selection(widget_id, frame, padding, text_style, text, cursor);
         }
 
-        let is_double_click = self
-            .pending_click
-            .as_ref()
-            .map(|pending| pending.widget_id == widget_id && pending.deadline > now)
-            .unwrap_or(false);
-
-        if is_double_click {
-            self.pending_click = None;
-            if let Some(command) = interactions.on_double_click.or(interactions.on_click) {
-                self.execute_command(&command);
-            }
-            return;
-        }
-
-        if interactions.on_double_click.is_some() {
-            self.pending_click = Some(PendingClick {
-                widget_id,
-                deadline: now + DOUBLE_CLICK_THRESHOLD,
-                command: interactions.on_click,
-            });
-        } else if let Some(command) = interactions.on_click {
-            self.execute_command(&command);
-        } else {
-            self.pending_click = None;
-        }
+        self.dispatch_widget_click(HoverTargetId::Widget(widget_id), interactions, now);
     }
 
     fn window_id(&self) -> Option<WindowId> {
@@ -2851,7 +2997,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             WindowEvent::ScaleFactorChanged { .. } => {
-                self.log_runtime_scales("bound WindowEvent::ScaleFactorChanged");
                 self.apply_window_theme(None);
                 self.invalidate_scene();
                 if let Some(window) = self.window.as_ref() {
@@ -2883,7 +3028,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             WindowEvent::SurfaceResized(size) => {
-                self.log_runtime_scales("bound WindowEvent::SurfaceResized");
                 self.invalidate_scene();
                 if let Some(renderer) = self.renderer.as_mut() {
                     let scale_factor = self
@@ -3976,11 +4120,13 @@ mod tests {
     use crate::dialog::async_dialog_channel;
     use crate::foundation::binding::{Binding, InvalidationSignal};
     use crate::foundation::color::Color;
+    use crate::foundation::view_model::{Command, ValueCommand};
     use crate::platform::dpi::LogicalSize;
     use crate::text::font::{FontCatalog, TextFontRequest};
     use crate::ui::unit::{dp, sp, UnitContext};
     use crate::ui::widget::{
-        Column, CursorStyle, HitInteraction, Input, InputEditState, Point, Text, WidgetTree,
+        Canvas, CanvasItem, CanvasPath, CanvasPointerEvent, Column, CursorStyle, HitInteraction,
+        Input, InputEditState, PathBuilder, Point, Text, WidgetTree,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -4028,13 +4174,21 @@ mod tests {
         widget_tree: Option<WidgetTree<TestVm>>,
         invalidation: InvalidationSignal,
     ) -> BoundRuntimeHandler<TestVm> {
+        test_handler_with_vm(TestVm, widget_tree, invalidation)
+    }
+
+    fn test_handler_with_vm<VM: crate::foundation::view_model::ViewModel>(
+        view_model: VM,
+        widget_tree: Option<WidgetTree<VM>>,
+        invalidation: InvalidationSignal,
+    ) -> BoundRuntimeHandler<VM> {
         let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
         BoundRuntimeHandler::new(
             "test".to_string(),
             1,
             WindowRole::Main,
             test_config(),
-            Arc::new(Mutex::new(TestVm)),
+            Arc::new(Mutex::new(view_model)),
             WindowBindings::default(),
             widget_tree,
             Vec::new(),
@@ -4549,5 +4703,93 @@ mod tests {
         let viewport = handler.viewport_rect();
         assert_eq!(handler.hover_path(viewport).len(), 1);
         assert_eq!(handler.hover_path(viewport).len(), 1);
+    }
+
+    #[derive(Default)]
+    struct CanvasEventVm {
+        hover_events: Vec<CanvasPointerEvent>,
+        clicks: usize,
+        widget_clicks: usize,
+    }
+
+    #[test]
+    fn canvas_item_hover_dispatches_canvas_pointer_payload() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(
+            Canvas::new(vec![CanvasItem::Path(
+                CanvasPath::new(
+                    7_u64,
+                    PathBuilder::new()
+                        .move_to(10.0, 10.0)
+                        .line_to(60.0, 10.0)
+                        .line_to(60.0, 40.0)
+                        .line_to(10.0, 40.0)
+                        .close(),
+                )
+                .fill(Color::WHITE),
+            )])
+            .size(dp(100.0), dp(80.0))
+            .on_item_mouse_move(ValueCommand::new(
+                |vm: &mut CanvasEventVm, event| {
+                    vm.hover_events.push(event);
+                },
+            )),
+        );
+        let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+        handler.cursor_position = Some(Point::new(dp(25.0), dp(20.0)));
+
+        handler.handle_hover(handler.viewport_rect());
+
+        let view_model = handler
+            .view_model
+            .lock()
+            .expect("view model lock should not be poisoned");
+        assert_eq!(view_model.hover_events.len(), 1);
+        assert_eq!(view_model.hover_events[0].item_id, 7_u64.into());
+        assert_eq!(
+            view_model.hover_events[0].canvas_position,
+            Point::new(25.0, 20.0)
+        );
+        assert_eq!(
+            view_model.hover_events[0].local_position,
+            Point::new(15.0, 10.0)
+        );
+    }
+
+    #[test]
+    fn canvas_item_click_takes_priority_over_widget_click() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(
+            Canvas::new(vec![CanvasItem::Path(
+                CanvasPath::new(
+                    11_u64,
+                    PathBuilder::new()
+                        .move_to(10.0, 10.0)
+                        .line_to(60.0, 10.0)
+                        .line_to(60.0, 40.0)
+                        .line_to(10.0, 40.0)
+                        .close(),
+                )
+                .fill(Color::WHITE),
+            )])
+            .size(dp(100.0), dp(80.0))
+            .on_click(Command::new(|vm: &mut CanvasEventVm| {
+                vm.widget_clicks += 1;
+            }))
+            .on_item_click(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+                vm.clicks += 1;
+            })),
+        );
+        let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+        handler.cursor_position = Some(Point::new(dp(20.0), dp(20.0)));
+
+        handler.handle_mouse_press(handler.viewport_rect(), Instant::now());
+
+        let view_model = handler
+            .view_model
+            .lock()
+            .expect("view model lock should not be poisoned");
+        assert_eq!(view_model.clicks, 1);
+        assert_eq!(view_model.widget_clicks, 0);
     }
 }

@@ -2,7 +2,7 @@
 use tgui::platform::ohos::export_ohos_winit_app;
 use tgui::{
     dp, el, sp, Align, Application, Binding, Button, Color, Column, Command, CommandContext,
-    Element, Insets, Justify, LogLevel, Observable, Stack, Text, Theme, ThemeMode,
+    Element, Insets, LogLevel, Observable, Stack, Text, Theme, ThemeMode,
     ViewModelContext,
 };
 #[cfg(target_env = "ohos")]
@@ -55,7 +55,6 @@ impl OhosApplication {
             .fill_size()
             .padding(Insets::all(dp(24.0)))
             .align(Align::Center)
-            .justify(Justify::Center)
             .child(el![
                 Column::new()
                     .fill_width()

@@ -1,4 +1,5 @@
 mod button;
+mod canvas;
 mod common;
 mod container;
 mod core;
@@ -9,9 +10,13 @@ mod text;
 mod video;
 
 pub use button::Button;
+pub use canvas::{
+    Canvas, CanvasItem, CanvasItemId, CanvasPath, CanvasPointerEvent, CanvasStroke, PathBuilder,
+};
 pub(crate) use common::{
     CompositionState, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
-    MediaEventPhase, MediaEventState, RenderedWidgetScene, ScrollbarAxis, ScrollbarHandle,
+    InteractionHandlers, MediaEventPhase, MediaEventState, MeshVertex, RenderCommand,
+    RenderedWidgetScene, ScrollbarAxis, ScrollbarHandle,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,
