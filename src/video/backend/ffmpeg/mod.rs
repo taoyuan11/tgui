@@ -170,6 +170,7 @@ impl Drop for FfmpegVideoBackend {
 
 impl VideoBackend for FfmpegVideoBackend {
     fn load(&self, source: VideoSource) -> Result<(), TguiError> {
+        validate_video_source(&source)?;
         self.command_tx
             .send(BackendCommand::Load(source))
             .map_err(|_| TguiError::Media("video backend is unavailable".to_string()))
@@ -518,7 +519,7 @@ fn clear_latest_frame(latest_frame: &Arc<Mutex<Option<Arc<TextureFrame>>>>) {
 fn buffering_profile_for_source(source: &VideoSource) -> BufferingProfile {
     match source {
         VideoSource::File(_) => LOCAL_BUFFERING_PROFILE,
-        VideoSource::Url(_) => NETWORK_BUFFERING_PROFILE,
+        VideoSource::Url { .. } => NETWORK_BUFFERING_PROFILE,
     }
 }
 
@@ -539,9 +540,56 @@ fn rational_frame_duration(rate: ffmpeg::Rational) -> Option<Duration> {
     ))
 }
 
-fn http_input_options() -> ffmpeg::Dictionary<'static> {
+fn validate_video_source(source: &VideoSource) -> Result<(), TguiError> {
+    let VideoSource::Url { headers, .. } = source else {
+        return Ok(());
+    };
+
+    for (name, value) in headers {
+        if name.is_empty() {
+            return Err(TguiError::Media(
+                "video header name cannot be empty".to_string(),
+            ));
+        }
+        if name.contains(['\r', '\n']) {
+            return Err(TguiError::Media(format!(
+                "video header {name:?} contains an invalid line break"
+            )));
+        }
+        if value.contains(['\r', '\n']) {
+            return Err(TguiError::Media(format!(
+                "video header value for {name:?} contains an invalid line break"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn http_input_options(source: &VideoSource) -> Result<ffmpeg::Dictionary<'static>, TguiError> {
     let mut options = ffmpeg::Dictionary::new();
-    options.set("user_agent", concat!("tgui/", env!("CARGO_PKG_VERSION")));
+    validate_video_source(source)?;
+
+    let custom_headers = match source {
+        VideoSource::File(_) => None,
+        VideoSource::Url { headers, .. } => (!headers.is_empty()).then(|| {
+            headers
+                .iter()
+                .map(|(name, value)| format!("{name}: {value}\r\n"))
+                .collect::<String>()
+        }),
+    };
+
+    let has_custom_user_agent = match source {
+        VideoSource::File(_) => false,
+        VideoSource::Url { headers, .. } => headers
+            .iter()
+            .any(|(name, _)| name.trim().eq_ignore_ascii_case("user-agent")),
+    };
+
+    if !has_custom_user_agent {
+        options.set("user_agent", concat!("tgui/", env!("CARGO_PKG_VERSION")));
+    }
     options.set("multiple_requests", "1");
     options.set("short_seek_size", "65536");
     options.set("reconnect", "1");
@@ -550,16 +598,20 @@ fn http_input_options() -> ffmpeg::Dictionary<'static> {
     options.set("reconnect_on_http_error", "4xx,5xx");
     options.set("reconnect_delay_max", "2");
     options.set("rw_timeout", "15000000");
-    options
+    if let Some(headers) = custom_headers {
+        options.set("headers", &headers);
+    }
+    Ok(options)
 }
 
-fn open_input(
-    source: &VideoSource,
-    source_url: &str,
-) -> Result<format::context::Input, ffmpeg::Error> {
+fn open_input(source: &VideoSource, source_url: &str) -> Result<format::context::Input, TguiError> {
     match source {
-        VideoSource::File(_) => format::input(source_url),
-        VideoSource::Url(_) => format::input_with_dictionary(source_url, http_input_options()),
+        VideoSource::File(_) => format::input(source_url)
+            .map_err(|error| TguiError::Media(format!("failed to open video source: {error}"))),
+        VideoSource::Url { .. } => {
+            format::input_with_dictionary(source_url, http_input_options(source)?)
+                .map_err(|error| TguiError::Media(format!("failed to open video source: {error}")))
+        }
     }
 }
 
@@ -913,9 +965,8 @@ mod tests {
 
     #[test]
     fn url_sources_use_deeper_buffer_profile() {
-        let profile = buffering_profile_for_source(&VideoSource::Url(
-            "https://example.com/demo.mp4".to_string(),
-        ));
+        let profile =
+            buffering_profile_for_source(&VideoSource::url("https://example.com/demo.mp4"));
         assert_eq!(profile, NETWORK_BUFFERING_PROFILE);
         assert_eq!(profile.video_start_buffer_target, Duration::from_secs(5));
     }
@@ -933,7 +984,12 @@ mod tests {
 
     #[test]
     fn http_sources_enable_recovery_and_connection_reuse_options() {
-        let options = http_input_options();
+        let options = http_input_options(&VideoSource::url("https://example.com/demo.mp4"))
+            .expect("http options should build");
+        assert_eq!(
+            options.get("user_agent"),
+            Some(concat!("tgui/", env!("CARGO_PKG_VERSION")))
+        );
         assert_eq!(options.get("multiple_requests"), Some("1"));
         assert_eq!(options.get("short_seek_size"), Some("65536"));
         assert_eq!(options.get("reconnect"), Some("1"));
@@ -941,6 +997,64 @@ mod tests {
         assert_eq!(options.get("reconnect_on_network_error"), Some("1"));
         assert_eq!(options.get("reconnect_on_http_error"), Some("4xx,5xx"));
         assert_eq!(options.get("rw_timeout"), Some("15000000"));
+    }
+
+    #[test]
+    fn http_sources_serialize_custom_headers_for_ffmpeg() {
+        let source = VideoSource::url("https://example.com/demo.mp4").with_headers([
+            ("Authorization", "Bearer token"),
+            ("Referer", "https://example.com/app"),
+            ("Cookie", "a=1; b=2"),
+        ]);
+
+        let options = http_input_options(&source).expect("http options should build");
+
+        assert_eq!(
+            options.get("headers"),
+            Some(
+                "Authorization: Bearer token\r\nReferer: https://example.com/app\r\nCookie: a=1; b=2\r\n"
+            )
+        );
+        assert_eq!(
+            options.get("user_agent"),
+            Some(concat!("tgui/", env!("CARGO_PKG_VERSION")))
+        );
+    }
+
+    #[test]
+    fn custom_user_agent_overrides_default_user_agent_option() {
+        let source = VideoSource::url("https://example.com/demo.mp4")
+            .with_header("User-Agent", "custom-agent/1.0");
+
+        let options = http_input_options(&source).expect("http options should build");
+
+        assert_eq!(
+            options.get("headers"),
+            Some("User-Agent: custom-agent/1.0\r\n")
+        );
+        assert_eq!(options.get("user_agent"), None);
+    }
+
+    #[test]
+    fn invalid_http_headers_are_rejected() {
+        let empty_name = VideoSource::url("https://example.com/demo.mp4").with_header("", "value");
+        let invalid_name =
+            VideoSource::url("https://example.com/demo.mp4").with_header("Bad\nHeader", "value");
+        let invalid_value = VideoSource::url("https://example.com/demo.mp4")
+            .with_header("Authorization", "Bearer\ntoken");
+
+        assert!(matches!(
+            validate_video_source(&empty_name),
+            Err(TguiError::Media(message)) if message.contains("cannot be empty")
+        ));
+        assert!(matches!(
+            validate_video_source(&invalid_name),
+            Err(TguiError::Media(message)) if message.contains("invalid line break")
+        ));
+        assert!(matches!(
+            validate_video_source(&invalid_value),
+            Err(TguiError::Media(message)) if message.contains("invalid line break")
+        ));
     }
 
     #[test]

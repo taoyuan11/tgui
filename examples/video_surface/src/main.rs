@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::path::PathBuf;
 
-use tgui::{dp, el, sp, Application, Button, Color, Column, Command, Input, Insets, Observable, Row, Stack, Text, ValueCommand, VideoController, VideoSource, VideoSurface, ViewModelContext};
+use tgui::{
+    dp, el, sp, Application, Button, Color, Column, Command, Input, Insets, Observable, Row,
+    Text, ValueCommand, VideoController, VideoSource, VideoSurface, ViewModelContext,
+};
 
 struct VideoVm {
     controller: VideoController,
@@ -14,7 +17,8 @@ impl VideoVm {
         controller.set_buffer_memory_limit_bytes(160 * 1024 * 1024);
         Self {
             controller,
-            source: ctx.observable(String::from("D:\\CloudMusic\\MV\\郭顶 - 凄美地.mp4")),
+            // source: ctx.observable(String::from("D:\\CloudMusic\\MV\\郭顶 - 凄美地.mp4")),
+            source: ctx.observable(String::from("https://cn-gddg-ct-01-12.bilivideo.com/upgcxcode/58/40/37649974058/37649974058-1-16.mp4?e=ig8euxZM2rNcNbRVhwdVhwdlhWdVhwdVhoNvNC8BqJIzNbfqXBvEqxTEto8BTrNvN0GvT90W5JZMkX_YN0MvXg8gNEV4NC8xNEV4N03eN0B5tZlqNxTEto8BTrNvNeZVuJ10Kj_g2UB02J0mN0B5tZlqNCNEto8BTrNvNC7MTX502C8f2jmMQJ6mqF2fka1mqx6gqj0eN0B599M=&trid=000015c2a1290e254e34b6fe4d611b0ff88u&platform=pc&mid=0&deadline=1777021829&oi=0x240e039d00309a31a581d8697d123978&og=hw&uipk=5&nbs=1&gen=playurlv3&os=bcache&upsig=2244948e27511007ecbcc45b5069269a&uparams=e,trid,platform,mid,deadline,oi,og,uipk,nbs,gen,os&cdnid=61312&bvc=vod&nettype=0&bw=230292&lrs=61&buvid=&build=0&dl=0&f=u_0_0&qn_dyeid=79b7153ec5a10ba60053ced269eb1765&agrr=1&orderid=0,3")),
         }
     }
 
@@ -24,6 +28,10 @@ impl VideoVm {
 
     fn pause(&mut self) {
         self.controller.pause();
+    }
+
+    fn replay(&mut self) {
+        self.controller.replay();
     }
 
     fn mute(&mut self) {
@@ -75,40 +83,19 @@ impl VideoVm {
                     .border_radius(dp(12.0))
                     .border(dp(1.0), Color::hexa(0x334155FF)),
                 Row::new().gap(dp(8.0)).child(el![
-                    Stack::new()
-                        .padding(Insets::symmetric(dp(12.0), dp(8.0)))
-                        .background(Color::hexa(0x2563EBFF))
-                        .border_radius(dp(8.0))
-                        .child(Text::new("Play").color(Color::WHITE))
-                        .on_click(Command::new(|vm: &mut VideoVm| {
-                            eprintln!("[vm] play clicked");
-                            vm.play()
-                        })),
-                    Stack::new()
-                        .padding(Insets::symmetric(dp(12.0), dp(8.0)))
-                        .background(Color::hexa(0x475569FF))
-                        .border_radius(dp(8.0))
-                        .child(Text::new("Pause").color(Color::WHITE))
+                    Button::new(Text::new("Play"))
+                        .on_click(Command::new(Self::play)),
+                    Button::new(Text::new("Pause"))
                         .on_click(Command::new(Self::pause)),
-                    Stack::new()
-                        .padding(Insets::symmetric(dp(12.0), dp(8.0)))
-                        .background(Color::hexa(0xEA580CFF))
-                        .border_radius(dp(8.0))
-                        .child(Text::new("to 95%").color(Color::WHITE))
+                    Button::new(Text::new("Replay"))
+                        .on_click(Command::new(Self::replay)),
+                    Button::new(Text::new("to 95%"))
                         .on_click(Command::new(|video_vm: &mut VideoVm| {
                             video_vm.set_progress(0.95)
                         })),
-                    Stack::new()
-                        .padding(Insets::symmetric(dp(12.0), dp(8.0)))
-                        .background(Color::hexa(0x7C3AEDFF))
-                        .border_radius(dp(8.0))
-                        .child(Text::new("Mute").color(Color::WHITE))
+                    Button::new(Text::new("Mute"))
                         .on_click(Command::new(Self::mute)),
-                    Stack::new()
-                        .padding(Insets::symmetric(dp(12.0), dp(8.0)))
-                        .background(Color::hexa(0x0F766EFF))
-                        .border_radius(dp(8.0))
-                        .child(Text::new("Unmute").color(Color::WHITE))
+                    Button::new(Text::new("Unmute"))
                         .on_click(Command::new(Self::unmute)),
                 ]),
                 Row::new().gap(dp(12.0)).child(el![
@@ -117,7 +104,7 @@ impl VideoVm {
                     Text::new("/").color(Color::hexa(0x64748BFF)),
                     Text::new(duration).color(Color::hexa(0xCBD5E1FF))
                 ]),
-                Row::new().fill_width().gap(dp(10.0)).child(el![
+                Column::new().fill_width().gap(dp(10.0)).child(el![
                     Input::new(Text::new(self.source.binding()))
                         .fill_width()
                         .placeholder_with_str("PleaseEnterTheVideoSourcePath")
@@ -128,7 +115,9 @@ impl VideoVm {
                         |video_vm: &mut VideoVm| {
                             let _ = video_vm
                                 .controller
-                                .load(parse_video_source(video_vm.source.get().clone()));
+                                .load(parse_video_source(video_vm.source.get().clone(), Some(vec![
+                                ("Referer".to_string(), "https://www.bilibili.com/".to_string())
+                            ])));
                         }
                     ))
                 ])
@@ -137,9 +126,13 @@ impl VideoVm {
     }
 }
 
-fn parse_video_source(value: String) -> VideoSource {
+fn parse_video_source(value: String, header: Option<Vec<(String, String)>>) -> VideoSource {
     if value.starts_with("http") {
-        VideoSource::Url(value)
+        let mut source = VideoSource::url(value);
+        if let Some(header) = header {
+            source = source.with_headers(header);
+        }
+        source
     } else {
         VideoSource::File(PathBuf::from(value))
     }

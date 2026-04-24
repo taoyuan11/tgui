@@ -250,12 +250,11 @@ impl DecodeSession {
                 .to_str()
                 .ok_or_else(|| TguiError::Media("video path is not valid UTF-8".to_string()))?
                 .to_string(),
-            VideoSource::Url(url) => url.clone(),
+            VideoSource::Url { url, .. } => url.clone(),
         };
 
         let buffering_profile = buffering_profile_for_source(&source);
-        let mut input = open_input(&source, &source_url)
-            .map_err(|error| TguiError::Media(format!("failed to open video source: {error}")))?;
+        let mut input = open_input(&source, &source_url)?;
 
         if !start_position.is_zero() {
             let timestamp = start_position.as_micros().min(i64::MAX as u128) as i64;

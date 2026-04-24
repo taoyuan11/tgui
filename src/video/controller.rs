@@ -48,6 +48,15 @@ impl VideoController {
     }
 
     pub fn play(&self) {
+        if self.inner.shared.playback_state.get() == PlaybackState::Ended {
+            self.replay();
+            return;
+        }
+        self.inner.backend.play();
+    }
+
+    pub fn replay(&self) {
+        self.inner.backend.seek(Duration::ZERO);
         self.inner.backend.play();
     }
 
@@ -143,7 +152,7 @@ mod tests {
     #[derive(Default)]
     struct RecordedCommands {
         loads: Vec<VideoSource>,
-        play_count: usize,
+        commands: Vec<&'static str>,
         pause_count: usize,
         seeks: Vec<Duration>,
         volumes: Vec<f32>,
@@ -176,25 +185,20 @@ mod tests {
         }
 
         fn play(&self) {
-            self.commands
-                .lock()
-                .expect("commands lock poisoned")
-                .play_count += 1;
+            let mut commands = self.commands.lock().expect("commands lock poisoned");
+            commands.commands.push("play");
         }
 
         fn pause(&self) {
-            self.commands
-                .lock()
-                .expect("commands lock poisoned")
-                .pause_count += 1;
+            let mut commands = self.commands.lock().expect("commands lock poisoned");
+            commands.commands.push("pause");
+            commands.pause_count += 1;
         }
 
         fn seek(&self, position: Duration) {
-            self.commands
-                .lock()
-                .expect("commands lock poisoned")
-                .seeks
-                .push(position);
+            let mut commands = self.commands.lock().expect("commands lock poisoned");
+            commands.commands.push("seek");
+            commands.seeks.push(position);
         }
 
         fn set_volume(&self, volume: f32) {
@@ -265,12 +269,41 @@ mod tests {
 
         let commands = commands.lock().expect("commands lock poisoned");
         assert_eq!(commands.loads, vec![VideoSource::File("demo.mp4".into())]);
-        assert_eq!(commands.play_count, 1);
+        assert_eq!(commands.commands, vec!["play", "pause", "seek"]);
         assert_eq!(commands.pause_count, 1);
         assert_eq!(commands.seeks, vec![Duration::from_secs(9)]);
         assert_eq!(commands.volumes, vec![0.25]);
         assert_eq!(commands.muteds, vec![true]);
         assert_eq!(commands.buffer_memory_limits, vec![32 * 1024 * 1024]);
+    }
+
+    #[test]
+    fn controller_forwards_url_sources_with_headers_to_backend() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        let backend = Arc::new(MockBackend::new());
+        let commands = backend.commands.clone();
+        let controller = VideoController::from_parts(shared, backend);
+
+        controller
+            .load(
+                VideoSource::url("https://example.com/demo.mp4")
+                    .with_header("Authorization", "Bearer token")
+                    .with_header("Referer", "https://example.com/app"),
+            )
+            .expect("mock load should succeed");
+
+        let commands = commands.lock().expect("commands lock poisoned");
+        assert_eq!(
+            commands.loads,
+            vec![VideoSource::Url {
+                url: "https://example.com/demo.mp4".to_string(),
+                headers: vec![
+                    ("Authorization".to_string(), "Bearer token".to_string()),
+                    ("Referer".to_string(), "https://example.com/app".to_string()),
+                ],
+            }]
+        );
     }
 
     #[test]
@@ -330,5 +363,36 @@ mod tests {
             controller.inner.shared.buffer_memory_limit_bytes.get(),
             DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES
         );
+    }
+
+    #[test]
+    fn play_restarts_from_beginning_after_playback_ended() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        shared.playback_state.set(PlaybackState::Ended);
+        let backend = Arc::new(MockBackend::new());
+        let commands = backend.commands.clone();
+        let controller = VideoController::from_parts(shared, backend);
+
+        controller.play();
+
+        let commands = commands.lock().expect("commands lock poisoned");
+        assert_eq!(commands.commands, vec!["seek", "play"]);
+        assert_eq!(commands.seeks, vec![Duration::ZERO]);
+    }
+
+    #[test]
+    fn replay_seeks_to_start_then_plays() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        let backend = Arc::new(MockBackend::new());
+        let commands = backend.commands.clone();
+        let controller = VideoController::from_parts(shared, backend);
+
+        controller.replay();
+
+        let commands = commands.lock().expect("commands lock poisoned");
+        assert_eq!(commands.commands, vec!["seek", "play"]);
+        assert_eq!(commands.seeks, vec![Duration::ZERO]);
     }
 }

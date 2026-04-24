@@ -249,6 +249,19 @@ cargo run --manifest-path examples/video_surface/Cargo.toml
 - `PlaybackState`
 - `VideoMetrics`
 
+网络视频如果需要自定义请求头，可以把 header 直接挂在 `VideoSource` 上：
+
+```rust
+let source = tgui::VideoSource::url("https://example.com/demo.mp4")
+    .with_header("Authorization", "Bearer <token>")
+    .with_headers([
+        ("Referer", "https://example.com/player"),
+        ("Cookie", "session=abc123"),
+    ]);
+
+controller.load(source)?;
+```
+
 ## 多窗口与平台支持
 
 桌面端当前包含 Windows、macOS、Linux 相关实现；同时提供：
