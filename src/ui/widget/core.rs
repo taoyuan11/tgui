@@ -706,6 +706,7 @@ impl<VM> ResolvedElement<VM> {
                     image.fit,
                     frame,
                     background_frame,
+                    background_radius,
                     primitive_clip,
                     opacity,
                     loading_background,
@@ -797,6 +798,7 @@ impl<VM> ResolvedElement<VM> {
                     video,
                     frame,
                     background_frame,
+                    background_radius,
                     primitive_clip,
                     opacity,
                     loading_background,
@@ -1454,6 +1456,7 @@ fn push_media_texture_or_placeholder<VM>(
     fit: ContentFit,
     frame: Rect,
     content_frame: Rect,
+    content_corner_radius: f32,
     clip_rect: Option<Rect>,
     opacity: f32,
     loading_background: Color,
@@ -1481,6 +1484,7 @@ fn push_media_texture_or_placeholder<VM>(
     push_media_placeholder(
         frame,
         content_frame,
+        content_corner_radius,
         clip_rect,
         opacity,
         context,
@@ -1490,6 +1494,7 @@ fn push_media_texture_or_placeholder<VM>(
         snapshot.loading,
         snapshot.error.as_deref(),
         loading_background,
+        snapshot.loading,
     );
 }
 
@@ -1499,6 +1504,7 @@ fn push_video_texture_or_placeholder<VM>(
     video: &PublicVideoSurface,
     frame: Rect,
     content_frame: Rect,
+    content_corner_radius: f32,
     clip_rect: Option<Rect>,
     opacity: f32,
     loading_background: Color,
@@ -1507,6 +1513,8 @@ fn push_video_texture_or_placeholder<VM>(
 ) {
     let snapshot = video.controller.surface_snapshot();
     let target_frame = resolve_media_rect(content_frame, snapshot.intrinsic_size, video.fit);
+    let use_surface_background =
+        snapshot.loading || (snapshot.texture.is_none() && snapshot.error.is_none());
 
     if let Some(texture) = snapshot.texture.as_ref() {
         computed.scene.push_texture(TexturePrimitive {
@@ -1520,6 +1528,7 @@ fn push_video_texture_or_placeholder<VM>(
     push_media_placeholder(
         frame,
         content_frame,
+        content_corner_radius,
         clip_rect,
         opacity,
         context,
@@ -1529,12 +1538,14 @@ fn push_video_texture_or_placeholder<VM>(
         snapshot.loading,
         snapshot.error.as_deref(),
         loading_background,
+        use_surface_background,
     );
 }
 
 fn push_media_placeholder(
     frame: Rect,
     content_frame: Rect,
+    content_corner_radius: f32,
     clip_rect: Option<Rect>,
     opacity: f32,
     context: &mut CollectContext<'_, '_>,
@@ -1544,14 +1555,20 @@ fn push_media_placeholder(
     loading: bool,
     error: Option<&str>,
     loading_background: Color,
+    use_loading_background: bool,
 ) {
-    let placeholder =
-        media_loading_fill_color(loading, error, loading_background).with_alpha_factor(opacity);
+    let placeholder = media_loading_fill_color(
+        loading,
+        error,
+        loading_background,
+        use_loading_background,
+    )
+    .with_alpha_factor(opacity);
     if content_frame.width > Dp::ZERO && content_frame.height > Dp::ZERO {
         scene.push_overlay_shape(RenderPrimitive {
             rect: content_frame,
             color: placeholder,
-            corner_radius: 0.0,
+            corner_radius: content_corner_radius,
             stroke_width: 0.0,
             clip_rect,
         });
@@ -1584,8 +1601,9 @@ fn media_loading_fill_color(
     loading: bool,
     error: Option<&str>,
     loading_background: Color,
+    use_loading_background: bool,
 ) -> Color {
-    if loading {
+    if use_loading_background {
         loading_background
     } else {
         media_placeholder_color(loading, error)
@@ -2482,7 +2500,7 @@ mod tests {
         let background = Color::hexa(0x11223344);
 
         assert_eq!(
-            super::media_loading_fill_color(true, None, background),
+            super::media_loading_fill_color(true, None, background, true),
             background
         );
     }
@@ -2490,7 +2508,12 @@ mod tests {
     #[test]
     fn image_loading_placeholder_defaults_to_transparent_white() {
         assert_eq!(
-            super::media_loading_fill_color(true, None, Color::rgba(255, 255, 255, 0)),
+            super::media_loading_fill_color(
+                true,
+                None,
+                Color::rgba(255, 255, 255, 0),
+                true
+            ),
             Color::rgba(255, 255, 255, 0)
         );
     }
@@ -2498,8 +2521,18 @@ mod tests {
     #[test]
     fn image_error_placeholder_keeps_error_color() {
         assert_eq!(
-            super::media_loading_fill_color(false, Some("boom"), Color::WHITE),
+            super::media_loading_fill_color(false, Some("boom"), Color::WHITE, false),
             crate::media::media_placeholder_color(false, Some("boom"))
+        );
+    }
+
+    #[test]
+    fn idle_media_placeholder_keeps_default_placeholder_color() {
+        let background = Color::hexa(0xABCDEF12);
+
+        assert_eq!(
+            super::media_loading_fill_color(false, None, background, false),
+            crate::media::media_placeholder_color(false, None)
         );
     }
 
@@ -3139,6 +3172,57 @@ mod tests {
             .texts
             .iter()
             .any(|text| text.content.contains("loading video")));
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn video_surface_idle_placeholder_uses_surface_background() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let background = Color::hexa(0x123456FF);
+        let radius = dp(12.0);
+        let controller = test_video_controller(crate::video::VideoSurfaceSnapshot {
+            intrinsic_size: crate::media::IntrinsicSize::ZERO,
+            texture: None,
+            loading: false,
+            error: None,
+        });
+        let tree: WidgetTree<()> = WidgetTree::new(
+            VideoSurface::new(controller)
+                .size(dp(160.0), dp(90.0))
+                .border_radius(radius)
+                .background(background),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 90.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered.primitives.textures.is_empty());
+        assert!(rendered
+            .primitives
+            .overlay_shapes
+            .iter()
+            .any(|shape| shape.color == background && shape.corner_radius == radius.get()));
+        assert!(rendered
+            .primitives
+            .texts
+            .iter()
+            .any(|text| text.content.contains("video unavailable")));
     }
 
     #[cfg(feature = "video")]

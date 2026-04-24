@@ -18,7 +18,7 @@ impl VideoVm {
         Self {
             controller,
             // source: ctx.observable(String::from("D:\\CloudMusic\\MV\\郭顶 - 凄美地.mp4")),
-            source: ctx.observable(String::from("https://cn-gddg-ct-01-12.bilivideo.com/upgcxcode/58/40/37649974058/37649974058-1-16.mp4?e=ig8euxZM2rNcNbRVhwdVhwdlhWdVhwdVhoNvNC8BqJIzNbfqXBvEqxTEto8BTrNvN0GvT90W5JZMkX_YN0MvXg8gNEV4NC8xNEV4N03eN0B5tZlqNxTEto8BTrNvNeZVuJ10Kj_g2UB02J0mN0B5tZlqNCNEto8BTrNvNC7MTX502C8f2jmMQJ6mqF2fka1mqx6gqj0eN0B599M=&trid=000015c2a1290e254e34b6fe4d611b0ff88u&platform=pc&mid=0&deadline=1777021829&oi=0x240e039d00309a31a581d8697d123978&og=hw&uipk=5&nbs=1&gen=playurlv3&os=bcache&upsig=2244948e27511007ecbcc45b5069269a&uparams=e,trid,platform,mid,deadline,oi,og,uipk,nbs,gen,os&cdnid=61312&bvc=vod&nettype=0&bw=230292&lrs=61&buvid=&build=0&dl=0&f=u_0_0&qn_dyeid=79b7153ec5a10ba60053ced269eb1765&agrr=1&orderid=0,3")),
+            source: ctx.observable(String::from("https://cn-jsnt-ct-01-01.bilivideo.com/upgcxcode/85/57/37691985785/37691985785-1-16.mp4?e=ig8euxZM2rNcNbRVhwdVhwdlhWdVhwdVhoNvNC8BqJIzNbfqXBvEqxTEto8BTrNvN0GvT90W5JZMkX_YN0MvXg8gNEV4NC8xNEV4N03eN0B5tZlqNxTEto8BTrNvNeZVuJ10Kj_g2UB02J0mN0B5tZlqNCNEto8BTrNvNC7MTX502C8f2jmMQJ6mqF2fka1mqx6gqj0eN0B599M=&uipk=5&os=bcache&mid=0&oi=2882915941&deadline=1777026992&platform=pc&trid=00008c9a0b26e40e433494404a9fc3b42f1u&gen=playurlv3&og=cos&nbs=1&upsig=17af2a95637bd18b06c59d5f2f104d5d&uparams=e,uipk,os,mid,oi,deadline,platform,trid,gen,og,nbs&cdnid=4309&bvc=vod&nettype=0&bw=427231&lrs=78&f=u_0_0&qn_dyeid=3b985d16adf341e3000935b869eb2b90&agrr=1&buvid=&build=0&dl=0&orderid=0,3")),
         }
     }
 
@@ -79,7 +79,6 @@ impl VideoVm {
                 VideoSurface::new(self.controller.clone())
                     .fill_width()
                     .height(dp(360.0))
-                    .background(Color::hexa(0x020617FF))
                     .border_radius(dp(12.0))
                     .border(dp(1.0), Color::hexa(0x334155FF)),
                 Row::new().gap(dp(8.0)).child(el![

@@ -27,7 +27,7 @@ impl VideoSurface {
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
             controller,
-            background: None,
+            background: Some(Value::Static(Color::BLACK)),
             fit: ContentFit::Contain,
             aspect_ratio: None,
             cursor_style: None,
