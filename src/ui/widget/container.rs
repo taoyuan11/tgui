@@ -1,9 +1,7 @@
 use crate::foundation::binding::Binding;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::ui::layout::{
-    Align, Axis, Insets, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap,
-};
+use crate::ui::layout::{Align, Axis, Insets, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap};
 use crate::ui::unit::Dp;
 
 use super::common::{

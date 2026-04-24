@@ -644,7 +644,9 @@ mod tests {
         assert!(worker.handle_backend_command(BackendCommand::Seek(Duration::from_secs(5))));
 
         assert!(matches!(
-            decode_rx.recv().expect("pause command should be sent first"),
+            decode_rx
+                .recv()
+                .expect("pause command should be sent first"),
             DecodeCommand::SetPlaying {
                 generation: 7,
                 playing: false,
@@ -670,7 +672,9 @@ mod tests {
         assert!(worker.handle_backend_command(BackendCommand::Load(source.clone())));
 
         assert!(matches!(
-            decode_rx.recv().expect("pause command should be sent first"),
+            decode_rx
+                .recv()
+                .expect("pause command should be sent first"),
             DecodeCommand::SetPlaying {
                 generation: 3,
                 playing: false,

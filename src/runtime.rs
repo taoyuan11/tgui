@@ -4125,8 +4125,8 @@ mod tests {
     use crate::text::font::{FontCatalog, TextFontRequest};
     use crate::ui::unit::{dp, sp, UnitContext};
     use crate::ui::widget::{
-        Canvas, CanvasItem, CanvasPath, CanvasPointerEvent, Column, CursorStyle, HitInteraction,
-        Input, InputEditState, PathBuilder, Point, Text, WidgetTree,
+        Canvas, CanvasItem, CanvasPath, CanvasPointerEvent, CanvasShadow, CanvasStroke, Column,
+        CursorStyle, HitInteraction, Input, InputEditState, PathBuilder, Point, Text, WidgetTree,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -4791,5 +4791,93 @@ mod tests {
             .expect("view model lock should not be poisoned");
         assert_eq!(view_model.clicks, 1);
         assert_eq!(view_model.widget_clicks, 0);
+    }
+
+    #[test]
+    fn dashed_canvas_item_hit_testing_skips_gaps() {
+        let make_tree = || {
+            WidgetTree::new(
+                Canvas::new(vec![CanvasItem::Path(
+                    CanvasPath::new(
+                        21_u64,
+                        PathBuilder::new().move_to(10.0, 20.0).line_to(90.0, 20.0),
+                    )
+                    .stroke(CanvasStroke::new(dp(6.0), Color::WHITE).dash([dp(10.0), dp(10.0)])),
+                )])
+                .size(dp(100.0), dp(60.0))
+                .on_item_mouse_move(ValueCommand::new(
+                    |vm: &mut CanvasEventVm, event| {
+                        vm.hover_events.push(event);
+                    },
+                )),
+            )
+        };
+
+        let mut hit_handler = test_handler_with_vm(
+            CanvasEventVm::default(),
+            Some(make_tree()),
+            InvalidationSignal::new(),
+        );
+        hit_handler.cursor_position = Some(Point::new(dp(15.0), dp(20.0)));
+        hit_handler.handle_hover(hit_handler.viewport_rect());
+        let hit_vm = hit_handler
+            .view_model
+            .lock()
+            .expect("view model lock should not be poisoned");
+        assert_eq!(hit_vm.hover_events.len(), 1);
+        drop(hit_vm);
+
+        let mut gap_handler = test_handler_with_vm(
+            CanvasEventVm::default(),
+            Some(make_tree()),
+            InvalidationSignal::new(),
+        );
+        gap_handler.cursor_position = Some(Point::new(dp(25.0), dp(20.0)));
+        gap_handler.handle_hover(gap_handler.viewport_rect());
+        let gap_vm = gap_handler
+            .view_model
+            .lock()
+            .expect("view model lock should not be poisoned");
+        assert!(gap_vm.hover_events.is_empty());
+    }
+
+    #[test]
+    fn canvas_shadow_does_not_extend_item_hit_region() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(
+            Canvas::new(vec![CanvasItem::Path(
+                CanvasPath::new(
+                    31_u64,
+                    PathBuilder::new()
+                        .move_to(10.0, 10.0)
+                        .line_to(40.0, 10.0)
+                        .line_to(40.0, 40.0)
+                        .line_to(10.0, 40.0)
+                        .close(),
+                )
+                .fill(Color::WHITE)
+                .shadow(CanvasShadow::new(
+                    Color::BLACK,
+                    Point::new(18.0, 0.0),
+                    dp(8.0),
+                )),
+            )])
+            .size(dp(100.0), dp(80.0))
+            .on_item_mouse_move(ValueCommand::new(
+                |vm: &mut CanvasEventVm, event| {
+                    vm.hover_events.push(event);
+                },
+            )),
+        );
+        let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+        handler.cursor_position = Some(Point::new(dp(55.0), dp(25.0)));
+
+        handler.handle_hover(handler.viewport_rect());
+
+        let view_model = handler
+            .view_model
+            .lock()
+            .expect("view model lock should not be poisoned");
+        assert!(view_model.hover_events.is_empty());
     }
 }

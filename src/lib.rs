@@ -92,7 +92,7 @@ macro_rules! el {
     };
 }
 
-pub use crate::log::{Log, LogLevel, tgui_log};
+pub use crate::log::{tgui_log, Log, LogLevel};
 pub use animation::{
     AnimatedValue, AnimationControllerBuilder, AnimationControllerHandle, AnimationCurve,
     AnimationSpec, AnimationStatus, Easing, FillMode, Keyframe, Keyframes, Playback,
@@ -110,15 +110,15 @@ pub use foundation::event::InputTrigger;
 pub use foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
 pub use media::{ContentFit, MediaBytes, MediaSource};
 pub use text::font::FontWeight;
-pub use ui::layout::{
-    Align, Axis, Insets, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap,
-};
+pub use ui::layout::{Align, Axis, Insets, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap};
 pub use ui::theme::{Theme, ThemeMode};
 pub use ui::unit::{dp, sp, Dp, Sp};
 pub use ui::widget::{
-    rect, Button, Canvas, CanvasItem, CanvasItemId, CanvasPath, CanvasPointerEvent, CanvasStroke,
-    Column, Container, CursorStyle, Element, Flex, Grid, Image, Input, PathBuilder, Point, Rect,
-    Row, Stack, Text, WidgetCommand, WidgetEventResult, WidgetId, WidgetTree,
+    rect, Button, Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem,
+    CanvasItemId, CanvasLinearGradient, CanvasPath, CanvasPathOpError, CanvasPointerEvent,
+    CanvasRadialGradient, CanvasShadow, CanvasStroke, Column, Container, CursorStyle, Element,
+    Flex, Grid, Image, Input, PathBuilder, Point, Rect, Row, Stack, Text, WidgetCommand,
+    WidgetEventResult, WidgetId, WidgetTree,
 };
 #[cfg(feature = "video")]
 pub use video::{

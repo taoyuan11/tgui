@@ -442,7 +442,13 @@ pub struct TexturePrimitive {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MeshVertex {
     pub position: [f32; 2],
-    pub color: Color,
+    pub local_position: [f32; 2],
+    pub brush_meta: [f32; 4],
+    pub gradient_data0: [f32; 4],
+    pub gradient_data1: [f32; 4],
+    pub stop_offsets0: [f32; 4],
+    pub stop_offsets1: [f32; 4],
+    pub stop_colors: [[f32; 4]; 8],
 }
 
 #[derive(Clone)]

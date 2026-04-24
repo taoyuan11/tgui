@@ -11,7 +11,9 @@ mod video;
 
 pub use button::Button;
 pub use canvas::{
-    Canvas, CanvasItem, CanvasItemId, CanvasPath, CanvasPointerEvent, CanvasStroke, PathBuilder,
+    Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasItemId,
+    CanvasLinearGradient, CanvasPath, CanvasPathOpError, CanvasPointerEvent, CanvasRadialGradient,
+    CanvasShadow, CanvasStroke, PathBuilder,
 };
 pub(crate) use common::{
     CompositionState, ComputedScene, HitInteraction, InputEditState, InputSnapshot,

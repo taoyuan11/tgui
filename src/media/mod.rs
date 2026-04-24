@@ -24,6 +24,7 @@ static HTTP_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 static RUSTLS_PROVIDER: OnceLock<()> = OnceLock::new();
 const MAX_IMAGE_DIMENSION: u32 = 2048;
 const MAX_SVG_RASTER_CACHE_ENTRIES: usize = 4;
+const MAX_CANVAS_SHADOW_CACHE_ENTRIES: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MediaSource {
@@ -318,6 +319,7 @@ pub(crate) fn resolve_media_rect(frame: Rect, media: IntrinsicSize, fit: Content
 pub(crate) struct MediaManager {
     invalidation: InvalidationSignal,
     images: Mutex<HashMap<MediaSource, Arc<Mutex<ImageEntry>>>>,
+    canvas_shadows: Mutex<Vec<CanvasShadowEntry>>,
 }
 
 impl MediaManager {
@@ -325,6 +327,7 @@ impl MediaManager {
         Self {
             invalidation,
             images: Mutex::new(HashMap::new()),
+            canvas_shadows: Mutex::new(Vec::new()),
         }
     }
 
@@ -352,6 +355,68 @@ impl MediaManager {
             })
             .clone()
     }
+
+    pub(crate) fn canvas_shadow_texture<F>(
+        &self,
+        cache_key: u64,
+        width: u32,
+        height: u32,
+        render: F,
+    ) -> Result<Option<Arc<TextureFrame>>, TguiError>
+    where
+        F: FnOnce() -> Result<TextureFrame, TguiError>,
+    {
+        if width == 0 || height == 0 {
+            return Ok(None);
+        }
+
+        let mut cache = self
+            .canvas_shadows
+            .lock()
+            .expect("canvas shadow cache lock poisoned");
+        if let Some(entry) = cache.iter_mut().find(|entry| {
+            entry.cache_key == cache_key && entry.width == width && entry.height == height
+        }) {
+            entry.last_used = entry.last_used.saturating_add(1);
+            return Ok(Some(entry.texture.clone()));
+        }
+
+        let texture = Arc::new(render()?);
+        let next_tick = cache
+            .iter()
+            .map(|entry| entry.last_used)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        cache.push(CanvasShadowEntry {
+            cache_key,
+            width,
+            height,
+            texture: texture.clone(),
+            last_used: next_tick,
+        });
+        while cache.len() > MAX_CANVAS_SHADOW_CACHE_ENTRIES {
+            if let Some((oldest_index, _)) = cache
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, entry)| entry.last_used)
+            {
+                cache.remove(oldest_index);
+            } else {
+                break;
+            }
+        }
+
+        Ok(Some(texture))
+    }
+}
+
+struct CanvasShadowEntry {
+    cache_key: u64,
+    width: u32,
+    height: u32,
+    texture: Arc<TextureFrame>,
+    last_used: u64,
 }
 
 struct ImageEntry {
@@ -1020,6 +1085,32 @@ mod tests {
             .expect("SVG should produce a texture");
 
         assert_eq!(texture.size(), (2048, 1024));
+    }
+
+    #[test]
+    fn canvas_shadow_cache_reuses_matching_texture() {
+        let media = MediaManager::new(InvalidationSignal::new());
+        let first = media
+            .canvas_shadow_texture(42, 16, 16, || {
+                Ok(super::TextureFrame::new(16, 16, vec![0; 16 * 16 * 4]))
+            })
+            .expect("shadow rasterization should succeed")
+            .expect("shadow texture should be cached");
+        let second = media
+            .canvas_shadow_texture(42, 16, 16, || {
+                Ok(super::TextureFrame::new(16, 16, vec![255; 16 * 16 * 4]))
+            })
+            .expect("shadow cache lookup should succeed")
+            .expect("shadow texture should be cached");
+        let third = media
+            .canvas_shadow_texture(43, 16, 16, || {
+                Ok(super::TextureFrame::new(16, 16, vec![255; 16 * 16 * 4]))
+            })
+            .expect("new shadow cache entry should succeed")
+            .expect("shadow texture should be cached");
+
+        assert_eq!(first.id(), second.id());
+        assert_ne!(first.id(), third.id());
     }
 
     #[test]

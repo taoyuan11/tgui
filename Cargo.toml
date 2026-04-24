@@ -32,6 +32,7 @@ cosmic-text = "0.18"
 crossbeam-channel = "0.5"
 dpi = "0.1.2"
 image = { version = "0.25", default-features = true, features = ["jpeg", "png", "gif", "webp", "bmp"] }
+geo = "0.32"
 lyon = "1.0"
 pollster = "0.4"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider"] }

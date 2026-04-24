@@ -730,13 +730,23 @@ impl<VM> ResolvedElement<VM> {
 
                 if canvas_frame.width > Dp::ZERO && canvas_frame.height > Dp::ZERO {
                     for item in items {
-                        let meshes = item.tessellate(canvas_origin, opacity, canvas_clip);
+                        let rendered = item.tessellate(
+                            canvas_origin,
+                            opacity,
+                            canvas_clip,
+                            context.media,
+                            context.units,
+                        );
+                        let meshes = rendered.meshes;
+                        for texture in rendered.textures {
+                            computed.scene.push_texture(texture);
+                        }
                         for mesh in &meshes {
                             computed.scene.push_mesh(mesh.clone());
                         }
 
                         if item_interactions.has_any() {
-                            if let Some(bounds) = item.bounds() {
+                            if let Some(bounds) = item.hit_bounds() {
                                 let triangles = meshes
                                     .iter()
                                     .flat_map(|mesh| mesh.triangles.iter().copied())

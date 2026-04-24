@@ -40,28 +40,17 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let outer_distance = rounded_box_sdf(
+    let distance = rounded_box_sdf(
         input.local_position,
         input.rect_size,
         input.corner_radius,
     );
-    let aa = max(fwidth(outer_distance), 1.0);
-    let outer_alpha = 1.0 - smoothstep(-aa, aa, outer_distance);
+    let outer_alpha = clamp(0.5 - distance, 0.0, 1.0);
 
     var alpha = outer_alpha;
     if input.stroke_width > 0.0 {
-        let inner_size = max(
-            input.rect_size - vec2<f32>(input.stroke_width * 2.0, input.stroke_width * 2.0),
-            vec2<f32>(0.0, 0.0),
-        );
-        if inner_size.x > 0.0 && inner_size.y > 0.0 {
-            let inner_local = input.local_position - vec2<f32>(input.stroke_width, input.stroke_width);
-            let inner_radius = max(input.corner_radius - input.stroke_width, 0.0);
-            let inner_distance = rounded_box_sdf(inner_local, inner_size, inner_radius);
-            let inner_aa = max(fwidth(inner_distance), 1.0);
-            let inner_alpha = smoothstep(-inner_aa, inner_aa, inner_distance);
-            alpha = outer_alpha * inner_alpha;
-        }
+        let inner_alpha = clamp(0.5 + distance + input.stroke_width, 0.0, 1.0);
+        alpha = outer_alpha * inner_alpha;
     }
 
     return vec4<f32>(input.color.rgb, input.color.a * alpha);

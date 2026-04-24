@@ -418,10 +418,22 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let command_buffers =
-            self.command_batches_for(&scene.commands, logical_width, logical_height)?;
-        let overlay_buffers =
-            self.command_batches_for(&scene.overlay_commands, logical_width, logical_height)?;
+        let command_buffers = self.command_batches_for(
+            &scene.commands,
+            logical_width,
+            logical_height,
+            self.config.width as f32,
+            self.config.height as f32,
+            self.scale_factor,
+        )?;
+        let overlay_buffers = self.command_batches_for(
+            &scene.overlay_commands,
+            logical_width,
+            logical_height,
+            self.config.width as f32,
+            self.config.height as f32,
+            self.scale_factor,
+        )?;
         let color_attachment_view = self
             .msaa_target
             .as_ref()
@@ -579,6 +591,9 @@ impl Renderer {
         commands: &[RenderCommand],
         logical_width: f32,
         logical_height: f32,
+        physical_width: f32,
+        physical_height: f32,
+        scale_factor: f32,
     ) -> Result<CommandBuffers, TguiError> {
         let mut rect_vertices = Vec::new();
         let mut mesh_vertices = Vec::new();
@@ -594,8 +609,9 @@ impl Renderer {
                     let start = rect_vertices.len() as u32;
                     rect_vertices.extend_from_slice(&RectVertex::from_primitive(
                         *primitive,
-                        logical_width,
-                        logical_height,
+                        physical_width,
+                        physical_height,
+                        scale_factor,
                     ));
                     let end = rect_vertices.len() as u32;
                     batches.push(DrawBatch::Rect(PrimitiveBatch {
@@ -1079,15 +1095,20 @@ impl RectVertex {
         }
     }
 
-    fn from_primitive(primitive: RenderPrimitive, width: f32, height: f32) -> [Self; 6] {
-        let rect_x = primitive.rect.x.get();
-        let rect_y = primitive.rect.y.get();
-        let rect_width = primitive.rect.width.max(0.0).get();
-        let rect_height = primitive.rect.height.max(0.0).get();
-        let x0 = rect_x / width * 2.0 - 1.0;
-        let x1 = (rect_x + rect_width) / width * 2.0 - 1.0;
-        let y0 = 1.0 - rect_y / height * 2.0;
-        let y1 = 1.0 - (rect_y + rect_height) / height * 2.0;
+    fn from_primitive(
+        primitive: RenderPrimitive,
+        physical_width: f32,
+        physical_height: f32,
+        scale_factor: f32,
+    ) -> [Self; 6] {
+        let rect_x = primitive.rect.x.get() * scale_factor;
+        let rect_y = primitive.rect.y.get() * scale_factor;
+        let rect_width = primitive.rect.width.max(0.0).get() * scale_factor;
+        let rect_height = primitive.rect.height.max(0.0).get() * scale_factor;
+        let x0 = rect_x / physical_width * 2.0 - 1.0;
+        let x1 = (rect_x + rect_width) / physical_width * 2.0 - 1.0;
+        let y0 = 1.0 - rect_y / physical_height * 2.0;
+        let y1 = 1.0 - (rect_y + rect_height) / physical_height * 2.0;
         let color = [
             primitive.color.r as f32 / 255.0,
             primitive.color.g as f32 / 255.0,
@@ -1095,14 +1116,10 @@ impl RectVertex {
             primitive.color.a as f32 / 255.0,
         ];
         let rect_size = [rect_width, rect_height];
-        let radius = primitive
-            .corner_radius
-            .max(0.0)
+        let radius = (primitive.corner_radius.max(0.0) * scale_factor)
             .min(rect_size[0] * 0.5)
             .min(rect_size[1] * 0.5);
-        let stroke_width = primitive
-            .stroke_width
-            .max(0.0)
+        let stroke_width = (primitive.stroke_width.max(0.0) * scale_factor)
             .min(rect_size[0] * 0.5)
             .min(rect_size[1] * 0.5);
 
@@ -1163,7 +1180,20 @@ impl RectVertex {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct MeshVertex {
     position: [f32; 2],
-    color: [f32; 4],
+    local_position: [f32; 2],
+    brush_meta: [f32; 4],
+    gradient_data0: [f32; 4],
+    gradient_data1: [f32; 4],
+    stop_offsets0: [f32; 4],
+    stop_offsets1: [f32; 4],
+    stop_color0: [f32; 4],
+    stop_color1: [f32; 4],
+    stop_color2: [f32; 4],
+    stop_color3: [f32; 4],
+    stop_color4: [f32; 4],
+    stop_color5: [f32; 4],
+    stop_color6: [f32; 4],
+    stop_color7: [f32; 4],
 }
 
 impl MeshVertex {
@@ -1178,9 +1208,86 @@ impl MeshVertex {
                     shader_location: 0,
                 },
                 wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
+                    format: wgpu::VertexFormat::Float32x2,
                     offset: std::mem::size_of::<[f32; 2]>() as u64,
                     shader_location: 1,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2) as u64,
+                    shader_location: 2,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2 + std::mem::size_of::<[f32; 4]>())
+                        as u64,
+                    shader_location: 3,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2
+                        + std::mem::size_of::<[f32; 4]>() * 2) as u64,
+                    shader_location: 4,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2
+                        + std::mem::size_of::<[f32; 4]>() * 3) as u64,
+                    shader_location: 5,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2
+                        + std::mem::size_of::<[f32; 4]>() * 4) as u64,
+                    shader_location: 6,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2
+                        + std::mem::size_of::<[f32; 4]>() * 5) as u64,
+                    shader_location: 7,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2
+                        + std::mem::size_of::<[f32; 4]>() * 6) as u64,
+                    shader_location: 8,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2
+                        + std::mem::size_of::<[f32; 4]>() * 7) as u64,
+                    shader_location: 9,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2
+                        + std::mem::size_of::<[f32; 4]>() * 8) as u64,
+                    shader_location: 10,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2
+                        + std::mem::size_of::<[f32; 4]>() * 9) as u64,
+                    shader_location: 11,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2
+                        + std::mem::size_of::<[f32; 4]>() * 10) as u64,
+                    shader_location: 12,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2
+                        + std::mem::size_of::<[f32; 4]>() * 11) as u64,
+                    shader_location: 13,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2
+                        + std::mem::size_of::<[f32; 4]>() * 12) as u64,
+                    shader_location: 14,
                 },
             ],
         }
@@ -1191,12 +1298,20 @@ impl MeshVertex {
         let y = 1.0 - vertex.position[1] / height * 2.0;
         Self {
             position: [x, y],
-            color: [
-                vertex.color.r as f32 / 255.0,
-                vertex.color.g as f32 / 255.0,
-                vertex.color.b as f32 / 255.0,
-                vertex.color.a as f32 / 255.0,
-            ],
+            local_position: vertex.local_position,
+            brush_meta: vertex.brush_meta,
+            gradient_data0: vertex.gradient_data0,
+            gradient_data1: vertex.gradient_data1,
+            stop_offsets0: vertex.stop_offsets0,
+            stop_offsets1: vertex.stop_offsets1,
+            stop_color0: vertex.stop_colors[0],
+            stop_color1: vertex.stop_colors[1],
+            stop_color2: vertex.stop_colors[2],
+            stop_color3: vertex.stop_colors[3],
+            stop_color4: vertex.stop_colors[4],
+            stop_color5: vertex.stop_colors[5],
+            stop_color6: vertex.stop_colors[6],
+            stop_color7: vertex.stop_colors[7],
         }
     }
 }

@@ -352,6 +352,10 @@ impl UnitContext {
         }
     }
 
+    pub(crate) fn scale_factor(self) -> f32 {
+        self.scale_factor
+    }
+
     pub(crate) fn resolve_dp(self, value: Dp) -> f32 {
         value.get()
     }
