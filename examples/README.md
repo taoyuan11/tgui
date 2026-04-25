@@ -15,9 +15,6 @@ cargo run --manifest-path examples/basic_window/Cargo.toml
 
 ```bash
 cargo run --manifest-path examples/mvvm_counter/Cargo.toml
-cargo run --manifest-path examples/layout/Cargo.toml
-cargo run --manifest-path examples/widgets_showcase/Cargo.toml
-cargo run --manifest-path examples/multi_page_showcase/Cargo.toml
 ```
 
 ## 推荐先看
@@ -26,11 +23,8 @@ cargo run --manifest-path examples/multi_page_showcase/Cargo.toml
 
 1. `basic_window`
 2. `mvvm_counter`
-3. `layout`
-4. `widgets_showcase`
-5. `animation_showcase`
-6. `multi_window`
-7. `multi_page_showcase`
+3. `animation_showcase`
+4. `multi_window`
 
 ## 桌面示例说明
 
@@ -52,80 +46,6 @@ cargo run --manifest-path examples/multi_page_showcase/Cargo.toml
 
 适合作为状态驱动 UI 的起点。
 
-### `layout`
-
-布局系统总览。集中展示：
-
-- `Grid`
-- `Flex`
-- `Stack`
-
-适合用来理解不同容器的布局职责与组合方式。
-
-### `layout_theme_showcase`
-
-把布局容器和自定义主题放在同一个界面里做展示。适合参考：
-
-- 仪表盘式页面排布
-- 自定义颜色与卡片样式
-- 多层容器组合
-
-### `theme`
-
-主题模式切换示例。演示：
-
-- `ThemeMode::Light`
-- `ThemeMode::Dark`
-- `ThemeMode::System`
-- `bind_theme_mode`
-
-也能看到运行时主题切换时的界面响应效果。
-
-### `widgets_showcase`
-
-常用组件综合示例。把这些能力放在一个页面里：
-
-- `Text`
-- `Button`
-- `Input`
-- `Stack`
-- `Grid`
-- `Flex`
-- 鼠标移动事件
-
-适合快速了解常见控件的搭配方式。
-
-### `multi_page_showcase`
-
-多页面、多文件示例。通过一个顶部页签把内容拆到不同源码文件中：
-
-- `src/pages/basic.rs`：基础组件页
-- `src/pages/media.rs`：媒体组件页
-- `src/pages/canvas.rs`：Canvas 页
-
-适合作为组织中型示例或文档型 demo 的结构参考。
-
-### `input`
-
-输入框与表单状态示例。演示：
-
-- `Input`
-- `ValueCommand`
-- 多个 `Observable<String>`
-- 输入内容实时反映到摘要区域
-
-适合做表单、设置页、资料编辑页参考。
-
-### `scroll`
-
-滚动与溢出处理示例。演示：
-
-- `Overflow::Scroll`
-- 纵向滚动
-- 横向/双向滚动
-- `ScrollbarStyle`
-- 滚动条颜色、厚度、圆角、内边距配置
-
 ### `canvas`
 
 自定义绘制示例。演示：
@@ -139,16 +59,6 @@ cargo run --manifest-path examples/multi_page_showcase/Cargo.toml
 - 画布命中与点击事件
 
 适合做图形编辑、可视化、流程图或定制图表表面。
-
-### `image_example`
-
-图片与 SVG 加载示例。展示：
-
-- 网络图片
-- SVG 资源
-- 绑定驱动的图片切换
-
-适合确认 `Image`、`MediaSource` 相关能力的使用方式。
 
 ### `dialogs`
 
@@ -197,18 +107,6 @@ cargo run --manifest-path examples/multi_page_showcase/Cargo.toml
 - 多个文档窗口
 
 核心类型是 `WindowSpec`，适合做文档型应用、浮动工具面板或 inspector 模式界面。
-
-### `video_surface`
-
-视频播放示例。演示：
-
-- `VideoController`
-- `VideoSurface`
-- `VideoSource`
-- 播放 / 暂停 / 静音 / 跳转
-- 绑定视频路径并动态加载
-
-这个示例当前默认依赖 `tgui` 的 `video-static` feature。
 
 ## 平台示例
 
