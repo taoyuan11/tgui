@@ -1,12 +1,12 @@
 use crate::ShowcaseVm;
 use tgui::{
-    dp, sp, Align, Axis, Binding, Button, Color, Column, Command, Flex, Grid, Input, Insets, Row,
+    dp, fr, pct, sp, Align, Axis, Binding, Button, Color, Command, Flex, Grid, Input, Insets,
     Stack, Text, ValueCommand, Wrap,
 };
 
 pub(crate) fn view(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
-    Column::new()
-        .fill_width()
+    Flex::new(Axis::Vertical)
+        .width(pct(100.0))
         .gap(dp(18.0))
         .child(
             Stack::new()
@@ -14,7 +14,7 @@ pub(crate) fn view(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
                 .background(Color::hexa(0x123552FF))
                 .border_radius(dp(20.0))
                 .child(
-                    Column::new()
+                    Flex::new(Axis::Vertical)
                         .gap(dp(10.0))
                         .child(
                             Text::new("Page 1: basic widgets")
@@ -31,13 +31,13 @@ pub(crate) fn view(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
                 ),
         )
         .child(
-            Row::new()
+            Flex::new(Axis::Horizontal)
                 .gap(dp(18.0))
                 .child(Stack::new().grow(1.2).child(interactive_panel(vm)))
                 .child(Stack::new().grow(1.0).child(layout_panel())),
         )
         .child(
-            Column::new()
+            Flex::new(Axis::Vertical)
                 .gap(dp(12.0))
                 .child(
                     Text::new("Layout snippets")
@@ -45,10 +45,10 @@ pub(crate) fn view(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
                         .color(Color::hexa(0xEAF6FFFF)),
                 )
                 .child(
-                    Grid::new(3)
+                    Grid::columns([fr(1.0), fr(1.0), fr(1.0)])
                         .gap(dp(12.0))
-                        .child(layout_card("Row", "Line up content horizontally."))
-                        .child(layout_card("Column", "Stack content vertically."))
+                        .child(layout_card("Flex (Horizontal)", "Line up content horizontally."))
+                        .child(layout_card("Flex (Vertical)", "Stack content vertically."))
                         .child(layout_card("Stack", "Overlay elements in one region."))
                         .child(layout_card("Grid", "Make dashboard-style matrices."))
                         .child(layout_card("Flex", "Wrap badges or fluid groups."))
@@ -69,7 +69,7 @@ fn interactive_panel(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
         )
     });
 
-    Column::new()
+    Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(18.0)))
         .gap(dp(14.0))
         .background(Color::hexa(0x0F2439FF))
@@ -87,7 +87,7 @@ fn interactive_panel(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
         )
         .child(
             Input::new(Text::new(vm.draft.binding()))
-                .fill_width()
+                .width(pct(100.0))
                 .background(Color::hexa(0x091521FF))
                 .border(dp(1.0), Color::hexa(0x315977FF))
                 .border_radius(dp(12.0))
@@ -95,7 +95,7 @@ fn interactive_panel(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
                 .on_change(ValueCommand::new(ShowcaseVm::set_draft)),
         )
         .child(
-            Row::new()
+            Flex::new(Axis::Horizontal)
                 .gap(dp(10.0))
                 .child(
                     Button::new(Text::new("Increment"))
@@ -124,7 +124,7 @@ fn interactive_panel(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
 }
 
 fn layout_panel() -> tgui::Element<ShowcaseVm> {
-    Column::new()
+    Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(18.0)))
         .gap(dp(14.0))
         .background(Color::hexa(0x0F2439FF))
@@ -136,7 +136,7 @@ fn layout_panel() -> tgui::Element<ShowcaseVm> {
                 .color(Color::WHITE),
         )
         .child(
-            Grid::new(2)
+            Grid::columns([fr(1.0), fr(1.0)])
                 .gap(dp(10.0))
                 .child(stat_card("Text", "Read-only copy"))
                 .child(stat_card("Button", "Action surface"))
@@ -164,7 +164,7 @@ fn stat_card(title: &str, subtitle: &str) -> tgui::Element<ShowcaseVm> {
         .background(Color::hexa(0x17324CFF))
         .border_radius(dp(14.0))
         .child(
-            Column::new()
+            Flex::new(Axis::Vertical)
                 .gap(dp(6.0))
                 .align(Align::Start)
                 .child(Text::new(title).font_size(sp(16.0)).color(Color::WHITE))
@@ -187,7 +187,7 @@ fn chip(label: &str) -> tgui::Element<ShowcaseVm> {
 }
 
 fn layout_card(title: &str, subtitle: &str) -> tgui::Element<ShowcaseVm> {
-    Column::new()
+    Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(16.0)))
         .gap(dp(8.0))
         .background(Color::hexa(0x0F2439FF))

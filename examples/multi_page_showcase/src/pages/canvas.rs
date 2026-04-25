@@ -1,13 +1,13 @@
 use crate::ShowcaseVm;
 use tgui::{
-    dp, sp, Canvas, CanvasGradientStop, CanvasItem, CanvasLinearGradient, CanvasPath,
-    CanvasRadialGradient, CanvasShadow, CanvasStroke, Color, Column, Insets, Overflow, PathBuilder,
-    Point, Row, ScrollbarStyle, Stack, Text, ValueCommand,
+    dp, pct, sp, Canvas, CanvasGradientStop, CanvasItem, CanvasLinearGradient, CanvasPath,
+    CanvasRadialGradient, CanvasShadow, CanvasStroke, Color, Axis, Flex, Insets, Overflow,
+    PathBuilder, Point, ScrollbarStyle, Stack, Text, ValueCommand,
 };
 
 pub(crate) fn view(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
-    Column::new()
-        .fill_width()
+    Flex::new(Axis::Vertical)
+        .width(pct(100.0))
         .gap(dp(18.0))
         .child(
             Stack::new()
@@ -15,7 +15,7 @@ pub(crate) fn view(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
                 .background(Color::hexa(0x123552FF))
                 .border_radius(dp(20.0))
                 .child(
-                    Column::new()
+                    Flex::new(Axis::Vertical)
                         .gap(dp(10.0))
                         .child(
                             Text::new("Page 3: canvas")
@@ -54,7 +54,7 @@ pub(crate) fn view(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
                 ),
         )
         .child(
-            Row::new()
+            Flex::new(Axis::Horizontal)
                 .gap(dp(12.0))
                 .child(
                     Stack::new()
@@ -173,7 +173,7 @@ fn canvas_items() -> Vec<CanvasItem> {
 }
 
 fn status_card(title: &str, value: tgui::Binding<String>) -> tgui::Element<ShowcaseVm> {
-    Column::new()
+    Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(16.0)))
         .gap(dp(10.0))
         .background(Color::hexa(0x0F2439FF))

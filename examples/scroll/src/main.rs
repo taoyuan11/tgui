@@ -1,6 +1,6 @@
 use tgui::{
-    Application, Color, Column, Insets, Overflow, Row, ScrollbarStyle, Stack, Text, TguiError,
-    dp, sp,
+    Application, Axis, Color, Flex, Insets, Overflow, ScrollbarStyle, Stack, Text, TguiError, dp,
+    pct, sp,
 };
 
 fn main() -> Result<(), TguiError> {
@@ -9,8 +9,8 @@ fn main() -> Result<(), TguiError> {
         .window_size(dp(1120.0), dp(760.0))
         .with_view_model(|_| ())
         .root_view(|_| {
-            Column::new()
-                .fill_size()
+            Flex::new(Axis::Vertical)
+                .size(pct(100.0), pct(100.0))
                 .padding(Insets::all(dp(24.0)))
                 .gap(dp(20.0))
                 .background(Color::hexa(0x0F172AFF))
@@ -27,8 +27,8 @@ fn main() -> Result<(), TguiError> {
                     .color(Color::hexa(0xCBD5E1FF)),
                 )
                 .child(
-                    Row::new()
-                        .fill_height()
+                    Flex::new(Axis::Horizontal)
+                        .height(pct(100.0))
                         .gap(dp(20.0))
                         .child(vertical_scroll_panel().grow(1.0))
                         .child(canvas_scroll_panel().grow(1.0)),
@@ -38,8 +38,8 @@ fn main() -> Result<(), TguiError> {
         .run()
 }
 
-fn panel(title: &str, subtitle: &str) -> Column<()> {
-    Column::new()
+fn panel(title: &str, subtitle: &str) -> Flex<()> {
+    Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(18.0)))
         .gap(dp(12.0))
         .background(Color::hexa(0x111827FF))
@@ -57,8 +57,8 @@ fn panel(title: &str, subtitle: &str) -> Column<()> {
         )
 }
 
-fn vertical_scroll_panel() -> Column<()> {
-    let mut list = Column::new()
+fn vertical_scroll_panel() -> Flex<()> {
+    let mut list = Flex::new(Axis::Vertical)
         .height(dp(460.0))
         .padding(Insets::all(dp(16.0)))
         .gap(dp(12.0))
@@ -101,7 +101,7 @@ fn vertical_scroll_panel() -> Column<()> {
     .child(list)
 }
 
-fn canvas_scroll_panel() -> Column<()> {
+fn canvas_scroll_panel() -> Flex<()> {
     panel(
         "Bi-Directional Scroll",
         "This panel is narrower than the canvas inside it. Trackpads can use native X/Y deltas, and regular mouse wheels can hold Shift for horizontal scrolling.",

@@ -1,6 +1,6 @@
 use tgui::{
-    el, Align, Application, Binding, Button, Color, Column, Command, Element, Insets,
-    Observable, Stack, Text, TguiError, Theme, ThemeMode, ViewModelContext, dp, sp,
+    el, Align, Application, Axis, Binding, Button, Color, Command, Element, Flex, Insets,
+    Observable, Stack, Text, TguiError, Theme, ThemeMode, ViewModelContext, dp, pct, sp,
 };
 #[cfg(target_os = "android")]
 use tgui::platform::android::activity::AndroidApp;
@@ -59,12 +59,12 @@ impl AndroidApplication {
         ).on_click(Command::new(Self::set_theme));
 
         Stack::new()
-            .fill_size()
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
             .align(Align::Center)
             .child(
-                Column::new()
-                    .fill_width()
+                Flex::new(Axis::Vertical)
+                    .width(pct(100.0))
                     .padding(Insets::all(dp(24.0)))
                     .gap(dp(12.0))
                     .background(Color::hex(0x0099FF))

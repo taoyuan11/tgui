@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use tgui::{
     AnimatedValue, AnimationControllerHandle, AnimationCurve, AnimationSpec, Application, Button,
-    Color, Column, Command, Dp, Insets, Keyframes, Observable, Playback, PlaybackDirection, Point,
-    Row, Text, TguiError, ViewModelContext, dp, sp,
+    Color, Axis, Command, Dp, Flex, Insets, Keyframes, Observable, Playback,
+    PlaybackDirection, Point, Text, TguiError, ViewModelContext, dp, pct, sp,
 };
 
 struct TimelineVm {
@@ -135,8 +135,8 @@ impl TimelineVm {
     }
 
     fn view(&self) -> tgui::Element<Self> {
-        Column::new()
-            .fill_size()
+        Flex::new(Axis::Vertical)
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
             .gap(dp(16.0))
             .child(
@@ -154,7 +154,7 @@ impl TimelineVm {
                 .color(Color::hexa(0xCBD5E1FF)),
             )
             .child(
-                Row::new()
+                Flex::new(Axis::Horizontal)
                     .gap(dp(10.0))
                     .child(Button::new(Text::new("Play")).on_click(Command::new(Self::play)))
                     .child(Button::new(Text::new("Pause")).on_click(Command::new(Self::pause)))

@@ -811,18 +811,10 @@ impl Renderer {
             &mut self.text_system.font_system,
             Metrics::new(font_size, line_height),
         );
-        buffer.set_size(
-            &mut self.text_system.font_system,
-            Some(width as f32),
-            Some(height as f32),
-        );
-        buffer.set_wrap(
-            &mut self.text_system.font_system,
-            cosmic_text::Wrap::WordOrGlyph,
-        );
+        buffer.set_size(Some(width as f32), Some(height as f32));
+        buffer.set_wrap(cosmic_text::Wrap::WordOrGlyph);
         let attrs = attrs_for_text(text, font_size, letter_spacing);
         buffer.set_text(
-            &mut self.text_system.font_system,
             &text.content,
             &attrs,
             Shaping::Advanced,

@@ -1,6 +1,6 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
+use crate::ui::layout::{Align, Insets, LayoutStyle, Length, Value};
 use crate::ui::unit::{dp, Dp};
 
 use super::common::{
@@ -8,13 +8,12 @@ use super::common::{
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
-use super::text::Text;
 
-pub struct Input<VM> {
+pub struct Switch<VM> {
     element: Element<VM>,
 }
 
-macro_rules! impl_input_layout_api {
+macro_rules! impl_widget_layout_api {
     () => {
         pub fn size(mut self, width: impl IntoLengthValue, height: impl IntoLengthValue) -> Self {
             set_layout_lengths(&mut self.element.layout, width, height);
@@ -146,55 +145,100 @@ macro_rules! impl_input_layout_api {
     };
 }
 
-impl<VM> Input<VM> {
-    pub fn new(text: Text) -> Self {
+impl<VM> Switch<VM> {
+    pub fn new(checked: impl Into<Value<bool>>) -> Self {
+        let mut interactions = InteractionHandlers::default();
+        interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+
         Self {
             element: Element {
                 id: WidgetId::next(),
                 layout: LayoutStyle {
-                    padding: Value::Static(Insets::symmetric(dp(12.0), dp(8.0))),
+                    width: Some(Value::Static(Length::Px(dp(44.0)))),
+                    height: Some(Value::Static(Length::Px(dp(24.0)))),
+                    padding: Value::Static(Insets::all(dp(2.0))),
                     ..LayoutStyle::default()
                 },
-                visual: VisualStyle::default(),
-                interactions: InteractionHandlers::default(),
+                visual: VisualStyle {
+                    border_radius: Value::Static(dp(999.0)),
+                    ..VisualStyle::default()
+                },
+                interactions,
                 media_events: MediaEventHandlers::default(),
                 background: None,
-                kind: WidgetKind::Input {
-                    text,
-                    placeholder: Text::new(String::new()),
+                kind: WidgetKind::Switch {
+                    checked: checked.into(),
                     on_change: None,
+                    active_background: Value::Static(Color::hexa(0x2563EBFF)),
+                    inactive_background: Value::Static(Color::hexa(0x94A3B8FF)),
+                    active_thumb_color: Value::Static(Color::WHITE),
+                    inactive_thumb_color: Value::Static(Color::WHITE),
                     disabled: Value::Static(false),
                 },
             },
         }
     }
 
-    impl_input_layout_api!();
-
-    pub fn placeholder_with_text(mut self, placeholder: Text) -> Self {
-        if let WidgetKind::Input {
-            placeholder: value, ..
-        } = &mut self.element.kind
-        {
-            *value = placeholder;
-        }
-        self
-    }
-
-    pub fn placeholder_with_str(mut self, placeholder: &str) -> Self {
-        let text = Text::new(placeholder.to_string()).into();
-
-        if let WidgetKind::Input {
-            placeholder: value, ..
-        } = &mut self.element.kind
-        {
-            *value = text;
-        }
-        self
-    }
+    impl_widget_layout_api!();
 
     pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
         self.element.background = Some(color.into());
+        self
+    }
+
+    pub fn active_background(mut self, color: impl Into<Value<Color>>) -> Self {
+        if let WidgetKind::Switch {
+            active_background, ..
+        } = &mut self.element.kind
+        {
+            *active_background = color.into();
+        }
+        self
+    }
+
+    pub fn inactive_background(mut self, color: impl Into<Value<Color>>) -> Self {
+        if let WidgetKind::Switch {
+            inactive_background,
+            ..
+        } = &mut self.element.kind
+        {
+            *inactive_background = color.into();
+        }
+        self
+    }
+
+    pub fn thumb_color(mut self, color: impl Into<Value<Color>>) -> Self {
+        let color = color.into();
+        if let WidgetKind::Switch {
+            active_thumb_color,
+            inactive_thumb_color,
+            ..
+        } = &mut self.element.kind
+        {
+            *active_thumb_color = color.clone();
+            *inactive_thumb_color = color;
+        }
+        self
+    }
+
+    pub fn active_thumb_color(mut self, color: impl Into<Value<Color>>) -> Self {
+        if let WidgetKind::Switch {
+            active_thumb_color, ..
+        } = &mut self.element.kind
+        {
+            *active_thumb_color = color.into();
+        }
+        self
+    }
+
+    pub fn inactive_thumb_color(mut self, color: impl Into<Value<Color>>) -> Self {
+        if let WidgetKind::Switch {
+            inactive_thumb_color,
+            ..
+        } = &mut self.element.kind
+        {
+            *inactive_thumb_color = color.into();
+        }
         self
     }
 
@@ -229,8 +273,8 @@ impl<VM> Input<VM> {
         self
     }
 
-    pub fn on_change(mut self, command: ValueCommand<VM, String>) -> Self {
-        if let WidgetKind::Input { on_change, .. } = &mut self.element.kind {
+    pub fn on_change(mut self, command: ValueCommand<VM, bool>) -> Self {
+        if let WidgetKind::Switch { on_change, .. } = &mut self.element.kind {
             *on_change = Some(command);
         }
         self
@@ -272,7 +316,7 @@ impl<VM> Input<VM> {
     }
 
     pub fn disable(mut self, disable: impl Into<Value<bool>>) -> Self {
-        if let WidgetKind::Input { disabled, .. } = &mut self.element.kind {
+        if let WidgetKind::Switch { disabled, .. } = &mut self.element.kind {
             *disabled = disable.into();
         }
         self
@@ -284,8 +328,8 @@ impl<VM> Input<VM> {
     }
 }
 
-impl<VM> From<Input<VM>> for Element<VM> {
-    fn from(value: Input<VM>) -> Self {
+impl<VM> From<Switch<VM>> for Element<VM> {
+    fn from(value: Switch<VM>) -> Self {
         value.element
     }
 }

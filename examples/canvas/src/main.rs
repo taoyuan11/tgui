@@ -1,8 +1,8 @@
 use tgui::{
     dp, sp, Application, Canvas, CanvasGradientStop, CanvasItem, CanvasLinearGradient, CanvasPath,
-    CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke, Color, Column, Insets,
-    Observable, Overflow, PathBuilder, Point, ScrollbarStyle, Stack, Text, ValueCommand,
-    ViewModelContext,
+    CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke, Color, Flex, Insets,
+    Observable, Overflow, PathBuilder, Point, ScrollbarStyle, Stack, Text, ValueCommand, Axis,
+    ViewModelContext, pct,
 };
 
 struct CanvasVm {
@@ -134,8 +134,8 @@ impl CanvasVm {
             ),
         ];
 
-        Column::new()
-            .fill_size()
+        Flex::new(Axis::Vertical)
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
             .gap(dp(16.0))
             .background(Color::hexa(0x0B1120FF))
@@ -175,7 +175,7 @@ impl CanvasVm {
                     ),
             )
             .child(
-                Column::new()
+                Flex::new(Axis::Vertical)
                     .gap(dp(8.0))
                     .child(
                         Text::new(self.hovered.binding())

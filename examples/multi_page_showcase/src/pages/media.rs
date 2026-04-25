@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use crate::ShowcaseVm;
 use tgui::{
-    dp, sp, Button, Color, Column, Command, ContentFit, Image, Insets, MediaSource, Row, Stack,
-    Text,
+    dp, pct, sp, Axis, Button, Color, Command, ContentFit, Flex, Image, Insets, MediaSource,
+    Stack, Text,
 };
 
 const EMBEDDED_RASTER: &[u8] =
@@ -42,8 +42,8 @@ fn local_svg_path() -> PathBuf {
 }
 
 pub(crate) fn view(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
-    Column::new()
-        .fill_width()
+    Flex::new(Axis::Vertical)
+        .width(pct(100.0))
         .gap(dp(18.0))
         .child(
             Stack::new()
@@ -51,7 +51,7 @@ pub(crate) fn view(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
                 .background(Color::hexa(0x123552FF))
                 .border_radius(dp(20.0))
                 .child(
-                    Column::new()
+                    Flex::new(Axis::Vertical)
                         .gap(dp(10.0))
                         .child(
                             Text::new("Page 2: media widgets")
@@ -68,7 +68,7 @@ pub(crate) fn view(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
                 ),
         )
         .child(
-            Row::new()
+            Flex::new(Axis::Horizontal)
                 .gap(dp(18.0))
                 .child(
                     Stack::new().grow(1.0).child(media_card(
@@ -100,7 +100,7 @@ pub(crate) fn view(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
 }
 
 fn preview_panel(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
-    Column::new()
+    Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(18.0)))
         .gap(dp(14.0))
         .background(Color::hexa(0x0F2439FF))
@@ -119,7 +119,7 @@ fn preview_panel(vm: &ShowcaseVm) -> tgui::Element<ShowcaseVm> {
             .color(Color::hexa(0xBCD8ECFF)),
         )
         .child(
-            Row::new()
+            Flex::new(Axis::Horizontal)
                 .gap(dp(10.0))
                 .child(
                     Button::new(Text::new("Preview raster"))
@@ -166,7 +166,7 @@ fn media_card(
     subtitle: &str,
     content: tgui::Element<ShowcaseVm>,
 ) -> tgui::Element<ShowcaseVm> {
-    Column::new()
+    Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(18.0)))
         .gap(dp(12.0))
         .background(Color::hexa(0x0F2439FF))

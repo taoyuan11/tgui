@@ -1,4 +1,4 @@
-use tgui::{el, Align, Application, Button, Color, Command, Element, Image, Observable, Row, Text, TguiError, ViewModelContext, dp};
+use tgui::{el, Align, Application, Axis, Button, Color, Command, Element, Flex, Image, Observable, Text, TguiError, ViewModelContext, dp};
 
 struct App {
     image_source: Observable<String>
@@ -42,7 +42,7 @@ impl App {
                 app.image_source.set(String::from("http://47.109.31.100:19900/wlop.jpg"))
             }));
 
-        Row::new()
+        Flex::new(Axis::Horizontal)
             .align(Align::Center)
             .gap(dp(20.0))
             .child(el![image1, image3, image4, btn])

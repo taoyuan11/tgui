@@ -1,6 +1,6 @@
 use tgui::{
-    Align, Application, Axis, Button, Color, Column, Flex, FontWeight, Grid, Insets, Row,
-    Stack, Text, TguiError, Theme, Wrap, dp, sp,
+    Align, Application, Axis, Button, Color, Flex, FontWeight, Grid, Insets, Stack, Text,
+    TguiError, Theme, Wrap, dp, fr, pct, sp,
 };
 
 fn main() -> Result<(), TguiError> {
@@ -17,13 +17,13 @@ fn main() -> Result<(), TguiError> {
         .theme(theme)
         .with_view_model(|_| ())
         .root_view(|_| {
-            Column::new()
-                .fill_size()
+            Flex::new(Axis::Vertical)
+                .size(pct(100.0), pct(100.0))
                 .padding(Insets::all(dp(24.0)))
                 .gap(dp(18.0))
                 .child(hero())
                 .child(
-                    Row::new()
+                    Flex::new(Axis::Horizontal)
                         .gap(dp(18.0))
                         .child(metric_grid().grow(1.4))
                         .child(sidebar().grow(1.0)),
@@ -34,14 +34,14 @@ fn main() -> Result<(), TguiError> {
 }
 
 fn hero() -> tgui::Element<()> {
-    Row::new()
+    Flex::new(Axis::Horizontal)
         .padding(Insets::all(dp(22.0)))
         .gap(dp(18.0))
         .background(Color::hexa(0x0F1B2BFF))
         .border(dp(1.0), Color::hexa(0x23435FFF))
         .border_radius(dp(22.0))
         .child(
-            Column::new()
+            Flex::new(Axis::Vertical)
                 .grow(1.0)
                 .gap(dp(12.0))
                 .child(
@@ -56,7 +56,7 @@ fn hero() -> tgui::Element<()> {
                         .color(Color::hexa(0xB8E6E1FF)),
                 )
                 .child(
-                    Row::new()
+                    Flex::new(Axis::Horizontal)
                         .gap(dp(10.0))
                         .child(
                             Button::new(Text::new("Primary action"))
@@ -86,8 +86,8 @@ fn hero() -> tgui::Element<()> {
         .into()
 }
 
-fn metric_grid() -> Column<()> {
-    Column::new()
+fn metric_grid() -> Flex<()> {
+    Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(18.0)))
         .gap(dp(14.0))
         .background(Color::hexa(0x0E1826FF))
@@ -99,7 +99,7 @@ fn metric_grid() -> Column<()> {
                 .color(Color::hexa(0xF8FAFCFF)),
         )
         .child(
-            Grid::new(2)
+            Grid::columns([fr(1.0), fr(1.0)])
                 .gap(dp(12.0))
                 .child(metric_card(
                     "Active users",
@@ -113,7 +113,7 @@ fn metric_grid() -> Column<()> {
 }
 
 fn metric_card(title: &str, value: &str, accent: Color) -> tgui::Element<()> {
-    Column::new()
+    Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(16.0)))
         .gap(dp(8.0))
         .background(Color::hexa(0x132235FF))
@@ -133,8 +133,8 @@ fn metric_card(title: &str, value: &str, accent: Color) -> tgui::Element<()> {
         .into()
 }
 
-fn sidebar() -> Column<()> {
-    Column::new()
+fn sidebar() -> Flex<()> {
+    Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(18.0)))
         .gap(dp(14.0))
         .background(Color::hexa(0x0E1826FF))

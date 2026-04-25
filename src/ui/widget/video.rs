@@ -1,13 +1,14 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::ContentFit;
-use crate::ui::layout::{Insets, LayoutStyle, Value};
+use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::Dp;
 use crate::video::VideoController;
 
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
+use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
 
 #[derive(Clone)]
@@ -17,8 +18,139 @@ pub struct VideoSurface {
     pub(crate) controller: VideoController,
     pub(crate) background: Option<Value<Color>>,
     pub(crate) fit: ContentFit,
-    pub(crate) aspect_ratio: Option<f32>,
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
+}
+
+macro_rules! impl_video_layout_api {
+    () => {
+        pub fn size(mut self, width: impl IntoLengthValue, height: impl IntoLengthValue) -> Self {
+            set_layout_lengths(&mut self.layout, width, height);
+            self
+        }
+
+        pub fn width(mut self, width: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.width, width);
+            self
+        }
+
+        pub fn height(mut self, height: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.height, height);
+            self
+        }
+
+        pub fn min_width(mut self, width: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.min_width, width);
+            self
+        }
+
+        pub fn min_height(mut self, height: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.min_height, height);
+            self
+        }
+
+        pub fn max_width(mut self, width: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.max_width, width);
+            self
+        }
+
+        pub fn max_height(mut self, height: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.max_height, height);
+            self
+        }
+
+        pub fn aspect_ratio(mut self, aspect_ratio: impl Into<Value<f32>>) -> Self {
+            self.layout.aspect_ratio = Some(aspect_ratio.into());
+            self
+        }
+
+        pub fn margin(mut self, insets: impl Into<Value<Insets>>) -> Self {
+            self.layout.margin = insets.into();
+            self
+        }
+
+        pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
+            self.layout.padding = insets.into();
+            self
+        }
+
+        pub fn grow(mut self, grow: impl Into<Value<f32>>) -> Self {
+            self.layout.grow = grow.into();
+            self
+        }
+
+        pub fn shrink(mut self, shrink: impl Into<Value<f32>>) -> Self {
+            self.layout.shrink = shrink.into();
+            self
+        }
+
+        pub fn basis(mut self, basis: impl IntoLengthValue) -> Self {
+            self.layout.basis = Some(basis.into_length_value());
+            self
+        }
+
+        pub fn align_self(mut self, align: Align) -> Self {
+            self.layout.align_self = Some(align);
+            self
+        }
+
+        pub fn justify_self(mut self, align: Align) -> Self {
+            self.layout.justify_self = Some(align);
+            self
+        }
+
+        pub fn column(mut self, start: usize) -> Self {
+            self.layout.column_start = Some(start.max(1));
+            self
+        }
+
+        pub fn row(mut self, start: usize) -> Self {
+            self.layout.row_start = Some(start.max(1));
+            self
+        }
+
+        pub fn column_span(mut self, span: usize) -> Self {
+            self.layout.column_span = span.max(1);
+            self
+        }
+
+        pub fn row_span(mut self, span: usize) -> Self {
+            self.layout.row_span = span.max(1);
+            self
+        }
+
+        pub fn position_absolute(mut self) -> Self {
+            self.layout.position_type = crate::ui::layout::PositionType::Absolute;
+            self
+        }
+
+        pub fn left(mut self, value: impl IntoLengthValue) -> Self {
+            set_layout_inset(&mut self.layout.left, value);
+            self
+        }
+
+        pub fn top(mut self, value: impl IntoLengthValue) -> Self {
+            set_layout_inset(&mut self.layout.top, value);
+            self
+        }
+
+        pub fn right(mut self, value: impl IntoLengthValue) -> Self {
+            set_layout_inset(&mut self.layout.right, value);
+            self
+        }
+
+        pub fn bottom(mut self, value: impl IntoLengthValue) -> Self {
+            set_layout_inset(&mut self.layout.bottom, value);
+            self
+        }
+
+        pub fn inset(mut self, value: impl IntoLengthValue + Copy) -> Self {
+            set_layout_inset(&mut self.layout.left, value);
+            set_layout_inset(&mut self.layout.top, value);
+            set_layout_inset(&mut self.layout.right, value);
+            set_layout_inset(&mut self.layout.bottom, value);
+            self
+        }
+    };
 }
 
 impl VideoSurface {
@@ -29,64 +161,14 @@ impl VideoSurface {
             controller,
             background: Some(Value::Static(Color::BLACK)),
             fit: ContentFit::Contain,
-            aspect_ratio: None,
             cursor_style: None,
         }
     }
 
-    pub fn size(mut self, width: impl Into<Value<Dp>>, height: impl Into<Value<Dp>>) -> Self {
-        self.layout.width = Some(width.into());
-        self.layout.height = Some(height.into());
-        self.layout.fill_width = false;
-        self.layout.fill_height = false;
-        self
-    }
-
-    pub fn width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.layout.width = Some(width.into());
-        self.layout.fill_width = false;
-        self
-    }
-
-    pub fn height(mut self, height: impl Into<Value<Dp>>) -> Self {
-        self.layout.height = Some(height.into());
-        self.layout.fill_height = false;
-        self
-    }
-
-    pub fn fill_width(mut self) -> Self {
-        self.layout.fill_width = true;
-        self.layout.width = None;
-        self
-    }
-
-    pub fn fill_height(mut self) -> Self {
-        self.layout.fill_height = true;
-        self.layout.height = None;
-        self
-    }
-
-    pub fn fill_size(mut self) -> Self {
-        self.layout.fill_width = true;
-        self.layout.fill_height = true;
-        self.layout.width = None;
-        self.layout.height = None;
-        self
-    }
-
-    pub fn margin(mut self, insets: impl Into<Value<Insets>>) -> Self {
-        self.layout.margin = insets.into();
-        self
-    }
+    impl_video_layout_api!();
 
     pub fn fit(mut self, fit: ContentFit) -> Self {
         self.fit = fit;
-        self
-    }
-
-    pub fn aspect_ratio(mut self, aspect_ratio: f32) -> Self {
-        self.aspect_ratio =
-            (aspect_ratio.is_finite() && aspect_ratio > 0.0).then_some(aspect_ratio);
         self
     }
 

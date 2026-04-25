@@ -6,7 +6,7 @@
 //! - [`ViewModelContext`] creates reactive state such as [`Observable`] and [`AnimatedValue`].
 //! - [`Binding`] derives UI-facing values from state and can opt into declarative transitions.
 //! - [`Command`] and [`ValueCommand`] connect widget events back to your view model.
-//! - Layout and widgets such as [`Column`], [`Button`], [`Input`], and [`Text`] build the widget tree.
+//! - Layout and widgets such as [`Flex`], [`Button`], [`Input`], and [`Text`] build the widget tree.
 //!
 //! A minimal app looks like this:
 //!
@@ -24,7 +24,7 @@
 //! For a state-driven application, create a view model and bind the root view:
 //!
 //! ```no_run
-//! use tgui::{Application, Button, Column, Command, Observable, Text, ViewModelContext};
+//! use tgui::{Application, Axis, Button, Command, Flex, Observable, Text, ViewModelContext};
 //!
 //! struct CounterVm {
 //!     count: Observable<u32>,
@@ -42,7 +42,7 @@
 //!     }
 //!
 //!     fn view(&self) -> tgui::Element<Self> {
-//!         Column::new()
+//!         Flex::new(Axis::Vertical)
 //!             .child(Text::new(
 //!                 self.count.binding().map(|count| format!("Count: {count}")),
 //!             ))
@@ -79,9 +79,9 @@ pub mod video;
 /// you want a compact call site.
 ///
 /// ```rust
-/// use tgui::{el, Column, Text};
+/// use tgui::{el, Axis, Flex, Text};
 ///
-/// let _column = Column::<()>::new().child(el![
+/// let _column = Flex::<()>::new(Axis::Vertical).child(el![
 ///     Text::new("First"),
 ///     Text::new("Second"),
 /// ]);
@@ -110,14 +110,17 @@ pub use foundation::event::InputTrigger;
 pub use foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
 pub use media::{ContentFit, MediaBytes, MediaSource};
 pub use text::font::FontWeight;
-pub use ui::layout::{Align, Axis, Insets, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap};
+pub use ui::layout::{
+    fr, pct, Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType,
+    ScrollbarStyle, Track, Value, Wrap,
+};
 pub use ui::theme::{Theme, ThemeMode};
 pub use ui::unit::{dp, sp, Dp, Sp};
 pub use ui::widget::{
     rect, Button, Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem,
     CanvasItemId, CanvasLinearGradient, CanvasPath, CanvasPathOpError, CanvasPointerEvent,
-    CanvasRadialGradient, CanvasShadow, CanvasStroke, Column, Container, CursorStyle, Element,
-    Flex, Grid, Image, Input, PathBuilder, Point, Rect, Row, Stack, Text, WidgetCommand,
+    CanvasRadialGradient, CanvasShadow, CanvasStroke, CursorStyle, Element, Flex, Grid, Image,
+    Input, IntoLengthValue, PathBuilder, Point, Rect, Stack, Switch, Text, WidgetCommand,
     WidgetEventResult, WidgetId, WidgetTree,
 };
 #[cfg(feature = "video")]

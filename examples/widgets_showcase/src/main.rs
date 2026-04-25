@@ -1,12 +1,14 @@
 use tgui::{
-    Align, Application, Axis, Binding, Button, Color, Column, Command, Flex, Grid, Input, Insets,
-    Observable, Point, Row, Stack, Text, TguiError, ValueCommand, ViewModelContext, Wrap, dp, sp,
+    Align, Application, Axis, Binding, Button, Color, Command, Flex, Grid, Input, Insets,
+    Observable, Point, Stack, Switch, Text, TguiError, ValueCommand, ViewModelContext, Wrap,
+    dp, fr, pct, sp,
 };
 
 struct WidgetsVm {
     clicks: Observable<u32>,
     draft: Observable<String>,
     cursor: Observable<String>,
+    enabled: Observable<bool>,
 }
 
 impl WidgetsVm {
@@ -15,6 +17,7 @@ impl WidgetsVm {
             clicks: ctx.observable(0),
             draft: ctx.observable("Ship a polished widgets page".to_string()),
             cursor: ctx.observable("Move over the hero card".to_string()),
+            enabled: ctx.observable(true),
         }
     }
 
@@ -27,12 +30,14 @@ impl WidgetsVm {
         let clicks = self.clicks.clone();
         let draft = self.draft.clone();
         let cursor = self.cursor.clone();
+        let enabled = self.enabled.clone();
         Binding::new(move || {
             format!(
-                "Clicks: {}\nDraft: {}\nPointer: {}",
+                "Clicks: {}\nDraft: {}\nPointer: {}\nSwitch: {}",
                 clicks.get(),
                 draft.get(),
-                cursor.get()
+                cursor.get(),
+                if enabled.get() { "on" } else { "off" }
             )
         })
     }
@@ -54,9 +59,13 @@ impl WidgetsVm {
             .set(format!("x: {:.0}, y: {:.0}", point.x, point.y));
     }
 
+    fn set_enabled(&mut self, value: bool) {
+        self.enabled.set(value);
+    }
+
     fn view(&self) -> tgui::Element<Self> {
-        Column::new()
-            .fill_size()
+        Flex::new(Axis::Vertical)
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
             .gap(dp(18.0))
             .background(Color::hexa(0x0F172AFF))
@@ -68,7 +77,7 @@ impl WidgetsVm {
                     .border_radius(dp(20.0))
                     .on_mouse_move(ValueCommand::new(Self::remember_pointer))
                     .child(
-                        Column::new()
+                        Flex::new(Axis::Vertical)
                             .gap(dp(12.0))
                             .child(
                                 Text::new("Widgets showcase")
@@ -83,10 +92,10 @@ impl WidgetsVm {
                     ),
             )
             .child(
-                Row::new()
+                Flex::new(Axis::Horizontal)
                     .gap(dp(18.0))
                     .child(
-                        Column::new()
+                        Flex::new(Axis::Vertical)
                             .grow(1.0)
                             .padding(Insets::all(dp(18.0)))
                             .gap(dp(12.0))
@@ -100,7 +109,7 @@ impl WidgetsVm {
                             )
                             .child(
                                 Input::new(Text::new(self.draft.binding()))
-                                    .fill_width()
+                                    .width(pct(100.0))
                                     .background(Color::hexa(0x1E293BFF))
                                     .border(dp(1.0), Color::hexa(0x475569FF))
                                     .border_radius(dp(12.0))
@@ -108,7 +117,32 @@ impl WidgetsVm {
                                     .on_change(ValueCommand::new(Self::set_draft)),
                             )
                             .child(
-                                Row::new()
+                                Flex::new(Axis::Horizontal)
+                                    .gap(dp(12.0))
+                                    .align(Align::Center)
+                                    .child(
+                                        Switch::new(self.enabled.binding())
+                                        .active_background(Color::hexa(0x10B981FF))
+                                        .inactive_background(Color::hexa(0x475569FF))
+                                        .active_thumb_color(Color::hexa(0xECFDF5FF))
+                                        .inactive_thumb_color(Color::hexa(0x10B981FF))
+                                        .on_change(ValueCommand::new(Self::set_enabled)),
+                                    )
+                                    .child(
+                                        Text::new(
+                                            self.enabled.binding().map(|value| {
+                                                if value {
+                                                    "Realtime sync enabled".to_string()
+                                                } else {
+                                                    "Realtime sync disabled".to_string()
+                                                }
+                                            }),
+                                        )
+                                        .color(Color::hexa(0xE2E8F0FF)),
+                                    ),
+                            )
+                            .child(
+                                Flex::new(Axis::Horizontal)
                                     .gap(dp(10.0))
                                     .child(
                                         Button::new(Text::new("Click me"))
@@ -135,7 +169,7 @@ impl WidgetsVm {
                             ),
                     )
                     .child(
-                        Column::new()
+                        Flex::new(Axis::Vertical)
                             .grow(1.0)
                             .padding(Insets::all(dp(18.0)))
                             .gap(dp(12.0))
@@ -148,7 +182,7 @@ impl WidgetsVm {
                                     .color(Color::hexa(0xF8FAFCFF)),
                             )
                             .child(
-                                Grid::new(2)
+                                Grid::columns([fr(1.0), fr(1.0)])
                                     .gap(dp(10.0))
                                     .child(stat_card("Buttons", "Action surfaces"))
                                     .child(stat_card("Input", "Editable state"))
@@ -179,7 +213,7 @@ fn stat_card(title: &str, subtitle: &str) -> tgui::Element<WidgetsVm> {
         .background(Color::hexa(0x1E293BFF))
         .border_radius(dp(14.0))
         .child(
-            Column::new()
+            Flex::new(Axis::Vertical)
                 .gap(dp(6.0))
                 .align(Align::Start)
                 .child(Text::new(title).font_size(sp(16.0)).color(Color::WHITE))

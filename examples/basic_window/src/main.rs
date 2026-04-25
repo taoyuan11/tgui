@@ -1,4 +1,4 @@
-use tgui::{dp, el, sp, tgui_log, Align, Application, Color, Column, Insets, LogLevel, Stack, Text, TguiError, Theme};
+use tgui::{dp, el, pct, sp, tgui_log, Align, Application, Axis, Color, Flex, Insets, LogLevel, Stack, Text, TguiError, Theme};
 
 fn main() -> Result<(), TguiError> {
     let mut theme = Theme::dark();
@@ -16,12 +16,12 @@ fn main() -> Result<(), TguiError> {
         .with_view_model(|_| ())
         .root_view(|_| {
             Stack::new()
-                .fill_size()
+                .size(pct(100.0), pct(100.0))
                 .padding(Insets::all(dp(36.0)))
                 .align(Align::Center)
                 .child(
-                    Column::new()
-                        .width(dp(460.0))
+                    Flex::new(Axis::Vertical)
+                        .width(pct(100.0))
                         .padding(Insets::all(dp(28.0)))
                         .gap(dp(14.0))
                         .background(Color::hexa(0x16233AFF))

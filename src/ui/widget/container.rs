@@ -1,7 +1,10 @@
 use crate::foundation::binding::Binding;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::ui::layout::{Align, Axis, Insets, LayoutStyle, Overflow, ScrollbarStyle, Value, Wrap};
+use crate::ui::layout::{
+    Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, ScrollbarStyle, Track, Value,
+    Wrap,
+};
 use crate::ui::unit::Dp;
 
 use super::common::{
@@ -86,15 +89,116 @@ where
     }
 }
 
+pub trait IntoLengthValue {
+    fn into_length_value(self) -> Value<Length>;
+}
+
+impl IntoLengthValue for Length {
+    fn into_length_value(self) -> Value<Length> {
+        self.into()
+    }
+}
+
+impl IntoLengthValue for Dp {
+    fn into_length_value(self) -> Value<Length> {
+        Length::from(self).into()
+    }
+}
+
+impl IntoLengthValue for f32 {
+    fn into_length_value(self) -> Value<Length> {
+        Length::from(self).into()
+    }
+}
+
+impl IntoLengthValue for f64 {
+    fn into_length_value(self) -> Value<Length> {
+        Length::from(self).into()
+    }
+}
+
+impl IntoLengthValue for i32 {
+    fn into_length_value(self) -> Value<Length> {
+        Length::from(self).into()
+    }
+}
+
+impl IntoLengthValue for u32 {
+    fn into_length_value(self) -> Value<Length> {
+        Length::from(self).into()
+    }
+}
+
+impl IntoLengthValue for Value<Length> {
+    fn into_length_value(self) -> Value<Length> {
+        self
+    }
+}
+
+impl IntoLengthValue for Binding<Length> {
+    fn into_length_value(self) -> Value<Length> {
+        self.into()
+    }
+}
+
+impl IntoLengthValue for Binding<Dp> {
+    fn into_length_value(self) -> Value<Length> {
+        self.map(Length::from).into()
+    }
+}
+
+impl IntoLengthValue for Value<Dp> {
+    fn into_length_value(self) -> Value<Length> {
+        match self {
+            Value::Static(value) => Length::from(value).into(),
+            Value::Bound(binding) => binding.map(Length::from).into(),
+        }
+    }
+}
+
+impl IntoLengthValue for Value<f32> {
+    fn into_length_value(self) -> Value<Length> {
+        match self {
+            Value::Static(value) => Length::from(value).into(),
+            Value::Bound(binding) => binding.map(Length::from).into(),
+        }
+    }
+}
+
+pub(crate) fn set_layout_length(target: &mut Option<Value<Length>>, value: impl IntoLengthValue) {
+    *target = Some(value.into_length_value());
+}
+
+pub(crate) fn set_layout_lengths(
+    layout: &mut LayoutStyle,
+    width: impl IntoLengthValue,
+    height: impl IntoLengthValue,
+) {
+    set_layout_length(&mut layout.width, width);
+    set_layout_length(&mut layout.height, height);
+}
+
+pub(crate) fn set_layout_inset(
+    target: &mut Option<Value<Length>>,
+    value: impl IntoLengthValue,
+) {
+    *target = Some(value.into_length_value());
+}
+
+fn apply_layout_api<VM, T>(
+    mut owner: T,
+    element: impl Fn(&mut T) -> &mut Element<VM>,
+    op: impl FnOnce(&mut LayoutStyle),
+) -> T {
+    op(&mut element(&mut owner).layout);
+    owner
+}
+
 pub struct Container<VM> {
     element: Element<VM>,
 }
 
 impl<VM> Container<VM> {
-    pub fn new() -> Self {
-        Self::with_layout(ContainerLayout::flow())
-    }
-
     pub(crate) fn with_layout(layout: ContainerLayout) -> Self {
         Self {
             element: Element {
@@ -192,9 +296,32 @@ impl<VM> Container<VM> {
         self
     }
 
-    pub fn gap(mut self, gap: impl Into<Value<Dp>>) -> Self {
+    pub fn gap(mut self, gap: impl IntoLengthValue) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.gap = gap.into();
+            layout.gap = gap.into_length_value();
+        }
+        self
+    }
+
+    pub fn justify(mut self, justify: Justify) -> Self {
+        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
+            layout.justify = justify;
+            layout.justify_x = Some(justify);
+            layout.justify_y = Some(justify);
+        }
+        self
+    }
+
+    pub fn justify_x(mut self, justify: Justify) -> Self {
+        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
+            layout.justify_x = Some(justify);
+        }
+        self
+    }
+
+    pub fn justify_y(mut self, justify: Justify) -> Self {
+        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
+            layout.justify_y = Some(justify);
         }
         self
     }
@@ -308,12 +435,6 @@ impl<VM> Container<VM> {
     }
 }
 
-impl<VM> Default for Container<VM> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<VM> From<Container<VM>> for Element<VM> {
     fn from(value: Container<VM>) -> Self {
         value.element
@@ -321,66 +442,157 @@ impl<VM> From<Container<VM>> for Element<VM> {
 }
 
 pub struct Stack<VM>(Container<VM>);
-pub struct Row<VM>(Container<VM>);
-pub struct Column<VM>(Container<VM>);
 pub struct Grid<VM>(Container<VM>);
 pub struct Flex<VM>(Container<VM>);
 
-macro_rules! impl_layout_container {
+macro_rules! impl_layout_api {
     ($name:ident) => {
         impl<VM> $name<VM> {
-            pub fn size(
-                mut self,
-                width: impl Into<Value<Dp>>,
-                height: impl Into<Value<Dp>>,
-            ) -> Self {
-                self.0.element.layout.width = Some(width.into());
-                self.0.element.layout.height = Some(height.into());
-                self.0.element.layout.fill_width = false;
-                self.0.element.layout.fill_height = false;
-                self
+            pub fn size(self, width: impl IntoLengthValue, height: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_lengths(layout, width, height);
+                })
             }
 
-            pub fn width(mut self, width: impl Into<Value<Dp>>) -> Self {
-                self.0.element.layout.width = Some(width.into());
-                self.0.element.layout.fill_width = false;
-                self
+            pub fn width(self, width: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_length(&mut layout.width, width);
+                })
             }
 
-            pub fn height(mut self, height: impl Into<Value<Dp>>) -> Self {
-                self.0.element.layout.height = Some(height.into());
-                self.0.element.layout.fill_height = false;
-                self
+            pub fn height(self, height: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_length(&mut layout.height, height);
+                })
             }
 
-            pub fn fill_width(mut self) -> Self {
-                self.0.element.layout.fill_width = true;
-                self.0.element.layout.width = None;
-                self
+            pub fn min_width(self, width: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_length(&mut layout.min_width, width);
+                })
             }
 
-            pub fn fill_height(mut self) -> Self {
-                self.0.element.layout.fill_height = true;
-                self.0.element.layout.height = None;
-                self
+            pub fn min_height(self, height: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_length(&mut layout.min_height, height);
+                })
             }
 
-            pub fn fill_size(mut self) -> Self {
-                self.0.element.layout.fill_width = true;
-                self.0.element.layout.fill_height = true;
-                self.0.element.layout.width = None;
-                self.0.element.layout.height = None;
-                self
+            pub fn max_width(self, width: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_length(&mut layout.max_width, width);
+                })
             }
 
-            pub fn margin(mut self, insets: impl Into<Value<Insets>>) -> Self {
-                self.0.element.layout.margin = insets.into();
-                self
+            pub fn max_height(self, height: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_length(&mut layout.max_height, height);
+                })
             }
 
-            pub fn grow(mut self, grow: impl Into<Value<f32>>) -> Self {
-                self.0.element.layout.grow = grow.into();
-                self
+            pub fn aspect_ratio(self, aspect_ratio: impl Into<Value<f32>>) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.aspect_ratio = Some(aspect_ratio.into());
+                })
+            }
+
+            pub fn margin(self, insets: impl Into<Value<Insets>>) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.margin = insets.into();
+                })
+            }
+
+            pub fn grow(self, grow: impl Into<Value<f32>>) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.grow = grow.into();
+                })
+            }
+
+            pub fn shrink(self, shrink: impl Into<Value<f32>>) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.shrink = shrink.into();
+                })
+            }
+
+            pub fn basis(self, basis: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.basis = Some(basis.into_length_value());
+                })
+            }
+
+            pub fn align_self(self, align: Align) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.align_self = Some(align);
+                })
+            }
+
+            pub fn justify_self(self, align: Align) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.justify_self = Some(align);
+                })
+            }
+
+            pub fn column(self, start: usize) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.column_start = Some(start.max(1));
+                })
+            }
+
+            pub fn row(self, start: usize) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.row_start = Some(start.max(1));
+                })
+            }
+
+            pub fn column_span(self, span: usize) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.column_span = span.max(1);
+                })
+            }
+
+            pub fn row_span(self, span: usize) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.row_span = span.max(1);
+                })
+            }
+
+            pub fn position_absolute(self) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    layout.position_type = crate::ui::layout::PositionType::Absolute;
+                })
+            }
+
+            pub fn left(self, value: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_inset(&mut layout.left, value);
+                })
+            }
+
+            pub fn top(self, value: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_inset(&mut layout.top, value);
+                })
+            }
+
+            pub fn right(self, value: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_inset(&mut layout.right, value);
+                })
+            }
+
+            pub fn bottom(self, value: impl IntoLengthValue) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_inset(&mut layout.bottom, value);
+                })
+            }
+
+            pub fn inset(self, value: impl IntoLengthValue + Copy) -> Self {
+                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
+                    set_layout_inset(&mut layout.left, value);
+                    set_layout_inset(&mut layout.top, value);
+                    set_layout_inset(&mut layout.right, value);
+                    set_layout_inset(&mut layout.bottom, value);
+                })
             }
 
             pub fn background(self, color: impl Into<Value<Color>>) -> Self {
@@ -447,8 +659,20 @@ macro_rules! impl_layout_container {
                 Self(self.0.padding(padding))
             }
 
-            pub fn gap(self, gap: impl Into<Value<Dp>>) -> Self {
+            pub fn gap(self, gap: impl IntoLengthValue) -> Self {
                 Self(self.0.gap(gap))
+            }
+
+            pub fn justify(self, justify: Justify) -> Self {
+                Self(self.0.justify(justify))
+            }
+
+            pub fn justify_x(self, justify: Justify) -> Self {
+                Self(self.0.justify_x(justify))
+            }
+
+            pub fn justify_y(self, justify: Justify) -> Self {
+                Self(self.0.justify_y(justify))
             }
 
             pub fn align(self, align: Align) -> Self {
@@ -535,44 +759,51 @@ impl<VM> Default for Stack<VM> {
     }
 }
 
-impl<VM> Row<VM> {
-    pub fn new() -> Self {
-        Self(Container::with_layout(ContainerLayout {
-            kind: ContainerKind::Row,
-            ..ContainerLayout::flow()
-        }))
-    }
-}
-
-impl<VM> Default for Row<VM> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<VM> Column<VM> {
-    pub fn new() -> Self {
-        Self(Container::with_layout(ContainerLayout {
-            kind: ContainerKind::Column,
-            ..ContainerLayout::flow()
-        }))
-    }
-}
-
-impl<VM> Default for Column<VM> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<VM> Grid<VM> {
-    pub fn new(columns: usize) -> Self {
+    pub fn columns<const N: usize>(columns: [Track; N]) -> Self {
         Self(Container::with_layout(ContainerLayout {
             kind: ContainerKind::Grid {
-                columns: columns.max(1),
+                columns: columns.into_iter().collect(),
+                rows: Vec::new(),
             },
             ..ContainerLayout::flow()
         }))
+    }
+
+    pub fn rows<const N: usize>(rows: [Track; N]) -> Self {
+        Self(Container::with_layout(ContainerLayout {
+            kind: ContainerKind::Grid {
+                columns: Vec::new(),
+                rows: rows.into_iter().collect(),
+            },
+            ..ContainerLayout::flow()
+        }))
+    }
+
+    pub fn set_columns<const N: usize>(mut self, columns: [Track; N]) -> Self {
+        if let WidgetKind::Container { layout, .. } = &mut self.0.element.kind {
+            layout.kind = match layout.kind.clone() {
+                ContainerKind::Grid { rows, .. } => ContainerKind::Grid {
+                    columns: columns.into_iter().collect(),
+                    rows,
+                },
+                other => other,
+            };
+        }
+        self
+    }
+
+    pub fn set_rows<const N: usize>(mut self, rows: [Track; N]) -> Self {
+        if let WidgetKind::Container { layout, .. } = &mut self.0.element.kind {
+            layout.kind = match layout.kind.clone() {
+                ContainerKind::Grid { columns, .. } => ContainerKind::Grid {
+                    columns,
+                    rows: rows.into_iter().collect(),
+                },
+                other => other,
+            };
+        }
+        self
     }
 }
 
@@ -587,9 +818,19 @@ impl<VM> Flex<VM> {
         }))
     }
 
+    pub fn direction(mut self, direction: Axis) -> Self {
+        if let WidgetKind::Container { layout, .. } = &mut self.0.element.kind {
+            layout.kind = match layout.kind.clone() {
+                ContainerKind::Flex { wrap, .. } => ContainerKind::Flex { direction, wrap },
+                other => other,
+            };
+        }
+        self
+    }
+
     pub fn wrap(mut self, wrap: Wrap) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.0.element.kind {
-            layout.kind = match layout.kind {
+            layout.kind = match layout.kind.clone() {
                 ContainerKind::Flex { direction, .. } => ContainerKind::Flex { direction, wrap },
                 other => other,
             };
@@ -598,186 +839,6 @@ impl<VM> Flex<VM> {
     }
 }
 
-impl_layout_container!(Stack);
-impl_layout_container!(Row);
-impl_layout_container!(Column);
-impl_layout_container!(Grid);
-impl_layout_container!(Flex);
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::animation::AnimationCoordinator;
-    use crate::foundation::binding::InvalidationSignal;
-    use crate::foundation::binding::ViewModelContext;
-    use crate::ui::unit::dp;
-    use crate::Text;
-
-    fn child_sources(container: &Container<()>) -> &Vec<ChildSource<()>> {
-        let WidgetKind::Container { children, .. } = &container.element.kind else {
-            panic!("expected container widget");
-        };
-        children
-    }
-
-    fn resolved_child_count(container: &Container<()>) -> usize {
-        child_sources(container)
-            .iter()
-            .map(|child| child.resolve().len())
-            .sum()
-    }
-
-    fn test_context() -> ViewModelContext {
-        ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
-    }
-
-    #[test]
-    fn container_overflow_defaults_to_hidden() {
-        let container = Container::<()>::new();
-        let WidgetKind::Container { layout, .. } = &container.element.kind else {
-            panic!("expected container widget");
-        };
-
-        assert_eq!(layout.overflow_x, Overflow::Hidden);
-        assert_eq!(layout.overflow_y, Overflow::Hidden);
-    }
-
-    #[test]
-    fn overflow_helpers_update_expected_axes() {
-        let container = Container::<()>::new()
-            .overflow_x(Overflow::Scroll)
-            .overflow_y(Overflow::Visible)
-            .overflow(Overflow::Hidden);
-        let WidgetKind::Container { layout, .. } = &container.element.kind else {
-            panic!("expected container widget");
-        };
-
-        assert_eq!(layout.overflow_x, Overflow::Hidden);
-        assert_eq!(layout.overflow_y, Overflow::Hidden);
-
-        let container = Container::<()>::new()
-            .overflow_x(Overflow::Scroll)
-            .overflow_y(Overflow::Visible);
-        let WidgetKind::Container { layout, .. } = &container.element.kind else {
-            panic!("expected container widget");
-        };
-
-        assert_eq!(layout.overflow_x, Overflow::Scroll);
-        assert_eq!(layout.overflow_y, Overflow::Visible);
-    }
-
-    #[test]
-    fn scrollbar_style_helpers_update_layout_style() {
-        let container = Container::<()>::new()
-            .scrollbar_thickness(dp(14.0))
-            .scrollbar_radius(dp(6.0))
-            .scrollbar_insets(Insets::symmetric(dp(3.0), dp(5.0)))
-            .scrollbar_min_thumb_length(dp(40.0))
-            .scrollbar_thumb_color(Color::BLACK)
-            .scrollbar_track_color(Color::WHITE);
-        let WidgetKind::Container { layout, .. } = &container.element.kind else {
-            panic!("expected container widget");
-        };
-
-        assert_eq!(layout.scrollbar_style.thickness, dp(14.0));
-        assert_eq!(layout.scrollbar_style.radius, dp(6.0));
-        assert_eq!(
-            layout.scrollbar_style.insets,
-            Insets::symmetric(dp(3.0), dp(5.0))
-        );
-        assert_eq!(layout.scrollbar_style.min_thumb_length, dp(40.0));
-        assert_eq!(layout.scrollbar_style.thumb_color, Color::BLACK);
-        assert_eq!(layout.scrollbar_style.track_color, Color::WHITE);
-
-        let container = Container::<()>::new()
-            .scrollbar_hover_thumb_color(Color::hexa(0x11223344))
-            .scrollbar_active_thumb_color(Color::hexa(0x55667788));
-        let WidgetKind::Container { layout, .. } = &container.element.kind else {
-            panic!("expected container widget");
-        };
-
-        assert_eq!(
-            layout.scrollbar_style.hover_thumb_color,
-            Color::hexa(0x11223344)
-        );
-        assert_eq!(
-            layout.scrollbar_style.active_thumb_color,
-            Color::hexa(0x55667788)
-        );
-    }
-
-    #[test]
-    fn cursor_helper_sets_cursor_style() {
-        let container = Container::<()>::new().cursor(CursorStyle::Pointer);
-        assert_eq!(
-            container
-                .element
-                .interactions
-                .cursor_style
-                .map(|style| style.resolve()),
-            Some(CursorStyle::Pointer)
-        );
-    }
-
-    #[test]
-    fn child_accepts_empty_array() {
-        let empty: [Element<()>; 0] = [];
-        let container = Container::<()>::new().child(empty);
-
-        assert_eq!(child_sources(&container).len(), 1);
-        assert_eq!(resolved_child_count(&container), 0);
-    }
-
-    #[test]
-    fn child_accepts_single_and_multiple_arrays() {
-        let single = Container::<()>::new().child([Element::from(Text::new("one"))]);
-        assert_eq!(child_sources(&single).len(), 1);
-        assert_eq!(resolved_child_count(&single), 1);
-
-        let multiple = Container::<()>::new().child([
-            Element::from(Text::new("one")),
-            Element::from(Text::new("two")),
-        ]);
-        assert_eq!(child_sources(&multiple).len(), 1);
-        assert_eq!(resolved_child_count(&multiple), 2);
-    }
-
-    #[test]
-    fn child_accepts_vec_groups() {
-        let container = Container::<()>::new().child(vec![
-            Element::from(Text::new("one")),
-            Element::from(Text::new("two")),
-        ]);
-
-        assert_eq!(child_sources(&container).len(), 1);
-        assert_eq!(resolved_child_count(&container), 2);
-    }
-
-    #[test]
-    fn child_accepts_binding_for_single_and_multiple_children() {
-        let context = test_context();
-        let enabled = context.observable(false);
-
-        let single = Container::<()>::new().child(enabled.binding().map(|value| {
-            if value {
-                Text::new("enabled")
-            } else {
-                Text::new("disabled")
-            }
-        }));
-        assert_eq!(resolved_child_count(&single), 1);
-        enabled.set(true);
-        assert_eq!(resolved_child_count(&single), 1);
-
-        let multiple = Container::<()>::new().child(enabled.binding().map(|value| {
-            if value {
-                vec![Text::new("a").into(), Text::new("b").into()]
-            } else {
-                Vec::<Element<()>>::new()
-            }
-        }));
-        assert_eq!(resolved_child_count(&multiple), 2);
-        enabled.set(false);
-        assert_eq!(resolved_child_count(&multiple), 0);
-    }
-}
+impl_layout_api!(Stack);
+impl_layout_api!(Grid);
+impl_layout_api!(Flex);

@@ -1,12 +1,13 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
-use crate::ui::layout::{Insets, LayoutStyle, Value};
+use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{Dp, Sp};
 
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
+use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
 
 #[derive(Clone)]
@@ -22,6 +23,138 @@ pub struct Text {
     pub(crate) letter_spacing: Sp,
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
     pub(crate) user_select: bool,
+}
+
+macro_rules! impl_text_layout_api {
+    () => {
+        pub fn size(mut self, width: impl IntoLengthValue, height: impl IntoLengthValue) -> Self {
+            set_layout_lengths(&mut self.layout, width, height);
+            self
+        }
+
+        pub fn width(mut self, width: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.width, width);
+            self
+        }
+
+        pub fn height(mut self, height: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.height, height);
+            self
+        }
+
+        pub fn min_width(mut self, width: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.min_width, width);
+            self
+        }
+
+        pub fn min_height(mut self, height: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.min_height, height);
+            self
+        }
+
+        pub fn max_width(mut self, width: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.max_width, width);
+            self
+        }
+
+        pub fn max_height(mut self, height: impl IntoLengthValue) -> Self {
+            set_layout_length(&mut self.layout.max_height, height);
+            self
+        }
+
+        pub fn aspect_ratio(mut self, aspect_ratio: impl Into<Value<f32>>) -> Self {
+            self.layout.aspect_ratio = Some(aspect_ratio.into());
+            self
+        }
+
+        pub fn margin(mut self, insets: impl Into<Value<Insets>>) -> Self {
+            self.layout.margin = insets.into();
+            self
+        }
+
+        pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
+            self.layout.padding = insets.into();
+            self
+        }
+
+        pub fn grow(mut self, grow: impl Into<Value<f32>>) -> Self {
+            self.layout.grow = grow.into();
+            self
+        }
+
+        pub fn shrink(mut self, shrink: impl Into<Value<f32>>) -> Self {
+            self.layout.shrink = shrink.into();
+            self
+        }
+
+        pub fn basis(mut self, basis: impl IntoLengthValue) -> Self {
+            self.layout.basis = Some(basis.into_length_value());
+            self
+        }
+
+        pub fn align_self(mut self, align: Align) -> Self {
+            self.layout.align_self = Some(align);
+            self
+        }
+
+        pub fn justify_self(mut self, align: Align) -> Self {
+            self.layout.justify_self = Some(align);
+            self
+        }
+
+        pub fn column(mut self, start: usize) -> Self {
+            self.layout.column_start = Some(start.max(1));
+            self
+        }
+
+        pub fn row(mut self, start: usize) -> Self {
+            self.layout.row_start = Some(start.max(1));
+            self
+        }
+
+        pub fn column_span(mut self, span: usize) -> Self {
+            self.layout.column_span = span.max(1);
+            self
+        }
+
+        pub fn row_span(mut self, span: usize) -> Self {
+            self.layout.row_span = span.max(1);
+            self
+        }
+
+        pub fn position_absolute(mut self) -> Self {
+            self.layout.position_type = crate::ui::layout::PositionType::Absolute;
+            self
+        }
+
+        pub fn left(mut self, value: impl IntoLengthValue) -> Self {
+            set_layout_inset(&mut self.layout.left, value);
+            self
+        }
+
+        pub fn top(mut self, value: impl IntoLengthValue) -> Self {
+            set_layout_inset(&mut self.layout.top, value);
+            self
+        }
+
+        pub fn right(mut self, value: impl IntoLengthValue) -> Self {
+            set_layout_inset(&mut self.layout.right, value);
+            self
+        }
+
+        pub fn bottom(mut self, value: impl IntoLengthValue) -> Self {
+            set_layout_inset(&mut self.layout.bottom, value);
+            self
+        }
+
+        pub fn inset(mut self, value: impl IntoLengthValue + Copy) -> Self {
+            set_layout_inset(&mut self.layout.left, value);
+            set_layout_inset(&mut self.layout.top, value);
+            set_layout_inset(&mut self.layout.right, value);
+            set_layout_inset(&mut self.layout.bottom, value);
+            self
+        }
+    };
 }
 
 impl Text {
@@ -41,15 +174,7 @@ impl Text {
         }
     }
 
-    pub fn margin(mut self, insets: impl Into<Value<Insets>>) -> Self {
-        self.layout.margin = insets.into();
-        self
-    }
-
-    pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
-        self.layout.padding = insets.into();
-        self
-    }
+    impl_text_layout_api!();
 
     pub fn font(mut self, font_family: impl Into<String>) -> Self {
         self.font_family = Some(font_family.into());

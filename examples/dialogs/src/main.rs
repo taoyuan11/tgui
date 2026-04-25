@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use tgui::{
-    Application, Button, Column, Command, DialogError, Element, FileDialogOptions,
+    Application, Axis, Button, Command, DialogError, Element, FileDialogOptions, Flex,
     MessageDialogButtons, MessageDialogLevel, MessageDialogOptions, MessageDialogResult,
-    Observable, Text, ValueCommand, ViewModelContext, el,
+    Observable, Text, ValueCommand, ViewModelContext, el, pct,
 };
 
 struct App {
@@ -118,8 +118,8 @@ impl App {
         ))
         .on_click(Command::new(Self::increment));
 
-        Column::new()
-            .fill_size()
+        Flex::new(Axis::Vertical)
+            .size(pct(100.0), pct(100.0))
             .child(el![
                 open_sync,
                 open_async,

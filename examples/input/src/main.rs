@@ -1,6 +1,6 @@
 use tgui::{
-    Align, Application, Binding, Button, Color, Column, Command, Input, Insets, Observable, Row,
-    Stack, Text, TguiError, ValueCommand, ViewModelContext, dp, sp,
+    Align, Application, Axis, Binding, Button, Color, Command, Flex, Input, Insets, Observable,
+    Stack, Text, TguiError, ValueCommand, ViewModelContext, dp, pct, sp,
 };
 
 struct FormVm {
@@ -68,11 +68,11 @@ impl FormVm {
 
     fn view(&self) -> tgui::Element<Self> {
         Stack::new()
-            .fill_size()
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
             .align(Align::Center)
             .child(
-                Column::new()
+                Flex::new(Axis::Vertical)
                     .width(dp(620.0))
                     .padding(Insets::all(dp(24.0)))
                     .gap(dp(14.0))
@@ -91,7 +91,7 @@ impl FormVm {
                     )
                     .child(
                         Input::new(Text::new(self.project.binding()))
-                            .fill_width()
+                            .width(pct(100.0))
                             .background(Color::hexa(0x1E293BFF))
                             .border(dp(1.0), Color::hexa(0x475569FF))
                             .border_radius(dp(12.0))
@@ -100,7 +100,7 @@ impl FormVm {
                     )
                     .child(
                         Input::new(Text::new(self.owner.binding()))
-                            .fill_width()
+                            .width(pct(100.0))
                             .background(Color::hexa(0x1E293BFF))
                             .border(dp(1.0), Color::hexa(0x475569FF))
                             .border_radius(dp(12.0))
@@ -109,7 +109,7 @@ impl FormVm {
                     )
                     .child(
                         Input::new(Text::new(self.status.binding()))
-                            .fill_width()
+                            .width(pct(100.0))
                             .background(Color::hexa(0x1E293BFF))
                             .border(dp(1.0), Color::hexa(0x475569FF))
                             .border_radius(dp(12.0))
@@ -117,7 +117,7 @@ impl FormVm {
                             .on_change(ValueCommand::new(Self::set_status)),
                     )
                     .child(
-                        Row::new()
+                        Flex::new(Axis::Horizontal)
                             .gap(dp(10.0))
                             .child(
                                 Button::new(Text::new("Fill demo values"))

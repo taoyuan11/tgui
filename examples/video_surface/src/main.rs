@@ -1,10 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::path::PathBuf;
 
-use tgui::{
-    dp, el, sp, Application, Button, Color, Column, Command, Input, Insets, Observable, Row,
-    Text, ValueCommand, VideoController, VideoSource, VideoSurface, ViewModelContext,
-};
+use tgui::{dp, el, pct, sp, Application, Axis, Button, Color, Command, Flex, Input, Insets, Observable, Text, ValueCommand, VideoController, VideoSource, VideoSurface, ViewModelContext};
 
 struct VideoVm {
     controller: VideoController,
@@ -17,8 +14,8 @@ impl VideoVm {
         controller.set_buffer_memory_limit_bytes(160 * 1024 * 1024);
         Self {
             controller,
-            // source: ctx.observable(String::from("D:\\CloudMusic\\MV\\郭顶 - 凄美地.mp4")),
-            source: ctx.observable(String::from("https://cn-jsnt-ct-01-01.bilivideo.com/upgcxcode/85/57/37691985785/37691985785-1-16.mp4?e=ig8euxZM2rNcNbRVhwdVhwdlhWdVhwdVhoNvNC8BqJIzNbfqXBvEqxTEto8BTrNvN0GvT90W5JZMkX_YN0MvXg8gNEV4NC8xNEV4N03eN0B5tZlqNxTEto8BTrNvNeZVuJ10Kj_g2UB02J0mN0B5tZlqNCNEto8BTrNvNC7MTX502C8f2jmMQJ6mqF2fka1mqx6gqj0eN0B599M=&uipk=5&os=bcache&mid=0&oi=2882915941&deadline=1777026992&platform=pc&trid=00008c9a0b26e40e433494404a9fc3b42f1u&gen=playurlv3&og=cos&nbs=1&upsig=17af2a95637bd18b06c59d5f2f104d5d&uparams=e,uipk,os,mid,oi,deadline,platform,trid,gen,og,nbs&cdnid=4309&bvc=vod&nettype=0&bw=427231&lrs=78&f=u_0_0&qn_dyeid=3b985d16adf341e3000935b869eb2b90&agrr=1&buvid=&build=0&dl=0&orderid=0,3")),
+            source: ctx.observable(String::from("D:\\CloudMusic\\MV\\郭顶 - 凄美地.mp4")),
+            // source: ctx.observable(String::from("https://cn-jsnt-ct-01-01.bilivideo.com/upgcxcode/85/57/37691985785/37691985785-1-16.mp4?e=ig8euxZM2rNcNbRVhwdVhwdlhWdVhwdVhoNvNC8BqJIzNbfqXBvEqxTEto8BTrNvN0GvT90W5JZMkX_YN0MvXg8gNEV4NC8xNEV4N03eN0B5tZlqNxTEto8BTrNvNeZVuJ10Kj_g2UB02J0mN0B5tZlqNCNEto8BTrNvNC7MTX502C8f2jmMQJ6mqF2fka1mqx6gqj0eN0B599M=&uipk=5&os=bcache&mid=0&oi=2882915941&deadline=1777026992&platform=pc&trid=00008c9a0b26e40e433494404a9fc3b42f1u&gen=playurlv3&og=cos&nbs=1&upsig=17af2a95637bd18b06c59d5f2f104d5d&uparams=e,uipk,os,mid,oi,deadline,platform,trid,gen,og,nbs&cdnid=4309&bvc=vod&nettype=0&bw=427231&lrs=78&f=u_0_0&qn_dyeid=3b985d16adf341e3000935b869eb2b90&agrr=1&buvid=&build=0&dl=0&orderid=0,3")),
         }
     }
 
@@ -64,7 +61,7 @@ impl VideoVm {
                 .unwrap_or_else(|| "--:--".to_string())
         });
 
-        Column::new()
+        Flex::new(Axis::Vertical)
             .padding(Insets::all(dp(20.0)))
             .gap(dp(12.0))
             .background(Color::hexa(0x0F172AFF))
@@ -77,11 +74,11 @@ impl VideoVm {
                 .font_size(sp(14.0))
                 .color(Color::WHITE),
                 VideoSurface::new(self.controller.clone())
-                    .fill_width()
+                    .width(pct(100.0))
                     .height(dp(360.0))
                     .border_radius(dp(12.0))
                     .border(dp(1.0), Color::hexa(0x334155FF)),
-                Row::new().gap(dp(8.0)).child(el![
+                Flex::new(Axis::Horizontal).gap(dp(8.0)).child(el![
                     Button::new(Text::new("Play"))
                         .on_click(Command::new(Self::play)),
                     Button::new(Text::new("Pause"))
@@ -97,29 +94,30 @@ impl VideoVm {
                     Button::new(Text::new("Unmute"))
                         .on_click(Command::new(Self::unmute)),
                 ]),
-                Row::new().gap(dp(12.0)).child(el![
+                Flex::new(Axis::Horizontal).gap(dp(12.0)).child(el![
                     Text::new(status).color(Color::hexa(0xE2E8F0FF)),
                     Text::new(position).color(Color::hexa(0xCBD5E1FF)),
                     Text::new("/").color(Color::hexa(0x64748BFF)),
                     Text::new(duration).color(Color::hexa(0xCBD5E1FF))
                 ]),
-                Column::new().fill_width().gap(dp(10.0)).child(el![
+                Flex::new(Axis::Horizontal).width(pct(100.0)).gap(dp(10.0)).child(el![
                     Input::new(Text::new(self.source.binding()))
-                        .fill_width()
+                        .grow(1.0)
                         .placeholder_with_str("PleaseEnterTheVideoSourcePath")
                         .on_change(ValueCommand::new(
                             |video_vm: &mut VideoVm, value: String| { video_vm.source.set(value) }
                         )),
-                    Button::new(Text::new("LoadSource")).on_click(Command::new(
+                    Button::new(Text::new("LoadSource"))
+                    .on_click(Command::new(
                         |video_vm: &mut VideoVm| {
-                            let _ = video_vm
-                                .controller
-                                .load(parse_video_source(video_vm.source.get().clone(), Some(vec![
-                                ("Referer".to_string(), "https://www.bilibili.com/".to_string())
-                            ])));
+                            let _ = video_vm.controller.load(parse_video_source(
+                                video_vm.source.get().clone(),
+                                Some(vec![("Referer".to_string(), "https://www.bilibili.com/".to_string())]),
+                            ));
                         }
                     ))
                 ])
+
             ])
             .into()
     }

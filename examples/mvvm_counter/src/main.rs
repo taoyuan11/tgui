@@ -1,6 +1,6 @@
 use tgui::{
-    Align, Application, Binding, Button, Color, Column, Command, InputTrigger, Insets,
-    Observable, Row, Stack, Text, TguiError, ViewModelContext, dp, sp,
+    Align, Application, Axis, Binding, Button, Color, Command, Flex, InputTrigger, Insets,
+    Observable, Stack, Text, TguiError, ViewModelContext, dp, pct, sp,
 };
 use tgui::platform::keyboard::KeyCode;
 
@@ -64,11 +64,11 @@ impl CounterVm {
 
     fn view(&self) -> tgui::Element<Self> {
         Stack::new()
-            .fill_size()
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(28.0)))
             .align(Align::Center)
             .child(
-                Column::new()
+                Flex::new(Axis::Vertical)
                     .width(dp(520.0))
                     .padding(Insets::all(dp(26.0)))
                     .gap(dp(16.0))
@@ -91,7 +91,7 @@ impl CounterVm {
                             .color(Color::hexa(0xCBD5E1FF)),
                     )
                     .child(
-                        Row::new()
+                        Flex::new(Axis::Horizontal)
                             .gap(dp(10.0))
                             .child(
                                 Button::new(Text::new("-1"))

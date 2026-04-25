@@ -1,8 +1,8 @@
 mod pages;
 
 use tgui::{
-    dp, sp, Application, Binding, Button, Color, Column, Command, Insets, MediaSource, Observable,
-    Overflow, Row, ScrollbarStyle, Stack, Text, TguiError, ViewModelContext,
+    dp, sp, Application, Axis, Binding, Button, Color, Command, Flex, Insets, MediaSource,
+    Observable, Overflow, ScrollbarStyle, Stack, Text, TguiError, ViewModelContext, pct,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,14 +148,14 @@ impl ShowcaseVm {
     }
 
     fn view(&self) -> tgui::Element<Self> {
-        Column::new()
-            .fill_size()
+        Flex::new(Axis::Vertical)
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
             .gap(dp(18.0))
             .background(Color::hexa(0x06131FFF))
             .child(hero_panel(self.page_label(), self.page_subtitle()))
             .child(
-                Row::new()
+                Flex::new(Axis::Horizontal)
                     .gap(dp(10.0))
                     .child(tab_button(
                         "Basic Widgets",
@@ -175,7 +175,7 @@ impl ShowcaseVm {
             )
             .child(
                 Stack::new()
-                    .fill_size()
+                    .size(pct(100.0), pct(100.0))
                     .padding(Insets::all(dp(20.0)))
                     .background(Color::hexa(0x0B1B2BFF))
                     .border(dp(1.0), Color::hexa(0x24435DFF))
@@ -199,7 +199,7 @@ fn hero_panel(title: Binding<String>, subtitle: Binding<String>) -> tgui::Elemen
         .background(Color::hexa(0x0E2A47FF))
         .border_radius(dp(24.0))
         .child(
-            Column::new()
+            Flex::new(Axis::Vertical)
                 .gap(dp(10.0))
                 .child(
                     Text::new("tgui multi-page showcase")

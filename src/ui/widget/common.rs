@@ -9,7 +9,9 @@ use taffy::NodeId as TaffyNodeId;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
-use crate::ui::layout::{Align, Axis, Insets, Overflow, ScrollbarStyle, Value, Wrap};
+use crate::ui::layout::{
+    Align, Axis, Insets, Justify, Length, Overflow, ScrollbarStyle, Track, Value, Wrap,
+};
 use crate::ui::unit::{Dp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface;
@@ -370,6 +372,35 @@ impl Value<Dp> {
     }
 }
 
+impl Value<Length> {
+    pub(crate) fn resolve_widget(
+        &self,
+        animations: &mut AnimationEngine,
+        widget_id: WidgetId,
+        property: WidgetProperty,
+        now: Instant,
+    ) -> Length {
+        match self {
+            Value::Static(value) => *value,
+            Value::Bound(binding) => {
+                let target = binding.get();
+                match target {
+                    Length::Px(target_dp) => Length::Px(animations.resolve_dp(
+                        AnimationKey::Widget {
+                            id: widget_id.raw(),
+                            property,
+                        },
+                        target_dp,
+                        binding.transition(),
+                        now,
+                    )),
+                    Length::Auto | Length::Percent(_) => target,
+                }
+            }
+        }
+    }
+}
+
 impl Value<Point> {
     pub(crate) fn resolve_widget(
         &self,
@@ -520,13 +551,14 @@ impl ScenePrimitives {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum ContainerKind {
     Flow,
     Stack,
-    Row,
-    Column,
-    Grid { columns: usize },
+    Grid {
+        columns: Vec<Track>,
+        rows: Vec<Track>,
+    },
     Flex { direction: Axis, wrap: Wrap },
 }
 
@@ -534,7 +566,10 @@ pub(crate) enum ContainerKind {
 pub(crate) struct ContainerLayout {
     pub kind: ContainerKind,
     pub padding: Value<Insets>,
-    pub gap: Value<Dp>,
+    pub gap: Value<crate::ui::layout::Length>,
+    pub justify: Justify,
+    pub justify_x: Option<Justify>,
+    pub justify_y: Option<Justify>,
     pub align: Align,
     pub align_x: Option<Align>,
     pub align_y: Option<Align>,
@@ -548,7 +583,10 @@ impl ContainerLayout {
         Self {
             kind: ContainerKind::Flow,
             padding: Value::Static(Insets::ZERO),
-            gap: Value::Static(Dp::ZERO),
+            gap: Value::Static(crate::ui::layout::Length::Px(Dp::ZERO)),
+            justify: Justify::Start,
+            justify_x: None,
+            justify_y: None,
             align: Align::Start,
             align_x: None,
             align_y: None,
@@ -605,6 +643,15 @@ pub(crate) enum WidgetKind<VM> {
         label: Text,
         disabled: Value<bool>,
     },
+    Switch {
+        checked: Value<bool>,
+        on_change: Option<ValueCommand<VM, bool>>,
+        active_background: Value<Color>,
+        inactive_background: Value<Color>,
+        active_thumb_color: Value<Color>,
+        inactive_thumb_color: Value<Color>,
+        disabled: Value<bool>,
+    },
     Input {
         text: Text,
         placeholder: Text,
@@ -639,6 +686,23 @@ impl<VM> Clone for WidgetKind<VM> {
                 label: label.clone(),
                 disabled: disabled.clone(),
             },
+            Self::Switch {
+                checked,
+                on_change,
+                active_background,
+                inactive_background,
+                active_thumb_color,
+                inactive_thumb_color,
+                disabled,
+            } => Self::Switch {
+                checked: checked.clone(),
+                on_change: on_change.clone(),
+                active_background: active_background.clone(),
+                inactive_background: inactive_background.clone(),
+                active_thumb_color: active_thumb_color.clone(),
+                inactive_thumb_color: inactive_thumb_color.clone(),
+                disabled: disabled.clone(),
+            },
             Self::Input {
                 text,
                 placeholder,
@@ -663,6 +727,7 @@ pub(crate) enum MeasureContext {
     #[cfg(feature = "video")]
     VideoSurface(VideoSurface),
     Button(Text),
+    Switch,
     Input {
         text: Text,
         placeholder: Text,
@@ -696,6 +761,12 @@ pub(crate) enum HitInteraction<VM> {
         interactions: InteractionHandlers<VM>,
         text_style: Text,
         text: String,
+    },
+    Switch {
+        id: WidgetId,
+        interactions: InteractionHandlers<VM>,
+        on_change: Option<ValueCommand<VM, bool>>,
+        current: bool,
     },
     CanvasItem {
         id: WidgetId,
@@ -750,6 +821,17 @@ impl<VM> Clone for HitInteraction<VM> {
                 text_style: text_style.clone(),
                 text: text.clone(),
             },
+            Self::Switch {
+                id,
+                interactions,
+                on_change,
+                current,
+            } => Self::Switch {
+                id: *id,
+                interactions: interactions.clone(),
+                on_change: on_change.clone(),
+                current: *current,
+            },
             Self::CanvasItem {
                 id,
                 item_id,
@@ -772,7 +854,8 @@ impl<VM> HitInteraction<VM> {
         match self {
             Self::Widget { id, .. }
             | Self::FocusInput { id, .. }
-            | Self::SelectableText { id, .. } => HitTargetId::Widget(*id),
+            | Self::SelectableText { id, .. }
+            | Self::Switch { id, .. } => HitTargetId::Widget(*id),
             Self::CanvasItem { id, item_id, .. } => HitTargetId::CanvasItem {
                 widget_id: *id,
                 item_id: *item_id,
@@ -920,11 +1003,12 @@ fn point_in_triangle(point: Point, a: Point, b: Point, c: Point) -> bool {
     !(has_neg && has_pos)
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct InputEditState {
     pub cursor: usize,
     pub anchor: usize,
     pub composition: Option<CompositionState>,
+    pub scroll_x: Dp,
 }
 
 impl InputEditState {
@@ -934,6 +1018,7 @@ impl InputEditState {
             cursor: end,
             anchor: end,
             composition: None,
+            scroll_x: Dp::ZERO,
         }
     }
 
@@ -954,6 +1039,7 @@ impl InputEditState {
                     (composition.replace_range.1, composition.replace_range.1);
             }
         }
+        self.scroll_x = self.scroll_x.max(Dp::ZERO);
         self
     }
 }

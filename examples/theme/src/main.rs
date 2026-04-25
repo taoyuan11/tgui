@@ -1,4 +1,4 @@
-use tgui::{dp, sp, Align, Application, Binding, Button, Color, Column, Command, Input, Insets, Observable, Row, Stack, Text, TguiError, ThemeMode, ValueCommand, ViewModelContext};
+use tgui::{dp, pct, sp, Align, Application, Axis, Binding, Button, Color, Command, Flex, Input, Insets, Observable, Stack, Text, TguiError, ThemeMode, ValueCommand, ViewModelContext};
 
 struct ThemeDemoVm {
     mode: Observable<ThemeMode>,
@@ -40,8 +40,8 @@ impl ThemeDemoVm {
     }
 
     fn view(&self) -> tgui::Element<Self> {
-        Column::new()
-            .fill_size()
+        Flex::new(Axis::Vertical)
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
             .gap(dp(18.0))
             .child(
@@ -57,7 +57,7 @@ impl ThemeDemoVm {
                 .font_size(sp(16.0)),
             )
             .child(
-                Row::new()
+                Flex::new(Axis::Horizontal)
                     .gap(dp(10.0))
                     .child(
                         Button::new(Text::new("Light"))
@@ -79,10 +79,10 @@ impl ThemeDemoVm {
                     ),
             )
             .child(
-                Row::new()
+                Flex::new(Axis::Horizontal)
                     .gap(dp(18.0))
                     .child(
-                        Column::new()
+                        Flex::new(Axis::Vertical)
                             .grow(1.0)
                             .padding(Insets::all(dp(18.0)))
                             .gap(dp(12.0))
@@ -100,14 +100,14 @@ impl ThemeDemoVm {
                             )
                             .child(
                                 Input::new(Text::new(self.search.binding()))
-                                    .fill_width()
+                                    .width(pct(100.0))
                                     .border_radius(dp(12.0))
                                     .placeholder_with_str("Type anything here")
                                     .on_change(ValueCommand::new(Self::set_search)),
                             )
                             .child(
                                 Button::new(Text::new("Sample action"))
-                                    .fill_width()
+                                    .width(pct(100.0))
                                     .border_radius(dp(12.0)),
                             ),
                     )

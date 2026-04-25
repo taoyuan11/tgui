@@ -2,9 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use taffy::prelude::{
-    auto, evenly_sized_tracks, length, line, percent, AlignItems as TaffyAlignItems,
-    AvailableSpace, Display, FlexDirection, FlexWrap, JustifyContent as TaffyJustifyContent,
-    Style as TaffyStyle, TaffyTree,
+    length, line, span, AlignContent as TaffyAlignContent,
+    AlignItems as TaffyAlignItems, AvailableSpace, Dimension, Display, FlexDirection, FlexWrap,
+    FromFr, FromLength, FromPercent, GridTemplateComponent,
+    JustifyContent as TaffyJustifyContent, LengthPercentage, LengthPercentageAuto,
+    Position as TaffyPosition, Style as TaffyStyle, TaffyAuto, TaffyTree, TaffyZero,
+    TrackSizingFunction,
 };
 use taffy::Size as TaffySize;
 
@@ -16,7 +19,10 @@ use crate::media::{
     IntrinsicSize, MediaManager, RasterRequest,
 };
 use crate::text::font::{FontManager, TextFontRequest};
-use crate::ui::layout::{Align, Axis, Insets, LayoutStyle, Overflow, Value, Wrap};
+use crate::ui::layout::{
+    Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, Track, Value,
+    Wrap,
+};
 use crate::ui::theme::Theme;
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
 #[cfg(feature = "video")]
@@ -40,9 +46,110 @@ const CARET_WIDTH: f32 = 2.0;
 /// 光标末尾间隔
 const CARET_END_GAP: f32 = 1.0;
 
+/// Minimum visible gap around the input caret while horizontally scrolling.
+/// 输入框横向滚动时光标边缘的最小可见间距
+pub(crate) const INPUT_CARET_EDGE_GAP: f32 = 8.0;
+
 /// Caret width in logical pixels when input is empty.
 /// 当输入为空时光标像素宽度
 const INPUT_EMPTY_CARET_INSET: f32 = 1.0;
+
+/// Default intrinsic width for single-line inputs when no explicit width is set.
+const INPUT_DEFAULT_WIDTH: f32 = 160.0;
+
+#[derive(Clone, Copy)]
+pub(crate) struct InputViewport {
+    pub frame: Rect,
+}
+
+pub(crate) fn input_max_scroll(inner: Rect, scrollable_width: f32) -> f32 {
+    let viewport_width = inner.width.get().max(0.0);
+    if viewport_width <= 0.0 {
+        return 0.0;
+    }
+
+    (scrollable_width - viewport_width).max(0.0)
+}
+
+pub(crate) fn input_scroll_offset_for_caret(
+    inner: Rect,
+    content_width: f32,
+    caret_start: f32,
+    caret_end: f32,
+    current_scroll_x: f32,
+) -> f32 {
+    let viewport_width = inner.width.get().max(0.0);
+    if viewport_width <= 0.0 {
+        return 0.0;
+    }
+
+    let scrollable_width = content_width.max(caret_end + INPUT_CARET_EDGE_GAP);
+    let max_scroll = input_max_scroll(inner, scrollable_width);
+    if max_scroll <= 0.0 {
+        return 0.0;
+    }
+
+    let caret_start = caret_start.max(0.0);
+    let caret_end = caret_end.max(caret_start);
+    if caret_end - caret_start >= viewport_width {
+        return caret_start.clamp(0.0, max_scroll);
+    }
+
+    let gap = INPUT_CARET_EDGE_GAP.min(viewport_width * 0.5);
+    let safe_start = current_scroll_x + gap;
+    let safe_end = current_scroll_x + viewport_width - gap;
+    if caret_start >= safe_start && caret_end <= safe_end {
+        return current_scroll_x.clamp(0.0, max_scroll);
+    }
+
+    let min_scroll = (caret_end + gap - viewport_width).max(0.0);
+    let max_scroll_for_caret = (caret_start - gap).max(0.0).min(max_scroll);
+    if caret_start < safe_start {
+        max_scroll_for_caret.clamp(0.0, max_scroll)
+    } else {
+        min_scroll.clamp(0.0, max_scroll)
+    }
+}
+
+pub(crate) fn clamp_input_scroll_offset(inner: Rect, scrollable_width: f32, scroll_x: f32) -> f32 {
+    scroll_x.clamp(0.0, input_max_scroll(inner, scrollable_width))
+}
+
+pub(crate) fn input_scroll_offset(
+    inner: Rect,
+    content_width: f32,
+    caret_start: f32,
+    caret_end: f32,
+    current_scroll_x: f32,
+) -> f32 {
+    input_scroll_offset_for_caret(
+        inner,
+        content_width,
+        caret_start,
+        caret_end,
+        current_scroll_x,
+    )
+}
+
+pub(crate) fn input_text_viewport(
+    inner: Rect,
+    content_width: f32,
+    content_height: f32,
+    line_height: f32,
+    scroll_x: f32,
+    scrollable_width: f32,
+) -> InputViewport {
+    let content_frame = centered_text_frame(inner, content_width, content_height, line_height);
+    let scroll_x = clamp_input_scroll_offset(inner, scrollable_width, scroll_x);
+    InputViewport {
+        frame: Rect::new(
+            inner.x - scroll_x,
+            content_frame.y,
+            content_width.max(content_frame.width.get()),
+            content_frame.height,
+        ),
+    }
+}
 
 pub struct Element<VM> {
     pub(crate) id: WidgetId,
@@ -101,6 +208,15 @@ enum ResolvedWidgetKind<VM> {
     },
     Button {
         label: Text,
+        disabled: Value<bool>,
+    },
+    Switch {
+        checked: Value<bool>,
+        on_change: Option<ValueCommand<VM, bool>>,
+        active_background: Value<Color>,
+        inactive_background: Value<Color>,
+        active_thumb_color: Value<Color>,
+        inactive_thumb_color: Value<Color>,
         disabled: Value<bool>,
     },
     Input {
@@ -227,6 +343,23 @@ impl<VM> Element<VM> {
                 label: label.clone(),
                 disabled: disabled.clone(),
             },
+            WidgetKind::Switch {
+                checked,
+                on_change,
+                active_background,
+                inactive_background,
+                active_thumb_color,
+                inactive_thumb_color,
+                disabled,
+            } => ResolvedWidgetKind::Switch {
+                checked: checked.clone(),
+                on_change: on_change.clone(),
+                active_background: active_background.clone(),
+                inactive_background: inactive_background.clone(),
+                active_thumb_color: active_thumb_color.clone(),
+                inactive_thumb_color: inactive_thumb_color.clone(),
+                disabled: disabled.clone(),
+            },
             WidgetKind::Input {
                 text,
                 placeholder,
@@ -264,6 +397,7 @@ impl<VM> ResolvedElement<VM> {
                 MeasureContext::VideoSurface(video.clone())
             }
             ResolvedWidgetKind::Button { label, .. } => MeasureContext::Button(label.clone()),
+            ResolvedWidgetKind::Switch { .. } => MeasureContext::Switch,
             ResolvedWidgetKind::Input {
                 text, placeholder, ..
             } => MeasureContext::Input {
@@ -291,7 +425,7 @@ impl<VM> ResolvedElement<VM> {
                     taffy,
                     animations,
                     units,
-                    Some(layout.kind),
+                    Some(layout.kind.clone()),
                     viewport,
                     false,
                     now,
@@ -325,46 +459,67 @@ impl<VM> ResolvedElement<VM> {
         units: UnitContext,
         now: std::time::Instant,
     ) -> TaffyStyle {
+        let default_min_width = match &self.kind {
+            ResolvedWidgetKind::Input { .. } if self.layout.min_width.is_none() => {
+                Dimension::from_length(0.0)
+            }
+            _ => Dimension::AUTO,
+        };
+        let width = if is_root {
+            Some(Dimension::from_length(viewport.width))
+        } else {
+            self.layout
+                .width
+                .as_ref()
+                .map(|value| resolve_dimension(value, animations, self.id, WidgetProperty::Width, now, units))
+        };
+        let height = if is_root {
+            Some(Dimension::from_length(viewport.height))
+        } else {
+            self.layout.height.as_ref().map(|value| {
+                resolve_dimension(value, animations, self.id, WidgetProperty::Height, now, units)
+            })
+        };
         let mut style = TaffyStyle {
             size: TaffySize {
-                width: if is_root {
-                    length(viewport.width)
-                } else if self.layout.fill_width {
-                    percent(1.0)
-                } else {
-                    self.layout
-                        .width
-                        .as_ref()
-                        .map(|value| {
-                            length(value.resolve_widget_to_logical(
-                                animations,
-                                self.id,
-                                WidgetProperty::Width,
-                                now,
-                                units,
-                            ))
-                        })
-                        .unwrap_or_else(auto)
-                },
-                height: if is_root {
-                    length(viewport.height)
-                } else if self.layout.fill_height {
-                    percent(1.0)
-                } else {
-                    self.layout
-                        .height
-                        .as_ref()
-                        .map(|value| {
-                            length(value.resolve_widget_to_logical(
-                                animations,
-                                self.id,
-                                WidgetProperty::Height,
-                                now,
-                                units,
-                            ))
-                        })
-                        .unwrap_or_else(auto)
-                },
+                width: width.unwrap_or(Dimension::AUTO),
+                height: height.unwrap_or(Dimension::AUTO),
+            },
+            min_size: TaffySize {
+                width: self
+                    .layout
+                    .min_width
+                    .as_ref()
+                    .map(|value| {
+                        resolve_dimension(value, animations, self.id, WidgetProperty::Width, now, units)
+                    })
+                    .unwrap_or(default_min_width),
+                height: self
+                    .layout
+                    .min_height
+                    .as_ref()
+                    .map(|value| {
+                        resolve_dimension(value, animations, self.id, WidgetProperty::Height, now, units)
+                    })
+                    .unwrap_or(Dimension::AUTO),
+            },
+            max_size: TaffySize {
+                width: self
+                    .layout
+                    .max_width
+                    .as_ref()
+                    .map(|value| {
+                        resolve_dimension(value, animations, self.id, WidgetProperty::Width, now, units)
+                    })
+                    .unwrap_or(Dimension::AUTO),
+                height: self
+                    .layout
+                    .max_height
+                    .as_ref()
+                    .map(|value| {
+                        resolve_dimension(value, animations, self.id, WidgetProperty::Height, now, units)
+                    })
+                    .unwrap_or(Dimension::AUTO),
             },
             margin: to_taffy_rect_auto(
                 self.layout
@@ -386,12 +541,81 @@ impl<VM> ResolvedElement<VM> {
                 .grow
                 .resolve_widget(animations, self.id, WidgetProperty::Grow, now)
                 .max(0.0),
+            flex_shrink: self
+                .layout
+                .shrink
+                .resolve_widget(animations, self.id, WidgetProperty::Grow, now)
+                .max(0.0),
+            flex_basis: self
+                .layout
+                .basis
+                .as_ref()
+                .map(|value| {
+                    resolve_dimension(value, animations, self.id, WidgetProperty::Width, now, units)
+                })
+                .unwrap_or(Dimension::AUTO),
+            aspect_ratio: self
+                .layout
+                .aspect_ratio
+                .as_ref()
+                .map(|value| {
+                    value
+                        .resolve_widget(animations, self.id, WidgetProperty::Grow, now)
+                        .max(0.0)
+                }),
+            position: match self.layout.position_type {
+                PositionType::Relative => TaffyPosition::Relative,
+                PositionType::Absolute => TaffyPosition::Absolute,
+            },
+            inset: taffy::Rect {
+                left: self
+                    .layout
+                    .left
+                    .as_ref()
+                    .map(|value| resolve_length_percentage_auto(value, animations, self.id, WidgetProperty::Width, now, units))
+                    .unwrap_or(LengthPercentageAuto::AUTO),
+                right: self
+                    .layout
+                    .right
+                    .as_ref()
+                    .map(|value| resolve_length_percentage_auto(value, animations, self.id, WidgetProperty::Width, now, units))
+                    .unwrap_or(LengthPercentageAuto::AUTO),
+                top: self
+                    .layout
+                    .top
+                    .as_ref()
+                    .map(|value| resolve_length_percentage_auto(value, animations, self.id, WidgetProperty::Height, now, units))
+                    .unwrap_or(LengthPercentageAuto::AUTO),
+                bottom: self
+                    .layout
+                    .bottom
+                    .as_ref()
+                    .map(|value| resolve_length_percentage_auto(value, animations, self.id, WidgetProperty::Height, now, units))
+                    .unwrap_or(LengthPercentageAuto::AUTO),
+            },
+            align_self: self.layout.align_self.map(map_align_self),
+            justify_self: self.layout.justify_self.map(map_align_self),
             ..Default::default()
         };
 
         if matches!(parent_kind, Some(ContainerKind::Stack)) {
             style.grid_row.start = line(1);
+            style.grid_row.end = span(self.layout.row_span.max(1) as u16);
             style.grid_column.start = line(1);
+            style.grid_column.end = span(self.layout.column_span.max(1) as u16);
+        } else {
+            if let Some(start) = self.layout.row_start {
+                style.grid_row.start = line(start as i16);
+            }
+            if self.layout.row_span > 1 {
+                style.grid_row.end = span(self.layout.row_span as u16);
+            }
+            if let Some(start) = self.layout.column_start {
+                style.grid_column.start = line(start as i16);
+            }
+            if self.layout.column_span > 1 {
+                style.grid_column.end = span(self.layout.column_span as u16);
+            }
         }
 
         if let ResolvedWidgetKind::Container { layout, .. } = &self.kind {
@@ -432,6 +656,7 @@ impl<VM> ResolvedElement<VM> {
         );
         let disabled = match &self.kind {
             ResolvedWidgetKind::Button { disabled, .. }
+            | ResolvedWidgetKind::Switch { disabled, .. }
             | ResolvedWidgetKind::Input { disabled, .. } => disabled.resolve(),
             _ => false,
         };
@@ -503,6 +728,24 @@ impl<VM> ResolvedElement<VM> {
                     )
                 })
                 .unwrap_or(context.theme.palette.input_background),
+            ResolvedWidgetKind::Switch {
+                checked,
+                active_background,
+                inactive_background,
+                ..
+            } => context.animations.resolve_color(
+                crate::animation::AnimationKey::Widget {
+                    id: self.id.raw(),
+                    property: WidgetProperty::BackgroundAlt,
+                },
+                if checked.resolve() {
+                    active_background.resolve()
+                } else {
+                    inactive_background.resolve()
+                },
+                Some(default_switch_transition()),
+                context.now,
+            ),
             _ => self
                 .background
                 .as_ref()
@@ -558,7 +801,10 @@ impl<VM> ResolvedElement<VM> {
                 interaction: HitInteraction::Widget {
                     id: self.id,
                     interactions: self.interactions.clone(),
-                    focusable: matches!(self.kind, ResolvedWidgetKind::Button { .. }),
+                    focusable: matches!(
+                        self.kind,
+                        ResolvedWidgetKind::Button { .. } | ResolvedWidgetKind::Switch { .. }
+                    ),
                 },
             });
         }
@@ -836,6 +1082,47 @@ impl<VM> ResolvedElement<VM> {
                     primitive_clip,
                 );
             }
+            ResolvedWidgetKind::Switch {
+                checked,
+                on_change,
+                active_thumb_color,
+                inactive_thumb_color,
+                ..
+            } => {
+                let padding = self.layout.padding.resolve_widget(
+                    context.animations,
+                    self.id,
+                    WidgetProperty::Padding,
+                    context.now,
+                );
+                push_switch_primitives(
+                    background_frame,
+                    background_radius,
+                    padding,
+                    checked.resolve(),
+                    active_thumb_color.resolve(),
+                    inactive_thumb_color.resolve(),
+                    opacity,
+                    self.id,
+                    primitive_clip,
+                    context.animations,
+                    &mut computed.scene,
+                    context.now,
+                );
+                if !disabled {
+                    computed.hit_regions.push(HitRegion {
+                        rect: frame,
+                        clip_rect: primitive_clip,
+                        geometry: HitGeometry::Rect,
+                        interaction: HitInteraction::Switch {
+                            id: self.id,
+                            interactions: self.interactions.clone(),
+                            on_change: on_change.clone(),
+                            current: checked.resolve(),
+                        },
+                    });
+                }
+            }
             ResolvedWidgetKind::Input {
                 text,
                 placeholder,
@@ -850,6 +1137,11 @@ impl<VM> ResolvedElement<VM> {
                     WidgetProperty::Padding,
                     context.now,
                 );
+                let input_state = if active {
+                    context.focused_input_state
+                } else {
+                    None
+                };
                 let ime_cursor_area = push_input_primitives(
                     frame,
                     text,
@@ -864,7 +1156,7 @@ impl<VM> ResolvedElement<VM> {
                     padding,
                     opacity,
                     self.id,
-                    active.then_some(context.focused_input_state).flatten(),
+                    input_state,
                     active && context.caret_visible && !disabled,
                     primitive_clip,
                 );
@@ -982,29 +1274,19 @@ fn apply_container_style(
     );
     let gap = layout
         .gap
-        .resolve_widget_to_logical(animations, widget_id, WidgetProperty::Gap, now, units)
-        .max(0.0);
+        .resolve_widget(animations, widget_id, WidgetProperty::Gap, now);
     style.gap = TaffySize {
-        width: length(gap),
-        height: length(gap),
+        width: resolve_length_percentage(&gap, units).unwrap_or(LengthPercentage::ZERO),
+        height: resolve_length_percentage(&gap, units).unwrap_or(LengthPercentage::ZERO),
     };
 
-    match layout.kind {
-        ContainerKind::Flow | ContainerKind::Column => {
+    match &layout.kind {
+        ContainerKind::Flow => {
             style.display = Display::Flex;
             style.flex_direction = FlexDirection::Column;
-            style.justify_content = Some(map_axis_align_content(
-                layout.align_y.unwrap_or(layout.align),
-            ));
+            style.justify_content =
+                Some(map_justify_content(layout.justify_y.unwrap_or(layout.justify)));
             style.align_items = map_align_items(layout.align_x.unwrap_or(layout.align));
-        }
-        ContainerKind::Row => {
-            style.display = Display::Flex;
-            style.flex_direction = FlexDirection::Row;
-            style.justify_content = Some(map_axis_align_content(
-                layout.align_x.unwrap_or(layout.align),
-            ));
-            style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
         }
         ContainerKind::Flex { direction, wrap } => {
             style.display = Display::Flex;
@@ -1018,29 +1300,38 @@ fn apply_container_style(
             };
             match direction {
                 Axis::Horizontal => {
-                    style.justify_content = Some(map_axis_align_content(
-                        layout.align_x.unwrap_or(layout.align),
-                    ));
+                    style.justify_content =
+                        Some(map_justify_content(layout.justify_x.unwrap_or(layout.justify)));
                     style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
                 }
                 Axis::Vertical => {
-                    style.justify_content = Some(map_axis_align_content(
-                        layout.align_y.unwrap_or(layout.align),
-                    ));
+                    style.justify_content =
+                        Some(map_justify_content(layout.justify_y.unwrap_or(layout.justify)));
                     style.align_items = map_align_items(layout.align_x.unwrap_or(layout.align));
                 }
             }
         }
-        ContainerKind::Grid { columns } => {
+        ContainerKind::Grid { columns, rows } => {
             style.display = Display::Grid;
-            style.grid_template_columns = evenly_sized_tracks(columns.max(1) as u16);
+            style.grid_template_columns = if columns.is_empty() {
+                vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)]
+            } else {
+                columns.iter().copied().map(map_track).map(GridTemplateComponent::Single).collect()
+            };
+            style.grid_template_rows = if rows.is_empty() {
+                vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)]
+            } else {
+                rows.iter().copied().map(map_track).map(GridTemplateComponent::Single).collect()
+            };
+            style.justify_content = Some(map_justify_content(layout.justify_x.unwrap_or(layout.justify)));
+            style.align_content = Some(map_align_content(layout.justify_y.unwrap_or(layout.justify)));
             style.justify_items = map_align_items(layout.align_x.unwrap_or(layout.align));
             style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
         }
         ContainerKind::Stack => {
             style.display = Display::Grid;
-            style.grid_template_columns = vec![auto()];
-            style.grid_template_rows = vec![auto()];
+            style.grid_template_columns = vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)];
+            style.grid_template_rows = vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)];
             style.justify_items = map_align_items(layout.align_x.unwrap_or(layout.align));
             style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
         }
@@ -1310,18 +1601,88 @@ fn map_align_items(align: Align) -> Option<TaffyAlignItems> {
         Align::Start => TaffyAlignItems::Start,
         Align::Center => TaffyAlignItems::Center,
         Align::End => TaffyAlignItems::End,
-        Align::SpaceBetween => TaffyAlignItems::Start,
         Align::Stretch => TaffyAlignItems::Stretch,
     })
 }
 
-fn map_axis_align_content(align: Align) -> TaffyJustifyContent {
+fn map_align_self(align: Align) -> TaffyAlignItems {
     match align {
-        Align::Start => TaffyJustifyContent::Start,
-        Align::Center => TaffyJustifyContent::Center,
-        Align::End => TaffyJustifyContent::End,
-        Align::SpaceBetween => TaffyJustifyContent::SpaceBetween,
-        Align::Stretch => TaffyJustifyContent::Start,
+        Align::Start => TaffyAlignItems::Start,
+        Align::Center => TaffyAlignItems::Center,
+        Align::End => TaffyAlignItems::End,
+        Align::Stretch => TaffyAlignItems::Stretch,
+    }
+}
+
+fn map_justify_content(justify: Justify) -> TaffyJustifyContent {
+    match justify {
+        Justify::Start => TaffyJustifyContent::Start,
+        Justify::Center => TaffyJustifyContent::Center,
+        Justify::End => TaffyJustifyContent::End,
+        Justify::SpaceBetween => TaffyJustifyContent::SpaceBetween,
+        Justify::SpaceAround => TaffyJustifyContent::SpaceAround,
+        Justify::SpaceEvenly => TaffyJustifyContent::SpaceEvenly,
+    }
+}
+
+fn map_align_content(justify: Justify) -> TaffyAlignContent {
+    match justify {
+        Justify::Start => TaffyAlignContent::Start,
+        Justify::Center => TaffyAlignContent::Center,
+        Justify::End => TaffyAlignContent::End,
+        Justify::SpaceBetween => TaffyAlignContent::SpaceBetween,
+        Justify::SpaceAround => TaffyAlignContent::SpaceAround,
+        Justify::SpaceEvenly => TaffyAlignContent::SpaceEvenly,
+    }
+}
+
+fn map_track(track: Track) -> TrackSizingFunction {
+    match track {
+        Track::Auto => TrackSizingFunction::AUTO,
+        Track::Px(value) => TrackSizingFunction::from_length(value.get()),
+        Track::Percent(value) => TrackSizingFunction::from_percent(value),
+        Track::Fr(value) => TrackSizingFunction::from_fr(value),
+    }
+}
+
+fn resolve_dimension(
+    value: &Value<Length>,
+    animations: &mut AnimationEngine,
+    widget_id: WidgetId,
+    property: WidgetProperty,
+    now: std::time::Instant,
+    units: UnitContext,
+) -> Dimension {
+    match value.resolve_widget(animations, widget_id, property, now) {
+        Length::Auto => Dimension::AUTO,
+        Length::Px(value) => Dimension::from_length(units.resolve_dp(value)),
+        Length::Percent(value) => Dimension::from_percent(value),
+    }
+}
+
+fn resolve_length_percentage(
+    value: &Length,
+    units: UnitContext,
+) -> Option<LengthPercentage> {
+    match value {
+        Length::Auto => None,
+        Length::Px(value) => Some(LengthPercentage::from_length(units.resolve_dp(*value))),
+        Length::Percent(value) => Some(LengthPercentage::from_percent(*value)),
+    }
+}
+
+fn resolve_length_percentage_auto(
+    value: &Value<Length>,
+    animations: &mut AnimationEngine,
+    widget_id: WidgetId,
+    property: WidgetProperty,
+    now: std::time::Instant,
+    units: UnitContext,
+) -> LengthPercentageAuto {
+    match value.resolve_widget(animations, widget_id, property, now) {
+        Length::Auto => LengthPercentageAuto::AUTO,
+        Length::Px(value) => LengthPercentageAuto::from_length(units.resolve_dp(value)),
+        Length::Percent(value) => LengthPercentageAuto::from_percent(value),
     }
 }
 
@@ -1363,7 +1724,7 @@ fn measure_node(
             let snapshot = media.image_snapshot(&image.source.resolve(), None);
             measure_media_content(
                 known_dimensions,
-                image.aspect_ratio,
+                image.layout.aspect_ratio.as_ref().map(Value::resolve),
                 snapshot.intrinsic_size,
             )
         }
@@ -1375,18 +1736,19 @@ fn measure_node(
             let snapshot = video.controller.surface_snapshot();
             measure_media_content(
                 known_dimensions,
-                video.aspect_ratio,
+                video.layout.aspect_ratio.as_ref().map(Value::resolve),
                 snapshot.intrinsic_size,
             )
         }
         Some(MeasureContext::Button(label)) => {
             measure_text_content(label, font_manager, theme, units)
         }
+        Some(MeasureContext::Switch) => (44.0, 24.0),
         Some(MeasureContext::Input { text, placeholder }) => {
             let text_size = measure_text_content(text, font_manager, theme, units);
             let placeholder_size = measure_text_content(placeholder, font_manager, theme, units);
             (
-                text_size.0.max(placeholder_size.0),
+                INPUT_DEFAULT_WIDTH,
                 text_size.1.max(placeholder_size.1),
             )
         }
@@ -1557,13 +1919,9 @@ fn push_media_placeholder(
     loading_background: Color,
     use_loading_background: bool,
 ) {
-    let placeholder = media_loading_fill_color(
-        loading,
-        error,
-        loading_background,
-        use_loading_background,
-    )
-    .with_alpha_factor(opacity);
+    let placeholder =
+        media_loading_fill_color(loading, error, loading_background, use_loading_background)
+            .with_alpha_factor(opacity);
     if content_frame.width > Dp::ZERO && content_frame.height > Dp::ZERO {
         scene.push_overlay_shape(RenderPrimitive {
             rect: content_frame,
@@ -1755,9 +2113,20 @@ fn push_input_primitives(
         weight: text.font_weight,
     };
     let inner = frame.inset(padding);
+    let input_clip_rect = clip_rect
+        .map(|parent_clip| {
+            parent_clip.intersect(inner).unwrap_or(Rect::new(
+                parent_clip.x.max(inner.x),
+                parent_clip.y.max(inner.y),
+                0.0,
+                0.0,
+            ))
+        })
+        .unwrap_or(inner);
+    let input_clip_rect = Some(input_clip_rect);
     let state = edit_state
         .cloned()
-        .unwrap_or_else(|| InputEditState::caret_at(current_text))
+        .unwrap_or_default()
         .clamped_to(current_text);
 
     let composition = state.composition.clone();
@@ -1809,7 +2178,7 @@ fn push_input_primitives(
             font_weight: placeholder.font_weight,
             line_height: placeholder_line_height,
             letter_spacing: placeholder_letter_spacing,
-            clip_rect,
+            clip_rect: input_clip_rect,
         });
 
         let caret_rect = Rect::new(
@@ -1824,7 +2193,7 @@ fn push_input_primitives(
                 color: theme.palette.text.with_alpha_factor(opacity),
                 corner_radius: 0.0,
                 stroke_width: 0.0,
-                clip_rect,
+                clip_rect: input_clip_rect,
             });
         }
 
@@ -1856,7 +2225,6 @@ fn push_input_primitives(
         line_height,
         letter_spacing,
     );
-    let content_frame = centered_text_frame(inner, display_width, display_height, line_height);
 
     let base_color = text
         .color
@@ -1906,6 +2274,57 @@ fn push_input_primitives(
             )
         });
 
+    let caret_boundary = composition
+        .as_ref()
+        .map(|composition| {
+            let visual_cursor = composition
+                .cursor
+                .map(|(_, end)| end.min(composition.text.len()))
+                .unwrap_or(composition.text.len());
+            prefix_width
+                + measure_segment(
+                    font_manager,
+                    &composition.text[..visual_cursor],
+                    text_request.clone(),
+                    font_size,
+                    line_height,
+                    letter_spacing,
+                )
+        })
+        .unwrap_or_else(|| {
+            current_layout
+                .as_ref()
+                .map(|layout| layout.x_for_index(state.cursor.min(current_text.len())))
+                .unwrap_or(0.0)
+        });
+    let caret_padding = if composition.is_none() && state.cursor >= current_text.len() {
+        CARET_END_GAP
+    } else {
+        0.0
+    };
+    let caret_end = caret_boundary + caret_padding + CARET_WIDTH;
+    let scrollable_width = display_width.max(caret_end + INPUT_CARET_EDGE_GAP);
+    let scroll_x = if composition.is_some() {
+        input_scroll_offset_for_caret(
+            inner,
+            display_width,
+            caret_boundary,
+            caret_end,
+            state.scroll_x.get(),
+        )
+    } else {
+        clamp_input_scroll_offset(inner, scrollable_width, state.scroll_x.get())
+    };
+    let viewport = input_text_viewport(
+        inner,
+        display_width,
+        display_height,
+        line_height,
+        scroll_x,
+        scrollable_width,
+    );
+    let content_frame = viewport.frame;
+
     if composition.is_none() {
         if let Some((selection_start, selection_end)) = state.selection_range() {
             let selection_start = selection_start.min(current_text.len());
@@ -1931,7 +2350,7 @@ fn push_input_primitives(
                     color: theme.palette.accent.with_alpha_factor(0.35 * opacity),
                     corner_radius: 4.0,
                     stroke_width: 0.0,
-                    clip_rect,
+                    clip_rect: input_clip_rect,
                 });
             }
         }
@@ -1952,7 +2371,7 @@ fn push_input_primitives(
             font_weight: text.font_weight,
             line_height,
             letter_spacing,
-            clip_rect,
+            clip_rect: input_clip_rect,
         });
     } else {
         let mut cursor_x = content_frame.x;
@@ -1971,7 +2390,7 @@ fn push_input_primitives(
                 font_weight: text.font_weight,
                 line_height,
                 letter_spacing,
-                clip_rect,
+                clip_rect: input_clip_rect,
             });
             cursor_x += prefix_width;
         }
@@ -1991,7 +2410,7 @@ fn push_input_primitives(
                 font_weight: text.font_weight,
                 line_height,
                 letter_spacing,
-                clip_rect,
+                clip_rect: input_clip_rect,
             });
             scene.push_overlay_shape(RenderPrimitive {
                 rect: Rect::new(
@@ -2003,7 +2422,7 @@ fn push_input_primitives(
                 color: preedit_color,
                 corner_radius: 0.0,
                 stroke_width: 0.0,
-                clip_rect,
+                clip_rect: input_clip_rect,
             });
             cursor_x += preedit_width;
         }
@@ -2031,39 +2450,11 @@ fn push_input_primitives(
                 font_weight: text.font_weight,
                 line_height,
                 letter_spacing,
-                clip_rect,
+                clip_rect: input_clip_rect,
             });
         }
     }
 
-    let caret_boundary = composition
-        .as_ref()
-        .map(|composition| {
-            let visual_cursor = composition
-                .cursor
-                .map(|(_, end)| end.min(composition.text.len()))
-                .unwrap_or(composition.text.len());
-            prefix_width
-                + measure_segment(
-                    font_manager,
-                    &composition.text[..visual_cursor],
-                    text_request.clone(),
-                    font_size,
-                    line_height,
-                    letter_spacing,
-                )
-        })
-        .unwrap_or_else(|| {
-            current_layout
-                .as_ref()
-                .map(|layout| layout.x_for_index(state.cursor.min(current_text.len())))
-                .unwrap_or(0.0)
-        });
-    let caret_padding = if composition.is_none() && state.cursor >= current_text.len() {
-        CARET_END_GAP
-    } else {
-        CARET_WIDTH - CARET_WIDTH - CARET_WIDTH
-    };
     let caret_rect = Rect::new(
         (content_frame.x + caret_boundary + caret_padding).max(inner.x),
         content_frame.y,
@@ -2081,7 +2472,7 @@ fn push_input_primitives(
             color: theme.palette.text.with_alpha_factor(opacity),
             corner_radius: 0.0,
             stroke_width: 0.0,
-            clip_rect,
+            clip_rect: input_clip_rect,
         });
     }
 
@@ -2095,6 +2486,72 @@ fn push_input_primitives(
             content_frame.height.max(Dp::new(line_height)),
         )
     })
+}
+
+fn default_switch_transition() -> crate::animation::Transition {
+    crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(180))
+}
+
+fn push_switch_primitives(
+    background_frame: Rect,
+    background_radius: f32,
+    padding: Insets,
+    checked: bool,
+    active_thumb_color: Color,
+    inactive_thumb_color: Color,
+    opacity: f32,
+    widget_id: WidgetId,
+    clip_rect: Option<Rect>,
+    animations: &mut AnimationEngine,
+    scene: &mut ScenePrimitives,
+    now: std::time::Instant,
+) {
+    let inner = background_frame.inset(padding);
+    if inner.width <= Dp::ZERO || inner.height <= Dp::ZERO {
+        return;
+    }
+
+    let thumb_diameter = inner.height.min(inner.width);
+    if thumb_diameter <= Dp::ZERO {
+        return;
+    }
+
+    let travel = (inner.width - thumb_diameter).max(Dp::ZERO);
+    let thumb_offset = animations.resolve_dp(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::SwitchThumbOffset,
+        },
+        if checked { travel } else { Dp::ZERO },
+        Some(default_switch_transition()),
+        now,
+    );
+    let thumb_color = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::SwitchThumbColor,
+        },
+        if checked {
+            active_thumb_color
+        } else {
+            inactive_thumb_color
+        },
+        Some(default_switch_transition()),
+        now,
+    );
+
+    scene.push_overlay_shape(RenderPrimitive {
+        rect: Rect::new(
+            inner.x + thumb_offset,
+            inner.y + ((inner.height - thumb_diameter) / 2.0),
+            thumb_diameter,
+            thumb_diameter,
+        ),
+        color: thumb_color.with_alpha_factor(opacity),
+        corner_radius: (thumb_diameter.get() * 0.5).min(background_radius),
+        stroke_width: 0.0,
+        clip_rect,
+    });
 }
 
 fn measure_segment(
@@ -2460,7 +2917,7 @@ impl<VM> WidgetTree<VM> {
 
 #[cfg(test)]
 mod tests {
-    use super::centered_text_frame;
+    use super::{centered_text_frame, input_text_viewport};
     use std::collections::HashMap;
 
     use crate::animation::{AnimationCoordinator, AnimationEngine};
@@ -2471,11 +2928,11 @@ mod tests {
     use crate::text::font::{FontCatalog, FontManager};
     use crate::ui::layout::Overflow;
     use crate::ui::theme::Theme;
-    use crate::ui::unit::dp;
+    use crate::ui::unit::{dp, Dp};
     use crate::ui::widget::common::Rect;
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasPath, CanvasStroke, Element, Image, Input, InputEditState,
-        PathBuilder, Point, ScrollbarAxis, ScrollbarHandle, Stack, Text, WidgetTree,
+        PathBuilder, Point, ScrollbarAxis, ScrollbarHandle, Stack, Switch, Text, WidgetTree,
     };
     #[cfg(feature = "video")]
     use crate::video::backend::{
@@ -2508,12 +2965,7 @@ mod tests {
     #[test]
     fn image_loading_placeholder_defaults_to_transparent_white() {
         assert_eq!(
-            super::media_loading_fill_color(
-                true,
-                None,
-                Color::rgba(255, 255, 255, 0),
-                true
-            ),
+            super::media_loading_fill_color(true, None, Color::rgba(255, 255, 255, 0), true),
             Color::rgba(255, 255, 255, 0)
         );
     }
@@ -3379,6 +3831,167 @@ mod tests {
     }
 
     #[test]
+    fn switch_renders_custom_track_and_thumb_colors() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let active_background = Color::hexa(0x10B981FF);
+        let inactive_background = Color::hexa(0x475569FF);
+        let active_thumb = Color::hexa(0xECFDF5FF);
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Switch::new(true)
+                .size(dp(52.0), dp(30.0))
+                .active_background(active_background)
+                .inactive_background(inactive_background)
+                .active_thumb_color(active_thumb),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.color == active_background));
+        assert!(rendered
+            .primitives
+            .overlay_shapes
+            .iter()
+            .any(|shape| shape.color == active_thumb));
+
+        let inactive_tree: WidgetTree<()> = WidgetTree::new(
+            Switch::new(false)
+                .size(dp(52.0), dp(30.0))
+                .active_background(active_background)
+                .inactive_background(inactive_background)
+                .inactive_thumb_color(Color::WHITE),
+        );
+        let inactive_render = inactive_tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut AnimationEngine::default(),
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        assert!(inactive_render
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.color == inactive_background));
+    }
+
+    #[test]
+    fn switch_thumb_animates_between_positions() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let context = test_context();
+        let checked = context.observable(false);
+        let tree: WidgetTree<()> = WidgetTree::new(Switch::new(checked.binding().animated(
+            crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(180)),
+        )));
+
+        let mut animations = AnimationEngine::default();
+        let initial = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 60.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let start_x = initial.primitives.overlay_shapes[0].rect.x;
+
+        checked.set(true);
+        let toggled = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 60.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let immediate_x = toggled.primitives.overlay_shapes[0].rect.x;
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let mid = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 60.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let mid_x = mid.primitives.overlay_shapes[0].rect.x;
+
+        std::thread::sleep(std::time::Duration::from_millis(140));
+        let end = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 60.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let end_x = end.primitives.overlay_shapes[0].rect.x;
+
+        assert_eq!(immediate_x, start_x);
+        assert!(mid_x > start_x);
+        assert!(mid_x < end_x);
+    }
+
+    #[test]
     fn selectable_text_renders_selection_highlight() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
@@ -3404,6 +4017,7 @@ mod tests {
                 cursor: 5,
                 anchor: 1,
                 composition: None,
+                scroll_x: Dp::ZERO,
             }),
             false,
         );
@@ -3439,6 +4053,7 @@ mod tests {
                 cursor: 2,
                 anchor: 2,
                 composition: None,
+                scroll_x: Dp::ZERO,
             }),
             None,
             None,
@@ -3452,6 +4067,142 @@ mod tests {
             .filter(|primitive| primitive.content == "hello")
             .collect();
         assert_eq!(texts.len(), 1);
+    }
+
+    #[test]
+    fn input_viewport_scrolls_long_content_to_keep_caret_visible() {
+        let inner = Rect::new(12.0, 8.0, 100.0, 24.0);
+        let viewport = input_text_viewport(inner, 220.0, 18.0, 18.0, 120.0, 220.0);
+
+        assert!(viewport.frame.x < inner.x);
+        assert!(190.0 >= (inner.x - viewport.frame.x).get());
+        assert!(193.0 <= (inner.x - viewport.frame.x + inner.width).get() + 0.1);
+    }
+
+    #[test]
+    fn input_defaults_to_zero_min_width_inside_flex_layout() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+
+        let tree = WidgetTree::new(
+            crate::ui::widget::Flex::<()>::new(crate::ui::layout::Axis::Horizontal)
+                .width(dp(220.0))
+                .gap(dp(10.0))
+                .child(Input::new(Text::new(
+                    "https://example.com/a/very/long/path/that/should/not/push/the/button/outside",
+                ))
+                .grow(1.0))
+                .child(crate::ui::widget::Button::new(Text::new("LoadSource"))),
+        );
+
+        let computed = tree.compute_scene(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 220.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        let mut regions = computed.hit_regions.iter();
+        let input_region = regions
+            .find(|region| matches!(region.interaction, super::HitInteraction::FocusInput { .. }))
+            .expect("input hit region should exist");
+        let button_region = computed
+            .hit_regions
+            .iter()
+            .find(|region| matches!(region.interaction, super::HitInteraction::Widget { .. }))
+            .expect("button hit region should exist");
+
+        assert!(button_region.rect.right() <= Rect::new(0.0, 0.0, 220.0, 40.0).right());
+        assert!(input_region.rect.right() <= button_region.rect.x);
+    }
+
+    #[test]
+    fn input_text_is_clipped_to_input_bounds_inside_flex_row() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+
+        let tree = WidgetTree::new(
+            crate::ui::widget::Flex::<()>::new(crate::ui::layout::Axis::Horizontal)
+                .width(dp(220.0))
+                .gap(dp(10.0))
+                .child(Input::new(Text::new(
+                    "https://example.com/a/very/long/path/that/should/be/clipped/inside/the/input",
+                ))
+                .grow(1.0))
+                .child(
+                    crate::ui::widget::Button::new(Text::new("LoadSource"))
+                        .background(crate::foundation::color::Color::TRANSPARENT),
+                ),
+        );
+
+        let computed = tree.compute_scene(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 220.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 220.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        let input_region = computed
+            .hit_regions
+            .iter()
+            .find(|region| matches!(region.interaction, super::HitInteraction::FocusInput { .. }))
+            .expect("input hit region should exist");
+        let button_region = computed
+            .hit_regions
+            .iter()
+            .find(|region| matches!(region.interaction, super::HitInteraction::Widget { .. }))
+            .expect("button hit region should exist");
+        let input_clip = match &input_region.interaction {
+            super::HitInteraction::FocusInput { frame, padding, .. } => frame.inset(*padding),
+            _ => panic!("expected focus input interaction"),
+        };
+        let input_text = rendered
+            .primitives
+            .texts
+            .iter()
+            .find(|primitive| primitive.content.contains("https://example.com"))
+            .expect("input text primitive should exist");
+
+        assert_eq!(input_text.clip_rect, Some(input_clip));
+        assert!(input_text.frame.right() > input_clip.right());
+        assert!(input_clip.right() <= button_region.rect.x);
     }
 }
 

@@ -56,8 +56,6 @@ cargo run --manifest-path examples/multi_page_showcase/Cargo.toml
 
 布局系统总览。集中展示：
 
-- `Row`
-- `Column`
 - `Grid`
 - `Flex`
 - `Stack`

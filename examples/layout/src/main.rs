@@ -1,6 +1,6 @@
 use tgui::{
-    Align, Application, Axis, Color, Column, Flex, Grid, Insets, Row, Stack, Text, TguiError, Wrap,
-    dp, sp,
+    Align, Application, Axis, Color, Flex, Grid, Insets, Stack, Text, TguiError, Wrap, dp, fr,
+    pct, sp,
 };
 
 fn main() -> Result<(), TguiError> {
@@ -9,8 +9,8 @@ fn main() -> Result<(), TguiError> {
         .window_size(dp(1100.0), dp(760.0))
         .with_view_model(|_| ())
         .root_view(|_| {
-            Column::new()
-                .fill_size()
+            Flex::new(Axis::Vertical)
+                .size(pct(100.0), pct(100.0))
                 .padding(Insets::all(dp(24.0)))
                 .gap(dp(18.0))
                 .background(Color::hexa(0x0F172AFF))
@@ -20,18 +20,18 @@ fn main() -> Result<(), TguiError> {
                         .color(Color::hexa(0xF8FAFCFF)),
                 )
                 .child(
-                    Text::new("This example shows how Row, Column, Grid, Flex, and Stack can be combined into one responsive page.")
+                    Text::new("This example shows how Flex, Grid, and Stack can be combined into one responsive page.")
                         .font_size(sp(15.0))
                         .color(Color::hexa(0xCBD5E1FF)),
                 )
                 .child(
-                    Row::new()
+                    Flex::new(Axis::Horizontal)
                         .gap(dp(18.0))
                         .child(row_panel().grow(1.0))
                         .child(column_panel().grow(1.0)),
                 )
                 .child(
-                    Row::new()
+                    Flex::new(Axis::Horizontal)
                         .gap(dp(18.0))
                         .child(grid_panel().grow(1.0))
                         .child(flex_panel().grow(1.0)),
@@ -42,8 +42,8 @@ fn main() -> Result<(), TguiError> {
         .run()
 }
 
-fn panel(title: &str, subtitle: &str) -> Column<()> {
-    Column::new()
+fn panel(title: &str, subtitle: &str) -> Flex<()> {
+    Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(18.0)))
         .gap(dp(12.0))
         .background(Color::hexa(0x111827FF))
@@ -78,9 +78,9 @@ fn chip(label: &str) -> Stack<()> {
         .child(Text::new(label).color(Color::WHITE))
 }
 
-fn row_panel() -> Column<()> {
-    panel("Row", "Horizontal layout with shared spacing.").child(
-        Row::new()
+fn row_panel() -> Flex<()> {
+    panel("Flex (Horizontal)", "Horizontal layout with shared spacing.").child(
+        Flex::new(Axis::Horizontal)
             .gap(dp(10.0))
             .child(block("Left", Color::hexa(0x0F766EFF)).grow(1.0))
             .child(block("Center", Color::hexa(0x0369A1FF)).grow(1.0))
@@ -88,9 +88,9 @@ fn row_panel() -> Column<()> {
     )
 }
 
-fn column_panel() -> Column<()> {
+fn column_panel() -> Flex<()> {
     panel(
-        "Column",
+        "Flex (Vertical)",
         "Vertical stacking is great for forms and dashboards.",
     )
     .child(block("Header", Color::hexa(0x1D4ED8FF)))
@@ -98,13 +98,13 @@ fn column_panel() -> Column<()> {
     .child(block("Footer", Color::hexa(0x475569FF)))
 }
 
-fn grid_panel() -> Column<()> {
+fn grid_panel() -> Flex<()> {
     panel(
         "Grid",
         "Regular cells work well for galleries and analytics.",
     )
     .child(
-        Grid::new(3)
+        Grid::columns([fr(1.0), fr(1.0), fr(1.0)])
             .gap(dp(10.0))
             .child(block("A1", Color::hexa(0x1E3A8AFF)))
             .child(block("A2", Color::hexa(0x1D4ED8FF)))
@@ -115,7 +115,7 @@ fn grid_panel() -> Column<()> {
     )
 }
 
-fn flex_panel() -> Column<()> {
+fn flex_panel() -> Flex<()> {
     panel(
         "Flex + Wrap",
         "Wrap long chip lists without building a manual grid.",
@@ -135,7 +135,7 @@ fn flex_panel() -> Column<()> {
     )
 }
 
-fn stack_panel() -> Column<()> {
+fn stack_panel() -> Flex<()> {
     panel("Stack", "Overlay a badge on top of a base surface.").child(
         Stack::new()
             .height(dp(120.0))

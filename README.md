@@ -28,7 +28,7 @@
 
 ### 布局与组件
 
-- 布局：`Stack`、`Column`、`Row`、`Grid`、`Flex`、`Container`
+- 布局：`Stack`、`Grid`、`Flex`
 - 基础组件：`Text`、`Button`、`Input`、`Image`
 - 画布：`Canvas`、`CanvasPath`、`PathBuilder`、渐变/阴影/布尔运算
 - 视频：`VideoSurface`、`VideoController`、`VideoSource`（需启用 `video` feature）
@@ -39,7 +39,7 @@
 - 颜色：`Color`
 - 单位：`dp()`、`sp()`、`Dp`、`Sp`
 - 排版：`FontWeight`
-- 布局枚举：`Align`、`Axis`、`Wrap`、`Overflow`、`Insets`
+- 布局类型：`Align`、`Justify`、`Axis`、`Wrap`、`Overflow`、`Insets`、`Length`、`Track`
 
 ### 动画与媒体
 
@@ -94,7 +94,7 @@ fn main() -> Result<(), TguiError> {
 
 ```rust
 use tgui::{
-    Application, Button, Column, Command, Observable, Text, TguiError, ViewModelContext,
+    Application, Axis, Button, Command, Flex, Observable, Text, TguiError, ViewModelContext,
 };
 
 struct CounterVm {
@@ -113,7 +113,7 @@ impl CounterVm {
     }
 
     fn view(&self) -> tgui::Element<Self> {
-        Column::new()
+        Flex::new(Axis::Vertical)
             .child(Text::new(
                 self.count.binding().map(|count| format!("Count: {count}")),
             ))
@@ -163,7 +163,7 @@ Binding<T>
 Command<T>
 ValueCommand<T, V>
 
-Stack / Column / Row / Grid / Flex
+Stack / Grid / Flex
 Text / Button / Input / Image / Canvas
 
 Theme / ThemeMode / Color

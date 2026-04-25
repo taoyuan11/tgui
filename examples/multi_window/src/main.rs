@@ -1,6 +1,6 @@
 use tgui::{
-    Align, Application, Binding, Button, Color, Column, Command, Insets, Observable,
-    Row, Stack, Text, TguiError, ViewModelContext, WindowSpec, dp, sp,
+    Align, Application, Axis, Binding, Button, Color, Command, Flex, Insets, Observable, Stack,
+    Text, TguiError, ViewModelContext, WindowSpec, dp, pct, sp,
 };
 
 struct MultiWindowVm {
@@ -68,11 +68,11 @@ impl MultiWindowVm {
 
     fn main_view(&self) -> tgui::Element<Self> {
         Stack::new()
-            .fill_size()
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(28.0)))
             .align(Align::Center)
             .child(
-                Column::new()
+                Flex::new(Axis::Vertical)
                     .width(dp(620.0))
                     .padding(Insets::all(dp(24.0)))
                     .gap(dp(14.0))
@@ -97,7 +97,7 @@ impl MultiWindowVm {
                             .color(Color::hexa(0x7DD3FCFF)),
                     )
                     .child(
-                        Row::new()
+                        Flex::new(Axis::Horizontal)
                             .gap(dp(10.0))
                             .child(
                                 Button::new(Text::new("Toggle inspector"))
@@ -127,10 +127,10 @@ impl MultiWindowVm {
 
     fn inspector_view(&self) -> tgui::Element<Self> {
         Stack::new()
-            .fill_size()
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(18.0)))
             .child(
-                Column::new()
+                Flex::new(Axis::Vertical)
                     .gap(dp(10.0))
                     .child(
                         Text::new("Inspector")
@@ -155,10 +155,10 @@ impl MultiWindowVm {
 
     fn document_view(&self, id: u32) -> tgui::Element<Self> {
         Stack::new()
-            .fill_size()
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(20.0)))
             .child(
-                Column::new()
+                Flex::new(Axis::Vertical)
                     .gap(dp(12.0))
                     .child(
                         Text::new(self.document_title(id))

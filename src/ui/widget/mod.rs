@@ -5,6 +5,7 @@ mod container;
 mod core;
 mod image;
 mod input;
+mod switch;
 mod text;
 #[cfg(feature = "video")]
 mod video;
@@ -23,10 +24,14 @@ pub(crate) use common::{
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,
 };
-pub use container::{Column, Container, Flex, Grid, Row, Stack};
+pub use container::{Flex, Grid, IntoLengthValue, Stack};
+pub(crate) use core::{
+    input_scroll_offset, input_text_viewport, InputViewport, INPUT_CARET_EDGE_GAP,
+};
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use image::Image;
 pub use input::Input;
+pub use switch::Switch;
 pub use text::Text;
 #[cfg(feature = "video")]
 pub use video::VideoSurface;

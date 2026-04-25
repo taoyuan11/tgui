@@ -319,13 +319,13 @@ impl FontManager {
         let resolved = self.resolve_text(text, request.clone());
         let mut font_system = self.font_system.borrow_mut();
         let mut buffer = Buffer::new(&mut font_system, Metrics::new(font_size, line_height));
-        buffer.set_size(&mut font_system, None, None);
-        buffer.set_wrap(&mut font_system, Wrap::None);
+        buffer.set_size(None, None);
+        buffer.set_wrap(Wrap::None);
         let attrs = Attrs::new()
             .family(Family::Name(&resolved.primary_font))
             .weight(Weight(request.weight.0))
             .letter_spacing(letter_spacing / font_size.max(1.0));
-        buffer.set_text(&mut font_system, text, &attrs, Shaping::Advanced, None);
+        buffer.set_text(text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut font_system, false);
         compute(&buffer)
     }
