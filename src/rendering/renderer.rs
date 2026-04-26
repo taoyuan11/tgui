@@ -814,12 +814,7 @@ impl Renderer {
         buffer.set_size(Some(width as f32), Some(height as f32));
         buffer.set_wrap(cosmic_text::Wrap::WordOrGlyph);
         let attrs = attrs_for_text(text, font_size, letter_spacing);
-        buffer.set_text(
-            &text.content,
-            &attrs,
-            Shaping::Advanced,
-            None,
-        );
+        buffer.set_text(&text.content, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.text_system.font_system, false);
 
         let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];

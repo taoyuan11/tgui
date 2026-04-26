@@ -5,11 +5,8 @@ use crate::log::Log;
 
 /// Marker trait for types that can back a `tgui` application.
 ///
-/// Most user-defined structs automatically satisfy this trait because every
-/// `Send + 'static` type implements it.
+/// Implement this trait explicitly on your root application view model.
 pub trait ViewModel: Send + 'static {}
-
-impl<T> ViewModel for T where T: Send + 'static {}
 
 pub struct CommandContext<T> {
     dialogs: Dialogs<T>,

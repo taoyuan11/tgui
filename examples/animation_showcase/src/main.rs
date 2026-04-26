@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use tgui::{Application, Axis, Binding, Button, Color, Command, Flex, Insets, Observable, Point, Stack, Text, TguiError, Transition, ViewModelContext, dp, pct, sp, Dp};
+use tgui::{Application, Axis, Binding, Button, Color, Command, Flex, Insets, Observable, Point, Stack, Text, TguiError, Transition, ViewModel, ViewModelContext, dp, pct, sp, Dp};
 
 struct AnimationVm {
     expanded: Observable<bool>,
@@ -146,6 +146,8 @@ impl AnimationVm {
             .into()
     }
 }
+
+impl ViewModel for AnimationVm {}
 
 fn main() -> Result<(), TguiError> {
     Application::new()

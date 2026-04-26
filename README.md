@@ -35,7 +35,7 @@
 
 ### 样式与基础类型
 
-- 主题：`Theme`、`ThemeMode`
+- 主题：`Theme`、`ThemeMode`、`ThemeSet`
 - 颜色：`Color`
 - 单位：`dp()`、`sp()`、`Dp`、`Sp`
 - 排版：`FontWeight`
@@ -58,14 +58,14 @@
 
 ```toml
 [dependencies]
-tgui = "0.1.5"
+tgui = "0.1.6"
 ```
 
 如果需要视频能力：
 
 ```toml
 [dependencies]
-tgui = { version = "0.1.5", features = ["video"] }
+tgui = { version = "0.1.6", features = ["video"] }
 ```
 
 可选 feature：
@@ -77,24 +77,12 @@ tgui = { version = "0.1.5", features = ["video"] }
 
 ## 快速开始
 
-### 1. 最小窗口
-
-```rust
-use tgui::{Application, TguiError, dp};
-
-fn main() -> Result<(), TguiError> {
-    Application::new()
-        .title("Hello tgui")
-        .window_size(dp(960.0), dp(640.0))
-        .run()
-}
-```
-
-### 2. 带 ViewModel 的响应式界面
+`tgui` 只支持 MVVM 启动路径。即使是静态界面，也需要定义一个命名 ViewModel 并显式实现 `ViewModel`。
 
 ```rust
 use tgui::{
-    Application, Axis, Button, Command, Flex, Observable, Text, TguiError, ViewModelContext,
+    Application, Axis, Button, Command, Flex, Observable, Text, TguiError, ViewModel,
+    ViewModelContext,
 };
 
 struct CounterVm {
@@ -124,6 +112,8 @@ impl CounterVm {
             .into()
     }
 }
+
+impl ViewModel for CounterVm {}
 
 fn main() -> Result<(), TguiError> {
     Application::new()
@@ -157,6 +147,7 @@ Application::new()
 ```rust
 Application
 WindowSpec
+ViewModel
 ViewModelContext
 Observable<T>
 Binding<T>
@@ -166,7 +157,7 @@ ValueCommand<T, V>
 Stack / Grid / Flex
 Text / Button / Input / Image / Canvas
 
-Theme / ThemeMode / Color
+Theme / ThemeMode / ThemeSet / Color
 dp / sp / Dp / Sp
 
 Transition
@@ -179,8 +170,8 @@ Keyframes<T>
 
 仓库内示例基本覆盖了当前主要能力：
 
-- `basic_window`：最小完整窗口
 - `mvvm_counter`：响应式状态、标题绑定、快捷键输入
+- `basic_window`：命名空 ViewModel 驱动的最小完整窗口
 - `layout_theme_showcase`：布局容器与自定义主题
 - `input`：输入框与 `ValueCommand`
 - `canvas`：路径绘制、渐变、阴影、布尔运算、命中事件

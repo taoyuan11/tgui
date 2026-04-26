@@ -3,7 +3,7 @@ use std::time::Duration;
 use tgui::{
     AnimatedValue, AnimationControllerHandle, AnimationCurve, AnimationSpec, Application, Button,
     Color, Axis, Command, Dp, Flex, Insets, Keyframes, Observable, Playback,
-    PlaybackDirection, Point, Text, TguiError, ViewModelContext, dp, pct, sp,
+    PlaybackDirection, Point, Text, TguiError, ViewModel, ViewModelContext, dp, pct, sp,
 };
 
 struct TimelineVm {
@@ -178,6 +178,8 @@ impl TimelineVm {
             .into()
     }
 }
+
+impl ViewModel for TimelineVm {}
 
 fn main() -> Result<(), TguiError> {
     Application::new()

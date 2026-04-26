@@ -12,15 +12,16 @@ use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, ViewModel};
-use crate::runtime::{BoundRuntime, Runtime, WindowBindings, WindowCommand};
+use crate::runtime::{BoundRuntime, WindowBindings, WindowCommand};
 use crate::text::font::FontCatalog;
-use crate::ui::theme::{Theme, ThemeMode};
+use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::Dp;
 use crate::ui::widget::{Element, WidgetTree};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ThemeSelection {
     System,
+    Mode(ThemeMode),
     Fixed(Theme),
 }
 
@@ -28,7 +29,7 @@ impl ThemeSelection {
     pub(crate) fn from_mode(mode: ThemeMode) -> Self {
         match mode {
             ThemeMode::System => Self::System,
-            ThemeMode::Light | ThemeMode::Dark => Self::Fixed(Theme::from_mode(mode, None)),
+            ThemeMode::Light | ThemeMode::Dark => Self::Mode(mode),
         }
     }
 }
@@ -36,16 +37,32 @@ impl ThemeSelection {
 #[derive(Debug, Clone)]
 /// Entry point for configuring and launching a `tgui` application.
 ///
-/// Use `Application` directly for a simple window, or call
-/// [`Application::with_view_model`] to move into the MVVM builder flow.
+/// `tgui` applications are MVVM-only: configure the window with `Application`,
+/// then call [`Application::with_view_model`] to bind a view model and root view.
 ///
 /// ```no_run
-/// use tgui::{dp, Application};
+/// use tgui::{dp, Application, Element, Text, ViewModel, ViewModelContext};
+///
+/// struct AppVm;
+///
+/// impl AppVm {
+///     fn new(_: &ViewModelContext) -> Self {
+///         Self
+///     }
+///
+///     fn view(&self) -> Element<Self> {
+///         Text::new("Hello tgui").into()
+///     }
+/// }
+///
+/// impl ViewModel for AppVm {}
 ///
 /// fn main() -> Result<(), tgui::TguiError> {
 ///     Application::new()
 ///         .title("Demo")
 ///         .window_size(dp(1024.0), dp(768.0))
+///         .with_view_model(AppVm::new)
+///         .root_view(AppVm::view)
 ///         .run()
 /// }
 /// ```
@@ -58,6 +75,7 @@ pub struct Application {
     close_children_with_main: bool,
     fonts: FontCatalog,
     theme: ThemeSelection,
+    theme_set: ThemeSet,
     window_icon: Option<&'static [u8]>,
 }
 
@@ -74,6 +92,7 @@ impl Application {
             close_children_with_main: true,
             fonts: FontCatalog::default(),
             theme: ThemeSelection::System,
+            theme_set: ThemeSet::default(),
             window_icon: None,
         }
     }
@@ -150,24 +169,16 @@ impl Application {
         self
     }
 
-    /// Runs the application without a view model.
-    pub fn run(self) -> Result<(), TguiError> {
-        Runtime::new(self.config())?.run()
-    }
-
-    #[cfg(all(target_os = "android", feature = "android"))]
-    pub fn run_android(self, app: AndroidApp) -> Result<(), TguiError> {
-        Runtime::new_android(self.config(), app)?.run()
-    }
-
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    pub fn run_ohos(self, app: OhosApp) -> Result<(), TguiError> {
-        Runtime::new_ohos(self.config(), app)?.run()
-    }
-
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    pub fn into_ohos_handler(self) -> impl winit_core::application::ApplicationHandler + Send {
-        Runtime::handler(self.config())
+    /// Sets the light and dark themes used by [`ThemeMode`] resolution.
+    ///
+    /// This does not force a fixed theme. Instead, [`ThemeMode::Light`],
+    /// [`ThemeMode::Dark`], and [`ThemeMode::System`] resolve through this set.
+    pub fn theme_set(mut self, theme_set: ThemeSet) -> Self {
+        if !self.clear_color_overridden {
+            self.clear_color = theme_set.dark.palette.window_background;
+        }
+        self.theme_set = theme_set;
+        self
     }
 
     /// Starts the MVVM builder flow for applications backed by a view model.
@@ -191,6 +202,7 @@ impl Application {
             close_children_with_main: self.close_children_with_main,
             fonts: self.fonts.clone(),
             theme: self.theme.clone(),
+            theme_set: self.theme_set.clone(),
             window_icon: self.window_icon,
         }
     }
@@ -211,11 +223,13 @@ pub(crate) struct ApplicationConfig {
     pub(crate) close_children_with_main: bool,
     pub(crate) fonts: FontCatalog,
     pub(crate) theme: ThemeSelection,
+    pub(crate) theme_set: ThemeSet,
     pub(crate) window_icon: Option<&'static [u8]>,
 }
 
 type TitleBinding<VM> = Arc<dyn Fn(&VM) -> Binding<String> + Send + Sync>;
 type ClearColorBinding<VM> = Arc<dyn Fn(&VM) -> Binding<Color> + Send + Sync>;
+type ThemeSetBinding<VM> = Arc<dyn Fn(&VM) -> Binding<ThemeSet> + Send + Sync>;
 type ThemeModeBinding<VM> = Arc<dyn Fn(&VM) -> Binding<ThemeMode> + Send + Sync>;
 type RootViewFactory<VM> = Arc<dyn Fn(&VM) -> Element<VM> + Send + Sync>;
 type WindowsFactory<VM> = Box<dyn Fn(&VM) -> Vec<WindowSpec<VM>> + Send + Sync>;
@@ -241,6 +255,7 @@ pub struct WindowSpec<VM> {
     pub(crate) size: Option<LogicalSize<f64>>,
     pub(crate) title_binding: Option<TitleBinding<VM>>,
     pub(crate) clear_color_binding: Option<ClearColorBinding<VM>>,
+    pub(crate) theme_set_binding: Option<ThemeSetBinding<VM>>,
     pub(crate) theme_mode_binding: Option<ThemeModeBinding<VM>>,
     pub(crate) root_view: Option<RootViewFactory<VM>>,
     pub(crate) commands: Vec<WindowCommand<VM>>,
@@ -262,6 +277,7 @@ impl<VM> WindowSpec<VM> {
             size: None,
             title_binding: None,
             clear_color_binding: None,
+            theme_set_binding: None,
             theme_mode_binding: None,
             root_view: None,
             commands: Vec::new(),
@@ -282,6 +298,7 @@ impl<VM> WindowSpec<VM> {
             size: None,
             title_binding: None,
             clear_color_binding: None,
+            theme_set_binding: None,
             theme_mode_binding: None,
             root_view: None,
             commands: Vec::new(),
@@ -319,6 +336,15 @@ impl<VM> WindowSpec<VM> {
         binding: impl Fn(&VM) -> Binding<Color> + Send + Sync + 'static,
     ) -> Self {
         self.clear_color_binding = Some(Arc::new(binding));
+        self
+    }
+
+    /// Binds the light and dark themes used by theme mode resolution.
+    pub fn bind_theme_set(
+        mut self,
+        binding: impl Fn(&VM) -> Binding<ThemeSet> + Send + Sync + 'static,
+    ) -> Self {
+        self.theme_set_binding = Some(Arc::new(binding));
         self
     }
 
@@ -384,6 +410,10 @@ impl<VM> WindowSpec<VM> {
                 .clear_color_binding
                 .as_ref()
                 .map(|binding| binding(view_model)),
+            theme_set: self
+                .theme_set_binding
+                .as_ref()
+                .map(|binding| binding(view_model)),
             theme_mode: self
                 .theme_mode_binding
                 .as_ref()
@@ -413,6 +443,7 @@ where
     factory: F,
     title_binding: Option<TitleBinding<VM>>,
     clear_color_binding: Option<ClearColorBinding<VM>>,
+    theme_set_binding: Option<ThemeSetBinding<VM>>,
     theme_mode_binding: Option<ThemeModeBinding<VM>>,
     root_view: Option<RootViewFactory<VM>>,
     commands: Vec<WindowCommand<VM>>,
@@ -430,6 +461,7 @@ where
             factory,
             title_binding: None,
             clear_color_binding: None,
+            theme_set_binding: None,
             theme_mode_binding: None,
             root_view: None,
             commands: Vec::new(),
@@ -452,6 +484,17 @@ where
         binding: impl Fn(&VM) -> Binding<Color> + Send + Sync + 'static,
     ) -> Self {
         self.clear_color_binding = Some(Arc::new(binding));
+        self
+    }
+
+    /// Binds the light and dark themes used by theme mode resolution.
+    ///
+    /// Runtime theme changes are animated automatically.
+    pub fn bind_theme_set(
+        mut self,
+        binding: impl Fn(&VM) -> Binding<ThemeSet> + Send + Sync + 'static,
+    ) -> Self {
+        self.theme_set_binding = Some(Arc::new(binding));
         self
     }
 
@@ -611,6 +654,7 @@ where
         } else {
             let title_binding = self.title_binding;
             let clear_color_binding = self.clear_color_binding;
+            let theme_set_binding = self.theme_set_binding;
             let theme_mode_binding = self.theme_mode_binding;
             let root_view = self.root_view;
             let commands = self.commands;
@@ -624,6 +668,7 @@ where
                         size: Some(main_config.size),
                         title_binding: title_binding.clone(),
                         clear_color_binding: clear_color_binding.clone(),
+                        theme_set_binding: theme_set_binding.clone(),
                         theme_mode_binding: theme_mode_binding.clone(),
                         root_view: root_view.clone(),
                         commands: commands.clone(),

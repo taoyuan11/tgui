@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tgui::{
     Application, Axis, Button, Command, DialogError, Element, FileDialogOptions, Flex,
     MessageDialogButtons, MessageDialogLevel, MessageDialogOptions, MessageDialogResult,
-    Observable, Text, ValueCommand, ViewModelContext, el, pct,
+    Observable, Text, ValueCommand, ViewModel, ViewModelContext, el, pct,
 };
 
 struct App {
@@ -132,6 +132,8 @@ impl App {
             .into()
     }
 }
+
+impl ViewModel for App {}
 
 fn main() -> Result<(), tgui::TguiError> {
     Application::new()

@@ -1,6 +1,6 @@
 use tgui::{
     Application, Axis, Binding, Button, Color, Command, Flex, Insets, Observable, Stack, Text,
-    TguiError, ViewModelContext, WindowSpec, dp, pct, sp,
+    TguiError, ViewModel, ViewModelContext, WindowSpec, dp, pct, sp,
 };
 
 struct MultiWindowVm {
@@ -217,6 +217,8 @@ impl MultiWindowVm {
         windows
     }
 }
+
+impl ViewModel for MultiWindowVm {}
 
 fn main() -> Result<(), TguiError> {
     Application::new()

@@ -3774,8 +3774,9 @@ mod tests {
 
     #[test]
     fn scoped_command_targets_child_view_model() {
-        let child: Element<ScopeChildVm> =
-            Stack::new().on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 1)).into();
+        let child: Element<ScopeChildVm> = Stack::new()
+            .on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 1))
+            .into();
         let root = child.scope(scope_child);
 
         let command = root.interactions.on_click.expect("scoped command");
@@ -3870,10 +3871,12 @@ mod tests {
     fn scoped_dynamic_children_resolve_to_root_commands() {
         let context = test_context();
         let show = context.observable(true);
-        let child_a: Element<ScopeChildVm> =
-            Stack::new().on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 1)).into();
-        let child_b: Element<ScopeChildVm> =
-            Stack::new().on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 10)).into();
+        let child_a: Element<ScopeChildVm> = Stack::new()
+            .on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 1))
+            .into();
+        let child_b: Element<ScopeChildVm> = Stack::new()
+            .on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 10))
+            .into();
 
         let tree = WidgetTree::new(Stack::<ScopeRootVm>::new().child(show.binding().map(
             move |visible| {

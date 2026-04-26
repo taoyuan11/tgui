@@ -2,7 +2,7 @@ use tgui::{
     dp, sp, Application, Canvas, CanvasGradientStop, CanvasItem, CanvasLinearGradient, CanvasPath,
     CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke, Color, Flex, Insets,
     Observable, Overflow, PathBuilder, Point, ScrollbarStyle, Stack, Text, ValueCommand, Axis,
-    ViewModelContext, pct,
+    ViewModel, ViewModelContext, pct,
 };
 
 struct CanvasVm {
@@ -199,6 +199,8 @@ impl CanvasVm {
             .into()
     }
 }
+
+impl ViewModel for CanvasVm {}
 
 fn main() -> Result<(), tgui::TguiError> {
     Application::new()

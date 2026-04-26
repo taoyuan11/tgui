@@ -61,6 +61,45 @@ impl Theme {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Pair of concrete themes used when resolving [`ThemeMode::Light`],
+/// [`ThemeMode::Dark`], and [`ThemeMode::System`].
+pub struct ThemeSet {
+    pub light: Theme,
+    pub dark: Theme,
+}
+
+impl Default for ThemeSet {
+    fn default() -> Self {
+        Self {
+            light: Theme::light(),
+            dark: Theme::dark(),
+        }
+    }
+}
+
+impl ThemeSet {
+    /// Creates a theme set from explicit light and dark themes.
+    pub fn new(light: Theme, dark: Theme) -> Self {
+        Self { light, dark }
+    }
+
+    pub(crate) fn resolve_mode(&self, mode: ThemeMode, system_theme: Option<WindowTheme>) -> Theme {
+        match mode {
+            ThemeMode::Light => self.light.clone(),
+            ThemeMode::Dark => self.dark.clone(),
+            ThemeMode::System => self.resolve_window_theme(system_theme),
+        }
+    }
+
+    pub(crate) fn resolve_window_theme(&self, theme: Option<WindowTheme>) -> Theme {
+        match theme.unwrap_or(WindowTheme::Dark) {
+            WindowTheme::Light => self.light.clone(),
+            WindowTheme::Dark => self.dark.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 /// Color palette used by the built-in widgets.
 pub struct Palette {
     pub window_background: Color,
@@ -139,5 +178,60 @@ impl Default for Typography {
             font_family: None,
             font_size: sp(16.0),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Theme, ThemeMode, ThemeSet};
+    use crate::foundation::color::Color;
+    use crate::platform::window::Theme as WindowTheme;
+
+    fn themed_pair() -> (Theme, Theme) {
+        let mut light = Theme::light();
+        light.palette.accent = Color::hexa(0x123456FF);
+        let mut dark = Theme::dark();
+        dark.palette.accent = Color::hexa(0xABCDEF88);
+        (light, dark)
+    }
+
+    #[test]
+    fn default_theme_set_uses_builtin_light_and_dark_themes() {
+        let themes = ThemeSet::default();
+
+        assert_eq!(themes.light, Theme::light());
+        assert_eq!(themes.dark, Theme::dark());
+    }
+
+    #[test]
+    fn theme_set_resolves_explicit_light_and_dark_modes() {
+        let (light, dark) = themed_pair();
+        let themes = ThemeSet::new(light.clone(), dark.clone());
+
+        assert_eq!(themes.resolve_mode(ThemeMode::Light, None), light);
+        assert_eq!(themes.resolve_mode(ThemeMode::Dark, None), dark);
+    }
+
+    #[test]
+    fn theme_set_resolves_system_mode_from_window_theme() {
+        let (light, dark) = themed_pair();
+        let themes = ThemeSet::new(light.clone(), dark.clone());
+
+        assert_eq!(
+            themes.resolve_mode(ThemeMode::System, Some(WindowTheme::Light)),
+            light
+        );
+        assert_eq!(
+            themes.resolve_mode(ThemeMode::System, Some(WindowTheme::Dark)),
+            dark
+        );
+    }
+
+    #[test]
+    fn theme_set_defaults_unknown_system_theme_to_dark() {
+        let (_light, dark) = themed_pair();
+        let themes = ThemeSet::new(Theme::light(), dark.clone());
+
+        assert_eq!(themes.resolve_mode(ThemeMode::System, None), dark);
     }
 }

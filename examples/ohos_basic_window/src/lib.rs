@@ -2,7 +2,7 @@
 use tgui::platform::ohos::export_ohos_winit_app;
 use tgui::{
     dp, el, sp, Application, Axis, Binding, Button, Color, Command, CommandContext, Element, Flex,
-    Insets, LogLevel, Observable, Stack, Text, Theme, ThemeMode, ViewModelContext, pct,
+    Insets, LogLevel, Observable, Stack, Text, Theme, ThemeMode, ViewModel, ViewModelContext, pct,
 };
 #[cfg(target_env = "ohos")]
 use winit_core::application::ApplicationHandler;
@@ -71,6 +71,8 @@ impl OhosApplication {
             .into()
     }
 }
+
+impl ViewModel for OhosApplication {}
 
 #[cfg(target_env = "ohos")]
 fn create_ohos_app() -> impl ApplicationHandler + Send {

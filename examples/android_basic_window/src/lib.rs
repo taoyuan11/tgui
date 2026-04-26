@@ -1,6 +1,6 @@
 use tgui::{
     el, Application, Axis, Binding, Button, Color, Command, Element, Flex, Insets, Observable,
-    Stack, Text, TguiError, Theme, ThemeMode, ViewModelContext, dp, pct, sp,
+    Stack, Text, TguiError, Theme, ThemeMode, ViewModel, ViewModelContext, dp, pct, sp,
 };
 #[cfg(target_os = "android")]
 use tgui::platform::android::activity::AndroidApp;
@@ -75,6 +75,8 @@ impl AndroidApplication {
             .into()
     }
 }
+
+impl ViewModel for AndroidApplication {}
 
 #[cfg(target_os = "android")]
 fn run_android_entry(app: AndroidApp) -> Result<(), TguiError> {

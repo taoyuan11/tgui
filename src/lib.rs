@@ -8,23 +8,12 @@
 //! - [`Command`] and [`ValueCommand`] connect widget events back to your view model.
 //! - Layout and widgets such as [`Flex`], [`Button`], [`Input`], and [`Text`] build the widget tree.
 //!
-//! A minimal app looks like this:
+//! Applications are always backed by an explicit view model:
 //!
 //! ```no_run
-//! use tgui::{dp, Application};
-//!
-//! fn main() -> Result<(), tgui::TguiError> {
-//!     Application::new()
-//!         .title("Hello tgui")
-//!         .window_size(dp(960.0), dp(640.0))
-//!         .run()
-//! }
-//! ```
-//!
-//! For a state-driven application, create a view model and bind the root view:
-//!
-//! ```no_run
-//! use tgui::{Application, Axis, Button, Command, Flex, Observable, Text, ViewModelContext};
+//! use tgui::{
+//!     Application, Axis, Button, Command, Flex, Observable, Text, ViewModel, ViewModelContext,
+//! };
 //!
 //! struct CounterVm {
 //!     count: Observable<u32>,
@@ -50,6 +39,8 @@
 //!             .into()
 //!     }
 //! }
+//!
+//! impl ViewModel for CounterVm {}
 //!
 //! fn main() -> Result<(), tgui::TguiError> {
 //!     Application::new()
@@ -79,12 +70,15 @@ pub mod video;
 /// you want a compact call site.
 ///
 /// ```rust
-/// use tgui::{el, Axis, Flex, Text};
+/// use tgui::{el, Axis, Element, Flex, Text, ViewModel};
 ///
-/// let _column = Flex::<()>::new(Axis::Vertical).child(el![
+/// struct AppVm;
+/// impl ViewModel for AppVm {}
+///
+/// let _column: Element<AppVm> = Flex::<AppVm>::new(Axis::Vertical).child(el![
 ///     Text::new("First"),
 ///     Text::new("Second"),
-/// ]);
+/// ]).into();
 /// ```
 macro_rules! el {
     ($($child:expr),* $(,)?) => {
@@ -114,7 +108,7 @@ pub use ui::layout::{
     fr, pct, Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType,
     ScrollbarStyle, Track, Value, Wrap,
 };
-pub use ui::theme::{Theme, ThemeMode};
+pub use ui::theme::{Theme, ThemeMode, ThemeSet};
 pub use ui::unit::{dp, sp, Dp, Sp};
 pub use ui::widget::{
     rect, Button, Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem,

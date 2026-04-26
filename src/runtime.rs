@@ -35,15 +35,15 @@ use crate::platform::window::{
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::{FontManager, TextFontRequest};
-use crate::ui::theme::{Theme, ThemeMode};
+use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
+use crate::ui::widget::{
+    input_scroll_offset, input_text_viewport, InputViewport, INPUT_CARET_EDGE_GAP,
+};
 use crate::ui::widget::{
     CanvasItemId, CanvasPointerEvent, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
     InteractionHandlers, MediaEventPhase, MediaEventState, Point, Rect, RenderedWidgetScene,
-    ScenePrimitives, ScrollbarAxis, ScrollbarHandle, Text, WidgetId, WidgetTree,
-};
-use crate::ui::widget::{
-    input_scroll_offset, input_text_viewport, InputViewport, INPUT_CARET_EDGE_GAP,
+    ScrollbarAxis, ScrollbarHandle, Text, WidgetId, WidgetTree,
 };
 use image::GenericImageView;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -74,75 +74,6 @@ impl SystemBarStyle {
             color,
             use_dark_icons: is_light_color(color),
         }
-    }
-}
-
-pub struct Runtime {
-    event_loop: EventLoop,
-    config: ApplicationConfig,
-    #[cfg(all(target_os = "android", feature = "android"))]
-    android_app: Option<AndroidApp>,
-}
-
-impl Runtime {
-    pub fn new(config: ApplicationConfig) -> Result<Self, TguiError> {
-        let event_loop = build_event_loop(ControlFlow::Poll)?;
-        Ok(Self {
-            event_loop,
-            config,
-            #[cfg(all(target_os = "android", feature = "android"))]
-            android_app: None,
-        })
-    }
-
-    #[cfg(all(target_os = "android", feature = "android"))]
-    pub fn new_android(config: ApplicationConfig, app: AndroidApp) -> Result<Self, TguiError> {
-        let event_loop = build_event_loop_with_android_app(ControlFlow::Poll, app.clone())?;
-        Ok(Self {
-            event_loop,
-            config,
-            android_app: Some(app),
-        })
-    }
-
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    pub fn new_ohos(config: ApplicationConfig, app: OhosApp) -> Result<Self, TguiError> {
-        let event_loop = build_event_loop_with_ohos_app(ControlFlow::Poll, app)?;
-        Ok(Self {
-            event_loop,
-            config,
-            #[cfg(all(target_os = "android", feature = "android"))]
-            android_app: None,
-        })
-    }
-
-    pub fn run(self) -> Result<(), TguiError> {
-        let (mut event_loop, mut handler) = self.into_parts();
-        event_loop.run_app_on_demand(&mut handler)?;
-
-        if let Some(error) = handler.error {
-            return Err(error);
-        }
-
-        Ok(())
-    }
-
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    pub(crate) fn handler(config: ApplicationConfig) -> RuntimeHandler {
-        RuntimeHandler::new(
-            config,
-            #[cfg(all(target_os = "android", feature = "android"))]
-            None,
-        )
-    }
-
-    fn into_parts(self) -> (EventLoop, RuntimeHandler) {
-        let handler = RuntimeHandler::new(
-            self.config,
-            #[cfg(all(target_os = "android", feature = "android"))]
-            self.android_app,
-        );
-        (self.event_loop, handler)
     }
 }
 
@@ -362,6 +293,7 @@ fn build_event_loop_with_ohos_app(
 pub struct WindowBindings {
     pub(crate) title: Option<Binding<String>>,
     pub(crate) clear_color: Option<Binding<Color>>,
+    pub(crate) theme_set: Option<Binding<ThemeSet>>,
     pub(crate) theme_mode: Option<Binding<ThemeMode>>,
 }
 
@@ -375,169 +307,6 @@ impl<VM> Clone for WindowCommand<VM> {
         Self {
             trigger: self.trigger,
             command: self.command.clone(),
-        }
-    }
-}
-
-#[doc(hidden)]
-pub struct RuntimeHandler {
-    config: ApplicationConfig,
-    window: Option<Arc<dyn Window>>,
-    renderer: Option<Renderer>,
-    window_id: Option<WindowId>,
-    error: Option<TguiError>,
-    #[cfg(all(target_os = "android", feature = "android"))]
-    android_app: Option<AndroidApp>,
-    #[cfg(all(target_os = "android", feature = "android"))]
-    system_bar_style: Option<SystemBarStyle>,
-}
-
-impl RuntimeHandler {
-    fn new(
-        config: ApplicationConfig,
-        #[cfg(all(target_os = "android", feature = "android"))] android_app: Option<AndroidApp>,
-    ) -> Self {
-        Self {
-            config,
-            window: None,
-            renderer: None,
-            window_id: None,
-            error: None,
-            #[cfg(all(target_os = "android", feature = "android"))]
-            android_app,
-            #[cfg(all(target_os = "android", feature = "android"))]
-            system_bar_style: None,
-        }
-    }
-
-    fn fail(&mut self, event_loop: &dyn ActiveEventLoop, error: TguiError) {
-        Log::with_tag("tgui-runtime").error(format!("runtime failed: {error}"));
-        self.error = Some(error);
-        event_loop.exit();
-    }
-
-    fn resolved_theme(&self, window: &dyn Window) -> Theme {
-        resolve_theme(
-            &self.config.theme,
-            resolve_window_theme(
-                Some(window),
-                #[cfg(all(target_os = "android", feature = "android"))]
-                self.android_app.as_ref(),
-            ),
-        )
-    }
-
-    #[cfg(all(target_os = "android", feature = "android"))]
-    fn sync_system_bar_style(&mut self, theme: &Theme) {
-        let Some(app) = self.android_app.as_ref() else {
-            return;
-        };
-        let style = SystemBarStyle::from_theme(theme);
-        if self.system_bar_style == Some(style) {
-            return;
-        }
-
-        if let Err(error) = apply_android_system_bar_style(app, style) {
-            Log::with_tag("tgui-runtime")
-                .warn(format!("failed to sync Android system bar style: {error}"));
-            return;
-        }
-
-        self.system_bar_style = Some(style);
-    }
-
-    fn render_hidden_frame(&mut self, event_loop: &dyn ActiveEventLoop) -> bool {
-        #[cfg(all(target_env = "ohos", feature = "ohos"))]
-        {
-            let _ = event_loop;
-            return true;
-        }
-
-        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
-        let Some(renderer) = self.renderer.as_mut() else {
-            return true;
-        };
-
-        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
-        match renderer.render(&ScenePrimitives::default()) {
-            Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => true,
-            Ok(RenderStatus::ReconfigureSurface) => {
-                renderer.reconfigure();
-                match renderer.render(&ScenePrimitives::default()) {
-                    Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => true,
-                    Ok(RenderStatus::ReconfigureSurface) => true,
-                    Err(error) => {
-                        self.fail(event_loop, error);
-                        false
-                    }
-                }
-            }
-            Err(error) => {
-                self.fail(event_loop, error);
-                false
-            }
-        }
-    }
-
-    fn resume_existing_window(&mut self, event_loop: &dyn ActiveEventLoop) {
-        let Some(window) = self.window.clone() else {
-            return;
-        };
-
-        let clear_color = if self.config.clear_color_overridden {
-            self.config.clear_color
-        } else {
-            self.resolved_theme(window.as_ref())
-                .palette
-                .window_background
-        };
-
-        match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
-            Ok(renderer) => self.renderer = Some(renderer),
-            Err(error) => {
-                self.fail(event_loop, error);
-                return;
-            }
-        }
-
-        #[cfg(all(target_os = "android", feature = "android"))]
-        {
-            let theme = self.resolved_theme(window.as_ref());
-            self.sync_system_bar_style(&theme);
-        }
-
-        if !self.render_hidden_frame(event_loop) {
-            return;
-        }
-
-        window.request_redraw();
-        window.set_visible(true);
-    }
-
-    fn suspend(&mut self) {
-        self.renderer = None;
-        #[cfg(all(target_os = "android", feature = "android"))]
-        {
-            self.system_bar_style = None;
-        }
-    }
-
-    fn handle_runtime_redraw(&mut self, event_loop: &dyn ActiveEventLoop) {
-        let Some(renderer) = self.renderer.as_mut() else {
-            return;
-        };
-
-        match renderer.render(&ScenePrimitives::default()) {
-            Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
-            Ok(RenderStatus::ReconfigureSurface) => {
-                renderer.reconfigure();
-                match renderer.render(&ScenePrimitives::default()) {
-                    Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
-                    Ok(RenderStatus::ReconfigureSurface) => {}
-                    Err(error) => self.fail(event_loop, error),
-                }
-            }
-            Err(error) => self.fail(event_loop, error),
         }
     }
 }
@@ -807,7 +576,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let font_manager = FontManager::new(&config.fonts);
         let theme = match &config.theme {
             ThemeSelection::Fixed(theme) => theme.clone(),
-            ThemeSelection::System => Theme::default(),
+            ThemeSelection::Mode(mode) => config.theme_set.resolve_mode(*mode, None),
+            ThemeSelection::System => config.theme_set.resolve_window_theme(None),
         };
         Self {
             window_key,
@@ -1036,6 +806,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if self.uses_system_theme() {
             self.apply_theme(resolve_theme(
                 &self.active_theme_selection(),
+                &self.active_theme_set(),
                 resolve_window_theme(
                     self.window.as_deref(),
                     #[cfg(all(target_os = "android", feature = "android"))]
@@ -1054,9 +825,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or_else(|| self.config.theme.clone())
     }
 
+    fn active_theme_set(&self) -> ThemeSet {
+        self.window_bindings
+            .theme_set
+            .as_ref()
+            .map(Binding::get)
+            .unwrap_or_else(|| self.config.theme_set.clone())
+    }
+
     fn sync_theme_binding(&mut self) {
         let resolved_theme = resolve_theme(
             &self.active_theme_selection(),
+            &self.active_theme_set(),
             resolve_window_theme(
                 self.window.as_deref(),
                 #[cfg(all(target_os = "android", feature = "android"))]
@@ -1748,8 +1528,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             } else {
                 overflow_right.get().max(1.0)
             };
-            next_state.scroll_x =
-                (next_state.scroll_x + delta).max(Dp::ZERO);
+            next_state.scroll_x = (next_state.scroll_x + delta).max(Dp::ZERO);
         }
         let cursor = input_cursor_index_at_point_with_state(
             &self.font_manager,
@@ -1965,7 +1744,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         );
         let inner = metrics.frame.inset(metrics.padding);
         let caret_boundary = layout.x_for_index(state.cursor.min(metrics.text.len()));
-        let caret_padding = if state.cursor >= metrics.text.len() { 1.0 } else { 0.0 };
+        let caret_padding = if state.cursor >= metrics.text.len() {
+            1.0
+        } else {
+            0.0
+        };
         Some(Dp::new(input_scroll_offset(
             inner,
             layout.width,
@@ -3047,6 +2830,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         self.theme = resolve_theme(
             &self.active_theme_selection(),
+            &self.active_theme_set(),
             resolve_window_theme(
                 Some(window.as_ref()),
                 #[cfg(all(target_os = "android", feature = "android"))]
@@ -3663,138 +3447,6 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
     }
 }
 
-impl ApplicationHandler for RuntimeHandler {
-    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
-        if self.window.is_some() {
-            self.resume_existing_window(event_loop);
-            return;
-        }
-
-        let attributes = WindowAttributes::default()
-            .with_transparent(!cfg!(all(target_env = "ohos", feature = "ohos")))
-            .with_title(self.config.title.clone())
-            .with_surface_size(self.config.size)
-            .with_visible(false);
-
-        let window: Arc<dyn Window> = match event_loop.create_window(attributes) {
-            Ok(window) => Arc::from(window),
-            Err(error) => {
-                self.fail(event_loop, error.into());
-                return;
-            }
-        };
-
-        let clear_color = if self.config.clear_color_overridden {
-            self.config.clear_color
-        } else {
-            self.resolved_theme(window.as_ref())
-                .palette
-                .window_background
-        };
-        #[cfg(all(target_os = "android", feature = "android"))]
-        {
-            let theme = self.resolved_theme(window.as_ref());
-            self.sync_system_bar_style(&theme);
-        }
-
-        let renderer = match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
-            Ok(renderer) => renderer,
-            Err(error) => {
-                self.fail(event_loop, error);
-                return;
-            }
-        };
-
-        self.window_id = Some(window.id());
-        self.renderer = Some(renderer);
-        self.window = Some(window);
-
-        if !self.render_hidden_frame(event_loop) {
-            return;
-        }
-
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
-            window.set_visible(true);
-        }
-    }
-
-    fn window_event(
-        &mut self,
-        event_loop: &dyn ActiveEventLoop,
-        window_id: WindowId,
-        event: WindowEvent,
-    ) {
-        if Some(window_id) != self.window_id {
-            return;
-        }
-
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::ThemeChanged(_) => {
-                if !self.config.clear_color_overridden {
-                    let resolved_theme = self
-                        .window
-                        .as_ref()
-                        .map(|window| self.resolved_theme(window.as_ref()));
-                    let clear_color = resolved_theme
-                        .as_ref()
-                        .map(|theme| theme.palette.window_background)
-                        .unwrap_or(self.config.clear_color);
-                    if let Some(renderer) = self.renderer.as_mut() {
-                        renderer.set_clear_color(clear_color);
-                    }
-                    #[cfg(all(target_os = "android", feature = "android"))]
-                    if let Some(theme) = resolved_theme.as_ref() {
-                        self.sync_system_bar_style(theme);
-                    }
-                }
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
-            }
-            WindowEvent::ScaleFactorChanged { .. } => {
-                if let Some(window) = self.window.clone() {
-                    if !self.config.clear_color_overridden {
-                        let theme = self.resolved_theme(window.as_ref());
-                        if let Some(renderer) = self.renderer.as_mut() {
-                            renderer.set_clear_color(theme.palette.window_background);
-                            renderer.resize(window.surface_size(), window.scale_factor() as f32);
-                        }
-                        #[cfg(all(target_os = "android", feature = "android"))]
-                        self.sync_system_bar_style(&theme);
-                    } else if let Some(renderer) = self.renderer.as_mut() {
-                        renderer.resize(window.surface_size(), window.scale_factor() as f32);
-                    }
-                    window.request_redraw();
-                }
-            }
-            WindowEvent::SurfaceResized(size) => {
-                if let Some(renderer) = self.renderer.as_mut() {
-                    let scale_factor = self
-                        .window
-                        .as_ref()
-                        .map(|window| window.scale_factor() as f32)
-                        .unwrap_or(1.0);
-                    renderer.resize(size, scale_factor);
-                }
-            }
-            WindowEvent::RedrawRequested => self.handle_runtime_redraw(event_loop),
-            _ => {}
-        }
-    }
-
-    fn about_to_wait(&mut self, _event_loop: &dyn ActiveEventLoop) {
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
-        }
-    }
-
-    fn suspended(&mut self, _event_loop: &dyn ActiveEventLoop) {
-        self.suspend();
-    }
-}
-
 impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
     fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.create_or_resume_surface(event_loop);
@@ -3977,9 +3629,14 @@ fn input_cursor_index_at_point_with_state(
         .unwrap_or_default()
         .clamped_to(current_text);
     let caret_boundary = layout.x_for_index(state.cursor.min(current_text.len()));
-    let caret_padding = if state.cursor >= current_text.len() { 1.0 } else { 0.0 };
-    let scrollable_width =
-        layout.width.max(caret_boundary + caret_padding + 2.0 + INPUT_CARET_EDGE_GAP);
+    let caret_padding = if state.cursor >= current_text.len() {
+        1.0
+    } else {
+        0.0
+    };
+    let scrollable_width = layout
+        .width
+        .max(caret_boundary + caret_padding + 2.0 + INPUT_CARET_EDGE_GAP);
     let InputViewport {
         frame: content_frame,
         ..
@@ -4018,9 +3675,14 @@ fn next_grapheme_boundary(text: &str, cursor: usize) -> usize {
         .unwrap_or(text.len())
 }
 
-fn resolve_theme(selection: &ThemeSelection, window_theme: Option<WindowTheme>) -> Theme {
+fn resolve_theme(
+    selection: &ThemeSelection,
+    theme_set: &ThemeSet,
+    window_theme: Option<WindowTheme>,
+) -> Theme {
     match selection {
-        ThemeSelection::System => Theme::from_window_theme(window_theme),
+        ThemeSelection::System => theme_set.resolve_window_theme(window_theme),
+        ThemeSelection::Mode(mode) => theme_set.resolve_mode(*mode, window_theme),
         ThemeSelection::Fixed(theme) => theme.clone(),
     }
 }
@@ -4373,6 +4035,7 @@ mod tests {
     use crate::platform::keyboard::{Key, KeyCode, KeyLocation, NamedKey, PhysicalKey};
     use crate::text::font::{FontCatalog, TextFontRequest};
     use crate::ui::layout::Axis;
+    use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
     use crate::ui::unit::{dp, sp, Dp, UnitContext};
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasPath, CanvasPointerEvent, CanvasShadow, CanvasStroke,
@@ -4386,9 +4049,9 @@ mod tests {
     use std::time::Instant;
 
     use super::{
-        input_cursor_index_at_point_with_state, next_grapheme_boundary,
-        normalize_single_line_text, previous_grapheme_boundary, text_cursor_index_at_point,
-        BoundRuntimeHandler, CachedScene, WindowBindings,
+        input_cursor_index_at_point_with_state, next_grapheme_boundary, normalize_single_line_text,
+        previous_grapheme_boundary, text_cursor_index_at_point, BoundRuntimeHandler, CachedScene,
+        WindowBindings,
     };
 
     #[cfg(feature = "video")]
@@ -4408,6 +4071,8 @@ mod tests {
     #[derive(Default)]
     struct TestVm;
 
+    impl crate::foundation::view_model::ViewModel for TestVm {}
+
     fn test_config() -> ApplicationConfig {
         ApplicationConfig {
             title: "test".to_string(),
@@ -4417,6 +4082,21 @@ mod tests {
             close_children_with_main: true,
             fonts: FontCatalog::default(),
             theme: ThemeSelection::System,
+            theme_set: ThemeSet::default(),
+            window_icon: None,
+        }
+    }
+
+    fn test_config_with_theme(theme: ThemeSelection, theme_set: ThemeSet) -> ApplicationConfig {
+        ApplicationConfig {
+            title: "test".to_string(),
+            size: LogicalSize::new(200.0, 120.0),
+            clear_color: Color::BLACK,
+            clear_color_overridden: true,
+            close_children_with_main: true,
+            fonts: FontCatalog::default(),
+            theme,
+            theme_set,
             window_icon: None,
         }
     }
@@ -4433,12 +4113,21 @@ mod tests {
         widget_tree: Option<WidgetTree<VM>>,
         invalidation: InvalidationSignal,
     ) -> BoundRuntimeHandler<VM> {
+        test_handler_with_config(view_model, widget_tree, invalidation, test_config())
+    }
+
+    fn test_handler_with_config<VM: crate::foundation::view_model::ViewModel>(
+        view_model: VM,
+        widget_tree: Option<WidgetTree<VM>>,
+        invalidation: InvalidationSignal,
+        config: ApplicationConfig,
+    ) -> BoundRuntimeHandler<VM> {
         let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
         BoundRuntimeHandler::new(
             "test".to_string(),
             1,
             WindowRole::Main,
-            test_config(),
+            config,
             Arc::new(Mutex::new(view_model)),
             WindowBindings::default(),
             widget_tree,
@@ -4463,6 +4152,84 @@ mod tests {
             text_with_all_modifiers: None,
             key_without_modifiers: Key::Named(named),
         }
+    }
+
+    fn custom_theme_set() -> (ThemeSet, Theme, Theme) {
+        let mut light = Theme::light();
+        light.palette.window_background = Color::hexa(0xEAF4FFFF);
+        light.palette.accent = Color::hexa(0x3366CCFF);
+        let mut dark = Theme::dark();
+        dark.palette.window_background = Color::hexa(0x06101DFF);
+        dark.palette.accent = Color::hexa(0x66D9E8FF);
+        (ThemeSet::new(light.clone(), dark.clone()), light, dark)
+    }
+
+    #[test]
+    fn bound_theme_modes_resolve_through_configured_theme_set() {
+        let invalidation = InvalidationSignal::new();
+        let (theme_set, light, dark) = custom_theme_set();
+        let mode = Binding::new(|| ThemeMode::Light);
+        let mut handler = test_handler_with_config(
+            TestVm,
+            None,
+            invalidation,
+            test_config_with_theme(ThemeSelection::System, theme_set),
+        );
+        handler.window_bindings.theme_mode = Some(mode);
+
+        handler.sync_theme_binding();
+        assert_eq!(handler.theme, light);
+
+        handler.window_bindings.theme_mode = Some(Binding::new(|| ThemeMode::Dark));
+        handler.sync_theme_binding();
+        assert_eq!(handler.theme, dark);
+    }
+
+    #[test]
+    fn bound_theme_set_updates_current_theme_without_mode_change() {
+        let invalidation = InvalidationSignal::new();
+        let (theme_set, light, _dark) = custom_theme_set();
+        let themes = Arc::new(Mutex::new(theme_set));
+        let theme_binding = {
+            let themes = themes.clone();
+            Binding::new(move || themes.lock().expect("theme set lock poisoned").clone())
+        };
+        let mut handler = test_handler_with_config(
+            TestVm,
+            None,
+            invalidation,
+            test_config_with_theme(ThemeSelection::System, ThemeSet::default()),
+        );
+        handler.window_bindings.theme_mode = Some(Binding::new(|| ThemeMode::Light));
+        handler.window_bindings.theme_set = Some(theme_binding);
+
+        handler.sync_theme_binding();
+        assert_eq!(handler.theme, light);
+
+        let mut updated_light = Theme::light();
+        updated_light.palette.window_background = Color::hexa(0xFFFFFFFF);
+        updated_light.palette.accent = Color::hexa(0xFFAA00FF);
+        themes.lock().expect("theme set lock poisoned").light = updated_light.clone();
+
+        handler.sync_theme_binding();
+        assert_eq!(handler.theme, updated_light);
+    }
+
+    #[test]
+    fn fixed_theme_selection_ignores_configured_theme_set() {
+        let invalidation = InvalidationSignal::new();
+        let (theme_set, _light, _dark) = custom_theme_set();
+        let mut fixed = Theme::dark();
+        fixed.palette.accent = Color::hexa(0xFF3366FF);
+        let mut handler = test_handler_with_config(
+            TestVm,
+            None,
+            invalidation,
+            test_config_with_theme(ThemeSelection::Fixed(fixed.clone()), theme_set),
+        );
+
+        handler.sync_theme_binding();
+        assert_eq!(handler.theme, fixed);
     }
 
     #[test]
@@ -4962,7 +4729,8 @@ mod tests {
         let visible_cursor = text.len().saturating_sub(10);
         let target_cursor = text.len();
         let scroll_x = Dp::new(
-            layout.x_for_index(visible_cursor)
+            layout
+                .x_for_index(visible_cursor)
                 .max(layout.x_for_index(target_cursor) - frame.inset(padding).width.get() + 8.0),
         );
         handler.focused_input = Some(input_id);
@@ -5072,7 +4840,9 @@ mod tests {
             &text_style,
             &text,
             handler.input_states.get(&input_id),
-            handler.cursor_position.expect("cursor position should be set"),
+            handler
+                .cursor_position
+                .expect("cursor position should be set"),
         );
 
         handler.handle_mouse_press(viewport, Instant::now());
@@ -5183,9 +4953,8 @@ mod tests {
             .nth(36)
             .map(|(index, _)| index)
             .unwrap_or(text.len());
-        let scroll_x = Dp::new(
-            (layout.x_for_index(cursor) - frame.inset(padding).width.get() * 0.5).max(0.0),
-        );
+        let scroll_x =
+            Dp::new((layout.x_for_index(cursor) - frame.inset(padding).width.get() * 0.5).max(0.0));
 
         handler.focused_input = Some(input_id);
         handler.input_states.insert(
@@ -5198,10 +4967,8 @@ mod tests {
             },
         );
 
-        handler.handle_input_keyboard_event(&key_press_event(
-            KeyCode::ArrowLeft,
-            NamedKey::ArrowLeft,
-        ));
+        handler
+            .handle_input_keyboard_event(&key_press_event(KeyCode::ArrowLeft, NamedKey::ArrowLeft));
         let state = handler
             .input_states
             .get(&input_id)
@@ -5233,10 +5000,7 @@ mod tests {
                 .iter()
                 .find_map(|region| match &region.interaction {
                     HitInteraction::FocusInput {
-                        id,
-                        frame,
-                        padding,
-                        ..
+                        id, frame, padding, ..
                     } => Some((*id, *frame, *padding)),
                     _ => None,
                 })
@@ -5285,10 +5049,7 @@ mod tests {
                 .iter()
                 .find_map(|region| match &region.interaction {
                     HitInteraction::FocusInput {
-                        id,
-                        frame,
-                        padding,
-                        ..
+                        id, frame, padding, ..
                     } => Some((*id, *frame, *padding)),
                     _ => None,
                 })
@@ -5338,10 +5099,7 @@ mod tests {
                 .iter()
                 .find_map(|region| match &region.interaction {
                     HitInteraction::FocusInput {
-                        id,
-                        frame,
-                        padding,
-                        ..
+                        id, frame, padding, ..
                     } => Some((*id, *frame, *padding)),
                     _ => None,
                 })
@@ -5372,6 +5130,8 @@ mod tests {
     struct SwitchVm {
         checked: bool,
     }
+
+    impl crate::foundation::view_model::ViewModel for SwitchVm {}
 
     #[test]
     fn clicking_switch_dispatches_toggled_value() {
@@ -5475,6 +5235,8 @@ mod tests {
         clicks: usize,
         widget_clicks: usize,
     }
+
+    impl crate::foundation::view_model::ViewModel for CanvasEventVm {}
 
     #[test]
     fn canvas_item_hover_dispatches_canvas_pointer_payload() {

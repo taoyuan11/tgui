@@ -21,8 +21,8 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 
 如果是第一次接触这个仓库，建议按这个顺序看：
 
-1. `basic_window`
-2. `mvvm_counter`
+1. `mvvm_counter`
+2. `basic_window`
 3. `animation_showcase`
 4. `multi_window`
 
@@ -31,6 +31,7 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 ### `basic_window`
 
 最小完整窗口示例。演示 `Application`、窗口大小、主题设置和最基本的组件树结构。
+这个示例也使用命名空 ViewModel，保持与库的 MVVM-only 启动路径一致。
 
 ### `mvvm_counter`
 

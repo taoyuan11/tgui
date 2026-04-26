@@ -1,6 +1,7 @@
 use tgui::{
     Application, Axis, Binding, Button, Color, Command, Flex, InputTrigger, Insets, Observable,
     Stack, Text, TguiError, ViewModelContext, dp, pct, sp,
+    ViewModel,
 };
 use tgui::platform::keyboard::KeyCode;
 
@@ -119,6 +120,8 @@ impl CounterVm {
             .into()
     }
 }
+
+impl ViewModel for CounterVm {}
 
 fn main() -> Result<(), TguiError> {
     Application::new()
