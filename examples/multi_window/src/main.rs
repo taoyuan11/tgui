@@ -1,6 +1,6 @@
 use tgui::{
-    Align, Application, Axis, Binding, Button, Color, Command, Flex, Insets, Observable, Stack,
-    Text, TguiError, ViewModelContext, WindowSpec, dp, pct, sp,
+    Application, Axis, Binding, Button, Color, Command, Flex, Insets, Observable, Stack, Text,
+    TguiError, ViewModelContext, WindowSpec, dp, pct, sp,
 };
 
 struct MultiWindowVm {
@@ -70,7 +70,7 @@ impl MultiWindowVm {
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(28.0)))
-            .align(Align::Center)
+            .center()
             .child(
                 Flex::new(Axis::Vertical)
                     .width(dp(620.0))

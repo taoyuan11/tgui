@@ -2,12 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use taffy::prelude::{
-    length, line, span, AlignContent as TaffyAlignContent,
-    AlignItems as TaffyAlignItems, AvailableSpace, Dimension, Display, FlexDirection, FlexWrap,
-    FromFr, FromLength, FromPercent, GridTemplateComponent,
-    JustifyContent as TaffyJustifyContent, LengthPercentage, LengthPercentageAuto,
-    Position as TaffyPosition, Style as TaffyStyle, TaffyAuto, TaffyTree, TaffyZero,
-    TrackSizingFunction,
+    length, line, span, AlignContent as TaffyAlignContent, AlignItems as TaffyAlignItems,
+    AvailableSpace, Dimension, Display, FlexDirection, FlexWrap, FromFr, FromLength, FromPercent,
+    GridTemplateComponent, JustifyContent as TaffyJustifyContent, LengthPercentage,
+    LengthPercentageAuto, Position as TaffyPosition, Style as TaffyStyle, TaffyAuto, TaffyTree,
+    TaffyZero, TrackSizingFunction,
 };
 use taffy::Size as TaffySize;
 
@@ -20,8 +19,7 @@ use crate::media::{
 };
 use crate::text::font::{FontManager, TextFontRequest};
 use crate::ui::layout::{
-    Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, Track, Value,
-    Wrap,
+    Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, Track, Value, Wrap,
 };
 use crate::ui::theme::Theme;
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
@@ -253,6 +251,89 @@ struct VisualContext {
 }
 
 impl<VM> Element<VM> {
+    /// Adapts an element tree built for a child view model so it can be mounted
+    /// inside a root view model tree.
+    ///
+    /// Commands stored anywhere inside the scoped subtree are executed against
+    /// the child view model returned by `selector`.
+    pub fn scope<RootVm: 'static>(
+        self,
+        selector: impl for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync + 'static,
+    ) -> Element<RootVm>
+    where
+        VM: 'static,
+    {
+        self.scope_with_selector(Arc::new(selector))
+    }
+
+    pub(crate) fn scope_with_selector<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> Element<RootVm>
+    where
+        VM: 'static,
+    {
+        let kind = match self.kind {
+            WidgetKind::Container { layout, children } => WidgetKind::Container {
+                layout,
+                children: children
+                    .into_iter()
+                    .map(|child| child.scope(selector.clone()))
+                    .collect(),
+            },
+            WidgetKind::Text { text } => WidgetKind::Text { text },
+            WidgetKind::Image { image } => WidgetKind::Image { image },
+            WidgetKind::Canvas {
+                items,
+                item_interactions,
+            } => WidgetKind::Canvas {
+                items,
+                item_interactions: item_interactions.scope(selector.clone()),
+            },
+            #[cfg(feature = "video")]
+            WidgetKind::VideoSurface { video } => WidgetKind::VideoSurface { video },
+            WidgetKind::Button { label, disabled } => WidgetKind::Button { label, disabled },
+            WidgetKind::Switch {
+                checked,
+                on_change,
+                active_background,
+                inactive_background,
+                active_thumb_color,
+                inactive_thumb_color,
+                disabled,
+            } => WidgetKind::Switch {
+                checked,
+                on_change: on_change.map(|command| command.scope(selector.clone())),
+                active_background,
+                inactive_background,
+                active_thumb_color,
+                inactive_thumb_color,
+                disabled,
+            },
+            WidgetKind::Input {
+                text,
+                placeholder,
+                on_change,
+                disabled,
+            } => WidgetKind::Input {
+                text,
+                placeholder,
+                on_change: on_change.map(|command| command.scope(selector.clone())),
+                disabled,
+            },
+        };
+
+        Element {
+            id: self.id,
+            layout: self.layout,
+            visual: self.visual,
+            interactions: self.interactions.scope(selector.clone()),
+            media_events: self.media_events.scope(selector),
+            background: self.background,
+            kind,
+        }
+    }
+
     pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
         self.visual.border_width = width.into();
         self.visual.border_color = color.into();
@@ -468,16 +549,29 @@ impl<VM> ResolvedElement<VM> {
         let width = if is_root {
             Some(Dimension::from_length(viewport.width))
         } else {
-            self.layout
-                .width
-                .as_ref()
-                .map(|value| resolve_dimension(value, animations, self.id, WidgetProperty::Width, now, units))
+            self.layout.width.as_ref().map(|value| {
+                resolve_dimension(
+                    value,
+                    animations,
+                    self.id,
+                    WidgetProperty::Width,
+                    now,
+                    units,
+                )
+            })
         };
         let height = if is_root {
             Some(Dimension::from_length(viewport.height))
         } else {
             self.layout.height.as_ref().map(|value| {
-                resolve_dimension(value, animations, self.id, WidgetProperty::Height, now, units)
+                resolve_dimension(
+                    value,
+                    animations,
+                    self.id,
+                    WidgetProperty::Height,
+                    now,
+                    units,
+                )
             })
         };
         let mut style = TaffyStyle {
@@ -491,7 +585,14 @@ impl<VM> ResolvedElement<VM> {
                     .min_width
                     .as_ref()
                     .map(|value| {
-                        resolve_dimension(value, animations, self.id, WidgetProperty::Width, now, units)
+                        resolve_dimension(
+                            value,
+                            animations,
+                            self.id,
+                            WidgetProperty::Width,
+                            now,
+                            units,
+                        )
                     })
                     .unwrap_or(default_min_width),
                 height: self
@@ -499,7 +600,14 @@ impl<VM> ResolvedElement<VM> {
                     .min_height
                     .as_ref()
                     .map(|value| {
-                        resolve_dimension(value, animations, self.id, WidgetProperty::Height, now, units)
+                        resolve_dimension(
+                            value,
+                            animations,
+                            self.id,
+                            WidgetProperty::Height,
+                            now,
+                            units,
+                        )
                     })
                     .unwrap_or(Dimension::AUTO),
             },
@@ -509,7 +617,14 @@ impl<VM> ResolvedElement<VM> {
                     .max_width
                     .as_ref()
                     .map(|value| {
-                        resolve_dimension(value, animations, self.id, WidgetProperty::Width, now, units)
+                        resolve_dimension(
+                            value,
+                            animations,
+                            self.id,
+                            WidgetProperty::Width,
+                            now,
+                            units,
+                        )
                     })
                     .unwrap_or(Dimension::AUTO),
                 height: self
@@ -517,7 +632,14 @@ impl<VM> ResolvedElement<VM> {
                     .max_height
                     .as_ref()
                     .map(|value| {
-                        resolve_dimension(value, animations, self.id, WidgetProperty::Height, now, units)
+                        resolve_dimension(
+                            value,
+                            animations,
+                            self.id,
+                            WidgetProperty::Height,
+                            now,
+                            units,
+                        )
                     })
                     .unwrap_or(Dimension::AUTO),
             },
@@ -551,18 +673,21 @@ impl<VM> ResolvedElement<VM> {
                 .basis
                 .as_ref()
                 .map(|value| {
-                    resolve_dimension(value, animations, self.id, WidgetProperty::Width, now, units)
+                    resolve_dimension(
+                        value,
+                        animations,
+                        self.id,
+                        WidgetProperty::Width,
+                        now,
+                        units,
+                    )
                 })
                 .unwrap_or(Dimension::AUTO),
-            aspect_ratio: self
-                .layout
-                .aspect_ratio
-                .as_ref()
-                .map(|value| {
-                    value
-                        .resolve_widget(animations, self.id, WidgetProperty::Grow, now)
-                        .max(0.0)
-                }),
+            aspect_ratio: self.layout.aspect_ratio.as_ref().map(|value| {
+                value
+                    .resolve_widget(animations, self.id, WidgetProperty::Grow, now)
+                    .max(0.0)
+            }),
             position: match self.layout.position_type {
                 PositionType::Relative => TaffyPosition::Relative,
                 PositionType::Absolute => TaffyPosition::Absolute,
@@ -572,25 +697,61 @@ impl<VM> ResolvedElement<VM> {
                     .layout
                     .left
                     .as_ref()
-                    .map(|value| resolve_length_percentage_auto(value, animations, self.id, WidgetProperty::Width, now, units))
+                    .map(|value| {
+                        resolve_length_percentage_auto(
+                            value,
+                            animations,
+                            self.id,
+                            WidgetProperty::Width,
+                            now,
+                            units,
+                        )
+                    })
                     .unwrap_or(LengthPercentageAuto::AUTO),
                 right: self
                     .layout
                     .right
                     .as_ref()
-                    .map(|value| resolve_length_percentage_auto(value, animations, self.id, WidgetProperty::Width, now, units))
+                    .map(|value| {
+                        resolve_length_percentage_auto(
+                            value,
+                            animations,
+                            self.id,
+                            WidgetProperty::Width,
+                            now,
+                            units,
+                        )
+                    })
                     .unwrap_or(LengthPercentageAuto::AUTO),
                 top: self
                     .layout
                     .top
                     .as_ref()
-                    .map(|value| resolve_length_percentage_auto(value, animations, self.id, WidgetProperty::Height, now, units))
+                    .map(|value| {
+                        resolve_length_percentage_auto(
+                            value,
+                            animations,
+                            self.id,
+                            WidgetProperty::Height,
+                            now,
+                            units,
+                        )
+                    })
                     .unwrap_or(LengthPercentageAuto::AUTO),
                 bottom: self
                     .layout
                     .bottom
                     .as_ref()
-                    .map(|value| resolve_length_percentage_auto(value, animations, self.id, WidgetProperty::Height, now, units))
+                    .map(|value| {
+                        resolve_length_percentage_auto(
+                            value,
+                            animations,
+                            self.id,
+                            WidgetProperty::Height,
+                            now,
+                            units,
+                        )
+                    })
                     .unwrap_or(LengthPercentageAuto::AUTO),
             },
             align_self: self.layout.align_self.map(map_align_self),
@@ -1284,9 +1445,8 @@ fn apply_container_style(
         ContainerKind::Flow => {
             style.display = Display::Flex;
             style.flex_direction = FlexDirection::Column;
-            style.justify_content =
-                Some(map_justify_content(layout.justify_y.unwrap_or(layout.justify)));
-            style.align_items = map_align_items(layout.align_x.unwrap_or(layout.align));
+            style.justify_content = Some(map_justify_content(layout.justify));
+            style.align_items = map_align_items(layout.align);
         }
         ContainerKind::Flex { direction, wrap } => {
             style.display = Display::Flex;
@@ -1298,42 +1458,43 @@ fn apply_container_style(
                 Wrap::NoWrap => FlexWrap::NoWrap,
                 Wrap::Wrap => FlexWrap::Wrap,
             };
-            match direction {
-                Axis::Horizontal => {
-                    style.justify_content =
-                        Some(map_justify_content(layout.justify_x.unwrap_or(layout.justify)));
-                    style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
-                }
-                Axis::Vertical => {
-                    style.justify_content =
-                        Some(map_justify_content(layout.justify_y.unwrap_or(layout.justify)));
-                    style.align_items = map_align_items(layout.align_x.unwrap_or(layout.align));
-                }
-            }
+            style.justify_content = Some(map_justify_content(layout.justify));
+            style.align_items = map_align_items(layout.align);
         }
         ContainerKind::Grid { columns, rows } => {
             style.display = Display::Grid;
             style.grid_template_columns = if columns.is_empty() {
                 vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)]
             } else {
-                columns.iter().copied().map(map_track).map(GridTemplateComponent::Single).collect()
+                columns
+                    .iter()
+                    .copied()
+                    .map(map_track)
+                    .map(GridTemplateComponent::Single)
+                    .collect()
             };
             style.grid_template_rows = if rows.is_empty() {
                 vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)]
             } else {
-                rows.iter().copied().map(map_track).map(GridTemplateComponent::Single).collect()
+                rows.iter()
+                    .copied()
+                    .map(map_track)
+                    .map(GridTemplateComponent::Single)
+                    .collect()
             };
-            style.justify_content = Some(map_justify_content(layout.justify_x.unwrap_or(layout.justify)));
-            style.align_content = Some(map_align_content(layout.justify_y.unwrap_or(layout.justify)));
-            style.justify_items = map_align_items(layout.align_x.unwrap_or(layout.align));
-            style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
+            style.justify_content = Some(map_justify_content(layout.justify));
+            style.align_content = Some(map_align_content(layout.align));
+            style.justify_items = map_justify_items(layout.justify);
+            style.align_items = map_align_items(layout.align);
         }
         ContainerKind::Stack => {
             style.display = Display::Grid;
-            style.grid_template_columns = vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)];
-            style.grid_template_rows = vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)];
-            style.justify_items = map_align_items(layout.align_x.unwrap_or(layout.align));
-            style.align_items = map_align_items(layout.align_y.unwrap_or(layout.align));
+            style.grid_template_columns =
+                vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)];
+            style.grid_template_rows =
+                vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)];
+            style.justify_items = map_justify_items(layout.justify);
+            style.align_items = map_align_items(layout.align);
         }
     }
 }
@@ -1625,14 +1786,21 @@ fn map_justify_content(justify: Justify) -> TaffyJustifyContent {
     }
 }
 
-fn map_align_content(justify: Justify) -> TaffyAlignContent {
+fn map_align_content(align: Align) -> TaffyAlignContent {
+    match align {
+        Align::Start => TaffyAlignContent::Start,
+        Align::Center => TaffyAlignContent::Center,
+        Align::End => TaffyAlignContent::End,
+        Align::Stretch => TaffyAlignContent::Stretch,
+    }
+}
+
+fn map_justify_items(justify: Justify) -> Option<TaffyAlignItems> {
     match justify {
-        Justify::Start => TaffyAlignContent::Start,
-        Justify::Center => TaffyAlignContent::Center,
-        Justify::End => TaffyAlignContent::End,
-        Justify::SpaceBetween => TaffyAlignContent::SpaceBetween,
-        Justify::SpaceAround => TaffyAlignContent::SpaceAround,
-        Justify::SpaceEvenly => TaffyAlignContent::SpaceEvenly,
+        Justify::Start => Some(TaffyAlignItems::Start),
+        Justify::Center => Some(TaffyAlignItems::Center),
+        Justify::End => Some(TaffyAlignItems::End),
+        Justify::SpaceBetween | Justify::SpaceAround | Justify::SpaceEvenly => None,
     }
 }
 
@@ -1660,10 +1828,7 @@ fn resolve_dimension(
     }
 }
 
-fn resolve_length_percentage(
-    value: &Length,
-    units: UnitContext,
-) -> Option<LengthPercentage> {
+fn resolve_length_percentage(value: &Length, units: UnitContext) -> Option<LengthPercentage> {
     match value {
         Length::Auto => None,
         Length::Px(value) => Some(LengthPercentage::from_length(units.resolve_dp(*value))),
@@ -1747,10 +1912,7 @@ fn measure_node(
         Some(MeasureContext::Input { text, placeholder }) => {
             let text_size = measure_text_content(text, font_manager, theme, units);
             let placeholder_size = measure_text_content(placeholder, font_manager, theme, units);
-            (
-                INPUT_DEFAULT_WIDTH,
-                text_size.1.max(placeholder_size.1),
-            )
+            (INPUT_DEFAULT_WIDTH, text_size.1.max(placeholder_size.1))
         }
         Some(MeasureContext::None) | None => (0.0, 0.0),
     };
@@ -2923,13 +3085,13 @@ mod tests {
     use crate::animation::{AnimationCoordinator, AnimationEngine};
     use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
     use crate::foundation::color::Color;
-    use crate::foundation::view_model::{Command, ValueCommand};
+    use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
     use crate::media::MediaManager;
     use crate::text::font::{FontCatalog, FontManager};
     use crate::ui::layout::Overflow;
     use crate::ui::theme::Theme;
     use crate::ui::unit::{dp, Dp};
-    use crate::ui::widget::common::Rect;
+    use crate::ui::widget::common::{Rect, WidgetKind};
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasPath, CanvasStroke, Element, Image, Input, InputEditState,
         PathBuilder, Point, ScrollbarAxis, ScrollbarHandle, Stack, Switch, Text, WidgetTree,
@@ -3584,6 +3746,173 @@ mod tests {
         assert_eq!(media_tree.media_event_states(&media).len(), 1);
         show_media.set(false);
         assert_eq!(media_tree.media_event_states(&media).len(), 0);
+    }
+
+    #[derive(Default)]
+    struct ScopeChildVm {
+        count: i32,
+        text: String,
+        checked: bool,
+        canvas_hits: usize,
+        context_hits: usize,
+    }
+
+    #[derive(Default)]
+    struct ScopeRootVm {
+        child: ScopeChildVm,
+        other: ScopeChildVm,
+        root_count: i32,
+    }
+
+    fn scope_child(root: &mut ScopeRootVm) -> &mut ScopeChildVm {
+        &mut root.child
+    }
+
+    fn scope_other(root: &mut ScopeRootVm) -> &mut ScopeChildVm {
+        &mut root.other
+    }
+
+    #[test]
+    fn scoped_command_targets_child_view_model() {
+        let child: Element<ScopeChildVm> =
+            Stack::new().on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 1)).into();
+        let root = child.scope(scope_child);
+
+        let command = root.interactions.on_click.expect("scoped command");
+        let mut vm = ScopeRootVm::default();
+        command.execute(&mut vm);
+
+        assert_eq!(vm.child.count, 1);
+        assert_eq!(vm.root_count, 0);
+    }
+
+    #[test]
+    fn scoped_context_command_receives_child_context() {
+        let command = Command::new_with_context(
+            |vm: &mut ScopeChildVm, _ctx: &CommandContext<ScopeChildVm>| {
+                vm.context_hits += 1;
+            },
+        )
+        .scope(std::sync::Arc::new(scope_child));
+
+        let mut vm = ScopeRootVm::default();
+        command.execute(&mut vm);
+
+        assert_eq!(vm.child.context_hits, 1);
+    }
+
+    #[test]
+    fn scoped_value_commands_cover_input_switch_canvas_and_media() {
+        let input: Element<ScopeChildVm> = Input::new(Text::new("initial"))
+            .on_change(ValueCommand::new(|vm: &mut ScopeChildVm, value| {
+                vm.text = value;
+            }))
+            .into();
+        let input_id = input.id;
+        let input_tree = WidgetTree::new(input.scope(scope_child));
+        let snapshot = input_tree.input_snapshot(input_id).expect("input snapshot");
+
+        let mut vm = ScopeRootVm::default();
+        snapshot
+            .on_change
+            .expect("input on_change")
+            .execute(&mut vm, "updated".to_string());
+        assert_eq!(vm.child.text, "updated");
+
+        let switch: Element<ScopeChildVm> = Switch::new(false)
+            .on_change(ValueCommand::new(|vm: &mut ScopeChildVm, value| {
+                vm.checked = value;
+            }))
+            .into();
+        let switch = switch.scope(scope_child);
+        match switch.kind {
+            WidgetKind::Switch {
+                on_change: Some(command),
+                ..
+            } => command.execute(&mut vm, true),
+            _ => panic!("switch command should be scoped"),
+        }
+        assert!(vm.child.checked);
+
+        let canvas: Element<ScopeChildVm> = Canvas::new(Vec::<CanvasItem>::new())
+            .on_item_click(ValueCommand::new(|vm: &mut ScopeChildVm, _event| {
+                vm.canvas_hits += 1;
+            }))
+            .into();
+        let canvas = canvas.scope(scope_child);
+        match canvas.kind {
+            WidgetKind::Canvas {
+                item_interactions, ..
+            } => item_interactions
+                .on_click
+                .expect("canvas item command")
+                .execute(
+                    &mut vm,
+                    crate::ui::widget::CanvasPointerEvent {
+                        item_id: 1_u64.into(),
+                        canvas_position: Point::ZERO,
+                        local_position: Point::ZERO,
+                    },
+                ),
+            _ => panic!("canvas command should be scoped"),
+        }
+        assert_eq!(vm.child.canvas_hits, 1);
+
+        let image = Image::from_path("missing-test-image.png")
+            .on_loading(Command::new(|vm: &mut ScopeChildVm| vm.count += 10))
+            .scope(scope_child);
+        let media_command = image.media_events.on_loading.expect("media command");
+        media_command.execute(&mut vm);
+        assert_eq!(vm.child.count, 10);
+    }
+
+    #[test]
+    fn scoped_dynamic_children_resolve_to_root_commands() {
+        let context = test_context();
+        let show = context.observable(true);
+        let child_a: Element<ScopeChildVm> =
+            Stack::new().on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 1)).into();
+        let child_b: Element<ScopeChildVm> =
+            Stack::new().on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 10)).into();
+
+        let tree = WidgetTree::new(Stack::<ScopeRootVm>::new().child(show.binding().map(
+            move |visible| {
+                if visible {
+                    vec![child_a.clone().scope(scope_child)]
+                } else {
+                    vec![child_b.clone().scope(scope_other)]
+                }
+            },
+        )));
+
+        let resolved = match &tree.root.kind {
+            WidgetKind::Container { children, .. } => children[0].resolve(),
+            _ => panic!("root should be a container"),
+        };
+
+        let command = resolved[0]
+            .interactions
+            .on_click
+            .clone()
+            .expect("dynamic scoped command");
+        let mut vm = ScopeRootVm::default();
+        command.execute(&mut vm);
+        assert_eq!(vm.child.count, 1);
+        assert_eq!(vm.other.count, 0);
+
+        show.set(false);
+        let resolved = match &tree.root.kind {
+            WidgetKind::Container { children, .. } => children[0].resolve(),
+            _ => panic!("root should be a container"),
+        };
+        let command = resolved[0]
+            .interactions
+            .on_click
+            .clone()
+            .expect("dynamic scoped command");
+        command.execute(&mut vm);
+        assert_eq!(vm.child.count, 1);
+        assert_eq!(vm.other.count, 10);
     }
 
     #[cfg(feature = "video")]

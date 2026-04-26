@@ -144,6 +144,8 @@ impl MessageDialogOptions {
 }
 
 type AsyncDialogCallback<VM> = Box<dyn FnOnce(&mut VM, &CommandContext<VM>) + Send>;
+type ScopedDialogDispatcher<VM> =
+    Arc<dyn Fn(PendingDialogCompletion<VM>) -> Result<(), DialogError> + Send + Sync>;
 
 pub(crate) struct PendingDialogCompletion<VM> {
     pub(crate) window_key: String,
@@ -217,7 +219,7 @@ struct DialogRuntimeContext<VM> {
     window_key: String,
     window_instance_id: u64,
     parent: Option<DialogParentHandles>,
-    dispatcher: AsyncDialogDispatcher<VM>,
+    dispatcher: ScopedDialogDispatcher<VM>,
 }
 
 impl<VM> Clone for DialogRuntimeContext<VM> {
@@ -259,7 +261,36 @@ impl<VM: 'static> Dialogs<VM> {
                 window_key,
                 window_instance_id,
                 parent: window.and_then(|window| DialogParentHandles::from_window(window.as_ref())),
-                dispatcher,
+                dispatcher: Arc::new(move |completion| dispatcher.dispatch(completion)),
+            }),
+        }
+    }
+
+    pub(crate) fn scope<ChildVm: 'static>(
+        &self,
+        selector: Arc<dyn for<'a> Fn(&'a mut VM) -> &'a mut ChildVm + Send + Sync>,
+    ) -> Dialogs<ChildVm> {
+        let Some(runtime) = &self.runtime else {
+            return Dialogs { runtime: None };
+        };
+
+        let dispatcher = runtime.dispatcher.clone();
+        Dialogs {
+            runtime: Some(DialogRuntimeContext {
+                window_key: runtime.window_key.clone(),
+                window_instance_id: runtime.window_instance_id,
+                parent: runtime.parent.clone(),
+                dispatcher: Arc::new(move |completion: PendingDialogCompletion<ChildVm>| {
+                    let scoped_selector = selector.clone();
+                    dispatcher(PendingDialogCompletion {
+                        window_key: completion.window_key,
+                        window_instance_id: completion.window_instance_id,
+                        callback: Box::new(move |view_model, context| {
+                            let scoped_context = context.scope(scoped_selector.clone());
+                            (completion.callback)(scoped_selector(view_model), &scoped_context);
+                        }),
+                    })
+                }),
             }),
         }
     }
@@ -386,7 +417,7 @@ impl<VM: 'static> Dialogs<VM> {
             let window_instance_id = runtime.window_instance_id;
             std::thread::spawn(move || {
                 let result = run_message_dialog(options, parent.as_ref());
-                let _ = dispatcher.dispatch(PendingDialogCompletion {
+                let _ = dispatcher(PendingDialogCompletion {
                     window_key,
                     window_instance_id,
                     callback: Box::new(move |view_model, context| {
@@ -484,7 +515,7 @@ impl<VM: 'static> Dialogs<VM> {
             let window_instance_id = runtime.window_instance_id;
             std::thread::spawn(move || {
                 let result = run_file_dialog_path(request, options, parent.as_ref());
-                let _ = dispatcher.dispatch(PendingDialogCompletion {
+                let _ = dispatcher(PendingDialogCompletion {
                     window_key,
                     window_instance_id,
                     callback: Box::new(move |view_model, context| {
@@ -532,7 +563,7 @@ impl<VM: 'static> Dialogs<VM> {
             let window_instance_id = runtime.window_instance_id;
             std::thread::spawn(move || {
                 let result = run_file_dialog_paths(request, options, parent.as_ref());
-                let _ = dispatcher.dispatch(PendingDialogCompletion {
+                let _ = dispatcher(PendingDialogCompletion {
                     window_key,
                     window_instance_id,
                     callback: Box::new(move |view_model, context| {

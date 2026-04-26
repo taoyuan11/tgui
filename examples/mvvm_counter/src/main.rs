@@ -1,6 +1,6 @@
 use tgui::{
-    Align, Application, Axis, Binding, Button, Color, Command, Flex, InputTrigger, Insets,
-    Observable, Stack, Text, TguiError, ViewModelContext, dp, pct, sp,
+    Application, Axis, Binding, Button, Color, Command, Flex, InputTrigger, Insets, Observable,
+    Stack, Text, TguiError, ViewModelContext, dp, pct, sp,
 };
 use tgui::platform::keyboard::KeyCode;
 
@@ -66,7 +66,7 @@ impl CounterVm {
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(28.0)))
-            .align(Align::Center)
+            .center()
             .child(
                 Flex::new(Axis::Vertical)
                     .width(dp(520.0))

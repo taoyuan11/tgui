@@ -2,8 +2,7 @@ use crate::foundation::binding::Binding;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::{
-    Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, ScrollbarStyle, Track, Value,
-    Wrap,
+    Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, ScrollbarStyle, Track, Value, Wrap,
 };
 use crate::ui::unit::Dp;
 
@@ -178,10 +177,7 @@ pub(crate) fn set_layout_lengths(
     set_layout_length(&mut layout.height, height);
 }
 
-pub(crate) fn set_layout_inset(
-    target: &mut Option<Value<Length>>,
-    value: impl IntoLengthValue,
-) {
+pub(crate) fn set_layout_inset(target: &mut Option<Value<Length>>, value: impl IntoLengthValue) {
     *target = Some(value.into_length_value());
 }
 
@@ -306,22 +302,6 @@ impl<VM> Container<VM> {
     pub fn justify(mut self, justify: Justify) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
             layout.justify = justify;
-            layout.justify_x = Some(justify);
-            layout.justify_y = Some(justify);
-        }
-        self
-    }
-
-    pub fn justify_x(mut self, justify: Justify) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.justify_x = Some(justify);
-        }
-        self
-    }
-
-    pub fn justify_y(mut self, justify: Justify) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.justify_y = Some(justify);
         }
         self
     }
@@ -329,24 +309,12 @@ impl<VM> Container<VM> {
     pub fn align(mut self, align: Align) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
             layout.align = align;
-            layout.align_x = Some(align);
-            layout.align_y = Some(align);
         }
         self
     }
 
-    pub fn align_x(mut self, align: Align) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.align_x = Some(align);
-        }
-        self
-    }
-
-    pub fn align_y(mut self, align: Align) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.align_y = Some(align);
-        }
-        self
+    pub fn center(self) -> Self {
+        self.justify(Justify::Center).align(Align::Center)
     }
 
     pub fn overflow(mut self, overflow: Overflow) -> Self {
@@ -449,150 +417,246 @@ macro_rules! impl_layout_api {
     ($name:ident) => {
         impl<VM> $name<VM> {
             pub fn size(self, width: impl IntoLengthValue, height: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_lengths(layout, width, height);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_lengths(layout, width, height);
+                    },
+                )
             }
 
             pub fn width(self, width: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_length(&mut layout.width, width);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_length(&mut layout.width, width);
+                    },
+                )
             }
 
             pub fn height(self, height: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_length(&mut layout.height, height);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_length(&mut layout.height, height);
+                    },
+                )
             }
 
             pub fn min_width(self, width: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_length(&mut layout.min_width, width);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_length(&mut layout.min_width, width);
+                    },
+                )
             }
 
             pub fn min_height(self, height: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_length(&mut layout.min_height, height);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_length(&mut layout.min_height, height);
+                    },
+                )
             }
 
             pub fn max_width(self, width: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_length(&mut layout.max_width, width);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_length(&mut layout.max_width, width);
+                    },
+                )
             }
 
             pub fn max_height(self, height: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_length(&mut layout.max_height, height);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_length(&mut layout.max_height, height);
+                    },
+                )
             }
 
             pub fn aspect_ratio(self, aspect_ratio: impl Into<Value<f32>>) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.aspect_ratio = Some(aspect_ratio.into());
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.aspect_ratio = Some(aspect_ratio.into());
+                    },
+                )
             }
 
             pub fn margin(self, insets: impl Into<Value<Insets>>) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.margin = insets.into();
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.margin = insets.into();
+                    },
+                )
             }
 
             pub fn grow(self, grow: impl Into<Value<f32>>) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.grow = grow.into();
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.grow = grow.into();
+                    },
+                )
             }
 
             pub fn shrink(self, shrink: impl Into<Value<f32>>) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.shrink = shrink.into();
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.shrink = shrink.into();
+                    },
+                )
             }
 
             pub fn basis(self, basis: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.basis = Some(basis.into_length_value());
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.basis = Some(basis.into_length_value());
+                    },
+                )
             }
 
             pub fn align_self(self, align: Align) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.align_self = Some(align);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.align_self = Some(align);
+                    },
+                )
             }
 
             pub fn justify_self(self, align: Align) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.justify_self = Some(align);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.justify_self = Some(align);
+                    },
+                )
             }
 
             pub fn column(self, start: usize) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.column_start = Some(start.max(1));
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.column_start = Some(start.max(1));
+                    },
+                )
             }
 
             pub fn row(self, start: usize) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.row_start = Some(start.max(1));
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.row_start = Some(start.max(1));
+                    },
+                )
             }
 
             pub fn column_span(self, span: usize) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.column_span = span.max(1);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.column_span = span.max(1);
+                    },
+                )
             }
 
             pub fn row_span(self, span: usize) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.row_span = span.max(1);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.row_span = span.max(1);
+                    },
+                )
             }
 
             pub fn position_absolute(self) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    layout.position_type = crate::ui::layout::PositionType::Absolute;
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        layout.position_type = crate::ui::layout::PositionType::Absolute;
+                    },
+                )
             }
 
             pub fn left(self, value: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_inset(&mut layout.left, value);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_inset(&mut layout.left, value);
+                    },
+                )
             }
 
             pub fn top(self, value: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_inset(&mut layout.top, value);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_inset(&mut layout.top, value);
+                    },
+                )
             }
 
             pub fn right(self, value: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_inset(&mut layout.right, value);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_inset(&mut layout.right, value);
+                    },
+                )
             }
 
             pub fn bottom(self, value: impl IntoLengthValue) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_inset(&mut layout.bottom, value);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_inset(&mut layout.bottom, value);
+                    },
+                )
             }
 
             pub fn inset(self, value: impl IntoLengthValue + Copy) -> Self {
-                apply_layout_api(self, |owner| &mut owner.0.element, |layout| {
-                    set_layout_inset(&mut layout.left, value);
-                    set_layout_inset(&mut layout.top, value);
-                    set_layout_inset(&mut layout.right, value);
-                    set_layout_inset(&mut layout.bottom, value);
-                })
+                apply_layout_api(
+                    self,
+                    |owner| &mut owner.0.element,
+                    |layout| {
+                        set_layout_inset(&mut layout.left, value);
+                        set_layout_inset(&mut layout.top, value);
+                        set_layout_inset(&mut layout.right, value);
+                        set_layout_inset(&mut layout.bottom, value);
+                    },
+                )
             }
 
             pub fn background(self, color: impl Into<Value<Color>>) -> Self {
@@ -667,24 +731,12 @@ macro_rules! impl_layout_api {
                 Self(self.0.justify(justify))
             }
 
-            pub fn justify_x(self, justify: Justify) -> Self {
-                Self(self.0.justify_x(justify))
-            }
-
-            pub fn justify_y(self, justify: Justify) -> Self {
-                Self(self.0.justify_y(justify))
-            }
-
             pub fn align(self, align: Align) -> Self {
                 Self(self.0.align(align))
             }
 
-            pub fn align_x(self, align: Align) -> Self {
-                Self(self.0.align_x(align))
-            }
-
-            pub fn align_y(self, align: Align) -> Self {
-                Self(self.0.align_y(align))
+            pub fn center(self) -> Self {
+                Self(self.0.center())
             }
 
             pub fn overflow(self, overflow: Overflow) -> Self {

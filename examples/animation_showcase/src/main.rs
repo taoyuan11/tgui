@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use tgui::{Align, Application, Axis, Binding, Button, Color, Command, Flex, Insets, Observable, Point, Stack, Text, TguiError, Transition, ViewModelContext, dp, pct, sp, Dp};
+use tgui::{Application, Axis, Binding, Button, Color, Command, Flex, Insets, Observable, Point, Stack, Text, TguiError, Transition, ViewModelContext, dp, pct, sp, Dp};
 
 struct AnimationVm {
     expanded: Observable<bool>,
@@ -114,7 +114,7 @@ impl AnimationVm {
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
-            .align(Align::Center)
+            .center()
             .child(
                 Flex::new(Axis::Vertical)
                     .width(self.card_width())

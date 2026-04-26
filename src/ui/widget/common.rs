@@ -205,6 +205,24 @@ impl<VM> MediaEventHandlers<VM> {
     pub(crate) fn has_any(&self) -> bool {
         self.on_loading.is_some() || self.on_success.is_some() || self.on_error.is_some()
     }
+
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> MediaEventHandlers<RootVm>
+    where
+        VM: 'static,
+    {
+        MediaEventHandlers {
+            on_loading: self
+                .on_loading
+                .map(|command| command.scope(selector.clone())),
+            on_success: self
+                .on_success
+                .map(|command| command.scope(selector.clone())),
+            on_error: self.on_error.map(|command| command.scope(selector)),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -276,6 +294,49 @@ impl<VM> InteractionHandlers<VM> {
             || self.on_mouse_leave.is_some()
             || self.on_mouse_move.is_some()
             || self.cursor_style.is_some()
+    }
+
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> InteractionHandlers<RootVm>
+    where
+        VM: 'static,
+    {
+        InteractionHandlers {
+            on_click: self.on_click.map(|command| command.scope(selector.clone())),
+            on_double_click: self
+                .on_double_click
+                .map(|command| command.scope(selector.clone())),
+            on_focus: self.on_focus.map(|command| command.scope(selector.clone())),
+            on_blur: self.on_blur.map(|command| command.scope(selector.clone())),
+            on_mouse_enter: self
+                .on_mouse_enter
+                .map(|command| command.scope(selector.clone())),
+            on_mouse_leave: self
+                .on_mouse_leave
+                .map(|command| command.scope(selector.clone())),
+            on_mouse_move: self.on_mouse_move.map(|command| command.scope(selector)),
+            cursor_style: self.cursor_style,
+        }
+    }
+}
+
+impl<VM: 'static> CanvasItemInteractionHandlers<VM> {
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> CanvasItemInteractionHandlers<RootVm> {
+        CanvasItemInteractionHandlers {
+            on_click: self.on_click.map(|command| command.scope(selector.clone())),
+            on_mouse_enter: self
+                .on_mouse_enter
+                .map(|command| command.scope(selector.clone())),
+            on_mouse_leave: self
+                .on_mouse_leave
+                .map(|command| command.scope(selector.clone())),
+            on_mouse_move: self.on_mouse_move.map(|command| command.scope(selector)),
+        }
     }
 }
 
@@ -559,7 +620,10 @@ pub(crate) enum ContainerKind {
         columns: Vec<Track>,
         rows: Vec<Track>,
     },
-    Flex { direction: Axis, wrap: Wrap },
+    Flex {
+        direction: Axis,
+        wrap: Wrap,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -568,11 +632,7 @@ pub(crate) struct ContainerLayout {
     pub padding: Value<Insets>,
     pub gap: Value<crate::ui::layout::Length>,
     pub justify: Justify,
-    pub justify_x: Option<Justify>,
-    pub justify_y: Option<Justify>,
     pub align: Align,
-    pub align_x: Option<Align>,
-    pub align_y: Option<Align>,
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
     pub scrollbar_style: ScrollbarStyle,
@@ -585,11 +645,7 @@ impl ContainerLayout {
             padding: Value::Static(Insets::ZERO),
             gap: Value::Static(crate::ui::layout::Length::Px(Dp::ZERO)),
             justify: Justify::Start,
-            justify_x: None,
-            justify_y: None,
             align: Align::Start,
-            align_x: None,
-            align_y: None,
             overflow_x: Overflow::Hidden,
             overflow_y: Overflow::Hidden,
             scrollbar_style: ScrollbarStyle::default(),
@@ -607,6 +663,29 @@ impl<VM> ChildSource<VM> {
         match self {
             Self::Static(children) => children.clone(),
             Self::Dynamic(resolver) => resolver(),
+        }
+    }
+
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> ChildSource<RootVm>
+    where
+        VM: 'static,
+    {
+        match self {
+            Self::Static(children) => ChildSource::Static(
+                children
+                    .into_iter()
+                    .map(|child| child.scope_with_selector(selector.clone()))
+                    .collect(),
+            ),
+            Self::Dynamic(resolver) => ChildSource::Dynamic(Arc::new(move || {
+                resolver()
+                    .into_iter()
+                    .map(|child| child.scope_with_selector(selector.clone()))
+                    .collect()
+            })),
         }
     }
 }

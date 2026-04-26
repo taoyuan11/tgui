@@ -1,4 +1,4 @@
-use tgui::{dp, el, pct, sp, tgui_log, Align, Application, Axis, Color, Flex, Insets, LogLevel, Stack, Text, TguiError, Theme};
+use tgui::{dp, el, pct, sp, tgui_log, Application, Axis, Color, Flex, Insets, LogLevel, Stack, Text, TguiError, Theme};
 
 fn main() -> Result<(), TguiError> {
     let mut theme = Theme::dark();
@@ -18,7 +18,7 @@ fn main() -> Result<(), TguiError> {
             Stack::new()
                 .size(pct(100.0), pct(100.0))
                 .padding(Insets::all(dp(36.0)))
-                .align(Align::Center)
+                .center()
                 .child(
                     Flex::new(Axis::Vertical)
                         .width(pct(100.0))

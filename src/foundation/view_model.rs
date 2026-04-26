@@ -41,6 +41,13 @@ impl<T: 'static> CommandContext<T> {
     pub(crate) fn detached() -> Self {
         Self::new(Dialogs::detached(), Log::default())
     }
+
+    pub(crate) fn scope<ChildVm: 'static>(
+        &self,
+        selector: Arc<dyn for<'a> Fn(&'a mut T) -> &'a mut ChildVm + Send + Sync>,
+    ) -> CommandContext<ChildVm> {
+        CommandContext::new(self.dialogs.scope(selector), self.log.clone())
+    }
 }
 
 type CommandHandler<T> = dyn Fn(&mut T) + Send + Sync;
@@ -100,6 +107,16 @@ impl<T: 'static> Command<T> {
             CommandKind::WithContext(handler) => handler(view_model, context),
         }
     }
+
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut T + Send + Sync>,
+    ) -> Command<RootVm> {
+        Command::new_with_context(move |view_model, context| {
+            let scoped_context = context.scope(selector.clone());
+            self.execute_with_context(selector(view_model), &scoped_context);
+        })
+    }
 }
 
 enum ValueCommandKind<T, V> {
@@ -154,5 +171,18 @@ impl<T: 'static, V> ValueCommand<T, V> {
             ValueCommandKind::Plain(handler) => handler(view_model, value),
             ValueCommandKind::WithContext(handler) => handler(view_model, value, context),
         }
+    }
+
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut T + Send + Sync>,
+    ) -> ValueCommand<RootVm, V>
+    where
+        V: 'static,
+    {
+        ValueCommand::new_with_context(move |view_model, value, context| {
+            let scoped_context = context.scope(selector.clone());
+            self.execute_with_context(selector(view_model), value, &scoped_context);
+        })
     }
 }

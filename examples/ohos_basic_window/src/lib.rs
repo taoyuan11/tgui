@@ -1,9 +1,8 @@
 #[cfg(target_env = "ohos")]
 use tgui::platform::ohos::export_ohos_winit_app;
 use tgui::{
-    dp, el, sp, Align, Application, Axis, Binding, Button, Color, Command, CommandContext,
-    Element, Flex, Insets, LogLevel, Observable, Stack, Text, Theme, ThemeMode,
-    ViewModelContext, pct,
+    dp, el, sp, Application, Axis, Binding, Button, Color, Command, CommandContext, Element, Flex,
+    Insets, LogLevel, Observable, Stack, Text, Theme, ThemeMode, ViewModelContext, pct,
 };
 #[cfg(target_env = "ohos")]
 use winit_core::application::ApplicationHandler;
@@ -54,7 +53,7 @@ impl OhosApplication {
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
-            .align(Align::Center)
+            .center()
             .child(el![
                 Flex::new(Axis::Vertical)
                     .width(pct(100.0))

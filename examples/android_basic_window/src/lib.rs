@@ -1,6 +1,6 @@
 use tgui::{
-    el, Align, Application, Axis, Binding, Button, Color, Command, Element, Flex, Insets,
-    Observable, Stack, Text, TguiError, Theme, ThemeMode, ViewModelContext, dp, pct, sp,
+    el, Application, Axis, Binding, Button, Color, Command, Element, Flex, Insets, Observable,
+    Stack, Text, TguiError, Theme, ThemeMode, ViewModelContext, dp, pct, sp,
 };
 #[cfg(target_os = "android")]
 use tgui::platform::android::activity::AndroidApp;
@@ -49,19 +49,16 @@ impl AndroidApplication {
     }
 
     fn view(&self) -> Element<Self> {
-        let title = Text::new("当前主题/CurrentTheme")
-            .font_size(sp(30.0));
+        let title = Text::new("当前主题/CurrentTheme").font_size(sp(30.0));
 
         let text = Text::new(self.current_theme.binding());
 
-        let button = Button::new(
-            Text::new("change theme")
-        ).on_click(Command::new(Self::set_theme));
+        let button = Button::new(Text::new("change theme")).on_click(Command::new(Self::set_theme));
 
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
-            .align(Align::Center)
+            .center()
             .child(
                 Flex::new(Axis::Vertical)
                     .width(pct(100.0))
