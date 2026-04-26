@@ -87,7 +87,7 @@ impl Application {
             title: "tgui".to_string(),
             width: Dp::new(800.0),
             height: Dp::new(600.0),
-            clear_color: Theme::default().palette.window_background,
+            clear_color: Theme::default().colors.background,
             clear_color_overridden: false,
             close_children_with_main: true,
             fonts: FontCatalog::default(),
@@ -163,7 +163,7 @@ impl Application {
     /// also used as the renderer clear color.
     pub fn theme(mut self, theme: Theme) -> Self {
         if !self.clear_color_overridden {
-            self.clear_color = theme.palette.window_background;
+            self.clear_color = theme.colors.background;
         }
         self.theme = ThemeSelection::Fixed(theme);
         self
@@ -175,7 +175,7 @@ impl Application {
     /// [`ThemeMode::Dark`], and [`ThemeMode::System`] resolve through this set.
     pub fn theme_set(mut self, theme_set: ThemeSet) -> Self {
         if !self.clear_color_overridden {
-            self.clear_color = theme_set.dark.palette.window_background;
+            self.clear_color = theme_set.dark.colors.background;
         }
         self.theme_set = theme_set;
         self

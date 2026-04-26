@@ -19,20 +19,21 @@ use crate::media::{
 };
 use crate::text::font::{FontManager, TextFontRequest};
 use crate::ui::layout::{
-    Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, Track, Value, Wrap,
+    Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, ScrollbarStyle,
+    Track, Value, Wrap,
 };
 use crate::ui::theme::Theme;
-use crate::ui::unit::{dp, sp, Dp, UnitContext};
+use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface as PublicVideoSurface;
 
 use super::canvas::{canvas_bounds, CanvasItem};
 use super::common::{
-    ComputedScene, ContainerKind, ContainerLayout, HitGeometry, HitInteraction, HitRegion,
-    InputEditState, InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext,
+    ButtonVariantKind, ComputedScene, ContainerKind, ContainerLayout, HitGeometry, HitInteraction,
+    HitRegion, InputEditState, InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext,
     MediaEventHandlers, MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive,
     RenderedWidgetScene, ScenePrimitives, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
+    TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind, WidgetStateMap,
 };
 use super::text::Text;
 
@@ -207,6 +208,7 @@ enum ResolvedWidgetKind<VM> {
     Button {
         label: Text,
         disabled: Value<bool>,
+        variant: ButtonVariantKind,
     },
     Switch {
         checked: Value<bool>,
@@ -237,6 +239,7 @@ struct CollectContext<'a, 'b> {
     caret_visible: bool,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar: Option<ScrollbarHandle>,
+    widget_states: &'a WidgetStateMap,
     scroll_offsets: &'a HashMap<WidgetId, Point>,
     units: UnitContext,
     animations: &'b mut AnimationEngine,
@@ -292,7 +295,15 @@ impl<VM> Element<VM> {
             },
             #[cfg(feature = "video")]
             WidgetKind::VideoSurface { video } => WidgetKind::VideoSurface { video },
-            WidgetKind::Button { label, disabled } => WidgetKind::Button { label, disabled },
+            WidgetKind::Button {
+                label,
+                disabled,
+                variant,
+            } => WidgetKind::Button {
+                label,
+                disabled,
+                variant,
+            },
             WidgetKind::Switch {
                 checked,
                 on_change,
@@ -420,9 +431,14 @@ impl<VM> Element<VM> {
             WidgetKind::VideoSurface { video } => ResolvedWidgetKind::VideoSurface {
                 video: video.clone(),
             },
-            WidgetKind::Button { label, disabled } => ResolvedWidgetKind::Button {
+            WidgetKind::Button {
+                label,
+                disabled,
+                variant,
+            } => ResolvedWidgetKind::Button {
                 label: label.clone(),
                 disabled: disabled.clone(),
+                variant: *variant,
             },
             WidgetKind::Switch {
                 checked,
@@ -477,7 +493,10 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::VideoSurface { video } => {
                 MeasureContext::VideoSurface(video.clone())
             }
-            ResolvedWidgetKind::Button { label, .. } => MeasureContext::Button(label.clone()),
+            ResolvedWidgetKind::Button { label, variant, .. } => MeasureContext::Button {
+                label: label.clone(),
+                variant: *variant,
+            },
             ResolvedWidgetKind::Switch { .. } => MeasureContext::Switch,
             ResolvedWidgetKind::Input {
                 text, placeholder, ..
@@ -821,6 +840,10 @@ impl<VM> ResolvedElement<VM> {
             | ResolvedWidgetKind::Input { disabled, .. } => disabled.resolve(),
             _ => false,
         };
+        let mut widget_state = context.widget_states.get(self.id);
+        if disabled {
+            widget_state.disabled = true;
+        }
         let opacity = visual_context.opacity
             * self.visual.opacity.resolve_widget_clamped(
                 context.animations,
@@ -863,9 +886,8 @@ impl<VM> ResolvedElement<VM> {
                 context.now,
             )
             .with_alpha_factor(opacity);
-
         let background = match &self.kind {
-            ResolvedWidgetKind::Button { .. } => self
+            ResolvedWidgetKind::Button { variant, .. } => self
                 .background
                 .as_ref()
                 .map(|background| {
@@ -876,7 +898,11 @@ impl<VM> ResolvedElement<VM> {
                         context.now,
                     )
                 })
-                .unwrap_or(context.theme.palette.accent),
+                .unwrap_or(
+                    button_variant_theme(&context.theme.components.button, *variant)
+                        .resolve(widget_state, context.theme.border.normal)
+                        .background,
+                ),
             ResolvedWidgetKind::Input { .. } => self
                 .background
                 .as_ref()
@@ -888,7 +914,14 @@ impl<VM> ResolvedElement<VM> {
                         context.now,
                     )
                 })
-                .unwrap_or(context.theme.palette.input_background),
+                .unwrap_or(
+                    context
+                        .theme
+                        .components
+                        .input
+                        .resolve(widget_state)
+                        .background,
+                ),
             ResolvedWidgetKind::Switch {
                 checked,
                 active_background,
@@ -1041,6 +1074,7 @@ impl<VM> ResolvedElement<VM> {
                 }
                 push_scrollbar_primitives(
                     &mut computed.scene,
+                    context.theme,
                     child_clip_rect,
                     opacity,
                     layout,
@@ -1072,7 +1106,7 @@ impl<VM> ResolvedElement<VM> {
                     (text.user_select && context.selected_text == Some(self.id))
                         .then_some(context.selected_text_state)
                         .flatten(),
-                    context.theme.palette.text,
+                    context.theme.colors.on_surface,
                     opacity,
                     self.id,
                     primitive_clip,
@@ -1213,13 +1247,10 @@ impl<VM> ResolvedElement<VM> {
                     computed,
                 );
             }
-            ResolvedWidgetKind::Button { label, .. } => {
-                let padding = self.layout.padding.resolve_widget(
-                    context.animations,
-                    self.id,
-                    WidgetProperty::Padding,
-                    context.now,
-                );
+            ResolvedWidgetKind::Button { label, variant, .. } => {
+                let button_style = button_variant_theme(&context.theme.components.button, *variant)
+                    .resolve(widget_state, context.theme.border.normal);
+                let padding = Insets::symmetric(button_style.padding_x, button_style.padding_y);
                 push_text_primitives(
                     label,
                     frame,
@@ -1233,11 +1264,7 @@ impl<VM> ResolvedElement<VM> {
                     padding,
                     None,
                     None,
-                    if disabled {
-                        context.theme.palette.text_muted
-                    } else {
-                        context.theme.palette.text
-                    },
+                    button_style.foreground,
                     opacity,
                     self.id,
                     primitive_clip,
@@ -1291,13 +1318,9 @@ impl<VM> ResolvedElement<VM> {
                 ..
             } => {
                 let active = context.focused_input == Some(self.id);
+                let input_style = context.theme.components.input.resolve(widget_state);
                 let current_text = text.content.resolve();
-                let padding = self.layout.padding.resolve_widget(
-                    context.animations,
-                    self.id,
-                    WidgetProperty::Padding,
-                    context.now,
-                );
+                let padding = Insets::symmetric(input_style.padding_x, input_style.padding_y);
                 let input_state = if active {
                     context.focused_input_state
                 } else {
@@ -1647,6 +1670,7 @@ fn compute_scrollbar_geometry(
 
 fn push_scrollbar_primitives(
     scene: &mut ScenePrimitives,
+    theme: &Theme,
     clip_rect: Rect,
     opacity: f32,
     layout: &ContainerLayout,
@@ -1659,23 +1683,43 @@ fn push_scrollbar_primitives(
         return;
     }
 
-    let style = layout.scrollbar_style;
     let track_clip = Some(clip_rect);
-    let track_color = style.track_color.with_alpha_factor(opacity);
+    let base = &theme.components.scrollbar;
+    let style = layout.scrollbar_style;
+    let default_scrollbar_style = ScrollbarStyle::default();
+    let track_color = if style.track_color != default_scrollbar_style.track_color {
+        style.track_color.with_alpha_factor(opacity)
+    } else {
+        base.track_color(Default::default())
+            .with_alpha_factor(opacity)
+    };
     let thumb_color_for = |axis| {
         let handle = ScrollbarHandle {
             id: widget_id,
             axis,
         };
+        let mut state = crate::ui::theme::WidgetState::default();
         if active_scrollbar == Some(handle) {
-            style.active_thumb_color.with_alpha_factor(opacity)
+            state.pressed = true;
         } else if hovered_scrollbar == Some(handle) {
-            style.hover_thumb_color.with_alpha_factor(opacity)
+            state.hovered = true;
+        }
+        if style.thumb_color != default_scrollbar_style.thumb_color
+            || style.hover_thumb_color != default_scrollbar_style.hover_thumb_color
+            || style.active_thumb_color != default_scrollbar_style.active_thumb_color
+        {
+            if state.pressed {
+                style.active_thumb_color.with_alpha_factor(opacity)
+            } else if state.hovered {
+                style.hover_thumb_color.with_alpha_factor(opacity)
+            } else {
+                style.thumb_color.with_alpha_factor(opacity)
+            }
         } else {
-            style.thumb_color.with_alpha_factor(opacity)
+            base.thumb_color(state).with_alpha_factor(opacity)
         }
     };
-    let thickness = style.thickness.max(dp(2.0)).get();
+    let thickness = style.thickness.max(base.width).max(dp(2.0)).get();
     let radius = style
         .radius
         .max(Dp::ZERO)
@@ -1905,8 +1949,18 @@ fn measure_node(
                 snapshot.intrinsic_size,
             )
         }
-        Some(MeasureContext::Button(label)) => {
-            measure_text_content(label, font_manager, theme, units)
+        Some(MeasureContext::Button { label, variant }) => {
+            let variant_theme = button_variant_theme(&theme.components.button, *variant);
+            let text_size = measure_text_content(label, font_manager, theme, units);
+            let horizontal = units.resolve_dp(variant_theme.padding_x) * 2.0;
+            let vertical = units.resolve_dp(variant_theme.padding_y) * 2.0;
+            (
+                text_size.0 + horizontal,
+                text_size
+                    .1
+                    .max(units.resolve_dp(variant_theme.min_height))
+                    .max(text_size.1 + vertical),
+            )
         }
         Some(MeasureContext::Switch) => (44.0, 24.0),
         Some(MeasureContext::Input { text, placeholder }) => {
@@ -1929,6 +1983,7 @@ fn measure_text_content(
     theme: &Theme,
     units: UnitContext,
 ) -> (f32, f32) {
+    let default_style = &theme.typography.body;
     let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
     font_manager.measure_text(
         &text.content.resolve(),
@@ -1936,7 +1991,7 @@ fn measure_text_content(
             preferred_font: text
                 .font_family
                 .as_deref()
-                .or(theme.typography.font_family.as_deref()),
+                .or(default_style.font_family.as_deref()),
             weight: text.font_weight,
         },
         font_size,
@@ -1945,13 +2000,31 @@ fn measure_text_content(
     )
 }
 
+fn button_variant_theme(
+    theme: &crate::ui::theme::ButtonTheme,
+    variant: ButtonVariantKind,
+) -> &crate::ui::theme::ButtonVariant {
+    match variant {
+        ButtonVariantKind::Primary => &theme.primary,
+        ButtonVariantKind::Secondary => &theme.secondary,
+        ButtonVariantKind::Ghost => &theme.ghost,
+        ButtonVariantKind::Danger => &theme.danger,
+    }
+}
+
 fn resolved_text_metrics(text: &Text, theme: &Theme, units: UnitContext) -> (f32, f32, f32) {
-    let font_size = units.resolve_sp(
-        text.font_size
-            .unwrap_or(theme.typography.font_size.max(sp(1.0))),
+    let default_style = &theme.typography.body;
+    let font_size = units.resolve_sp(text.font_size.unwrap_or(default_style.size.max(sp(1.0))));
+    let line_height = units.resolve_sp(
+        default_style
+            .line_height
+            .unwrap_or(default_style.size * 1.25),
     );
-    let line_height = (font_size * 1.25).max(font_size + 4.0);
-    let letter_spacing = units.resolve_sp(text.letter_spacing);
+    let line_height = line_height.max(font_size + 4.0);
+    let letter_spacing = units.resolve_sp(
+        text.letter_spacing
+            .max(default_style.letter_spacing.unwrap_or(Sp::ZERO)),
+    );
     (font_size, line_height, letter_spacing)
 }
 
@@ -2095,8 +2168,8 @@ fn push_media_placeholder(
     }
 
     let label = media_placeholder_label(kind, loading, error);
-    let text =
-        Text::new(label).font_size((context.theme.typography.font_size - sp(1.0)).max(sp(12.0)));
+    let text = Text::new(label)
+        .font_size((context.theme.typography.body_small.size - sp(1.0)).max(sp(12.0)));
     push_text_primitives(
         &text,
         frame,
@@ -2149,11 +2222,12 @@ fn push_text_primitives(
     clip_rect: Option<Rect>,
 ) {
     let content = text.content.resolve();
+    let default_style = &theme.typography.body;
     let text_request = TextFontRequest {
         preferred_font: text
             .font_family
             .as_deref()
-            .or(theme.typography.font_family.as_deref()),
+            .or(default_style.font_family.as_deref()),
         weight: text.font_weight,
     };
     let resolved = font_manager.resolve_text(&content, text_request.clone());
@@ -2198,7 +2272,7 @@ fn push_text_primitives(
                     selection_width,
                     content_frame.height.max(Dp::new(line_height)),
                 ),
-                color: theme.palette.accent.with_alpha_factor(0.35 * opacity),
+                color: theme.colors.selection.with_alpha_factor(opacity),
                 corner_radius: 4.0,
                 stroke_width: 0.0,
                 clip_rect,
@@ -2240,7 +2314,7 @@ fn push_text_primitives(
                 CARET_WIDTH,
                 content_frame.height.max(Dp::new(line_height)),
             ),
-            color: theme.palette.text.with_alpha_factor(opacity),
+            color: theme.colors.on_surface.with_alpha_factor(opacity),
             corner_radius: 0.0,
             stroke_width: 0.0,
             clip_rect,
@@ -2268,10 +2342,11 @@ fn push_input_primitives(
 ) -> Option<Rect> {
     let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
     let text_request = TextFontRequest {
-        preferred_font: text
+        preferred_font: text.font_family.as_deref().or(theme
+            .typography
+            .body
             .font_family
-            .as_deref()
-            .or(theme.typography.font_family.as_deref()),
+            .as_deref()),
         weight: text.font_weight,
     };
     let inner = frame.inset(padding);
@@ -2305,13 +2380,14 @@ fn push_input_primitives(
             .map(|color| {
                 color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now)
             })
-            .unwrap_or(theme.palette.text_muted)
+            .unwrap_or(theme.components.input.placeholder.normal)
             .with_alpha_factor(opacity);
         let placeholder_request = TextFontRequest {
-            preferred_font: placeholder
+            preferred_font: placeholder.font_family.as_deref().or(theme
+                .typography
+                .body
                 .font_family
-                .as_deref()
-                .or(theme.typography.font_family.as_deref()),
+                .as_deref()),
             weight: placeholder.font_weight,
         };
         let placeholder_content = placeholder.content.resolve();
@@ -2352,7 +2428,7 @@ fn push_input_primitives(
         if show_caret {
             scene.push_overlay_shape(RenderPrimitive {
                 rect: caret_rect,
-                color: theme.palette.text.with_alpha_factor(opacity),
+                color: theme.components.input.cursor.with_alpha_factor(opacity),
                 corner_radius: 0.0,
                 stroke_width: 0.0,
                 clip_rect: input_clip_rect,
@@ -2392,9 +2468,14 @@ fn push_input_primitives(
         .color
         .as_ref()
         .map(|color| color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now))
-        .unwrap_or(theme.palette.text)
+        .unwrap_or(theme.components.input.text.normal)
         .with_alpha_factor(opacity);
-    let preedit_color = theme.palette.text_muted.with_alpha_factor(opacity);
+    let preedit_color = theme
+        .components
+        .input
+        .placeholder
+        .normal
+        .with_alpha_factor(opacity);
     let resolved = font_manager.resolve_text(current_text, text_request.clone());
 
     let current_layout = composition.is_none().then(|| {
@@ -2509,7 +2590,7 @@ fn push_input_primitives(
                         selection_width,
                         content_frame.height.max(Dp::new(line_height)),
                     ),
-                    color: theme.palette.accent.with_alpha_factor(0.35 * opacity),
+                    color: theme.components.input.selection.with_alpha_factor(opacity),
                     corner_radius: 4.0,
                     stroke_width: 0.0,
                     clip_rect: input_clip_rect,
@@ -2631,7 +2712,7 @@ fn push_input_primitives(
     if show_caret && !hide_caret {
         scene.push_overlay_shape(RenderPrimitive {
             rect: caret_rect,
-            color: theme.palette.text.with_alpha_factor(opacity),
+            color: theme.components.input.cursor.with_alpha_factor(opacity),
             corner_radius: 0.0,
             stroke_width: 0.0,
             clip_rect: input_clip_rect,
@@ -2790,6 +2871,7 @@ impl<VM> WidgetTree<VM> {
         Self { root: root.into() }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn compute_scene(
         &self,
         font_manager: &FontManager,
@@ -2806,14 +2888,14 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&InputEditState>,
         caret_visible: bool,
     ) -> ComputedScene<VM> {
-        self.compute_scene_with_units(
+        self.compute_scene_with_widget_state(
             font_manager,
             theme,
             media,
-            UnitContext::default(),
             animations,
             hovered_scrollbar,
             active_scrollbar,
+            &WidgetStateMap::default(),
             scroll_offsets,
             viewport,
             focused_input,
@@ -2824,6 +2906,43 @@ impl<VM> WidgetTree<VM> {
         )
     }
 
+    pub(crate) fn compute_scene_with_widget_state(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_input_state: Option<&InputEditState>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&InputEditState>,
+        caret_visible: bool,
+    ) -> ComputedScene<VM> {
+        self.compute_scene_with_units_and_widget_state(
+            font_manager,
+            theme,
+            media,
+            UnitContext::default(),
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            scroll_offsets,
+            viewport,
+            focused_input,
+            focused_input_state,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+        )
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn compute_scene_with_units(
         &self,
         font_manager: &FontManager,
@@ -2833,6 +2952,43 @@ impl<VM> WidgetTree<VM> {
         animations: &mut AnimationEngine,
         hovered_scrollbar: Option<ScrollbarHandle>,
         active_scrollbar: Option<ScrollbarHandle>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_input_state: Option<&InputEditState>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&InputEditState>,
+        caret_visible: bool,
+    ) -> ComputedScene<VM> {
+        self.compute_scene_with_units_and_widget_state(
+            font_manager,
+            theme,
+            media,
+            units,
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            &WidgetStateMap::default(),
+            scroll_offsets,
+            viewport,
+            focused_input,
+            focused_input_state,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+        )
+    }
+
+    pub(crate) fn compute_scene_with_units_and_widget_state(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        units: UnitContext,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
         scroll_offsets: &HashMap<WidgetId, Point>,
         viewport: Rect,
         focused_input: Option<WidgetId>,
@@ -2880,6 +3036,7 @@ impl<VM> WidgetTree<VM> {
             caret_visible,
             hovered_scrollbar,
             active_scrollbar,
+            widget_states,
             scroll_offsets,
             units,
             animations,
@@ -2918,14 +3075,14 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&InputEditState>,
         caret_visible: bool,
     ) -> RenderedWidgetScene {
-        self.render_output_with_units(
+        self.render_output_with_widget_state(
             font_manager,
             theme,
             media,
-            UnitContext::default(),
             animations,
             hovered_scrollbar,
             active_scrollbar,
+            &WidgetStateMap::default(),
             scroll_offsets,
             viewport,
             focused_input,
@@ -2936,6 +3093,43 @@ impl<VM> WidgetTree<VM> {
         )
     }
 
+    pub(crate) fn render_output_with_widget_state(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_input_state: Option<&InputEditState>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&InputEditState>,
+        caret_visible: bool,
+    ) -> RenderedWidgetScene {
+        self.render_output_with_units_and_widget_state(
+            font_manager,
+            theme,
+            media,
+            UnitContext::default(),
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            scroll_offsets,
+            viewport,
+            focused_input,
+            focused_input_state,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+        )
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn render_output_with_units(
         &self,
         font_manager: &FontManager,
@@ -2953,7 +3147,7 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&InputEditState>,
         caret_visible: bool,
     ) -> RenderedWidgetScene {
-        let computed = self.compute_scene_with_units(
+        self.render_output_with_units_and_widget_state(
             font_manager,
             theme,
             media,
@@ -2961,6 +3155,44 @@ impl<VM> WidgetTree<VM> {
             animations,
             hovered_scrollbar,
             active_scrollbar,
+            &WidgetStateMap::default(),
+            scroll_offsets,
+            viewport,
+            focused_input,
+            focused_input_state,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+        )
+    }
+
+    pub(crate) fn render_output_with_units_and_widget_state(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        units: UnitContext,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_input_state: Option<&InputEditState>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&InputEditState>,
+        caret_visible: bool,
+    ) -> RenderedWidgetScene {
+        let computed = self.compute_scene_with_units_and_widget_state(
+            font_manager,
+            theme,
+            media,
+            units,
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
             scroll_offsets,
             viewport,
             focused_input,
@@ -3014,19 +3246,85 @@ impl<VM> WidgetTree<VM> {
         cursor_position: Option<Point>,
         focused_input: Option<WidgetId>,
     ) -> Option<HitInteraction<VM>> {
-        self.hit_path(
+        self.hit_test_with_widget_state(
             font_manager,
             theme,
             media,
             animations,
             hovered_scrollbar,
             active_scrollbar,
+            &WidgetStateMap::default(),
+            scroll_offsets,
+            viewport,
+            cursor_position,
+            focused_input,
+        )
+    }
+
+    pub(crate) fn hit_test_with_widget_state(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        cursor_position: Option<Point>,
+        focused_input: Option<WidgetId>,
+    ) -> Option<HitInteraction<VM>> {
+        self.hit_path_with_widget_state(
+            font_manager,
+            theme,
+            media,
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
             scroll_offsets,
             viewport,
             cursor_position,
             focused_input,
         )
         .pop()
+    }
+
+    pub(crate) fn hit_path_with_widget_state(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        cursor_position: Option<Point>,
+        focused_input: Option<WidgetId>,
+    ) -> Vec<HitInteraction<VM>> {
+        let Some(point) = cursor_position else {
+            return Vec::new();
+        };
+        let computed = self.compute_scene_with_widget_state(
+            font_manager,
+            theme,
+            media,
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            scroll_offsets,
+            viewport,
+            focused_input,
+            None,
+            None,
+            None,
+            false,
+        );
+        Self::hit_path_from_computed(&computed, point)
     }
 
     #[allow(dead_code)]
@@ -3043,25 +3341,19 @@ impl<VM> WidgetTree<VM> {
         cursor_position: Option<Point>,
         focused_input: Option<WidgetId>,
     ) -> Vec<HitInteraction<VM>> {
-        let Some(point) = cursor_position else {
-            return Vec::new();
-        };
-        let computed = self.compute_scene(
+        self.hit_path_with_widget_state(
             font_manager,
             theme,
             media,
             animations,
             hovered_scrollbar,
             active_scrollbar,
+            &WidgetStateMap::default(),
             scroll_offsets,
             viewport,
+            cursor_position,
             focused_input,
-            None,
-            None,
-            None,
-            false,
-        );
-        Self::hit_path_from_computed(&computed, point)
+        )
     }
 
     pub(crate) fn input_snapshot(&self, id: WidgetId) -> Option<InputSnapshot<VM>> {
@@ -4358,7 +4650,7 @@ mod tests {
             .primitives
             .shapes
             .iter()
-            .any(|primitive| { primitive.color == theme.palette.accent.with_alpha_factor(0.35) }));
+            .any(|primitive| { primitive.color == theme.colors.selection.with_alpha_factor(1.0) }));
     }
 
     #[test]

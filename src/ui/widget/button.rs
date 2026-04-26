@@ -4,7 +4,8 @@ use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{dp, Dp};
 
 use super::common::{
-    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
+    ButtonVariantKind, CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle,
+    WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -164,9 +165,38 @@ impl<VM> Button<VM> {
                 kind: WidgetKind::Button {
                     label,
                     disabled: Value::Static(false),
+                    variant: ButtonVariantKind::Primary,
                 },
             },
         }
+    }
+
+    pub fn primary(mut self) -> Self {
+        if let WidgetKind::Button { variant, .. } = &mut self.element.kind {
+            *variant = ButtonVariantKind::Primary;
+        }
+        self
+    }
+
+    pub fn secondary(mut self) -> Self {
+        if let WidgetKind::Button { variant, .. } = &mut self.element.kind {
+            *variant = ButtonVariantKind::Secondary;
+        }
+        self
+    }
+
+    pub fn ghost(mut self) -> Self {
+        if let WidgetKind::Button { variant, .. } = &mut self.element.kind {
+            *variant = ButtonVariantKind::Ghost;
+        }
+        self
+    }
+
+    pub fn danger(mut self) -> Self {
+        if let WidgetKind::Button { variant, .. } = &mut self.element.kind {
+            *variant = ButtonVariantKind::Danger;
+        }
+        self
     }
 
     impl_widget_layout_api!();

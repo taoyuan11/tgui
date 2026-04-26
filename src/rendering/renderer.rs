@@ -757,7 +757,7 @@ impl Renderer {
             font_size_bits: font_size.to_bits(),
             line_height_bits: line_height.to_bits(),
             letter_spacing_bits: letter_spacing.to_bits(),
-            font_weight: text.font_weight.0,
+            font_weight: text.font_weight.to_raw(),
         })
     }
 
@@ -992,7 +992,7 @@ fn attrs_for_text(text: &TextPrimitive, font_size: f32, letter_spacing: f32) -> 
 }
 
 fn text_weight(weight: FontWeight) -> Weight {
-    Weight(weight.0)
+    Weight(weight.to_raw())
 }
 
 fn color_to_text(color: TguiColor) -> Color {

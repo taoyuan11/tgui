@@ -44,8 +44,8 @@ impl RootVM {
         let themes = self.themes.binding();
         let mode = self.current_theme.binding();
         Binding::new(move || match mode.get() {
-            ThemeMode::Light => themes.get().light.palette.window_background,
-            ThemeMode::Dark | ThemeMode::System => themes.get().dark.palette.window_background,
+            ThemeMode::Light => themes.get().light.colors.background,
+            ThemeMode::Dark | ThemeMode::System => themes.get().dark.colors.background,
         })
     }
 
@@ -53,14 +53,14 @@ impl RootVM {
         let themes = self.themes.binding();
         let mode = self.current_theme.binding();
         Binding::new(move || match mode.get() {
-            ThemeMode::Light => themes.get().light.palette.accent,
-            ThemeMode::Dark | ThemeMode::System => themes.get().dark.palette.accent,
+            ThemeMode::Light => themes.get().light.colors.primary,
+            ThemeMode::Dark | ThemeMode::System => themes.get().dark.colors.primary,
         })
     }
 
     fn toggle_theme_colors(&mut self) {
         self.themes.update(|themes| {
-            let alternate = themes.light.palette.window_background == Color::hex(0xFF3333);
+            let alternate = themes.light.colors.background == Color::hex(0xFF3333);
             *themes = multiple_vm_theme_set(alternate);
         });
     }
@@ -84,7 +84,6 @@ impl RootVM {
                 Text::new("根 VM：多页面应用"),
                 Flex::new(Axis::Horizontal)
                     .gap(dp(10.0))
-                    .background(self.accent_color())
                     .padding(Insets::all(dp(10.0)))
                     .child(el![
                         Button::new(Text::new("Home")).on_click(Command::new(Self::show_home)),
@@ -109,24 +108,24 @@ impl ViewModel for RootVM {}
 
 fn multiple_vm_theme_set(alternate: bool) -> ThemeSet {
     let mut light = Theme::light();
-    light.palette.window_background = if alternate {
+    light.colors.background = if alternate {
         Color::hex(0xFFE066)
     } else {
         Color::hex(0xFF3333)
     };
-    light.palette.accent = if alternate {
+    light.colors.primary = if alternate {
         Color::hex(0x35A853)
     } else {
         Color::hex(0xFF8A00)
     };
 
     let mut dark = Theme::dark();
-    dark.palette.window_background = if alternate {
+    dark.colors.background = if alternate {
         Color::hex(0x4B0082)
     } else {
         Color::hex(0x0066FF)
     };
-    dark.palette.accent = if alternate {
+    dark.colors.primary = if alternate {
         Color::hex(0xE040FB)
     } else {
         Color::hex(0x00D1FF)

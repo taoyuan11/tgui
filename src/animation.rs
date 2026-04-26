@@ -1086,13 +1086,21 @@ pub(crate) enum WidgetProperty {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum WindowProperty {
     ClearColor,
-    ThemeWindowBackground,
+    ThemeBackground,
     ThemeSurface,
-    ThemeSurfaceMuted,
-    ThemeAccent,
-    ThemeText,
-    ThemeTextMuted,
+    ThemeSurfaceLow,
+    ThemeSurfaceHigh,
+    ThemePrimary,
+    ThemeOnSurface,
+    ThemeOnSurfaceMuted,
+    ThemePrimaryContainer,
+    ThemeFocusRing,
+    ThemeSelection,
     ThemeInputBackground,
+    ThemeInputBorder,
+    ThemeButtonPrimary,
+    ThemeButtonSecondary,
+    ThemeScrollbarThumb,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

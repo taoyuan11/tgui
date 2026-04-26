@@ -8,18 +8,36 @@ use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FontWeight(pub u16);
+pub enum FontWeight {
+    Thin,
+    Light,
+    Regular,
+    Medium,
+    SemiBold,
+    Bold,
+    ExtraBold,
+}
 
 impl FontWeight {
-    pub const NORMAL: Self = Self(400);
-    pub const MEDIUM: Self = Self(500);
-    pub const SEMIBOLD: Self = Self(600);
-    pub const BOLD: Self = Self(700);
+    pub const NORMAL: Self = Self::Regular;
+    pub const SEMIBOLD: Self = Self::SemiBold;
+
+    pub const fn to_raw(self) -> u16 {
+        match self {
+            Self::Thin => 100,
+            Self::Light => 300,
+            Self::Regular => 400,
+            Self::Medium => 500,
+            Self::SemiBold => 600,
+            Self::Bold => 700,
+            Self::ExtraBold => 800,
+        }
+    }
 }
 
 impl Default for FontWeight {
     fn default() -> Self {
-        Self::NORMAL
+        Self::Regular
     }
 }
 
@@ -323,7 +341,7 @@ impl FontManager {
         buffer.set_wrap(Wrap::None);
         let attrs = Attrs::new()
             .family(Family::Name(&resolved.primary_font))
-            .weight(Weight(request.weight.0))
+            .weight(Weight(request.weight.to_raw()))
             .letter_spacing(letter_spacing / font_size.max(1.0));
         buffer.set_text(text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut font_system, false);
@@ -338,7 +356,7 @@ impl FontManager {
         let families = [Family::Name(name)];
         let query = Query {
             families: &families,
-            weight: Weight(weight.0),
+            weight: Weight(weight.to_raw()),
             stretch: Stretch::Normal,
             style: Style::Normal,
         };
@@ -362,7 +380,7 @@ impl FontManager {
         let families = [Family::SansSerif];
         let query = Query {
             families: &families,
-            weight: Weight(weight.0),
+            weight: Weight(weight.to_raw()),
             stretch: Stretch::Normal,
             style: Style::Normal,
         };

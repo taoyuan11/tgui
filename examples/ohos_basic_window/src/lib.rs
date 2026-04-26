@@ -9,10 +9,10 @@ use winit_core::application::ApplicationHandler;
 
 fn themed_app() -> Application {
     let mut theme = Theme::dark();
-    theme.palette.window_background = Color::hexa(0x07111EFF);
-    theme.palette.surface = Color::hexa(0x13263BFF);
-    theme.palette.surface_muted = Color::hexa(0x1A3658FF);
-    theme.palette.accent = Color::hexa(0x5ED0FAFF);
+    theme.colors.background = Color::hexa(0x07111EFF);
+    theme.colors.surface = Color::hexa(0x13263BFF);
+    theme.colors.surface_low = Color::hexa(0x1A3658FF);
+    theme.colors.primary = Color::hexa(0x5ED0FAFF);
 
     Application::new().title("tgui ohos").theme(theme)
 }

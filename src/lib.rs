@@ -103,12 +103,15 @@ pub use foundation::error::TguiError;
 pub use foundation::event::InputTrigger;
 pub use foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
 pub use media::{ContentFit, MediaBytes, MediaSource};
-pub use text::font::FontWeight;
 pub use ui::layout::{
     fr, pct, Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType,
     ScrollbarStyle, Track, Value, Wrap,
 };
-pub use ui::theme::{Theme, ThemeMode, ThemeSet};
+pub use ui::theme::{
+    BorderScale, ColorScheme, ComponentTheme, ElevationScale, FontWeight, MotionScale, RadiusScale,
+    Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet, ThemeStore, TypeScale,
+    WidgetState,
+};
 pub use ui::unit::{dp, sp, Dp, Sp};
 pub use ui::widget::{
     rect, Button, Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem,

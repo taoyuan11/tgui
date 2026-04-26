@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -12,6 +13,7 @@ use crate::text::font::FontWeight;
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, Length, Overflow, ScrollbarStyle, Track, Value, Wrap,
 };
+use crate::ui::theme::WidgetState;
 use crate::ui::unit::{Dp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface;
@@ -721,6 +723,7 @@ pub(crate) enum WidgetKind<VM> {
     Button {
         label: Text,
         disabled: Value<bool>,
+        variant: ButtonVariantKind,
     },
     Switch {
         checked: Value<bool>,
@@ -737,6 +740,14 @@ pub(crate) enum WidgetKind<VM> {
         on_change: Option<ValueCommand<VM, String>>,
         disabled: Value<bool>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonVariantKind {
+    Primary,
+    Secondary,
+    Ghost,
+    Danger,
 }
 
 impl<VM> Clone for WidgetKind<VM> {
@@ -761,9 +772,14 @@ impl<VM> Clone for WidgetKind<VM> {
             Self::VideoSurface { video } => Self::VideoSurface {
                 video: video.clone(),
             },
-            Self::Button { label, disabled } => Self::Button {
+            Self::Button {
+                label,
+                disabled,
+                variant,
+            } => Self::Button {
                 label: label.clone(),
                 disabled: disabled.clone(),
+                variant: *variant,
             },
             Self::Switch {
                 checked,
@@ -805,7 +821,10 @@ pub(crate) enum MeasureContext {
     Canvas(Vec<CanvasItem>),
     #[cfg(feature = "video")]
     VideoSurface(VideoSurface),
-    Button(Text),
+    Button {
+        label: Text,
+        variant: ButtonVariantKind,
+    },
     Switch,
     Input {
         text: Text,
@@ -1027,6 +1046,21 @@ pub(crate) struct ComputedScene<VM> {
     pub hit_regions: Vec<HitRegion<VM>>,
     pub scroll_regions: Vec<ScrollRegion>,
     pub ime_cursor_area: Option<Rect>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct WidgetStateMap {
+    states: HashMap<WidgetId, WidgetState>,
+}
+
+impl WidgetStateMap {
+    pub(crate) fn set(&mut self, id: WidgetId, state: WidgetState) {
+        self.states.insert(id, state);
+    }
+
+    pub(crate) fn get(&self, id: WidgetId) -> WidgetState {
+        self.states.get(&id).copied().unwrap_or_default()
+    }
 }
 
 impl<VM> Default for ComputedScene<VM> {

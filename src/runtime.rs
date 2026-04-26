@@ -35,15 +35,15 @@ use crate::platform::window::{
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::{FontManager, TextFontRequest};
-use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
-use crate::ui::unit::{dp, sp, Dp, UnitContext};
+use crate::ui::theme::{Theme, ThemeMode, ThemeSet, ThemeStore};
+use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 use crate::ui::widget::{
     input_scroll_offset, input_text_viewport, InputViewport, INPUT_CARET_EDGE_GAP,
 };
 use crate::ui::widget::{
     CanvasItemId, CanvasPointerEvent, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
     InteractionHandlers, MediaEventPhase, MediaEventState, Point, Rect, RenderedWidgetScene,
-    ScrollbarAxis, ScrollbarHandle, Text, WidgetId, WidgetTree,
+    ScrollbarAxis, ScrollbarHandle, Text, WidgetId, WidgetStateMap, WidgetTree,
 };
 use image::GenericImageView;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -69,7 +69,7 @@ struct SystemBarStyle {
 #[cfg(all(target_os = "android", feature = "android"))]
 impl SystemBarStyle {
     fn from_theme(theme: &Theme) -> Self {
-        let color = theme.palette.window_background;
+        let color = theme.colors.background;
         Self {
             color,
             use_dark_icons: is_light_color(color),
@@ -319,6 +319,7 @@ pub struct BoundRuntimeHandler<VM> {
     config: ApplicationConfig,
     font_manager: FontManager,
     theme: Theme,
+    theme_store: ThemeStore,
     view_model: Arc<Mutex<VM>>,
     window_bindings: WindowBindings,
     widget_tree: Option<WidgetTree<VM>>,
@@ -336,6 +337,7 @@ pub struct BoundRuntimeHandler<VM> {
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
     pending_click: Option<PendingClick<VM>>,
+    pressed_widget: Option<WidgetId>,
     focused_widget: Option<FocusedWidget<VM>>,
     focused_input: Option<WidgetId>,
     input_states: HashMap<WidgetId, InputEditState>,
@@ -576,9 +578,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let font_manager = FontManager::new(&config.fonts);
         let theme = match &config.theme {
             ThemeSelection::Fixed(theme) => theme.clone(),
-            ThemeSelection::Mode(mode) => config.theme_set.resolve_mode(*mode, None),
-            ThemeSelection::System => config.theme_set.resolve_window_theme(None),
+            ThemeSelection::Mode(mode) => config.theme_set.resolve(*mode, None).as_ref().clone(),
+            ThemeSelection::System => config.theme_set.resolve_window_theme(None).as_ref().clone(),
         };
+        let theme_store = ThemeStore::new(config.theme_set.clone(), ThemeMode::System, None);
         Self {
             window_key,
             window_instance_id,
@@ -586,6 +589,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             config,
             font_manager,
             theme,
+            theme_store,
             view_model,
             window_bindings,
             widget_tree,
@@ -603,6 +607,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
             pending_click: None,
+            pressed_widget: None,
             focused_widget: None,
             focused_input: None,
             input_states: HashMap::new(),
@@ -834,15 +839,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn sync_theme_binding(&mut self) {
-        let resolved_theme = resolve_theme(
-            &self.active_theme_selection(),
-            &self.active_theme_set(),
-            resolve_window_theme(
-                self.window.as_deref(),
-                #[cfg(all(target_os = "android", feature = "android"))]
-                self.android_app.as_ref(),
-            ),
+        let selection = self.active_theme_selection();
+        let theme_set = self.active_theme_set();
+        let system_theme = resolve_window_theme(
+            self.window.as_deref(),
+            #[cfg(all(target_os = "android", feature = "android"))]
+            self.android_app.as_ref(),
         );
+        self.theme_store.set_theme_set(theme_set.clone());
+        self.theme_store.set_system_theme(system_theme);
+        let resolved_theme = match selection {
+            ThemeSelection::Fixed(theme) => theme,
+            ThemeSelection::System => {
+                self.theme_store.set_mode(ThemeMode::System);
+                self.theme_store.current().as_ref().clone()
+            }
+            ThemeSelection::Mode(mode) => {
+                self.theme_store.set_mode(mode);
+                self.theme_store.current().as_ref().clone()
+            }
+        };
         if self.theme != resolved_theme {
             self.apply_theme(resolved_theme);
         }
@@ -878,7 +894,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     now,
                 ));
             } else if !self.config.clear_color_overridden {
-                renderer.set_clear_color(theme.palette.window_background);
+                renderer.set_clear_color(theme.colors.background);
             }
         }
     }
@@ -937,10 +953,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             })
             .unwrap_or(false);
 
+        let widget_states = self.widget_state_map(active_scrollbar);
         if !cache_valid {
             let theme = self.animated_theme(Instant::now());
             let computed = match self.widget_tree.as_ref() {
-                Some(tree) => tree.compute_scene_with_units(
+                Some(tree) => tree.compute_scene_with_units_and_widget_state(
                     &self.font_manager,
                     &theme,
                     &self.media_manager,
@@ -948,6 +965,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     &mut self.animation_engine,
                     self.hovered_scrollbar,
                     active_scrollbar,
+                    &widget_states,
                     &self.scroll_states,
                     viewport,
                     self.focused_input,
@@ -977,6 +995,43 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .as_ref()
             .expect("computed scene cache should exist")
             .computed
+    }
+
+    fn widget_state_map(&self, active_scrollbar: Option<ScrollbarHandle>) -> WidgetStateMap {
+        let mut states = WidgetStateMap::default();
+        for hovered in &self.hovered_widgets {
+            if let HoverTargetId::Widget(id) = hovered.target_id {
+                let mut state = states.get(id);
+                state.hovered = true;
+                states.set(id, state);
+            }
+        }
+        if let Some(id) = self.pressed_widget {
+            let mut state = states.get(id);
+            state.pressed = true;
+            states.set(id, state);
+        }
+        if let Some(id) = self.focused_input {
+            let mut state = states.get(id);
+            state.focused = true;
+            states.set(id, state);
+        }
+        if let Some(focused) = self.focused_widget.as_ref() {
+            let mut state = states.get(focused.widget_id);
+            state.focused = true;
+            states.set(focused.widget_id, state);
+        }
+        if let Some(handle) = self.hovered_scrollbar {
+            let mut state = states.get(handle.id);
+            state.hovered = true;
+            states.set(handle.id, state);
+        }
+        if let Some(handle) = active_scrollbar {
+            let mut state = states.get(handle.id);
+            state.pressed = true;
+            states.set(handle.id, state);
+        }
+        states
     }
 
     fn render_primitives(&mut self) -> RenderedWidgetScene {
@@ -1242,7 +1297,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if self.window_bindings.clear_color.is_some() || self.config.clear_color_overridden {
                 self.config.clear_color
             } else {
-                self.theme.palette.window_background
+                self.theme.colors.background
             };
 
         match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
@@ -1280,48 +1335,110 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn animated_theme(&mut self, now: Instant) -> Theme {
         let transition = Some(default_theme_transition());
         let mut theme = self.theme.clone();
-        theme.palette.window_background = self.resolve_theme_color(
-            WindowProperty::ThemeWindowBackground,
-            theme.palette.window_background,
+        theme.colors.background = self.resolve_theme_color(
+            WindowProperty::ThemeBackground,
+            theme.colors.background,
             transition,
             now,
         );
-        theme.palette.surface = self.resolve_theme_color(
+        theme.colors.surface = self.resolve_theme_color(
             WindowProperty::ThemeSurface,
-            theme.palette.surface,
+            theme.colors.surface,
             transition,
             now,
         );
-        theme.palette.surface_muted = self.resolve_theme_color(
-            WindowProperty::ThemeSurfaceMuted,
-            theme.palette.surface_muted,
+        theme.colors.surface_low = self.resolve_theme_color(
+            WindowProperty::ThemeSurfaceLow,
+            theme.colors.surface_low,
             transition,
             now,
         );
-        theme.palette.accent = self.resolve_theme_color(
-            WindowProperty::ThemeAccent,
-            theme.palette.accent,
+        theme.colors.surface_high = self.resolve_theme_color(
+            WindowProperty::ThemeSurfaceHigh,
+            theme.colors.surface_high,
             transition,
             now,
         );
-        theme.palette.text = self.resolve_theme_color(
-            WindowProperty::ThemeText,
-            theme.palette.text,
+        theme.colors.primary = self.resolve_theme_color(
+            WindowProperty::ThemePrimary,
+            theme.colors.primary,
             transition,
             now,
         );
-        theme.palette.text_muted = self.resolve_theme_color(
-            WindowProperty::ThemeTextMuted,
-            theme.palette.text_muted,
+        theme.colors.on_surface = self.resolve_theme_color(
+            WindowProperty::ThemeOnSurface,
+            theme.colors.on_surface,
             transition,
             now,
         );
-        theme.palette.input_background = self.resolve_theme_color(
+        theme.colors.on_surface_muted = self.resolve_theme_color(
+            WindowProperty::ThemeOnSurfaceMuted,
+            theme.colors.on_surface_muted,
+            transition,
+            now,
+        );
+        theme.colors.primary_container = self.resolve_theme_color(
+            WindowProperty::ThemePrimaryContainer,
+            theme.colors.primary_container,
+            transition,
+            now,
+        );
+        theme.colors.focus_ring = self.resolve_theme_color(
+            WindowProperty::ThemeFocusRing,
+            theme.colors.focus_ring,
+            transition,
+            now,
+        );
+        theme.colors.selection = self.resolve_theme_color(
+            WindowProperty::ThemeSelection,
+            theme.colors.selection,
+            transition,
+            now,
+        );
+        let input_background = self.resolve_theme_color(
             WindowProperty::ThemeInputBackground,
-            theme.palette.input_background,
+            theme.components.input.background.normal,
             transition,
             now,
         );
+        let input_border = self.resolve_theme_color(
+            WindowProperty::ThemeInputBorder,
+            theme.components.input.border.normal,
+            transition,
+            now,
+        );
+        let button_primary = self.resolve_theme_color(
+            WindowProperty::ThemeButtonPrimary,
+            theme.components.button.primary.container.normal,
+            transition,
+            now,
+        );
+        let button_secondary = self.resolve_theme_color(
+            WindowProperty::ThemeButtonSecondary,
+            theme.components.button.secondary.container.normal,
+            transition,
+            now,
+        );
+        let scrollbar_thumb = self.resolve_theme_color(
+            WindowProperty::ThemeScrollbarThumb,
+            theme.components.scrollbar.thumb.normal,
+            transition,
+            now,
+        );
+        theme.components = crate::ui::theme::ComponentTheme::from_tokens(
+            &theme.colors,
+            &theme.typography,
+            &theme.spacing,
+            &theme.radius,
+            &theme.border,
+            &theme.elevation,
+            &theme.motion,
+        );
+        theme.components.input.background.normal = input_background;
+        theme.components.input.border.normal = input_border;
+        theme.components.button.primary.container.normal = button_primary;
+        theme.components.button.secondary.container.normal = button_secondary;
+        theme.components.scrollbar.thumb.normal = scrollbar_thumb;
         theme
     }
 
@@ -1719,18 +1836,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let units = self.unit_context();
+        let theme_text = &self.theme.typography.body;
         let font_size = units.resolve_sp(
             metrics
                 .text_style
                 .font_size
-                .unwrap_or(self.theme.typography.font_size.max(sp(1.0))),
+                .unwrap_or(theme_text.size.max(sp(1.0))),
         );
-        let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(metrics.text_style.letter_spacing);
+        let line_height =
+            units.resolve_sp(theme_text.line_height.unwrap_or(theme_text.size * 1.25));
+        let line_height = line_height.max(font_size + 4.0);
+        let letter_spacing = units.resolve_sp(if metrics.text_style.letter_spacing == Sp::ZERO {
+            theme_text.letter_spacing.unwrap_or(Sp::ZERO)
+        } else {
+            metrics.text_style.letter_spacing
+        });
         let request = TextFontRequest {
             preferred_font: metrics.text_style.font_family.as_deref().or(self
                 .theme
                 .typography
+                .body
                 .font_family
                 .as_deref()),
             weight: metrics.text_style.font_weight,
@@ -2541,6 +2666,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.clear_selected_text();
             self.update_focus(None, None, None, None);
             self.pending_click = None;
+            self.pressed_widget = None;
             return;
         };
 
@@ -2549,6 +2675,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.clear_selected_text();
             self.update_focus(None, None, None, None);
             self.pending_click = None;
+            self.pressed_widget = None;
 
             for interaction in hit_path.into_iter().rev() {
                 match interaction {
@@ -2720,6 +2847,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             focus_command,
             input_text.as_deref(),
         );
+        self.pressed_widget = Some(widget_id);
 
         if input_selection.is_none() {
             if let (Some(input_id), Some(text), Some(cursor)) =
@@ -2846,7 +2974,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if self.window_bindings.clear_color.is_some() || self.config.clear_color_overridden {
                 self.config.clear_color
             } else {
-                self.theme.palette.window_background
+                self.theme.colors.background
             };
 
         let renderer = match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
@@ -2971,6 +3099,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             WindowEvent::CloseRequested => return self.close_policy() == WindowClosePolicy::Close,
             WindowEvent::Focused(false) => {
                 self.end_scrollbar_drag();
+                self.pressed_widget = None;
                 self.update_focus(None, None, None, None);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
@@ -3005,6 +3134,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 if button.clone().mouse_button() == Some(MouseButton::Left) {
                     self.set_pointer_position(position);
                     self.end_scrollbar_drag();
+                    self.pressed_widget = None;
                     self.end_input_selection_drag();
                     self.end_text_selection_drag();
                     self.handle_hover(self.viewport_rect());
@@ -3551,10 +3681,11 @@ fn text_cursor_index_at_point(
         return 0;
     }
 
+    let default_style = &theme.typography.body;
     let font_size = units.resolve_sp(
         text_style
             .font_size
-            .unwrap_or(theme.typography.font_size.max(sp(1.0))),
+            .unwrap_or(default_style.size.max(sp(1.0))),
     );
     let line_height = (font_size * 1.25).max(font_size + 4.0);
     let letter_spacing = units.resolve_sp(text_style.letter_spacing);
@@ -3562,7 +3693,7 @@ fn text_cursor_index_at_point(
         preferred_font: text_style
             .font_family
             .as_deref()
-            .or(theme.typography.font_family.as_deref()),
+            .or(default_style.font_family.as_deref()),
         weight: text_style.font_weight,
     };
     let inner = frame.inset(padding);
@@ -3602,10 +3733,11 @@ fn input_cursor_index_at_point_with_state(
         return 0;
     }
 
+    let default_style = &theme.typography.body;
     let font_size = units.resolve_sp(
         text_style
             .font_size
-            .unwrap_or(theme.typography.font_size.max(sp(1.0))),
+            .unwrap_or(default_style.size.max(sp(1.0))),
     );
     let line_height = (font_size * 1.25).max(font_size + 4.0);
     let letter_spacing = units.resolve_sp(text_style.letter_spacing);
@@ -3613,7 +3745,7 @@ fn input_cursor_index_at_point_with_state(
         preferred_font: text_style
             .font_family
             .as_deref()
-            .or(theme.typography.font_family.as_deref()),
+            .or(default_style.font_family.as_deref()),
         weight: text_style.font_weight,
     };
     let inner = frame.inset(padding);
@@ -3681,8 +3813,11 @@ fn resolve_theme(
     window_theme: Option<WindowTheme>,
 ) -> Theme {
     match selection {
-        ThemeSelection::System => theme_set.resolve_window_theme(window_theme),
-        ThemeSelection::Mode(mode) => theme_set.resolve_mode(*mode, window_theme),
+        ThemeSelection::System => theme_set
+            .resolve_window_theme(window_theme)
+            .as_ref()
+            .clone(),
+        ThemeSelection::Mode(mode) => theme_set.resolve(*mode, window_theme).as_ref().clone(),
         ThemeSelection::Fixed(theme) => theme.clone(),
     }
 }
@@ -4156,11 +4291,11 @@ mod tests {
 
     fn custom_theme_set() -> (ThemeSet, Theme, Theme) {
         let mut light = Theme::light();
-        light.palette.window_background = Color::hexa(0xEAF4FFFF);
-        light.palette.accent = Color::hexa(0x3366CCFF);
+        light.colors.background = Color::hexa(0xEAF4FFFF);
+        light.colors.primary = Color::hexa(0x3366CCFF);
         let mut dark = Theme::dark();
-        dark.palette.window_background = Color::hexa(0x06101DFF);
-        dark.palette.accent = Color::hexa(0x66D9E8FF);
+        dark.colors.background = Color::hexa(0x06101DFF);
+        dark.colors.primary = Color::hexa(0x66D9E8FF);
         (ThemeSet::new(light.clone(), dark.clone()), light, dark)
     }
 
@@ -4207,9 +4342,9 @@ mod tests {
         assert_eq!(handler.theme, light);
 
         let mut updated_light = Theme::light();
-        updated_light.palette.window_background = Color::hexa(0xFFFFFFFF);
-        updated_light.palette.accent = Color::hexa(0xFFAA00FF);
-        themes.lock().expect("theme set lock poisoned").light = updated_light.clone();
+        updated_light.colors.background = Color::hexa(0xFFFFFFFF);
+        updated_light.colors.primary = Color::hexa(0xFFAA00FF);
+        themes.lock().expect("theme set lock poisoned").light = Arc::new(updated_light.clone());
 
         handler.sync_theme_binding();
         assert_eq!(handler.theme, updated_light);
@@ -4220,7 +4355,7 @@ mod tests {
         let invalidation = InvalidationSignal::new();
         let (theme_set, _light, _dark) = custom_theme_set();
         let mut fixed = Theme::dark();
-        fixed.palette.accent = Color::hexa(0xFF3366FF);
+        fixed.colors.primary = Color::hexa(0xFF3366FF);
         let mut handler = test_handler_with_config(
             TestVm,
             None,
@@ -4438,7 +4573,7 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.font_size.max(sp(1.0))),
+                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(text_style.letter_spacing);
@@ -4446,6 +4581,7 @@ mod tests {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
                 .typography
+                .body
                 .font_family
                 .as_deref()),
             weight: text_style.font_weight,
@@ -4514,7 +4650,7 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.font_size.max(sp(1.0))),
+                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(text_style.letter_spacing);
@@ -4522,6 +4658,7 @@ mod tests {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
                 .typography
+                .body
                 .font_family
                 .as_deref()),
             weight: text_style.font_weight,
@@ -4597,7 +4734,7 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.font_size.max(sp(1.0))),
+                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(text_style.letter_spacing);
@@ -4605,6 +4742,7 @@ mod tests {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
                 .typography
+                .body
                 .font_family
                 .as_deref()),
             weight: text_style.font_weight,
@@ -4707,7 +4845,7 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.font_size.max(sp(1.0))),
+                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(text_style.letter_spacing);
@@ -4715,6 +4853,7 @@ mod tests {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
                 .typography
+                .body
                 .font_family
                 .as_deref()),
             weight: text_style.font_weight,
@@ -4793,7 +4932,7 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.font_size.max(sp(1.0))),
+                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(text_style.letter_spacing);
@@ -4801,6 +4940,7 @@ mod tests {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
                 .typography
+                .body
                 .font_family
                 .as_deref()),
             weight: text_style.font_weight,
@@ -4929,7 +5069,7 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.font_size.max(sp(1.0))),
+                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(text_style.letter_spacing);
@@ -4937,6 +5077,7 @@ mod tests {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
                 .typography
+                .body
                 .font_family
                 .as_deref()),
             weight: text_style.font_weight,

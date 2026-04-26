@@ -47,10 +47,10 @@ impl ViewModel for AppVm {}
 
 fn main() -> Result<(), TguiError> {
     let mut theme = Theme::dark();
-    theme.palette.window_background = Color::hexa(0x0B1220FF);
-    theme.palette.surface = Color::hexa(0x111B2EFF);
-    theme.palette.surface_muted = Color::hexa(0x1B2942FF);
-    theme.palette.accent = Color::hexa(0x4F9CF9FF);
+    theme.colors.background = Color::hexa(0x0B1220FF);
+    theme.colors.surface = Color::hexa(0x111B2EFF);
+    theme.colors.surface_low = Color::hexa(0x1B2942FF);
+    theme.colors.primary = Color::hexa(0x4F9CF9FF);
 
     tgui_log(LogLevel::Info, "starting...");
 

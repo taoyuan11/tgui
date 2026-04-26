@@ -19,7 +19,7 @@ pub use canvas::{
 pub(crate) use common::{
     CompositionState, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
     InteractionHandlers, MediaEventPhase, MediaEventState, MeshVertex, RenderCommand,
-    RenderedWidgetScene, ScrollbarAxis, ScrollbarHandle,
+    RenderedWidgetScene, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,

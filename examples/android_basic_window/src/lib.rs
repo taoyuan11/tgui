@@ -7,10 +7,10 @@ use tgui::platform::android::activity::AndroidApp;
 
 fn themed_app() -> Application {
     let mut theme = Theme::dark();
-    theme.palette.window_background = Color::hexa(0x09111EFF);
-    theme.palette.surface = Color::hexa(0x132238FF);
-    theme.palette.surface_muted = Color::hexa(0x1C3150FF);
-    theme.palette.accent = Color::hexa(0x54A6FFFF);
+    theme.colors.background = Color::hexa(0x09111EFF);
+    theme.colors.surface = Color::hexa(0x132238FF);
+    theme.colors.surface_low = Color::hexa(0x1C3150FF);
+    theme.colors.primary = Color::hexa(0x54A6FFFF);
 
     Application::new()
         .title("tgui android")
@@ -19,7 +19,7 @@ fn themed_app() -> Application {
 
 struct AndroidApplication {
     current_theme: Observable<String>,
-    theme: Observable<ThemeMode>
+    theme: Observable<ThemeMode>,
 }
 
 impl AndroidApplication {
