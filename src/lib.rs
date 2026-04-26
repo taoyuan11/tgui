@@ -114,7 +114,7 @@ pub use ui::theme::{
 };
 pub use ui::unit::{dp, sp, Dp, Sp};
 pub use ui::widget::{
-    rect, BackgroundBrush, BackgroundGradientStop, BackgroundLinearGradient,
+    rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
     BackgroundRadialGradient, Button, Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop,
     CanvasItem, CanvasItemId, CanvasLinearGradient, CanvasPath, CanvasPathOpError,
     CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke, CursorStyle, Element,

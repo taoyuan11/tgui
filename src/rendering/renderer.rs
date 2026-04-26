@@ -837,6 +837,10 @@ impl Renderer {
                             texture.frame,
                             logical_width,
                             logical_height,
+                            texture.corner_radius,
+                            physical_width,
+                            physical_height,
+                            scale_factor,
                         );
                         let vertex_buffer =
                             self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -858,6 +862,10 @@ impl Renderer {
                             text.frame,
                             logical_width,
                             logical_height,
+                            0.0,
+                            physical_width,
+                            physical_height,
+                            scale_factor,
                         );
                         let vertex_buffer =
                             self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1116,6 +1124,10 @@ impl Renderer {
             ),
             self.config.width as f32 / self.scale_factor,
             self.config.height as f32 / self.scale_factor,
+            0.0,
+            self.config.width as f32,
+            self.config.height as f32,
+            1.0,
         );
         let full_screen_buffer =
             self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1311,6 +1323,10 @@ impl Renderer {
             ),
             self.config.width as f32 / self.scale_factor,
             self.config.height as f32 / self.scale_factor,
+            0.0,
+            self.config.width as f32,
+            self.config.height as f32,
+            1.0,
         );
         let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tgui-scene-present-vertices"),
@@ -2395,6 +2411,10 @@ fn surface_clear_color(color: TguiColor) -> wgpu::Color {
 struct TextVertex {
     position: [f32; 2],
     uv: [f32; 2],
+    local_position: [f32; 2],
+    rect_size: [f32; 2],
+    corner_radius: f32,
+    _padding: f32,
 }
 
 impl TextVertex {
@@ -2413,11 +2433,34 @@ impl TextVertex {
                     offset: std::mem::size_of::<[f32; 2]>() as u64,
                     shader_location: 1,
                 },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 2) as u64,
+                    shader_location: 2,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 3) as u64,
+                    shader_location: 3,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32,
+                    offset: (std::mem::size_of::<[f32; 2]>() * 4) as u64,
+                    shader_location: 4,
+                },
             ],
         }
     }
 
-    fn quad(rect: crate::ui::widget::Rect, width: f32, height: f32) -> [Self; 6] {
+    fn quad(
+        rect: crate::ui::widget::Rect,
+        width: f32,
+        height: f32,
+        corner_radius: f32,
+        physical_width: f32,
+        physical_height: f32,
+        scale_factor: f32,
+    ) -> [Self; 6] {
         let rect_x = rect.x.get();
         let rect_y = rect.y.get();
         let rect_width = rect.width.get();
@@ -2426,31 +2469,65 @@ impl TextVertex {
         let x1 = (rect_x + rect_width) / width * 2.0 - 1.0;
         let y0 = 1.0 - rect_y / height * 2.0;
         let y1 = 1.0 - (rect_y + rect_height) / height * 2.0;
+        let rect_width_physical = rect_width * scale_factor;
+        let rect_height_physical = rect_height * scale_factor;
+        let radius = (corner_radius.max(0.0) * scale_factor)
+            .min(rect_width_physical * 0.5)
+            .min(rect_height_physical * 0.5);
+        let rect_size = [rect_width_physical, rect_height_physical];
+        let local_tl = [0.0, 0.0];
+        let local_tr = [rect_size[0], 0.0];
+        let local_br = [rect_size[0], rect_size[1]];
+        let local_bl = [0.0, rect_size[1]];
 
         [
             Self {
                 position: [x0, y0],
                 uv: [0.0, 0.0],
+                local_position: local_tl,
+                rect_size,
+                corner_radius: radius,
+                _padding: physical_width + physical_height - (physical_width + physical_height),
             },
             Self {
                 position: [x1, y0],
                 uv: [1.0, 0.0],
+                local_position: local_tr,
+                rect_size,
+                corner_radius: radius,
+                _padding: 0.0,
             },
             Self {
                 position: [x1, y1],
                 uv: [1.0, 1.0],
+                local_position: local_br,
+                rect_size,
+                corner_radius: radius,
+                _padding: 0.0,
             },
             Self {
                 position: [x0, y0],
                 uv: [0.0, 0.0],
+                local_position: local_tl,
+                rect_size,
+                corner_radius: radius,
+                _padding: 0.0,
             },
             Self {
                 position: [x1, y1],
                 uv: [1.0, 1.0],
+                local_position: local_br,
+                rect_size,
+                corner_radius: radius,
+                _padding: 0.0,
             },
             Self {
                 position: [x0, y1],
                 uv: [0.0, 1.0],
+                local_position: local_bl,
+                rect_size,
+                corner_radius: radius,
+                _padding: 0.0,
             },
         ]
     }

@@ -3,7 +3,7 @@ use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{dp, Dp};
 
-use super::background::BackgroundBrush;
+use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     ButtonVariantKind, CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle,
     WidgetId, WidgetKind,
@@ -209,6 +209,11 @@ impl<VM> Button<VM> {
 
     pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
         self.element.visual.background_brush = Some(brush.into());
+        self
+    }
+
+    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
+        self.element.visual.background_image = Some(image.into());
         self
     }
 

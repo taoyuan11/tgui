@@ -13,7 +13,8 @@ mod video;
 
 pub use button::Button;
 pub use background::{
-    BackgroundBrush, BackgroundGradientStop, BackgroundLinearGradient, BackgroundRadialGradient,
+    BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
+    BackgroundRadialGradient,
 };
 pub use canvas::{
     Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasItemId,

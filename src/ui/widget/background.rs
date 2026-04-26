@@ -1,5 +1,6 @@
 use crate::foundation::binding::Binding;
 use crate::foundation::color::Color;
+use crate::media::{ContentFit, MediaBytes, MediaSource};
 use crate::ui::layout::Value;
 use crate::ui::unit::Dp;
 
@@ -71,6 +72,38 @@ pub enum BackgroundBrush {
     RadialGradient(BackgroundRadialGradient),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BackgroundImage {
+    pub source: MediaSource,
+    pub fit: ContentFit,
+}
+
+impl BackgroundImage {
+    pub fn new(source: impl Into<MediaSource>) -> Self {
+        Self {
+            source: source.into(),
+            fit: ContentFit::Cover,
+        }
+    }
+
+    pub fn from_path(path: impl Into<std::path::PathBuf>) -> Self {
+        Self::new(MediaSource::Path(path.into()))
+    }
+
+    pub fn from_url(url: impl Into<String>) -> Self {
+        Self::new(MediaSource::Url(url.into()))
+    }
+
+    pub fn from_bytes(bytes: impl Into<MediaBytes>) -> Self {
+        Self::new(MediaSource::Bytes(bytes.into()))
+    }
+
+    pub fn fit(mut self, fit: ContentFit) -> Self {
+        self.fit = fit;
+        self
+    }
+}
+
 impl From<Color> for BackgroundBrush {
     fn from(value: Color) -> Self {
         Self::Solid(value)
@@ -135,4 +168,26 @@ fn clamp_background_stops(mut stops: Vec<BackgroundGradientStop>) -> Vec<Backgro
         stops.truncate(MAX_BACKGROUND_GRADIENT_STOPS);
     }
     stops
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::media::{ContentFit, MediaSource};
+
+    use super::BackgroundImage;
+
+    #[test]
+    fn background_image_defaults_to_cover() {
+        let image = BackgroundImage::from_path("assets/bg.jpg");
+
+        assert_eq!(image.fit, ContentFit::Cover);
+        assert_eq!(image.source, MediaSource::path("assets/bg.jpg"));
+    }
+
+    #[test]
+    fn background_image_fit_is_configurable() {
+        let image = BackgroundImage::from_url("https://example.com/bg.jpg").fit(ContentFit::Contain);
+
+        assert_eq!(image.fit, ContentFit::Contain);
+    }
 }

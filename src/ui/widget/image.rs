@@ -5,7 +5,7 @@ use crate::media::{ContentFit, MediaBytes, MediaSource};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::Dp;
 
-use super::background::BackgroundBrush;
+use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
@@ -281,6 +281,11 @@ impl Image {
 
     pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
         self.visual.background_brush = Some(brush.into());
+        self
+    }
+
+    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
+        self.visual.background_image = Some(image.into());
         self
     }
 

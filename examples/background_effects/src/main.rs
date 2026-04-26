@@ -1,7 +1,7 @@
 use tgui::{
-    dp, pct, sp, Application, Axis, BackgroundGradientStop, BackgroundLinearGradient,
-    BackgroundRadialGradient, Color, Flex, Insets, Point, Stack, Text, Theme, TguiError,
-    ViewModel, ViewModelContext,
+    dp, pct, sp, Application, Axis, BackgroundGradientStop, BackgroundImage,
+    BackgroundLinearGradient, BackgroundRadialGradient, Color, ContentFit, Flex, Insets, Point,
+    Stack, Text, Theme, TguiError, ViewModel, ViewModelContext,
 };
 
 struct BackgroundEffectsVm;
@@ -14,14 +14,7 @@ impl BackgroundEffectsVm {
     fn view(&self) -> tgui::Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
-            .background_brush(BackgroundRadialGradient::new(
-                Point::new(dp(180.0), dp(120.0)),
-                dp(260.0),
-                vec![
-                    BackgroundGradientStop::new(0.0, Color::hexa(0x1D4ED880)),
-                    BackgroundGradientStop::new(1.0, Color::hexa(0x0B102000)),
-                ],
-            ))
+            .background_image(BackgroundImage::from_bytes(include_bytes!("../assets/juequling_shushu.jpg")).fit(ContentFit::Cover))
             .child(background_pattern())
             .child(
                 Flex::new(Axis::Vertical)
@@ -108,22 +101,22 @@ fn hero_card() -> tgui::Element<BackgroundEffectsVm> {
 fn gallery_row() -> tgui::Element<BackgroundEffectsVm> {
     Flex::new(Axis::Horizontal)
         .gap(dp(20.0))
-        .child(gallery_column("Linear Gradient", linear_gallery()))
-        .child(gallery_column("Radial Gradient", radial_gallery()))
-        .child(gallery_column("Glass Blur", blur_gallery()))
+        .child(gallery_column("Linear Gradient", true, linear_gallery()))
+        .child(gallery_column("Radial Gradient", true, radial_gallery()))
+        .child(gallery_column("Glass Blur", false, blur_gallery()))
         .into()
 }
 
 fn gallery_column(
     title: &str,
+    show_background_blur: bool,
     content: tgui::Element<BackgroundEffectsVm>,
 ) -> tgui::Element<BackgroundEffectsVm> {
-    Flex::new(Axis::Vertical)
+    let mut flex = Flex::new(Axis::Vertical)
         .grow(1.0)
         .padding(Insets::all(dp(18.0)))
         .gap(dp(16.0))
         .border_radius(dp(24.0))
-        .background_blur(dp(14.0))
         .background_brush(BackgroundLinearGradient::new(
             Point::new(dp(0.0), dp(0.0)),
             Point::new(dp(0.0), dp(480.0)),
@@ -134,8 +127,13 @@ fn gallery_column(
         ))
         .border(dp(1.0), Color::hexa(0xFFFFFF2E))
         .child(Text::new(title).font_size(sp(20.0)).color(Color::WHITE))
-        .child(content)
-        .into()
+        .child(content);
+
+    if show_background_blur {
+        flex = flex.background_blur(dp(12.0));
+    }
+
+    flex.into()
 }
 
 fn linear_gallery() -> tgui::Element<BackgroundEffectsVm> {

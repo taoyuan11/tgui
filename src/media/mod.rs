@@ -172,7 +172,7 @@ impl<const N: usize> From<&'static [u8; N]> for MediaBytes {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum ContentFit {
     #[default]
     Contain,

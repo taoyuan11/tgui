@@ -23,7 +23,7 @@ use crate::media::{MediaManager, TextureFrame};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{Dp, UnitContext};
 
-use super::background::BackgroundBrush;
+use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     CanvasItemInteractionHandlers, CursorStyle, InteractionHandlers, MediaEventHandlers,
     MeshPrimitive, MeshVertex, Point, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
@@ -813,6 +813,11 @@ impl<VM> Canvas<VM> {
         self
     }
 
+    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
+        self.element.visual.background_image = Some(image.into());
+        self
+    }
+
     pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
         self.element.visual.background_blur = blur.into();
         self
@@ -1294,6 +1299,7 @@ fn shadow_texture_for_path(
     Some(TexturePrimitive {
         texture,
         frame,
+        corner_radius: 0.0,
         clip_rect,
     })
 }

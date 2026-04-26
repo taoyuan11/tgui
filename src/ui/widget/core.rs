@@ -978,6 +978,11 @@ impl<VM> ResolvedElement<VM> {
             .background_brush
             .as_ref()
             .map(|brush| brush.resolve_widget());
+        let background_image = self
+            .visual
+            .background_image
+            .as_ref()
+            .map(|image| image.resolve_widget());
 
         if background_blur > 0.0
             && background_frame.width > Dp::ZERO
@@ -994,21 +999,37 @@ impl<VM> ResolvedElement<VM> {
         let preserve_solid_background = matches!(self.kind, ResolvedWidgetKind::Switch { .. });
 
         if background_frame.width > Dp::ZERO && background_frame.height > Dp::ZERO {
-            if let Some(brush) = background_brush.clone() {
-                computed.scene.push_brush(BrushPrimitive {
-                    rect: background_frame,
-                    brush,
-                    corner_radius: background_radius,
-                    clip_rect: primitive_clip,
-                });
-            }
-
-            if background.a > 0 && (background_brush.is_none() || preserve_solid_background) {
+            let should_draw_base_background = background.a > 0
+                && (background_image.is_some()
+                    || background_brush.is_none()
+                    || preserve_solid_background);
+            if should_draw_base_background {
                 computed.scene.push_shape(RenderPrimitive {
                     rect: background_frame,
                     color: background,
                     corner_radius: background_radius,
                     stroke_width: 0.0,
+                    clip_rect: primitive_clip,
+                });
+            }
+
+            if let Some(image) = background_image.as_ref() {
+                push_background_media_texture(
+                    &image.source,
+                    image.fit,
+                    background_frame,
+                    background_radius,
+                    primitive_clip,
+                    context,
+                    computed,
+                );
+            }
+
+            if let Some(brush) = background_brush.clone() {
+                computed.scene.push_brush(BrushPrimitive {
+                    rect: background_frame,
+                    brush,
+                    corner_radius: background_radius,
                     clip_rect: primitive_clip,
                 });
             }
@@ -2120,6 +2141,7 @@ fn push_media_texture_or_placeholder<VM>(
         computed.scene.push_texture(TexturePrimitive {
             texture: Arc::clone(texture),
             frame: target_frame,
+            corner_radius: content_corner_radius,
             clip_rect,
         });
         return;
@@ -2140,6 +2162,33 @@ fn push_media_texture_or_placeholder<VM>(
         loading_background,
         snapshot.loading,
     );
+}
+
+fn push_background_media_texture<VM>(
+    source: &crate::media::MediaSource,
+    fit: ContentFit,
+    content_frame: Rect,
+    content_corner_radius: f32,
+    clip_rect: Option<Rect>,
+    context: &mut CollectContext<'_, '_>,
+    computed: &mut ComputedScene<VM>,
+) {
+    let metadata = context.media.image_snapshot(source, None);
+    let target_frame = resolve_media_rect(content_frame, metadata.intrinsic_size, fit);
+    let snapshot = if let Some(raster_request) = RasterRequest::from_frame(target_frame) {
+        context.media.image_snapshot(source, Some(raster_request))
+    } else {
+        metadata
+    };
+
+    if let Some(texture) = snapshot.texture.as_ref() {
+        computed.scene.push_texture(TexturePrimitive {
+            texture: Arc::clone(texture),
+            frame: target_frame,
+            corner_radius: content_corner_radius,
+            clip_rect,
+        });
+    }
 }
 
 #[cfg(feature = "video")]
@@ -2164,6 +2213,7 @@ fn push_video_texture_or_placeholder<VM>(
         computed.scene.push_texture(TexturePrimitive {
             texture: Arc::clone(texture),
             frame: target_frame,
+            corner_radius: content_corner_radius,
             clip_rect,
         });
         return;
@@ -3425,13 +3475,14 @@ mod tests {
     use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
     use crate::foundation::color::Color;
     use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
-    use crate::media::MediaManager;
+    use crate::media::{MediaManager, MediaSource};
     use crate::text::font::{FontCatalog, FontManager};
     use crate::ui::layout::Overflow;
     use crate::ui::theme::Theme;
     use crate::ui::unit::{dp, sp, Dp, UnitContext};
     use crate::ui::widget::{
-        BackgroundGradientStop, BackgroundLinearGradient, BackgroundRadialGradient,
+        BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
+        BackgroundRadialGradient,
     };
     use crate::ui::widget::common::{Rect, WidgetKind};
     use crate::ui::widget::{
@@ -3444,6 +3495,12 @@ mod tests {
     };
     #[cfg(feature = "video")]
     use crate::video::{PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSurface};
+
+    const ONE_BY_ONE_GIF: &[u8] = &[
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x00, 0x02, 0x01, 0x4C, 0x00, 0x3B,
+    ];
 
     #[test]
     fn centers_text_using_actual_render_height() {
@@ -3674,6 +3731,143 @@ mod tests {
     }
 
     #[test]
+    fn background_image_produces_texture_primitive() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Stack::new()
+                .size(dp(64.0), dp(64.0))
+                .background_image(BackgroundImage::from_bytes(ONE_BY_ONE_GIF)),
+        );
+
+        let rendered = wait_for_rendered_output(
+            &tree,
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            Rect::new(0.0, 0.0, 64.0, 64.0),
+        );
+
+        assert_eq!(rendered.primitives.textures.len(), 1);
+        assert_eq!(rendered.primitives.textures[0].frame.width, 64.0);
+        assert_eq!(rendered.primitives.textures[0].frame.height, 64.0);
+    }
+
+    #[test]
+    fn background_image_loading_failure_keeps_base_background_without_placeholder_text() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let fallback = Color::hexa(0x112233FF);
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Stack::new()
+                .size(dp(80.0), dp(50.0))
+                .background(fallback)
+                .background_image(BackgroundImage::new(MediaSource::bytes(
+                    b"not-an-image".as_slice(),
+                ))),
+        );
+
+        let rendered = wait_for_rendered_output(
+            &tree,
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            Rect::new(0.0, 0.0, 80.0, 50.0),
+        );
+
+        assert!(rendered.primitives.textures.is_empty());
+        assert!(rendered.primitives.texts.is_empty());
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.color == fallback));
+    }
+
+    #[test]
+    fn background_image_renders_between_blur_and_brush_overlay() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Stack::new()
+                .size(dp(96.0), dp(72.0))
+                .background(Color::hexa(0x0F172AFF))
+                .background_blur(dp(10.0))
+                .background_image(BackgroundImage::from_bytes(ONE_BY_ONE_GIF))
+                .background_brush(BackgroundLinearGradient::new(
+                    Point::new(dp(0.0), dp(0.0)),
+                    Point::new(dp(96.0), dp(72.0)),
+                    vec![
+                        BackgroundGradientStop::new(0.0, Color::hexa(0xFFFFFF33)),
+                        BackgroundGradientStop::new(1.0, Color::hexa(0x00000033)),
+                    ],
+                ))
+                .border(dp(1.0), Color::WHITE),
+        );
+
+        let rendered = wait_for_rendered_output(
+            &tree,
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            Rect::new(0.0, 0.0, 96.0, 72.0),
+        );
+
+        let commands = &rendered.primitives.commands;
+        assert!(matches!(
+            commands.get(0),
+            Some(crate::ui::widget::RenderCommand::BackdropBlur(_))
+        ));
+        assert!(matches!(
+            commands.get(1),
+            Some(crate::ui::widget::RenderCommand::Shape(_))
+        ));
+        assert!(matches!(
+            commands.get(2),
+            Some(crate::ui::widget::RenderCommand::Texture(_))
+        ));
+        assert!(matches!(
+            commands.get(3),
+            Some(crate::ui::widget::RenderCommand::Brush(_))
+        ));
+    }
+
+    #[test]
+    fn background_image_texture_uses_corner_radius() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Stack::new()
+                .size(dp(64.0), dp(64.0))
+                .border_radius(dp(18.0))
+                .background_image(BackgroundImage::from_bytes(ONE_BY_ONE_GIF)),
+        );
+
+        let rendered = wait_for_rendered_output(
+            &tree,
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            Rect::new(0.0, 0.0, 64.0, 64.0),
+        );
+
+        assert_eq!(rendered.primitives.textures.len(), 1);
+        assert_eq!(rendered.primitives.textures[0].corner_radius, 18.0);
+    }
+
+    #[test]
     fn background_brush_keeps_clip_rect() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
@@ -3821,6 +4015,53 @@ mod tests {
 
     fn test_media() -> MediaManager {
         MediaManager::new(InvalidationSignal::new())
+    }
+
+    fn wait_for_rendered_output(
+        tree: &WidgetTree<()>,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        viewport: Rect,
+    ) -> super::RenderedWidgetScene {
+        for _ in 0..150 {
+            let rendered = tree.render_output(
+                font_manager,
+                theme,
+                media,
+                animations,
+                None,
+                None,
+                &HashMap::new(),
+                viewport,
+                None,
+                None,
+                None,
+                None,
+                false,
+            );
+            if !rendered.primitives.textures.is_empty() {
+                return rendered;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        tree.render_output(
+            font_manager,
+            theme,
+            media,
+            animations,
+            None,
+            None,
+            &HashMap::new(),
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
     }
 
     fn test_context() -> ViewModelContext {

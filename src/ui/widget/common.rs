@@ -18,7 +18,7 @@ use crate::ui::unit::{Dp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface;
 
-use super::background::{BackgroundBrush, BackgroundGradientStop};
+use super::background::{BackgroundBrush, BackgroundGradientStop, BackgroundImage};
 use super::canvas::{CanvasItem, CanvasItemId, CanvasPointerEvent};
 use super::image::Image;
 use super::text::Text;
@@ -138,6 +138,7 @@ pub struct VisualStyle {
     pub border_radius: Value<Dp>,
     pub border_width: Value<Dp>,
     pub background_brush: Option<Value<BackgroundBrush>>,
+    pub background_image: Option<Value<BackgroundImage>>,
     pub background_blur: Value<Dp>,
     pub opacity: Value<f32>,
     pub offset: Value<Point>,
@@ -150,6 +151,7 @@ impl Default for VisualStyle {
             border_radius: Value::Static(Dp::ZERO),
             border_width: Value::Static(Dp::ZERO),
             background_brush: None,
+            background_image: None,
             background_blur: Value::Static(Dp::ZERO),
             opacity: Value::Static(1.0),
             offset: Value::Static(Point::ZERO),
@@ -518,6 +520,15 @@ impl Value<BackgroundBrush> {
     }
 }
 
+impl Value<BackgroundImage> {
+    pub(crate) fn resolve_widget(&self) -> BackgroundImage {
+        match self {
+            Value::Static(value) => value.clone(),
+            Value::Bound(binding) => binding.get(),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct RenderPrimitive {
     pub rect: Rect,
@@ -560,6 +571,7 @@ pub struct TextPrimitive {
 pub struct TexturePrimitive {
     pub texture: Arc<TextureFrame>,
     pub frame: Rect,
+    pub corner_radius: f32,
     pub clip_rect: Option<Rect>,
 }
 
