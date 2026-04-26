@@ -61,6 +61,22 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 
 适合做图形编辑、可视化、流程图或定制图表表面。
 
+### `background_effects`
+
+背景效果画廊示例。演示：
+
+- 通用线性渐变背景
+- 通用径向渐变背景
+- backdrop blur 毛玻璃卡片
+- 渐变与 blur 叠加
+- 圆角裁剪与层叠玻璃面板
+
+运行方式：
+
+```bash
+cargo run --manifest-path examples/background_effects/Cargo.toml
+```
+
 ### `dialogs`
 
 原生对话框示例。演示：

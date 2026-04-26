@@ -1067,6 +1067,7 @@ fn is_cycle_reversed(direction: PlaybackDirection, cycle_index: u32) -> bool {
 pub(crate) enum WidgetProperty {
     Background,
     BackgroundAlt,
+    BackgroundBlur,
     BorderColor,
     BorderRadius,
     BorderWidth,

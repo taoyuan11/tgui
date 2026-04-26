@@ -6,6 +6,7 @@ use crate::ui::layout::{
 };
 use crate::ui::unit::Dp;
 
+use super::background::BackgroundBrush;
 use super::common::{
     ChildSource, ContainerKind, ContainerLayout, CursorStyle, InteractionHandlers,
     MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
@@ -214,6 +215,16 @@ impl<VM> Container<VM> {
 
     pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
         self.element.background = Some(color.into());
+        self
+    }
+
+    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
+        self.element.visual.background_brush = Some(brush.into());
+        self
+    }
+
+    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
+        self.element.visual.background_blur = blur.into();
         self
     }
 
@@ -661,6 +672,14 @@ macro_rules! impl_layout_api {
 
             pub fn background(self, color: impl Into<Value<Color>>) -> Self {
                 Self(self.0.background(color))
+            }
+
+            pub fn background_brush(self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
+                Self(self.0.background_brush(brush))
+            }
+
+            pub fn background_blur(self, blur: impl Into<Value<Dp>>) -> Self {
+                Self(self.0.background_blur(blur))
             }
 
             pub fn border(

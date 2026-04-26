@@ -5,6 +5,7 @@ use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::Dp;
 use crate::video::VideoController;
 
+use super::background::BackgroundBrush;
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
@@ -174,6 +175,16 @@ impl VideoSurface {
 
     pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
         self.background = Some(color.into());
+        self
+    }
+
+    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
+        self.visual.background_brush = Some(brush.into());
+        self
+    }
+
+    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
+        self.visual.background_blur = blur.into();
         self
     }
 

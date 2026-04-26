@@ -29,11 +29,12 @@ use crate::video::VideoSurface as PublicVideoSurface;
 
 use super::canvas::{canvas_bounds, CanvasItem};
 use super::common::{
-    ButtonVariantKind, ComputedScene, ContainerKind, ContainerLayout, HitGeometry, HitInteraction,
-    HitRegion, InputEditState, InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext,
-    MediaEventHandlers, MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive,
-    RenderedWidgetScene, ScenePrimitives, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind, WidgetStateMap,
+    BackdropBlurPrimitive, BrushPrimitive, ButtonVariantKind, ComputedScene, ContainerKind,
+    ContainerLayout, HitGeometry, HitInteraction, HitRegion, InputEditState, InputSnapshot,
+    InteractionHandlers, LayoutNode, MeasureContext, MediaEventHandlers, MediaEventPhase,
+    MediaEventState, Point, Rect, RenderPrimitive, RenderedWidgetScene, ScenePrimitives,
+    ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextPrimitive, TexturePrimitive, VisualStyle,
+    WidgetId, WidgetKind, WidgetStateMap,
 };
 use super::text::Text;
 
@@ -961,18 +962,56 @@ impl<VM> ResolvedElement<VM> {
         let background_frame = frame.inset(Insets::all(Dp::new(background_inset)));
         let background_radius = (border_radius - background_inset).max(0.0);
         let primitive_clip = Some(visual_context.clip_rect);
+        let background_blur = self
+            .visual
+            .background_blur
+            .resolve_widget_to_logical(
+                context.animations,
+                self.id,
+                WidgetProperty::BackgroundBlur,
+                context.now,
+                context.units,
+            )
+            .max(0.0);
+        let background_brush = self
+            .visual
+            .background_brush
+            .as_ref()
+            .map(|brush| brush.resolve_widget());
 
-        if background.a > 0
+        if background_blur > 0.0
             && background_frame.width > Dp::ZERO
             && background_frame.height > Dp::ZERO
         {
-            computed.scene.push_shape(RenderPrimitive {
+            computed.scene.push_backdrop_blur(BackdropBlurPrimitive {
                 rect: background_frame,
-                color: background,
                 corner_radius: background_radius,
-                stroke_width: 0.0,
+                blur_radius: background_blur,
                 clip_rect: primitive_clip,
             });
+        }
+
+        let preserve_solid_background = matches!(self.kind, ResolvedWidgetKind::Switch { .. });
+
+        if background_frame.width > Dp::ZERO && background_frame.height > Dp::ZERO {
+            if let Some(brush) = background_brush.clone() {
+                computed.scene.push_brush(BrushPrimitive {
+                    rect: background_frame,
+                    brush,
+                    corner_radius: background_radius,
+                    clip_rect: primitive_clip,
+                });
+            }
+
+            if background.a > 0 && (background_brush.is_none() || preserve_solid_background) {
+                computed.scene.push_shape(RenderPrimitive {
+                    rect: background_frame,
+                    color: background,
+                    corner_radius: background_radius,
+                    stroke_width: 0.0,
+                    clip_rect: primitive_clip,
+                });
+            }
         }
 
         push_border_primitives(
@@ -2014,13 +2053,21 @@ fn button_variant_theme(
 
 fn resolved_text_metrics(text: &Text, theme: &Theme, units: UnitContext) -> (f32, f32, f32) {
     let default_style = &theme.typography.body;
-    let font_size = units.resolve_sp(text.font_size.unwrap_or(default_style.size.max(sp(1.0))));
-    let line_height = units.resolve_sp(
-        default_style
-            .line_height
-            .unwrap_or(default_style.size * 1.25),
-    );
-    let line_height = line_height.max(font_size + 4.0);
+    let default_size = default_style.size.max(sp(1.0));
+    let default_line_height_sp = default_style
+        .line_height
+        .unwrap_or(default_style.size * 1.25);
+    let font_size = units.resolve_sp(text.font_size.unwrap_or(default_size));
+    let default_line_height = units.resolve_sp(default_line_height_sp);
+    let default_font_size = units.resolve_sp(default_size);
+    let scaled_line_height = if default_font_size > 0.0 {
+        default_line_height * (font_size / default_font_size)
+    } else {
+        default_line_height
+    };
+    let line_height = default_line_height
+        .max(scaled_line_height)
+        .max(font_size + 4.0);
     let letter_spacing = units.resolve_sp(
         text.letter_spacing
             .max(default_style.letter_spacing.unwrap_or(Sp::ZERO)),
@@ -3371,7 +3418,7 @@ impl<VM> WidgetTree<VM> {
 
 #[cfg(test)]
 mod tests {
-    use super::{centered_text_frame, input_text_viewport};
+    use super::{centered_text_frame, input_text_viewport, resolved_text_metrics};
     use std::collections::HashMap;
 
     use crate::animation::{AnimationCoordinator, AnimationEngine};
@@ -3382,7 +3429,10 @@ mod tests {
     use crate::text::font::{FontCatalog, FontManager};
     use crate::ui::layout::Overflow;
     use crate::ui::theme::Theme;
-    use crate::ui::unit::{dp, Dp};
+    use crate::ui::unit::{dp, sp, Dp, UnitContext};
+    use crate::ui::widget::{
+        BackgroundGradientStop, BackgroundLinearGradient, BackgroundRadialGradient,
+    };
     use crate::ui::widget::common::{Rect, WidgetKind};
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasPath, CanvasStroke, Element, Image, Input, InputEditState,
@@ -3404,6 +3454,16 @@ mod tests {
         assert_eq!(frame.y, 11.0);
         assert_eq!(frame.width, 56.0);
         assert_eq!(frame.height, 18.0);
+    }
+
+    #[test]
+    fn larger_font_sizes_scale_default_line_height() {
+        let theme = Theme::default();
+        let text = Text::new("Background Effects Gallery").font_size(sp(30.0));
+        let (font_size, line_height, _) = resolved_text_metrics(&text, &theme, UnitContext::default());
+
+        assert_eq!(font_size, 30.0);
+        assert_eq!(line_height, 41.25);
     }
 
     #[test]
@@ -3488,6 +3548,176 @@ mod tests {
             .expect("canvas widget region should exist");
         assert_eq!(widget_region.rect.width, 80.0);
         assert_eq!(widget_region.rect.height, 30.0);
+    }
+
+    #[test]
+    fn background_brush_generates_brush_primitive() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Stack::new()
+                .size(dp(120.0), dp(80.0))
+                .border_radius(dp(12.0))
+                .background_brush(BackgroundLinearGradient::new(
+                    Point::new(dp(0.0), dp(0.0)),
+                    Point::new(dp(120.0), dp(80.0)),
+                    vec![
+                        BackgroundGradientStop::new(0.0, Color::hexa(0x38BDF8FF)),
+                        BackgroundGradientStop::new(1.0, Color::hexa(0x1D4ED8FF)),
+                    ],
+                )),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 80.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert_eq!(rendered.primitives.brushes.len(), 1);
+        assert!(matches!(
+            rendered.primitives.brushes[0].brush,
+            crate::ui::widget::BackgroundBrush::LinearGradient(_)
+        ));
+    }
+
+    #[test]
+    fn background_brush_takes_priority_over_background_color() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Stack::new()
+                .size(dp(120.0), dp(80.0))
+                .background(Color::hexa(0xEF4444FF))
+                .background_brush(BackgroundRadialGradient::new(
+                    Point::new(dp(60.0), dp(40.0)),
+                    dp(72.0),
+                    vec![
+                        BackgroundGradientStop::new(0.0, Color::hexa(0xFFFFFFAA)),
+                        BackgroundGradientStop::new(1.0, Color::hexa(0x2563EB00)),
+                    ],
+                )),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 80.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert_eq!(rendered.primitives.brushes.len(), 1);
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .all(|shape| shape.color != Color::hexa(0xEF4444FF)));
+    }
+
+    #[test]
+    fn background_blur_is_emitted_before_background_fill() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Stack::new()
+                .size(dp(120.0), dp(80.0))
+                .background(Color::hexa(0x112233AA))
+                .background_blur(dp(18.0)),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 80.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert_eq!(rendered.primitives.backdrop_blurs.len(), 1);
+        assert!(matches!(
+            rendered.primitives.commands.first(),
+            Some(crate::ui::widget::RenderCommand::BackdropBlur(_))
+        ));
+    }
+
+    #[test]
+    fn background_brush_keeps_clip_rect() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Stack::new()
+                .size(dp(100.0), dp(100.0))
+                .overflow(Overflow::Hidden)
+                .child(
+                    Stack::new()
+                        .size(dp(120.0), dp(80.0))
+                        .background_brush(BackgroundLinearGradient::new(
+                            Point::new(dp(0.0), dp(0.0)),
+                            Point::new(dp(120.0), dp(80.0)),
+                            vec![
+                                BackgroundGradientStop::new(0.0, Color::hexa(0x14B8A6FF)),
+                                BackgroundGradientStop::new(1.0, Color::hexa(0x0F766EFF)),
+                            ],
+                        )),
+                ),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert_eq!(rendered.primitives.brushes.len(), 1);
+        assert_eq!(
+            rendered.primitives.brushes[0].clip_rect,
+            Some(Rect::new(0.0, 0.0, 100.0, 100.0))
+        );
     }
 
     #[test]

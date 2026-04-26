@@ -23,6 +23,7 @@ use crate::media::{MediaManager, TextureFrame};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{Dp, UnitContext};
 
+use super::background::BackgroundBrush;
 use super::common::{
     CanvasItemInteractionHandlers, CursorStyle, InteractionHandlers, MediaEventHandlers,
     MeshPrimitive, MeshVertex, Point, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
@@ -804,6 +805,16 @@ impl<VM> Canvas<VM> {
 
     pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
         self.element.background = Some(color.into());
+        self
+    }
+
+    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
+        self.element.visual.background_brush = Some(brush.into());
+        self
+    }
+
+    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
+        self.element.visual.background_blur = blur.into();
         self
     }
 

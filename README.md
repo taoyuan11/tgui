@@ -230,6 +230,19 @@ cargo run --manifest-path examples/video_surface/Cargo.toml
 - `CanvasBooleanOp`
 - `CanvasPointerEvent`
 
+### 通用背景
+
+除 `Canvas` 外，常规控件背景现在也支持更丰富的视觉能力：
+
+- `BackgroundBrush`
+- `BackgroundLinearGradient`
+- `BackgroundRadialGradient`
+- `BackgroundGradientStop`
+- `background_brush(...)`
+- `background_blur(...)`
+
+`background_blur(...)` 是应用窗口内容上的 backdrop blur，可用于玻璃卡片、磨砂面板和层叠浮层。
+
 ### 视频
 
 启用 `video` feature 后可使用：

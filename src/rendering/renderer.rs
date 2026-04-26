@@ -15,8 +15,8 @@ use crate::platform::dpi::PhysicalSize;
 use crate::text::font::{FontCatalog, FontWeight};
 use crate::ui::unit::Dp;
 use crate::ui::widget::{
-    MeshVertex as SceneMeshVertex, Rect, RenderCommand, RenderPrimitive, ScenePrimitives,
-    TextPrimitive,
+    BackdropBlurPrimitive, BrushPrimitiveData, MeshVertex as SceneMeshVertex, Rect, RenderCommand,
+    RenderPrimitive, ScenePrimitives, TextPrimitive,
 };
 
 pub enum RenderStatus {
@@ -32,14 +32,22 @@ pub struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     rect_pipeline: wgpu::RenderPipeline,
+    brush_pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
     text_pipeline: wgpu::RenderPipeline,
+    backdrop_blur_pipeline: wgpu::RenderPipeline,
+    backdrop_composite_pipeline: wgpu::RenderPipeline,
     text_bind_group_layout: wgpu::BindGroupLayout,
+    backdrop_blur_bind_group_layout: wgpu::BindGroupLayout,
+    backdrop_composite_bind_group_layout: wgpu::BindGroupLayout,
     text_sampler: wgpu::Sampler,
     size: PhysicalSize<u32>,
     scale_factor: f32,
     msaa_sample_count: u32,
     msaa_target: Option<MultisampleTarget>,
+    scene_target: Option<OffscreenTarget>,
+    blur_target: Option<OffscreenTarget>,
+    blur_scratch_target: Option<OffscreenTarget>,
     clear_color: TguiColor,
     text_system: TextSystem,
     text_cache: Vec<TextCacheEntry>,
@@ -53,37 +61,54 @@ struct TextSystem {
 
 struct MultisampleTarget {
     _texture: wgpu::Texture,
+    _view: wgpu::TextureView,
+}
+
+struct OffscreenTarget {
+    texture: wgpu::Texture,
     view: wgpu::TextureView,
 }
 
-struct PrimitiveBatch {
+struct PreparedRect {
     clip_rect: Option<Rect>,
-    vertex_range: std::ops::Range<u32>,
+    vertex_buffer: wgpu::Buffer,
+    vertex_count: u32,
 }
 
-struct MeshBatch {
+struct PreparedBrush {
     clip_rect: Option<Rect>,
-    vertex_range: std::ops::Range<u32>,
+    vertex_buffer: wgpu::Buffer,
+    vertex_count: u32,
 }
 
-struct TextBatch {
+struct PreparedMesh {
+    clip_rect: Option<Rect>,
+    vertex_buffer: wgpu::Buffer,
+    vertex_count: u32,
+}
+
+struct PreparedSprite {
     bind_group: wgpu::BindGroup,
     clip_rect: Option<Rect>,
-    vertex_range: std::ops::Range<u32>,
+    vertex_buffer: wgpu::Buffer,
+    vertex_count: u32,
 }
 
-enum DrawBatch {
-    Rect(PrimitiveBatch),
-    Mesh(MeshBatch),
-    Sprite(TextBatch),
+struct PreparedBackdropBlur {
+    primitive: BackdropBlurPrimitive,
+    composite_buffer: wgpu::Buffer,
+    composite_vertex_count: u32,
 }
 
-struct CommandBuffers {
-    rect_vertices: Vec<RectVertex>,
-    mesh_vertices: Vec<MeshVertex>,
-    text_vertices: Vec<TextVertex>,
-    batches: Vec<DrawBatch>,
+enum PreparedCommand {
+    BackdropBlur(PreparedBackdropBlur),
+    Rect(PreparedRect),
+    Brush(PreparedBrush),
+    Mesh(PreparedMesh),
+    Sprite(PreparedSprite),
 }
+
+struct PreparedCommands(Vec<PreparedCommand>);
 
 struct TextCacheEntry {
     key: TextCacheKey,
@@ -109,6 +134,15 @@ struct TextCacheKey {
     line_height_bits: u32,
     letter_spacing_bits: u32,
     font_weight: u16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct BlurUniform {
+    direction: [f32; 2],
+    texel_size: [f32; 2],
+    radius: f32,
+    _pad: f32,
 }
 
 impl Renderer {
@@ -159,10 +193,6 @@ impl Renderer {
 
         let alpha_mode = surface_alpha_mode(&caps.alpha_modes);
         let msaa_sample_count = surface_msaa_sample_count(&adapter, format);
-        let multisample_state = wgpu::MultisampleState {
-            count: msaa_sample_count,
-            ..Default::default()
-        };
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -186,6 +216,18 @@ impl Renderer {
         let text_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tgui-text-shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader/text.wgsl").into()),
+        });
+        let brush_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tgui-brush-shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader/brush.wgsl").into()),
+        });
+        let backdrop_blur_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tgui-backdrop-blur-shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader/backdrop_blur.wgsl").into()),
+        });
+        let backdrop_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tgui-backdrop-composite-shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader/backdrop_composite.wgsl").into()),
         });
 
         let rect_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -213,9 +255,50 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: multisample_state,
+            multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &rect_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let brush_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("tgui-brush-pipeline-layout"),
+                bind_group_layouts: &[],
+                immediate_size: 0,
+            });
+
+        let brush_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("tgui-brush-pipeline"),
+            layout: Some(&brush_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &brush_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[BrushVertex::layout()],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &brush_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -253,7 +336,7 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: multisample_state,
+            multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &mesh_shader,
                 entry_point: Some("fs_main"),
@@ -291,6 +374,72 @@ impl Renderer {
                 ],
             });
 
+        let backdrop_blur_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("tgui-backdrop-blur-bind-group-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let backdrop_composite_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("tgui-backdrop-composite-bind-group-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
         let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("tgui-text-pipeline-layout"),
             bind_group_layouts: &[Some(&text_bind_group_layout)],
@@ -316,7 +465,7 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: multisample_state,
+            multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &text_shader,
                 entry_point: Some("fs_main"),
@@ -330,6 +479,87 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+
+        let backdrop_blur_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("tgui-backdrop-blur-pipeline-layout"),
+                bind_group_layouts: &[Some(&backdrop_blur_bind_group_layout)],
+                immediate_size: 0,
+            });
+        let backdrop_blur_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("tgui-backdrop-blur-pipeline"),
+            layout: Some(&backdrop_blur_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &backdrop_blur_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[TextVertex::layout()],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &backdrop_blur_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let backdrop_composite_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("tgui-backdrop-composite-pipeline-layout"),
+                bind_group_layouts: &[Some(&backdrop_composite_bind_group_layout)],
+                immediate_size: 0,
+            });
+        let backdrop_composite_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("tgui-backdrop-composite-pipeline"),
+                layout: Some(&backdrop_composite_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &backdrop_composite_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[CompositeVertex::layout()],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &backdrop_composite_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
 
         let text_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("tgui-text-sampler"),
@@ -348,6 +578,10 @@ impl Renderer {
 
         surface.configure(&device, &config);
         let msaa_target = create_multisample_target(&device, &config, msaa_sample_count);
+        let scene_target = create_offscreen_target(&device, &config, "tgui-scene-target");
+        let blur_target = create_offscreen_target(&device, &config, "tgui-blur-target");
+        let blur_scratch_target =
+            create_offscreen_target(&device, &config, "tgui-blur-scratch-target");
 
         Ok(Self {
             window,
@@ -356,14 +590,22 @@ impl Renderer {
             queue,
             config,
             rect_pipeline,
+            brush_pipeline,
             mesh_pipeline,
             text_pipeline,
+            backdrop_blur_pipeline,
+            backdrop_composite_pipeline,
             text_bind_group_layout,
+            backdrop_blur_bind_group_layout,
+            backdrop_composite_bind_group_layout,
             text_sampler,
             size,
             scale_factor,
             msaa_sample_count,
             msaa_target,
+            scene_target,
+            blur_target,
+            blur_scratch_target,
             clear_color,
             text_system: TextSystem {
                 font_system,
@@ -387,6 +629,7 @@ impl Renderer {
         self.config.height = new_size.height;
         self.surface.configure(&self.device, &self.config);
         self.recreate_multisample_target();
+        self.recreate_offscreen_targets();
     }
 
     pub fn render(&mut self, scene: &ScenePrimitives) -> Result<RenderStatus, TguiError> {
@@ -418,7 +661,7 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let command_buffers = self.command_batches_for(
+        let command_buffers = self.prepare_commands(
             &scene.commands,
             logical_width,
             logical_height,
@@ -426,7 +669,7 @@ impl Renderer {
             self.config.height as f32,
             self.scale_factor,
         )?;
-        let overlay_buffers = self.command_batches_for(
+        let overlay_buffers = self.prepare_commands(
             &scene.overlay_commands,
             logical_width,
             logical_height,
@@ -434,62 +677,8 @@ impl Renderer {
             self.config.height as f32,
             self.scale_factor,
         )?;
-        let color_attachment_view = self
-            .msaa_target
-            .as_ref()
-            .map(|target| &target.view)
-            .unwrap_or(&view);
-        let resolve_target = (self.msaa_sample_count > 1).then_some(&view);
-
-        let rect_vertex_buffer = (!command_buffers.rect_vertices.is_empty()).then(|| {
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tgui-rect-vertices"),
-                    contents: bytemuck::cast_slice(&command_buffers.rect_vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
-        });
-        let mesh_vertex_buffer = (!command_buffers.mesh_vertices.is_empty()).then(|| {
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tgui-mesh-vertices"),
-                    contents: bytemuck::cast_slice(&command_buffers.mesh_vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
-        });
-        let text_vertex_buffer = (!command_buffers.text_vertices.is_empty()).then(|| {
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tgui-text-vertices"),
-                    contents: bytemuck::cast_slice(&command_buffers.text_vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
-        });
-
-        let overlay_rect_vertex_buffer = (!overlay_buffers.rect_vertices.is_empty()).then(|| {
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tgui-overlay-rect-vertices"),
-                    contents: bytemuck::cast_slice(&overlay_buffers.rect_vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
-        });
-        let overlay_mesh_vertex_buffer = (!overlay_buffers.mesh_vertices.is_empty()).then(|| {
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tgui-overlay-mesh-vertices"),
-                    contents: bytemuck::cast_slice(&overlay_buffers.mesh_vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
-        });
-        let overlay_text_vertex_buffer = (!overlay_buffers.text_vertices.is_empty()).then(|| {
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tgui-overlay-text-vertices"),
-                    contents: bytemuck::cast_slice(&overlay_buffers.text_vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
-        });
+        let color_attachment_view = view.clone();
+        let scene_view = self.scene_target_view()?;
 
         let mut encoder = self
             .device
@@ -499,10 +688,10 @@ impl Renderer {
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("tgui-render-pass"),
+                label: Some("tgui-scene-clear-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: color_attachment_view,
-                    resolve_target,
+                    view: scene_view,
+                    resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(surface_clear_color(self.clear_color)),
@@ -514,22 +703,18 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-
-            self.draw_command_batches(
-                &mut pass,
-                rect_vertex_buffer.as_ref(),
-                mesh_vertex_buffer.as_ref(),
-                text_vertex_buffer.as_ref(),
-                &command_buffers.batches,
-            );
-            self.draw_command_batches(
-                &mut pass,
-                overlay_rect_vertex_buffer.as_ref(),
-                overlay_mesh_vertex_buffer.as_ref(),
-                overlay_text_vertex_buffer.as_ref(),
-                &overlay_buffers.batches,
-            );
+            let _ = &mut pass;
         }
+
+        self.execute_prepared_commands(&mut encoder, &command_buffers.0)?;
+        self.execute_prepared_commands(&mut encoder, &overlay_buffers.0)?;
+        let scene_view = self.scene_target_view()?;
+        self.blit_scene_to_surface(
+            &mut encoder,
+            scene_view,
+            &color_attachment_view,
+            None,
+        );
 
         self.queue.submit(Some(encoder.finish()));
         self.window.pre_present_notify();
@@ -538,55 +723,7 @@ impl Renderer {
         Ok(RenderStatus::Rendered)
     }
 
-    fn draw_command_batches<'a>(
-        &'a self,
-        pass: &mut wgpu::RenderPass<'a>,
-        rect_vertex_buffer: Option<&'a wgpu::Buffer>,
-        mesh_vertex_buffer: Option<&'a wgpu::Buffer>,
-        text_vertex_buffer: Option<&'a wgpu::Buffer>,
-        batches: &[DrawBatch],
-    ) {
-        for batch in batches {
-            match batch {
-                DrawBatch::Rect(batch) => {
-                    let Some(vertex_buffer) = rect_vertex_buffer else {
-                        continue;
-                    };
-                    if !self.apply_scissor(pass, batch.clip_rect) {
-                        continue;
-                    }
-                    pass.set_pipeline(&self.rect_pipeline);
-                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                    pass.draw(batch.vertex_range.clone(), 0..1);
-                }
-                DrawBatch::Mesh(batch) => {
-                    let Some(vertex_buffer) = mesh_vertex_buffer else {
-                        continue;
-                    };
-                    if !self.apply_scissor(pass, batch.clip_rect) {
-                        continue;
-                    }
-                    pass.set_pipeline(&self.mesh_pipeline);
-                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                    pass.draw(batch.vertex_range.clone(), 0..1);
-                }
-                DrawBatch::Sprite(batch) => {
-                    let Some(vertex_buffer) = text_vertex_buffer else {
-                        continue;
-                    };
-                    if !self.apply_scissor(pass, batch.clip_rect) {
-                        continue;
-                    }
-                    pass.set_pipeline(&self.text_pipeline);
-                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                    pass.set_bind_group(0, &batch.bind_group, &[]);
-                    pass.draw(batch.vertex_range.clone(), 0..1);
-                }
-            }
-        }
-    }
-
-    fn command_batches_for(
+    fn prepare_commands(
         &mut self,
         commands: &[RenderCommand],
         logical_width: f32,
@@ -594,86 +731,152 @@ impl Renderer {
         physical_width: f32,
         physical_height: f32,
         scale_factor: f32,
-    ) -> Result<CommandBuffers, TguiError> {
-        let mut rect_vertices = Vec::new();
-        let mut mesh_vertices = Vec::new();
-        let mut text_vertices = Vec::new();
-        let mut batches = Vec::new();
+    ) -> Result<PreparedCommands, TguiError> {
+        let mut prepared = Vec::new();
 
         for command in commands {
             match command {
+                RenderCommand::BackdropBlur(primitive) => {
+                    if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
+                        continue;
+                    }
+                    let vertices = CompositeVertex::quad(
+                        primitive.rect,
+                        logical_width,
+                        logical_height,
+                        primitive.corner_radius,
+                    );
+                    let composite_buffer =
+                        self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("tgui-backdrop-composite-vertices"),
+                            contents: bytemuck::cast_slice(&vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    prepared.push(PreparedCommand::BackdropBlur(PreparedBackdropBlur {
+                        primitive: *primitive,
+                        composite_buffer,
+                        composite_vertex_count: vertices.len() as u32,
+                    }));
+                }
+                RenderCommand::Brush(primitive) => {
+                    if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
+                        continue;
+                    }
+                    let Some(brush_data) =
+                        BrushPrimitiveData::from_background_brush(&primitive.brush, 1.0)
+                    else {
+                        continue;
+                    };
+                    let vertices = BrushVertex::from_primitive(
+                        primitive.rect,
+                        primitive.corner_radius,
+                        brush_data,
+                        physical_width,
+                        physical_height,
+                        scale_factor,
+                    );
+                    let vertex_buffer =
+                        self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("tgui-brush-vertices"),
+                            contents: bytemuck::cast_slice(&vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    prepared.push(PreparedCommand::Brush(PreparedBrush {
+                        clip_rect: primitive.clip_rect,
+                        vertex_buffer,
+                        vertex_count: vertices.len() as u32,
+                    }));
+                }
                 RenderCommand::Shape(primitive) => {
                     if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
                         continue;
                     }
-                    let start = rect_vertices.len() as u32;
-                    rect_vertices.extend_from_slice(&RectVertex::from_primitive(
+                    let vertices = RectVertex::from_primitive(
                         *primitive,
                         physical_width,
                         physical_height,
                         scale_factor,
-                    ));
-                    let end = rect_vertices.len() as u32;
-                    batches.push(DrawBatch::Rect(PrimitiveBatch {
+                    );
+                    let vertex_buffer =
+                        self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("tgui-rect-vertices"),
+                            contents: bytemuck::cast_slice(&vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    prepared.push(PreparedCommand::Rect(PreparedRect {
                         clip_rect: primitive.clip_rect,
-                        vertex_range: start..end,
+                        vertex_buffer,
+                        vertex_count: vertices.len() as u32,
                     }));
                 }
                 RenderCommand::Mesh(primitive) => {
                     if primitive.vertices.is_empty() {
                         continue;
                     }
-                    let start = mesh_vertices.len() as u32;
-                    mesh_vertices.extend(primitive.vertices.iter().copied().map(|vertex| {
-                        MeshVertex::from_scene_vertex(vertex, logical_width, logical_height)
-                    }));
-                    let end = mesh_vertices.len() as u32;
-                    batches.push(DrawBatch::Mesh(MeshBatch {
+                    let vertices: Vec<_> = primitive
+                        .vertices
+                        .iter()
+                        .copied()
+                        .map(|vertex| MeshVertex::from_scene_vertex(vertex, logical_width, logical_height))
+                        .collect();
+                    let vertex_buffer =
+                        self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("tgui-mesh-vertices"),
+                            contents: bytemuck::cast_slice(&vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    prepared.push(PreparedCommand::Mesh(PreparedMesh {
                         clip_rect: primitive.clip_rect,
-                        vertex_range: start..end,
+                        vertex_buffer,
+                        vertex_count: vertices.len() as u32,
                     }));
                 }
                 RenderCommand::Texture(texture) => {
                     if let Some(bind_group) = self.texture_bind_group_for(&texture.texture)? {
-                        let start = text_vertices.len() as u32;
-                        text_vertices.extend_from_slice(&TextVertex::quad(
+                        let vertices = TextVertex::quad(
                             texture.frame,
                             logical_width,
                             logical_height,
-                        ));
-                        let end = text_vertices.len() as u32;
-                        batches.push(DrawBatch::Sprite(TextBatch {
+                        );
+                        let vertex_buffer =
+                            self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("tgui-sprite-vertices"),
+                                contents: bytemuck::cast_slice(&vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                        prepared.push(PreparedCommand::Sprite(PreparedSprite {
                             bind_group,
                             clip_rect: texture.clip_rect,
-                            vertex_range: start..end,
+                            vertex_buffer,
+                            vertex_count: vertices.len() as u32,
                         }));
                     }
                 }
                 RenderCommand::Text(text) => {
                     if let Some(bind_group) = self.text_bind_group_for(text)? {
-                        let start = text_vertices.len() as u32;
-                        text_vertices.extend_from_slice(&TextVertex::quad(
+                        let vertices = TextVertex::quad(
                             text.frame,
                             logical_width,
                             logical_height,
-                        ));
-                        let end = text_vertices.len() as u32;
-                        batches.push(DrawBatch::Sprite(TextBatch {
+                        );
+                        let vertex_buffer =
+                            self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("tgui-text-vertices"),
+                                contents: bytemuck::cast_slice(&vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                        prepared.push(PreparedCommand::Sprite(PreparedSprite {
                             bind_group,
                             clip_rect: text.clip_rect,
-                            vertex_range: start..end,
+                            vertex_buffer,
+                            vertex_count: vertices.len() as u32,
                         }));
                     }
                 }
             }
         }
 
-        Ok(CommandBuffers {
-            rect_vertices,
-            mesh_vertices,
-            text_vertices,
-            batches,
-        })
+        Ok(PreparedCommands(prepared))
     }
 
     fn apply_scissor<'a>(
@@ -724,11 +927,423 @@ impl Renderer {
 
         self.surface.configure(&self.device, &self.config);
         self.recreate_multisample_target();
+        self.recreate_offscreen_targets();
     }
 
     fn recreate_multisample_target(&mut self) {
         self.msaa_target =
             create_multisample_target(&self.device, &self.config, self.msaa_sample_count);
+    }
+
+    fn recreate_offscreen_targets(&mut self) {
+        self.scene_target = create_offscreen_target(&self.device, &self.config, "tgui-scene-target");
+        self.blur_target = create_offscreen_target(&self.device, &self.config, "tgui-blur-target");
+        self.blur_scratch_target =
+            create_offscreen_target(&self.device, &self.config, "tgui-blur-scratch-target");
+    }
+
+    fn execute_prepared_commands(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        commands: &[PreparedCommand],
+    ) -> Result<(), TguiError> {
+        for command in commands {
+            match command {
+                PreparedCommand::BackdropBlur(blur) => self.apply_backdrop_blur(encoder, blur)?,
+                PreparedCommand::Rect(batch) => {
+                    let scene_view = self.scene_target_view()?;
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("tgui-scene-rect-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: scene_view,
+                            resolve_target: None,
+                            depth_slice: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    if self.apply_scissor(&mut pass, batch.clip_rect) {
+                        pass.set_pipeline(&self.rect_pipeline);
+                        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                        pass.draw(0..batch.vertex_count, 0..1);
+                    }
+                }
+                PreparedCommand::Brush(batch) => {
+                    let scene_view = self.scene_target_view()?;
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("tgui-scene-brush-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: scene_view,
+                            resolve_target: None,
+                            depth_slice: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    if self.apply_scissor(&mut pass, batch.clip_rect) {
+                        pass.set_pipeline(&self.brush_pipeline);
+                        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                        pass.draw(0..batch.vertex_count, 0..1);
+                    }
+                }
+                PreparedCommand::Mesh(batch) => {
+                    let scene_view = self.scene_target_view()?;
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("tgui-scene-mesh-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: scene_view,
+                            resolve_target: None,
+                            depth_slice: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    if self.apply_scissor(&mut pass, batch.clip_rect) {
+                        pass.set_pipeline(&self.mesh_pipeline);
+                        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                        pass.draw(0..batch.vertex_count, 0..1);
+                    }
+                }
+                PreparedCommand::Sprite(batch) => {
+                    let scene_view = self.scene_target_view()?;
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("tgui-scene-sprite-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: scene_view,
+                            resolve_target: None,
+                            depth_slice: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    if self.apply_scissor(&mut pass, batch.clip_rect) {
+                        pass.set_pipeline(&self.text_pipeline);
+                        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                        pass.set_bind_group(0, &batch.bind_group, &[]);
+                        pass.draw(0..batch.vertex_count, 0..1);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn apply_backdrop_blur(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        blur: &PreparedBackdropBlur,
+    ) -> Result<(), TguiError> {
+        let scene_target = self
+            .scene_target
+            .as_ref()
+            .ok_or_else(|| TguiError::TextRender("scene target unavailable".into()))?;
+        let blur_target = self
+            .blur_target
+            .as_ref()
+            .ok_or_else(|| TguiError::TextRender("blur target unavailable".into()))?;
+        let blur_scratch_target = self
+            .blur_scratch_target
+            .as_ref()
+            .ok_or_else(|| TguiError::TextRender("blur scratch target unavailable".into()))?;
+
+        let scene_snapshot = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("tgui-scene-snapshot"),
+            size: wgpu::Extent3d {
+                width: self.config.width,
+                height: self.config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.config.format,
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &scene_target.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &scene_snapshot,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: self.config.width,
+                height: self.config.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let scene_snapshot_view =
+            scene_snapshot.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let full_screen = TextVertex::quad(
+            Rect::new(
+                0.0,
+                0.0,
+                self.config.width as f32 / self.scale_factor,
+                self.config.height as f32 / self.scale_factor,
+            ),
+            self.config.width as f32 / self.scale_factor,
+            self.config.height as f32 / self.scale_factor,
+        );
+        let full_screen_buffer =
+            self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("tgui-backdrop-fullscreen-vertices"),
+                contents: bytemuck::cast_slice(&full_screen),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        let horizontal_uniform = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tgui-backdrop-horizontal-uniform"),
+            contents: bytemuck::bytes_of(&BlurUniform {
+                direction: [1.0, 0.0],
+                texel_size: [
+                    1.0 / self.config.width.max(1) as f32,
+                    1.0 / self.config.height.max(1) as f32,
+                ],
+                radius: blur.primitive.blur_radius.max(0.0),
+                _pad: 0.0,
+            }),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let vertical_uniform = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tgui-backdrop-vertical-uniform"),
+            contents: bytemuck::bytes_of(&BlurUniform {
+                direction: [0.0, 1.0],
+                texel_size: [
+                    1.0 / self.config.width.max(1) as f32,
+                    1.0 / self.config.height.max(1) as f32,
+                ],
+                radius: blur.primitive.blur_radius.max(0.0),
+                _pad: 0.0,
+            }),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let horizontal_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui-backdrop-horizontal-bind-group"),
+            layout: &self.backdrop_blur_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&scene_snapshot_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.text_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: horizontal_uniform.as_entire_binding(),
+                },
+            ],
+        });
+        let vertical_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui-backdrop-vertical-bind-group"),
+            layout: &self.backdrop_blur_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&blur_scratch_target.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.text_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: vertical_uniform.as_entire_binding(),
+                },
+            ],
+        });
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("tgui-backdrop-horizontal-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &blur_scratch_target.view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.backdrop_blur_pipeline);
+            pass.set_vertex_buffer(0, full_screen_buffer.slice(..));
+            pass.set_bind_group(0, &horizontal_bind_group, &[]);
+            pass.draw(0..full_screen.len() as u32, 0..1);
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("tgui-backdrop-vertical-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &blur_target.view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.backdrop_blur_pipeline);
+            pass.set_vertex_buffer(0, full_screen_buffer.slice(..));
+            pass.set_bind_group(0, &vertical_bind_group, &[]);
+            pass.draw(0..full_screen.len() as u32, 0..1);
+        }
+
+        let composite_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui-backdrop-composite-bind-group"),
+            layout: &self.backdrop_composite_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&blur_target.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&scene_snapshot_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.text_sampler),
+                },
+            ],
+        });
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("tgui-backdrop-composite-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &scene_target.view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            if self.apply_scissor(&mut pass, blur.primitive.clip_rect) {
+                pass.set_pipeline(&self.backdrop_composite_pipeline);
+                pass.set_vertex_buffer(0, blur.composite_buffer.slice(..));
+                pass.set_bind_group(0, &composite_bind_group, &[]);
+                pass.draw(0..blur.composite_vertex_count, 0..1);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn blit_scene_to_surface(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        scene_view: &wgpu::TextureView,
+        color_attachment_view: &wgpu::TextureView,
+        resolve_target: Option<&wgpu::TextureView>,
+    ) {
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui-scene-present-bind-group"),
+            layout: &self.text_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(scene_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.text_sampler),
+                },
+            ],
+        });
+        let quad = TextVertex::quad(
+            Rect::new(
+                0.0,
+                0.0,
+                self.config.width as f32 / self.scale_factor,
+                self.config.height as f32 / self.scale_factor,
+            ),
+            self.config.width as f32 / self.scale_factor,
+            self.config.height as f32 / self.scale_factor,
+        );
+        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tgui-scene-present-vertices"),
+            contents: bytemuck::cast_slice(&quad),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("tgui-present-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: color_attachment_view,
+                resolve_target,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(surface_clear_color(self.clear_color)),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.text_pipeline);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.draw(0..quad.len() as u32, 0..1);
+    }
+
+    fn scene_target_view(&self) -> Result<&wgpu::TextureView, TguiError> {
+        self.scene_target
+            .as_ref()
+            .map(|target| &target.view)
+            .ok_or_else(|| TguiError::TextRender("scene target unavailable".into()))
     }
 
     fn text_cache_key(&self, text: &TextPrimitive) -> Option<TextCacheKey> {
@@ -1303,6 +1918,182 @@ impl MeshVertex {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct BrushVertex {
+    position: [f32; 2],
+    local_position: [f32; 2],
+    rect_size: [f32; 2],
+    corner_radius: f32,
+    brush_meta: [f32; 4],
+    gradient_data0: [f32; 4],
+    gradient_data1: [f32; 4],
+    stop_offsets0: [f32; 4],
+    stop_offsets1: [f32; 4],
+    stop_color0: [f32; 4],
+    stop_color1: [f32; 4],
+    stop_color2: [f32; 4],
+    stop_color3: [f32; 4],
+    stop_color4: [f32; 4],
+    stop_color5: [f32; 4],
+    stop_color6: [f32; 4],
+}
+
+impl BrushVertex {
+    fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        const ATTRIBUTES: [wgpu::VertexAttribute; 16] = wgpu::vertex_attr_array![
+            0 => Float32x2,
+            1 => Float32x2,
+            2 => Float32x2,
+            3 => Float32,
+            4 => Float32x4,
+            5 => Float32x4,
+            6 => Float32x4,
+            7 => Float32x4,
+            8 => Float32x4,
+            9 => Float32x4,
+            10 => Float32x4,
+            11 => Float32x4,
+            12 => Float32x4,
+            13 => Float32x4,
+            14 => Float32x4,
+            15 => Float32x4
+        ];
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &ATTRIBUTES,
+        }
+    }
+
+    fn from_primitive(
+        rect: Rect,
+        corner_radius: f32,
+        brush_data: BrushPrimitiveData,
+        physical_width: f32,
+        physical_height: f32,
+        scale_factor: f32,
+    ) -> [Self; 6] {
+        let rect_x = rect.x.get() * scale_factor;
+        let rect_y = rect.y.get() * scale_factor;
+        let rect_width = rect.width.max(0.0).get() * scale_factor;
+        let rect_height = rect.height.max(0.0).get() * scale_factor;
+        let x0 = rect_x / physical_width * 2.0 - 1.0;
+        let x1 = (rect_x + rect_width) / physical_width * 2.0 - 1.0;
+        let y0 = 1.0 - rect_y / physical_height * 2.0;
+        let y1 = 1.0 - (rect_y + rect_height) / physical_height * 2.0;
+        let rect_size = [rect_width, rect_height];
+        let radius = (corner_radius.max(0.0) * scale_factor)
+            .min(rect_size[0] * 0.5)
+            .min(rect_size[1] * 0.5);
+
+        let build = |position: [f32; 2], local_position: [f32; 2]| Self {
+            position,
+            local_position,
+            rect_size,
+            corner_radius: radius,
+            brush_meta: brush_data.brush_meta,
+            gradient_data0: scale_gradient_pair(brush_data.gradient_data0, scale_factor),
+            gradient_data1: scale_gradient_pair(brush_data.gradient_data1, scale_factor),
+            stop_offsets0: brush_data.stop_offsets0,
+            stop_offsets1: brush_data.stop_offsets1,
+            stop_color0: brush_data.stop_colors[0],
+            stop_color1: brush_data.stop_colors[1],
+            stop_color2: brush_data.stop_colors[2],
+            stop_color3: brush_data.stop_colors[3],
+            stop_color4: brush_data.stop_colors[4],
+            stop_color5: brush_data.stop_colors[5],
+            stop_color6: brush_data.stop_colors[6],
+        };
+
+        [
+            build([x0, y0], [0.0, 0.0]),
+            build([x1, y0], [rect_size[0], 0.0]),
+            build([x1, y1], [rect_size[0], rect_size[1]]),
+            build([x0, y0], [0.0, 0.0]),
+            build([x1, y1], [rect_size[0], rect_size[1]]),
+            build([x0, y1], [0.0, rect_size[1]]),
+        ]
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct CompositeVertex {
+    position: [f32; 2],
+    uv: [f32; 2],
+    local_position: [f32; 2],
+    rect_size: [f32; 2],
+    corner_radius: f32,
+}
+
+impl CompositeVertex {
+    fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        const ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+            0 => Float32x2,
+            1 => Float32x2,
+            2 => Float32x2,
+            3 => Float32x2,
+            4 => Float32
+        ];
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &ATTRIBUTES,
+        }
+    }
+
+    fn quad(rect: Rect, width: f32, height: f32, corner_radius: f32) -> [Self; 6] {
+        let rect_x = rect.x.get();
+        let rect_y = rect.y.get();
+        let rect_width = rect.width.get();
+        let rect_height = rect.height.get();
+        let x0 = rect_x / width * 2.0 - 1.0;
+        let x1 = (rect_x + rect_width) / width * 2.0 - 1.0;
+        let y0 = 1.0 - rect_y / height * 2.0;
+        let y1 = 1.0 - (rect_y + rect_height) / height * 2.0;
+        let uv_x0 = rect_x / width;
+        let uv_x1 = (rect_x + rect_width) / width;
+        let uv_y0 = rect_y / height;
+        let uv_y1 = (rect_y + rect_height) / height;
+        let rect_size = [rect_width, rect_height];
+        let radius = corner_radius.min(rect_width * 0.5).min(rect_height * 0.5);
+
+        let build = |position: [f32; 2], uv: [f32; 2], local_position: [f32; 2]| Self {
+            position,
+            uv,
+            local_position,
+            rect_size,
+            corner_radius: radius,
+        };
+
+        [
+            build([x0, y0], [uv_x0, uv_y0], [0.0, 0.0]),
+            build([x1, y0], [uv_x1, uv_y0], [rect_size[0], 0.0]),
+            build(
+                [x1, y1],
+                [uv_x1, uv_y1],
+                [rect_size[0], rect_size[1]],
+            ),
+            build([x0, y0], [uv_x0, uv_y0], [0.0, 0.0]),
+            build(
+                [x1, y1],
+                [uv_x1, uv_y1],
+                [rect_size[0], rect_size[1]],
+            ),
+            build([x0, y1], [uv_x0, uv_y1], [0.0, rect_size[1]]),
+        ]
+    }
+}
+
+fn scale_gradient_pair(mut pair: [f32; 4], scale_factor: f32) -> [f32; 4] {
+    pair[0] *= scale_factor;
+    pair[1] *= scale_factor;
+    pair[2] *= scale_factor;
+    pair[3] *= scale_factor;
+    pair
+}
+
 fn instance_descriptor(clear_color: TguiColor) -> wgpu::InstanceDescriptor {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = instance_backends(clear_color);
@@ -1413,7 +2204,40 @@ fn create_multisample_target(
 
     Some(MultisampleTarget {
         _texture: texture,
-        view,
+        _view: view,
+    })
+}
+
+fn create_offscreen_target(
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+    label: &str,
+) -> Option<OffscreenTarget> {
+    if config.width == 0 || config.height == 0 {
+        return None;
+    }
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: config.format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+
+    Some(OffscreenTarget {
+        view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
+        texture,
     })
 }
 

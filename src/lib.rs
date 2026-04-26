@@ -114,11 +114,12 @@ pub use ui::theme::{
 };
 pub use ui::unit::{dp, sp, Dp, Sp};
 pub use ui::widget::{
-    rect, Button, Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem,
-    CanvasItemId, CanvasLinearGradient, CanvasPath, CanvasPathOpError, CanvasPointerEvent,
-    CanvasRadialGradient, CanvasShadow, CanvasStroke, CursorStyle, Element, Flex, Grid, Image,
-    Input, IntoLengthValue, PathBuilder, Point, Rect, Stack, Switch, Text, WidgetCommand,
-    WidgetEventResult, WidgetId, WidgetTree,
+    rect, BackgroundBrush, BackgroundGradientStop, BackgroundLinearGradient,
+    BackgroundRadialGradient, Button, Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop,
+    CanvasItem, CanvasItemId, CanvasLinearGradient, CanvasPath, CanvasPathOpError,
+    CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke, CursorStyle, Element,
+    Flex, Grid, Image, Input, IntoLengthValue, PathBuilder, Point, Rect, Stack, Switch, Text,
+    WidgetCommand, WidgetEventResult, WidgetId, WidgetTree,
 };
 #[cfg(feature = "video")]
 pub use video::{

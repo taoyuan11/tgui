@@ -3,6 +3,7 @@ use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{dp, Dp};
 
+use super::background::BackgroundBrush;
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
@@ -195,6 +196,16 @@ impl<VM> Input<VM> {
 
     pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
         self.element.background = Some(color.into());
+        self
+    }
+
+    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
+        self.element.visual.background_brush = Some(brush.into());
+        self
+    }
+
+    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
+        self.element.visual.background_blur = blur.into();
         self
     }
 

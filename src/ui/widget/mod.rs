@@ -1,4 +1,5 @@
 mod button;
+mod background;
 mod canvas;
 mod common;
 mod container;
@@ -11,15 +12,18 @@ mod text;
 mod video;
 
 pub use button::Button;
+pub use background::{
+    BackgroundBrush, BackgroundGradientStop, BackgroundLinearGradient, BackgroundRadialGradient,
+};
 pub use canvas::{
     Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasItemId,
     CanvasLinearGradient, CanvasPath, CanvasPathOpError, CanvasPointerEvent, CanvasRadialGradient,
     CanvasShadow, CanvasStroke, PathBuilder,
 };
 pub(crate) use common::{
-    CompositionState, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
-    InteractionHandlers, MediaEventPhase, MediaEventState, MeshVertex, RenderCommand,
-    RenderedWidgetScene, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
+    BackdropBlurPrimitive, BrushPrimitiveData, CompositionState, ComputedScene, HitInteraction,
+    InputEditState, InputSnapshot, InteractionHandlers, MediaEventPhase, MediaEventState,
+    MeshVertex, RenderCommand, RenderedWidgetScene, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,
