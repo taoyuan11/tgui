@@ -20,8 +20,8 @@ pub struct Text {
     pub(crate) background: Option<Value<Color>>,
     pub(crate) color: Option<Value<Color>>,
     pub(crate) font_size: Option<Sp>,
-    pub(crate) font_weight: FontWeight,
-    pub(crate) letter_spacing: Sp,
+    pub(crate) font_weight: Option<FontWeight>,
+    pub(crate) letter_spacing: Option<Sp>,
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
     pub(crate) user_select: bool,
 }
@@ -74,7 +74,7 @@ macro_rules! impl_text_layout_api {
         }
 
         pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
-            self.layout.padding = insets.into();
+            self.layout.padding = Some(insets.into());
             self
         }
 
@@ -168,8 +168,8 @@ impl Text {
             background: None,
             color: None,
             font_size: None,
-            font_weight: FontWeight::NORMAL,
-            letter_spacing: Sp::new(1.0),
+            font_weight: None,
+            letter_spacing: None,
             cursor_style: None,
             user_select: false,
         }
@@ -203,23 +203,23 @@ impl Text {
     }
 
     pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_width = width.into();
-        self.visual.border_color = color.into();
+        self.visual.border_width = Some(width.into());
+        self.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_color = color.into();
+        self.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_radius = radius.into();
+        self.visual.border_radius = Some(radius.into());
         self
     }
 
     pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_width = width.into();
+        self.visual.border_width = Some(width.into());
         self
     }
 
@@ -234,12 +234,12 @@ impl Text {
     }
 
     pub fn font_weight(mut self, weight: FontWeight) -> Self {
-        self.font_weight = weight;
+        self.font_weight = Some(weight);
         self
     }
 
     pub fn character_spacing(mut self, spacing: Sp) -> Self {
-        self.letter_spacing = spacing;
+        self.letter_spacing = Some(spacing);
         self
     }
 
@@ -352,6 +352,6 @@ mod tests {
     #[test]
     fn character_spacing_updates_letter_spacing() {
         let text = Text::new("hello").character_spacing(Sp::new(2.5));
-        assert_eq!(text.letter_spacing, Sp::new(2.5));
+        assert_eq!(text.letter_spacing, Some(Sp::new(2.5)));
     }
 }

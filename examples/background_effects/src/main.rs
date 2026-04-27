@@ -6,7 +6,8 @@ use tgui::{
 
 struct BackgroundEffectsVm;
 
-impl BackgroundEffectsVm {
+impl ViewModel for BackgroundEffectsVm {
+
     fn new(_: &ViewModelContext) -> Self {
         Self
     }
@@ -26,9 +27,8 @@ impl BackgroundEffectsVm {
             )
             .into()
     }
+    
 }
-
-impl ViewModel for BackgroundEffectsVm {}
 
 fn background_pattern() -> tgui::Element<BackgroundEffectsVm> {
     Flex::new(Axis::Vertical)

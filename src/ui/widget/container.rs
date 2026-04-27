@@ -234,23 +234,23 @@ impl<VM> Container<VM> {
     }
 
     pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_width = width.into();
-        self.element.visual.border_color = color.into();
+        self.element.visual.border_width = Some(width.into());
+        self.element.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_color = color.into();
+        self.element.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_radius = radius.into();
+        self.element.visual.border_radius = Some(radius.into());
         self
     }
 
     pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_width = width.into();
+        self.element.visual.border_width = Some(width.into());
         self
     }
 
@@ -303,7 +303,7 @@ impl<VM> Container<VM> {
 
     pub fn padding(mut self, padding: impl Into<Value<Insets>>) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.padding = padding.into();
+            layout.padding = Some(padding.into());
         }
         self
     }
@@ -364,56 +364,56 @@ impl<VM> Container<VM> {
 
     pub fn scrollbar_thumb_color(mut self, color: Color) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.thumb_color = color;
+            layout.scrollbar_style.thumb_color = Some(color);
         }
         self
     }
 
     pub fn scrollbar_track_color(mut self, color: Color) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.track_color = color;
+            layout.scrollbar_style.track_color = Some(color);
         }
         self
     }
 
     pub fn scrollbar_hover_thumb_color(mut self, color: Color) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.hover_thumb_color = color;
+            layout.scrollbar_style.hover_thumb_color = Some(color);
         }
         self
     }
 
     pub fn scrollbar_active_thumb_color(mut self, color: Color) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.active_thumb_color = color;
+            layout.scrollbar_style.active_thumb_color = Some(color);
         }
         self
     }
 
     pub fn scrollbar_thickness(mut self, thickness: Dp) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.thickness = thickness;
+            layout.scrollbar_style.thickness = Some(thickness);
         }
         self
     }
 
     pub fn scrollbar_radius(mut self, radius: Dp) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.radius = radius;
+            layout.scrollbar_style.radius = Some(radius);
         }
         self
     }
 
     pub fn scrollbar_insets(mut self, insets: Insets) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.insets = insets;
+            layout.scrollbar_style.insets = Some(insets);
         }
         self
     }
 
     pub fn scrollbar_min_thumb_length(mut self, min_thumb_length: Dp) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.min_thumb_length = min_thumb_length;
+            layout.scrollbar_style.min_thumb_length = Some(min_thumb_length);
         }
         self
     }

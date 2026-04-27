@@ -955,106 +955,66 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         commands: &[PreparedCommand],
     ) -> Result<(), TguiError> {
-        for command in commands {
-            match command {
-                PreparedCommand::BackdropBlur(blur) => self.apply_backdrop_blur(encoder, blur)?,
-                PreparedCommand::Rect(batch) => {
-                    let scene_view = self.scene_target_view()?;
-                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("tgui-scene-rect-pass"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: scene_view,
-                            resolve_target: None,
-                            depth_slice: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Load,
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                        multiview_mask: None,
-                    });
-                    if self.apply_scissor(&mut pass, batch.clip_rect) {
-                        pass.set_pipeline(&self.rect_pipeline);
-                        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
-                        pass.draw(0..batch.vertex_count, 0..1);
+        let mut index = 0;
+        while index < commands.len() {
+            if let PreparedCommand::BackdropBlur(blur) = &commands[index] {
+                self.apply_backdrop_blur(encoder, blur)?;
+                index += 1;
+                continue;
+            }
+
+            let scene_view = self.scene_target_view()?;
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("tgui-scene-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: scene_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            while index < commands.len() {
+                match &commands[index] {
+                    PreparedCommand::BackdropBlur(_) => break,
+                    PreparedCommand::Rect(batch) => {
+                        if self.apply_scissor(&mut pass, batch.clip_rect) {
+                            pass.set_pipeline(&self.rect_pipeline);
+                            pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                            pass.draw(0..batch.vertex_count, 0..1);
+                        }
+                    }
+                    PreparedCommand::Brush(batch) => {
+                        if self.apply_scissor(&mut pass, batch.clip_rect) {
+                            pass.set_pipeline(&self.brush_pipeline);
+                            pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                            pass.draw(0..batch.vertex_count, 0..1);
+                        }
+                    }
+                    PreparedCommand::Mesh(batch) => {
+                        if self.apply_scissor(&mut pass, batch.clip_rect) {
+                            pass.set_pipeline(&self.mesh_pipeline);
+                            pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                            pass.draw(0..batch.vertex_count, 0..1);
+                        }
+                    }
+                    PreparedCommand::Sprite(batch) => {
+                        if self.apply_scissor(&mut pass, batch.clip_rect) {
+                            pass.set_pipeline(&self.text_pipeline);
+                            pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                            pass.set_bind_group(0, &batch.bind_group, &[]);
+                            pass.draw(0..batch.vertex_count, 0..1);
+                        }
                     }
                 }
-                PreparedCommand::Brush(batch) => {
-                    let scene_view = self.scene_target_view()?;
-                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("tgui-scene-brush-pass"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: scene_view,
-                            resolve_target: None,
-                            depth_slice: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Load,
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                        multiview_mask: None,
-                    });
-                    if self.apply_scissor(&mut pass, batch.clip_rect) {
-                        pass.set_pipeline(&self.brush_pipeline);
-                        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
-                        pass.draw(0..batch.vertex_count, 0..1);
-                    }
-                }
-                PreparedCommand::Mesh(batch) => {
-                    let scene_view = self.scene_target_view()?;
-                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("tgui-scene-mesh-pass"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: scene_view,
-                            resolve_target: None,
-                            depth_slice: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Load,
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                        multiview_mask: None,
-                    });
-                    if self.apply_scissor(&mut pass, batch.clip_rect) {
-                        pass.set_pipeline(&self.mesh_pipeline);
-                        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
-                        pass.draw(0..batch.vertex_count, 0..1);
-                    }
-                }
-                PreparedCommand::Sprite(batch) => {
-                    let scene_view = self.scene_target_view()?;
-                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("tgui-scene-sprite-pass"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: scene_view,
-                            resolve_target: None,
-                            depth_slice: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Load,
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                        multiview_mask: None,
-                    });
-                    if self.apply_scissor(&mut pass, batch.clip_rect) {
-                        pass.set_pipeline(&self.text_pipeline);
-                        pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
-                        pass.set_bind_group(0, &batch.bind_group, &[]);
-                        pass.draw(0..batch.vertex_count, 0..1);
-                    }
-                }
+                index += 1;
             }
         }
 
@@ -1727,12 +1687,7 @@ impl RectVertex {
         let x1 = (rect_x + rect_width) / physical_width * 2.0 - 1.0;
         let y0 = 1.0 - rect_y / physical_height * 2.0;
         let y1 = 1.0 - (rect_y + rect_height) / physical_height * 2.0;
-        let color = [
-            primitive.color.r as f32 / 255.0,
-            primitive.color.g as f32 / 255.0,
-            primitive.color.b as f32 / 255.0,
-            primitive.color.a as f32 / 255.0,
-        ];
+        let color = primitive.color.to_linear_rgba_f32();
         let rect_size = [rect_width, rect_height];
         let radius = (primitive.corner_radius.max(0.0) * scale_factor)
             .min(rect_size[0] * 0.5)

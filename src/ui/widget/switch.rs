@@ -1,7 +1,7 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::ui::layout::{Align, Insets, LayoutStyle, Length, Value};
-use crate::ui::unit::{dp, Dp};
+use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
+use crate::ui::unit::Dp;
 
 use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
@@ -62,7 +62,7 @@ macro_rules! impl_widget_layout_api {
         }
 
         pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
-            self.element.layout.padding = insets.into();
+            self.element.layout.padding = Some(insets.into());
             self
         }
 
@@ -154,26 +154,18 @@ impl<VM> Switch<VM> {
         Self {
             element: Element {
                 id: WidgetId::next(),
-                layout: LayoutStyle {
-                    width: Some(Value::Static(Length::Px(dp(44.0)))),
-                    height: Some(Value::Static(Length::Px(dp(24.0)))),
-                    padding: Value::Static(Insets::all(dp(2.0))),
-                    ..LayoutStyle::default()
-                },
-                visual: VisualStyle {
-                    border_radius: Value::Static(dp(999.0)),
-                    ..VisualStyle::default()
-                },
+                layout: LayoutStyle::default(),
+                visual: VisualStyle::default(),
                 interactions,
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::Switch {
                     checked: checked.into(),
                     on_change: None,
-                    active_background: Value::Static(Color::hexa(0x2563EBFF)),
-                    inactive_background: Value::Static(Color::hexa(0x94A3B8FF)),
-                    active_thumb_color: Value::Static(Color::WHITE),
-                    inactive_thumb_color: Value::Static(Color::WHITE),
+                    active_background: None,
+                    inactive_background: None,
+                    active_thumb_color: None,
+                    inactive_thumb_color: None,
                     disabled: Value::Static(false),
                 },
             },
@@ -207,7 +199,7 @@ impl<VM> Switch<VM> {
             active_background, ..
         } = &mut self.element.kind
         {
-            *active_background = color.into();
+            *active_background = Some(color.into());
         }
         self
     }
@@ -218,7 +210,7 @@ impl<VM> Switch<VM> {
             ..
         } = &mut self.element.kind
         {
-            *inactive_background = color.into();
+            *inactive_background = Some(color.into());
         }
         self
     }
@@ -231,8 +223,8 @@ impl<VM> Switch<VM> {
             ..
         } = &mut self.element.kind
         {
-            *active_thumb_color = color.clone();
-            *inactive_thumb_color = color;
+            *active_thumb_color = Some(color.clone());
+            *inactive_thumb_color = Some(color);
         }
         self
     }
@@ -242,7 +234,7 @@ impl<VM> Switch<VM> {
             active_thumb_color, ..
         } = &mut self.element.kind
         {
-            *active_thumb_color = color.into();
+            *active_thumb_color = Some(color.into());
         }
         self
     }
@@ -253,29 +245,29 @@ impl<VM> Switch<VM> {
             ..
         } = &mut self.element.kind
         {
-            *inactive_thumb_color = color.into();
+            *inactive_thumb_color = Some(color.into());
         }
         self
     }
 
     pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_width = width.into();
-        self.element.visual.border_color = color.into();
+        self.element.visual.border_width = Some(width.into());
+        self.element.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_color = color.into();
+        self.element.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_radius = radius.into();
+        self.element.visual.border_radius = Some(radius.into());
         self
     }
 
     pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_width = width.into();
+        self.element.visual.border_width = Some(width.into());
         self
     }
 

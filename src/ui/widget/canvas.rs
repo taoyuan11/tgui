@@ -699,7 +699,7 @@ macro_rules! impl_canvas_layout_api {
         }
 
         pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
-            self.element.layout.padding = insets.into();
+            self.element.layout.padding = Some(insets.into());
             self
         }
 
@@ -824,23 +824,23 @@ impl<VM> Canvas<VM> {
     }
 
     pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_width = width.into();
-        self.element.visual.border_color = color.into();
+        self.element.visual.border_width = Some(width.into());
+        self.element.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_color = color.into();
+        self.element.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_radius = radius.into();
+        self.element.visual.border_radius = Some(radius.into());
         self
     }
 
     pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_width = width.into();
+        self.element.visual.border_width = Some(width.into());
         self
     }
 
@@ -1505,12 +1505,7 @@ fn shadow_padding(blur: Dp) -> f32 {
 }
 
 fn color_to_f32(color: Color) -> [f32; 4] {
-    [
-        color.r as f32 / 255.0,
-        color.g as f32 / 255.0,
-        color.b as f32 / 255.0,
-        color.a as f32 / 255.0,
-    ]
+    color.to_linear_rgba_f32()
 }
 
 fn points_approx_equal(lhs: lyon::math::Point, rhs: lyon::math::Point) -> bool {

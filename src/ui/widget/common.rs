@@ -134,9 +134,9 @@ impl Rect {
 
 #[derive(Clone)]
 pub struct VisualStyle {
-    pub border_color: Value<Color>,
-    pub border_radius: Value<Dp>,
-    pub border_width: Value<Dp>,
+    pub border_color: Option<Value<Color>>,
+    pub border_radius: Option<Value<Dp>>,
+    pub border_width: Option<Value<Dp>>,
     pub background_brush: Option<Value<BackgroundBrush>>,
     pub background_image: Option<Value<BackgroundImage>>,
     pub background_blur: Value<Dp>,
@@ -147,9 +147,9 @@ pub struct VisualStyle {
 impl Default for VisualStyle {
     fn default() -> Self {
         Self {
-            border_color: Value::Static(Color::TRANSPARENT),
-            border_radius: Value::Static(Dp::ZERO),
-            border_width: Value::Static(Dp::ZERO),
+            border_color: None,
+            border_radius: None,
+            border_width: None,
             background_brush: None,
             background_image: None,
             background_blur: Value::Static(Dp::ZERO),
@@ -773,28 +773,18 @@ fn normalized_background_stops(
         stops
             .iter()
             .map(|stop| {
-                let color = stop.color.with_alpha_factor(opacity);
-                BackgroundGradientStopData {
-                    offset: stop.offset,
-                    color: [
-                        color.r as f32 / 255.0,
-                        color.g as f32 / 255.0,
-                        color.b as f32 / 255.0,
-                        color.a as f32 / 255.0,
-                    ],
-                }
-            })
-            .collect(),
-    )
-}
+                    let color = stop.color.with_alpha_factor(opacity);
+                    BackgroundGradientStopData {
+                        offset: stop.offset,
+                        color: color.to_linear_rgba_f32(),
+                    }
+                })
+                .collect(),
+        )
+    }
 
 fn solid_stop_colors(color: Color) -> [[f32; 4]; 7] {
-    let rgba = [
-        color.r as f32 / 255.0,
-        color.g as f32 / 255.0,
-        color.b as f32 / 255.0,
-        color.a as f32 / 255.0,
-    ];
+    let rgba = color.to_linear_rgba_f32();
     let mut colors = [[0.0; 4]; 7];
     colors[0] = rgba;
     colors[1] = rgba;
@@ -818,7 +808,7 @@ pub(crate) enum ContainerKind {
 #[derive(Clone, Debug)]
 pub(crate) struct ContainerLayout {
     pub kind: ContainerKind,
-    pub padding: Value<Insets>,
+    pub padding: Option<Value<Insets>>,
     pub gap: Value<crate::ui::layout::Length>,
     pub justify: Justify,
     pub align: Align,
@@ -831,7 +821,7 @@ impl ContainerLayout {
     pub(crate) fn flow() -> Self {
         Self {
             kind: ContainerKind::Flow,
-            padding: Value::Static(Insets::ZERO),
+            padding: None,
             gap: Value::Static(crate::ui::layout::Length::Px(Dp::ZERO)),
             justify: Justify::Start,
             align: Align::Start,
@@ -915,10 +905,10 @@ pub(crate) enum WidgetKind<VM> {
     Switch {
         checked: Value<bool>,
         on_change: Option<ValueCommand<VM, bool>>,
-        active_background: Value<Color>,
-        inactive_background: Value<Color>,
-        active_thumb_color: Value<Color>,
-        inactive_thumb_color: Value<Color>,
+        active_background: Option<Value<Color>>,
+        inactive_background: Option<Value<Color>>,
+        active_thumb_color: Option<Value<Color>>,
+        inactive_thumb_color: Option<Value<Color>>,
         disabled: Value<bool>,
     },
     Input {
@@ -1012,13 +1002,17 @@ pub(crate) enum MeasureContext {
         label: Text,
         variant: ButtonVariantKind,
     },
-    Switch,
+    Switch {
+        checked: bool,
+    },
     Input {
         text: Text,
         placeholder: Text,
     },
 }
 
+
+#[derive(Clone)]
 pub(crate) struct LayoutNode {
     pub node: TaffyNodeId,
     pub children: Vec<LayoutNode>,

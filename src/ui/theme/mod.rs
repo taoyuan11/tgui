@@ -13,7 +13,7 @@ pub use color::ColorScheme;
 #[allow(unused_imports)]
 pub use component::{
     ButtonStyle, ButtonTheme, ButtonVariant, ComponentTheme, DialogTheme, InputStyle, InputTheme,
-    PanelTheme, ScrollbarTheme, TextTheme, TooltipTheme,
+    PanelTheme, ScrollbarTheme, SwitchStyle, SwitchTheme, TextTheme, TooltipTheme,
 };
 pub use mode::ThemeMode;
 pub use motion::MotionScale;
@@ -89,5 +89,16 @@ mod tests {
                 selected: false,
             });
         assert_eq!(resolved, Theme::dark().colors.disabled);
+    }
+
+    #[test]
+    fn refresh_components_rebuilds_button_tokens_after_color_mutation() {
+        let mut theme = Theme::dark();
+        theme.colors.primary = crate::foundation::color::Color::WHITE;
+        assert_ne!(theme.components.button.primary.container.normal, theme.colors.primary);
+
+        theme.refresh_components();
+
+        assert_eq!(theme.components.button.primary.container.normal, theme.colors.primary);
     }
 }

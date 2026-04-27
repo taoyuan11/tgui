@@ -1,7 +1,7 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
-use crate::ui::unit::{dp, Dp};
+use crate::ui::unit::Dp;
 
 use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
@@ -64,7 +64,7 @@ macro_rules! impl_widget_layout_api {
         }
 
         pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
-            self.element.layout.padding = insets.into();
+            self.element.layout.padding = Some(insets.into());
             self
         }
 
@@ -155,10 +155,7 @@ impl<VM> Button<VM> {
         Self {
             element: Element {
                 id: WidgetId::next(),
-                layout: LayoutStyle {
-                    padding: Value::Static(Insets::symmetric(dp(12.0), dp(8.0))),
-                    ..LayoutStyle::default()
-                },
+                layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
                 interactions,
                 media_events: MediaEventHandlers::default(),
@@ -223,23 +220,23 @@ impl<VM> Button<VM> {
     }
 
     pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_width = width.into();
-        self.element.visual.border_color = color.into();
+        self.element.visual.border_width = Some(width.into());
+        self.element.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_color = color.into();
+        self.element.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_radius = radius.into();
+        self.element.visual.border_radius = Some(radius.into());
         self
     }
 
     pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_width = width.into();
+        self.element.visual.border_width = Some(width.into());
         self
     }
 

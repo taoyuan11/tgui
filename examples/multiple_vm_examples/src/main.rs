@@ -20,17 +20,7 @@ struct RootVM {
 }
 
 impl RootVM {
-    fn new(context: &ViewModelContext) -> Self {
-        Self {
-            page: context.observable(Page::Home),
-            home: HomePage::new(context),
-            settings: SettingsPage::new(context, Some(Arc::new(|enabled| {
-                tgui_log(LogLevel::Debug, format!("Settings enabled: {}", enabled));
-            }))),
-            themes: context.observable(multiple_vm_theme_set(false)),
-            current_theme: context.observable(ThemeMode::System),
-        }
-    }
+    
 
     fn theme_set(&self) -> Binding<ThemeSet> {
         self.themes.binding()
@@ -73,6 +63,22 @@ impl RootVM {
         self.page.set(Page::Settings);
     }
 
+    
+}
+
+impl ViewModel for RootVM {
+    fn new(context: &ViewModelContext) -> Self {
+        Self {
+            page: context.observable(Page::Home),
+            home: HomePage::new(context),
+            settings: SettingsPage::new(context, Some(Arc::new(|enabled| {
+                tgui_log(LogLevel::Debug, format!("Settings enabled: {}", enabled));
+            }))),
+            themes: context.observable(multiple_vm_theme_set(false)),
+            current_theme: context.observable(ThemeMode::System),
+        }
+    }
+
     fn view(&self) -> Element<Self> {
         let page = self.page.binding();
         let home = self.home.clone();
@@ -103,8 +109,6 @@ impl RootVM {
             .into()
     }
 }
-
-impl ViewModel for RootVM {}
 
 fn multiple_vm_theme_set(alternate: bool) -> ThemeSet {
     let mut light = Theme::light();

@@ -3,7 +3,7 @@ use std::fmt;
 use crate::animation::Transition;
 use crate::foundation::binding::Binding;
 use crate::foundation::color::Color;
-use crate::ui::unit::{dp, Dp};
+use crate::ui::unit::Dp;
 
 #[derive(Clone)]
 pub enum Value<T> {
@@ -212,54 +212,54 @@ pub enum Overflow {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScrollbarStyle {
-    pub thumb_color: Color,
-    pub hover_thumb_color: Color,
-    pub active_thumb_color: Color,
-    pub track_color: Color,
-    pub thickness: Dp,
-    pub radius: Dp,
-    pub insets: Insets,
-    pub min_thumb_length: Dp,
+    pub thumb_color: Option<Color>,
+    pub hover_thumb_color: Option<Color>,
+    pub active_thumb_color: Option<Color>,
+    pub track_color: Option<Color>,
+    pub thickness: Option<Dp>,
+    pub radius: Option<Dp>,
+    pub insets: Option<Insets>,
+    pub min_thumb_length: Option<Dp>,
 }
 
 impl ScrollbarStyle {
     pub fn thumb_color(mut self, color: Color) -> Self {
-        self.thumb_color = color;
+        self.thumb_color = Some(color);
         self
     }
 
     pub fn track_color(mut self, color: Color) -> Self {
-        self.track_color = color;
+        self.track_color = Some(color);
         self
     }
 
     pub fn hover_thumb_color(mut self, color: Color) -> Self {
-        self.hover_thumb_color = color;
+        self.hover_thumb_color = Some(color);
         self
     }
 
     pub fn active_thumb_color(mut self, color: Color) -> Self {
-        self.active_thumb_color = color;
+        self.active_thumb_color = Some(color);
         self
     }
 
     pub fn thickness(mut self, thickness: Dp) -> Self {
-        self.thickness = thickness;
+        self.thickness = Some(thickness);
         self
     }
 
     pub fn radius(mut self, radius: Dp) -> Self {
-        self.radius = radius;
+        self.radius = Some(radius);
         self
     }
 
     pub fn insets(mut self, insets: Insets) -> Self {
-        self.insets = insets;
+        self.insets = Some(insets);
         self
     }
 
     pub fn min_thumb_length(mut self, min_thumb_length: Dp) -> Self {
-        self.min_thumb_length = min_thumb_length;
+        self.min_thumb_length = Some(min_thumb_length);
         self
     }
 }
@@ -267,14 +267,14 @@ impl ScrollbarStyle {
 impl Default for ScrollbarStyle {
     fn default() -> Self {
         Self {
-            thumb_color: Color::hexa(0xFFFFFFFF).with_alpha_factor(0.72),
-            hover_thumb_color: Color::hexa(0xFFFFFFFF).with_alpha_factor(0.86),
-            active_thumb_color: Color::hexa(0xFFFFFFFF),
-            track_color: Color::hexa(0xFFFFFF1F),
-            thickness: dp(8.0),
-            radius: dp(999.0),
-            insets: Insets::all(dp(6.0)),
-            min_thumb_length: dp(28.0),
+            thumb_color: None,
+            hover_thumb_color: None,
+            active_thumb_color: None,
+            track_color: None,
+            thickness: None,
+            radius: None,
+            insets: None,
+            min_thumb_length: None,
         }
     }
 }
@@ -288,7 +288,7 @@ pub struct LayoutStyle {
     pub max_width: Option<Value<Length>>,
     pub max_height: Option<Value<Length>>,
     pub aspect_ratio: Option<Value<f32>>,
-    pub padding: Value<Insets>,
+    pub padding: Option<Value<Insets>>,
     pub margin: Value<Insets>,
     pub grow: Value<f32>,
     pub shrink: Value<f32>,
@@ -316,7 +316,7 @@ impl Default for LayoutStyle {
             max_width: None,
             max_height: None,
             aspect_ratio: None,
-            padding: Value::Static(Insets::ZERO),
+            padding: None,
             margin: Value::Static(Insets::ZERO),
             grow: Value::Static(0.0),
             shrink: Value::Static(1.0),

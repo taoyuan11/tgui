@@ -33,6 +33,23 @@ impl Theme {
         Self::new("dark", ColorScheme::dark())
     }
 
+    /// Rebuilds component styles from the current theme tokens.
+    ///
+    /// Call this after mutating `colors`, `typography`, `spacing`, `radius`,
+    /// `border`, `elevation`, or `motion` directly so derived component styles
+    /// stay in sync with the updated token values.
+    pub fn refresh_components(&mut self) {
+        self.components = ComponentTheme::from_tokens(
+            &self.colors,
+            &self.typography,
+            &self.spacing,
+            &self.radius,
+            &self.border,
+            &self.elevation,
+            &self.motion,
+        );
+    }
+
     pub(crate) fn new(name: impl Into<String>, colors: ColorScheme) -> Self {
         let typography = TypeScale::default();
         let spacing = SpaceScale::default();

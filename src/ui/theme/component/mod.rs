@@ -3,6 +3,7 @@ mod dialog;
 mod input;
 mod panel;
 mod scrollbar;
+mod switch;
 mod text;
 mod tooltip;
 
@@ -13,12 +14,14 @@ use crate::ui::theme::shape::{BorderScale, ElevationScale, RadiusScale};
 use crate::ui::theme::spacing::SpaceScale;
 use crate::ui::theme::state::Stateful;
 use crate::ui::theme::typography::TypeScale;
+use crate::ui::unit::Dp;
 
 pub use button::{ButtonStyle, ButtonTheme, ButtonVariant};
 pub use dialog::DialogTheme;
 pub use input::{InputStyle, InputTheme};
 pub use panel::PanelTheme;
 pub use scrollbar::ScrollbarTheme;
+pub use switch::{SwitchStyle, SwitchTheme};
 pub use text::TextTheme;
 pub use tooltip::TooltipTheme;
 
@@ -27,6 +30,7 @@ pub struct ComponentTheme {
     pub button: ButtonTheme,
     pub input: InputTheme,
     pub text: TextTheme,
+    pub switch: SwitchTheme,
     pub panel: PanelTheme,
     pub dialog: DialogTheme,
     pub tooltip: TooltipTheme,
@@ -69,9 +73,10 @@ impl ComponentTheme {
                         focused: colors.focus_ring,
                         disabled: disabled_surface,
                     },
+                    border_width: Dp::ZERO,
                     radius: radius.md,
-                    padding_x: spacing.md,
-                    padding_y: spacing.sm,
+                    padding_x: spacing.sm,
+                    padding_y: spacing.xs,
                     min_height: spacing.xl,
                     text_style: typography.label.clone(),
                 },
@@ -97,9 +102,10 @@ impl ComponentTheme {
                         focused: colors.focus_ring,
                         disabled: disabled_surface,
                     },
+                    border_width: border.thin,
                     radius: radius.md,
-                    padding_x: spacing.md,
-                    padding_y: spacing.sm,
+                    padding_x: spacing.sm,
+                    padding_y: spacing.xs,
                     min_height: spacing.xl,
                     text_style: typography.label.clone(),
                 },
@@ -125,9 +131,10 @@ impl ComponentTheme {
                         focused: colors.focus_ring,
                         disabled: Color::TRANSPARENT,
                     },
+                    border_width: Dp::ZERO,
                     radius: radius.md,
-                    padding_x: spacing.md,
-                    padding_y: spacing.sm,
+                    padding_x: spacing.sm,
+                    padding_y: spacing.xs,
                     min_height: spacing.xl,
                     text_style: typography.label.clone(),
                 },
@@ -153,9 +160,10 @@ impl ComponentTheme {
                         focused: colors.focus_ring,
                         disabled: disabled_surface,
                     },
+                    border_width: Dp::ZERO,
                     radius: radius.md,
-                    padding_x: spacing.md,
-                    padding_y: spacing.sm,
+                    padding_x: spacing.sm,
+                    padding_y: spacing.xs,
                     min_height: spacing.xl,
                     text_style: typography.label.clone(),
                 },
@@ -201,6 +209,55 @@ impl ComponentTheme {
                 default: typography.body.clone(),
                 muted_color: colors.on_surface_muted,
                 primary_color: colors.primary,
+            },
+            switch: SwitchTheme {
+                track: Stateful {
+                    normal: colors.surface_high,
+                    hovered: colors.surface_overlay,
+                    pressed: colors.surface_low,
+                    focused: colors.surface_overlay,
+                    disabled: colors.disabled,
+                },
+                track_checked: Stateful {
+                    normal: colors.primary,
+                    hovered: colors.primary,
+                    pressed: colors.primary,
+                    focused: colors.primary,
+                    disabled: colors.disabled,
+                },
+                thumb: Stateful {
+                    normal: colors.on_surface,
+                    hovered: colors.on_surface,
+                    pressed: colors.on_surface,
+                    focused: colors.on_surface,
+                    disabled: colors.on_disabled,
+                },
+                thumb_checked: Stateful {
+                    normal: colors.on_primary,
+                    hovered: colors.on_primary,
+                    pressed: colors.on_primary,
+                    focused: colors.on_primary,
+                    disabled: colors.on_disabled,
+                },
+                border: Stateful {
+                    normal: colors.outline_muted,
+                    hovered: colors.outline,
+                    pressed: colors.outline,
+                    focused: colors.focus_ring,
+                    disabled: colors.disabled,
+                },
+                border_checked: Stateful {
+                    normal: colors.primary,
+                    hovered: colors.primary,
+                    pressed: colors.primary,
+                    focused: colors.focus_ring,
+                    disabled: colors.disabled,
+                },
+                border_width: border.thin,
+                radius: radius.full,
+                padding: crate::ui::layout::Insets::all(spacing.xxs),
+                width: spacing.xl + spacing.sm + spacing.xxs,
+                height: spacing.lg,
             },
             panel: PanelTheme {
                 background: colors.surface,

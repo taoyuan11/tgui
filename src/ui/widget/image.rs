@@ -70,7 +70,7 @@ macro_rules! impl_image_layout_api {
         }
 
         pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
-            self.layout.padding = insets.into();
+            self.layout.padding = Some(insets.into());
             self
         }
 
@@ -295,23 +295,23 @@ impl Image {
     }
 
     pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_width = width.into();
-        self.visual.border_color = color.into();
+        self.visual.border_width = Some(width.into());
+        self.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_color = color.into();
+        self.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_radius = radius.into();
+        self.visual.border_radius = Some(radius.into());
         self
     }
 
     pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_width = width.into();
+        self.visual.border_width = Some(width.into());
         self
     }
 

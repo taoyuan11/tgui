@@ -4,8 +4,7 @@ use tgui::{
 };
 
 struct AppVm;
-
-impl AppVm {
+impl ViewModel for AppVm {
     fn new(_: &ViewModelContext) -> Self {
         Self
     }
@@ -42,8 +41,6 @@ impl AppVm {
             .into()
     }
 }
-
-impl ViewModel for AppVm {}
 
 fn main() -> Result<(), TguiError> {
     let mut theme = Theme::dark();

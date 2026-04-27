@@ -1,4 +1,3 @@
-use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::ContentFit;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
@@ -71,7 +70,7 @@ macro_rules! impl_video_layout_api {
         }
 
         pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
-            self.layout.padding = insets.into();
+            self.layout.padding = Some(insets.into());
             self
         }
 
@@ -161,7 +160,7 @@ impl VideoSurface {
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
             controller,
-            background: Some(Value::Static(Color::BLACK)),
+            background: None,
             fit: ContentFit::Contain,
             cursor_style: None,
         }
@@ -195,23 +194,23 @@ impl VideoSurface {
     }
 
     pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_width = width.into();
-        self.visual.border_color = color.into();
+        self.visual.border_width = Some(width.into());
+        self.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_color = color.into();
+        self.visual.border_color = Some(color.into());
         self
     }
 
     pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_radius = radius.into();
+        self.visual.border_radius = Some(radius.into());
         self
     }
 
     pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_width = width.into();
+        self.visual.border_width = Some(width.into());
         self
     }
 

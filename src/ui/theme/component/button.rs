@@ -16,6 +16,7 @@ pub struct ButtonVariant {
     pub container: Stateful<Color>,
     pub content: Stateful<Color>,
     pub border: Stateful<Color>,
+    pub border_width: Dp,
     pub radius: Dp,
     pub padding_x: Dp,
     pub padding_y: Dp,
@@ -37,12 +38,12 @@ pub struct ButtonStyle {
 }
 
 impl ButtonVariant {
-    pub fn resolve(&self, state: WidgetState, border_width: Dp) -> ButtonStyle {
+    pub fn resolve(&self, state: WidgetState) -> ButtonStyle {
         ButtonStyle {
             background: self.container.resolve(state),
             foreground: self.content.resolve(state),
             border_color: self.border.resolve(state),
-            border_width,
+            border_width: self.border_width,
             radius: self.radius,
             padding_x: self.padding_x,
             padding_y: self.padding_y,

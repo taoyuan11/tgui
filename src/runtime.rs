@@ -42,8 +42,8 @@ use crate::ui::widget::{
 };
 use crate::ui::widget::{
     CanvasItemId, CanvasPointerEvent, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
-    InteractionHandlers, MediaEventPhase, MediaEventState, Point, Rect, RenderedWidgetScene,
-    ScrollbarAxis, ScrollbarHandle, Text, WidgetId, WidgetStateMap, WidgetTree,
+    InteractionHandlers, MediaEventPhase, MediaEventState, Point, Rect, ResolvedSceneLayout,
+    ScrollRegion, ScrollbarAxis, ScrollbarHandle, Text, WidgetId, WidgetStateMap, WidgetTree,
 };
 use image::GenericImageView;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -374,6 +374,7 @@ struct CachedScene<VM> {
     scroll_epoch: u64,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar: Option<ScrollbarHandle>,
+    layout: Option<ResolvedSceneLayout<VM>>,
     computed: ComputedScene<VM>,
 }
 
@@ -931,6 +932,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && cached.active_scrollbar == active_scrollbar
     }
 
+    fn scene_layout_cache_matches(
+        &self,
+        cached: &CachedScene<VM>,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+    ) -> bool {
+        cached.viewport == viewport
+            && cached.units == units
+            && cached.focused_input == self.focused_input
+            && cached.selected_text == self.selected_text
+            && cached.caret_visible == caret_visible
+            && cached.animation_epoch == self.animation_epoch
+    }
+
     fn computed_scene(&mut self) -> &ComputedScene<VM> {
         let viewport = self.viewport_rect();
         let units = self.unit_context();
@@ -952,29 +968,77 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.scene_cache_matches(cached, viewport, units, caret_visible, active_scrollbar)
             })
             .unwrap_or(false);
+        let layout_cache_valid = self
+            .cached_scene
+            .as_ref()
+            .map(|cached| self.scene_layout_cache_matches(cached, viewport, units, caret_visible))
+            .unwrap_or(false);
 
         let widget_states = self.widget_state_map(active_scrollbar);
         if !cache_valid {
+            let previous_cached = self.cached_scene.take();
             let theme = self.animated_theme(Instant::now());
-            let computed = match self.widget_tree.as_ref() {
-                Some(tree) => tree.compute_scene_with_units_and_widget_state(
-                    &self.font_manager,
-                    &theme,
-                    &self.media_manager,
-                    units,
-                    &mut self.animation_engine,
-                    self.hovered_scrollbar,
-                    active_scrollbar,
-                    &widget_states,
-                    &self.scroll_states,
-                    viewport,
-                    self.focused_input,
-                    focused_input_state.as_ref(),
-                    self.selected_text,
-                    selected_text_state.as_ref(),
-                    caret_visible,
-                ),
-                None => ComputedScene::default(),
+            let (layout, computed) = match self.widget_tree.as_ref() {
+                Some(tree) => {
+                    if layout_cache_valid {
+                        let computed = {
+                            let cached = previous_cached
+                                .as_ref()
+                                .expect("layout cache should exist when layout cache is valid");
+                            let layout = cached
+                                .layout
+                                .as_ref()
+                                .expect("layout should exist when layout cache is valid");
+                            tree.collect_scene_from_layout(
+                                &self.font_manager,
+                                layout,
+                                &theme,
+                                &self.media_manager,
+                                &mut self.animation_engine,
+                                self.hovered_scrollbar,
+                                active_scrollbar,
+                                &widget_states,
+                                &self.scroll_states,
+                                viewport,
+                                self.focused_input,
+                                focused_input_state.as_ref(),
+                                self.selected_text,
+                                selected_text_state.as_ref(),
+                                caret_visible,
+                            )
+                        };
+                        let layout = previous_cached.and_then(|cached| cached.layout);
+                        (layout, computed)
+                    } else {
+                        let layout = tree.build_scene_layout(
+                            &self.font_manager,
+                            &theme,
+                            &self.media_manager,
+                            &mut self.animation_engine,
+                            units,
+                            viewport,
+                        );
+                        let computed = tree.collect_scene_from_layout(
+                            &self.font_manager,
+                            &layout,
+                            &theme,
+                            &self.media_manager,
+                            &mut self.animation_engine,
+                            self.hovered_scrollbar,
+                            active_scrollbar,
+                            &widget_states,
+                            &self.scroll_states,
+                            viewport,
+                            self.focused_input,
+                            focused_input_state.as_ref(),
+                            self.selected_text,
+                            selected_text_state.as_ref(),
+                            caret_visible,
+                        );
+                        (Some(layout), computed)
+                    }
+                }
+                None => (None, ComputedScene::default()),
             };
             self.cached_scene = Some(CachedScene {
                 viewport,
@@ -986,6 +1050,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 scroll_epoch: self.scroll_epoch,
                 hovered_scrollbar: self.hovered_scrollbar,
                 active_scrollbar,
+                layout,
                 computed,
             });
         }
@@ -1034,8 +1099,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         states
     }
 
-    fn render_primitives(&mut self) -> RenderedWidgetScene {
-        self.computed_scene().rendered()
+    fn scroll_regions(&mut self) -> Vec<ScrollRegion> {
+        self.computed_scene().scroll_regions.clone()
+    }
+
+    fn ime_cursor_area(&mut self) -> Option<Rect> {
+        self.computed_scene().ime_cursor_area
     }
 
     fn dispatch_media_events(&mut self) {
@@ -1120,19 +1189,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         self.sync_bindings(Instant::now());
-        let rendered = self.render_primitives();
         self.dispatch_media_events();
-        if let (Some(window), Some(caret_rect)) = (self.window.as_ref(), rendered.ime_cursor_area) {
+        let caret_rect = self.ime_cursor_area();
+        if let (Some(window), Some(caret_rect)) = (self.window.as_ref(), caret_rect) {
             let _ = window.request_ime_update(ImeRequest::Update(Self::ime_cursor_request_data(
                 caret_rect,
                 self.unit_context(),
             )));
         }
-        let renderer = self
+        let mut renderer = self
             .renderer
-            .as_mut()
+            .take()
             .expect("renderer should exist before drawing");
-        renderer.render(&rendered.primitives)
+        let status = {
+            let computed = self.computed_scene();
+            renderer.render(&computed.scene)
+        };
+        self.renderer = Some(renderer);
+        status
     }
 
     #[cfg(all(target_os = "android", feature = "android"))]
@@ -1757,7 +1831,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn ime_enable_request(&mut self) -> Option<ImeEnableRequest> {
         let request_data = Self::ime_cursor_request_data(
-            self.render_primitives().ime_cursor_area?,
+            self.ime_cursor_area()?,
             self.unit_context(),
         )
         .with_hint_and_purpose(ImeHint::NONE, ImePurpose::Normal);
@@ -1836,7 +1910,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let units = self.unit_context();
-        let theme_text = &self.theme.typography.body;
+        let theme_text = &self.theme.components.text.default;
         let font_size = units.resolve_sp(
             metrics
                 .text_style
@@ -1846,19 +1920,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let line_height =
             units.resolve_sp(theme_text.line_height.unwrap_or(theme_text.size * 1.25));
         let line_height = line_height.max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(if metrics.text_style.letter_spacing == Sp::ZERO {
-            theme_text.letter_spacing.unwrap_or(Sp::ZERO)
-        } else {
-            metrics.text_style.letter_spacing
-        });
+        let letter_spacing = units.resolve_sp(
+            metrics
+                .text_style
+                .letter_spacing
+                .unwrap_or(theme_text.letter_spacing.unwrap_or(Sp::ZERO)),
+        );
         let request = TextFontRequest {
             preferred_font: metrics.text_style.font_family.as_deref().or(self
                 .theme
-                .typography
-                .body
+                .components
+                .text
+                .default
                 .font_family
                 .as_deref()),
-            weight: metrics.text_style.font_weight,
+            weight: metrics.text_style.font_weight.unwrap_or(theme_text.weight),
         };
         let layout = self.font_manager.measure_text_layout(
             &metrics.text,
@@ -2347,8 +2423,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        let rendered = self.render_primitives();
-        for region in rendered.scroll_regions.iter().rev().copied() {
+        let scroll_regions = self.scroll_regions();
+        for region in scroll_regions.iter().rev().copied() {
             if region.visible_frame.is_empty() || !region.visible_frame.contains(cursor_position) {
                 continue;
             }
@@ -2391,14 +2467,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn scrollbar_thumb_hit(&mut self) -> Option<ScrollbarHandle> {
         let cursor_position = self.cursor_position?;
-        let rendered = self.render_primitives();
-        rendered.scroll_regions.iter().rev().find_map(|region| {
+        let scroll_regions = self.scroll_regions();
+        scroll_regions.iter().rev().find_map(|region| {
             if region.visible_frame.is_empty() || !region.visible_frame.contains(cursor_position) {
                 return None;
             }
             if region
                 .vertical_thumb
-                .map(|thumb| thumb.contains(cursor_position))
+                .map(|thumb: Rect| thumb.contains(cursor_position))
                 .unwrap_or(false)
             {
                 return Some(ScrollbarHandle {
@@ -2408,7 +2484,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             if region
                 .horizontal_thumb
-                .map(|thumb| thumb.contains(cursor_position))
+                .map(|thumb: Rect| thumb.contains(cursor_position))
                 .unwrap_or(false)
             {
                 return Some(ScrollbarHandle {
@@ -2427,9 +2503,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(cursor_position) = self.cursor_position else {
             return false;
         };
-        let rendered = self.render_primitives();
-        let Some(region) = rendered
-            .scroll_regions
+        let scroll_regions = self.scroll_regions();
+        let Some(region) = scroll_regions
             .iter()
             .copied()
             .find(|region| region.id == handle.id)
@@ -2563,7 +2638,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.scroll_epoch = self.scroll_epoch.wrapping_add(1);
         self.invalidate_scene();
-        self.invalidation.mark_dirty();
     }
 
     fn update_focus(
@@ -3681,20 +3755,21 @@ fn text_cursor_index_at_point(
         return 0;
     }
 
-    let default_style = &theme.typography.body;
+    let default_style = &theme.components.text.default;
     let font_size = units.resolve_sp(
         text_style
             .font_size
             .unwrap_or(default_style.size.max(sp(1.0))),
     );
     let line_height = (font_size * 1.25).max(font_size + 4.0);
-    let letter_spacing = units.resolve_sp(text_style.letter_spacing);
+    let letter_spacing =
+        units.resolve_sp(text_style.letter_spacing.unwrap_or(default_style.letter_spacing.unwrap_or(Sp::ZERO)));
     let text_request = TextFontRequest {
         preferred_font: text_style
             .font_family
             .as_deref()
             .or(default_style.font_family.as_deref()),
-        weight: text_style.font_weight,
+        weight: text_style.font_weight.unwrap_or(default_style.weight),
     };
     let inner = frame.inset(padding);
     let layout = font_manager.measure_text_layout(
@@ -3733,20 +3808,21 @@ fn input_cursor_index_at_point_with_state(
         return 0;
     }
 
-    let default_style = &theme.typography.body;
+    let default_style = &theme.components.text.default;
     let font_size = units.resolve_sp(
         text_style
             .font_size
             .unwrap_or(default_style.size.max(sp(1.0))),
     );
     let line_height = (font_size * 1.25).max(font_size + 4.0);
-    let letter_spacing = units.resolve_sp(text_style.letter_spacing);
+    let letter_spacing =
+        units.resolve_sp(text_style.letter_spacing.unwrap_or(default_style.letter_spacing.unwrap_or(Sp::ZERO)));
     let text_request = TextFontRequest {
         preferred_font: text_style
             .font_family
             .as_deref()
             .or(default_style.font_family.as_deref()),
-        weight: text_style.font_weight,
+        weight: text_style.font_weight.unwrap_or(default_style.weight),
     };
     let inner = frame.inset(padding);
     let layout = font_manager.measure_text_layout(
@@ -4171,7 +4247,7 @@ mod tests {
     use crate::text::font::{FontCatalog, TextFontRequest};
     use crate::ui::layout::Axis;
     use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
-    use crate::ui::unit::{dp, sp, Dp, UnitContext};
+    use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasPath, CanvasPointerEvent, CanvasShadow, CanvasStroke,
         CursorStyle, Flex, HitInteraction, Input, InputEditState, PathBuilder, Point, Text,
@@ -4182,7 +4258,7 @@ mod tests {
     #[cfg(feature = "video")]
     use std::time::Duration;
     use std::time::Instant;
-
+    use crate::{Element, Stack, ViewModelContext};
     use super::{
         input_cursor_index_at_point_with_state, next_grapheme_boundary, normalize_single_line_text,
         previous_grapheme_boundary, text_cursor_index_at_point, BoundRuntimeHandler, CachedScene,
@@ -4206,7 +4282,18 @@ mod tests {
     #[derive(Default)]
     struct TestVm;
 
-    impl crate::foundation::view_model::ViewModel for TestVm {}
+    impl crate::foundation::view_model::ViewModel for TestVm {
+        fn new(context: &ViewModelContext) -> Self {
+            todo!()
+        }
+
+        fn view(&self) -> Element<Self>
+        where
+            Self: Sized
+        {
+            todo!()
+        }
+    }
 
     fn test_config() -> ApplicationConfig {
         ApplicationConfig {
@@ -4423,6 +4510,7 @@ mod tests {
             scroll_epoch: 0,
             hovered_scrollbar: None,
             active_scrollbar: None,
+            layout: None,
             computed: Default::default(),
         };
 
@@ -4573,18 +4661,25 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
+                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(text_style.letter_spacing);
+        let letter_spacing = units.resolve_sp(
+            text_style
+                .letter_spacing
+                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+        );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
-                .typography
-                .body
+                .components
+                .text
+                .default
                 .font_family
                 .as_deref()),
-            weight: text_style.font_weight,
+            weight: text_style
+                .font_weight
+                .unwrap_or(handler.theme.components.text.default.weight),
         };
         let left = frame.x + padding.left.get();
         let before_target = handler
@@ -4650,18 +4745,25 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
+                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(text_style.letter_spacing);
+        let letter_spacing = units.resolve_sp(
+            text_style
+                .letter_spacing
+                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+        );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
-                .typography
-                .body
+                .components
+                .text
+                .default
                 .font_family
                 .as_deref()),
-            weight: text_style.font_weight,
+            weight: text_style
+                .font_weight
+                .unwrap_or(handler.theme.components.text.default.weight),
         };
         let left = frame.x + padding.left.get();
         let before_target = handler
@@ -4734,18 +4836,25 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
+                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(text_style.letter_spacing);
+        let letter_spacing = units.resolve_sp(
+            text_style
+                .letter_spacing
+                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+        );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
-                .typography
-                .body
+                .components
+                .text
+                .default
                 .font_family
                 .as_deref()),
-            weight: text_style.font_weight,
+            weight: text_style
+                .font_weight
+                .unwrap_or(handler.theme.components.text.default.weight),
         };
         let left = frame.x + padding.left.get();
         let before_start = handler
@@ -4845,18 +4954,25 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
+                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(text_style.letter_spacing);
+        let letter_spacing = units.resolve_sp(
+            text_style
+                .letter_spacing
+                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+        );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
-                .typography
-                .body
+                .components
+                .text
+                .default
                 .font_family
                 .as_deref()),
-            weight: text_style.font_weight,
+            weight: text_style
+                .font_weight
+                .unwrap_or(handler.theme.components.text.default.weight),
         };
         let layout = handler.font_manager.measure_text_layout(
             &text,
@@ -4932,18 +5048,25 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
+                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(text_style.letter_spacing);
+        let letter_spacing = units.resolve_sp(
+            text_style
+                .letter_spacing
+                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+        );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
-                .typography
-                .body
+                .components
+                .text
+                .default
                 .font_family
                 .as_deref()),
-            weight: text_style.font_weight,
+            weight: text_style
+                .font_weight
+                .unwrap_or(handler.theme.components.text.default.weight),
         };
         let layout = handler.font_manager.measure_text_layout(
             &text,
@@ -5069,18 +5192,25 @@ mod tests {
         let font_size = units.resolve_sp(
             text_style
                 .font_size
-                .unwrap_or(handler.theme.typography.body.size.max(sp(1.0))),
+                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(text_style.letter_spacing);
+        let letter_spacing = units.resolve_sp(
+            text_style
+                .letter_spacing
+                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+        );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
                 .theme
-                .typography
-                .body
+                .components
+                .text
+                .default
                 .font_family
                 .as_deref()),
-            weight: text_style.font_weight,
+            weight: text_style
+                .font_weight
+                .unwrap_or(handler.theme.components.text.default.weight),
         };
         let layout = handler.font_manager.measure_text_layout(
             &text,
@@ -5161,8 +5291,8 @@ mod tests {
 
         handler.handle_input_keyboard_event(&key_press_event(KeyCode::End, NamedKey::End));
 
-        let rendered = handler.render_primitives();
-        let caret = rendered
+        let caret = handler
+            .computed_scene()
             .ime_cursor_area
             .expect("focused input should expose caret rect");
         let input_clip = frame.inset(padding);
@@ -5210,8 +5340,8 @@ mod tests {
 
         handler.handle_input_keyboard_event(&key_press_event(KeyCode::Home, NamedKey::Home));
 
-        let rendered = handler.render_primitives();
-        let caret = rendered
+        let caret = handler
+            .computed_scene()
             .ime_cursor_area
             .expect("focused input should expose caret rect");
         let input_clip = frame.inset(padding);
@@ -5272,7 +5402,18 @@ mod tests {
         checked: bool,
     }
 
-    impl crate::foundation::view_model::ViewModel for SwitchVm {}
+    impl crate::foundation::view_model::ViewModel for SwitchVm {
+        fn new(context: &ViewModelContext) -> Self {
+            todo!()
+        }
+
+        fn view(&self) -> Element<Self>
+        where
+            Self: Sized
+        {
+            todo!()
+        }
+    }
 
     #[test]
     fn clicking_switch_dispatches_toggled_value() {
@@ -5377,7 +5518,22 @@ mod tests {
         widget_clicks: usize,
     }
 
-    impl crate::foundation::view_model::ViewModel for CanvasEventVm {}
+    impl crate::foundation::view_model::ViewModel for CanvasEventVm {
+        fn new(context: &ViewModelContext) -> Self {
+            Self {
+                hover_events: vec![],
+                clicks: 0,
+                widget_clicks: 0,
+            }
+        }
+
+        fn view(&self) -> Element<Self>
+        where
+            Self: Sized
+        {
+            Stack::new().into()
+        }
+    }
 
     #[test]
     fn canvas_item_hover_dispatches_canvas_pointer_payload() {

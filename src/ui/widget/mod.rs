@@ -24,14 +24,16 @@ pub use canvas::{
 pub(crate) use common::{
     BackdropBlurPrimitive, BrushPrimitiveData, CompositionState, ComputedScene, HitInteraction,
     InputEditState, InputSnapshot, InteractionHandlers, MediaEventPhase, MediaEventState,
-    MeshVertex, RenderCommand, RenderedWidgetScene, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
+    MeshVertex, RenderCommand, RenderedWidgetScene, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
+    WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,
 };
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
 pub(crate) use core::{
-    input_scroll_offset, input_text_viewport, InputViewport, INPUT_CARET_EDGE_GAP,
+    input_scroll_offset, input_text_viewport, InputViewport, ResolvedSceneLayout,
+    INPUT_CARET_EDGE_GAP,
 };
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use image::Image;

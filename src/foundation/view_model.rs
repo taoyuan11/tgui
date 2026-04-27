@@ -2,11 +2,16 @@ use std::sync::Arc;
 
 use crate::dialog::Dialogs;
 use crate::log::Log;
+use crate::{Element, ViewModelContext};
 
 /// Marker trait for types that can back a `tgui` application.
 ///
 /// Implement this trait explicitly on your root application view model.
-pub trait ViewModel: Send + 'static {}
+pub trait ViewModel: Send + 'static {
+    fn new(context: &ViewModelContext) -> Self;
+
+    fn view(&self) -> Element<Self> where Self: Sized;
+}
 
 pub struct CommandContext<T> {
     dialogs: Dialogs<T>,

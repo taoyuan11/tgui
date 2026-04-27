@@ -9,6 +9,9 @@ pub struct Color {
 impl Color {
     pub const BLACK: Self = Self::rgb(0, 0, 0);
     pub const WHITE: Self = Self::rgb(255, 255, 255);
+    pub const RED: Self = Self::rgb(255, 0, 0);
+    pub const GREEN: Self = Self::rgb(0, 255, 0);
+    pub const BLUE: Self = Self::rgb(0, 0, 255);
     pub const TRANSPARENT: Self = Self::rgba(0, 0, 0, 0);
 
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
@@ -39,6 +42,15 @@ impl Color {
 
     pub const fn to_rgba8(self) -> [u8; 4] {
         [self.r, self.g, self.b, self.a]
+    }
+
+    pub(crate) fn to_linear_rgba_f32(self) -> [f32; 4] {
+        [
+            srgb_channel_to_linear_f32(self.r),
+            srgb_channel_to_linear_f32(self.g),
+            srgb_channel_to_linear_f32(self.b),
+            self.a as f32 / 255.0,
+        ]
     }
 
     pub(crate) fn with_alpha_factor(self, factor: f32) -> Self {
@@ -81,6 +93,15 @@ fn float_channel(value: f64) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
+fn srgb_channel_to_linear_f32(channel: u8) -> f32 {
+    let srgb = channel as f32 / 255.0;
+    if srgb <= 0.04045 {
+        srgb / 12.92
+    } else {
+        ((srgb + 0.055) / 1.055).powf(2.4)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Color;
@@ -105,5 +126,16 @@ mod tests {
         let color = Color::rgba(16, 32, 64, 128);
         let round_trip = Color::from(wgpu::Color::from(color));
         assert_eq!(round_trip, color);
+    }
+
+    #[test]
+    fn linear_rgba_uses_srgb_decoding_for_rgb_channels() {
+        let color = Color::hexa(0xFF4D4FFF);
+        let linear = color.to_linear_rgba_f32();
+
+        assert!((linear[0] - 1.0).abs() < 1e-6);
+        assert!((linear[1] - 0.07421357).abs() < 1e-6);
+        assert!((linear[2] - 0.07818742).abs() < 1e-6);
+        assert!((linear[3] - 1.0).abs() < 1e-6);
     }
 }

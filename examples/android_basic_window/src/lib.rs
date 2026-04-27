@@ -23,12 +23,6 @@ struct AndroidApplication {
 }
 
 impl AndroidApplication {
-    fn new(context: &ViewModelContext) -> Self {
-        Self {
-            current_theme: context.observable("System".to_string()),
-            theme: context.observable(ThemeMode::System),
-        }
-    }
 
     fn get_theme(&self) -> Binding<ThemeMode> {
         self.theme.binding()
@@ -45,6 +39,17 @@ impl AndroidApplication {
         } else {
             self.theme.set(ThemeMode::System);
             self.current_theme.set("System".to_string());
+        }
+    }
+    
+}
+
+impl ViewModel for AndroidApplication {
+
+    fn new(context: &ViewModelContext) -> Self {
+        Self {
+            current_theme: context.observable("System".to_string()),
+            theme: context.observable(ThemeMode::System),
         }
     }
 
@@ -74,9 +79,8 @@ impl AndroidApplication {
             )
             .into()
     }
+    
 }
-
-impl ViewModel for AndroidApplication {}
 
 #[cfg(target_os = "android")]
 fn run_android_entry(app: AndroidApp) -> Result<(), TguiError> {

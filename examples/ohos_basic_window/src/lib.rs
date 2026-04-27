@@ -23,12 +23,7 @@ struct OhosApplication {
 }
 
 impl OhosApplication {
-    fn new(context: &ViewModelContext) -> Self {
-        Self {
-            current_theme: context.observable("System".to_string()),
-            theme: context.observable(ThemeMode::System),
-        }
-    }
+    
 
     fn theme_mode(&self) -> Binding<ThemeMode> {
         self.theme.binding()
@@ -49,6 +44,18 @@ impl OhosApplication {
         self.current_theme.set(label.to_string());
     }
 
+    
+}
+
+impl ViewModel for OhosApplication {
+
+    fn new(context: &ViewModelContext) -> Self {
+        Self {
+            current_theme: context.observable("System".to_string()),
+            theme: context.observable(ThemeMode::System),
+        }
+    }
+    
     fn view(&self) -> Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
@@ -71,8 +78,6 @@ impl OhosApplication {
             .into()
     }
 }
-
-impl ViewModel for OhosApplication {}
 
 #[cfg(target_env = "ohos")]
 fn create_ohos_app() -> impl ApplicationHandler + Send {

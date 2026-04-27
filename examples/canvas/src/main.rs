@@ -11,12 +11,7 @@ struct CanvasVm {
 }
 
 impl CanvasVm {
-    fn new(ctx: &ViewModelContext) -> Self {
-        Self {
-            hovered: ctx.observable("Move over a path".to_string()),
-            clicked: ctx.observable(0u64),
-        }
-    }
+
 
     fn on_hover(&mut self, event: CanvasPointerEvent) {
         self.hovered.set(format!(
@@ -32,6 +27,10 @@ impl CanvasVm {
     fn on_click(&mut self, event: CanvasPointerEvent) {
         self.clicked.set(event.item_id.get());
     }
+
+}
+
+impl ViewModel for CanvasVm {
 
     fn view(&self) -> tgui::Element<Self> {
         let boolean_base = PathBuilder::new()
@@ -61,21 +60,21 @@ impl CanvasVm {
                         .line_to(40.0, 220.0)
                         .close(),
                 )
-                .fill(CanvasLinearGradient::new(
-                    Point::new(40.0, 60.0),
-                    Point::new(260.0, 220.0),
-                    vec![
-                        CanvasGradientStop::new(0.0, Color::hexa(0x38BDF8FF)),
-                        CanvasGradientStop::new(0.55, Color::hexa(0x2563EBFF)),
-                        CanvasGradientStop::new(1.0, Color::hexa(0x1D4ED8FF)),
-                    ],
-                ))
-                .stroke(CanvasStroke::new(dp(4.0), Color::hexa(0xE0F2FEFF)))
-                .shadow(CanvasShadow::new(
-                    Color::hexa(0x0F172A99),
-                    Point::new(12.0, 12.0),
-                    dp(10.0),
-                )),
+                    .fill(CanvasLinearGradient::new(
+                        Point::new(40.0, 60.0),
+                        Point::new(260.0, 220.0),
+                        vec![
+                            CanvasGradientStop::new(0.0, Color::hexa(0x38BDF8FF)),
+                            CanvasGradientStop::new(0.55, Color::hexa(0x2563EBFF)),
+                            CanvasGradientStop::new(1.0, Color::hexa(0x1D4ED8FF)),
+                        ],
+                    ))
+                    .stroke(CanvasStroke::new(dp(4.0), Color::hexa(0xE0F2FEFF)))
+                    .shadow(CanvasShadow::new(
+                        Color::hexa(0x0F172A99),
+                        Point::new(12.0, 12.0),
+                        dp(10.0),
+                    )),
             ),
             CanvasItem::Path(
                 CanvasPath::new(
@@ -84,21 +83,21 @@ impl CanvasVm {
                         .move_to(320.0, 90.0)
                         .cubic_to(380.0, 10.0, 520.0, 210.0, 620.0, 90.0),
                 )
-                .stroke(
-                    CanvasStroke::with_brush(
-                        dp(10.0),
-                        CanvasLinearGradient::new(
-                            Point::new(320.0, 90.0),
-                            Point::new(620.0, 90.0),
-                            vec![
-                                CanvasGradientStop::new(0.0, Color::hexa(0xF59E0BFF)),
-                                CanvasGradientStop::new(1.0, Color::hexa(0xEF4444FF)),
-                            ],
-                        ),
-                    )
-                    .dash([dp(18.0), dp(14.0)])
-                    .dash_offset(dp(6.0)),
-                ),
+                    .stroke(
+                        CanvasStroke::with_brush(
+                            dp(10.0),
+                            CanvasLinearGradient::new(
+                                Point::new(320.0, 90.0),
+                                Point::new(620.0, 90.0),
+                                vec![
+                                    CanvasGradientStop::new(0.0, Color::hexa(0xF59E0BFF)),
+                                    CanvasGradientStop::new(1.0, Color::hexa(0xEF4444FF)),
+                                ],
+                            ),
+                        )
+                            .dash([dp(18.0), dp(14.0)])
+                            .dash_offset(dp(6.0)),
+                    ),
             ),
             CanvasItem::Path(
                 CanvasPath::new(
@@ -111,16 +110,16 @@ impl CanvasVm {
                         .line_to(90.0, 500.0)
                         .close(),
                 )
-                .fill(CanvasRadialGradient::new(
-                    Point::new(270.0, 360.0),
-                    dp(160.0),
-                    vec![
-                        CanvasGradientStop::new(0.0, Color::hexa(0xDCFCE7FF)),
-                        CanvasGradientStop::new(0.55, Color::hexa(0x4ADE80FF)),
-                        CanvasGradientStop::new(1.0, Color::hexa(0x166534FF)),
-                    ],
-                ))
-                .stroke(CanvasStroke::new(dp(3.0), Color::hexa(0x14532DFF))),
+                    .fill(CanvasRadialGradient::new(
+                        Point::new(270.0, 360.0),
+                        dp(160.0),
+                        vec![
+                            CanvasGradientStop::new(0.0, Color::hexa(0xDCFCE7FF)),
+                            CanvasGradientStop::new(0.55, Color::hexa(0x4ADE80FF)),
+                            CanvasGradientStop::new(1.0, Color::hexa(0x166534FF)),
+                        ],
+                    ))
+                    .stroke(CanvasStroke::new(dp(3.0), Color::hexa(0x14532DFF))),
             ),
             CanvasItem::Path(
                 CanvasPath::new(4_u64, boolean_shape)
@@ -148,8 +147,8 @@ impl CanvasVm {
                 Text::new(
                     "The surface below mixes linear/radial gradients, dashed stroke geometry, drop shadows, and a boolean-difference path.",
                 )
-                .font_size(sp(15.0))
-                .color(Color::hexa(0xBFDBFEFF)),
+                    .font_size(sp(15.0))
+                    .color(Color::hexa(0xBFDBFEFF)),
             )
             .child(
                 Stack::new()
@@ -190,17 +189,23 @@ impl CanvasVm {
                                 .binding()
                                 .map(|item_id| format!("clicked item={item_id}")),
                         )
-                        .padding(Insets::all(dp(12.0)))
-                        .background(Color::hexa(0x111827FF))
-                        .border_radius(dp(12.0))
-                        .color(Color::hexa(0xFDE68AFF)),
+                            .padding(Insets::all(dp(12.0)))
+                            .background(Color::hexa(0x111827FF))
+                            .border_radius(dp(12.0))
+                            .color(Color::hexa(0xFDE68AFF)),
                     ),
             )
             .into()
     }
-}
 
-impl ViewModel for CanvasVm {}
+    fn new(ctx: &ViewModelContext) -> Self {
+        Self {
+            hovered: ctx.observable("Move over a path".to_string()),
+            clicked: ctx.observable(0u64),
+        }
+    }
+
+}
 
 fn main() -> Result<(), tgui::TguiError> {
     Application::new()

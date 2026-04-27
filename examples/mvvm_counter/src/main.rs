@@ -10,11 +10,7 @@ struct CounterVm {
 }
 
 impl CounterVm {
-    fn new(ctx: &ViewModelContext) -> Self {
-        Self {
-            count: ctx.observable(0),
-        }
-    }
+    
 
     fn title(&self) -> Binding<String> {
         self.count
@@ -61,6 +57,16 @@ impl CounterVm {
 
     fn reset(&mut self) {
         self.count.set(0);
+    }
+
+    
+}
+
+impl ViewModel for CounterVm {
+    fn new(ctx: &ViewModelContext) -> Self {
+        Self {
+            count: ctx.observable(0),
+        }
     }
 
     fn view(&self) -> tgui::Element<Self> {
@@ -119,9 +125,8 @@ impl CounterVm {
             )
             .into()
     }
+    
 }
-
-impl ViewModel for CounterVm {}
 
 fn main() -> Result<(), TguiError> {
     Application::new()

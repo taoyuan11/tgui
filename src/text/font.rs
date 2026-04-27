@@ -221,8 +221,7 @@ impl FontManager {
         line_height: f32,
         letter_spacing: f32,
     ) -> (f32, f32) {
-        let measured = self.measure_text_raw(text, request, font_size, line_height, letter_spacing);
-        (measured.0.max(32.0).ceil(), measured.1.max(24.0).ceil())
+        self.measure_text_raw(text, request, font_size, line_height, letter_spacing)
     }
 
     pub(crate) fn measure_text_raw(
