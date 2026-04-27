@@ -3544,6 +3544,7 @@ dependencies = [
  "unicode-segmentation",
  "usvg-remote-resolvers",
  "wgpu",
+ "windows",
  "winit-android",
  "winit-appkit",
  "winit-core",

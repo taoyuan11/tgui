@@ -1,13 +1,29 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::hash::{Hash, Hasher};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
+
+#[cfg(target_os = "windows")]
+use windows::core::Interface;
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_FALSE};
+#[cfg(target_os = "windows")]
+use windows::Win32::Graphics::Imaging::{
+    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppRGBA, IWICBitmapFrameDecode,
+    IWICBitmapSource, IWICImagingFactory, IWICStream, WICBitmapDitherTypeNone,
+    WICBitmapInterpolationModeFant, WICBitmapPaletteTypeCustom, WICDecodeMetadataCacheOnDemand,
+};
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+    COINIT_MULTITHREADED,
+};
 
 use reqwest::header::CONTENT_TYPE;
 use reqwest::Url;
@@ -24,6 +40,7 @@ static HTTP_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 static RUSTLS_PROVIDER: OnceLock<()> = OnceLock::new();
 const MAX_IMAGE_DIMENSION: u32 = 2048;
 const MAX_SVG_RASTER_CACHE_ENTRIES: usize = 4;
+const MAX_RASTER_CACHE_ENTRIES: usize = 4;
 const MAX_CANVAS_SHADOW_CACHE_ENTRIES: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -248,13 +265,14 @@ pub(crate) struct RasterRequest {
 }
 
 impl RasterRequest {
-    pub(crate) fn from_frame(frame: Rect) -> Option<Self> {
+    pub(crate) fn from_frame(frame: Rect, scale_factor: f32) -> Option<Self> {
         if frame.width <= 0.0 || frame.height <= 0.0 {
             return None;
         }
 
-        let width = frame.width.round().max(1.0).get() as u32;
-        let height = frame.height.round().max(1.0).get() as u32;
+        let scale_factor = scale_factor.max(1.0 / 64.0);
+        let width = (frame.width.get() * scale_factor).ceil().max(1.0) as u32;
+        let height = (frame.height.get() * scale_factor).ceil().max(1.0) as u32;
         Some(clamp_raster_request(width, height))
     }
 }
@@ -345,14 +363,29 @@ impl MediaManager {
     }
 
     fn image_entry(&self, source: &MediaSource) -> Arc<Mutex<ImageEntry>> {
-        let mut images = self.images.lock().expect("image cache lock poisoned");
-        images
-            .entry(source.clone())
-            .or_insert_with(|| {
+        if let Some(entry) = self
+            .images
+            .lock()
+            .expect("image cache lock poisoned")
+            .get(source)
+            .cloned()
+        {
+            return entry;
+        }
+
+        let new_entry = match source {
+            MediaSource::Bytes(_) => Arc::new(Mutex::new(load_image_entry(source))),
+            _ => {
                 let entry = Arc::new(Mutex::new(ImageEntry::loading()));
                 spawn_image_loader(entry.clone(), source.clone(), self.invalidation.clone());
                 entry
-            })
+            }
+        };
+
+        let mut images = self.images.lock().expect("image cache lock poisoned");
+        images
+            .entry(source.clone())
+            .or_insert_with(|| new_entry.clone())
             .clone()
     }
 
@@ -434,6 +467,22 @@ impl ImageEntry {
         }
     }
 
+    fn ready(document: DocumentEntry) -> Self {
+        Self {
+            document: Some(document),
+            loading: false,
+            error: None,
+        }
+    }
+
+    fn failed(error: TguiError) -> Self {
+        Self {
+            document: None,
+            loading: false,
+            error: Some(error.to_string()),
+        }
+    }
+
     fn snapshot(
         &mut self,
         raster_request: Option<RasterRequest>,
@@ -445,11 +494,15 @@ impl ImageEntry {
             .map(|document| document.intrinsic_size)
             .unwrap_or(IntrinsicSize::ZERO);
 
+        let mut loading = self.loading;
         let texture = if self.loading || self.error.is_some() {
             None
         } else if let (Some(document), Some(request)) = (self.document.as_mut(), raster_request) {
-            match document.texture_for(request) {
-                Ok(texture) => texture,
+            match document.texture_for(request, invalidation) {
+                Ok(texture) => {
+                    loading |= document.is_loading(request);
+                    texture
+                }
                 Err(error) => {
                     self.error = Some(error.to_string());
                     invalidation.mark_dirty();
@@ -463,10 +516,11 @@ impl ImageEntry {
         ImageSnapshot {
             intrinsic_size,
             texture,
-            loading: self.loading,
+            loading,
             error: self.error.clone(),
         }
     }
+
 }
 
 struct DocumentEntry {
@@ -478,18 +532,192 @@ impl DocumentEntry {
     fn texture_for(
         &mut self,
         raster_request: RasterRequest,
+        invalidation: &InvalidationSignal,
     ) -> Result<Option<Arc<TextureFrame>>, TguiError> {
         let raster_request = clamp_raster_request(raster_request.width, raster_request.height);
         match &mut self.content {
-            DocumentContent::Raster(texture) => Ok(Some(texture.clone())),
+            DocumentContent::Raster(raster) => raster.texture_for(raster_request, invalidation),
             DocumentContent::Svg(svg) => svg.texture_for(raster_request),
         }
     }
+
+    fn is_loading(&self, raster_request: RasterRequest) -> bool {
+        match &self.content {
+            DocumentContent::Raster(raster) => raster.is_loading(raster_request),
+            DocumentContent::Svg(_) => false,
+        }
+    }
+
 }
 
 enum DocumentContent {
-    Raster(Arc<TextureFrame>),
+    Raster(RasterDocument),
     Svg(SvgDocument),
+}
+
+struct RasterDocument {
+    bytes: MediaBytes,
+    raster_cache: Vec<RasterTextureEntry>,
+    pending_rasters: Vec<PendingRasterEntry>,
+    next_access_tick: u64,
+}
+
+impl RasterDocument {
+    fn new(bytes: MediaBytes) -> Self {
+        Self {
+            bytes,
+            raster_cache: Vec::new(),
+            pending_rasters: Vec::new(),
+            next_access_tick: 1,
+        }
+    }
+
+    fn texture_for(
+        &mut self,
+        raster_request: RasterRequest,
+        invalidation: &InvalidationSignal,
+    ) -> Result<Option<Arc<TextureFrame>>, TguiError> {
+        self.collect_finished_rasters()?;
+
+        let tick = self.bump_access_tick();
+        if let Some(entry) = self
+            .raster_cache
+            .iter_mut()
+            .find(|entry| entry.request == raster_request)
+        {
+            entry.last_used = tick;
+            return Ok(Some(entry.texture.clone()));
+        }
+
+        if self
+            .pending_rasters
+            .iter()
+            .any(|entry| entry.request == raster_request)
+        {
+            return Ok(self.best_cached_texture(raster_request, tick));
+        }
+
+        let slot = Arc::new(Mutex::new(None));
+        spawn_raster_texture_loader(
+            self.bytes.clone(),
+            raster_request,
+            slot.clone(),
+            invalidation.clone(),
+        );
+        self.pending_rasters.push(PendingRasterEntry {
+            request: raster_request,
+            result: slot,
+        });
+        Ok(self.best_cached_texture(raster_request, tick))
+    }
+
+    fn is_loading(&self, raster_request: RasterRequest) -> bool {
+        self.pending_rasters
+            .iter()
+            .any(|entry| entry.request == raster_request)
+    }
+
+    fn collect_finished_rasters(&mut self) -> Result<(), TguiError> {
+        let mut completed = Vec::new();
+        for (index, entry) in self.pending_rasters.iter().enumerate() {
+            let Some(result) = entry
+                .result
+                .lock()
+                .expect("pending raster lock poisoned")
+                .take()
+            else {
+                continue;
+            };
+            completed.push((index, entry.request, result));
+        }
+
+        for (index, request, result) in completed.into_iter().rev() {
+            self.pending_rasters.remove(index);
+            match result {
+                Ok(texture) => {
+                    let tick = self.bump_access_tick();
+                    self.raster_cache.push(RasterTextureEntry {
+                        request,
+                        texture,
+                        last_used: tick,
+                    });
+                    self.evict_if_needed();
+                }
+                Err(error) => return Err(TguiError::Media(error)),
+            }
+        }
+
+        Ok(())
+    }
+
+    fn bump_access_tick(&mut self) -> u64 {
+        let tick = self.next_access_tick;
+        self.next_access_tick = self.next_access_tick.saturating_add(1);
+        tick
+    }
+
+    fn evict_if_needed(&mut self) {
+        while self.raster_cache.len() > MAX_RASTER_CACHE_ENTRIES {
+            if let Some((oldest_index, _)) = self
+                .raster_cache
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, entry)| entry.last_used)
+            {
+                self.raster_cache.remove(oldest_index);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn best_cached_texture(
+        &mut self,
+        raster_request: RasterRequest,
+        tick: u64,
+    ) -> Option<Arc<TextureFrame>> {
+        let best_index = self
+            .raster_cache
+            .iter()
+            .enumerate()
+            .min_by(|(_, left), (_, right)| {
+                raster_request_distance(left.request, raster_request)
+                    .total_cmp(&raster_request_distance(right.request, raster_request))
+                    .then_with(|| {
+                        let left_area = left.request.width as u64 * left.request.height as u64;
+                        let right_area = right.request.width as u64 * right.request.height as u64;
+                        right_area.cmp(&left_area)
+                    })
+            })
+            .map(|(index, _)| index)?;
+
+        let entry = &mut self.raster_cache[best_index];
+        entry.last_used = tick;
+        Some(entry.texture.clone())
+    }
+}
+
+struct RasterTextureEntry {
+    request: RasterRequest,
+    texture: Arc<TextureFrame>,
+    last_used: u64,
+}
+
+struct PendingRasterEntry {
+    request: RasterRequest,
+    result: Arc<Mutex<Option<Result<Arc<TextureFrame>, String>>>>,
+}
+
+fn raster_request_distance(left: RasterRequest, right: RasterRequest) -> f32 {
+    let left_area = (left.width.max(1) as f32) * (left.height.max(1) as f32);
+    let right_area = (right.width.max(1) as f32) * (right.height.max(1) as f32);
+    let area_ratio = (left_area / right_area).max(right_area / left_area);
+
+    let left_aspect = left.width.max(1) as f32 / left.height.max(1) as f32;
+    let right_aspect = right.width.max(1) as f32 / right.height.max(1) as f32;
+    let aspect_ratio = (left_aspect / right_aspect).max(right_aspect / left_aspect);
+
+    area_ratio + aspect_ratio
 }
 
 struct SvgDocument {
@@ -562,16 +790,33 @@ struct SvgRasterEntry {
 type ExternalErrorSlot = Arc<Mutex<Option<String>>>;
 
 enum LoadedSource<'a> {
-    File { bytes: Cow<'a, [u8]>, path: PathBuf },
-    Url { bytes: Cow<'a, [u8]>, url: Url },
-    Embedded { bytes: Cow<'a, [u8]> },
+    File {
+        bytes: MediaBytes,
+        path: PathBuf,
+    },
+    Url {
+        bytes: MediaBytes,
+        url: Url,
+    },
+    Embedded {
+        bytes: MediaBytes,
+        _marker: std::marker::PhantomData<&'a ()>,
+    },
 }
 
 impl<'a> LoadedSource<'a> {
     fn bytes(&self) -> &[u8] {
         match self {
-            Self::File { bytes, .. } | Self::Url { bytes, .. } | Self::Embedded { bytes } => {
-                bytes.as_ref()
+            Self::File { bytes, .. } | Self::Url { bytes, .. } | Self::Embedded { bytes, .. } => {
+                bytes.as_slice()
+            }
+        }
+    }
+
+    fn media_bytes(&self) -> MediaBytes {
+        match self {
+            Self::File { bytes, .. } | Self::Url { bytes, .. } | Self::Embedded { bytes, .. } => {
+                bytes.clone()
             }
         }
     }
@@ -648,23 +893,42 @@ fn spawn_image_loader(
         let mut guard = entry.lock().expect("image entry lock poisoned");
         match result {
             Ok(document) => {
-                guard.document = Some(document);
-                guard.loading = false;
-                guard.error = None;
+                *guard = ImageEntry::ready(document);
             }
             Err(error) => {
-                guard.document = None;
-                guard.loading = false;
-                guard.error = Some(error.to_string());
+                *guard = ImageEntry::failed(error);
             }
         }
         invalidation.mark_dirty();
     });
 }
 
+fn spawn_raster_texture_loader(
+    bytes: MediaBytes,
+    raster_request: RasterRequest,
+    slot: Arc<Mutex<Option<Result<Arc<TextureFrame>, String>>>>,
+    invalidation: InvalidationSignal,
+) {
+    thread::spawn(move || {
+        let result = decode_raster_texture(&bytes, raster_request)
+            .map(Arc::new)
+            .map_err(|error| error.to_string());
+        let mut guard = slot.lock().expect("pending raster lock poisoned");
+        *guard = Some(result);
+        invalidation.mark_dirty();
+    });
+}
+
+fn load_image_entry(source: &MediaSource) -> ImageEntry {
+    match load_media_document(source) {
+        Ok(document) => ImageEntry::ready(document),
+        Err(error) => ImageEntry::failed(error),
+    }
+}
+
 fn load_media_document(source: &MediaSource) -> Result<DocumentEntry, TguiError> {
     let loaded = load_media_source(source)?;
-    match load_raster_document(loaded.bytes()) {
+    match load_raster_document(&loaded) {
         Ok(document) => Ok(document),
         Err(raster_error) => {
             if !looks_like_svg(source, &loaded) {
@@ -678,7 +942,7 @@ fn load_media_document(source: &MediaSource) -> Result<DocumentEntry, TguiError>
 fn load_media_source(source: &MediaSource) -> Result<LoadedSource<'_>, TguiError> {
     match source {
         MediaSource::Path(path) => Ok(LoadedSource::File {
-            bytes: Cow::Owned(fs::read(path).map_err(|error| {
+            bytes: MediaBytes::from(fs::read(path).map_err(|error| {
                 TguiError::Media(format!("failed to read image {:?}: {error}", path))
             })?),
             path: path.clone(),
@@ -699,38 +963,239 @@ fn load_media_source(source: &MediaSource) -> Result<LoadedSource<'_>, TguiError
                     TguiError::Media(format!("failed to read image body {parsed_url}: {error}"))
                 })?;
             Ok(LoadedSource::Url {
-                bytes: Cow::Owned(bytes),
+                bytes: MediaBytes::from(bytes),
                 url: parsed_url,
             })
         }
         MediaSource::Bytes(bytes) => Ok(LoadedSource::Embedded {
-            bytes: Cow::Borrowed(bytes.as_slice()),
+            bytes: bytes.clone(),
+            _marker: std::marker::PhantomData,
         }),
     }
 }
 
-fn load_raster_document(bytes: &[u8]) -> Result<DocumentEntry, TguiError> {
-    let mut image = image::load_from_memory(bytes)
-        .map_err(|error| TguiError::Media(format!("failed to decode raster image: {error}")))?;
-    let longest_edge = image.width().max(image.height());
-    if longest_edge > MAX_IMAGE_DIMENSION {
-        let scale = MAX_IMAGE_DIMENSION as f32 / longest_edge as f32;
-        let width = (image.width() as f32 * scale).round().max(1.0) as u32;
-        let height = (image.height() as f32 * scale).round().max(1.0) as u32;
-        image = image.resize(width, height, image::imageops::FilterType::Triangle);
+fn load_raster_document(source: &LoadedSource<'_>) -> Result<DocumentEntry, TguiError> {
+    let (width, height) = load_raster_dimensions(source.bytes())?;
+
+    Ok(DocumentEntry {
+        intrinsic_size: IntrinsicSize::from_pixels(width, height),
+        content: DocumentContent::Raster(RasterDocument::new(source.media_bytes())),
+    })
+}
+
+fn load_raster_dimensions(bytes: &[u8]) -> Result<(u32, u32), TguiError> {
+    image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| {
+            TguiError::Media(format!("failed to detect raster image format: {error}"))
+        })?
+        .into_dimensions()
+        .map_err(|error| {
+            TguiError::Media(format!("failed to read raster image dimensions: {error}"))
+        })
+}
+
+fn decode_raster_texture(
+    bytes: &MediaBytes,
+    raster_request: RasterRequest,
+) -> Result<TextureFrame, TguiError> {
+    let raster_request = clamp_raster_request(raster_request.width, raster_request.height);
+    decode_raster_texture_platform(bytes.as_slice(), raster_request)
+}
+
+fn decode_raster_texture_platform(
+    bytes: &[u8],
+    raster_request: RasterRequest,
+) -> Result<TextureFrame, TguiError> {
+    #[cfg(target_os = "windows")]
+    if let Ok(texture) = decode_raster_texture_with_wic(bytes, raster_request) {
+        return Ok(texture);
     }
 
-    let rgba = image.to_rgba8();
-    let texture = Arc::new(TextureFrame::new(
+    decode_raster_texture_with_image_crate(bytes, raster_request)
+}
+
+fn decode_raster_texture_with_image_crate(
+    bytes: &[u8],
+    raster_request: RasterRequest,
+) -> Result<TextureFrame, TguiError> {
+    let image = image::load_from_memory(bytes)
+        .map_err(|error| TguiError::Media(format!("failed to decode raster image: {error}")))?;
+
+    let resized =
+        if image.width() == raster_request.width && image.height() == raster_request.height {
+            image
+        } else if image.width() > raster_request.width || image.height() > raster_request.height {
+            image.thumbnail_exact(raster_request.width, raster_request.height)
+        } else {
+            image.resize_exact(
+                raster_request.width,
+                raster_request.height,
+                image::imageops::FilterType::Triangle,
+            )
+        };
+
+    let rgba = resized.to_rgba8();
+    Ok(TextureFrame::new(
         rgba.width(),
         rgba.height(),
         rgba.into_raw(),
-    ));
+    ))
+}
 
-    Ok(DocumentEntry {
-        intrinsic_size: IntrinsicSize::from_pixels(texture.size().0, texture.size().1),
-        content: DocumentContent::Raster(texture),
-    })
+#[cfg(target_os = "windows")]
+fn decode_raster_texture_with_wic(
+    bytes: &[u8],
+    raster_request: RasterRequest,
+) -> Result<TextureFrame, TguiError> {
+    let _com_scope = ComScope::initialize()?;
+    let factory = create_wic_factory()?;
+    let stream = create_wic_stream(&factory, bytes)?;
+    let decoder = unsafe {
+        factory
+            .CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnDemand)
+            .map_err(map_wic_error("failed to create WIC decoder"))?
+    };
+    let frame = unsafe { decoder.GetFrame(0).map_err(map_wic_error("failed to read WIC frame"))? };
+
+    let source = create_scaled_wic_source(&factory, &frame, raster_request)?;
+    let (width, height) = wic_source_size(&source)?;
+    let stride = width
+        .checked_mul(4)
+        .ok_or_else(|| TguiError::Media("failed to compute WIC raster stride".to_string()))?;
+    let buffer_len = stride
+        .checked_mul(height)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| TguiError::Media("failed to allocate WIC raster buffer".to_string()))?;
+    let mut pixels = vec![0u8; buffer_len];
+    unsafe {
+        source
+            .CopyPixels(std::ptr::null(), stride, pixels.as_mut_slice())
+            .map_err(map_wic_error("failed to copy WIC pixels"))?;
+    }
+
+    Ok(TextureFrame::new(width, height, pixels))
+}
+
+#[cfg(target_os = "windows")]
+fn create_wic_factory() -> Result<IWICImagingFactory, TguiError> {
+    unsafe {
+        CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)
+            .map_err(map_wic_error("failed to create WIC imaging factory"))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn create_wic_stream(factory: &IWICImagingFactory, bytes: &[u8]) -> Result<IWICStream, TguiError> {
+    let stream = unsafe {
+        factory
+            .CreateStream()
+            .map_err(map_wic_error("failed to create WIC stream"))?
+    };
+    unsafe {
+        stream
+            .InitializeFromMemory(bytes)
+            .map_err(map_wic_error("failed to initialize WIC stream from memory"))?;
+    }
+    Ok(stream)
+}
+
+#[cfg(target_os = "windows")]
+fn create_scaled_wic_source(
+    factory: &IWICImagingFactory,
+    frame: &IWICBitmapFrameDecode,
+    raster_request: RasterRequest,
+) -> Result<IWICBitmapSource, TguiError> {
+    let scaler = unsafe {
+        factory
+            .CreateBitmapScaler()
+            .map_err(map_wic_error("failed to create WIC bitmap scaler"))?
+    };
+    unsafe {
+        scaler
+            .Initialize(
+                frame,
+                raster_request.width,
+                raster_request.height,
+                WICBitmapInterpolationModeFant,
+            )
+            .map_err(map_wic_error("failed to scale image with WIC"))?;
+    }
+
+    let converter = unsafe {
+        factory
+            .CreateFormatConverter()
+            .map_err(map_wic_error("failed to create WIC format converter"))?
+    };
+    unsafe {
+        converter
+            .Initialize(
+                &scaler,
+                &GUID_WICPixelFormat32bppRGBA,
+                WICBitmapDitherTypeNone,
+                None,
+                0.0,
+                WICBitmapPaletteTypeCustom,
+            )
+            .map_err(map_wic_error("failed to convert WIC pixel format"))?;
+    }
+
+    Ok(converter.cast().expect("WIC format converter should be a bitmap source"))
+}
+
+#[cfg(target_os = "windows")]
+fn wic_source_size(source: &IWICBitmapSource) -> Result<(u32, u32), TguiError> {
+    let mut width = 0;
+    let mut height = 0;
+    unsafe {
+        source
+            .GetSize(&mut width, &mut height)
+            .map_err(map_wic_error("failed to query WIC source size"))?;
+    }
+    Ok((width, height))
+}
+
+#[cfg(target_os = "windows")]
+fn map_wic_error(context: &'static str) -> impl FnOnce(windows::core::Error) -> TguiError {
+    move |error| TguiError::Media(format!("{context}: {error}"))
+}
+
+#[cfg(target_os = "windows")]
+struct ComScope {
+    should_uninitialize: bool,
+}
+
+#[cfg(target_os = "windows")]
+impl ComScope {
+    fn initialize() -> Result<Self, TguiError> {
+        let result = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        if result.is_ok() {
+            return Ok(Self {
+                should_uninitialize: true,
+            });
+        }
+
+        if result == S_FALSE || result == RPC_E_CHANGED_MODE {
+            return Ok(Self {
+                should_uninitialize: false,
+            });
+        }
+
+        Err(TguiError::Media(format!(
+            "failed to initialize COM for WIC: {result}"
+        )))
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for ComScope {
+    fn drop(&mut self) {
+        if self.should_uninitialize {
+            unsafe {
+                CoUninitialize();
+            }
+        }
+    }
 }
 
 fn load_svg_document(source: &LoadedSource<'_>) -> Result<DocumentEntry, TguiError> {
@@ -999,6 +1464,7 @@ pub(crate) fn media_placeholder_label(kind: &str, loading: bool, error: Option<&
 #[cfg(test)]
 mod tests {
     use super::{load_media_document, DocumentContent, MediaManager, MediaSource, RasterRequest};
+    use crate::ui::widget::Rect;
     use crate::foundation::binding::InvalidationSignal;
     use std::collections::HashMap;
     use std::fs;
@@ -1040,26 +1506,36 @@ mod tests {
     fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
         let mut document = load_media_document(&MediaSource::bytes(SIMPLE_SVG))
             .expect("embedded SVG should decode");
+        let invalidation = InvalidationSignal::new();
 
         let first = document
-            .texture_for(RasterRequest {
-                width: 20,
-                height: 40,
-            })
+            .texture_for(
+                RasterRequest {
+                    width: 20,
+                    height: 40,
+                },
+                &invalidation,
+            )
             .expect("SVG rasterization should work")
             .expect("SVG should produce a texture");
         let second = document
-            .texture_for(RasterRequest {
-                width: 20,
-                height: 40,
-            })
+            .texture_for(
+                RasterRequest {
+                    width: 20,
+                    height: 40,
+                },
+                &invalidation,
+            )
             .expect("SVG rasterization should work")
             .expect("SVG should produce a texture");
         let third = document
-            .texture_for(RasterRequest {
-                width: 40,
-                height: 80,
-            })
+            .texture_for(
+                RasterRequest {
+                    width: 40,
+                    height: 80,
+                },
+                &invalidation,
+            )
             .expect("SVG rasterization should work")
             .expect("SVG should produce a texture");
 
@@ -1075,16 +1551,35 @@ mod tests {
             br##"<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="2048"><rect width="4096" height="2048" fill="#2563eb"/></svg>"##,
         ))
         .expect("large SVG should decode");
+        let invalidation = InvalidationSignal::new();
 
         let texture = document
-            .texture_for(RasterRequest {
-                width: 4096,
-                height: 2048,
-            })
+            .texture_for(
+                RasterRequest {
+                    width: 4096,
+                    height: 2048,
+                },
+                &invalidation,
+            )
             .expect("SVG rasterization should work")
             .expect("SVG should produce a texture");
 
         assert_eq!(texture.size(), (2048, 1024));
+    }
+
+    #[test]
+    fn raster_request_uses_physical_pixels() {
+        let frame = Rect::new(0.0, 0.0, 120.0, 80.0);
+
+        let request_1x =
+            RasterRequest::from_frame(frame, 1.0).expect("logical frame should rasterize");
+        let request_2x =
+            RasterRequest::from_frame(frame, 2.0).expect("scaled frame should rasterize");
+
+        assert_eq!(request_1x.width, 120);
+        assert_eq!(request_1x.height, 80);
+        assert_eq!(request_2x.width, 240);
+        assert_eq!(request_2x.height, 160);
     }
 
     #[test]
@@ -1216,6 +1711,77 @@ mod tests {
                 .size(),
             (20, 40)
         );
+    }
+
+    #[test]
+    fn embedded_raster_bytes_are_available_without_background_loader_delay() {
+        let media = MediaManager::new(InvalidationSignal::new());
+        let source = MediaSource::bytes(ONE_BY_ONE_GIF);
+
+        let snapshot = media.image_snapshot(&source, None);
+
+        assert!(!snapshot.loading);
+        assert!(snapshot.error.is_none());
+        assert_eq!(snapshot.intrinsic_size.width, 1.0);
+        assert_eq!(snapshot.intrinsic_size.height, 1.0);
+    }
+
+    #[test]
+    fn raster_document_rasterizes_requested_size_and_reuses_cached_texture() {
+        let media = MediaManager::new(InvalidationSignal::new());
+        let source = MediaSource::bytes(ONE_BY_ONE_GIF);
+
+        let first = wait_for_snapshot(
+            &media,
+            &source,
+            Some(RasterRequest {
+                width: 64,
+                height: 64,
+            }),
+        );
+        let second = wait_for_snapshot(
+            &media,
+            &source,
+            Some(RasterRequest {
+                width: 64,
+                height: 64,
+            }),
+        );
+
+        let first_texture = first.texture.expect("raster image should decode");
+        let second_texture = second.texture.expect("raster image should decode");
+        assert_eq!(first_texture.size(), (64, 64));
+        assert_eq!(first_texture.id(), second_texture.id());
+    }
+
+    #[test]
+    fn raster_document_keeps_previous_texture_while_new_size_is_loading() {
+        let media = MediaManager::new(InvalidationSignal::new());
+        let source = MediaSource::bytes(ONE_BY_ONE_GIF);
+
+        let first = wait_for_snapshot(
+            &media,
+            &source,
+            Some(RasterRequest {
+                width: 64,
+                height: 64,
+            }),
+        );
+        let first_texture = first.texture.expect("raster image should decode");
+
+        let resized = media.image_snapshot(
+            &source,
+            Some(RasterRequest {
+                width: 192,
+                height: 192,
+            }),
+        );
+
+        assert!(resized.loading);
+        let fallback_texture = resized
+            .texture
+            .expect("previous raster texture should remain available while resizing");
+        assert_eq!(fallback_texture.id(), first_texture.id());
     }
 
     fn wait_for_snapshot(

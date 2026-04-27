@@ -2131,7 +2131,9 @@ fn push_media_texture_or_placeholder<VM>(
 ) {
     let metadata = context.media.image_snapshot(source, None);
     let target_frame = resolve_media_rect(content_frame, metadata.intrinsic_size, fit);
-    let snapshot = if let Some(raster_request) = RasterRequest::from_frame(target_frame) {
+    let snapshot = if let Some(raster_request) =
+        RasterRequest::from_frame(target_frame, context.units.scale_factor())
+    {
         context.media.image_snapshot(source, Some(raster_request))
     } else {
         metadata
@@ -2175,7 +2177,9 @@ fn push_background_media_texture<VM>(
 ) {
     let metadata = context.media.image_snapshot(source, None);
     let target_frame = resolve_media_rect(content_frame, metadata.intrinsic_size, fit);
-    let snapshot = if let Some(raster_request) = RasterRequest::from_frame(target_frame) {
+    let snapshot = if let Some(raster_request) =
+        RasterRequest::from_frame(target_frame, context.units.scale_factor())
+    {
         context.media.image_snapshot(source, Some(raster_request))
     } else {
         metadata
