@@ -152,7 +152,6 @@ impl ViewModel for CanvasVm {
             )
             .child(
                 Stack::new()
-                    .height(dp(560.0))
                     .padding(Insets::all(dp(16.0)))
                     .background(Color::hexa(0x020617FF))
                     .border_radius(dp(20.0))
