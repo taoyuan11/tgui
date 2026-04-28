@@ -1,11 +1,8 @@
 mod button;
-mod dialog;
 mod input;
-mod panel;
 mod scrollbar;
 mod switch;
 mod text;
-mod tooltip;
 
 use crate::foundation::color::Color;
 use crate::ui::theme::color::ColorScheme;
@@ -17,13 +14,10 @@ use crate::ui::theme::typography::TypeScale;
 use crate::ui::unit::Dp;
 
 pub use button::{ButtonStyle, ButtonTheme, ButtonVariant};
-pub use dialog::DialogTheme;
 pub use input::{InputStyle, InputTheme};
-pub use panel::PanelTheme;
 pub use scrollbar::ScrollbarTheme;
 pub use switch::{SwitchStyle, SwitchTheme};
 pub use text::TextTheme;
-pub use tooltip::TooltipTheme;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ComponentTheme {
@@ -31,9 +25,6 @@ pub struct ComponentTheme {
     pub input: InputTheme,
     pub text: TextTheme,
     pub switch: SwitchTheme,
-    pub panel: PanelTheme,
-    pub dialog: DialogTheme,
-    pub tooltip: TooltipTheme,
     pub scrollbar: ScrollbarTheme,
 }
 
@@ -44,7 +35,7 @@ impl ComponentTheme {
         spacing: &SpaceScale,
         radius: &RadiusScale,
         border: &BorderScale,
-        elevation: &ElevationScale,
+        _elevation: &ElevationScale,
         _motion: &MotionScale,
     ) -> Self {
         const HOVER_LIGHTEN: f32 = 0.1;
@@ -263,30 +254,6 @@ impl ComponentTheme {
                 padding: crate::ui::layout::Insets::all(spacing.xxs),
                 width: spacing.xl + spacing.sm + spacing.xxs,
                 height: spacing.lg,
-            },
-            panel: PanelTheme {
-                background: colors.surface,
-                border_color: colors.outline_muted,
-                border_width: border.thin,
-                radius: radius.lg,
-                shadow: elevation.sm.clone(),
-            },
-            dialog: DialogTheme {
-                background: colors.surface_overlay,
-                scrim: colors.scrim,
-                border_color: colors.outline,
-                radius: radius.xl,
-                shadow: elevation.lg.clone(),
-                title_style: typography.title.clone(),
-                body_style: typography.body.clone(),
-            },
-            tooltip: TooltipTheme {
-                background: colors.surface_overlay,
-                text: colors.on_surface,
-                radius: radius.sm,
-                padding_x: spacing.sm,
-                padding_y: spacing.xs,
-                text_style: typography.label_small.clone(),
             },
             scrollbar: ScrollbarTheme {
                 track: Stateful {

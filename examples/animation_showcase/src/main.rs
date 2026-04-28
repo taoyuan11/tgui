@@ -7,11 +7,6 @@ struct AnimationVm {
 }
 
 impl AnimationVm {
-    fn new(ctx: &ViewModelContext) -> Self {
-        Self {
-            expanded: ctx.observable(false),
-        }
-    }
 
     fn title(&self) -> Binding<String> {
         self.expanded.binding().map(|expanded| {
@@ -110,6 +105,16 @@ impl AnimationVm {
         self.expanded.update(|expanded| *expanded = !*expanded);
     }
 
+}
+
+impl ViewModel for AnimationVm {
+
+    fn new(ctx: &ViewModelContext) -> Self {
+        Self {
+            expanded: ctx.observable(false),
+        }
+    }
+
     fn view(&self) -> tgui::Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
@@ -145,9 +150,8 @@ impl AnimationVm {
             )
             .into()
     }
-}
 
-impl ViewModel for AnimationVm {}
+}
 
 fn main() -> Result<(), TguiError> {
     Application::new()

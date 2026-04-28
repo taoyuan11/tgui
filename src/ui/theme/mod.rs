@@ -12,8 +12,8 @@ mod typography;
 pub use color::ColorScheme;
 #[allow(unused_imports)]
 pub use component::{
-    ButtonStyle, ButtonTheme, ButtonVariant, ComponentTheme, DialogTheme, InputStyle, InputTheme,
-    PanelTheme, ScrollbarTheme, SwitchStyle, SwitchTheme, TextTheme, TooltipTheme,
+    ButtonStyle, ButtonTheme, ButtonVariant, ComponentTheme, InputStyle, InputTheme,
+    ScrollbarTheme, SwitchStyle, SwitchTheme, TextTheme,
 };
 pub use mode::ThemeMode;
 pub use motion::MotionScale;

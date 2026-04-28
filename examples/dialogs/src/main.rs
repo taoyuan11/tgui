@@ -13,13 +13,6 @@ struct App {
 }
 
 impl App {
-    fn new(context: &ViewModelContext) -> Self {
-        Self {
-            clicks: context.observable(0),
-            file_status: context.observable("尚未选择文件".to_string()),
-            message_status: context.observable("尚未显示消息框".to_string()),
-        }
-    }
 
     fn open_file_sync(&mut self, ctx: &tgui::CommandContext<Self>) {
         let result = ctx.dialogs().open_file(
@@ -93,6 +86,17 @@ impl App {
             Err(error) => format!("消息框失败: {error}"),
         }
     }
+}
+
+impl ViewModel for App {
+
+    fn new(context: &ViewModelContext) -> Self {
+        Self {
+            clicks: context.observable(0),
+            file_status: context.observable("尚未选择文件".to_string()),
+            message_status: context.observable("尚未显示消息框".to_string()),
+        }
+    }
 
     fn view(&self) -> Element<Self> {
         let open_sync = Button::new(Text::new("同步文件选择")).on_click(Command::new_with_context(
@@ -116,7 +120,7 @@ impl App {
                 .binding()
                 .map(|clicks| format!("普通按钮，点击了 {clicks} 次")),
         ))
-        .on_click(Command::new(Self::increment));
+            .on_click(Command::new(Self::increment));
 
         Flex::new(Axis::Vertical)
             .size(pct(100.0), pct(100.0))
@@ -131,9 +135,8 @@ impl App {
             ])
             .into()
     }
-}
 
-impl ViewModel for App {}
+}
 
 fn main() -> Result<(), tgui::TguiError> {
     Application::new()

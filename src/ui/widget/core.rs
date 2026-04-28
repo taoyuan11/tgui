@@ -6185,7 +6185,8 @@ mod tests {
 
     #[test]
     fn focused_switch_uses_focused_colors_over_pressed_and_hovered() {
-        let theme = Theme::default();
+        let mut theme = Theme::default();
+        theme.components.switch.border_width = dp(2.0);
         let font_manager = FontManager::new(&FontCatalog::default());
         let media = test_media();
         let switch: Element<()> = Switch::new(true).into();
@@ -6261,11 +6262,7 @@ mod tests {
             false,
         );
 
-        assert!(!rendered
-            .primitives
-            .shapes
-            .iter()
-            .any(|shape| shape.color == theme.components.panel.background));
+        assert!(rendered.primitives.shapes.is_empty());
     }
 
     #[test]

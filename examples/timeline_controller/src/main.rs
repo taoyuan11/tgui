@@ -17,6 +17,40 @@ struct TimelineVm {
 }
 
 impl TimelineVm {
+
+    fn play(&mut self) {
+        self.timeline.play();
+    }
+
+    fn pause(&mut self) {
+        self.timeline.pause();
+        self.status.set("Paused".to_string());
+    }
+
+    fn resume(&mut self) {
+        self.timeline.resume();
+        self.status.set("Running".to_string());
+    }
+
+    fn restart(&mut self) {
+        self.timeline.restart();
+        self.status.set("Restarted".to_string());
+    }
+
+    fn reverse(&mut self) {
+        self.timeline.reverse();
+        self.status.set("Reversed".to_string());
+    }
+
+    fn seek_middle(&mut self) {
+        self.timeline.seek_percent(0.5);
+        self.status.set("Jumped to 50%".to_string());
+    }
+
+}
+
+impl ViewModel for TimelineVm {
+
     fn new(ctx: &ViewModelContext) -> Self {
         let status = ctx.observable("Idle".to_string());
         let card_color = ctx.animated_value(Color::hexa(0x2563EBFF));
@@ -105,35 +139,6 @@ impl TimelineVm {
         }
     }
 
-    fn play(&mut self) {
-        self.timeline.play();
-    }
-
-    fn pause(&mut self) {
-        self.timeline.pause();
-        self.status.set("Paused".to_string());
-    }
-
-    fn resume(&mut self) {
-        self.timeline.resume();
-        self.status.set("Running".to_string());
-    }
-
-    fn restart(&mut self) {
-        self.timeline.restart();
-        self.status.set("Restarted".to_string());
-    }
-
-    fn reverse(&mut self) {
-        self.timeline.reverse();
-        self.status.set("Reversed".to_string());
-    }
-
-    fn seek_middle(&mut self) {
-        self.timeline.seek_percent(0.5);
-        self.status.set("Jumped to 50%".to_string());
-    }
-
     fn view(&self) -> tgui::Element<Self> {
         Flex::new(Axis::Vertical)
             .size(pct(100.0), pct(100.0))
@@ -150,8 +155,8 @@ impl TimelineVm {
                         .binding()
                         .map(|status| format!("Status: {status}")),
                 )
-                .font_size(sp(16.0))
-                .color(Color::hexa(0xCBD5E1FF)),
+                    .font_size(sp(16.0))
+                    .color(Color::hexa(0xCBD5E1FF)),
             )
             .child(
                 Flex::new(Axis::Horizontal)
@@ -177,9 +182,8 @@ impl TimelineVm {
             )
             .into()
     }
-}
 
-impl ViewModel for TimelineVm {}
+}
 
 fn main() -> Result<(), TguiError> {
     Application::new()
