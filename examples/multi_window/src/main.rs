@@ -187,6 +187,8 @@ impl MultiWindowVm {
             WindowSpec::main("main")
                 .title("tgui multi-window")
                 .window_size(dp(980.0), dp(700.0))
+                .min_window_size(dp(760.0), dp(520.0))
+                .max_window_size(dp(1280.0), dp(900.0))
                 .bind_title(Self::main_title)
                 .root_view(Self::main_view),
         ];
@@ -196,6 +198,8 @@ impl MultiWindowVm {
                 WindowSpec::child("inspector")
                     .title("Inspector")
                     .window_size(dp(420.0), dp(320.0))
+                    .min_window_size(dp(320.0), dp(240.0))
+                    .max_window_size(dp(640.0), dp(480.0))
                     .bind_title(Self::inspector_title)
                     .root_view(Self::inspector_view),
             );
@@ -206,6 +210,8 @@ impl MultiWindowVm {
                 WindowSpec::child(format!("document-{id}"))
                     .title(format!("Document {id}"))
                     .window_size(dp(540.0), dp(360.0))
+                    .min_window_size(dp(360.0), dp(260.0))
+                    .max_window_size(dp(900.0), dp(700.0))
                     .bind_title(move |vm: &Self| vm.document_title(id))
                     .root_view(move |vm: &Self| vm.document_view(id)),
             );
