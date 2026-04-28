@@ -34,6 +34,7 @@ pub struct Renderer {
     rect_pipeline: wgpu::RenderPipeline,
     brush_pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
+    scene_text_pipeline: wgpu::RenderPipeline,
     text_pipeline: wgpu::RenderPipeline,
     backdrop_blur_pipeline: wgpu::RenderPipeline,
     backdrop_composite_pipeline: wgpu::RenderPipeline,
@@ -61,7 +62,7 @@ struct TextSystem {
 
 struct MultisampleTarget {
     _texture: wgpu::Texture,
-    _view: wgpu::TextureView,
+    view: wgpu::TextureView,
 }
 
 struct OffscreenTarget {
@@ -255,7 +256,10 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: msaa_sample_count,
+                ..Default::default()
+            },
             fragment: Some(wgpu::FragmentState {
                 module: &rect_shader,
                 entry_point: Some("fs_main"),
@@ -296,7 +300,10 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: msaa_sample_count,
+                ..Default::default()
+            },
             fragment: Some(wgpu::FragmentState {
                 module: &brush_shader,
                 entry_point: Some("fs_main"),
@@ -336,7 +343,10 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: msaa_sample_count,
+                ..Default::default()
+            },
             fragment: Some(wgpu::FragmentState {
                 module: &mesh_shader,
                 entry_point: Some("fs_main"),
@@ -444,6 +454,43 @@ impl Renderer {
             label: Some("tgui-text-pipeline-layout"),
             bind_group_layouts: &[Some(&text_bind_group_layout)],
             immediate_size: 0,
+        });
+
+        let scene_text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("tgui-scene-text-pipeline"),
+            layout: Some(&text_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &text_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[TextVertex::layout()],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: msaa_sample_count,
+                ..Default::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &text_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
         });
 
         let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -592,6 +639,7 @@ impl Renderer {
             rect_pipeline,
             brush_pipeline,
             mesh_pipeline,
+            scene_text_pipeline,
             text_pipeline,
             backdrop_blur_pipeline,
             backdrop_composite_pipeline,
@@ -964,11 +1012,12 @@ impl Renderer {
             }
 
             let scene_view = self.scene_target_view()?;
+            let msaa_view = self.msaa_target.as_ref().map(|target| &target.view);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tgui-scene-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: scene_view,
-                    resolve_target: None,
+                    view: msaa_view.unwrap_or(scene_view),
+                    resolve_target: msaa_view.map(|_| scene_view),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -1007,7 +1056,7 @@ impl Renderer {
                     }
                     PreparedCommand::Sprite(batch) => {
                         if self.apply_scissor(&mut pass, batch.clip_rect) {
-                            pass.set_pipeline(&self.text_pipeline);
+                            pass.set_pipeline(&self.scene_text_pipeline);
                             pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
                             pass.set_bind_group(0, &batch.bind_group, &[]);
                             pass.draw(0..batch.vertex_count, 0..1);
@@ -2175,7 +2224,7 @@ fn create_multisample_target(
 
     Some(MultisampleTarget {
         _texture: texture,
-        _view: view,
+        view,
     })
 }
 

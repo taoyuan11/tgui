@@ -898,6 +898,14 @@ impl<VM> Flex<VM> {
         }))
     }
 
+    pub fn horizontal() -> Self {
+        Self::new(Axis::Horizontal)
+    }
+
+    pub fn vertical() -> Self {
+        Self::new(Axis::Vertical)
+    }
+
     pub fn direction(mut self, direction: Axis) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.0.element.kind {
             layout.kind = match layout.kind.clone() {

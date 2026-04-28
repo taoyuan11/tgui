@@ -1,6 +1,11 @@
 use std::path::PathBuf;
 
-use tgui::{dp, el, fr, pct, sp, Application, Axis, Button, Color, Element, Flex, Grid, Image, Input, Insets, Observable, Overflow, Stack, Switch, Text, TguiError, Theme, ValueCommand, ViewModel, ViewModelContext};
+use tgui::{
+    dp, el, pct, sp, Application, Axis, Button, Canvas, CanvasGradientStop, CanvasItem,
+    CanvasLinearGradient, CanvasPath, CanvasStroke, Color, Element, Flex, Image, Input, Insets,
+    Observable, Overflow, PathBuilder, Point, Stack, Switch, Text, TguiError, Theme,
+    ValueCommand, ViewModel, ViewModelContext,
+};
 
 struct App {
     switch: Observable<bool>,
@@ -38,57 +43,19 @@ impl ViewModel for App {
                                 Button::new(Text::new("普通按钮")).primary(),
                                 Button::new(Text::new("次要按钮")).secondary(),
                                 Button::new(Text::new("危险按钮")).danger(),
-                                Button::new(Text::new("幽灵按钮")).ghost(),
                             ]),
                         ),
                         component_card(
                             "Input",
-                            Input::new(Text::new("输入框示例输入框示例输入框示例输入框示例输入框示例输入框示例输入框示例输入框示例输入框示例输入框示例输入框示例输入框示例输入框示例输入框示例输入框示例输入框示例"))
+                            Input::new(Text::new("输入框示例输入框示例输入框示例"))
                                 .placeholder_with_str("请输入内容")
                                 .width(dp(260.0)),
                         ),
                         component_card(
                             "Switch",
-                            Switch::new(self.switch.binding())
-                            .on_change(ValueCommand::new(|app: &mut App, enable| {
-                                app.switch.set(enable)
-                            }))
-                        ),
-                        component_card(
-                            "Stack",
-                            Stack::new()
-                                .width(dp(260.0))
-                                .height(dp(80.0))
-                                .padding(Insets::all(dp(12.0)))
-                                .background(Color::rgb(36, 44, 58))
-                                .border_radius(dp(12.0))
-                                .center()
-                                .child(
-                                    Text::new("Stack 容器")
-                                        .font_size(sp(16.0))
-                                        .color(Color::WHITE),
-                                ),
-                        ),
-                        component_card(
-                            "Flex",
-                            Flex::new(Axis::Horizontal).gap(dp(10.0)).child(el![
-                                pill("Rust"),
-                                pill("Desktop"),
-                                pill("GPU"),
-                                pill("MVVM"),
-                            ]),
-                        ),
-                        component_card(
-                            "Grid",
-                            Grid::columns([fr(1.0), fr(1.0)])
-                                .gap(dp(10.0))
-                                .width(dp(260.0))
-                                .child(el![
-                                    grid_block("A", Color::rgb(58, 86, 140)),
-                                    grid_block("B", Color::rgb(67, 116, 89)),
-                                    grid_block("C", Color::rgb(125, 82, 48)),
-                                    grid_block("D", Color::rgb(124, 66, 102)),
-                                ]),
+                            Switch::new(self.switch.binding()).on_change(ValueCommand::new(
+                                |app: &mut App, enable| app.switch.set(enable),
+                            )),
                         ),
                         component_card(
                             "Image",
@@ -96,15 +63,7 @@ impl ViewModel for App {
                                 .size(dp(220.0), dp(120.0))
                                 .border_radius(dp(12.0)),
                         ),
-                        component_card(
-                            "其他组件",
-                            Flex::new(Axis::Vertical).gap(dp(6.0)).child(el![
-                                Text::new("Canvas：当前示例接入后会触发栈溢出，暂不启用")
-                                    .color(Color::rgb(190, 198, 214)),
-                                Text::new("VideoSurface：启用 video feature 后可用")
-                                    .color(Color::rgb(190, 198, 214)),
-                            ]),
-                        ),
+                        component_card("Canvas", demo_canvas()),
                     ]),
             )
             .into()
@@ -127,28 +86,53 @@ fn component_card(title: &str, content: impl Into<Element<App>>) -> Element<App>
         .into()
 }
 
-fn pill(label: &str) -> Element<App> {
-    Text::new(label)
-        .padding(Insets::symmetric(dp(10.0), dp(6.0)))
-        .background(Color::rgb(38, 50, 68))
-        .border_radius(dp(999.0))
-        .color(Color::rgb(226, 234, 246))
-        .into()
-}
-
-fn grid_block(label: &str, color: Color) -> Element<App> {
-    Stack::new()
-        .height(dp(52.0))
-        .width(dp(52.0))
-        .background(color)
-        .border_radius(dp(10.0))
-        .center()
-        .child(Text::new(label).color(Color::WHITE).background(Color::RED))
-        .into()
-}
-
 fn demo_image_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../background_effects/assets/juequling_shushu.jpg")
+}
+
+fn demo_canvas() -> Element<App> {
+    let items = vec![
+        CanvasItem::Path(
+            CanvasPath::new(
+                1_u64,
+                PathBuilder::new()
+                    .move_to(24.0, 20.0)
+                    .line_to(208.0, 20.0)
+                    .line_to(208.0, 128.0)
+                    .line_to(24.0, 128.0)
+                    .close(),
+            )
+            .fill(CanvasLinearGradient::new(
+                Point::new(24.0, 20.0),
+                Point::new(208.0, 128.0),
+                vec![
+                    CanvasGradientStop::new(0.0, Color::hexa(0x38BDF8FF)),
+                    CanvasGradientStop::new(1.0, Color::hexa(0x1D4ED8FF)),
+                ],
+            ))
+            .stroke(CanvasStroke::new(dp(3.0), Color::hexa(0xE0F2FEFF))),
+        ),
+        CanvasItem::Path(
+            CanvasPath::new(
+                2_u64,
+                PathBuilder::new()
+                    .move_to(44.0, 146.0)
+                    .quad_to(116.0, 92.0, 188.0, 146.0)
+                    .line_to(188.0, 188.0)
+                    .line_to(44.0, 188.0)
+                    .close(),
+            )
+            .fill(Color::hexa(0x22C55EFF))
+            .stroke(CanvasStroke::new(dp(3.0), Color::hexa(0x14532DFF))),
+        ),
+    ];
+
+    Canvas::new(items)
+        .size(dp(232.0), dp(212.0))
+        .background(Color::rgb(15, 23, 42))
+        .border(dp(1.0), Color::rgb(51, 65, 85))
+        .border_radius(dp(14.0))
+        .into()
 }
 
 impl App {
