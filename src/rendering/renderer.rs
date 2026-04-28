@@ -754,8 +754,17 @@ impl Renderer {
             let _ = &mut pass;
         }
 
-        self.execute_prepared_commands(&mut encoder, &command_buffers.0)?;
-        self.execute_prepared_commands(&mut encoder, &overlay_buffers.0)?;
+        let mut cleared_draw_target = false;
+        self.execute_prepared_commands(
+            &mut encoder,
+            &command_buffers.0,
+            &mut cleared_draw_target,
+        )?;
+        self.execute_prepared_commands(
+            &mut encoder,
+            &overlay_buffers.0,
+            &mut cleared_draw_target,
+        )?;
         let scene_view = self.scene_target_view()?;
         self.blit_scene_to_surface(
             &mut encoder,
@@ -1002,6 +1011,7 @@ impl Renderer {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         commands: &[PreparedCommand],
+        cleared_draw_target: &mut bool,
     ) -> Result<(), TguiError> {
         let mut index = 0;
         while index < commands.len() {
@@ -1020,7 +1030,12 @@ impl Renderer {
                     resolve_target: msaa_view.map(|_| scene_view),
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: if *cleared_draw_target {
+                            wgpu::LoadOp::Load
+                        } else {
+                            *cleared_draw_target = true;
+                            wgpu::LoadOp::Clear(surface_clear_color(self.clear_color))
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],
