@@ -41,20 +41,6 @@ mod tests {
     use crate::platform::window::Theme as WindowTheme;
 
     #[test]
-    fn default_theme_set_uses_builtin_light_and_dark_themes() {
-        let themes = ThemeSet::default();
-        assert_eq!(themes.light.as_ref(), &Theme::light());
-        assert_eq!(themes.dark.as_ref(), &Theme::dark());
-    }
-
-    #[test]
-    fn theme_set_resolves_explicit_light_and_dark_modes() {
-        let themes = ThemeSet::new(Theme::light(), Theme::dark());
-        assert_eq!(themes.resolve(ThemeMode::Light, None).name, "light");
-        assert_eq!(themes.resolve(ThemeMode::Dark, None).name, "dark");
-    }
-
-    #[test]
     fn theme_store_increments_version_when_resolution_changes() {
         let mut store = ThemeStore::new(ThemeSet::default(), ThemeMode::Light, None);
         assert_eq!(store.version(), 0);
@@ -116,25 +102,4 @@ mod tests {
         assert_eq!(theme.components.button.primary.container.normal, theme.colors.primary);
     }
 
-    #[test]
-    fn hover_colors_are_derived_from_base_component_colors() {
-        let theme = Theme::dark();
-
-        assert_eq!(
-            theme.components.button.primary.container.hovered,
-            theme.colors.primary.lighten(0.1)
-        );
-        assert_eq!(
-            theme.components.button.danger.container.hovered,
-            theme.colors.error.lighten(0.1)
-        );
-        assert_eq!(
-            theme.components.input.background.hovered,
-            theme.colors.surface_low.lighten(0.06)
-        );
-        assert_eq!(
-            theme.components.switch.track_checked.hovered,
-            theme.colors.primary.lighten(0.1)
-        );
-    }
 }

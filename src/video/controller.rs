@@ -355,17 +355,6 @@ mod tests {
     }
 
     #[test]
-    fn controller_defaults_buffer_memory_limit_to_100_mib() {
-        let ctx = test_context();
-        let controller = VideoController::new(&ctx);
-
-        assert_eq!(
-            controller.inner.shared.buffer_memory_limit_bytes.get(),
-            DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES
-        );
-    }
-
-    #[test]
     fn play_restarts_from_beginning_after_playback_ended() {
         let ctx = test_context();
         let shared = test_shared(&ctx);

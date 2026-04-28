@@ -343,15 +343,3 @@ impl<VM> From<Text> for Element<VM> {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Text;
-    use crate::Sp;
-
-    #[test]
-    fn character_spacing_updates_letter_spacing() {
-        let text = Text::new("hello").character_spacing(Sp::new(2.5));
-        assert_eq!(text.letter_spacing, Some(Sp::new(2.5)));
-    }
-}

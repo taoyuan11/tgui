@@ -1,9 +1,4 @@
-use tgui::{
-    dp, sp, Application, Canvas, CanvasGradientStop, CanvasItem, CanvasLinearGradient, CanvasPath,
-    CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke, Color, Flex, Insets,
-    Observable, Overflow, PathBuilder, Point, ScrollbarStyle, Stack, Text, ValueCommand, Axis,
-    ViewModel, ViewModelContext, pct,
-};
+use tgui::prelude::*;
 
 struct CanvasVm {
     hovered: Observable<String>,
@@ -32,7 +27,7 @@ impl CanvasVm {
 
 impl ViewModel for CanvasVm {
 
-    fn view(&self) -> tgui::Element<Self> {
+    fn view(&self) -> Element<Self> {
         let boolean_base = PathBuilder::new()
             .move_to(560.0, 110.0)
             .line_to(760.0, 110.0)
@@ -206,7 +201,7 @@ impl ViewModel for CanvasVm {
 
 }
 
-fn main() -> Result<(), tgui::TguiError> {
+fn main() -> Result<(), TguiError> {
     Application::new()
         .title("tgui Canvas")
         .window_size(dp(1160.0), dp(920.0))

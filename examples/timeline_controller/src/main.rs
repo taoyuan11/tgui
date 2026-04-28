@@ -1,10 +1,6 @@
 use std::time::Duration;
 
-use tgui::{
-    AnimatedValue, AnimationControllerHandle, AnimationCurve, AnimationSpec, Application, Button,
-    Color, Axis, Command, Dp, Flex, Insets, Keyframes, Observable, Playback,
-    PlaybackDirection, Point, Text, TguiError, ViewModel, ViewModelContext, dp, pct, sp,
-};
+use tgui::prelude::*;
 
 struct TimelineVm {
     status: Observable<String>,
@@ -139,7 +135,7 @@ impl ViewModel for TimelineVm {
         }
     }
 
-    fn view(&self) -> tgui::Element<Self> {
+    fn view(&self) -> Element<Self> {
         Flex::new(Axis::Vertical)
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))

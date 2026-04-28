@@ -4271,7 +4271,8 @@ mod tests {
     #[cfg(feature = "video")]
     use std::time::Duration;
     use std::time::Instant;
-    use crate::{Element, Stack, ViewModelContext, WidgetId};
+    use crate::foundation::binding::ViewModelContext;
+    use crate::ui::widget::{Element, Stack, WidgetId};
     use super::{
         input_cursor_index_at_point_with_state, next_grapheme_boundary, normalize_single_line_text,
         previous_grapheme_boundary, text_cursor_index_at_point, BoundRuntimeHandler, CachedScene,
@@ -4296,7 +4297,7 @@ mod tests {
     struct TestVm;
 
     impl crate::foundation::view_model::ViewModel for TestVm {
-        fn new(context: &ViewModelContext) -> Self {
+        fn new(_context: &ViewModelContext) -> Self {
             todo!()
         }
 
@@ -5450,7 +5451,7 @@ mod tests {
     }
 
     impl crate::foundation::view_model::ViewModel for SwitchVm {
-        fn new(context: &ViewModelContext) -> Self {
+        fn new(_context: &ViewModelContext) -> Self {
             todo!()
         }
 
@@ -5566,7 +5567,7 @@ mod tests {
     }
 
     impl crate::foundation::view_model::ViewModel for CanvasEventVm {
-        fn new(context: &ViewModelContext) -> Self {
+        fn new(_context: &ViewModelContext) -> Self {
             Self {
                 hover_events: vec![],
                 clicks: 0,

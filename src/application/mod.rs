@@ -41,7 +41,7 @@ impl ThemeSelection {
 /// then call [`Application::with_view_model`] to bind a view model and root view.
 ///
 /// ```no_run
-/// use tgui::{dp, Application, Element, Text, ViewModel, ViewModelContext};
+/// use tgui::prelude::*;
 ///
 /// struct AppVm;
 ///
@@ -55,9 +55,17 @@ impl ThemeSelection {
 ///     }
 /// }
 ///
-/// impl ViewModel for AppVm {}
+/// impl ViewModel for AppVm {
+///     fn new(context: &ViewModelContext) -> Self {
+///         AppVm::new(context)
+///     }
 ///
-/// fn main() -> Result<(), tgui::TguiError> {
+///     fn view(&self) -> Element<Self> {
+///         AppVm::view(self)
+///     }
+/// }
+///
+/// fn main() -> Result<(), TguiError> {
 ///     Application::new()
 ///         .title("Demo")
 ///         .window_size(dp(1024.0), dp(768.0))

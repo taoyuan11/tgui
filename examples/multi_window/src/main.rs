@@ -1,7 +1,4 @@
-use tgui::{
-    Application, Axis, Binding, Button, Color, Command, Flex, Insets, Observable, Stack, Text,
-    TguiError, ViewModel, ViewModelContext, WindowSpec, dp, pct, sp,
-};
+use tgui::prelude::*;
 
 struct MultiWindowVm {
     next_document_id: Observable<u32>,
@@ -66,7 +63,7 @@ impl MultiWindowVm {
         });
     }
 
-    fn main_view(&self) -> tgui::Element<Self> {
+    fn main_view(&self) -> Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(28.0)))
@@ -125,7 +122,7 @@ impl MultiWindowVm {
             .into()
     }
 
-    fn inspector_view(&self) -> tgui::Element<Self> {
+    fn inspector_view(&self) -> Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(18.0)))
@@ -153,7 +150,7 @@ impl MultiWindowVm {
             .into()
     }
 
-    fn document_view(&self, id: u32) -> tgui::Element<Self> {
+    fn document_view(&self, id: u32) -> Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(20.0)))
@@ -218,7 +215,15 @@ impl MultiWindowVm {
     }
 }
 
-impl ViewModel for MultiWindowVm {}
+impl ViewModel for MultiWindowVm {
+    fn new(ctx: &ViewModelContext) -> Self {
+        MultiWindowVm::new(ctx)
+    }
+
+    fn view(&self) -> Element<Self> {
+        MultiWindowVm::main_view(self)
+    }
+}
 
 fn main() -> Result<(), TguiError> {
     Application::new()

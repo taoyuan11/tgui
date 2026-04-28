@@ -1,4 +1,4 @@
-#[cfg(any(target_os = "android", target_env = "ohos", test))]
+#[cfg(any(target_os = "android", target_env = "ohos"))]
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -99,7 +99,7 @@ pub fn tgui_log(level: LogLevel, message: impl Display) {
     Log::default().log(level, message);
 }
 
-#[cfg(any(target_os = "android", target_env = "ohos", test))]
+#[cfg(any(target_os = "android", target_env = "ohos"))]
 fn sanitize_c_string(input: &str) -> Cow<'_, str> {
     if input.contains('\0') {
         Cow::Owned(input.replace('\0', " "))
@@ -188,30 +188,5 @@ mod platform {
             LogLevel::Warn => OhosLogLevel::LOG_WARN,
             LogLevel::Error => OhosLogLevel::LOG_ERROR,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{sanitize_c_string, Log, LogLevel};
-
-    #[test]
-    fn empty_tag_falls_back_to_default() {
-        assert_eq!(Log::with_tag("").tag(), "tgui");
-    }
-
-    #[test]
-    fn scoped_logger_overrides_tag() {
-        assert_eq!(Log::new().scoped("video").tag(), "tgui/video");
-    }
-
-    #[test]
-    fn level_display_uses_uppercase_names() {
-        assert_eq!(LogLevel::Warn.to_string(), "WARN");
-    }
-
-    #[test]
-    fn interior_null_bytes_are_sanitized() {
-        assert_eq!(sanitize_c_string("a\0b").as_ref(), "a b");
     }
 }

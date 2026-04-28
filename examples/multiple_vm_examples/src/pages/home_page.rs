@@ -1,7 +1,4 @@
-use tgui::{
-    dp, el, pct, sp, Axis, Button, Color, Command, Element, Flex, Insets, Observable, Text,
-    ViewModelContext,
-};
+use tgui::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HomeTab {

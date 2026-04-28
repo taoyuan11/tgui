@@ -1,9 +1,6 @@
-use tgui::{
-    el, Application, Axis, Binding, Button, Color, Command, Element, Flex, Insets, Observable,
-    Stack, Text, TguiError, Theme, ThemeMode, ViewModel, ViewModelContext, dp, pct, sp,
-};
 #[cfg(target_os = "android")]
 use tgui::platform::android::activity::AndroidApp;
+use tgui::prelude::*;
 
 fn themed_app() -> Application {
     let mut theme = Theme::dark();

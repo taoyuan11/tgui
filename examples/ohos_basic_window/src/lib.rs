@@ -1,11 +1,9 @@
 #[cfg(target_env = "ohos")]
 use tgui::platform::ohos::export_ohos_winit_app;
-use tgui::{
-    dp, el, sp, Application, Axis, Binding, Button, Color, Command, CommandContext, Element, Flex,
-    Insets, LogLevel, Observable, Stack, Text, Theme, ThemeMode, ViewModel, ViewModelContext, pct,
-};
+use tgui::prelude::*;
 #[cfg(target_env = "ohos")]
 use winit_core::application::ApplicationHandler;
+use tgui::application::Application;
 
 fn themed_app() -> Application {
     let mut theme = Theme::dark();

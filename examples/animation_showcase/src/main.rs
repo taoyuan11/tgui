@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use tgui::{Application, Axis, Binding, Button, Color, Command, Flex, Insets, Observable, Point, Stack, Text, TguiError, Transition, ViewModel, ViewModelContext, dp, pct, sp, Dp};
+use tgui::prelude::*;
 
 struct AnimationVm {
     expanded: Observable<bool>,
@@ -115,7 +115,7 @@ impl ViewModel for AnimationVm {
         }
     }
 
-    fn view(&self) -> tgui::Element<Self> {
+    fn view(&self) -> Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))

@@ -3,7 +3,7 @@ pub mod pages;
 use crate::pages::home_page::HomePage;
 use crate::pages::settings_page::SettingsPage;
 use std::sync::Arc;
-use tgui::{dp, el, tgui_log, Application, Axis, Binding, Button, Color, Command, Element, Flex, Insets, LogLevel, Observable, Text, TguiError, Theme, ThemeMode, ThemeSet, ViewModel, ViewModelContext};
+use tgui::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -20,8 +20,6 @@ struct RootVM {
 }
 
 impl RootVM {
-    
-
     fn theme_set(&self) -> Binding<ThemeSet> {
         self.themes.binding()
     }
@@ -39,15 +37,6 @@ impl RootVM {
         })
     }
 
-    fn accent_color(&self) -> Binding<Color> {
-        let themes = self.themes.binding();
-        let mode = self.current_theme.binding();
-        Binding::new(move || match mode.get() {
-            ThemeMode::Light => themes.get().light.colors.primary,
-            ThemeMode::Dark | ThemeMode::System => themes.get().dark.colors.primary,
-        })
-    }
-
     fn toggle_theme_colors(&mut self) {
         self.themes.update(|themes| {
             let alternate = themes.light.colors.background == Color::hex(0xFF3333);
@@ -62,8 +51,6 @@ impl RootVM {
     fn show_settings(&mut self) {
         self.page.set(Page::Settings);
     }
-
-    
 }
 
 impl ViewModel for RootVM {

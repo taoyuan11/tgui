@@ -1,7 +1,4 @@
-use tgui::{
-    dp, el, pct, sp, tgui_log, Application, Axis, Color, Element, Flex, Insets, LogLevel, Stack,
-    Text, TguiError, Theme, ViewModel, ViewModelContext,
-};
+use tgui::prelude::*;
 
 struct AppVm;
 impl ViewModel for AppVm {

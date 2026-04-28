@@ -1,8 +1,5 @@
 use std::sync::Arc;
-use tgui::{
-    dp, el, pct, sp, Axis, Button, Color, Command, Element, Flex, Insets, Observable, Text,
-    ViewModelContext,
-};
+use tgui::prelude::*;
 
 #[derive(Clone)]
 pub struct SettingsPage {

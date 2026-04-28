@@ -1,10 +1,6 @@
 use std::path::PathBuf;
 
-use tgui::{
-    Application, Axis, Button, Command, DialogError, Element, FileDialogOptions, Flex,
-    MessageDialogButtons, MessageDialogLevel, MessageDialogOptions, MessageDialogResult,
-    Observable, Text, ValueCommand, ViewModel, ViewModelContext, el, pct,
-};
+use tgui::prelude::*;
 
 struct App {
     clicks: Observable<u32>,
@@ -14,7 +10,7 @@ struct App {
 
 impl App {
 
-    fn open_file_sync(&mut self, ctx: &tgui::CommandContext<Self>) {
+    fn open_file_sync(&mut self, ctx: &CommandContext<Self>) {
         let result = ctx.dialogs().open_file(
             FileDialogOptions::new()
                 .title("选择一个文本文件")
@@ -24,7 +20,7 @@ impl App {
         self.file_status.set(Self::describe_file_result(result));
     }
 
-    fn open_file_async(ctx: &tgui::CommandContext<Self>) {
+    fn open_file_async(ctx: &CommandContext<Self>) {
         let _ = ctx.dialogs().open_file_async(
             FileDialogOptions::new()
                 .title("异步选择一个文本文件")
@@ -33,7 +29,7 @@ impl App {
         );
     }
 
-    fn show_message_sync(&mut self, ctx: &tgui::CommandContext<Self>) {
+    fn show_message_sync(&mut self, ctx: &CommandContext<Self>) {
         let result = ctx.dialogs().show_message(
             MessageDialogOptions::new()
                 .title("确认")
@@ -45,7 +41,7 @@ impl App {
             .set(Self::describe_message_result(result));
     }
 
-    fn show_message_async(ctx: &tgui::CommandContext<Self>) {
+    fn show_message_async(ctx: &CommandContext<Self>) {
         let _ = ctx.dialogs().show_message_async(
             MessageDialogOptions::new()
                 .title("异步提示")
@@ -138,7 +134,7 @@ impl ViewModel for App {
 
 }
 
-fn main() -> Result<(), tgui::TguiError> {
+fn main() -> Result<(), TguiError> {
     Application::new()
         .with_view_model(App::new)
         .root_view(App::view)

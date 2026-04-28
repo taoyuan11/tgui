@@ -78,15 +78,26 @@ tgui = { version = "0.1.6", features = ["video"] }
 - `android`：启用 Android 入口
 - `ohos`：启用 HarmonyOS / OpenHarmony 入口
 
+## 公开 API 结构
+
+`tgui` 的公开类型按职责分类导出：
+
+- `application`：应用、窗口和运行入口
+- `mvvm`：`ViewModel`、`Observable`、`Binding`、`Command`
+- `layout`：布局容器、尺寸、间距和滚动相关类型
+- `widgets` / `canvas`：基础控件、控件树和 Canvas 绘制 API
+- `theme`：主题、色板、排版、状态和设计 token
+- `core`：颜色、错误、输入触发器、基础单位和几何类型
+- `media` / `dialog` / `logging` / `platform` / `video`：媒体、对话框、日志、平台和视频能力
+
+示例代码可使用 `tgui::prelude::*` 引入常用 API；库代码建议优先从具体分类模块导入。
+
 ## 快速开始
 
 `tgui` 只支持 MVVM 启动路径。即使是静态界面，也需要定义一个命名 ViewModel 并显式实现 `ViewModel`。
 
 ```rust
-use tgui::{
-    Application, Axis, Button, Command, Flex, Observable, Text, TguiError, ViewModel,
-    ViewModelContext,
-};
+use tgui::prelude::*;
 
 struct CounterVm {
     count: Observable<u32>,
@@ -103,7 +114,7 @@ impl CounterVm {
         self.count.update(|value| *value += 1);
     }
 
-    fn view(&self) -> tgui::Element<Self> {
+fn view(&self) -> Element<Self> {
         Flex::new(Axis::Vertical)
             .child(Text::new(
                 self.count.binding().map(|count| format!("Count: {count}")),
@@ -250,16 +261,16 @@ cargo run --manifest-path examples/video_surface/Cargo.toml
 
 启用 `video` feature 后可使用：
 
-- `VideoController`
-- `VideoSurface`
-- `VideoSource`
-- `PlaybackState`
-- `VideoMetrics`
+- `video::VideoController`
+- `video::VideoSurface`
+- `video::VideoSource`
+- `video::PlaybackState`
+- `video::VideoMetrics`
 
 网络视频如果需要自定义请求头，可以把 header 直接挂在 `VideoSource` 上：
 
 ```rust
-let source = tgui::VideoSource::url("https://example.com/demo.mp4")
+let source = tgui::video::VideoSource::url("https://example.com/demo.mp4")
     .with_header("Authorization", "Bearer <token>")
     .with_headers([
         ("Referer", "https://example.com/player"),

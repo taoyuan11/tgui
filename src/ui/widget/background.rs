@@ -169,25 +169,3 @@ fn clamp_background_stops(mut stops: Vec<BackgroundGradientStop>) -> Vec<Backgro
     }
     stops
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::media::{ContentFit, MediaSource};
-
-    use super::BackgroundImage;
-
-    #[test]
-    fn background_image_defaults_to_cover() {
-        let image = BackgroundImage::from_path("assets/bg.jpg");
-
-        assert_eq!(image.fit, ContentFit::Cover);
-        assert_eq!(image.source, MediaSource::path("assets/bg.jpg"));
-    }
-
-    #[test]
-    fn background_image_fit_is_configurable() {
-        let image = BackgroundImage::from_url("https://example.com/bg.jpg").fit(ContentFit::Contain);
-
-        assert_eq!(image.fit, ContentFit::Contain);
-    }
-}

@@ -2,18 +2,21 @@
 //!
 //! The crate is organized around a few core building blocks:
 //!
-//! - [`Application`] configures the window, theme, fonts, and runtime entry point.
-//! - [`ViewModelContext`] creates reactive state such as [`Observable`] and [`AnimatedValue`].
-//! - [`Binding`] derives UI-facing values from state and can opt into declarative transitions.
-//! - [`Command`] and [`ValueCommand`] connect widget events back to your view model.
-//! - Layout and widgets such as [`Flex`], [`Button`], [`Input`], and [`Text`] build the widget tree.
+//! - [`application::Application`] configures the window, theme, fonts, and runtime entry point.
+//! - [`mvvm::ViewModelContext`] creates reactive state such as [`mvvm::Observable`] and
+//!   [`animation::AnimatedValue`].
+//! - [`mvvm::Binding`] derives UI-facing values from state and can opt into declarative transitions.
+//! - [`mvvm::Command`] and [`mvvm::ValueCommand`] connect widget events back to your view model.
+//! - Layout and widgets such as [`layout::Flex`], [`widgets::Button`], [`widgets::Input`],
+//!   and [`widgets::Text`] build the widget tree.
 //!
 //! Applications are always backed by an explicit view model:
 //!
 //! ```no_run
-//! use tgui::{
-//!     Application, Axis, Button, Command, Flex, Observable, Text, ViewModel, ViewModelContext,
-//! };
+//! use tgui::application::Application;
+//! use tgui::layout::Axis;
+//! use tgui::mvvm::{Command, Observable, ViewModel, ViewModelContext};
+//! use tgui::widgets::{Button, Element, Flex, Text};
 //!
 //! struct CounterVm {
 //!     count: Observable<u32>,
@@ -30,7 +33,7 @@
 //!         self.count.update(|value| *value += 1);
 //!     }
 //!
-//!     fn view(&self) -> tgui::Element<Self> {
+//!     fn view(&self) -> Element<Self> {
 //!         Flex::new(Axis::Vertical)
 //!             .child(Text::new(
 //!                 self.count.binding().map(|count| format!("Count: {count}")),
@@ -40,21 +43,29 @@
 //!     }
 //! }
 //!
-//! impl ViewModel for CounterVm {}
+//! impl ViewModel for CounterVm {
+//!     fn new(ctx: &ViewModelContext) -> Self {
+//!         CounterVm::new(ctx)
+//!     }
 //!
-//! fn main() -> Result<(), tgui::TguiError> {
+//!     fn view(&self) -> Element<Self> {
+//!         CounterVm::view(self)
+//!     }
+//! }
+//!
+//! fn main() -> Result<(), tgui::core::TguiError> {
 //!     Application::new()
 //!         .with_view_model(CounterVm::new)
 //!         .root_view(CounterVm::view)
 //!         .run()
 //! }
 //! ```
-mod animation;
-mod application;
-mod dialog;
+pub mod animation;
+pub mod application;
+pub mod dialog;
 mod foundation;
 mod log;
-mod media;
+pub mod media;
 pub mod platform;
 mod rendering;
 mod runtime;
@@ -70,10 +81,21 @@ pub mod video;
 /// you want a compact call site.
 ///
 /// ```rust
-/// use tgui::{el, Axis, Element, Flex, Text, ViewModel};
+/// use tgui::el;
+/// use tgui::layout::Axis;
+/// use tgui::mvvm::{ViewModel, ViewModelContext};
+/// use tgui::widgets::{Element, Flex, Text};
 ///
 /// struct AppVm;
-/// impl ViewModel for AppVm {}
+/// impl ViewModel for AppVm {
+///     fn new(_: &ViewModelContext) -> Self {
+///         Self
+///     }
+///
+///     fn view(&self) -> Element<Self> {
+///         Text::new("App").into()
+///     }
+/// }
 ///
 /// let _column: Element<AppVm> = Flex::<AppVm>::new(Axis::Vertical).child(el![
 ///     Text::new("First"),
@@ -82,46 +104,110 @@ pub mod video;
 /// ```
 macro_rules! el {
     ($($child:expr),* $(,)?) => {
-        ::std::vec![$($crate::Element::from($child)),*]
+        ::std::vec![$($crate::widgets::Element::from($child)),*]
     };
 }
 
-pub use crate::log::{tgui_log, Log, LogLevel};
-pub use animation::{
-    AnimatedValue, AnimationControllerBuilder, AnimationControllerHandle, AnimationCurve,
-    AnimationSpec, AnimationStatus, Easing, FillMode, Keyframe, Keyframes, Playback,
-    PlaybackDirection, Repeat, Transition,
-};
-pub use application::{Application, WindowClosePolicy, WindowRole, WindowSpec};
-pub use dialog::{
-    DialogError, Dialogs, FileDialogOptions, MessageDialogButtons, MessageDialogLevel,
-    MessageDialogOptions, MessageDialogResult,
-};
-pub use foundation::binding::{Binding, Observable, ViewModelContext};
-pub use foundation::color::Color;
-pub use foundation::error::TguiError;
-pub use foundation::event::InputTrigger;
-pub use foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
-pub use media::{ContentFit, MediaBytes, MediaSource};
-pub use ui::layout::{
-    fr, pct, Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType,
-    ScrollbarStyle, Track, Value, Wrap,
-};
-pub use ui::theme::{
-    BorderScale, ColorScheme, ComponentTheme, ElevationScale, FontWeight, MotionScale, RadiusScale,
-    Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet, ThemeStore, TypeScale,
-    WidgetState,
-};
-pub use ui::unit::{dp, sp, Dp, Sp};
-pub use ui::widget::{
-    rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
-    BackgroundRadialGradient, Button, Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop,
-    CanvasItem, CanvasItemId, CanvasLinearGradient, CanvasPath, CanvasPathOpError,
-    CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke, CursorStyle, Element,
-    Flex, Grid, Image, Input, IntoLengthValue, PathBuilder, Point, Rect, Stack, Switch, Text,
-    WidgetCommand, WidgetEventResult, WidgetId, WidgetTree,
-};
-#[cfg(feature = "video")]
-pub use video::{
-    PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
-};
+/// Canvas drawing widgets and drawing primitives.
+pub mod canvas {
+    pub use crate::ui::widget::{
+        Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasItemId,
+        CanvasLinearGradient, CanvasPath, CanvasPathOpError, CanvasPointerEvent,
+        CanvasRadialGradient, CanvasShadow, CanvasStroke, PathBuilder,
+    };
+}
+
+/// Foundational types that are shared across multiple subsystems.
+pub mod core {
+    pub use crate::foundation::color::Color;
+    pub use crate::foundation::error::TguiError;
+    pub use crate::foundation::event::InputTrigger;
+    pub use crate::ui::unit::{dp, sp, Dp, Sp};
+    pub use crate::ui::widget::{Point, Rect, WidgetId};
+}
+
+/// Layout primitives, sizing helpers, and container widgets.
+pub mod layout {
+    pub use crate::ui::layout::{
+        fr, pct, Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType,
+        ScrollbarStyle, Track, Value, Wrap,
+    };
+    pub use crate::ui::unit::{dp, sp, Dp, Sp};
+    pub use crate::ui::widget::{Flex, Grid, IntoLengthValue, Stack};
+}
+
+/// Logging helpers used by platform integrations and examples.
+pub mod logging {
+    pub use crate::log::{tgui_log, Log, LogLevel};
+}
+
+/// MVVM state, bindings, commands, and view model contracts.
+pub mod mvvm {
+    pub use crate::foundation::binding::{Binding, Observable, ViewModelContext};
+    pub use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
+}
+
+/// Convenient imports for small applications and examples.
+pub mod prelude {
+    pub use crate::el;
+    pub use crate::animation::{
+        AnimatedValue, AnimationControllerBuilder, AnimationControllerHandle, AnimationCurve,
+        AnimationSpec, AnimationStatus, Easing, FillMode, Keyframe, Keyframes, Playback,
+        PlaybackDirection, Repeat, Transition,
+    };
+    pub use crate::application::{Application, WindowClosePolicy, WindowRole, WindowSpec};
+    pub use crate::canvas::{
+        Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasItemId,
+        CanvasLinearGradient, CanvasPath, CanvasPathOpError, CanvasPointerEvent,
+        CanvasRadialGradient, CanvasShadow, CanvasStroke, PathBuilder,
+    };
+    pub use crate::core::{dp, sp, Color, Dp, InputTrigger, Point, Rect, Sp, TguiError, WidgetId};
+    pub use crate::dialog::{
+        DialogError, Dialogs, FileDialogOptions, MessageDialogButtons, MessageDialogLevel,
+        MessageDialogOptions, MessageDialogResult,
+    };
+    pub use crate::layout::{
+        fr, pct, Align, Axis, Flex, Grid, Insets, IntoLengthValue, Justify, LayoutStyle, Length,
+        Overflow, PositionType, ScrollbarStyle, Stack, Track, Value, Wrap,
+    };
+    pub use crate::logging::{tgui_log, Log, LogLevel};
+    pub use crate::media::{ContentFit, MediaBytes, MediaSource};
+    pub use crate::mvvm::{
+        Binding, Command, CommandContext, Observable, ValueCommand, ViewModel, ViewModelContext,
+    };
+    pub use crate::theme::{
+        BorderScale, ColorScheme, ComponentTheme, ElevationScale, FontWeight, MotionScale,
+        RadiusScale, Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet,
+        ThemeStore, TypeScale, WidgetState,
+    };
+    pub use crate::widgets::{
+        rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
+        BackgroundRadialGradient, Button, CursorStyle, Element, Image, Input, Switch, Text,
+        WidgetCommand, WidgetEventResult, WidgetTree,
+    };
+    #[cfg(feature = "video")]
+    pub use crate::video::{
+        PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
+    };
+}
+
+/// Theme tokens, state resolution, and theme storage.
+pub mod theme {
+    pub use crate::ui::theme::{
+        BorderScale, ColorScheme, ComponentTheme, ElevationScale, FontWeight, MotionScale,
+        RadiusScale, Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet,
+        ThemeStore, TypeScale, WidgetState,
+    };
+}
+
+/// Built-in widgets and widget-tree infrastructure.
+pub mod widgets {
+    pub use crate::ui::widget::{
+        rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
+        BackgroundRadialGradient, Button, CursorStyle, Element, Image, Input, Switch, Text,
+        WidgetCommand, WidgetEventResult, WidgetTree,
+    };
+    pub use crate::layout::{Flex, Grid, IntoLengthValue, Stack};
+    #[cfg(feature = "video")]
+    pub use crate::video::VideoSurface;
+}

@@ -1,8 +1,4 @@
-use tgui::{
-    dp, pct, sp, Application, Axis, BackgroundGradientStop, BackgroundImage,
-    BackgroundLinearGradient, BackgroundRadialGradient, Color, ContentFit, Flex, Insets, Point,
-    Stack, Text, Theme, TguiError, ViewModel, ViewModelContext,
-};
+use tgui::prelude::*;
 
 struct BackgroundEffectsVm;
 
@@ -12,7 +8,7 @@ impl ViewModel for BackgroundEffectsVm {
         Self
     }
 
-    fn view(&self) -> tgui::Element<Self> {
+    fn view(&self) -> Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .background_image(BackgroundImage::from_bytes(include_bytes!("../assets/juequling_shushu.jpg")).fit(ContentFit::Cover))
@@ -30,7 +26,7 @@ impl ViewModel for BackgroundEffectsVm {
     
 }
 
-fn background_pattern() -> tgui::Element<BackgroundEffectsVm> {
+fn background_pattern() -> Element<BackgroundEffectsVm> {
     Flex::new(Axis::Vertical)
         .size(pct(100.0), pct(100.0))
         .padding(Insets::all(dp(22.0)))
@@ -53,7 +49,7 @@ fn background_pattern() -> tgui::Element<BackgroundEffectsVm> {
         .into()
 }
 
-fn color_band(start: u32, end: u32) -> tgui::Element<BackgroundEffectsVm> {
+fn color_band(start: u32, end: u32) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .grow(1.0)
         .border_radius(dp(28.0))
@@ -68,7 +64,7 @@ fn color_band(start: u32, end: u32) -> tgui::Element<BackgroundEffectsVm> {
         .into()
 }
 
-fn hero_card() -> tgui::Element<BackgroundEffectsVm> {
+fn hero_card() -> Element<BackgroundEffectsVm> {
     Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(24.0)))
         .gap(dp(12.0))
@@ -98,7 +94,7 @@ fn hero_card() -> tgui::Element<BackgroundEffectsVm> {
         .into()
 }
 
-fn gallery_row() -> tgui::Element<BackgroundEffectsVm> {
+fn gallery_row() -> Element<BackgroundEffectsVm> {
     Flex::new(Axis::Horizontal)
         .gap(dp(20.0))
         .child(gallery_column("Linear Gradient", true, linear_gallery()))
@@ -110,8 +106,8 @@ fn gallery_row() -> tgui::Element<BackgroundEffectsVm> {
 fn gallery_column(
     title: &str,
     show_background_blur: bool,
-    content: tgui::Element<BackgroundEffectsVm>,
-) -> tgui::Element<BackgroundEffectsVm> {
+    content: Element<BackgroundEffectsVm>,
+) -> Element<BackgroundEffectsVm> {
     let mut flex = Flex::new(Axis::Vertical)
         .grow(1.0)
         .padding(Insets::all(dp(18.0)))
@@ -136,7 +132,7 @@ fn gallery_column(
     flex.into()
 }
 
-fn linear_gallery() -> tgui::Element<BackgroundEffectsVm> {
+fn linear_gallery() -> Element<BackgroundEffectsVm> {
     Flex::new(Axis::Vertical)
         .gap(dp(12.0))
         .child(gradient_tile(
@@ -165,7 +161,7 @@ fn linear_gallery() -> tgui::Element<BackgroundEffectsVm> {
         .into()
 }
 
-fn radial_gallery() -> tgui::Element<BackgroundEffectsVm> {
+fn radial_gallery() -> Element<BackgroundEffectsVm> {
     Flex::new(Axis::Vertical)
         .gap(dp(12.0))
         .child(radial_tile(
@@ -194,7 +190,7 @@ fn radial_gallery() -> tgui::Element<BackgroundEffectsVm> {
         .into()
 }
 
-fn blur_gallery() -> tgui::Element<BackgroundEffectsVm> {
+fn blur_gallery() -> Element<BackgroundEffectsVm> {
     Flex::new(Axis::Vertical)
         .gap(dp(12.0))
         .child(glass_tile("Blur 8", dp(8.0), Color::hexa(0xFFFFFF18)))
@@ -206,7 +202,7 @@ fn blur_gallery() -> tgui::Element<BackgroundEffectsVm> {
 fn gradient_tile(
     gradient: BackgroundLinearGradient,
     label: &str,
-) -> tgui::Element<BackgroundEffectsVm> {
+) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .height(dp(110.0))
         .border_radius(dp(18.0))
@@ -223,7 +219,7 @@ fn gradient_tile(
 fn radial_tile(
     gradient: BackgroundRadialGradient,
     label: &str,
-) -> tgui::Element<BackgroundEffectsVm> {
+) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .height(dp(110.0))
         .border_radius(dp(18.0))
@@ -238,7 +234,7 @@ fn radial_tile(
         .into()
 }
 
-fn glass_tile(label: &str, blur: tgui::Dp, fill: Color) -> tgui::Element<BackgroundEffectsVm> {
+fn glass_tile(label: &str, blur: Dp, fill: Color) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .height(dp(96.0))
         .border_radius(dp(18.0))

@@ -1,9 +1,6 @@
-use tgui::{
-    Application, Axis, Binding, Button, Color, Command, Flex, InputTrigger, Insets, Observable,
-    Stack, Text, TguiError, ViewModelContext, dp, pct, sp,
-    ViewModel,
-};
+use tgui::core::Color;
 use tgui::platform::keyboard::KeyCode;
+use tgui::prelude::*;
 
 struct CounterVm {
     count: Observable<i32>,
@@ -69,7 +66,7 @@ impl ViewModel for CounterVm {
         }
     }
 
-    fn view(&self) -> tgui::Element<Self> {
+    fn view(&self) -> Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(28.0)))

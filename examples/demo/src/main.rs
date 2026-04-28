@@ -1,11 +1,6 @@
 use std::path::PathBuf;
 
-use tgui::{
-    dp, el, pct, sp, Application, Axis, Button, Canvas, CanvasGradientStop, CanvasItem,
-    CanvasLinearGradient, CanvasPath, CanvasStroke, Color, Element, Flex, Image, Input, Insets,
-    Observable, Overflow, PathBuilder, Point, Stack, Switch, Text, TguiError,
-    ValueCommand, ViewModel, ViewModelContext,
-};
+use tgui::prelude::*;
 
 struct App {
     switch: Observable<bool>,

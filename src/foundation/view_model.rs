@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use crate::dialog::Dialogs;
+use crate::foundation::binding::ViewModelContext;
 use crate::log::Log;
-use crate::{Element, ViewModelContext};
+use crate::ui::widget::Element;
 
 /// Marker trait for types that can back a `tgui` application.
 ///

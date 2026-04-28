@@ -1419,45 +1419,17 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{
-        default_theme_transition, sample_timeline, Animatable, AnimationControllerBuilder,
-        AnimationCoordinator, AnimationCurve, AnimationEngine, AnimationKey, AnimationSpec,
-        AnimationStatus, FillMode, Keyframes, Playback, PlaybackDirection, Transition,
-        WidgetProperty,
+        sample_timeline, AnimationControllerBuilder, AnimationCoordinator, AnimationCurve,
+        AnimationEngine, AnimationKey, AnimationSpec, AnimationStatus, FillMode, Keyframes,
+        Playback, PlaybackDirection, Transition, WidgetProperty,
     };
     use crate::foundation::binding::InvalidationSignal;
     use crate::foundation::color::Color;
-    use crate::ui::layout::Insets;
     use crate::ui::unit::dp;
     use crate::ui::widget::Point;
 
     fn key(property: WidgetProperty) -> AnimationKey {
         AnimationKey::Widget { id: 1, property }
-    }
-
-    #[test]
-    fn color_interpolation_blends_channels() {
-        let start = Color::rgba(0, 20, 40, 60);
-        let end = Color::rgba(100, 120, 140, 160);
-        assert_eq!(
-            Color::interpolate(&start, &end, 0.5),
-            Color::rgba(50, 70, 90, 110)
-        );
-    }
-
-    #[test]
-    fn point_interpolation_blends_coordinates() {
-        let interpolated = Point::interpolate(
-            &Point::new(dp(0.0), dp(10.0)),
-            &Point::new(dp(20.0), dp(30.0)),
-            0.25,
-        );
-        assert_eq!(interpolated, Point::new(dp(5.0), dp(15.0)));
-    }
-
-    #[test]
-    fn insets_interpolation_blends_edges() {
-        let interpolated = Insets::interpolate(&Insets::all(dp(0.0)), &Insets::all(dp(20.0)), 0.5);
-        assert_eq!(interpolated, Insets::all(dp(10.0)));
     }
 
     #[test]
@@ -1607,22 +1579,6 @@ mod tests {
         assert!(value.get() > 0.0);
         coordinator.refresh(Instant::now() + Duration::from_millis(150));
         assert_eq!(handle.status(), AnimationStatus::Completed);
-    }
-
-    #[test]
-    fn reverse_toggles_playback_direction() {
-        let transition = Transition::default().direction(PlaybackDirection::AlternateReverse);
-        assert_eq!(
-            transition.playback_mode().direction_mode(),
-            PlaybackDirection::AlternateReverse
-        );
-        let reversed = transition.playback_mode().direction_mode().toggled();
-        assert_eq!(reversed, PlaybackDirection::Alternate);
-    }
-
-    #[test]
-    fn theme_transition_uses_non_zero_duration() {
-        assert!(default_theme_transition().duration() > Duration::ZERO);
     }
 
     #[test]

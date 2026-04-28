@@ -1358,5 +1358,6 @@ pub(crate) struct InputSnapshot<VM> {
 pub(crate) struct RenderedWidgetScene {
     pub primitives: ScenePrimitives,
     pub scroll_regions: Vec<ScrollRegion>,
+    #[allow(dead_code)]
     pub ime_cursor_area: Option<Rect>,
 }

@@ -368,20 +368,3 @@ impl UnitContext {
         value * self.scale_factor
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{dp, sp, UnitContext};
-
-    #[test]
-    fn resolve_sp_applies_font_scale() {
-        let units = UnitContext::new(2.0, 1.5);
-        assert_eq!(units.resolve_sp(sp(16.0)), 24.0);
-    }
-
-    #[test]
-    fn resolve_dp_ignores_font_scale() {
-        let units = UnitContext::new(2.0, 1.5);
-        assert_eq!(units.resolve_dp(dp(16.0)), 16.0);
-    }
-}

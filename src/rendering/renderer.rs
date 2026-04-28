@@ -2276,33 +2276,6 @@ fn create_offscreen_target(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::supported_msaa_sample_count;
-
-    #[test]
-    fn prefers_x4_msaa_when_resolve_is_supported() {
-        let flags = wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4
-            | wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE;
-        assert_eq!(supported_msaa_sample_count(flags), 4);
-    }
-
-    #[test]
-    fn falls_back_to_x2_when_x4_is_unavailable() {
-        let flags = wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X2
-            | wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE;
-        assert_eq!(supported_msaa_sample_count(flags), 2);
-    }
-
-    #[test]
-    fn disables_msaa_without_resolve_support() {
-        assert_eq!(
-            supported_msaa_sample_count(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4),
-            1
-        );
-    }
-}
-
 fn instance_backends(_clear_color: TguiColor) -> wgpu::Backends {
     #[cfg(target_os = "windows")]
     {

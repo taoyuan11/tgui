@@ -10,7 +10,7 @@ use taffy::prelude::{
 };
 use taffy::Size as TaffySize;
 
-use crate::animation::{AnimationEngine, WidgetProperty};
+use crate::animation::{AnimationEngine, Transition, WidgetProperty};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{
@@ -18,7 +18,6 @@ use crate::media::{
     IntrinsicSize, MediaManager, RasterRequest,
 };
 use crate::text::font::{FontManager, TextFontRequest};
-use crate::Transition;
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, Track, Value, Wrap,
 };
