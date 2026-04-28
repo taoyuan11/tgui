@@ -18,6 +18,21 @@ use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::Dp;
 use crate::ui::widget::{Element, WidgetTree};
 
+fn logical_window_size(width: Dp, height: Dp) -> LogicalSize<f64> {
+    LogicalSize::new(
+        width.max(Dp::new(1.0)).get() as f64,
+        height.max(Dp::new(1.0)).get() as f64,
+    )
+}
+
+fn max_logical_size(lhs: LogicalSize<f64>, rhs: LogicalSize<f64>) -> LogicalSize<f64> {
+    LogicalSize::new(lhs.width.max(rhs.width), lhs.height.max(rhs.height))
+}
+
+fn min_logical_size(lhs: LogicalSize<f64>, rhs: LogicalSize<f64>) -> LogicalSize<f64> {
+    LogicalSize::new(lhs.width.min(rhs.width), lhs.height.min(rhs.height))
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum ThemeSelection {
     System,
@@ -78,6 +93,8 @@ pub struct Application {
     title: String,
     width: Dp,
     height: Dp,
+    min_size: Option<LogicalSize<f64>>,
+    max_size: Option<LogicalSize<f64>>,
     clear_color: Color,
     clear_color_overridden: bool,
     close_children_with_main: bool,
@@ -95,6 +112,8 @@ impl Application {
             title: "tgui".to_string(),
             width: Dp::new(800.0),
             height: Dp::new(600.0),
+            min_size: None,
+            max_size: None,
             clear_color: Theme::default().colors.background,
             clear_color_overridden: false,
             close_children_with_main: true,
@@ -117,6 +136,22 @@ impl Application {
     pub fn window_size(mut self, width: Dp, height: Dp) -> Self {
         self.width = width.max(Dp::new(1.0));
         self.height = height.max(Dp::new(1.0));
+        self
+    }
+
+    /// Sets the minimum resizable window surface size in logical pixels.
+    ///
+    /// Values are clamped to at least `1x1`.
+    pub fn min_window_size(mut self, width: Dp, height: Dp) -> Self {
+        self.min_size = Some(logical_window_size(width, height));
+        self
+    }
+
+    /// Sets the maximum resizable window surface size in logical pixels.
+    ///
+    /// Values are clamped to at least `1x1`.
+    pub fn max_window_size(mut self, width: Dp, height: Dp) -> Self {
+        self.max_size = Some(logical_window_size(width, height));
         self
     }
 
@@ -202,9 +237,11 @@ impl Application {
     }
 
     pub(crate) fn config(&self) -> ApplicationConfig {
-        ApplicationConfig {
+        let mut config = ApplicationConfig {
             title: self.title.clone(),
             size: LogicalSize::new(self.width.get() as f64, self.height.get() as f64),
+            min_size: self.min_size,
+            max_size: self.max_size,
             clear_color: self.clear_color,
             clear_color_overridden: self.clear_color_overridden,
             close_children_with_main: self.close_children_with_main,
@@ -212,7 +249,9 @@ impl Application {
             theme: self.theme.clone(),
             theme_set: self.theme_set.clone(),
             window_icon: self.window_icon,
-        }
+        };
+        config.normalize_size_constraints();
+        config
     }
 }
 
@@ -226,6 +265,8 @@ impl Default for Application {
 pub(crate) struct ApplicationConfig {
     pub(crate) title: String,
     pub(crate) size: LogicalSize<f64>,
+    pub(crate) min_size: Option<LogicalSize<f64>>,
+    pub(crate) max_size: Option<LogicalSize<f64>>,
     pub(crate) clear_color: Color,
     pub(crate) clear_color_overridden: bool,
     pub(crate) close_children_with_main: bool,
@@ -233,6 +274,22 @@ pub(crate) struct ApplicationConfig {
     pub(crate) theme: ThemeSelection,
     pub(crate) theme_set: ThemeSet,
     pub(crate) window_icon: Option<&'static [u8]>,
+}
+
+impl ApplicationConfig {
+    pub(crate) fn normalize_size_constraints(&mut self) {
+        if let (Some(min_size), Some(max_size)) = (self.min_size, self.max_size) {
+            self.max_size = Some(max_logical_size(max_size, min_size));
+        }
+
+        if let Some(min_size) = self.min_size {
+            self.size = max_logical_size(self.size, min_size);
+        }
+
+        if let Some(max_size) = self.max_size {
+            self.size = min_logical_size(self.size, max_size);
+        }
+    }
 }
 
 type TitleBinding<VM> = Arc<dyn Fn(&VM) -> Binding<String> + Send + Sync>;
@@ -261,6 +318,8 @@ pub struct WindowSpec<VM> {
     pub(crate) role: WindowRole,
     pub(crate) title: Option<String>,
     pub(crate) size: Option<LogicalSize<f64>>,
+    pub(crate) min_size: Option<LogicalSize<f64>>,
+    pub(crate) max_size: Option<LogicalSize<f64>>,
     pub(crate) title_binding: Option<TitleBinding<VM>>,
     pub(crate) clear_color_binding: Option<ClearColorBinding<VM>>,
     pub(crate) theme_set_binding: Option<ThemeSetBinding<VM>>,
@@ -283,6 +342,8 @@ impl<VM> WindowSpec<VM> {
             role: WindowRole::Main,
             title: None,
             size: None,
+            min_size: None,
+            max_size: None,
             title_binding: None,
             clear_color_binding: None,
             theme_set_binding: None,
@@ -304,6 +365,8 @@ impl<VM> WindowSpec<VM> {
             },
             title: None,
             size: None,
+            min_size: None,
+            max_size: None,
             title_binding: None,
             clear_color_binding: None,
             theme_set_binding: None,
@@ -322,10 +385,19 @@ impl<VM> WindowSpec<VM> {
 
     /// Sets the initial native window size in logical pixels.
     pub fn window_size(mut self, width: Dp, height: Dp) -> Self {
-        self.size = Some(LogicalSize::new(
-            width.max(Dp::new(1.0)).get() as f64,
-            height.max(Dp::new(1.0)).get() as f64,
-        ));
+        self.size = Some(logical_window_size(width, height));
+        self
+    }
+
+    /// Sets the minimum resizable native window size in logical pixels.
+    pub fn min_window_size(mut self, width: Dp, height: Dp) -> Self {
+        self.min_size = Some(logical_window_size(width, height));
+        self
+    }
+
+    /// Sets the maximum resizable native window size in logical pixels.
+    pub fn max_window_size(mut self, width: Dp, height: Dp) -> Self {
+        self.max_size = Some(logical_window_size(width, height));
         self
     }
 
@@ -405,6 +477,13 @@ impl<VM> WindowSpec<VM> {
         if let Some(size) = self.size {
             config.size = size;
         }
+        if let Some(min_size) = self.min_size {
+            config.min_size = Some(min_size);
+        }
+        if let Some(max_size) = self.max_size {
+            config.max_size = Some(max_size);
+        }
+        config.normalize_size_constraints();
         config
     }
 
@@ -674,6 +753,8 @@ where
                         role: WindowRole::Main,
                         title: Some(main_config.title.clone()),
                         size: Some(main_config.size),
+                        min_size: main_config.min_size,
+                        max_size: main_config.max_size,
                         title_binding: title_binding.clone(),
                         clear_color_binding: clear_color_binding.clone(),
                         theme_set_binding: theme_set_binding.clone(),

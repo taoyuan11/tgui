@@ -3013,6 +3013,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .with_surface_size(self.config.size)
             .with_visible(false);
 
+        if let Some(min_size) = self.config.min_size {
+            attributes = attributes.with_min_surface_size(min_size);
+        }
+
+        if let Some(max_size) = self.config.max_size {
+            attributes = attributes.with_max_surface_size(max_size);
+        }
+
         if let Some(icon_bytes) = self.config.window_icon {
             match image::load_from_memory(icon_bytes) {
                 Ok(image) => {
@@ -4313,6 +4321,8 @@ mod tests {
         ApplicationConfig {
             title: "test".to_string(),
             size: LogicalSize::new(200.0, 120.0),
+            min_size: None,
+            max_size: None,
             clear_color: Color::BLACK,
             clear_color_overridden: true,
             close_children_with_main: true,
@@ -4327,6 +4337,8 @@ mod tests {
         ApplicationConfig {
             title: "test".to_string(),
             size: LogicalSize::new(200.0, 120.0),
+            min_size: None,
+            max_size: None,
             clear_color: Color::BLACK,
             clear_color_overridden: true,
             close_children_with_main: true,
