@@ -3,8 +3,6 @@
   <img src="./docs/images/tgui_logo.png" width="150px" alt="logo">
 </p>
 
-<p align="center" style="font-size: 50px; font-weight: 600">tgui</p>
-
 `tgui` 是一个基于 `wgpu` 的 Rust GUI 框架，强调这几件事：
 
 - GPU 加速渲染
