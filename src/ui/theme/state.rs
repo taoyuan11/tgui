@@ -21,14 +21,14 @@ impl<T: Clone> Stateful<T> {
         if state.disabled {
             return self.disabled.clone();
         }
+        if state.focused {
+            return self.focused.clone();
+        }
         if state.pressed {
             return self.pressed.clone();
         }
         if state.hovered {
             return self.hovered.clone();
-        }
-        if state.focused {
-            return self.focused.clone();
         }
         self.normal.clone()
     }

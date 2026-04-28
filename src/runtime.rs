@@ -330,6 +330,7 @@ pub struct BoundRuntimeHandler<VM> {
     animations: AnimationCoordinator,
     animation_engine: AnimationEngine,
     animation_epoch: u64,
+    hover_epoch: u64,
     caret_blink_started_at: Option<Instant>,
     cursor_position: Option<Point>,
     modifiers: ModifiersState,
@@ -368,10 +369,12 @@ struct CachedScene<VM> {
     viewport: Rect,
     units: UnitContext,
     focused_input: Option<WidgetId>,
+    pressed_widget: Option<WidgetId>,
     selected_text: Option<WidgetId>,
     caret_visible: bool,
     animation_epoch: u64,
     scroll_epoch: u64,
+    hover_epoch: u64,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar: Option<ScrollbarHandle>,
     layout: Option<ResolvedSceneLayout<VM>>,
@@ -601,6 +604,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             animations,
             animation_engine: AnimationEngine::default(),
             animation_epoch: 0,
+            hover_epoch: 0,
             caret_blink_started_at: None,
             cursor_position: None,
             modifiers: ModifiersState::default(),
@@ -924,10 +928,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         cached.viewport == viewport
             && cached.units == units
             && cached.focused_input == self.focused_input
+            && cached.pressed_widget == self.pressed_widget
             && cached.selected_text == self.selected_text
             && cached.caret_visible == caret_visible
             && cached.animation_epoch == self.animation_epoch
             && cached.scroll_epoch == self.scroll_epoch
+            && cached.hover_epoch == self.hover_epoch
             && cached.hovered_scrollbar == self.hovered_scrollbar
             && cached.active_scrollbar == active_scrollbar
     }
@@ -942,9 +948,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         cached.viewport == viewport
             && cached.units == units
             && cached.focused_input == self.focused_input
+            && cached.pressed_widget == self.pressed_widget
             && cached.selected_text == self.selected_text
             && cached.caret_visible == caret_visible
             && cached.animation_epoch == self.animation_epoch
+            && cached.hover_epoch == self.hover_epoch
     }
 
     fn computed_scene(&mut self) -> &ComputedScene<VM> {
@@ -1044,10 +1052,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 viewport,
                 units,
                 focused_input: self.focused_input,
+                pressed_widget: self.pressed_widget,
                 selected_text: self.selected_text,
                 caret_visible,
                 animation_epoch: self.animation_epoch,
                 scroll_epoch: self.scroll_epoch,
+                hover_epoch: self.hover_epoch,
                 hovered_scrollbar: self.hovered_scrollbar,
                 active_scrollbar,
                 layout,
@@ -2401,6 +2411,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         self.hovered_widgets = next_hovered;
+        if hover_path_changed {
+            self.hover_epoch = self.hover_epoch.wrapping_add(1);
+        }
         let scrollbar_changed = self.sync_scrollbar_hover();
         let cursor_changed = self.update_cursor_icon();
         hover_path_changed
@@ -4258,7 +4271,7 @@ mod tests {
     #[cfg(feature = "video")]
     use std::time::Duration;
     use std::time::Instant;
-    use crate::{Element, Stack, ViewModelContext};
+    use crate::{Element, Stack, ViewModelContext, WidgetId};
     use super::{
         input_cursor_index_at_point_with_state, next_grapheme_boundary, normalize_single_line_text,
         previous_grapheme_boundary, text_cursor_index_at_point, BoundRuntimeHandler, CachedScene,
@@ -4504,10 +4517,12 @@ mod tests {
             viewport,
             units: UnitContext::new(1.0, 1.0),
             focused_input: None,
+            pressed_widget: None,
             selected_text: None,
             caret_visible: false,
             animation_epoch: 0,
             scroll_epoch: 0,
+            hover_epoch: 0,
             hovered_scrollbar: None,
             active_scrollbar: None,
             layout: None,
@@ -4518,6 +4533,38 @@ mod tests {
             &cached,
             viewport,
             UnitContext::new(1.0, 1.25),
+            false,
+            None,
+        ));
+    }
+
+    #[test]
+    fn scene_cache_invalidates_when_pressed_widget_changes() {
+        let invalidation = InvalidationSignal::new();
+        let mut handler = test_handler(None, invalidation);
+        let viewport = handler.viewport_rect();
+        let cached = CachedScene::<TestVm> {
+            viewport,
+            units: UnitContext::new(1.0, 1.0),
+            focused_input: None,
+            pressed_widget: None,
+            selected_text: None,
+            caret_visible: false,
+            animation_epoch: 0,
+            scroll_epoch: 0,
+            hover_epoch: 0,
+            hovered_scrollbar: None,
+            active_scrollbar: None,
+            layout: None,
+            computed: Default::default(),
+        };
+
+        handler.pressed_widget = Some(WidgetId::next());
+
+        assert!(!handler.scene_cache_matches(
+            &cached,
+            viewport,
+            UnitContext::new(1.0, 1.0),
             false,
             None,
         ));

@@ -75,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn stateful_resolution_prefers_disabled_then_pressed_then_hovered_then_focused() {
+    fn stateful_resolution_prefers_disabled_then_focused_then_pressed_then_hovered() {
         let resolved = Theme::dark()
             .components
             .button
@@ -92,6 +92,20 @@ mod tests {
     }
 
     #[test]
+    fn stateful_resolution_prefers_focused_over_pressed_and_hovered() {
+        let theme = Theme::dark();
+        let resolved = theme.components.button.primary.border.resolve(WidgetState {
+            hovered: true,
+            pressed: true,
+            focused: true,
+            disabled: false,
+            selected: false,
+        });
+
+        assert_eq!(resolved, theme.colors.focus_ring);
+    }
+
+    #[test]
     fn refresh_components_rebuilds_button_tokens_after_color_mutation() {
         let mut theme = Theme::dark();
         theme.colors.primary = crate::foundation::color::Color::WHITE;
@@ -100,5 +114,27 @@ mod tests {
         theme.refresh_components();
 
         assert_eq!(theme.components.button.primary.container.normal, theme.colors.primary);
+    }
+
+    #[test]
+    fn hover_colors_are_derived_from_base_component_colors() {
+        let theme = Theme::dark();
+
+        assert_eq!(
+            theme.components.button.primary.container.hovered,
+            theme.colors.primary.lighten(0.1)
+        );
+        assert_eq!(
+            theme.components.button.danger.container.hovered,
+            theme.colors.error.lighten(0.1)
+        );
+        assert_eq!(
+            theme.components.input.background.hovered,
+            theme.colors.surface_low.lighten(0.06)
+        );
+        assert_eq!(
+            theme.components.switch.track_checked.hovered,
+            theme.colors.primary.lighten(0.1)
+        );
     }
 }

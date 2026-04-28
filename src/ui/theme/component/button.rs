@@ -40,9 +40,9 @@ pub struct ButtonStyle {
 impl ButtonVariant {
     pub fn resolve(&self, state: WidgetState) -> ButtonStyle {
         ButtonStyle {
-            background: self.container.resolve(state),
-            foreground: self.content.resolve(state),
-            border_color: self.border.resolve(state),
+            background: resolve_button_fill(&self.container, state),
+            foreground: resolve_button_fill(&self.content, state),
+            border_color: resolve_button_border(&self.border, state),
             border_width: self.border_width,
             radius: self.radius,
             padding_x: self.padding_x,
@@ -51,4 +51,36 @@ impl ButtonVariant {
             text_style: self.text_style.clone(),
         }
     }
+}
+
+fn resolve_button_fill<T: Clone>(stateful: &Stateful<T>, state: WidgetState) -> T {
+    if state.disabled {
+        return stateful.disabled.clone();
+    }
+    if state.pressed {
+        return stateful.pressed.clone();
+    }
+    if state.hovered {
+        return stateful.hovered.clone();
+    }
+    if state.focused {
+        return stateful.focused.clone();
+    }
+    stateful.normal.clone()
+}
+
+fn resolve_button_border<T: Clone>(stateful: &Stateful<T>, state: WidgetState) -> T {
+    if state.disabled {
+        return stateful.disabled.clone();
+    }
+    if state.focused {
+        return stateful.focused.clone();
+    }
+    if state.pressed {
+        return stateful.pressed.clone();
+    }
+    if state.hovered {
+        return stateful.hovered.clone();
+    }
+    stateful.normal.clone()
 }

@@ -44,6 +44,26 @@ impl Color {
         [self.r, self.g, self.b, self.a]
     }
 
+    pub fn lighten(self, amount: f32) -> Self {
+        let amount = amount.clamp(0.0, 1.0);
+        Self {
+            r: mix_channel(self.r, 255, amount),
+            g: mix_channel(self.g, 255, amount),
+            b: mix_channel(self.b, 255, amount),
+            a: self.a,
+        }
+    }
+
+    pub fn darken(self, amount: f32) -> Self {
+        let amount = amount.clamp(0.0, 1.0);
+        Self {
+            r: mix_channel(self.r, 0, amount),
+            g: mix_channel(self.g, 0, amount),
+            b: mix_channel(self.b, 0, amount),
+            a: self.a,
+        }
+    }
+
     pub(crate) fn to_linear_rgba_f32(self) -> [f32; 4] {
         [
             srgb_channel_to_linear_f32(self.r),
@@ -93,6 +113,12 @@ fn float_channel(value: f64) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
+fn mix_channel(channel: u8, target: u8, amount: f32) -> u8 {
+    (channel as f32 + (target as f32 - channel as f32) * amount)
+        .round()
+        .clamp(0.0, 255.0) as u8
+}
+
 fn srgb_channel_to_linear_f32(channel: u8) -> f32 {
     let srgb = channel as f32 / 255.0;
     if srgb <= 0.04045 {
@@ -137,5 +163,19 @@ mod tests {
         assert!((linear[1] - 0.07421357).abs() < 1e-6);
         assert!((linear[2] - 0.07818742).abs() < 1e-6);
         assert!((linear[3] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lighten_moves_channels_toward_white_without_changing_alpha() {
+        let color = Color::rgba(16, 64, 128, 80);
+
+        assert_eq!(color.lighten(0.25), Color::rgba(76, 112, 160, 80));
+    }
+
+    #[test]
+    fn darken_moves_channels_toward_black_without_changing_alpha() {
+        let color = Color::rgba(16, 64, 128, 80);
+
+        assert_eq!(color.darken(0.25), Color::rgba(12, 48, 96, 80));
     }
 }

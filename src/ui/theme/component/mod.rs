@@ -47,6 +47,11 @@ impl ComponentTheme {
         elevation: &ElevationScale,
         _motion: &MotionScale,
     ) -> Self {
+        const HOVER_LIGHTEN: f32 = 0.1;
+        const SURFACE_HOVER_LIGHTEN: f32 = 0.06;
+        const BORDER_HOVER_LIGHTEN: f32 = 0.12;
+        const SCROLLBAR_HOVER_LIGHTEN: f32 = 0.18;
+
         let disabled_surface = colors.disabled;
         let disabled_content = colors.on_disabled;
         Self {
@@ -54,22 +59,22 @@ impl ComponentTheme {
                 primary: ButtonVariant {
                     container: Stateful {
                         normal: colors.primary,
-                        hovered: colors.primary_container,
-                        pressed: colors.primary_container,
+                        hovered: colors.primary.lighten(HOVER_LIGHTEN),
+                        pressed: colors.primary.darken(HOVER_LIGHTEN),
                         focused: colors.primary,
                         disabled: disabled_surface,
                     },
                     content: Stateful {
                         normal: colors.on_primary,
-                        hovered: colors.on_primary_container,
-                        pressed: colors.on_primary_container,
+                        hovered: colors.on_primary,
+                        pressed: colors.on_primary,
                         focused: colors.on_primary,
                         disabled: disabled_content,
                     },
                     border: Stateful {
                         normal: colors.primary,
-                        hovered: colors.primary_container,
-                        pressed: colors.primary_container,
+                        hovered: colors.primary.lighten(HOVER_LIGHTEN),
+                        pressed: colors.primary.darken(HOVER_LIGHTEN),
                         focused: colors.focus_ring,
                         disabled: disabled_surface,
                     },
@@ -83,8 +88,8 @@ impl ComponentTheme {
                 secondary: ButtonVariant {
                     container: Stateful {
                         normal: colors.surface_high,
-                        hovered: colors.surface_overlay,
-                        pressed: colors.surface_low,
+                        hovered: colors.surface_high.lighten(SURFACE_HOVER_LIGHTEN),
+                        pressed: colors.surface_high.darken(SURFACE_HOVER_LIGHTEN),
                         focused: colors.surface_high,
                         disabled: disabled_surface,
                     },
@@ -97,9 +102,9 @@ impl ComponentTheme {
                     },
                     border: Stateful {
                         normal: colors.outline,
-                        hovered: colors.outline,
-                        pressed: colors.outline_muted,
-                        focused: colors.focus_ring,
+                        hovered: colors.outline.lighten(BORDER_HOVER_LIGHTEN),
+                        pressed: colors.outline.darken(BORDER_HOVER_LIGHTEN),
+                        focused: colors.outline,
                         disabled: disabled_surface,
                     },
                     border_width: border.thin,
@@ -112,8 +117,8 @@ impl ComponentTheme {
                 ghost: ButtonVariant {
                     container: Stateful {
                         normal: Color::TRANSPARENT,
-                        hovered: colors.surface_low,
-                        pressed: colors.surface_high,
+                        hovered: colors.surface_low.lighten(SURFACE_HOVER_LIGHTEN),
+                        pressed: colors.surface_low.darken(SURFACE_HOVER_LIGHTEN),
                         focused: colors.surface_low,
                         disabled: Color::TRANSPARENT,
                     },
@@ -141,8 +146,8 @@ impl ComponentTheme {
                 danger: ButtonVariant {
                     container: Stateful {
                         normal: colors.error,
-                        hovered: colors.error,
-                        pressed: colors.error,
+                        hovered: colors.error.lighten(HOVER_LIGHTEN),
+                        pressed: colors.error.darken(HOVER_LIGHTEN),
                         focused: colors.error,
                         disabled: disabled_surface,
                     },
@@ -155,8 +160,8 @@ impl ComponentTheme {
                     },
                     border: Stateful {
                         normal: colors.error,
-                        hovered: colors.error,
-                        pressed: colors.error,
+                        hovered: colors.error.lighten(HOVER_LIGHTEN),
+                        pressed: colors.error.darken(HOVER_LIGHTEN),
                         focused: colors.focus_ring,
                         disabled: disabled_surface,
                     },
@@ -171,8 +176,8 @@ impl ComponentTheme {
             input: InputTheme {
                 background: Stateful {
                     normal: colors.surface_low,
-                    hovered: colors.surface,
-                    pressed: colors.surface,
+                    hovered: colors.surface_low.lighten(SURFACE_HOVER_LIGHTEN),
+                    pressed: colors.surface_low.darken(SURFACE_HOVER_LIGHTEN),
                     focused: colors.surface,
                     disabled: colors.disabled,
                 },
@@ -192,15 +197,15 @@ impl ComponentTheme {
                 },
                 border: Stateful {
                     normal: colors.outline,
-                    hovered: colors.outline_muted,
-                    pressed: colors.outline,
+                    hovered: colors.outline.lighten(BORDER_HOVER_LIGHTEN),
+                    pressed: colors.outline.darken(BORDER_HOVER_LIGHTEN),
                     focused: colors.focus_ring,
                     disabled: colors.disabled,
                 },
                 cursor: colors.on_surface,
                 selection: colors.selection,
                 radius: radius.md,
-                padding_x: spacing.md,
+                padding_x: spacing.sm,
                 padding_y: spacing.sm,
                 min_height: spacing.xl,
                 text_style: typography.body.clone(),
@@ -213,15 +218,15 @@ impl ComponentTheme {
             switch: SwitchTheme {
                 track: Stateful {
                     normal: colors.surface_high,
-                    hovered: colors.surface_overlay,
-                    pressed: colors.surface_low,
+                    hovered: colors.surface_high.lighten(SURFACE_HOVER_LIGHTEN),
+                    pressed: colors.surface_high.darken(SURFACE_HOVER_LIGHTEN),
                     focused: colors.surface_overlay,
                     disabled: colors.disabled,
                 },
                 track_checked: Stateful {
                     normal: colors.primary,
-                    hovered: colors.primary,
-                    pressed: colors.primary,
+                    hovered: colors.primary.lighten(HOVER_LIGHTEN),
+                    pressed: colors.primary.darken(HOVER_LIGHTEN),
                     focused: colors.primary,
                     disabled: colors.disabled,
                 },
@@ -241,19 +246,19 @@ impl ComponentTheme {
                 },
                 border: Stateful {
                     normal: colors.outline_muted,
-                    hovered: colors.outline,
-                    pressed: colors.outline,
+                    hovered: colors.outline_muted.lighten(BORDER_HOVER_LIGHTEN),
+                    pressed: colors.outline_muted.darken(BORDER_HOVER_LIGHTEN),
                     focused: colors.focus_ring,
                     disabled: colors.disabled,
                 },
                 border_checked: Stateful {
                     normal: colors.primary,
-                    hovered: colors.primary,
-                    pressed: colors.primary,
+                    hovered: colors.primary.lighten(HOVER_LIGHTEN),
+                    pressed: colors.primary.darken(HOVER_LIGHTEN),
                     focused: colors.focus_ring,
                     disabled: colors.disabled,
                 },
-                border_width: border.thin,
+                border_width: border.none,
                 radius: radius.full,
                 padding: crate::ui::layout::Insets::all(spacing.xxs),
                 width: spacing.xl + spacing.sm + spacing.xxs,
@@ -286,15 +291,19 @@ impl ComponentTheme {
             scrollbar: ScrollbarTheme {
                 track: Stateful {
                     normal: colors.surface_low,
-                    hovered: colors.surface_low,
-                    pressed: colors.surface_low,
+                    hovered: colors.surface_low.lighten(SURFACE_HOVER_LIGHTEN),
+                    pressed: colors.surface_low.darken(SURFACE_HOVER_LIGHTEN),
                     focused: colors.surface_low,
                     disabled: colors.surface_low,
                 },
                 thumb: Stateful {
                     normal: colors.outline.with_alpha_factor(0.72),
-                    hovered: colors.on_surface_muted,
-                    pressed: colors.on_surface,
+                    hovered: colors.outline
+                        .with_alpha_factor(0.72)
+                        .lighten(SCROLLBAR_HOVER_LIGHTEN),
+                    pressed: colors.outline
+                        .with_alpha_factor(0.72)
+                        .darken(SCROLLBAR_HOVER_LIGHTEN),
                     focused: colors.on_surface_muted,
                     disabled: colors.disabled,
                 },

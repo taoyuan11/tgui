@@ -18,6 +18,7 @@ use crate::media::{
     IntrinsicSize, MediaManager, RasterRequest,
 };
 use crate::text::font::{FontManager, TextFontRequest};
+use crate::Transition;
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, Track, Value, Wrap,
 };
@@ -31,10 +32,12 @@ use super::common::{
     BackdropBlurPrimitive, BrushPrimitive, ButtonVariantKind, ComputedScene, ContainerKind,
     ContainerLayout, HitGeometry, HitInteraction, HitRegion, InputEditState, InputSnapshot,
     InteractionHandlers, LayoutNode, MeasureContext, MediaEventHandlers, MediaEventPhase,
-    MediaEventState, Point, Rect, RenderPrimitive, RenderedWidgetScene, ScenePrimitives,
-    ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextPrimitive, TexturePrimitive, VisualStyle,
-    WidgetId, WidgetKind, WidgetStateMap,
+    MediaEventState, Point, Rect, RenderPrimitive, ScenePrimitives, ScrollRegion,
+    ScrollbarAxis, ScrollbarHandle, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId,
+    WidgetKind, WidgetStateMap,
 };
+#[cfg(test)]
+use super::common::RenderedWidgetScene;
 use super::text::Text;
 
 /// Caret width in logical pixels.
@@ -990,7 +993,17 @@ impl<VM> ResolvedElement<VM> {
                             context.now,
                         )
                     })
-                    .unwrap_or(button_style.border_color)
+                    .unwrap_or_else(|| {
+                        context.animations.resolve_color(
+                            crate::animation::AnimationKey::Widget {
+                                id: self.id.raw(),
+                                property: WidgetProperty::BorderColor,
+                            },
+                            button_style.border_color,
+                            Some(Transition::default()),
+                            context.now,
+                        )
+                    })
             }
             ResolvedWidgetKind::Input { .. } => {
                 let input_style = context.theme.components.input.resolve(widget_state);
@@ -1005,7 +1018,17 @@ impl<VM> ResolvedElement<VM> {
                             context.now,
                         )
                     })
-                    .unwrap_or(input_style.border)
+                    .unwrap_or_else(|| {
+                        context.animations.resolve_color(
+                            crate::animation::AnimationKey::Widget {
+                                id: self.id.raw(),
+                                property: WidgetProperty::BorderColor,
+                            },
+                            input_style.border,
+                            Some(Transition::default()),
+                            context.now,
+                        )
+                    })
             }
             ResolvedWidgetKind::Switch { checked, .. } => {
                 let switch_style = context
@@ -1053,11 +1076,19 @@ impl<VM> ResolvedElement<VM> {
                         context.now,
                     )
                 })
-                .unwrap_or(
-                    button_variant_theme(&context.theme.components.button, *variant)
-                        .resolve(widget_state)
-                        .background,
-                ),
+                .unwrap_or_else(|| {
+                    context.animations.resolve_color(
+                        crate::animation::AnimationKey::Widget {
+                            id: self.id.raw(),
+                            property: WidgetProperty::Background,
+                        },
+                        button_variant_theme(&context.theme.components.button, *variant)
+                            .resolve(widget_state)
+                            .background,
+                        Some(Transition::default()),
+                        context.now,
+                    )
+                }),
             ResolvedWidgetKind::Input { .. } => self
                 .background
                 .as_ref()
@@ -1494,6 +1525,20 @@ impl<VM> ResolvedElement<VM> {
                 let button_style =
                     button_variant_theme(&context.theme.components.button, *variant).resolve(widget_state);
                 let padding = Insets::symmetric(button_style.padding_x, button_style.padding_y);
+                let button_foreground = label.color.as_ref().map_or_else(
+                    || {
+                        context.animations.resolve_color(
+                            crate::animation::AnimationKey::Widget {
+                                id: self.id.raw(),
+                                property: WidgetProperty::TextColor,
+                            },
+                            button_style.foreground,
+                            Some(Transition::default()),
+                            context.now,
+                        )
+                    },
+                    |_| button_style.foreground,
+                );
                 push_text_primitives(
                     label,
                     frame,
@@ -1508,7 +1553,7 @@ impl<VM> ResolvedElement<VM> {
                     padding,
                     None,
                     None,
-                    button_style.foreground,
+                    button_foreground,
                     opacity,
                     self.id,
                     primitive_clip,
@@ -1600,6 +1645,8 @@ impl<VM> ResolvedElement<VM> {
                     context.now,
                     &mut computed.scene,
                     padding,
+                    input_style.text,
+                    input_style.placeholder,
                     opacity,
                     self.id,
                     input_state,
@@ -2706,6 +2753,8 @@ fn push_input_primitives(
     now: std::time::Instant,
     scene: &mut ScenePrimitives,
     padding: Insets,
+    text_color: Color,
+    placeholder_color: Color,
     opacity: f32,
     widget_id: WidgetId,
     edit_state: Option<&InputEditState>,
@@ -2752,7 +2801,7 @@ fn push_input_primitives(
             .map(|color| {
                 color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now)
             })
-            .unwrap_or(theme.components.input.placeholder.normal)
+            .unwrap_or(placeholder_color)
             .with_alpha_factor(opacity);
         let placeholder_request = TextFontRequest {
             preferred_font: placeholder
@@ -2844,7 +2893,7 @@ fn push_input_primitives(
         .color
         .as_ref()
         .map(|color| color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now))
-        .unwrap_or(theme.components.input.text.normal)
+        .unwrap_or(text_color)
         .with_alpha_factor(opacity);
     let preedit_color = theme
         .components
@@ -3497,6 +3546,7 @@ impl<VM> WidgetTree<VM> {
         computed
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn render_output(
         &self,
@@ -3532,6 +3582,7 @@ impl<VM> WidgetTree<VM> {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn render_output_with_widget_state(
         &self,
         font_manager: &FontManager,
@@ -3568,6 +3619,7 @@ impl<VM> WidgetTree<VM> {
         )
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn render_output_with_units(
         &self,
@@ -3605,6 +3657,7 @@ impl<VM> WidgetTree<VM> {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn render_output_with_units_and_widget_state(
         &self,
         font_manager: &FontManager,
@@ -3813,7 +3866,7 @@ mod tests {
     use super::{centered_text_frame, input_text_viewport, resolved_text_metrics};
     use std::collections::HashMap;
 
-    use crate::animation::{AnimationCoordinator, AnimationEngine};
+    use crate::animation::{default_theme_transition, AnimationCoordinator, AnimationEngine};
     use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
     use crate::foundation::color::Color;
     use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
@@ -5432,6 +5485,267 @@ mod tests {
     }
 
     #[test]
+    fn primary_button_uses_hover_background_when_hovered() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let button: Element<()> =
+            crate::ui::widget::Button::new(Text::new("hover")).size(dp(120.0), dp(40.0)).into();
+        let button_id = button.id;
+        let tree: WidgetTree<()> = WidgetTree::new(button);
+        let mut hovered_state = WidgetStateMap::default();
+        hovered_state.set(
+            button_id,
+            crate::ui::theme::WidgetState {
+                hovered: true,
+                ..Default::default()
+            },
+        );
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &hovered_state,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.stroke_width == 0.0
+                && shape.color == theme.components.button.primary.container.hovered));
+    }
+
+    #[test]
+    fn primary_button_hover_background_uses_transition() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let button: Element<()> =
+            crate::ui::widget::Button::new(Text::new("hover")).size(dp(120.0), dp(40.0)).into();
+        let button_id = button.id;
+        let tree: WidgetTree<()> = WidgetTree::new(button);
+        let mut hovered_state = WidgetStateMap::default();
+        hovered_state.set(
+            button_id,
+            crate::ui::theme::WidgetState {
+                hovered: true,
+                ..Default::default()
+            },
+        );
+
+        let normal = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let start_background = normal
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| shape.stroke_width == 0.0)
+            .expect("button should render a filled background")
+            .color;
+
+        let hovered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &hovered_state,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let immediate_background = hovered
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| shape.stroke_width == 0.0)
+            .expect("hovered button should render a filled background")
+            .color;
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let mid = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &hovered_state,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let mid_background = mid
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| shape.stroke_width == 0.0)
+            .expect("hovered button should keep a filled background")
+            .color;
+
+        std::thread::sleep(std::time::Duration::from_millis(140));
+        let settled = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &hovered_state,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let settled_background = settled
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| shape.stroke_width == 0.0)
+            .expect("hovered button should render a filled background after transition")
+            .color;
+
+        assert_eq!(start_background, theme.components.button.primary.container.normal);
+        assert_eq!(immediate_background, start_background);
+        assert_ne!(mid_background, start_background);
+        assert_ne!(mid_background, theme.components.button.primary.container.hovered);
+        assert_eq!(settled_background, theme.components.button.primary.container.hovered);
+    }
+
+    #[test]
+    fn pressed_button_background_takes_priority_over_focus_fill() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let button: Element<()> =
+            crate::ui::widget::Button::new(Text::new("focus")).size(dp(120.0), dp(40.0)).into();
+        let button_id = button.id;
+        let tree: WidgetTree<()> = WidgetTree::new(button);
+        let mut state = WidgetStateMap::default();
+        state.set(
+            button_id,
+            crate::ui::theme::WidgetState {
+                hovered: true,
+                pressed: true,
+                focused: true,
+                ..Default::default()
+            },
+        );
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &state,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.stroke_width == 0.0
+                && shape.color == theme.components.button.primary.container.pressed));
+    }
+
+    #[test]
+    fn focused_secondary_button_border_takes_priority_over_pressed_and_hovered() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let button: Element<()> = crate::ui::widget::Button::new(Text::new("focus"))
+            .secondary()
+            .size(dp(120.0), dp(40.0))
+            .into();
+        let button_id = button.id;
+        let tree: WidgetTree<()> = WidgetTree::new(button);
+        let mut state = WidgetStateMap::default();
+        state.set(
+            button_id,
+            crate::ui::theme::WidgetState {
+                hovered: true,
+                pressed: true,
+                focused: true,
+                ..Default::default()
+            },
+        );
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &state,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.stroke_width > 0.0
+                && shape.color == theme.components.button.secondary.border.focused));
+    }
+
+    #[test]
     fn secondary_button_uses_theme_border_by_default() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
@@ -5678,16 +5992,16 @@ mod tests {
     fn switch_uses_theme_defaults_when_styles_are_not_explicitly_set() {
         let mut theme = Theme::default();
         theme.components.switch.track.normal = Color::hexa(0x223344FF);
-        theme.components.switch.track_checked.normal = Color::hexa(0x2F6FEBFF);
-        theme.components.switch.track_checked.hovered = Color::hexa(0x2F6FEBFF);
-        theme.components.switch.track_checked.pressed = Color::hexa(0x2F6FEBFF);
+        theme.components.switch.track_checked.normal = Color::hexa(0x0078D4FF);
+        theme.components.switch.track_checked.hovered = Color::hexa(0x0078D4FF);
+        theme.components.switch.track_checked.pressed = Color::hexa(0x0078D4FF);
         theme.components.switch.thumb.normal = Color::hexa(0xF8FAFCFF);
         theme.components.switch.thumb_checked.normal = Color::hexa(0x111111FF);
         theme.components.switch.thumb_checked.hovered = Color::hexa(0x111111FF);
         theme.components.switch.thumb_checked.pressed = Color::hexa(0x111111FF);
-        theme.components.switch.border_checked.normal = Color::hexa(0x2F6FEBFF);
-        theme.components.switch.border_checked.hovered = Color::hexa(0x2F6FEBFF);
-        theme.components.switch.border_checked.pressed = Color::hexa(0x2F6FEBFF);
+        theme.components.switch.border_checked.normal = Color::hexa(0x0078D4FF);
+        theme.components.switch.border_checked.hovered = Color::hexa(0x0078D4FF);
+        theme.components.switch.border_checked.pressed = Color::hexa(0x0078D4FF);
         theme.components.switch.border.normal = Color::hexa(0x556677FF);
         theme.components.switch.border_width = dp(2.0);
         theme.components.switch.radius = dp(14.0);
@@ -5758,7 +6072,7 @@ mod tests {
             .primitives
             .shapes
             .iter()
-            .any(|shape| shape.color == Color::hexa(0x2F6FEBFF) && shape.corner_radius == 12.0));
+            .any(|shape| shape.color == Color::hexa(0x0078D4FF) && shape.corner_radius == 12.0));
         assert!(checked_rendered
             .primitives
             .overlay_shapes
@@ -5801,7 +6115,7 @@ mod tests {
             .primitives
             .shapes
             .iter()
-            .any(|shape| shape.color == Color::hexa(0x2F6FEBFF)));
+            .any(|shape| shape.color == Color::hexa(0x0078D4FF)));
     }
 
     #[test]
@@ -5867,6 +6181,54 @@ mod tests {
             .overlay_shapes
             .iter()
             .any(|shape| shape.color == Color::BLACK));
+    }
+
+    #[test]
+    fn focused_switch_uses_focused_colors_over_pressed_and_hovered() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let switch: Element<()> = Switch::new(true).into();
+        let switch_id = switch.id;
+        let tree: WidgetTree<()> = WidgetTree::new(switch);
+        let mut state = WidgetStateMap::default();
+        state.set(
+            switch_id,
+            crate::ui::theme::WidgetState {
+                hovered: true,
+                pressed: true,
+                focused: true,
+                ..Default::default()
+            },
+        );
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut AnimationEngine::default(),
+            None,
+            None,
+            &state,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.color == theme.components.switch.track_checked.focused));
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.color == theme.components.switch.border_checked.focused));
     }
 
     #[test]
@@ -6070,6 +6432,256 @@ mod tests {
             .filter(|primitive| primitive.content == "hello")
             .collect();
         assert_eq!(texts.len(), 1);
+    }
+
+    #[test]
+    fn focused_input_border_color_uses_theme_transition() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let input: Element<()> = Input::new(Text::new("hello")).width(dp(160.0)).into();
+        let input_id = input.id;
+        let tree = WidgetTree::new(input);
+        let mut focused_states = WidgetStateMap::default();
+        let mut input_state = focused_states.get(input_id);
+        input_state.focused = true;
+        focused_states.set(input_id, input_state);
+
+        let unfocused = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let start_border = unfocused
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| shape.stroke_width > 0.0)
+            .expect("input should render a border")
+            .color;
+
+        let focused = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &focused_states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            Some(input_id),
+            Some(&InputEditState {
+                cursor: 5,
+                anchor: 5,
+                composition: None,
+                scroll_x: Dp::ZERO,
+            }),
+            None,
+            None,
+            true,
+        );
+        let immediate_border = focused
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| shape.stroke_width > 0.0)
+            .expect("focused input should render a border")
+            .color;
+
+        std::thread::sleep(default_theme_transition().duration() / 2);
+        let mid = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &focused_states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            Some(input_id),
+            Some(&InputEditState {
+                cursor: 5,
+                anchor: 5,
+                composition: None,
+                scroll_x: Dp::ZERO,
+            }),
+            None,
+            None,
+            true,
+        );
+        let mid_border = mid
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| shape.stroke_width > 0.0)
+            .expect("focused input should keep rendering a border")
+            .color;
+
+        std::thread::sleep(default_theme_transition().duration());
+        let settled = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &focused_states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            Some(input_id),
+            Some(&InputEditState {
+                cursor: 5,
+                anchor: 5,
+                composition: None,
+                scroll_x: Dp::ZERO,
+            }),
+            None,
+            None,
+            true,
+        );
+        let settled_border = settled
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| shape.stroke_width > 0.0)
+            .expect("focused input should render a border after transition")
+            .color;
+
+        assert_eq!(start_border, theme.components.input.border.normal);
+        assert_eq!(immediate_border, start_border);
+        assert_ne!(mid_border, start_border);
+        assert_ne!(mid_border, theme.components.input.border.focused);
+        assert_eq!(settled_border, theme.components.input.border.focused);
+    }
+
+    #[test]
+    fn focused_input_colors_take_priority_over_pressed_and_hovered() {
+        let mut theme = Theme::default();
+        theme.components.input.background.focused = Color::hexa(0x102030FF);
+        theme.components.input.border.focused = Color::hexa(0x405060FF);
+        theme.components.input.text.focused = Color::hexa(0x708090FF);
+        theme.components.input.placeholder.focused = Color::hexa(0x90A0B0FF);
+
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let input: Element<()> = Input::new(Text::new("hello")).width(dp(160.0)).into();
+        let input_id = input.id;
+        let tree = WidgetTree::new(input);
+        let mut state = WidgetStateMap::default();
+        state.set(
+            input_id,
+            crate::ui::theme::WidgetState {
+                hovered: true,
+                pressed: true,
+                focused: true,
+                ..Default::default()
+            },
+        );
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut AnimationEngine::default(),
+            None,
+            None,
+            &state,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            Some(input_id),
+            Some(&InputEditState {
+                cursor: 5,
+                anchor: 5,
+                composition: None,
+                scroll_x: Dp::ZERO,
+            }),
+            None,
+            None,
+            true,
+        );
+
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.stroke_width == 0.0
+                && shape.color == theme.components.input.background.focused));
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.stroke_width > 0.0
+                && shape.color == theme.components.input.border.focused));
+        assert!(rendered
+            .primitives
+            .texts
+            .iter()
+            .any(|text| text.content == "hello"
+                && text.color == theme.components.input.text.focused));
+    }
+
+    #[test]
+    fn focused_input_placeholder_uses_focused_color() {
+        let mut theme = Theme::default();
+        theme.components.input.placeholder.focused = Color::hexa(0x90A0B0FF);
+
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let input: Element<()> = Input::new(Text::new("")).placeholder_with_str("hint").into();
+        let input_id = input.id;
+        let tree = WidgetTree::new(input);
+        let mut state = WidgetStateMap::default();
+        state.set(
+            input_id,
+            crate::ui::theme::WidgetState {
+                hovered: true,
+                pressed: true,
+                focused: true,
+                ..Default::default()
+            },
+        );
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut AnimationEngine::default(),
+            None,
+            None,
+            &state,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            Some(input_id),
+            Some(&InputEditState {
+                cursor: 0,
+                anchor: 0,
+                composition: None,
+                scroll_x: Dp::ZERO,
+            }),
+            None,
+            None,
+            true,
+        );
+
+        assert!(rendered
+            .primitives
+            .texts
+            .iter()
+            .any(|text| text.content == "hint"
+                && text.color == theme.components.input.placeholder.focused));
     }
 
     #[test]

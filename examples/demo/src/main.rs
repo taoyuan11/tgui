@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tgui::{
     dp, el, pct, sp, Application, Axis, Button, Canvas, CanvasGradientStop, CanvasItem,
     CanvasLinearGradient, CanvasPath, CanvasStroke, Color, Element, Flex, Image, Input, Insets,
-    Observable, Overflow, PathBuilder, Point, Stack, Switch, Text, TguiError, Theme,
+    Observable, Overflow, PathBuilder, Point, Stack, Switch, Text, TguiError,
     ValueCommand, ViewModel, ViewModelContext,
 };
 
@@ -137,12 +137,7 @@ fn demo_canvas() -> Element<App> {
 
 impl App {
     fn run() -> Result<(), TguiError> {
-        let mut theme = Theme::dark();
-        theme.colors.primary = Color::rgb(0, 120, 212);
-        theme.refresh_components();
-
         Application::new()
-            .theme(theme)
             .with_view_model(App::new)
             .root_view(App::view)
             .run()

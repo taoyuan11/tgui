@@ -24,8 +24,7 @@ pub use canvas::{
 pub(crate) use common::{
     BackdropBlurPrimitive, BrushPrimitiveData, CompositionState, ComputedScene, HitInteraction,
     InputEditState, InputSnapshot, InteractionHandlers, MediaEventPhase, MediaEventState,
-    MeshVertex, RenderCommand, RenderedWidgetScene, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    WidgetStateMap,
+    MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,

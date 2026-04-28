@@ -1256,6 +1256,7 @@ impl<VM> Default for ComputedScene<VM> {
 }
 
 impl<VM> ComputedScene<VM> {
+    #[cfg(test)]
     pub(crate) fn rendered(&self) -> RenderedWidgetScene {
         RenderedWidgetScene {
             primitives: self.scene.clone(),
@@ -1352,6 +1353,7 @@ pub(crate) struct InputSnapshot<VM> {
     pub text: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Default)]
 pub(crate) struct RenderedWidgetScene {
     pub primitives: ScenePrimitives,
