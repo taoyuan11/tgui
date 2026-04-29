@@ -2334,6 +2334,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
                 | HitInteraction::Checkbox {
                     id, interactions, ..
+                }
+                | HitInteraction::Radio {
+                    id, interactions, ..
                 } => HoveredWidget {
                     target_id: HoverTargetId::Widget(id),
                     cursor_style: interactions.cursor_style.map(|c| c.resolve()),
@@ -2923,6 +2926,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 None,
             ),
             HitInteraction::Checkbox {
+                id,
+                interactions,
+                on_change,
+                current,
+            } => (
+                id,
+                interactions.clone(),
+                Some(id),
+                None,
+                interactions.on_focus.clone(),
+                on_change
+                    .clone()
+                    .map(|command| ClickHandler::Toggle(command, !current))
+                    .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
+                None,
+                None,
+                None,
+                None,
+            ),
+            HitInteraction::Radio {
                 id,
                 interactions,
                 on_change,

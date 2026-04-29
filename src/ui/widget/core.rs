@@ -219,6 +219,12 @@ enum ResolvedWidgetKind<VM> {
         on_change: Option<ValueCommand<VM, bool>>,
         disabled: Value<bool>,
     },
+    Radio {
+        checked: Value<bool>,
+        label: Option<Text>,
+        on_change: Option<ValueCommand<VM, bool>>,
+        disabled: Value<bool>,
+    },
     Switch {
         checked: Value<bool>,
         on_change: Option<ValueCommand<VM, bool>>,
@@ -327,6 +333,17 @@ impl<VM> Element<VM> {
                 on_change,
                 disabled,
             } => WidgetKind::Checkbox {
+                checked,
+                label,
+                on_change: on_change.map(|command| command.scope(selector.clone())),
+                disabled,
+            },
+            WidgetKind::Radio {
+                checked,
+                label,
+                on_change,
+                disabled,
+            } => WidgetKind::Radio {
                 checked,
                 label,
                 on_change: on_change.map(|command| command.scope(selector.clone())),
@@ -479,6 +496,17 @@ impl<VM> Element<VM> {
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
             },
+            WidgetKind::Radio {
+                checked,
+                label,
+                on_change,
+                disabled,
+            } => ResolvedWidgetKind::Radio {
+                checked: checked.clone(),
+                label: label.clone(),
+                on_change: on_change.clone(),
+                disabled: disabled.clone(),
+            },
             WidgetKind::Switch {
                 checked,
                 on_change,
@@ -537,6 +565,10 @@ impl<VM> ResolvedElement<VM> {
                 variant: *variant,
             },
             ResolvedWidgetKind::Checkbox { checked, label, .. } => MeasureContext::Checkbox {
+                checked: checked.resolve(),
+                label: label.clone(),
+            },
+            ResolvedWidgetKind::Radio { checked, label, .. } => MeasureContext::Radio {
                 checked: checked.resolve(),
                 label: label.clone(),
             },
@@ -894,6 +926,7 @@ impl<VM> ResolvedElement<VM> {
         let disabled = match &self.kind {
             ResolvedWidgetKind::Button { disabled, .. }
             | ResolvedWidgetKind::Checkbox { disabled, .. }
+            | ResolvedWidgetKind::Radio { disabled, .. }
             | ResolvedWidgetKind::Switch { disabled, .. }
             | ResolvedWidgetKind::Input { disabled, .. } => disabled.resolve(),
             _ => false,
@@ -964,6 +997,26 @@ impl<VM> ResolvedElement<VM> {
                     })
                     .unwrap_or_else(|| context.units.resolve_dp(checkbox_style.border_width))
             }
+            ResolvedWidgetKind::Radio { checked, .. } => {
+                let radio_style = context
+                    .theme
+                    .components
+                    .radio
+                    .resolve(widget_state, checked.resolve());
+                self.visual
+                    .border_width
+                    .as_ref()
+                    .map(|width| {
+                        width.resolve_widget_to_logical(
+                            context.animations,
+                            self.id,
+                            WidgetProperty::BorderWidth,
+                            context.now,
+                            context.units,
+                        )
+                    })
+                    .unwrap_or_else(|| context.units.resolve_dp(radio_style.border_width))
+            }
             ResolvedWidgetKind::Switch { checked, .. } => {
                 let switch_style = context
                     .theme
@@ -1027,6 +1080,14 @@ impl<VM> ResolvedElement<VM> {
                         .theme
                         .components
                         .checkbox
+                        .resolve(widget_state, checked.resolve())
+                        .radius,
+                ),
+                ResolvedWidgetKind::Radio { checked, .. } => context.units.resolve_dp(
+                    context
+                        .theme
+                        .components
+                        .radio
                         .resolve(widget_state, checked.resolve())
                         .radius,
                 ),
@@ -1320,6 +1381,7 @@ impl<VM> ResolvedElement<VM> {
                         self.kind,
                         ResolvedWidgetKind::Button { .. }
                             | ResolvedWidgetKind::Checkbox { .. }
+                            | ResolvedWidgetKind::Radio { .. }
                             | ResolvedWidgetKind::Switch { .. }
                     ),
                 },
@@ -1656,6 +1718,46 @@ impl<VM> ResolvedElement<VM> {
                         clip_rect: primitive_clip,
                         geometry: HitGeometry::Rect,
                         interaction: HitInteraction::Checkbox {
+                            id: self.id,
+                            interactions: self.interactions.clone(),
+                            on_change: on_change.clone(),
+                            current: checked.resolve(),
+                        },
+                    });
+                }
+            }
+            ResolvedWidgetKind::Radio {
+                checked,
+                label,
+                on_change,
+                ..
+            } => {
+                let radio_style = context
+                    .theme
+                    .components
+                    .radio
+                    .resolve(widget_state, checked.resolve());
+                push_radio_primitives(
+                    frame,
+                    checked.resolve(),
+                    label.as_ref(),
+                    &radio_style,
+                    opacity,
+                    self.id,
+                    primitive_clip,
+                    context.font_manager,
+                    context.theme,
+                    context.units,
+                    context.animations,
+                    context.now,
+                    &mut computed.scene,
+                );
+                if !disabled {
+                    computed.hit_regions.push(HitRegion {
+                        rect: frame,
+                        clip_rect: primitive_clip,
+                        geometry: HitGeometry::Rect,
+                        interaction: HitInteraction::Radio {
                             id: self.id,
                             interactions: self.interactions.clone(),
                             on_change: on_change.clone(),
@@ -2435,6 +2537,10 @@ fn measure_node(
                 .resolve(Default::default(), *checked);
             measure_checkbox_content(label.as_ref(), &checkbox_style, font_manager, theme, units)
         }
+        Some(MeasureContext::Radio { checked, label }) => {
+            let radio_style = theme.components.radio.resolve(Default::default(), *checked);
+            measure_radio_content(label.as_ref(), &radio_style, font_manager, theme, units)
+        }
         Some(MeasureContext::Input { text, placeholder }) => {
             let text_size = measure_text_content(text, font_manager, theme, units);
             let placeholder_size = measure_text_content(placeholder, font_manager, theme, units);
@@ -2512,6 +2618,43 @@ fn checkbox_label_with_theme(
     label
 }
 
+fn measure_radio_content(
+    label: Option<&Text>,
+    radio_style: &crate::ui::theme::RadioStyle,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+) -> (f32, f32) {
+    let size = units.resolve_dp(radio_style.size);
+    let Some(label) = label else {
+        return (size, size);
+    };
+
+    let label = radio_label_with_theme(label, radio_style);
+    let label_size = measure_text_content(&label, font_manager, theme, units);
+    (
+        size + units.resolve_dp(radio_style.label_gap) + label_size.0,
+        size.max(label_size.1),
+    )
+}
+
+fn radio_label_with_theme(label: &Text, radio_style: &crate::ui::theme::RadioStyle) -> Text {
+    let mut label = label.clone();
+    if label.font_family.is_none() {
+        label.font_family = radio_style.text_style.font_family.clone();
+    }
+    if label.font_size.is_none() {
+        label.font_size = Some(radio_style.text_style.size);
+    }
+    if label.font_weight.is_none() {
+        label.font_weight = Some(radio_style.text_style.weight);
+    }
+    if label.letter_spacing.is_none() {
+        label.letter_spacing = radio_style.text_style.letter_spacing;
+    }
+    label
+}
+
 fn button_variant_theme(
     theme: &crate::ui::theme::ButtonTheme,
     variant: ButtonVariantKind,
@@ -2542,6 +2685,7 @@ fn default_layout_padding<VM>(element: &ResolvedElement<VM>, theme: &Theme) -> I
                 .padding
         }
         ResolvedWidgetKind::Checkbox { .. } => Insets::ZERO,
+        ResolvedWidgetKind::Radio { .. } => Insets::ZERO,
         ResolvedWidgetKind::Text { .. } => Insets::ZERO,
         ResolvedWidgetKind::Container { .. } => Insets::ZERO,
         ResolvedWidgetKind::Image { .. } => Insets::ZERO,
@@ -3423,6 +3567,105 @@ fn push_checkbox_primitives(
     }
 }
 
+fn push_radio_primitives(
+    frame: Rect,
+    checked: bool,
+    label: Option<&Text>,
+    radio_style: &crate::ui::theme::RadioStyle,
+    opacity: f32,
+    widget_id: WidgetId,
+    clip_rect: Option<Rect>,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+    animations: &mut AnimationEngine,
+    now: std::time::Instant,
+    scene: &mut ScenePrimitives,
+) {
+    let size = units.resolve_dp(radio_style.size);
+    let control_frame = Rect::new(
+        frame.x,
+        frame.y + ((frame.height - size) * 0.5).max(Dp::ZERO),
+        size,
+        size,
+    );
+    let radius = units
+        .resolve_dp(radio_style.radius)
+        .min(size * 0.5)
+        .max(0.0);
+    let background = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::BackgroundAlt,
+        },
+        radio_style.background,
+        Some(default_switch_transition()),
+        now,
+    );
+    scene.push_shape(RenderPrimitive {
+        rect: control_frame,
+        color: background.with_alpha_factor(opacity),
+        corner_radius: radius,
+        stroke_width: 0.0,
+        clip_rect,
+    });
+    push_border_primitives(
+        scene,
+        control_frame,
+        units.resolve_dp(radio_style.border_width),
+        radio_style.border.with_alpha_factor(opacity),
+        radius,
+        clip_rect,
+    );
+
+    if checked {
+        let inset = dp(size * 0.28);
+        let indicator_frame = control_frame.inset(Insets::all(inset));
+        if indicator_frame.width > Dp::ZERO && indicator_frame.height > Dp::ZERO {
+            let indicator_radius = (indicator_frame.width.min(indicator_frame.height).get() * 0.5)
+                .min(radius)
+                .max(0.0);
+            scene.push_overlay_shape(RenderPrimitive {
+                rect: indicator_frame,
+                color: radio_style.indicator.with_alpha_factor(opacity),
+                corner_radius: indicator_radius,
+                stroke_width: 0.0,
+                clip_rect,
+            });
+        }
+    }
+
+    if let Some(label) = label {
+        let label = radio_label_with_theme(label, radio_style);
+        let label_x = control_frame.right() + radio_style.label_gap;
+        let label_frame = Rect::new(
+            label_x,
+            frame.y + dp(1.0),
+            (frame.right() - label_x).max(Dp::ZERO),
+            frame.height,
+        );
+        push_text_primitives(
+            &label,
+            label_frame,
+            font_manager,
+            theme,
+            units,
+            animations,
+            now,
+            scene,
+            false,
+            false,
+            Insets::ZERO,
+            None,
+            None,
+            radio_style.label,
+            opacity,
+            widget_id,
+            clip_rect,
+        );
+    }
+}
+
 fn push_switch_primitives(
     background_frame: Rect,
     background_radius: f32,
@@ -4137,17 +4380,17 @@ mod tests {
     use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
     use crate::media::{MediaManager, MediaSource};
     use crate::text::font::{FontCatalog, FontManager};
-    use crate::ui::layout::{Insets, Overflow};
+    use crate::ui::layout::{Axis, Insets, Overflow};
     use crate::ui::theme::Theme;
     use crate::ui::unit::{dp, sp, Dp, UnitContext};
-    use crate::ui::widget::common::{Rect, WidgetKind};
+    use crate::ui::widget::common::{ContainerKind, Rect, WidgetKind};
     use crate::ui::widget::{
         BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient, BackgroundRadialGradient,
     };
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasPath, CanvasStroke, Checkbox, CompositionState, Element, Image,
-        Input, InputEditState, PathBuilder, Point, ScrollbarAxis, ScrollbarHandle, Stack, Switch,
-        Text, WidgetStateMap, WidgetTree,
+        Input, InputEditState, PathBuilder, Point, Radio, RadioGroup, ScrollbarAxis,
+        ScrollbarHandle, Stack, Switch, Text, WidgetStateMap, WidgetTree,
     };
     #[cfg(feature = "video")]
     use crate::video::backend::{
@@ -5277,6 +5520,8 @@ mod tests {
         count: i32,
         text: String,
         checked: bool,
+        selected_key: String,
+        selected_value: String,
         canvas_hits: usize,
         context_hits: usize,
     }
@@ -5528,6 +5773,288 @@ mod tests {
     }
 
     #[test]
+    fn radio_without_label_measures_to_theme_control_size() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(Radio::new(false));
+        let expected = UnitContext::default().resolve_dp(theme.components.radio.size);
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| { shape.rect.width == expected && shape.rect.height == expected }));
+    }
+
+    #[test]
+    fn radio_label_extends_measure_and_hit_region() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(Radio::new(false).label(Text::new("Email")));
+        let size = UnitContext::default().resolve_dp(theme.components.radio.size);
+        let gap = UnitContext::default().resolve_dp(theme.components.radio.label_gap);
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let label = rendered
+            .primitives
+            .texts
+            .iter()
+            .find(|text| text.content == "Email")
+            .expect("radio label should render");
+
+        assert_eq!(label.frame.x, size + gap);
+        let hit = tree.hit_test(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            Some(Point::new(label.frame.right() - 1.0, label.frame.y + 1.0)),
+            None,
+        );
+        assert!(matches!(hit, Some(super::HitInteraction::Radio { .. })));
+    }
+
+    #[test]
+    fn checked_radio_renders_indicator() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(Radio::new(true));
+        let checked_style = theme
+            .components
+            .radio
+            .resolve(crate::ui::theme::WidgetState::default(), true);
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered
+            .primitives
+            .overlay_shapes
+            .iter()
+            .any(|shape| shape.color == checked_style.indicator));
+    }
+
+    #[test]
+    fn disabled_radio_does_not_participate_in_hit_testing() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(Radio::new(false).disable(true));
+
+        let hit = tree.hit_test(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            Some(Point::new(4.0, 4.0)),
+            None,
+        );
+
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn radio_group_renders_selected_option_and_dispatches_key_value() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<ScopeChildVm> = WidgetTree::new(
+            RadioGroup::new(
+                vec![
+                    ("email".to_string(), "Email".to_string()),
+                    ("sms".to_string(), "SMS".to_string()),
+                ],
+                "email".to_string(),
+            )
+            .on_change(ValueCommand::new(
+                |vm: &mut ScopeChildVm, (key, value): (String, String)| {
+                    vm.selected_key = key;
+                    vm.selected_value = value;
+                },
+            )),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 80.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let indicator = theme
+            .components
+            .radio
+            .resolve(crate::ui::theme::WidgetState::default(), true)
+            .indicator;
+        assert_eq!(
+            rendered
+                .primitives
+                .overlay_shapes
+                .iter()
+                .filter(|shape| shape.color == indicator)
+                .count(),
+            1
+        );
+
+        let hit = tree.hit_test(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 80.0),
+            Some(Point::new(4.0, 30.0)),
+            None,
+        );
+        let mut vm = ScopeChildVm::default();
+        match hit {
+            Some(super::HitInteraction::Radio {
+                on_change: Some(command),
+                current,
+                ..
+            }) => {
+                assert!(!current);
+                command.execute(&mut vm, true);
+            }
+            _ => panic!("second radio should be hit"),
+        }
+
+        assert_eq!(vm.selected_key, "sms");
+        assert_eq!(vm.selected_value, "SMS");
+    }
+
+    #[test]
+    fn radio_group_ignores_false_child_change_and_maps_direction() {
+        let group: Element<ScopeChildVm> = RadioGroup::new(
+            vec![
+                ("email".to_string(), "Email".to_string()),
+                ("sms".to_string(), "SMS".to_string()),
+            ],
+            "email".to_string(),
+        )
+        .horizontal()
+        .on_change(ValueCommand::new(
+            |vm: &mut ScopeChildVm, (key, value): (String, String)| {
+                vm.selected_key = key;
+                vm.selected_value = value;
+            },
+        ))
+        .into();
+
+        match &group.kind {
+            WidgetKind::Container { layout, .. } => match &layout.kind {
+                ContainerKind::Flex { direction, .. } => {
+                    assert_eq!(*direction, Axis::Horizontal);
+                }
+                _ => panic!("radio group should render as flex"),
+            },
+            _ => panic!("radio group should render as container"),
+        }
+
+        let tree = WidgetTree::new(group);
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let hit = tree.hit_test(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 40.0),
+            Some(Point::new(4.0, 4.0)),
+            None,
+        );
+        let mut vm = ScopeChildVm::default();
+        match hit {
+            Some(super::HitInteraction::Radio {
+                on_change: Some(command),
+                current,
+                ..
+            }) => {
+                assert!(current);
+                command.execute(&mut vm, false);
+            }
+            _ => panic!("first radio should be hit"),
+        }
+
+        assert!(vm.selected_key.is_empty());
+        assert!(vm.selected_value.is_empty());
+    }
+
+    #[test]
     fn scoped_value_commands_cover_input_switch_canvas_and_media() {
         let input: Element<ScopeChildVm> = Input::new(Text::new("initial"))
             .on_change(ValueCommand::new(|vm: &mut ScopeChildVm, value| {
@@ -5573,6 +6100,22 @@ mod tests {
                 ..
             } => command.execute(&mut vm, true),
             _ => panic!("checkbox command should be scoped"),
+        }
+        assert!(vm.child.checked);
+
+        vm.child.checked = false;
+        let radio: Element<ScopeChildVm> = Radio::new(false)
+            .on_change(ValueCommand::new(|vm: &mut ScopeChildVm, value| {
+                vm.checked = value;
+            }))
+            .into();
+        let radio = radio.scope(scope_child);
+        match radio.kind {
+            WidgetKind::Radio {
+                on_change: Some(command),
+                ..
+            } => command.execute(&mut vm, true),
+            _ => panic!("radio command should be scoped"),
         }
         assert!(vm.child.checked);
 
