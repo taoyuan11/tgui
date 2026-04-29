@@ -13,8 +13,6 @@ categories = ["gui", "rendering"]
 exclude = [
     "target/*",
     "*.png",
-    "*.ttf",
-    "assets/*",
     ".github/*",
     "examples/*",
     "AGENTS.md",
