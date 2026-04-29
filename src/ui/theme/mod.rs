@@ -12,8 +12,8 @@ mod typography;
 pub use color::ColorScheme;
 #[allow(unused_imports)]
 pub use component::{
-    ButtonStyle, ButtonTheme, ButtonVariant, ComponentTheme, InputStyle, InputTheme,
-    ScrollbarTheme, SwitchStyle, SwitchTheme, TextTheme,
+    ButtonStyle, ButtonTheme, ButtonVariant, CheckboxStyle, CheckboxTheme, ComponentTheme,
+    InputStyle, InputTheme, ScrollbarTheme, SwitchStyle, SwitchTheme, TextTheme,
 };
 pub use mode::ThemeMode;
 pub use motion::MotionScale;
@@ -95,11 +95,16 @@ mod tests {
     fn refresh_components_rebuilds_button_tokens_after_color_mutation() {
         let mut theme = Theme::dark();
         theme.colors.primary = crate::foundation::color::Color::WHITE;
-        assert_ne!(theme.components.button.primary.container.normal, theme.colors.primary);
+        assert_ne!(
+            theme.components.button.primary.container.normal,
+            theme.colors.primary
+        );
 
         theme.refresh_components();
 
-        assert_eq!(theme.components.button.primary.container.normal, theme.colors.primary);
+        assert_eq!(
+            theme.components.button.primary.container.normal,
+            theme.colors.primary
+        );
     }
-
 }

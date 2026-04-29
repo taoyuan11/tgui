@@ -1287,12 +1287,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn clear_pointer_position(&mut self) {
         let previous_position = self.cursor_position;
         self.cursor_position = None;
+        let had_hovered_widgets = !self.hovered_widgets.is_empty();
+        let previous_scrollbar = self.hovered_scrollbar;
         for hovered in std::mem::take(&mut self.hovered_widgets).into_iter().rev() {
             if let Some(command) = hovered.on_mouse_leave {
                 self.execute_hover_transition_handler(&command, previous_position);
             }
         }
         self.hovered_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
+        if had_hovered_widgets || self.hovered_scrollbar != previous_scrollbar {
+            self.hover_epoch = self.hover_epoch.wrapping_add(1);
+            self.invalidate_scene();
+        }
         self.update_cursor_icon();
     }
 
@@ -1840,11 +1846,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn ime_enable_request(&mut self) -> Option<ImeEnableRequest> {
-        let request_data = Self::ime_cursor_request_data(
-            self.ime_cursor_area()?,
-            self.unit_context(),
-        )
-        .with_hint_and_purpose(ImeHint::NONE, ImePurpose::Normal);
+        let request_data =
+            Self::ime_cursor_request_data(self.ime_cursor_area()?, self.unit_context())
+                .with_hint_and_purpose(ImeHint::NONE, ImePurpose::Normal);
         ImeEnableRequest::new(
             ImeCapabilities::new()
                 .with_cursor_area()
@@ -2326,6 +2330,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     on_mouse_move: interactions.on_mouse_move.map(HoverMoveHandler::Point),
                 },
                 HitInteraction::Switch {
+                    id, interactions, ..
+                }
+                | HitInteraction::Checkbox {
                     id, interactions, ..
                 } => HoveredWidget {
                     target_id: HoverTargetId::Widget(id),
@@ -2915,6 +2922,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 None,
                 None,
             ),
+            HitInteraction::Checkbox {
+                id,
+                interactions,
+                on_change,
+                current,
+            } => (
+                id,
+                interactions.clone(),
+                Some(id),
+                None,
+                interactions.on_focus.clone(),
+                on_change
+                    .clone()
+                    .map(|command| ClickHandler::Toggle(command, !current))
+                    .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
+                None,
+                None,
+                None,
+                None,
+            ),
             HitInteraction::CanvasItem { .. } => unreachable!("canvas item handled above"),
         };
 
@@ -3109,6 +3136,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         if matches!(event, WindowEvent::PointerLeft { .. }) {
             self.clear_pointer_position();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
         }
 
         if Self::should_dispatch_widget_event(&event) {
@@ -3783,8 +3813,11 @@ fn text_cursor_index_at_point(
             .unwrap_or(default_style.size.max(sp(1.0))),
     );
     let line_height = (font_size * 1.25).max(font_size + 4.0);
-    let letter_spacing =
-        units.resolve_sp(text_style.letter_spacing.unwrap_or(default_style.letter_spacing.unwrap_or(Sp::ZERO)));
+    let letter_spacing = units.resolve_sp(
+        text_style
+            .letter_spacing
+            .unwrap_or(default_style.letter_spacing.unwrap_or(Sp::ZERO)),
+    );
     let text_request = TextFontRequest {
         preferred_font: text_style
             .font_family
@@ -3836,8 +3869,11 @@ fn input_cursor_index_at_point_with_state(
             .unwrap_or(default_style.size.max(sp(1.0))),
     );
     let line_height = (font_size * 1.25).max(font_size + 4.0);
-    let letter_spacing =
-        units.resolve_sp(text_style.letter_spacing.unwrap_or(default_style.letter_spacing.unwrap_or(Sp::ZERO)));
+    let letter_spacing = units.resolve_sp(
+        text_style
+            .letter_spacing
+            .unwrap_or(default_style.letter_spacing.unwrap_or(Sp::ZERO)),
+    );
     let text_request = TextFontRequest {
         preferred_font: text_style
             .font_family
@@ -4256,9 +4292,15 @@ fn is_light_color(color: Color) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        input_cursor_index_at_point_with_state, next_grapheme_boundary, normalize_single_line_text,
+        previous_grapheme_boundary, text_cursor_index_at_point, BoundRuntimeHandler, CachedScene,
+        WindowBindings,
+    };
     use crate::animation::AnimationCoordinator;
     use crate::application::{ApplicationConfig, ThemeSelection, WindowRole};
     use crate::dialog::async_dialog_channel;
+    use crate::foundation::binding::ViewModelContext;
     use crate::foundation::binding::{Binding, InvalidationSignal};
     use crate::foundation::color::Color;
     use crate::foundation::view_model::{Command, ValueCommand};
@@ -4270,22 +4312,16 @@ mod tests {
     use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
     use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
     use crate::ui::widget::{
-        Canvas, CanvasItem, CanvasPath, CanvasPointerEvent, CanvasShadow, CanvasStroke,
+        Canvas, CanvasItem, CanvasPath, CanvasPointerEvent, CanvasShadow, CanvasStroke, Checkbox,
         CursorStyle, Flex, HitInteraction, Input, InputEditState, PathBuilder, Point, Text,
         WidgetTree, INPUT_CARET_EDGE_GAP,
     };
+    use crate::ui::widget::{Element, Stack, WidgetId};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     #[cfg(feature = "video")]
     use std::time::Duration;
     use std::time::Instant;
-    use crate::foundation::binding::ViewModelContext;
-    use crate::ui::widget::{Element, Stack, WidgetId};
-    use super::{
-        input_cursor_index_at_point_with_state, next_grapheme_boundary, normalize_single_line_text,
-        previous_grapheme_boundary, text_cursor_index_at_point, BoundRuntimeHandler, CachedScene,
-        WindowBindings,
-    };
 
     #[cfg(feature = "video")]
     use crate::media::TextureFrame;
@@ -4311,7 +4347,7 @@ mod tests {
 
         fn view(&self) -> Element<Self>
         where
-            Self: Sized
+            Self: Sized,
         {
             todo!()
         }
@@ -4522,6 +4558,26 @@ mod tests {
     }
 
     #[test]
+    fn clearing_pointer_position_invalidates_hovered_scene() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(Text::new("hover").cursor(CursorStyle::Pointer));
+        let mut handler = test_handler(Some(tree), invalidation);
+        handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+
+        let viewport = handler.viewport_rect();
+        assert!(handler.handle_hover(viewport));
+        let hover_epoch = handler.hover_epoch;
+        let _ = handler.computed_scene();
+        assert!(handler.cached_scene.is_some());
+
+        handler.clear_pointer_position();
+
+        assert!(handler.hovered_widgets.is_empty());
+        assert_eq!(handler.hover_epoch, hover_epoch.wrapping_add(1));
+        assert!(handler.cached_scene.is_none());
+    }
+
+    #[test]
     fn scene_cache_invalidates_when_units_change() {
         let invalidation = InvalidationSignal::new();
         let handler = test_handler(None, invalidation);
@@ -4725,9 +4781,15 @@ mod tests {
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(
-            text_style
-                .letter_spacing
-                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+            text_style.letter_spacing.unwrap_or(
+                handler
+                    .theme
+                    .components
+                    .text
+                    .default
+                    .letter_spacing
+                    .unwrap_or(Sp::ZERO),
+            ),
         );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
@@ -4809,9 +4871,15 @@ mod tests {
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(
-            text_style
-                .letter_spacing
-                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+            text_style.letter_spacing.unwrap_or(
+                handler
+                    .theme
+                    .components
+                    .text
+                    .default
+                    .letter_spacing
+                    .unwrap_or(Sp::ZERO),
+            ),
         );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
@@ -4900,9 +4968,15 @@ mod tests {
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(
-            text_style
-                .letter_spacing
-                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+            text_style.letter_spacing.unwrap_or(
+                handler
+                    .theme
+                    .components
+                    .text
+                    .default
+                    .letter_spacing
+                    .unwrap_or(Sp::ZERO),
+            ),
         );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
@@ -5018,9 +5092,15 @@ mod tests {
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(
-            text_style
-                .letter_spacing
-                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+            text_style.letter_spacing.unwrap_or(
+                handler
+                    .theme
+                    .components
+                    .text
+                    .default
+                    .letter_spacing
+                    .unwrap_or(Sp::ZERO),
+            ),
         );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
@@ -5112,9 +5192,15 @@ mod tests {
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(
-            text_style
-                .letter_spacing
-                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+            text_style.letter_spacing.unwrap_or(
+                handler
+                    .theme
+                    .components
+                    .text
+                    .default
+                    .letter_spacing
+                    .unwrap_or(Sp::ZERO),
+            ),
         );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
@@ -5256,9 +5342,15 @@ mod tests {
         );
         let line_height = (font_size * 1.25).max(font_size + 4.0);
         let letter_spacing = units.resolve_sp(
-            text_style
-                .letter_spacing
-                .unwrap_or(handler.theme.components.text.default.letter_spacing.unwrap_or(Sp::ZERO)),
+            text_style.letter_spacing.unwrap_or(
+                handler
+                    .theme
+                    .components
+                    .text
+                    .default
+                    .letter_spacing
+                    .unwrap_or(Sp::ZERO),
+            ),
         );
         let request = TextFontRequest {
             preferred_font: text_style.font_family.as_deref().or(handler
@@ -5469,7 +5561,7 @@ mod tests {
 
         fn view(&self) -> Element<Self>
         where
-            Self: Sized
+            Self: Sized,
         {
             todo!()
         }
@@ -5498,6 +5590,42 @@ mod tests {
                     _ => None,
                 })
                 .expect("switch hit region should exist")
+        };
+
+        handler.cursor_position = Some(Point {
+            x: frame.x + (frame.width * 0.5),
+            y: frame.y + (frame.height * 0.5),
+        });
+        handler.handle_mouse_press(viewport, Instant::now());
+
+        let checked = handler.with_view_model(|vm| vm.checked);
+        assert!(checked);
+    }
+
+    #[test]
+    fn clicking_checkbox_dispatches_toggled_value() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(
+            Checkbox::new(false)
+                .label(Text::new("Accept"))
+                .on_change(ValueCommand::new(|vm: &mut SwitchVm, value| {
+                    vm.checked = value
+                }))
+                .size(dp(120.0), dp(30.0)),
+        );
+        let mut handler = test_handler_with_vm(SwitchVm::default(), Some(tree), invalidation);
+        let viewport = handler.viewport_rect();
+
+        let frame = {
+            let computed = handler.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::Checkbox { .. } => Some(region.rect),
+                    _ => None,
+                })
+                .expect("checkbox hit region should exist")
         };
 
         handler.cursor_position = Some(Point {
@@ -5589,7 +5717,7 @@ mod tests {
 
         fn view(&self) -> Element<Self>
         where
-            Self: Sized
+            Self: Sized,
         {
             Stack::new().into()
         }
