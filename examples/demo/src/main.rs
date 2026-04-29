@@ -4,12 +4,14 @@ use tgui::prelude::*;
 
 struct App {
     switch: Observable<bool>,
+    checkbox: Observable<bool>,
 }
 
 impl ViewModel for App {
     fn new(context: &ViewModelContext) -> Self {
         Self {
             switch: context.observable(false),
+            checkbox: context.observable(false),
         }
     }
 
@@ -19,7 +21,7 @@ impl ViewModel for App {
             .padding(Insets::all(dp(20.0)))
             .overflow_y(Overflow::Scroll)
             .child(
-                Flex::new(Axis::Vertical)
+                Flex::vertical()
                     .width(pct(100.0))
                     .gap(dp(14.0))
                     .child(el![
@@ -53,6 +55,14 @@ impl ViewModel for App {
                             )),
                         ),
                         component_card(
+                            "Checkbox",
+                            Checkbox::new(self.checkbox.binding())
+                                .label(Text::new("接收通知"))
+                                .on_change(ValueCommand::new(|app: &mut App, checked| {
+                                    app.checkbox.set(checked)
+                                })),
+                        ),
+                        component_card(
                             "Image",
                             Image::from_path(demo_image_path())
                                 .size(dp(220.0), dp(120.0))
@@ -66,7 +76,7 @@ impl ViewModel for App {
 }
 
 fn component_card(title: &str, content: impl Into<Element<App>>) -> Element<App> {
-    Flex::new(Axis::Vertical)
+    Flex::vertical()
         .gap(dp(10.0))
         .padding(Insets::all(dp(14.0)))
         .background(Color::rgb(23, 28, 38))

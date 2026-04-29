@@ -27,16 +27,16 @@ use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 use crate::video::VideoSurface as PublicVideoSurface;
 
 use super::canvas::{canvas_bounds, CanvasItem};
+#[cfg(test)]
+use super::common::RenderedWidgetScene;
 use super::common::{
     BackdropBlurPrimitive, BrushPrimitive, ButtonVariantKind, ComputedScene, ContainerKind,
     ContainerLayout, HitGeometry, HitInteraction, HitRegion, InputEditState, InputSnapshot,
     InteractionHandlers, LayoutNode, MeasureContext, MediaEventHandlers, MediaEventPhase,
-    MediaEventState, Point, Rect, RenderPrimitive, ScenePrimitives, ScrollRegion,
-    ScrollbarAxis, ScrollbarHandle, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId,
-    WidgetKind, WidgetStateMap,
+    MediaEventState, Point, Rect, RenderPrimitive, ScenePrimitives, ScrollRegion, ScrollbarAxis,
+    ScrollbarHandle, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
+    WidgetStateMap,
 };
-#[cfg(test)]
-use super::common::RenderedWidgetScene;
 use super::text::Text;
 
 /// Caret width in logical pixels.
@@ -213,6 +213,12 @@ enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         variant: ButtonVariantKind,
     },
+    Checkbox {
+        checked: Value<bool>,
+        label: Option<Text>,
+        on_change: Option<ValueCommand<VM, bool>>,
+        disabled: Value<bool>,
+    },
     Switch {
         checked: Value<bool>,
         on_change: Option<ValueCommand<VM, bool>>,
@@ -314,6 +320,17 @@ impl<VM> Element<VM> {
                 label,
                 disabled,
                 variant,
+            },
+            WidgetKind::Checkbox {
+                checked,
+                label,
+                on_change,
+                disabled,
+            } => WidgetKind::Checkbox {
+                checked,
+                label,
+                on_change: on_change.map(|command| command.scope(selector.clone())),
+                disabled,
             },
             WidgetKind::Switch {
                 checked,
@@ -451,6 +468,17 @@ impl<VM> Element<VM> {
                 disabled: disabled.clone(),
                 variant: *variant,
             },
+            WidgetKind::Checkbox {
+                checked,
+                label,
+                on_change,
+                disabled,
+            } => ResolvedWidgetKind::Checkbox {
+                checked: checked.clone(),
+                label: label.clone(),
+                on_change: on_change.clone(),
+                disabled: disabled.clone(),
+            },
             WidgetKind::Switch {
                 checked,
                 on_change,
@@ -508,6 +536,10 @@ impl<VM> ResolvedElement<VM> {
                 label: label.clone(),
                 variant: *variant,
             },
+            ResolvedWidgetKind::Checkbox { checked, label, .. } => MeasureContext::Checkbox {
+                checked: checked.resolve(),
+                label: label.clone(),
+            },
             ResolvedWidgetKind::Switch { checked, .. } => MeasureContext::Switch {
                 checked: checked.resolve(),
             },
@@ -548,7 +580,15 @@ impl<VM> ResolvedElement<VM> {
             }
         }
 
-        let style = self.taffy_style(parent_kind, viewport, is_root, animations, theme, units, now);
+        let style = self.taffy_style(
+            parent_kind,
+            viewport,
+            is_root,
+            animations,
+            theme,
+            units,
+            now,
+        );
         let node = if child_layouts.is_empty() {
             taffy.new_leaf_with_context(style, self.measure_context())?
         } else {
@@ -689,12 +729,7 @@ impl<VM> ResolvedElement<VM> {
                     .padding
                     .as_ref()
                     .map(|padding| {
-                        padding.resolve_widget(
-                            animations,
-                            self.id,
-                            WidgetProperty::Padding,
-                            now,
-                        )
+                        padding.resolve_widget(animations, self.id, WidgetProperty::Padding, now)
                     })
                     .unwrap_or_else(|| default_layout_padding(self, theme)),
                 units,
@@ -858,6 +893,7 @@ impl<VM> ResolvedElement<VM> {
         );
         let disabled = match &self.kind {
             ResolvedWidgetKind::Button { disabled, .. }
+            | ResolvedWidgetKind::Checkbox { disabled, .. }
             | ResolvedWidgetKind::Switch { disabled, .. }
             | ResolvedWidgetKind::Input { disabled, .. } => disabled.resolve(),
             _ => false,
@@ -878,8 +914,8 @@ impl<VM> ResolvedElement<VM> {
             * if disabled { 0.55 } else { 1.0 };
         let border_width = match &self.kind {
             ResolvedWidgetKind::Button { variant, .. } => {
-                let button_style =
-                    button_variant_theme(&context.theme.components.button, *variant).resolve(widget_state);
+                let button_style = button_variant_theme(&context.theme.components.button, *variant)
+                    .resolve(widget_state);
                 self.visual
                     .border_width
                     .as_ref()
@@ -908,6 +944,26 @@ impl<VM> ResolvedElement<VM> {
                     )
                 })
                 .unwrap_or_else(|| context.units.resolve_dp(context.theme.border.normal)),
+            ResolvedWidgetKind::Checkbox { checked, .. } => {
+                let checkbox_style = context
+                    .theme
+                    .components
+                    .checkbox
+                    .resolve(widget_state, checked.resolve());
+                self.visual
+                    .border_width
+                    .as_ref()
+                    .map(|width| {
+                        width.resolve_widget_to_logical(
+                            context.animations,
+                            self.id,
+                            WidgetProperty::BorderWidth,
+                            context.now,
+                            context.units,
+                        )
+                    })
+                    .unwrap_or_else(|| context.units.resolve_dp(checkbox_style.border_width))
+            }
             ResolvedWidgetKind::Switch { checked, .. } => {
                 let switch_style = context
                     .theme
@@ -966,6 +1022,14 @@ impl<VM> ResolvedElement<VM> {
                 ResolvedWidgetKind::Input { .. } => context
                     .units
                     .resolve_dp(context.theme.components.input.resolve(widget_state).radius),
+                ResolvedWidgetKind::Checkbox { checked, .. } => context.units.resolve_dp(
+                    context
+                        .theme
+                        .components
+                        .checkbox
+                        .resolve(widget_state, checked.resolve())
+                        .radius,
+                ),
                 ResolvedWidgetKind::Switch { checked, .. } => context.units.resolve_dp(
                     context
                         .theme
@@ -979,8 +1043,8 @@ impl<VM> ResolvedElement<VM> {
             .max(0.0);
         let border_color = match &self.kind {
             ResolvedWidgetKind::Button { variant, .. } => {
-                let button_style =
-                    button_variant_theme(&context.theme.components.button, *variant).resolve(widget_state);
+                let button_style = button_variant_theme(&context.theme.components.button, *variant)
+                    .resolve(widget_state);
                 self.visual
                     .border_color
                     .as_ref()
@@ -1254,7 +1318,9 @@ impl<VM> ResolvedElement<VM> {
                     interactions: self.interactions.clone(),
                     focusable: matches!(
                         self.kind,
-                        ResolvedWidgetKind::Button { .. } | ResolvedWidgetKind::Switch { .. }
+                        ResolvedWidgetKind::Button { .. }
+                            | ResolvedWidgetKind::Checkbox { .. }
+                            | ResolvedWidgetKind::Switch { .. }
                     ),
                 },
             });
@@ -1521,8 +1587,8 @@ impl<VM> ResolvedElement<VM> {
                 );
             }
             ResolvedWidgetKind::Button { label, variant, .. } => {
-                let button_style =
-                    button_variant_theme(&context.theme.components.button, *variant).resolve(widget_state);
+                let button_style = button_variant_theme(&context.theme.components.button, *variant)
+                    .resolve(widget_state);
                 let padding = Insets::symmetric(button_style.padding_x, button_style.padding_y);
                 let button_foreground = label.color.as_ref().map_or_else(
                     || {
@@ -1557,6 +1623,46 @@ impl<VM> ResolvedElement<VM> {
                     self.id,
                     primitive_clip,
                 );
+            }
+            ResolvedWidgetKind::Checkbox {
+                checked,
+                label,
+                on_change,
+                ..
+            } => {
+                let checkbox_style = context
+                    .theme
+                    .components
+                    .checkbox
+                    .resolve(widget_state, checked.resolve());
+                push_checkbox_primitives(
+                    frame,
+                    checked.resolve(),
+                    label.as_ref(),
+                    &checkbox_style,
+                    opacity,
+                    self.id,
+                    primitive_clip,
+                    context.font_manager,
+                    context.theme,
+                    context.units,
+                    context.animations,
+                    context.now,
+                    &mut computed.scene,
+                );
+                if !disabled {
+                    computed.hit_regions.push(HitRegion {
+                        rect: frame,
+                        clip_rect: primitive_clip,
+                        geometry: HitGeometry::Rect,
+                        interaction: HitInteraction::Checkbox {
+                            id: self.id,
+                            interactions: self.interactions.clone(),
+                            on_change: on_change.clone(),
+                            current: checked.resolve(),
+                        },
+                    });
+                }
             }
             ResolvedWidgetKind::Switch {
                 checked,
@@ -1762,7 +1868,9 @@ fn apply_container_style(
         layout
             .padding
             .as_ref()
-            .map(|padding| padding.resolve_widget(animations, widget_id, WidgetProperty::Padding, now))
+            .map(|padding| {
+                padding.resolve_widget(animations, widget_id, WidgetProperty::Padding, now)
+            })
             .unwrap_or(Insets::ZERO),
         units,
     );
@@ -2311,11 +2419,21 @@ fn measure_node(
             )
         }
         Some(MeasureContext::Switch { checked }) => {
-            let switch_style = theme.components.switch.resolve(Default::default(), *checked);
+            let switch_style = theme
+                .components
+                .switch
+                .resolve(Default::default(), *checked);
             (
                 units.resolve_dp(switch_style.width),
                 units.resolve_dp(switch_style.height),
             )
+        }
+        Some(MeasureContext::Checkbox { checked, label }) => {
+            let checkbox_style = theme
+                .components
+                .checkbox
+                .resolve(Default::default(), *checked);
+            measure_checkbox_content(label.as_ref(), &checkbox_style, font_manager, theme, units)
         }
         Some(MeasureContext::Input { text, placeholder }) => {
             let text_size = measure_text_content(text, font_manager, theme, units);
@@ -2354,6 +2472,46 @@ fn measure_text_content(
     )
 }
 
+fn measure_checkbox_content(
+    label: Option<&Text>,
+    checkbox_style: &crate::ui::theme::CheckboxStyle,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+) -> (f32, f32) {
+    let size = units.resolve_dp(checkbox_style.size);
+    let Some(label) = label else {
+        return (size, size);
+    };
+
+    let label = checkbox_label_with_theme(label, checkbox_style);
+    let label_size = measure_text_content(&label, font_manager, theme, units);
+    (
+        size + units.resolve_dp(checkbox_style.label_gap) + label_size.0,
+        size.max(label_size.1),
+    )
+}
+
+fn checkbox_label_with_theme(
+    label: &Text,
+    checkbox_style: &crate::ui::theme::CheckboxStyle,
+) -> Text {
+    let mut label = label.clone();
+    if label.font_family.is_none() {
+        label.font_family = checkbox_style.text_style.font_family.clone();
+    }
+    if label.font_size.is_none() {
+        label.font_size = Some(checkbox_style.text_style.size);
+    }
+    if label.font_weight.is_none() {
+        label.font_weight = Some(checkbox_style.text_style.weight);
+    }
+    if label.letter_spacing.is_none() {
+        label.letter_spacing = checkbox_style.text_style.letter_spacing;
+    }
+    label
+}
+
 fn button_variant_theme(
     theme: &crate::ui::theme::ButtonTheme,
     variant: ButtonVariantKind,
@@ -2377,8 +2535,13 @@ fn default_layout_padding<VM>(element: &ResolvedElement<VM>, theme: &Theme) -> I
             Insets::symmetric(input_style.padding_x, input_style.padding_y)
         }
         ResolvedWidgetKind::Switch { checked, .. } => {
-            theme.components.switch.resolve(Default::default(), checked.resolve()).padding
+            theme
+                .components
+                .switch
+                .resolve(Default::default(), checked.resolve())
+                .padding
         }
+        ResolvedWidgetKind::Checkbox { .. } => Insets::ZERO,
         ResolvedWidgetKind::Text { .. } => Insets::ZERO,
         ResolvedWidgetKind::Container { .. } => Insets::ZERO,
         ResolvedWidgetKind::Image { .. } => Insets::ZERO,
@@ -2405,8 +2568,10 @@ fn resolved_text_metrics(text: &Text, theme: &Theme, units: UnitContext) -> (f32
     let line_height = default_line_height
         .max(scaled_line_height)
         .max(font_size + 4.0);
-    let letter_spacing =
-        units.resolve_sp(text.letter_spacing.unwrap_or(default_style.letter_spacing.unwrap_or(Sp::ZERO)));
+    let letter_spacing = units.resolve_sp(
+        text.letter_spacing
+            .unwrap_or(default_style.letter_spacing.unwrap_or(Sp::ZERO)),
+    );
     (font_size, line_height, letter_spacing)
 }
 
@@ -2807,9 +2972,7 @@ fn push_input_primitives(
                 .font_family
                 .as_deref()
                 .or(default_text_style.font_family.as_deref()),
-            weight: placeholder
-                .font_weight
-                .unwrap_or(default_text_style.weight),
+            weight: placeholder.font_weight.unwrap_or(default_text_style.weight),
         };
         let placeholder_content = placeholder.content.resolve();
         let resolved = font_manager.resolve_text(&placeholder_content, placeholder_request.clone());
@@ -2835,9 +2998,7 @@ fn push_input_primitives(
             color: placeholder_color,
             font_family: Some(resolved.primary_font),
             font_size: placeholder_size,
-            font_weight: placeholder
-                .font_weight
-                .unwrap_or(default_text_style.weight),
+            font_weight: placeholder.font_weight.unwrap_or(default_text_style.weight),
             line_height: placeholder_line_height,
             letter_spacing: placeholder_letter_spacing,
             clip_rect: input_clip_rect,
@@ -3160,6 +3321,108 @@ fn default_switch_transition() -> crate::animation::Transition {
     crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(180))
 }
 
+fn push_checkbox_primitives(
+    frame: Rect,
+    checked: bool,
+    label: Option<&Text>,
+    checkbox_style: &crate::ui::theme::CheckboxStyle,
+    opacity: f32,
+    widget_id: WidgetId,
+    clip_rect: Option<Rect>,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+    animations: &mut AnimationEngine,
+    now: std::time::Instant,
+    scene: &mut ScenePrimitives,
+) {
+    let box_size = units.resolve_dp(checkbox_style.size);
+    let box_frame = Rect::new(
+        frame.x,
+        frame.y + ((frame.height - box_size) * 0.5).max(Dp::ZERO),
+        box_size,
+        box_size,
+    );
+    let radius = units.resolve_dp(checkbox_style.radius);
+    let background = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::BackgroundAlt,
+        },
+        checkbox_style.background,
+        Some(default_switch_transition()),
+        now,
+    );
+    scene.push_shape(RenderPrimitive {
+        rect: box_frame,
+        color: background.with_alpha_factor(opacity),
+        corner_radius: radius,
+        stroke_width: 0.0,
+        clip_rect,
+    });
+    push_border_primitives(
+        scene,
+        box_frame,
+        units.resolve_dp(checkbox_style.border_width),
+        checkbox_style.border.with_alpha_factor(opacity),
+        radius,
+        clip_rect,
+    );
+
+    if checked {
+        let checkmark = Text::new("\u{2713}").font_size(checkbox_style.text_style.size);
+        push_text_primitives(
+            &checkmark,
+            box_frame,
+            font_manager,
+            theme,
+            units,
+            animations,
+            now,
+            scene,
+            false,
+            true,
+            Insets::ZERO,
+            None,
+            None,
+            checkbox_style.checkmark,
+            opacity,
+            widget_id,
+            clip_rect,
+        );
+    }
+
+    if let Some(label) = label {
+        let label = checkbox_label_with_theme(label, checkbox_style);
+        let label_x = box_frame.right() + checkbox_style.label_gap;
+        let label_frame = Rect::new(
+            label_x,
+            frame.y + dp(1.0),
+            (frame.right() - label_x).max(Dp::ZERO),
+            frame.height,
+        );
+        push_text_primitives(
+            &label,
+            label_frame,
+            font_manager,
+            theme,
+            units,
+            animations,
+            now,
+            scene,
+            false,
+            false,
+            Insets::ZERO,
+            None,
+            None,
+            checkbox_style.label,
+            opacity,
+            widget_id,
+            clip_rect,
+        );
+    }
+}
+
 fn push_switch_primitives(
     background_frame: Rect,
     background_radius: f32,
@@ -3429,7 +3692,8 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&InputEditState>,
         caret_visible: bool,
     ) -> ComputedScene<VM> {
-        let layout = self.build_scene_layout(font_manager, theme, media, animations, units, viewport);
+        let layout =
+            self.build_scene_layout(font_manager, theme, media, animations, units, viewport);
         self.collect_scene_from_layout(
             font_manager,
             &layout,
@@ -3462,7 +3726,9 @@ impl<VM> WidgetTree<VM> {
         let now = std::time::Instant::now();
         let resolved_root = self.root.resolve();
         let root_layout = resolved_root
-            .build_layout_tree(&mut taffy, animations, theme, units, None, viewport, true, now)
+            .build_layout_tree(
+                &mut taffy, animations, theme, units, None, viewport, true, now,
+            )
             .expect("widget tree layout should build");
         taffy
             .compute_layout_with_measure(
@@ -3874,15 +4140,14 @@ mod tests {
     use crate::ui::layout::{Insets, Overflow};
     use crate::ui::theme::Theme;
     use crate::ui::unit::{dp, sp, Dp, UnitContext};
-    use crate::ui::widget::{
-        BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
-        BackgroundRadialGradient,
-    };
     use crate::ui::widget::common::{Rect, WidgetKind};
     use crate::ui::widget::{
-        Canvas, CanvasItem, CanvasPath, CanvasStroke, Element, Image, Input, InputEditState,
-        PathBuilder, Point, ScrollbarAxis, ScrollbarHandle, Stack, Switch, Text, WidgetStateMap,
-        WidgetTree,
+        BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient, BackgroundRadialGradient,
+    };
+    use crate::ui::widget::{
+        Canvas, CanvasItem, CanvasPath, CanvasStroke, Checkbox, Element, Image, Input,
+        InputEditState, PathBuilder, Point, ScrollbarAxis, ScrollbarHandle, Stack, Switch, Text,
+        WidgetStateMap, WidgetTree,
     };
     #[cfg(feature = "video")]
     use crate::video::backend::{
@@ -3892,9 +4157,9 @@ mod tests {
     use crate::video::{PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSurface};
 
     const ONE_BY_ONE_GIF: &[u8] = &[
-        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
-        0x00, 0x02, 0x01, 0x4C, 0x00, 0x3B,
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0xFF, 0xFF, 0xFF, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02,
+        0x01, 0x4C, 0x00, 0x3B,
     ];
 
     #[test]
@@ -3969,7 +4234,8 @@ mod tests {
     fn larger_font_sizes_scale_default_line_height() {
         let theme = Theme::default();
         let text = Text::new("Background Effects Gallery").font_size(sp(30.0));
-        let (font_size, line_height, _) = resolved_text_metrics(&text, &theme, UnitContext::default());
+        let (font_size, line_height, _) =
+            resolved_text_metrics(&text, &theme, UnitContext::default());
 
         assert_eq!(font_size, 30.0);
         assert_eq!(line_height, 41.25);
@@ -4329,18 +4595,16 @@ mod tests {
             Stack::new()
                 .size(dp(100.0), dp(100.0))
                 .overflow(Overflow::Hidden)
-                .child(
-                    Stack::new()
-                        .size(dp(120.0), dp(80.0))
-                        .background_brush(BackgroundLinearGradient::new(
-                            Point::new(dp(0.0), dp(0.0)),
-                            Point::new(dp(120.0), dp(80.0)),
-                            vec![
-                                BackgroundGradientStop::new(0.0, Color::hexa(0x14B8A6FF)),
-                                BackgroundGradientStop::new(1.0, Color::hexa(0x0F766EFF)),
-                            ],
-                        )),
-                ),
+                .child(Stack::new().size(dp(120.0), dp(80.0)).background_brush(
+                    BackgroundLinearGradient::new(
+                        Point::new(dp(0.0), dp(0.0)),
+                        Point::new(dp(120.0), dp(80.0)),
+                        vec![
+                            BackgroundGradientStop::new(0.0, Color::hexa(0x14B8A6FF)),
+                            BackgroundGradientStop::new(1.0, Color::hexa(0x0F766EFF)),
+                        ],
+                    ),
+                )),
         );
 
         let rendered = tree.render_output(
@@ -5063,6 +5327,207 @@ mod tests {
     }
 
     #[test]
+    fn checkbox_without_label_measures_to_theme_box_size() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(Checkbox::new(false));
+        let expected = UnitContext::default().resolve_dp(theme.components.checkbox.size);
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| { shape.rect.width == expected && shape.rect.height == expected }));
+    }
+
+    #[test]
+    fn checkbox_label_extends_measure_and_hit_region() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(Checkbox::new(false).label(Text::new("Accept")));
+        let size = UnitContext::default().resolve_dp(theme.components.checkbox.size);
+        let gap = UnitContext::default().resolve_dp(theme.components.checkbox.label_gap);
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let label = rendered
+            .primitives
+            .texts
+            .iter()
+            .find(|text| text.content == "Accept")
+            .expect("checkbox label should render");
+
+        assert_eq!(label.frame.x, size + gap);
+        assert!(label.frame.y >= Dp::ZERO);
+        assert!(label.frame.y <= dp(12.0));
+        let hit = tree.hit_test(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            Some(Point::new(label.frame.right() - 1.0, label.frame.y + 1.0)),
+            None,
+        );
+        assert!(matches!(hit, Some(super::HitInteraction::Checkbox { .. })));
+    }
+
+    #[test]
+    fn checked_checkbox_renders_checked_background_and_checkmark() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(Checkbox::new(true));
+        let checked_style = theme
+            .components
+            .checkbox
+            .resolve(crate::ui::theme::WidgetState::default(), true);
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.color == checked_style.background));
+        assert!(rendered
+            .primitives
+            .texts
+            .iter()
+            .any(|text| text.content == "\u{2713}" && text.color == checked_style.checkmark));
+    }
+
+    #[test]
+    fn focused_unchecked_checkbox_keeps_default_box_colors() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let checkbox: Element<()> = Checkbox::new(false).into();
+        let checkbox_id = checkbox.id;
+        let tree: WidgetTree<()> = WidgetTree::new(checkbox);
+        let mut states = WidgetStateMap::default();
+        states.set(
+            checkbox_id,
+            crate::ui::theme::WidgetState {
+                focused: true,
+                ..Default::default()
+            },
+        );
+        let default_style = theme
+            .components
+            .checkbox
+            .resolve(crate::ui::theme::WidgetState::default(), false);
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut AnimationEngine::default(),
+            None,
+            None,
+            &states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.stroke_width == 0.0 && shape.color == default_style.background));
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.stroke_width > 0.0 && shape.color == default_style.border));
+        assert!(rendered
+            .primitives
+            .texts
+            .iter()
+            .all(|text| text.content != "\u{2713}"));
+    }
+
+    #[test]
+    fn disabled_checkbox_does_not_participate_in_hit_testing() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(Checkbox::new(false).disable(true));
+
+        let hit = tree.hit_test(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            Some(Point::new(4.0, 4.0)),
+            None,
+        );
+
+        assert!(hit.is_none());
+    }
+
+    #[test]
     fn scoped_value_commands_cover_input_switch_canvas_and_media() {
         let input: Element<ScopeChildVm> = Input::new(Text::new("initial"))
             .on_change(ValueCommand::new(|vm: &mut ScopeChildVm, value| {
@@ -5092,6 +5557,22 @@ mod tests {
                 ..
             } => command.execute(&mut vm, true),
             _ => panic!("switch command should be scoped"),
+        }
+        assert!(vm.child.checked);
+
+        vm.child.checked = false;
+        let checkbox: Element<ScopeChildVm> = Checkbox::new(false)
+            .on_change(ValueCommand::new(|vm: &mut ScopeChildVm, value| {
+                vm.checked = value;
+            }))
+            .into();
+        let checkbox = checkbox.scope(scope_child);
+        match checkbox.kind {
+            WidgetKind::Checkbox {
+                on_change: Some(command),
+                ..
+            } => command.execute(&mut vm, true),
+            _ => panic!("checkbox command should be scoped"),
         }
         assert!(vm.child.checked);
 
@@ -5375,8 +5856,11 @@ mod tests {
         let media = test_media();
         let mut animations = AnimationEngine::default();
 
-        let text_tree: WidgetTree<()> =
-            WidgetTree::new(Text::new("Center").padding(Insets::all(dp(16.0))).size(dp(160.0), dp(48.0)));
+        let text_tree: WidgetTree<()> = WidgetTree::new(
+            Text::new("Center")
+                .padding(Insets::all(dp(16.0)))
+                .size(dp(160.0), dp(48.0)),
+        );
         let text_render = text_tree.render_output(
             &font_manager,
             &theme,
@@ -5393,8 +5877,9 @@ mod tests {
             false,
         );
 
-        let button_tree: WidgetTree<()> =
-            WidgetTree::new(crate::ui::widget::Button::new(Text::new("Center")).size(dp(160.0), dp(48.0)));
+        let button_tree: WidgetTree<()> = WidgetTree::new(
+            crate::ui::widget::Button::new(Text::new("Center")).size(dp(160.0), dp(48.0)),
+        );
         let button_render = button_tree.render_output(
             &font_manager,
             &theme,
@@ -5413,7 +5898,9 @@ mod tests {
 
         assert_eq!(text_render.primitives.texts.len(), 1);
         assert_eq!(button_render.primitives.texts.len(), 1);
-        assert!(button_render.primitives.texts[0].frame.x > text_render.primitives.texts[0].frame.x);
+        assert!(
+            button_render.primitives.texts[0].frame.x > text_render.primitives.texts[0].frame.x
+        );
     }
 
     #[test]
@@ -5480,7 +5967,8 @@ mod tests {
             .primitives
             .shapes
             .iter()
-            .any(|shape| shape.stroke_width > 0.0 && shape.color == theme.components.button.primary.border.normal));
+            .any(|shape| shape.stroke_width > 0.0
+                && shape.color == theme.components.button.primary.border.normal));
     }
 
     #[test]
@@ -5489,8 +5977,9 @@ mod tests {
         let font_manager = FontManager::new(&FontCatalog::default());
         let media = test_media();
         let mut animations = AnimationEngine::default();
-        let button: Element<()> =
-            crate::ui::widget::Button::new(Text::new("hover")).size(dp(120.0), dp(40.0)).into();
+        let button: Element<()> = crate::ui::widget::Button::new(Text::new("hover"))
+            .size(dp(120.0), dp(40.0))
+            .into();
         let button_id = button.id;
         let tree: WidgetTree<()> = WidgetTree::new(button);
         let mut hovered_state = WidgetStateMap::default();
@@ -5533,8 +6022,9 @@ mod tests {
         let font_manager = FontManager::new(&FontCatalog::default());
         let media = test_media();
         let mut animations = AnimationEngine::default();
-        let button: Element<()> =
-            crate::ui::widget::Button::new(Text::new("hover")).size(dp(120.0), dp(40.0)).into();
+        let button: Element<()> = crate::ui::widget::Button::new(Text::new("hover"))
+            .size(dp(120.0), dp(40.0))
+            .into();
         let button_id = button.id;
         let tree: WidgetTree<()> = WidgetTree::new(button);
         let mut hovered_state = WidgetStateMap::default();
@@ -5643,11 +6133,20 @@ mod tests {
             .expect("hovered button should render a filled background after transition")
             .color;
 
-        assert_eq!(start_background, theme.components.button.primary.container.normal);
+        assert_eq!(
+            start_background,
+            theme.components.button.primary.container.normal
+        );
         assert_eq!(immediate_background, start_background);
         assert_ne!(mid_background, start_background);
-        assert_ne!(mid_background, theme.components.button.primary.container.hovered);
-        assert_eq!(settled_background, theme.components.button.primary.container.hovered);
+        assert_ne!(
+            mid_background,
+            theme.components.button.primary.container.hovered
+        );
+        assert_eq!(
+            settled_background,
+            theme.components.button.primary.container.hovered
+        );
     }
 
     #[test]
@@ -5656,8 +6155,9 @@ mod tests {
         let font_manager = FontManager::new(&FontCatalog::default());
         let media = test_media();
         let mut animations = AnimationEngine::default();
-        let button: Element<()> =
-            crate::ui::widget::Button::new(Text::new("focus")).size(dp(120.0), dp(40.0)).into();
+        let button: Element<()> = crate::ui::widget::Button::new(Text::new("focus"))
+            .size(dp(120.0), dp(40.0))
+            .into();
         let button_id = button.id;
         let tree: WidgetTree<()> = WidgetTree::new(button);
         let mut state = WidgetStateMap::default();
@@ -5772,12 +6272,9 @@ mod tests {
             false,
         );
 
-        assert!(rendered
-            .primitives
-            .shapes
-            .iter()
-            .any(|shape| shape.color == theme.components.button.secondary.border.normal
-                && shape.stroke_width == theme.components.button.secondary.border_width.get()));
+        assert!(rendered.primitives.shapes.iter().any(|shape| shape.color
+            == theme.components.button.secondary.border.normal
+            && shape.stroke_width == theme.components.button.secondary.border_width.get()));
     }
 
     #[test]
@@ -5812,7 +6309,8 @@ mod tests {
             .primitives
             .shapes
             .iter()
-            .any(|shape| shape.stroke_width > 0.0 && shape.color == theme.components.button.danger.border.normal));
+            .any(|shape| shape.stroke_width > 0.0
+                && shape.color == theme.components.button.danger.border.normal));
     }
 
     #[test]
@@ -5847,7 +6345,8 @@ mod tests {
             .primitives
             .shapes
             .iter()
-            .any(|shape| shape.stroke_width > 0.0 && shape.color == theme.components.button.primary.border.normal));
+            .any(|shape| shape.stroke_width > 0.0
+                && shape.color == theme.components.button.primary.border.normal));
     }
 
     #[test]
@@ -6621,12 +7120,9 @@ mod tests {
             .iter()
             .any(|shape| shape.stroke_width > 0.0
                 && shape.color == theme.components.input.border.focused));
-        assert!(rendered
-            .primitives
-            .texts
-            .iter()
-            .any(|text| text.content == "hello"
-                && text.color == theme.components.input.text.focused));
+        assert!(rendered.primitives.texts.iter().any(
+            |text| text.content == "hello" && text.color == theme.components.input.text.focused
+        ));
     }
 
     #[test]
@@ -6636,7 +7132,9 @@ mod tests {
 
         let font_manager = FontManager::new(&FontCatalog::default());
         let media = test_media();
-        let input: Element<()> = Input::new(Text::new("")).placeholder_with_str("hint").into();
+        let input: Element<()> = Input::new(Text::new(""))
+            .placeholder_with_str("hint")
+            .into();
         let input_id = input.id;
         let tree = WidgetTree::new(input);
         let mut state = WidgetStateMap::default();

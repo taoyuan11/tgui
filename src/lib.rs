@@ -149,7 +149,6 @@ pub mod mvvm {
 
 /// Convenient imports for small applications and examples.
 pub mod prelude {
-    pub use crate::el;
     pub use crate::animation::{
         AnimatedValue, AnimationControllerBuilder, AnimationControllerHandle, AnimationCurve,
         AnimationSpec, AnimationStatus, Easing, FillMode, Keyframe, Keyframes, Playback,
@@ -166,6 +165,7 @@ pub mod prelude {
         DialogError, Dialogs, FileDialogOptions, MessageDialogButtons, MessageDialogLevel,
         MessageDialogOptions, MessageDialogResult,
     };
+    pub use crate::el;
     pub use crate::layout::{
         fr, pct, Align, Axis, Flex, Grid, Insets, IntoLengthValue, Justify, LayoutStyle, Length,
         Overflow, PositionType, ScrollbarStyle, Stack, Track, Value, Wrap,
@@ -176,38 +176,38 @@ pub mod prelude {
         Binding, Command, CommandContext, Observable, ValueCommand, ViewModel, ViewModelContext,
     };
     pub use crate::theme::{
-        BorderScale, ColorScheme, ComponentTheme, ElevationScale, FontWeight, MotionScale,
-        RadiusScale, Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet,
-        ThemeStore, TypeScale, WidgetState,
-    };
-    pub use crate::widgets::{
-        rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
-        BackgroundRadialGradient, Button, CursorStyle, Element, Image, Input, Switch, Text,
-        WidgetCommand, WidgetEventResult, WidgetTree,
+        BorderScale, CheckboxStyle, CheckboxTheme, ColorScheme, ComponentTheme, ElevationScale,
+        FontWeight, MotionScale, RadiusScale, Shadow, SpaceScale, Stateful, TextStyle, Theme,
+        ThemeMode, ThemeSet, ThemeStore, TypeScale, WidgetState,
     };
     #[cfg(feature = "video")]
     pub use crate::video::{
         PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
+    };
+    pub use crate::widgets::{
+        rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
+        BackgroundRadialGradient, Button, Checkbox, CursorStyle, Element, Image, Input, Switch,
+        Text, WidgetCommand, WidgetEventResult, WidgetTree,
     };
 }
 
 /// Theme tokens, state resolution, and theme storage.
 pub mod theme {
     pub use crate::ui::theme::{
-        BorderScale, ColorScheme, ComponentTheme, ElevationScale, FontWeight, MotionScale,
-        RadiusScale, Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet,
-        ThemeStore, TypeScale, WidgetState,
+        BorderScale, CheckboxStyle, CheckboxTheme, ColorScheme, ComponentTheme, ElevationScale,
+        FontWeight, MotionScale, RadiusScale, Shadow, SpaceScale, Stateful, TextStyle, Theme,
+        ThemeMode, ThemeSet, ThemeStore, TypeScale, WidgetState,
     };
 }
 
 /// Built-in widgets and widget-tree infrastructure.
 pub mod widgets {
+    pub use crate::layout::{Flex, Grid, IntoLengthValue, Stack};
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
-        BackgroundRadialGradient, Button, CursorStyle, Element, Image, Input, Switch, Text,
-        WidgetCommand, WidgetEventResult, WidgetTree,
+        BackgroundRadialGradient, Button, Checkbox, CursorStyle, Element, Image, Input, Switch,
+        Text, WidgetCommand, WidgetEventResult, WidgetTree,
     };
-    pub use crate::layout::{Flex, Grid, IntoLengthValue, Stack};
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;
 }

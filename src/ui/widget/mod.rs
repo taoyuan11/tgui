@@ -1,6 +1,7 @@
-mod button;
 mod background;
+mod button;
 mod canvas;
+mod checkbox;
 mod common;
 mod container;
 mod core;
@@ -11,16 +12,17 @@ mod text;
 #[cfg(feature = "video")]
 mod video;
 
-pub use button::Button;
 pub use background::{
     BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
     BackgroundRadialGradient,
 };
+pub use button::Button;
 pub use canvas::{
     Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasItemId,
     CanvasLinearGradient, CanvasPath, CanvasPathOpError, CanvasPointerEvent, CanvasRadialGradient,
     CanvasShadow, CanvasStroke, PathBuilder,
 };
+pub use checkbox::Checkbox;
 pub(crate) use common::{
     BackdropBlurPrimitive, BrushPrimitiveData, CompositionState, ComputedScene, HitInteraction,
     InputEditState, InputSnapshot, InteractionHandlers, MediaEventPhase, MediaEventState,

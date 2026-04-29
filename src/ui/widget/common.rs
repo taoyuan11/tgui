@@ -773,15 +773,15 @@ fn normalized_background_stops(
         stops
             .iter()
             .map(|stop| {
-                    let color = stop.color.with_alpha_factor(opacity);
-                    BackgroundGradientStopData {
-                        offset: stop.offset,
-                        color: color.to_linear_rgba_f32(),
-                    }
-                })
-                .collect(),
-        )
-    }
+                let color = stop.color.with_alpha_factor(opacity);
+                BackgroundGradientStopData {
+                    offset: stop.offset,
+                    color: color.to_linear_rgba_f32(),
+                }
+            })
+            .collect(),
+    )
+}
 
 fn solid_stop_colors(color: Color) -> [[f32; 4]; 7] {
     let rgba = color.to_linear_rgba_f32();
@@ -902,6 +902,12 @@ pub(crate) enum WidgetKind<VM> {
         disabled: Value<bool>,
         variant: ButtonVariantKind,
     },
+    Checkbox {
+        checked: Value<bool>,
+        label: Option<Text>,
+        on_change: Option<ValueCommand<VM, bool>>,
+        disabled: Value<bool>,
+    },
     Switch {
         checked: Value<bool>,
         on_change: Option<ValueCommand<VM, bool>>,
@@ -958,6 +964,17 @@ impl<VM> Clone for WidgetKind<VM> {
                 disabled: disabled.clone(),
                 variant: *variant,
             },
+            Self::Checkbox {
+                checked,
+                label,
+                on_change,
+                disabled,
+            } => Self::Checkbox {
+                checked: checked.clone(),
+                label: label.clone(),
+                on_change: on_change.clone(),
+                disabled: disabled.clone(),
+            },
             Self::Switch {
                 checked,
                 on_change,
@@ -1002,6 +1019,10 @@ pub(crate) enum MeasureContext {
         label: Text,
         variant: ButtonVariantKind,
     },
+    Checkbox {
+        checked: bool,
+        label: Option<Text>,
+    },
     Switch {
         checked: bool,
     },
@@ -1010,7 +1031,6 @@ pub(crate) enum MeasureContext {
         placeholder: Text,
     },
 }
-
 
 #[derive(Clone)]
 pub(crate) struct LayoutNode {
@@ -1042,6 +1062,12 @@ pub(crate) enum HitInteraction<VM> {
         text: String,
     },
     Switch {
+        id: WidgetId,
+        interactions: InteractionHandlers<VM>,
+        on_change: Option<ValueCommand<VM, bool>>,
+        current: bool,
+    },
+    Checkbox {
         id: WidgetId,
         interactions: InteractionHandlers<VM>,
         on_change: Option<ValueCommand<VM, bool>>,
@@ -1111,6 +1137,17 @@ impl<VM> Clone for HitInteraction<VM> {
                 on_change: on_change.clone(),
                 current: *current,
             },
+            Self::Checkbox {
+                id,
+                interactions,
+                on_change,
+                current,
+            } => Self::Checkbox {
+                id: *id,
+                interactions: interactions.clone(),
+                on_change: on_change.clone(),
+                current: *current,
+            },
             Self::CanvasItem {
                 id,
                 item_id,
@@ -1134,7 +1171,8 @@ impl<VM> HitInteraction<VM> {
             Self::Widget { id, .. }
             | Self::FocusInput { id, .. }
             | Self::SelectableText { id, .. }
-            | Self::Switch { id, .. } => HitTargetId::Widget(*id),
+            | Self::Switch { id, .. }
+            | Self::Checkbox { id, .. } => HitTargetId::Widget(*id),
             Self::CanvasItem { id, item_id, .. } => HitTargetId::CanvasItem {
                 widget_id: *id,
                 item_id: *item_id,
