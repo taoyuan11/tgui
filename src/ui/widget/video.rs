@@ -1,9 +1,9 @@
+use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::ContentFit;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::Dp;
 use crate::video::VideoController;
-use crate::foundation::color::Color;
 
 use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{

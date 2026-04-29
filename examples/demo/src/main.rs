@@ -22,88 +22,87 @@ impl ViewModel for App {
     }
 
     fn view(&self) -> Element<Self> {
-        Stack::new()
-            .size(pct(100.0), pct(100.0))
+        Flex::horizontal()
+            .wrap(Wrap::Wrap)
             .padding(Insets::all(dp(20.0)))
+            .gap(dp(10.0))
             .overflow_y(Overflow::Scroll)
-            .child(
-                Flex::vertical()
+            .child(el![
+                Text::new("TGUI 组件列表示例")
+                    .font_size(sp(28.0))
                     .width(pct(100.0))
-                    .gap(dp(14.0))
-                    .child(el![
-                        Text::new("TGUI 组件列表示例")
-                            .font_size(sp(28.0))
-                            .color(Color::WHITE),
-                        component_card(
-                            "Text",
-                            Text::new("这是一段可直接渲染的文本组件")
-                                .font_size(sp(16.0))
-                                .color(Color::rgb(240, 244, 255)),
-                        ),
-                        component_card(
-                            "Button",
-                            Flex::new(Axis::Horizontal).gap(dp(10.0)).child(el![
-                                Button::new(Text::new("普通按钮")).primary(),
-                                Button::new(Text::new("次要按钮")).secondary(),
-                                Button::new(Text::new("幽灵按钮")).ghost(),
-                                Button::new(Text::new("危险按钮")).danger(),
-                            ]),
-                        ),
-                        component_card(
-                            "Input",
-                            Input::new(Text::new(self.content.binding()))
-                                .placeholder_with_str("请输入内容")
-                                .width(dp(260.0))
-                                .on_change(ValueCommand::new(|app: &mut App, text| {
-                                    app.content.set(text)
-                                }))
-                        ),
-                        component_card(
-                            "Switch",
-                            Switch::new(self.switch.binding()).on_change(ValueCommand::new(
-                                |app: &mut App, enable| app.switch.set(enable),
-                            )),
-                        ),
-                        component_card(
-                            "Checkbox",
-                            Checkbox::new(self.checkbox.binding())
-                                .label(Text::new("接收通知"))
-                                .on_change(ValueCommand::new(|app: &mut App, checked| {
-                                    app.checkbox.set(checked)
-                                })),
-                        ),
-                        component_card(
-                            "Radio",
-                            Radio::new(self.radio.binding())
-                                .label(Text::new("单个单选框"))
-                                .on_change(ValueCommand::new(|app: &mut App, checked| {
-                                    app.radio.set(checked)
-                                })),
-                        ),
-                        component_card(
-                            "RadioGroup",
-                            RadioGroup::new(
-                                vec![
-                                    ("email".to_string(), "邮件".to_string()),
-                                    ("sms".to_string(), "短信".to_string()),
-                                    ("phone".to_string(), "电话".to_string()),
-                                ],
-                                self.contact_method.binding(),
-                            )
-                            .horizontal()
-                            .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
-                                app.contact_method.set(key)
-                            })),
-                        ),
-                        component_card(
-                            "Image",
-                            Image::from_path(demo_image_path())
-                                .size(dp(220.0), dp(120.0))
-                                .border_radius(dp(12.0)),
-                        ),
-                        component_card("Canvas", demo_canvas()),
+                    .color(Color::WHITE),
+                component_card(
+                    "Text",
+                    Text::new("这是一段可直接渲染、可复制的文本组件")
+                        .user_select(true)
+                        .font_size(sp(16.0))
+                        .color(Color::rgb(240, 244, 255)),
+                ),
+                component_card(
+                    "Input",
+                    Input::new(Text::new(self.content.binding()))
+                        .placeholder_with_str("请输入内容")
+                        .width(dp(260.0))
+                        .on_change(ValueCommand::new(|app: &mut App, text| {
+                            app.content.set(text)
+                        }))
+                ),
+                component_card(
+                    "Button",
+                    Flex::new(Axis::Horizontal).gap(dp(10.0)).child(el![
+                        Button::new(Text::new("普通按钮")).primary(),
+                        Button::new(Text::new("次要按钮")).secondary(),
+                        Button::new(Text::new("幽灵按钮")).ghost(),
+                        Button::new(Text::new("危险按钮")).danger(),
+                        Button::new(Text::new("禁用按钮")).disable(true),
                     ]),
-            )
+                ),
+                component_card(
+                    "Switch",
+                    Switch::new(self.switch.binding()).on_change(ValueCommand::new(
+                        |app: &mut App, enable| app.switch.set(enable),
+                    )),
+                ),
+                component_card(
+                    "Checkbox",
+                    Checkbox::new(self.checkbox.binding())
+                        .label(Text::new("接收通知"))
+                        .on_change(ValueCommand::new(|app: &mut App, checked| {
+                            app.checkbox.set(checked)
+                        })),
+                ),
+                component_card(
+                    "Radio",
+                    Radio::new(self.radio.binding())
+                        .label(Text::new("单个单选框"))
+                        .on_change(ValueCommand::new(|app: &mut App, checked| {
+                            app.radio.set(checked)
+                        })),
+                ),
+                component_card(
+                    "RadioGroup",
+                    RadioGroup::new(
+                        vec![
+                            RadioOption::new("email".to_string(), "邮件".to_string()).disable(true),
+                            RadioOption::new("sms".to_string(), "短信".to_string()),
+                            RadioOption::new("phone".to_string(), "电话".to_string()),
+                        ],
+                        self.contact_method.binding(),
+                    )
+                    .horizontal()
+                    .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
+                        app.contact_method.set(key)
+                    })),
+                ),
+                component_card(
+                    "Image",
+                    Image::from_path(demo_image_path())
+                        .size(dp(220.0), dp(120.0))
+                        .border_radius(dp(12.0)),
+                ),
+                component_card("Canvas", demo_canvas()),
+            ])
             .into()
     }
 }

@@ -298,6 +298,7 @@ pub struct RadioOption<K, V> {
     key: K,
     value: V,
     label: Option<Text>,
+    disabled: Value<bool>,
 }
 
 impl<K, V> RadioOption<K, V> {
@@ -306,11 +307,17 @@ impl<K, V> RadioOption<K, V> {
             key,
             value,
             label: None,
+            disabled: Value::Static(false),
         }
     }
 
     pub fn label(mut self, label: Text) -> Self {
         self.label = Some(label);
+        self
+    }
+
+    pub fn disable(mut self, disable: impl Into<Value<bool>>) -> Self {
+        self.disabled = disable.into();
         self
     }
 }
@@ -374,7 +381,7 @@ where
                 .label
                 .clone()
                 .unwrap_or_else(|| Text::new(option.value.clone()));
-            let mut radio = Radio::new(selected).label(label);
+            let mut radio = Radio::new(selected).label(label).disable(option.disabled);
 
             if let Some(command) = group.on_change.clone() {
                 let key = option.key.clone();

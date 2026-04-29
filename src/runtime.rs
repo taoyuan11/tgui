@@ -368,6 +368,7 @@ pub struct BoundRuntimeHandler<VM> {
 struct CachedScene<VM> {
     viewport: Rect,
     units: UnitContext,
+    focused_widget: Option<WidgetId>,
     focused_input: Option<WidgetId>,
     pressed_widget: Option<WidgetId>,
     selected_text: Option<WidgetId>,
@@ -927,6 +928,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) -> bool {
         cached.viewport == viewport
             && cached.units == units
+            && cached.focused_widget == self.focused_widget_id()
             && cached.focused_input == self.focused_input
             && cached.pressed_widget == self.pressed_widget
             && cached.selected_text == self.selected_text
@@ -947,6 +949,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) -> bool {
         cached.viewport == viewport
             && cached.units == units
+            && cached.focused_widget == self.focused_widget_id()
             && cached.focused_input == self.focused_input
             && cached.pressed_widget == self.pressed_widget
             && cached.selected_text == self.selected_text
@@ -1051,6 +1054,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.cached_scene = Some(CachedScene {
                 viewport,
                 units,
+                focused_widget: self.focused_widget_id(),
                 focused_input: self.focused_input,
                 pressed_widget: self.pressed_widget,
                 selected_text: self.selected_text,
@@ -1070,6 +1074,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .as_ref()
             .expect("computed scene cache should exist")
             .computed
+    }
+
+    fn focused_widget_id(&self) -> Option<WidgetId> {
+        self.focused_widget
+            .as_ref()
+            .map(|focused| focused.widget_id)
     }
 
     fn widget_state_map(&self, active_scrollbar: Option<ScrollbarHandle>) -> WidgetStateMap {
@@ -2284,6 +2294,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.hit_path(_viewport)
             .into_iter()
             .map(|interaction| match interaction {
+                HitInteraction::Disabled { id } => HoveredWidget {
+                    target_id: HoverTargetId::Widget(id),
+                    cursor_style: Some(crate::ui::widget::CursorStyle::NotAllowed),
+                    on_mouse_enter: None,
+                    on_mouse_leave: None,
+                    on_mouse_move: None,
+                },
                 HitInteraction::Widget {
                     id, interactions, ..
                 } => HoveredWidget {
@@ -2677,9 +2694,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let next_id = next_widget.as_ref().map(|focused| focused.widget_id);
 
         if current_id == next_id {
+            let previous_input = self.focused_input;
             self.focused_input = next_input;
             self.caret_blink_started_at = next_input.map(|_| Instant::now());
             self.sync_ime_allowed();
+            if previous_input != self.focused_input {
+                self.invalidate_scene();
+            }
             return;
         }
 
@@ -2693,11 +2714,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        let mut fired_handler = false;
         if let Some(previous) = self.focused_widget.take() {
             if let Some(command) = previous.on_blur {
                 self.execute_command(&command);
-                fired_handler = true;
             }
         }
 
@@ -2712,13 +2731,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if let Some(command) = on_focus {
             if next_id.is_some() {
                 self.execute_command(&command);
-                fired_handler = true;
             }
         }
 
-        if fired_handler {
-            self.invalidate_scene();
-        }
+        self.invalidate_scene();
     }
 
     fn dispatch_widget_click(
@@ -2766,6 +2782,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.pressed_widget = None;
             return;
         };
+
+        if matches!(hit, HitInteraction::Disabled { .. }) {
+            self.end_input_selection_drag();
+            self.clear_selected_text();
+            self.update_focus(None, None, None, None);
+            self.pending_click = None;
+            self.pressed_widget = None;
+            return;
+        }
 
         if matches!(hit, HitInteraction::CanvasItem { .. }) {
             self.end_input_selection_drag();
@@ -2965,6 +2990,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 None,
                 None,
             ),
+            HitInteraction::Disabled { .. } => unreachable!("disabled hit handled above"),
             HitInteraction::CanvasItem { .. } => unreachable!("canvas item handled above"),
         };
 
@@ -4608,6 +4634,7 @@ mod tests {
         let cached = CachedScene::<TestVm> {
             viewport,
             units: UnitContext::new(1.0, 1.0),
+            focused_widget: None,
             focused_input: None,
             pressed_widget: None,
             selected_text: None,
@@ -4638,6 +4665,7 @@ mod tests {
         let cached = CachedScene::<TestVm> {
             viewport,
             units: UnitContext::new(1.0, 1.0),
+            focused_widget: None,
             focused_input: None,
             pressed_widget: None,
             selected_text: None,
@@ -4663,6 +4691,42 @@ mod tests {
     }
 
     #[test]
+    fn scene_cache_invalidates_when_focused_widget_changes() {
+        let invalidation = InvalidationSignal::new();
+        let mut handler = test_handler(None, invalidation);
+        let viewport = handler.viewport_rect();
+        let cached = CachedScene::<TestVm> {
+            viewport,
+            units: UnitContext::new(1.0, 1.0),
+            focused_widget: None,
+            focused_input: None,
+            pressed_widget: None,
+            selected_text: None,
+            caret_visible: false,
+            animation_epoch: 0,
+            scroll_epoch: 0,
+            hover_epoch: 0,
+            hovered_scrollbar: None,
+            active_scrollbar: None,
+            layout: None,
+            computed: Default::default(),
+        };
+
+        handler.focused_widget = Some(super::FocusedWidget {
+            widget_id: WidgetId::next(),
+            on_blur: None,
+        });
+
+        assert!(!handler.scene_cache_matches(
+            &cached,
+            viewport,
+            UnitContext::new(1.0, 1.0),
+            false,
+            None,
+        ));
+    }
+
+    #[test]
     fn user_select_text_defaults_to_text_cursor() {
         let invalidation = InvalidationSignal::new();
         let tree = WidgetTree::new(Text::new("hover").user_select(true));
@@ -4674,6 +4738,20 @@ mod tests {
         assert_eq!(
             hovered.last().and_then(|hovered| hovered.cursor_style),
             Some(CursorStyle::Text)
+        );
+    }
+
+    #[test]
+    fn disabled_control_defaults_to_not_allowed_cursor() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(Checkbox::new(false).disable(true).size(dp(120.0), dp(30.0)));
+        let mut handler = test_handler(Some(tree), invalidation);
+        handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+
+        let hovered = handler.hover_path(handler.viewport_rect());
+        assert_eq!(
+            hovered.last().and_then(|hovered| hovered.cursor_style),
+            Some(CursorStyle::NotAllowed)
         );
     }
 
@@ -5659,6 +5737,42 @@ mod tests {
 
         let checked = handler.with_view_model(|vm| vm.checked);
         assert!(checked);
+    }
+
+    #[test]
+    fn clicking_disabled_checkbox_does_not_dispatch_toggled_value() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(
+            Checkbox::new(false)
+                .disable(true)
+                .on_change(ValueCommand::new(|vm: &mut SwitchVm, value| {
+                    vm.checked = value
+                }))
+                .size(dp(120.0), dp(30.0)),
+        );
+        let mut handler = test_handler_with_vm(SwitchVm::default(), Some(tree), invalidation);
+        let viewport = handler.viewport_rect();
+
+        let frame = {
+            let computed = handler.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::Disabled { .. } => Some(region.rect),
+                    _ => None,
+                })
+                .expect("disabled hit region should exist")
+        };
+
+        handler.cursor_position = Some(Point {
+            x: frame.x + (frame.width * 0.5),
+            y: frame.y + (frame.height * 0.5),
+        });
+        handler.handle_mouse_press(viewport, Instant::now());
+
+        let checked = handler.with_view_model(|vm| vm.checked);
+        assert!(!checked);
     }
 
     #[cfg(feature = "video")]

@@ -11,7 +11,9 @@ use crate::ui::widget::Element;
 pub trait ViewModel: Send + 'static {
     fn new(context: &ViewModelContext) -> Self;
 
-    fn view(&self) -> Element<Self> where Self: Sized;
+    fn view(&self) -> Element<Self>
+    where
+        Self: Sized;
 }
 
 pub struct CommandContext<T> {
