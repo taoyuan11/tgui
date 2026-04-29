@@ -385,6 +385,10 @@ struct CachedScene<VM> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HoverTargetId {
     Widget(WidgetId),
+    SelectOption {
+        widget_id: WidgetId,
+        option_index: usize,
+    },
     CanvasItem {
         widget_id: WidgetId,
         item_id: CanvasItemId,
@@ -418,6 +422,7 @@ impl CanvasPointerContext {
 enum ClickHandler<VM> {
     Command(Command<VM>),
     Toggle(ValueCommand<VM, bool>, bool),
+    SelectOption(Option<Command<VM>>),
     Canvas(ValueCommand<VM, CanvasPointerEvent>, CanvasPointerContext),
 }
 
@@ -707,6 +712,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         match handler {
             ClickHandler::Command(command) => self.execute_command(command),
             ClickHandler::Toggle(command, next) => self.execute_value_command(command, *next),
+            ClickHandler::SelectOption(command) => {
+                if let Some(command) = command {
+                    self.execute_command(command);
+                }
+            }
             ClickHandler::Canvas(command, context) => {
                 if let Some(position) = position {
                     self.execute_value_command(command, context.pointer_event(position));
@@ -1085,10 +1095,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn widget_state_map(&self, active_scrollbar: Option<ScrollbarHandle>) -> WidgetStateMap {
         let mut states = WidgetStateMap::default();
         for hovered in &self.hovered_widgets {
-            if let HoverTargetId::Widget(id) = hovered.target_id {
-                let mut state = states.get(id);
-                state.hovered = true;
-                states.set(id, state);
+            match hovered.target_id {
+                HoverTargetId::Widget(id) => {
+                    let mut state = states.get(id);
+                    state.hovered = true;
+                    states.set(id, state);
+                }
+                HoverTargetId::SelectOption {
+                    widget_id,
+                    option_index,
+                } => {
+                    let mut state = states.get_select_option(widget_id, option_index);
+                    state.hovered = true;
+                    states.set_select_option(widget_id, option_index, state);
+                }
+                HoverTargetId::CanvasItem { .. } => {}
             }
         }
         if let Some(id) = self.pressed_widget {
@@ -2354,8 +2375,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
                 | HitInteraction::Radio {
                     id, interactions, ..
-                } => HoveredWidget {
+                }
+                | HitInteraction::SelectTrigger { id, interactions } => HoveredWidget {
                     target_id: HoverTargetId::Widget(id),
+                    cursor_style: interactions.cursor_style.map(|c| c.resolve()),
+                    on_mouse_enter: interactions
+                        .on_mouse_enter
+                        .map(HoverTransitionHandler::Command),
+                    on_mouse_leave: interactions
+                        .on_mouse_leave
+                        .map(HoverTransitionHandler::Command),
+                    on_mouse_move: interactions.on_mouse_move.map(HoverMoveHandler::Point),
+                },
+                HitInteraction::SelectOption {
+                    id,
+                    option_index,
+                    interactions,
+                    ..
+                } => HoveredWidget {
+                    target_id: HoverTargetId::SelectOption {
+                        widget_id: id,
+                        option_index,
+                    },
                     cursor_style: interactions.cursor_style.map(|c| c.resolve()),
                     on_mouse_enter: interactions
                         .on_mouse_enter
@@ -2985,6 +3026,38 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .clone()
                     .map(|command| ClickHandler::Toggle(command, !current))
                     .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
+                None,
+                None,
+                None,
+                None,
+            ),
+            HitInteraction::SelectTrigger { id, interactions } => {
+                let is_open = self.focused_widget_id() == Some(id);
+                (
+                    id,
+                    interactions.clone(),
+                    (!is_open).then_some(id),
+                    None,
+                    (!is_open).then(|| interactions.on_focus.clone()).flatten(),
+                    interactions.on_click.clone().map(ClickHandler::Command),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }
+            HitInteraction::SelectOption {
+                id,
+                option_index: _,
+                interactions,
+                on_select,
+            } => (
+                id,
+                interactions.clone(),
+                None,
+                None,
+                None,
+                Some(ClickHandler::SelectOption(on_select.clone())),
                 None,
                 None,
                 None,
@@ -4362,8 +4435,8 @@ mod tests {
     use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasPath, CanvasPointerEvent, CanvasShadow, CanvasStroke, Checkbox,
-        CursorStyle, Flex, HitInteraction, Input, InputEditState, PathBuilder, Point, Text,
-        WidgetTree, INPUT_CARET_EDGE_GAP,
+        CursorStyle, Flex, HitInteraction, Input, InputEditState, PathBuilder, Point, Select,
+        SelectOption, Text, WidgetTree, INPUT_CARET_EDGE_GAP,
     };
     use crate::ui::widget::{Element, Stack, WidgetId};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -4753,6 +4826,28 @@ mod tests {
             hovered.last().and_then(|hovered| hovered.cursor_style),
             Some(CursorStyle::NotAllowed)
         );
+    }
+
+    #[test]
+    fn clicking_open_select_trigger_closes_dropdown() {
+        let invalidation = InvalidationSignal::new();
+        let select: Element<TestVm> = Select::new(
+            vec![SelectOption::new("email".to_string(), "Email".to_string())],
+            None::<String>,
+        )
+        .size(dp(160.0), dp(32.0))
+        .into();
+        let select_id = select.id;
+        let tree = WidgetTree::new(select);
+        let mut handler = test_handler(Some(tree), invalidation);
+        let viewport = handler.viewport_rect();
+
+        handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+        handler.handle_mouse_press(viewport, Instant::now());
+        assert_eq!(handler.focused_widget_id(), Some(select_id));
+
+        handler.handle_mouse_press(viewport, Instant::now());
+        assert_eq!(handler.focused_widget_id(), None);
     }
 
     #[test]

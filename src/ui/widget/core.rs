@@ -31,11 +31,11 @@ use super::canvas::{canvas_bounds, CanvasItem};
 use super::common::RenderedWidgetScene;
 use super::common::{
     BackdropBlurPrimitive, BrushPrimitive, ButtonVariantKind, ComputedScene, ContainerKind,
-    ContainerLayout, HitGeometry, HitInteraction, HitRegion, InputEditState, InputSnapshot,
-    InteractionHandlers, LayoutNode, MeasureContext, MediaEventHandlers, MediaEventPhase,
-    MediaEventState, Point, Rect, RenderPrimitive, ScenePrimitives, ScrollRegion, ScrollbarAxis,
-    ScrollbarHandle, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
-    WidgetStateMap,
+    ContainerLayout, CursorStyle, HitGeometry, HitInteraction, HitRegion, InputEditState,
+    InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext, MediaEventHandlers,
+    MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive, ScenePrimitives, ScrollRegion,
+    ScrollbarAxis, ScrollbarHandle, SelectOptionState, TextPrimitive, TexturePrimitive,
+    VisualStyle, WidgetId, WidgetKind, WidgetStateMap,
 };
 use super::text::Text;
 
@@ -59,6 +59,7 @@ const INPUT_EMPTY_CARET_INSET: f32 = 1.0;
 const INPUT_DEFAULT_WIDTH: f32 = 160.0;
 
 const CHECKBOX_CHECKMARK_ICON: &str = "\u{e687}";
+const SELECT_ARROW_ICON: &str = "\u{e686}";
 
 #[derive(Clone, Copy)]
 pub(crate) struct InputViewport {
@@ -242,6 +243,12 @@ enum ResolvedWidgetKind<VM> {
         on_change: Option<ValueCommand<VM, String>>,
         disabled: Value<bool>,
     },
+    Select {
+        selected_label: Value<Option<String>>,
+        placeholder: Text,
+        options: Vec<SelectOptionState<VM>>,
+        disabled: Value<bool>,
+    },
 }
 
 struct CollectContext<'a, 'b> {
@@ -258,6 +265,7 @@ struct CollectContext<'a, 'b> {
     active_scrollbar: Option<ScrollbarHandle>,
     widget_states: &'a WidgetStateMap,
     scroll_offsets: &'a HashMap<WidgetId, Point>,
+    viewport: Rect,
     units: UnitContext,
     animations: &'b mut AnimationEngine,
     now: std::time::Instant,
@@ -377,6 +385,27 @@ impl<VM> Element<VM> {
                 text,
                 placeholder,
                 on_change: on_change.map(|command| command.scope(selector.clone())),
+                disabled,
+            },
+            WidgetKind::Select {
+                selected_label,
+                placeholder,
+                options,
+                disabled,
+            } => WidgetKind::Select {
+                selected_label,
+                placeholder,
+                options: options
+                    .into_iter()
+                    .map(|option| SelectOptionState {
+                        label: option.label,
+                        selected: option.selected,
+                        disabled: option.disabled,
+                        on_select: option
+                            .on_select
+                            .map(|command| command.scope(selector.clone())),
+                    })
+                    .collect(),
                 disabled,
             },
         };
@@ -537,6 +566,17 @@ impl<VM> Element<VM> {
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
             },
+            WidgetKind::Select {
+                selected_label,
+                placeholder,
+                options,
+                disabled,
+            } => ResolvedWidgetKind::Select {
+                selected_label: selected_label.clone(),
+                placeholder: placeholder.clone(),
+                options: options.clone(),
+                disabled: disabled.clone(),
+            },
         };
 
         ResolvedElement {
@@ -581,6 +621,14 @@ impl<VM> ResolvedElement<VM> {
                 text, placeholder, ..
             } => MeasureContext::Input {
                 text: text.clone(),
+                placeholder: placeholder.clone(),
+            },
+            ResolvedWidgetKind::Select {
+                selected_label,
+                placeholder,
+                ..
+            } => MeasureContext::Select {
+                selected_label: selected_label.resolve(),
                 placeholder: placeholder.clone(),
             },
         }
@@ -650,7 +698,9 @@ impl<VM> ResolvedElement<VM> {
         now: std::time::Instant,
     ) -> TaffyStyle {
         let default_min_width = match &self.kind {
-            ResolvedWidgetKind::Input { .. } if self.layout.min_width.is_none() => {
+            ResolvedWidgetKind::Input { .. } | ResolvedWidgetKind::Select { .. }
+                if self.layout.min_width.is_none() =>
+            {
                 Dimension::from_length(0.0)
             }
             _ => Dimension::AUTO,
@@ -930,7 +980,8 @@ impl<VM> ResolvedElement<VM> {
             | ResolvedWidgetKind::Checkbox { disabled, .. }
             | ResolvedWidgetKind::Radio { disabled, .. }
             | ResolvedWidgetKind::Switch { disabled, .. }
-            | ResolvedWidgetKind::Input { disabled, .. } => disabled.resolve(),
+            | ResolvedWidgetKind::Input { disabled, .. }
+            | ResolvedWidgetKind::Select { disabled, .. } => disabled.resolve(),
             _ => false,
         };
         let widget_state = if disabled {
@@ -983,6 +1034,29 @@ impl<VM> ResolvedElement<VM> {
                     )
                 })
                 .unwrap_or_else(|| context.units.resolve_dp(context.theme.border.normal)),
+            ResolvedWidgetKind::Select { .. } => self
+                .visual
+                .border_width
+                .as_ref()
+                .map(|width| {
+                    width.resolve_widget_to_logical(
+                        context.animations,
+                        self.id,
+                        WidgetProperty::BorderWidth,
+                        context.now,
+                        context.units,
+                    )
+                })
+                .unwrap_or_else(|| {
+                    context.units.resolve_dp(
+                        context
+                            .theme
+                            .components
+                            .select
+                            .resolve(widget_state)
+                            .border_width,
+                    )
+                }),
             ResolvedWidgetKind::Checkbox { checked, .. } => {
                 let checkbox_style = context
                     .theme
@@ -1081,6 +1155,9 @@ impl<VM> ResolvedElement<VM> {
                 ResolvedWidgetKind::Input { .. } => context
                     .units
                     .resolve_dp(context.theme.components.input.resolve(widget_state).radius),
+                ResolvedWidgetKind::Select { .. } => context
+                    .units
+                    .resolve_dp(context.theme.components.select.resolve(widget_state).radius),
                 ResolvedWidgetKind::Checkbox { checked, .. } => context.units.resolve_dp(
                     context
                         .theme
@@ -1155,6 +1232,31 @@ impl<VM> ResolvedElement<VM> {
                                 property: WidgetProperty::BorderColor,
                             },
                             input_style.border,
+                            Some(Transition::default()),
+                            context.now,
+                        )
+                    })
+            }
+            ResolvedWidgetKind::Select { .. } => {
+                let select_style = context.theme.components.select.resolve(widget_state);
+                self.visual
+                    .border_color
+                    .as_ref()
+                    .map(|color| {
+                        color.resolve_widget(
+                            context.animations,
+                            self.id,
+                            WidgetProperty::BorderColor,
+                            context.now,
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        context.animations.resolve_color(
+                            crate::animation::AnimationKey::Widget {
+                                id: self.id.raw(),
+                                property: WidgetProperty::BorderColor,
+                            },
+                            select_style.border,
                             Some(Transition::default()),
                             context.now,
                         )
@@ -1235,6 +1337,25 @@ impl<VM> ResolvedElement<VM> {
                         .theme
                         .components
                         .input
+                        .resolve(widget_state)
+                        .background,
+                ),
+            ResolvedWidgetKind::Select { .. } => self
+                .background
+                .as_ref()
+                .map(|background| {
+                    background.resolve_widget(
+                        context.animations,
+                        self.id,
+                        WidgetProperty::Background,
+                        context.now,
+                    )
+                })
+                .unwrap_or(
+                    context
+                        .theme
+                        .components
+                        .select
                         .resolve(widget_state)
                         .background,
                 ),
@@ -1381,6 +1502,7 @@ impl<VM> ResolvedElement<VM> {
             });
         } else if self.interactions.has_any()
             && !matches!(&self.kind, ResolvedWidgetKind::Text { text } if text.user_select)
+            && !matches!(&self.kind, ResolvedWidgetKind::Select { .. })
         {
             computed.hit_regions.push(HitRegion {
                 rect: frame,
@@ -1395,6 +1517,7 @@ impl<VM> ResolvedElement<VM> {
                             | ResolvedWidgetKind::Checkbox { .. }
                             | ResolvedWidgetKind::Radio { .. }
                             | ResolvedWidgetKind::Switch { .. }
+                            | ResolvedWidgetKind::Select { .. }
                     ),
                 },
             });
@@ -1892,6 +2015,55 @@ impl<VM> ResolvedElement<VM> {
                     });
                 }
             }
+            ResolvedWidgetKind::Select {
+                selected_label,
+                placeholder,
+                options,
+                ..
+            } => {
+                let active = widget_state.focused;
+                let select_style = context.theme.components.select.resolve(widget_state);
+                let padding = Insets::symmetric(select_style.padding_x, select_style.padding_y);
+                push_select_primitives(
+                    frame,
+                    selected_label.resolve(),
+                    placeholder,
+                    &select_style,
+                    context.font_manager,
+                    context.theme,
+                    context.units,
+                    context.animations,
+                    context.now,
+                    &mut computed.scene,
+                    padding,
+                    opacity,
+                    self.id,
+                    primitive_clip,
+                );
+                if active && !disabled {
+                    push_select_menu_primitives(
+                        self.id,
+                        frame,
+                        context.viewport,
+                        options,
+                        &select_style,
+                        context,
+                        computed,
+                        opacity,
+                    );
+                }
+                if !disabled {
+                    computed.hit_regions.push(HitRegion {
+                        rect: frame,
+                        clip_rect: primitive_clip,
+                        geometry: HitGeometry::Rect,
+                        interaction: HitInteraction::SelectTrigger {
+                            id: self.id,
+                            interactions: self.interactions.clone(),
+                        },
+                    });
+                }
+            }
         }
     }
 
@@ -2015,6 +2187,7 @@ fn apply_container_style(
             };
             style.justify_content = Some(map_justify_content(layout.justify));
             style.align_items = map_align_items(layout.align);
+            style.align_content = Some(map_align_content(layout.align));
         }
         ContainerKind::Grid { columns, rows } => {
             style.display = Display::Grid;
@@ -2558,6 +2731,17 @@ fn measure_node(
             let placeholder_size = measure_text_content(placeholder, font_manager, theme, units);
             (INPUT_DEFAULT_WIDTH, text_size.1.max(placeholder_size.1))
         }
+        Some(MeasureContext::Select {
+            selected_label,
+            placeholder,
+        }) => measure_select_content(
+            selected_label.as_deref(),
+            placeholder,
+            &theme.components.select.resolve(Default::default()),
+            font_manager,
+            theme,
+            units,
+        ),
         Some(MeasureContext::None) | None => (0.0, 0.0),
     };
 
@@ -2688,6 +2872,10 @@ fn default_layout_padding<VM>(element: &ResolvedElement<VM>, theme: &Theme) -> I
         ResolvedWidgetKind::Input { .. } => {
             let input_style = theme.components.input.resolve(Default::default());
             Insets::symmetric(input_style.padding_x, input_style.padding_y)
+        }
+        ResolvedWidgetKind::Select { .. } => {
+            let select_style = theme.components.select.resolve(Default::default());
+            Insets::symmetric(select_style.padding_x, select_style.padding_y)
         }
         ResolvedWidgetKind::Switch { checked, .. } => {
             theme
@@ -3479,6 +3667,359 @@ fn push_input_primitives(
     })
 }
 
+fn measure_select_content(
+    selected_label: Option<&str>,
+    placeholder: &Text,
+    select_style: &crate::ui::theme::SelectStyle,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+) -> (f32, f32) {
+    let display = selected_label
+        .map(|label| select_display_text(Text::new(label.to_string()), select_style))
+        .unwrap_or_else(|| select_display_text(placeholder.clone(), select_style));
+    let text_size = measure_text_content(&display, font_manager, theme, units);
+    let horizontal = units.resolve_dp(select_style.padding_x) * 2.0 + units.resolve_dp(dp(24.0));
+    let vertical = units.resolve_dp(select_style.padding_y) * 2.0;
+    (
+        INPUT_DEFAULT_WIDTH.max(text_size.0 + horizontal),
+        text_size
+            .1
+            .max(units.resolve_dp(select_style.min_height))
+            .max(text_size.1 + vertical),
+    )
+}
+
+fn select_display_text(mut text: Text, select_style: &crate::ui::theme::SelectStyle) -> Text {
+    if text.font_family.is_none() {
+        text.font_family = select_style.text_style.font_family.clone();
+    }
+    if text.font_size.is_none() {
+        text.font_size = Some(select_style.text_style.size);
+    }
+    if text.font_weight.is_none() {
+        text.font_weight = Some(select_style.text_style.weight);
+    }
+    if text.letter_spacing.is_none() {
+        text.letter_spacing = select_style.text_style.letter_spacing;
+    }
+    text
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_select_primitives(
+    frame: Rect,
+    selected_label: Option<String>,
+    placeholder: &Text,
+    select_style: &crate::ui::theme::SelectStyle,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+    animations: &mut AnimationEngine,
+    now: std::time::Instant,
+    scene: &mut ScenePrimitives,
+    padding: Insets,
+    opacity: f32,
+    widget_id: WidgetId,
+    clip_rect: Option<Rect>,
+) {
+    let arrow_width = dp(24.0);
+    let text_frame = Rect::new(
+        frame.x,
+        frame.y,
+        (frame.width - arrow_width).max(Dp::ZERO),
+        frame.height,
+    );
+    match selected_label {
+        Some(label) => push_select_text(
+            &select_display_text(Text::new(label), select_style),
+            text_frame,
+            font_manager,
+            theme,
+            units,
+            animations,
+            now,
+            scene,
+            padding,
+            select_style.text,
+            opacity,
+            widget_id,
+            clip_rect,
+            false,
+        ),
+        None => push_select_text(
+            &select_display_text(placeholder.clone(), select_style),
+            text_frame,
+            font_manager,
+            theme,
+            units,
+            animations,
+            now,
+            scene,
+            padding,
+            select_style.placeholder,
+            opacity,
+            widget_id,
+            clip_rect,
+            false,
+        ),
+    }
+
+    push_select_icon(
+        Rect::new(
+            (frame.right() - arrow_width).max(frame.x),
+            frame.y,
+            arrow_width.min(frame.width),
+            frame.height,
+        ),
+        font_manager,
+        select_style,
+        units,
+        scene,
+        opacity,
+        clip_rect,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_select_menu_primitives<VM>(
+    widget_id: WidgetId,
+    trigger_frame: Rect,
+    viewport: Rect,
+    options: &[SelectOptionState<VM>],
+    select_style: &crate::ui::theme::SelectStyle,
+    context: &mut CollectContext<'_, '_>,
+    computed: &mut ComputedScene<VM>,
+    opacity: f32,
+) {
+    if options.is_empty() {
+        return;
+    }
+
+    let option_height = context
+        .units
+        .resolve_dp(select_style.option_height)
+        .max(1.0);
+    let menu_height = option_height * options.len() as f32;
+    let menu_gap = context.units.resolve_dp(select_style.menu_gap);
+    let below_space = (viewport.bottom().get() - trigger_frame.bottom().get() - menu_gap).max(0.0);
+    let above_space = (trigger_frame.y.get() - viewport.y.get() - menu_gap).max(0.0);
+    let open_down = below_space >= menu_height || below_space >= above_space;
+    let available_height = if open_down { below_space } else { above_space };
+    let visible_height = menu_height.min(available_height).max(0.0);
+    if visible_height <= 0.0 {
+        return;
+    }
+
+    let menu_y = if open_down {
+        trigger_frame.bottom().get() + menu_gap
+    } else {
+        trigger_frame.y.get() - menu_gap - visible_height
+    };
+    let menu_frame = Rect::new(trigger_frame.x, menu_y, trigger_frame.width, visible_height);
+    let Some(menu_clip) = viewport.intersect(menu_frame) else {
+        return;
+    };
+    let menu_clip = Some(menu_clip);
+
+    computed.scene.push_overlay_shape(RenderPrimitive {
+        rect: menu_frame,
+        color: select_style.menu_background.with_alpha_factor(opacity),
+        corner_radius: context.units.resolve_dp(select_style.radius),
+        stroke_width: 0.0,
+        clip_rect: menu_clip,
+    });
+
+    let option_padding = Insets::symmetric(select_style.padding_x, Dp::ZERO);
+    let disabled_text = context.theme.components.select.text.disabled;
+    let mut option_interactions = InteractionHandlers::default();
+    option_interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+
+    for (index, option) in options.iter().enumerate() {
+        let option_frame = Rect::new(
+            menu_frame.x,
+            menu_frame.y + option_height * index as f32,
+            menu_frame.width,
+            option_height,
+        );
+        let selected = option.selected.resolve();
+        let option_disabled = option.disabled.resolve();
+        let mut option_state = context.widget_states.get_select_option(widget_id, index);
+        option_state.disabled = option_disabled;
+        let hovered_option_color = context
+            .theme
+            .components
+            .select
+            .option_background
+            .resolve(option_state);
+        let option_color = if option_state.hovered || option_state.pressed {
+            hovered_option_color
+        } else if selected {
+            select_style.selected_option_background
+        } else {
+            hovered_option_color
+        };
+        if selected || option_color.a > 0 {
+            computed.scene.push_overlay_shape(RenderPrimitive {
+                rect: option_frame,
+                color: option_color.with_alpha_factor(opacity),
+                corner_radius: 0.0,
+                stroke_width: 0.0,
+                clip_rect: menu_clip,
+            });
+        }
+
+        push_select_text(
+            &select_display_text(option.label.clone(), select_style),
+            option_frame,
+            context.font_manager,
+            context.theme,
+            context.units,
+            context.animations,
+            context.now,
+            &mut computed.scene,
+            option_padding,
+            if option_disabled {
+                disabled_text
+            } else {
+                select_style.text
+            },
+            opacity,
+            widget_id,
+            menu_clip,
+            true,
+        );
+
+        computed.overlay_hit_regions.push(HitRegion {
+            rect: option_frame,
+            clip_rect: menu_clip,
+            geometry: HitGeometry::Rect,
+            interaction: if option_disabled {
+                HitInteraction::Disabled { id: widget_id }
+            } else {
+                HitInteraction::SelectOption {
+                    id: widget_id,
+                    option_index: index,
+                    interactions: option_interactions.clone(),
+                    on_select: option.on_select.clone(),
+                }
+            },
+        });
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_select_text(
+    text: &Text,
+    frame: Rect,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+    animations: &mut AnimationEngine,
+    now: std::time::Instant,
+    scene: &mut ScenePrimitives,
+    padding: Insets,
+    fallback_color: Color,
+    opacity: f32,
+    widget_id: WidgetId,
+    clip_rect: Option<Rect>,
+    overlay: bool,
+) {
+    let content = text.content.resolve();
+    let default_style = &theme.components.text.default;
+    let text_request = TextFontRequest {
+        preferred_font: text
+            .font_family
+            .as_deref()
+            .or(default_style.font_family.as_deref()),
+        weight: text.font_weight.unwrap_or(default_style.weight),
+    };
+    let resolved = font_manager.resolve_text(&content, text_request.clone());
+    let color = text
+        .color
+        .as_ref()
+        .map(|color| color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now))
+        .unwrap_or(fallback_color)
+        .with_alpha_factor(opacity);
+    let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
+    let inner = frame.inset(padding);
+    let layout = font_manager.measure_text_layout(
+        &content,
+        text_request,
+        font_size,
+        line_height,
+        letter_spacing,
+    );
+    let content_frame = centered_text_frame(inner, layout.width, layout.height, line_height, false);
+    let primitive = TextPrimitive {
+        content,
+        frame: content_frame,
+        color,
+        force_color: false,
+        font_family: Some(resolved.primary_font),
+        font_size,
+        font_weight: text.font_weight.unwrap_or(default_style.weight),
+        line_height,
+        letter_spacing,
+        clip_rect,
+    };
+    if overlay {
+        scene.push_overlay_text(primitive);
+    } else {
+        scene.push_text(primitive);
+    }
+}
+
+fn push_select_icon(
+    frame: Rect,
+    font_manager: &FontManager,
+    select_style: &crate::ui::theme::SelectStyle,
+    units: UnitContext,
+    scene: &mut ScenePrimitives,
+    opacity: f32,
+    clip_rect: Option<Rect>,
+) {
+    let font_size = units
+        .resolve_sp(select_style.text_style.size)
+        .min(frame.width.get())
+        .min(frame.height.get())
+        .max(1.0);
+    let line_height = font_size;
+    let letter_spacing = 0.0;
+    let text_request = TextFontRequest {
+        preferred_font: Some(ICON_FONT_FAMILY),
+        weight: select_style.text_style.weight,
+    };
+    let resolved = font_manager.resolve_text(SELECT_ARROW_ICON, text_request.clone());
+    let layout = font_manager.measure_text_layout(
+        SELECT_ARROW_ICON,
+        text_request,
+        font_size,
+        line_height,
+        letter_spacing,
+    );
+    let icon_frame = centered_text_frame(
+        frame,
+        layout.width.max(font_size),
+        layout.height.max(line_height),
+        line_height,
+        true,
+    );
+
+    scene.push_text(TextPrimitive {
+        content: SELECT_ARROW_ICON.to_string(),
+        frame: icon_frame,
+        color: select_style.arrow.with_alpha_factor(opacity),
+        force_color: true,
+        font_family: Some(resolved.primary_font),
+        font_size,
+        font_weight: select_style.text_style.weight,
+        line_height,
+        letter_spacing,
+        clip_rect,
+    });
+}
+
 fn default_switch_transition() -> crate::animation::Transition {
     crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(180))
 }
@@ -4074,6 +4615,7 @@ impl<VM> WidgetTree<VM> {
             active_scrollbar,
             widget_states,
             scroll_offsets,
+            viewport,
             units: layout.units,
             animations,
             now: std::time::Instant::now(),
@@ -4251,14 +4793,19 @@ impl<VM> WidgetTree<VM> {
         let mut path = Vec::new();
         let mut ids = Vec::new();
 
-        for hit in computed.hit_regions.iter().filter(|hit| {
-            hit.rect.contains(point)
-                && hit
-                    .clip_rect
-                    .map(|clip_rect| clip_rect.contains(point))
-                    .unwrap_or(true)
-                && hit.geometry.contains(point)
-        }) {
+        for hit in computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .filter(|hit| {
+                hit.rect.contains(point)
+                    && hit
+                        .clip_rect
+                        .map(|clip_rect| clip_rect.contains(point))
+                        .unwrap_or(true)
+                    && hit.geometry.contains(point)
+            })
+        {
             let id = hit.interaction.target_id();
 
             if let Some(index) = ids.iter().position(|existing| *existing == id) {
@@ -4411,7 +4958,9 @@ impl<VM> WidgetTree<VM> {
 
 #[cfg(test)]
 mod tests {
-    use super::{centered_text_frame, input_text_viewport, resolved_text_metrics};
+    use super::{
+        centered_text_frame, input_text_viewport, resolved_text_metrics, SELECT_ARROW_ICON,
+    };
     use std::collections::HashMap;
 
     use crate::animation::{default_theme_transition, AnimationCoordinator, AnimationEngine};
@@ -4430,7 +4979,7 @@ mod tests {
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasPath, CanvasStroke, Checkbox, CompositionState, Element, Image,
         Input, InputEditState, PathBuilder, Point, Radio, RadioGroup, RadioOption, ScrollbarAxis,
-        ScrollbarHandle, Stack, Switch, Text, WidgetStateMap, WidgetTree,
+        ScrollbarHandle, Select, SelectOption, Stack, Switch, Text, WidgetStateMap, WidgetTree,
     };
     #[cfg(feature = "video")]
     use crate::video::backend::{
@@ -5170,6 +5719,61 @@ mod tests {
             None,
         );
         assert!(hit.is_none());
+    }
+
+    #[test]
+    fn wrapped_flex_align_start_packs_lines_from_cross_axis_start() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let child_color = crate::foundation::color::Color::hexa(0x22C55EFF);
+        let tree: WidgetTree<()> = WidgetTree::new(
+            crate::ui::widget::Flex::horizontal()
+                .wrap(crate::ui::layout::Wrap::Wrap)
+                .align(crate::ui::layout::Align::Start)
+                .justify(crate::ui::layout::Justify::Start)
+                .gap(dp(10.0))
+                .child([
+                    Stack::new()
+                        .size(dp(60.0), dp(40.0))
+                        .background(child_color),
+                    Stack::new()
+                        .size(dp(60.0), dp(40.0))
+                        .background(child_color),
+                    Stack::new()
+                        .size(dp(60.0), dp(40.0))
+                        .background(child_color),
+                ]),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 140.0, 240.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let child_rects: Vec<_> = rendered
+            .primitives
+            .shapes
+            .iter()
+            .filter(|shape| shape.color == child_color)
+            .map(|shape| shape.rect)
+            .collect();
+
+        assert_eq!(child_rects.len(), 3);
+        assert_eq!(child_rects[0], Rect::new(0.0, 0.0, 60.0, 40.0));
+        assert_eq!(child_rects[1], Rect::new(70.0, 0.0, 60.0, 40.0));
+        assert_eq!(child_rects[2], Rect::new(0.0, 50.0, 60.0, 40.0));
     }
 
     #[test]
@@ -6281,6 +6885,327 @@ mod tests {
             enabled_hit,
             Some(super::HitInteraction::Radio { .. })
         ));
+    }
+
+    #[test]
+    fn select_renders_placeholder_and_arrow_when_unselected() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Select::<(), String, String>::new(
+                vec![SelectOption::new("email".to_string(), "Email".to_string())],
+                None::<String>,
+            )
+            .placeholder_with_str("Choose one")
+            .size(dp(180.0), dp(40.0)),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered
+            .primitives
+            .texts
+            .iter()
+            .any(|text| text.content == "Choose one"));
+        assert!(rendered
+            .primitives
+            .texts
+            .iter()
+            .any(|text| text.content == SELECT_ARROW_ICON));
+    }
+
+    #[test]
+    fn disabled_select_exposes_disabled_hit_for_cursor_only() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Select::<(), String, String>::new(
+                vec![SelectOption::new("email".to_string(), "Email".to_string())],
+                None::<String>,
+            )
+            .disable(true)
+            .size(dp(180.0), dp(40.0)),
+        );
+
+        let hit = tree.hit_test(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 40.0),
+            Some(Point::new(10.0, 10.0)),
+            None,
+        );
+        assert!(matches!(hit, Some(super::HitInteraction::Disabled { .. })));
+    }
+
+    #[test]
+    fn focused_select_opens_upward_and_hits_enabled_and_disabled_options() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let select: Element<ScopeChildVm> = Select::new(
+            vec![
+                SelectOption::new("email".to_string(), "Email".to_string()),
+                SelectOption::new("sms".to_string(), "SMS".to_string()).disable(true),
+                SelectOption::new("phone".to_string(), "Phone".to_string()),
+            ],
+            Some("email".to_string()),
+        )
+        .on_change(ValueCommand::new(
+            |vm: &mut ScopeChildVm, (key, value): (String, String)| {
+                vm.selected_key = key;
+                vm.selected_value = value;
+            },
+        ))
+        .size(dp(180.0), dp(40.0))
+        .position_absolute()
+        .top(dp(50.0))
+        .into();
+        let select_id = select.id;
+        let tree = WidgetTree::new(Stack::new().child(select));
+        let mut widget_states = WidgetStateMap::default();
+        widget_states.set(
+            select_id,
+            crate::ui::theme::WidgetState {
+                focused: true,
+                ..Default::default()
+            },
+        );
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &widget_states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 220.0, 90.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        assert!(rendered
+            .primitives
+            .overlay_shapes
+            .iter()
+            .any(|shape| shape.rect.y < dp(50.0) && shape.rect.height > dp(40.0)));
+
+        let enabled_hit = tree.hit_test_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &widget_states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 220.0, 90.0),
+            Some(Point::new(8.0, 10.0)),
+            None,
+        );
+        let mut vm = ScopeChildVm::default();
+        match enabled_hit {
+            Some(super::HitInteraction::SelectOption {
+                on_select: Some(command),
+                ..
+            }) => command.execute(&mut vm),
+            _ => panic!("enabled select option should be hit"),
+        }
+        assert_eq!(vm.selected_key, "email");
+        assert_eq!(vm.selected_value, "Email");
+
+        let disabled_hit = tree.hit_test_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &widget_states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 220.0, 90.0),
+            Some(Point::new(8.0, 45.0)),
+            None,
+        );
+        assert!(matches!(
+            disabled_hit,
+            Some(super::HitInteraction::Disabled { .. })
+        ));
+    }
+
+    #[test]
+    fn select_dropdown_escapes_parent_overflow_clip() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let select: Element<ScopeChildVm> = Select::new(
+            vec![
+                SelectOption::new("email".to_string(), "Email".to_string()),
+                SelectOption::new("sms".to_string(), "SMS".to_string()),
+            ],
+            None::<String>,
+        )
+        .placeholder_with_str("Choose")
+        .on_change(ValueCommand::new(
+            |vm: &mut ScopeChildVm, (key, value): (String, String)| {
+                vm.selected_key = key;
+                vm.selected_value = value;
+            },
+        ))
+        .size(dp(180.0), dp(40.0))
+        .into();
+        let select_id = select.id;
+        let tree = WidgetTree::new(
+            Stack::new()
+                .size(dp(180.0), dp(45.0))
+                .overflow(Overflow::Hidden)
+                .child(select),
+        );
+        let mut widget_states = WidgetStateMap::default();
+        widget_states.set(
+            select_id,
+            crate::ui::theme::WidgetState {
+                focused: true,
+                ..Default::default()
+            },
+        );
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &widget_states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 140.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        assert!(rendered
+            .primitives
+            .overlay_shapes
+            .iter()
+            .any(|shape| shape.rect.y > dp(40.0) && shape.rect.bottom() > dp(45.0)));
+
+        let hit = tree.hit_test_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &widget_states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 140.0),
+            Some(Point::new(8.0, 58.0)),
+            None,
+        );
+        let mut vm = ScopeChildVm::default();
+        match hit {
+            Some(super::HitInteraction::SelectOption {
+                on_select: Some(command),
+                ..
+            }) => command.execute(&mut vm),
+            _ => panic!("select option outside parent clip should be hit"),
+        }
+        assert_eq!(vm.selected_key, "email");
+    }
+
+    #[test]
+    fn select_dropdown_highlights_hovered_option() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let select: Element<ScopeChildVm> = Select::new(
+            vec![
+                SelectOption::new("email".to_string(), "Email".to_string()),
+                SelectOption::new("sms".to_string(), "SMS".to_string()),
+            ],
+            None::<String>,
+        )
+        .size(dp(180.0), dp(32.0))
+        .into();
+        let select_id = select.id;
+        let tree = WidgetTree::new(Stack::new().child(select));
+        let mut widget_states = WidgetStateMap::default();
+        widget_states.set(
+            select_id,
+            crate::ui::theme::WidgetState {
+                focused: true,
+                ..Default::default()
+            },
+        );
+        widget_states.set_select_option(
+            select_id,
+            1,
+            crate::ui::theme::WidgetState {
+                hovered: true,
+                ..Default::default()
+            },
+        );
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &widget_states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 140.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let hovered_options = rendered
+            .primitives
+            .overlay_shapes
+            .iter()
+            .filter(|shape| {
+                shape.rect.y > dp(60.0)
+                    && shape.rect.height == theme.components.select.option_height
+                    && shape.color.a > 0
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(hovered_options.len(), 1);
     }
 
     #[test]

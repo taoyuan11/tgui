@@ -3,6 +3,7 @@ mod checkbox;
 mod input;
 mod radio;
 mod scrollbar;
+mod select;
 mod switch;
 mod text;
 
@@ -20,6 +21,7 @@ pub use checkbox::{CheckboxStyle, CheckboxTheme};
 pub use input::{InputStyle, InputTheme};
 pub use radio::{RadioStyle, RadioTheme};
 pub use scrollbar::ScrollbarTheme;
+pub use select::{SelectStyle, SelectTheme};
 pub use switch::{SwitchStyle, SwitchTheme};
 pub use text::TextTheme;
 
@@ -29,6 +31,7 @@ pub struct ComponentTheme {
     pub checkbox: CheckboxTheme,
     pub radio: RadioTheme,
     pub input: InputTheme,
+    pub select: SelectTheme,
     pub text: TextTheme,
     pub switch: SwitchTheme,
     pub scrollbar: ScrollbarTheme,
@@ -303,6 +306,60 @@ impl ComponentTheme {
                 padding_x: spacing.sm,
                 padding_y: spacing.sm,
                 min_height: spacing.xl,
+                text_style: typography.body.clone(),
+            },
+            select: SelectTheme {
+                background: Stateful {
+                    normal: colors.surface_low,
+                    hovered: colors.surface_low.lighten(SURFACE_HOVER_LIGHTEN),
+                    pressed: colors.surface_low.darken(SURFACE_HOVER_LIGHTEN),
+                    focused: colors.surface,
+                    disabled: colors.disabled,
+                },
+                text: Stateful {
+                    normal: colors.on_surface,
+                    hovered: colors.on_surface,
+                    pressed: colors.on_surface,
+                    focused: colors.on_surface,
+                    disabled: colors.on_disabled,
+                },
+                placeholder: Stateful {
+                    normal: colors.on_surface_muted,
+                    hovered: colors.on_surface_muted,
+                    pressed: colors.on_surface_muted,
+                    focused: colors.on_surface_muted,
+                    disabled: colors.on_disabled,
+                },
+                border: Stateful {
+                    normal: colors.outline,
+                    hovered: colors.outline.lighten(BORDER_HOVER_LIGHTEN),
+                    pressed: colors.outline.darken(BORDER_HOVER_LIGHTEN),
+                    focused: colors.focus_ring,
+                    disabled: colors.disabled,
+                },
+                arrow: Stateful {
+                    normal: colors.on_surface_muted,
+                    hovered: colors.on_surface,
+                    pressed: colors.on_surface,
+                    focused: colors.on_surface,
+                    disabled: colors.on_disabled,
+                },
+                menu_background: colors.surface,
+                option_background: Stateful {
+                    normal: Color::TRANSPARENT,
+                    hovered: colors.surface_high.lighten(SURFACE_HOVER_LIGHTEN),
+                    pressed: colors.surface_high.darken(SURFACE_HOVER_LIGHTEN),
+                    focused: colors.surface_high,
+                    disabled: Color::TRANSPARENT,
+                },
+                selected_option_background: colors.surface_high,
+                border_width: border.thin,
+                radius: radius.md,
+                padding_x: spacing.sm,
+                padding_y: spacing.xs,
+                min_height: spacing.xl,
+                option_height: spacing.xl,
+                menu_gap: spacing.xxs,
                 text_style: typography.body.clone(),
             },
             text: TextTheme {
