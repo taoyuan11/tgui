@@ -15,14 +15,13 @@ use windows::core::Interface;
 use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_FALSE};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Imaging::{
-    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppRGBA, IWICBitmapFrameDecode,
-    IWICBitmapSource, IWICImagingFactory, IWICStream, WICBitmapDitherTypeNone,
-    WICBitmapInterpolationModeFant, WICBitmapPaletteTypeCustom, WICDecodeMetadataCacheOnDemand,
+    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppRGBA, IWICBitmapFrameDecode, IWICBitmapSource,
+    IWICImagingFactory, IWICStream, WICBitmapDitherTypeNone, WICBitmapInterpolationModeFant,
+    WICBitmapPaletteTypeCustom, WICDecodeMetadataCacheOnDemand,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
-    COINIT_MULTITHREADED,
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 
 use reqwest::header::CONTENT_TYPE;
@@ -520,7 +519,6 @@ impl ImageEntry {
             error: self.error.clone(),
         }
     }
-
 }
 
 struct DocumentEntry {
@@ -547,7 +545,6 @@ impl DocumentEntry {
             DocumentContent::Svg(_) => false,
         }
     }
-
 }
 
 enum DocumentContent {
@@ -1056,7 +1053,11 @@ fn decode_raster_texture_with_wic(
             .CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnDemand)
             .map_err(map_wic_error("failed to create WIC decoder"))?
     };
-    let frame = unsafe { decoder.GetFrame(0).map_err(map_wic_error("failed to read WIC frame"))? };
+    let frame = unsafe {
+        decoder
+            .GetFrame(0)
+            .map_err(map_wic_error("failed to read WIC frame"))?
+    };
 
     let source = create_scaled_wic_source(&factory, &frame, raster_request)?;
     let (width, height) = wic_source_size(&source)?;
@@ -1140,7 +1141,9 @@ fn create_scaled_wic_source(
             .map_err(map_wic_error("failed to convert WIC pixel format"))?;
     }
 
-    Ok(converter.cast().expect("WIC format converter should be a bitmap source"))
+    Ok(converter
+        .cast()
+        .expect("WIC format converter should be a bitmap source"))
 }
 
 #[cfg(target_os = "windows")]
@@ -1464,8 +1467,8 @@ pub(crate) fn media_placeholder_label(kind: &str, loading: bool, error: Option<&
 #[cfg(test)]
 mod tests {
     use super::{load_media_document, DocumentContent, MediaManager, MediaSource, RasterRequest};
-    use crate::ui::widget::Rect;
     use crate::foundation::binding::InvalidationSignal;
+    use crate::ui::widget::Rect;
     use std::collections::HashMap;
     use std::fs;
     use std::io::{Read, Write};

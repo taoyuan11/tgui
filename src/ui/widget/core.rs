@@ -21,7 +21,7 @@ use crate::text::font::{FontManager, TextFontRequest, ICON_FONT_FAMILY};
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, Track, Value, Wrap,
 };
-use crate::ui::theme::Theme;
+use crate::ui::theme::{Theme, WidgetState};
 use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface as PublicVideoSurface;
@@ -59,7 +59,6 @@ const INPUT_EMPTY_CARET_INSET: f32 = 1.0;
 const INPUT_DEFAULT_WIDTH: f32 = 160.0;
 
 const CHECKBOX_CHECKMARK_ICON: &str = "\u{e687}";
-const CHECKBOX_CHECKMARK_COLOR: Color = Color::WHITE;
 
 #[derive(Clone, Copy)]
 pub(crate) struct InputViewport {
@@ -934,10 +933,14 @@ impl<VM> ResolvedElement<VM> {
             | ResolvedWidgetKind::Input { disabled, .. } => disabled.resolve(),
             _ => false,
         };
-        let mut widget_state = context.widget_states.get(self.id);
-        if disabled {
-            widget_state.disabled = true;
-        }
+        let widget_state = if disabled {
+            WidgetState {
+                disabled: true,
+                ..Default::default()
+            }
+        } else {
+            context.widget_states.get(self.id)
+        };
         let opacity = visual_context.opacity
             * self.visual.opacity.resolve_widget_clamped(
                 context.animations,
@@ -1369,8 +1372,14 @@ impl<VM> ResolvedElement<VM> {
             primitive_clip,
         );
 
-        if self.interactions.has_any()
-            && !disabled
+        if disabled {
+            computed.hit_regions.push(HitRegion {
+                rect: frame,
+                clip_rect: primitive_clip,
+                geometry: HitGeometry::Rect,
+                interaction: HitInteraction::Disabled { id: self.id },
+            });
+        } else if self.interactions.has_any()
             && !matches!(&self.kind, ResolvedWidgetKind::Text { text } if text.user_select)
         {
             computed.hit_regions.push(HitRegion {
@@ -3497,26 +3506,18 @@ fn push_checkbox_primitives(
         box_size,
     );
     let radius = units.resolve_dp(checkbox_style.radius);
-    let background = animations.resolve_color(
-        crate::animation::AnimationKey::Widget {
-            id: widget_id.raw(),
-            property: WidgetProperty::BackgroundAlt,
-        },
-        checkbox_style.background,
-        Some(default_switch_transition()),
-        now,
-    );
     scene.push_shape(RenderPrimitive {
         rect: box_frame,
-        color: background.with_alpha_factor(opacity),
+        color: checkbox_style.background.with_alpha_factor(opacity),
         corner_radius: radius,
         stroke_width: 0.0,
         clip_rect,
     });
+    let border_width = units.resolve_dp(checkbox_style.border_width);
     push_border_primitives(
         scene,
         box_frame,
-        units.resolve_dp(checkbox_style.border_width),
+        border_width,
         checkbox_style.border.with_alpha_factor(opacity),
         radius,
         clip_rect,
@@ -3604,7 +3605,7 @@ fn push_checkbox_checkmark_primitives(
     scene.push_text(TextPrimitive {
         content: CHECKBOX_CHECKMARK_ICON.to_string(),
         frame: icon_frame,
-        color: CHECKBOX_CHECKMARK_COLOR.with_alpha_factor(opacity),
+        color: checkbox_style.checkmark.with_alpha_factor(opacity),
         force_color: true,
         font_family: Some(resolved.primary_font),
         font_size,
@@ -3641,18 +3642,9 @@ fn push_radio_primitives(
         .resolve_dp(radio_style.radius)
         .min(size * 0.5)
         .max(0.0);
-    let background = animations.resolve_color(
-        crate::animation::AnimationKey::Widget {
-            id: widget_id.raw(),
-            property: WidgetProperty::BackgroundAlt,
-        },
-        radio_style.background,
-        Some(default_switch_transition()),
-        now,
-    );
     scene.push_shape(RenderPrimitive {
         rect: control_frame,
-        color: background.with_alpha_factor(opacity),
+        color: radio_style.background.with_alpha_factor(opacity),
         corner_radius: radius,
         stroke_width: 0.0,
         clip_rect,
@@ -4437,7 +4429,7 @@ mod tests {
     };
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasPath, CanvasStroke, Checkbox, CompositionState, Element, Image,
-        Input, InputEditState, PathBuilder, Point, Radio, RadioGroup, ScrollbarAxis,
+        Input, InputEditState, PathBuilder, Point, Radio, RadioGroup, RadioOption, ScrollbarAxis,
         ScrollbarHandle, Stack, Switch, Text, WidgetStateMap, WidgetTree,
     };
     #[cfg(feature = "video")]
@@ -5750,6 +5742,130 @@ mod tests {
     }
 
     #[test]
+    fn hovered_checkbox_uses_primary_border_without_changing_background() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let checkbox: Element<()> = Checkbox::new(false).into();
+        let checkbox_id = checkbox.id;
+        let tree: WidgetTree<()> = WidgetTree::new(checkbox);
+        let mut states = WidgetStateMap::default();
+        states.set(
+            checkbox_id,
+            crate::ui::theme::WidgetState {
+                hovered: true,
+                ..Default::default()
+            },
+        );
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut AnimationEngine::default(),
+            None,
+            None,
+            &states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(rendered.primitives.shapes.iter().any(|shape| {
+            shape.stroke_width == 0.0 && shape.color == theme.components.checkbox.background.normal
+        }));
+        assert!(rendered.primitives.shapes.iter().any(|shape| {
+            shape.stroke_width > 0.0 && shape.color == theme.components.checkbox.border.hovered
+        }));
+    }
+
+    #[test]
+    fn checkbox_checked_content_switches_without_animation() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let checkbox: Element<()> = Checkbox::new(false).into();
+        let checkbox_id = checkbox.id;
+        let unchecked_tree: WidgetTree<()> = WidgetTree::new(checkbox.clone());
+
+        unchecked_tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        assert!(!animations.has_active_animations());
+
+        let mut checked_checkbox: Element<()> = Checkbox::new(true).into();
+        checked_checkbox.id = checkbox_id;
+        let checked_tree: WidgetTree<()> = WidgetTree::new(checked_checkbox);
+        let checked = checked_tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let checked_fill = checked
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| {
+                shape.stroke_width == 0.0
+                    && shape.color == theme.components.checkbox.background_checked.normal
+            })
+            .expect("checked fill should render immediately");
+        let control_size = UnitContext::default().resolve_dp(theme.components.checkbox.size);
+        assert_eq!(checked_fill.rect.width, control_size);
+        assert_eq!(checked_fill.rect.height, control_size);
+        assert!(!animations.has_active_animations());
+
+        let unchecked = unchecked_tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        assert!(unchecked.primitives.shapes.iter().all(|shape| {
+            shape.stroke_width == 0.0
+                && shape.color != theme.components.checkbox.background_checked.normal
+                || shape.stroke_width > 0.0
+        }));
+        assert!(!animations.has_active_animations());
+    }
+
+    #[test]
     fn focused_unchecked_checkbox_keeps_default_box_colors() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
@@ -5805,7 +5921,7 @@ mod tests {
     }
 
     #[test]
-    fn disabled_checkbox_does_not_participate_in_hit_testing() {
+    fn disabled_checkbox_exposes_disabled_hit_for_cursor_only() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
         let media = test_media();
@@ -5825,7 +5941,7 @@ mod tests {
             None,
         );
 
-        assert!(hit.is_none());
+        assert!(matches!(hit, Some(super::HitInteraction::Disabled { .. })));
     }
 
     #[test]
@@ -5944,7 +6060,7 @@ mod tests {
     }
 
     #[test]
-    fn disabled_radio_does_not_participate_in_hit_testing() {
+    fn disabled_radio_exposes_disabled_hit_for_cursor_only() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
         let media = test_media();
@@ -5964,7 +6080,7 @@ mod tests {
             None,
         );
 
-        assert!(hit.is_none());
+        assert!(matches!(hit, Some(super::HitInteraction::Disabled { .. })));
     }
 
     #[test]
@@ -6108,6 +6224,63 @@ mod tests {
 
         assert!(vm.selected_key.is_empty());
         assert!(vm.selected_value.is_empty());
+    }
+
+    #[test]
+    fn radio_group_disabled_option_exposes_disabled_hit_for_cursor_only() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<ScopeChildVm> = WidgetTree::new(
+            RadioGroup::new(
+                vec![
+                    RadioOption::new("email".to_string(), "Email".to_string()),
+                    RadioOption::new("sms".to_string(), "SMS".to_string()).disable(true),
+                ],
+                "email".to_string(),
+            )
+            .on_change(ValueCommand::new(
+                |vm: &mut ScopeChildVm, (key, value): (String, String)| {
+                    vm.selected_key = key;
+                    vm.selected_value = value;
+                },
+            )),
+        );
+
+        let disabled_hit = tree.hit_test(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 80.0),
+            Some(Point::new(4.0, 30.0)),
+            None,
+        );
+        assert!(matches!(
+            disabled_hit,
+            Some(super::HitInteraction::Disabled { .. })
+        ));
+
+        let enabled_hit = tree.hit_test(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 80.0),
+            Some(Point::new(4.0, 4.0)),
+            None,
+        );
+        assert!(matches!(
+            enabled_hit,
+            Some(super::HitInteraction::Radio { .. })
+        ));
     }
 
     #[test]
@@ -6503,7 +6676,7 @@ mod tests {
     }
 
     #[test]
-    fn disabled_button_does_not_participate_in_hit_testing() {
+    fn disabled_button_exposes_disabled_hit_for_cursor_only() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
         let media = test_media();
@@ -6526,7 +6699,7 @@ mod tests {
             Some(Point::new(dp(10.0), dp(10.0))),
             None,
         );
-        assert!(hit.is_none());
+        assert!(matches!(hit, Some(super::HitInteraction::Disabled { .. })));
     }
 
     #[test]
@@ -7009,7 +7182,7 @@ mod tests {
             Some(Point::new(dp(10.0), dp(10.0))),
             None,
         );
-        assert!(hit.is_none());
+        assert!(matches!(hit, Some(super::HitInteraction::Disabled { .. })));
     }
 
     #[test]
