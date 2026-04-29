@@ -6,6 +6,8 @@ struct App {
     content: Observable<String>,
     switch: Observable<bool>,
     checkbox: Observable<bool>,
+    radio: Observable<bool>,
+    contact_method: Observable<String>,
 }
 
 impl ViewModel for App {
@@ -14,6 +16,8 @@ impl ViewModel for App {
             content: context.observable(String::from("输入框示例输入框示例输入框示例")),
             switch: context.observable(false),
             checkbox: context.observable(false),
+            radio: context.observable(false),
+            contact_method: context.observable(String::from("email")),
         }
     }
 
@@ -67,6 +71,29 @@ impl ViewModel for App {
                                 .on_change(ValueCommand::new(|app: &mut App, checked| {
                                     app.checkbox.set(checked)
                                 })),
+                        ),
+                        component_card(
+                            "Radio",
+                            Radio::new(self.radio.binding())
+                                .label(Text::new("单个单选框"))
+                                .on_change(ValueCommand::new(|app: &mut App, checked| {
+                                    app.radio.set(checked)
+                                })),
+                        ),
+                        component_card(
+                            "RadioGroup",
+                            RadioGroup::new(
+                                vec![
+                                    ("email".to_string(), "邮件".to_string()),
+                                    ("sms".to_string(), "短信".to_string()),
+                                    ("phone".to_string(), "电话".to_string()),
+                                ],
+                                self.contact_method.binding(),
+                            )
+                            .horizontal()
+                            .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
+                                app.contact_method.set(key)
+                            })),
                         ),
                         component_card(
                             "Image",

@@ -1,6 +1,7 @@
 mod button;
 mod checkbox;
 mod input;
+mod radio;
 mod scrollbar;
 mod switch;
 mod text;
@@ -17,6 +18,7 @@ use crate::ui::unit::Dp;
 pub use button::{ButtonStyle, ButtonTheme, ButtonVariant};
 pub use checkbox::{CheckboxStyle, CheckboxTheme};
 pub use input::{InputStyle, InputTheme};
+pub use radio::{RadioStyle, RadioTheme};
 pub use scrollbar::ScrollbarTheme;
 pub use switch::{SwitchStyle, SwitchTheme};
 pub use text::TextTheme;
@@ -25,6 +27,7 @@ pub use text::TextTheme;
 pub struct ComponentTheme {
     pub button: ButtonTheme,
     pub checkbox: CheckboxTheme,
+    pub radio: RadioTheme,
     pub input: InputTheme,
     pub text: TextTheme,
     pub switch: SwitchTheme,
@@ -212,6 +215,55 @@ impl ComponentTheme {
                 },
                 border_width: border.thin,
                 radius: radius.sm,
+                size: spacing.md,
+                label_gap: spacing.xs,
+                text_style: typography.label.clone(),
+            },
+            radio: RadioTheme {
+                background: Stateful {
+                    normal: colors.surface_low,
+                    hovered: colors.surface_low.lighten(SURFACE_HOVER_LIGHTEN),
+                    pressed: colors.surface_low.darken(SURFACE_HOVER_LIGHTEN),
+                    focused: colors.surface_low,
+                    disabled: disabled_surface,
+                },
+                background_checked: Stateful {
+                    normal: colors.surface_low,
+                    hovered: colors.surface_low.lighten(SURFACE_HOVER_LIGHTEN),
+                    pressed: colors.surface_low.darken(SURFACE_HOVER_LIGHTEN),
+                    focused: colors.surface_low,
+                    disabled: disabled_surface,
+                },
+                border: Stateful {
+                    normal: colors.outline,
+                    hovered: colors.outline.lighten(BORDER_HOVER_LIGHTEN),
+                    pressed: colors.outline.darken(BORDER_HOVER_LIGHTEN),
+                    focused: colors.outline,
+                    disabled: colors.disabled,
+                },
+                border_checked: Stateful {
+                    normal: colors.primary,
+                    hovered: colors.primary.lighten(HOVER_LIGHTEN),
+                    pressed: colors.primary.darken(HOVER_LIGHTEN),
+                    focused: colors.focus_ring,
+                    disabled: colors.disabled,
+                },
+                indicator: Stateful {
+                    normal: colors.primary,
+                    hovered: colors.primary.lighten(HOVER_LIGHTEN),
+                    pressed: colors.primary.darken(HOVER_LIGHTEN),
+                    focused: colors.primary,
+                    disabled: disabled_content,
+                },
+                label: Stateful {
+                    normal: colors.on_surface,
+                    hovered: colors.on_surface,
+                    pressed: colors.on_surface,
+                    focused: colors.on_surface,
+                    disabled: disabled_content,
+                },
+                border_width: border.thin,
+                radius: radius.full,
                 size: spacing.md,
                 label_gap: spacing.xs,
                 text_style: typography.label.clone(),

@@ -908,6 +908,12 @@ pub(crate) enum WidgetKind<VM> {
         on_change: Option<ValueCommand<VM, bool>>,
         disabled: Value<bool>,
     },
+    Radio {
+        checked: Value<bool>,
+        label: Option<Text>,
+        on_change: Option<ValueCommand<VM, bool>>,
+        disabled: Value<bool>,
+    },
     Switch {
         checked: Value<bool>,
         on_change: Option<ValueCommand<VM, bool>>,
@@ -975,6 +981,17 @@ impl<VM> Clone for WidgetKind<VM> {
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
             },
+            Self::Radio {
+                checked,
+                label,
+                on_change,
+                disabled,
+            } => Self::Radio {
+                checked: checked.clone(),
+                label: label.clone(),
+                on_change: on_change.clone(),
+                disabled: disabled.clone(),
+            },
             Self::Switch {
                 checked,
                 on_change,
@@ -1023,6 +1040,10 @@ pub(crate) enum MeasureContext {
         checked: bool,
         label: Option<Text>,
     },
+    Radio {
+        checked: bool,
+        label: Option<Text>,
+    },
     Switch {
         checked: bool,
     },
@@ -1068,6 +1089,12 @@ pub(crate) enum HitInteraction<VM> {
         current: bool,
     },
     Checkbox {
+        id: WidgetId,
+        interactions: InteractionHandlers<VM>,
+        on_change: Option<ValueCommand<VM, bool>>,
+        current: bool,
+    },
+    Radio {
         id: WidgetId,
         interactions: InteractionHandlers<VM>,
         on_change: Option<ValueCommand<VM, bool>>,
@@ -1148,6 +1175,17 @@ impl<VM> Clone for HitInteraction<VM> {
                 on_change: on_change.clone(),
                 current: *current,
             },
+            Self::Radio {
+                id,
+                interactions,
+                on_change,
+                current,
+            } => Self::Radio {
+                id: *id,
+                interactions: interactions.clone(),
+                on_change: on_change.clone(),
+                current: *current,
+            },
             Self::CanvasItem {
                 id,
                 item_id,
@@ -1172,7 +1210,8 @@ impl<VM> HitInteraction<VM> {
             | Self::FocusInput { id, .. }
             | Self::SelectableText { id, .. }
             | Self::Switch { id, .. }
-            | Self::Checkbox { id, .. } => HitTargetId::Widget(*id),
+            | Self::Checkbox { id, .. }
+            | Self::Radio { id, .. } => HitTargetId::Widget(*id),
             Self::CanvasItem { id, item_id, .. } => HitTargetId::CanvasItem {
                 widget_id: *id,
                 item_id: *item_id,
