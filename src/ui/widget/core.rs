@@ -17,7 +17,7 @@ use crate::media::{
     media_placeholder_color, media_placeholder_label, resolve_media_rect, ContentFit,
     IntrinsicSize, MediaManager, RasterRequest,
 };
-use crate::text::font::{FontManager, TextFontRequest};
+use crate::text::font::{FontManager, TextFontRequest, ICON_FONT_FAMILY};
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, Track, Value, Wrap,
 };
@@ -57,6 +57,9 @@ const INPUT_EMPTY_CARET_INSET: f32 = 1.0;
 
 /// Default intrinsic width for single-line inputs when no explicit width is set.
 const INPUT_DEFAULT_WIDTH: f32 = 160.0;
+
+const CHECKBOX_CHECKMARK_ICON: &str = "\u{e687}";
+const CHECKBOX_CHECKMARK_COLOR: Color = Color::WHITE;
 
 #[derive(Clone, Copy)]
 pub(crate) struct InputViewport {
@@ -3011,6 +3014,7 @@ fn push_text_primitives(
         content: content.clone(),
         frame: content_frame,
         color: color.with_alpha_factor(opacity),
+        force_color: false,
         font_family: Some(resolved.primary_font),
         font_size,
         font_weight: text.font_weight.unwrap_or(default_style.weight),
@@ -3140,6 +3144,7 @@ fn push_input_primitives(
             content: placeholder_content,
             frame: content_frame,
             color: placeholder_color,
+            force_color: false,
             font_family: Some(resolved.primary_font),
             font_size: placeholder_size,
             font_weight: placeholder.font_weight.unwrap_or(default_text_style.weight),
@@ -3339,6 +3344,7 @@ fn push_input_primitives(
                 content_frame.height,
             ),
             color: base_color,
+            force_color: false,
             font_family: Some(resolved.primary_font),
             font_size,
             font_weight: resolved_weight,
@@ -3358,6 +3364,7 @@ fn push_input_primitives(
                     content_frame.height,
                 ),
                 color: base_color,
+                force_color: false,
                 font_family: Some(resolved.primary_font.clone()),
                 font_size,
                 font_weight: text.font_weight.unwrap_or(default_text_style.weight),
@@ -3378,6 +3385,7 @@ fn push_input_primitives(
                     content_frame.height,
                 ),
                 color: preedit_color,
+                force_color: false,
                 font_family: Some(resolved.primary_font.clone()),
                 font_size,
                 font_weight: text.font_weight.unwrap_or(default_text_style.weight),
@@ -3418,6 +3426,7 @@ fn push_input_primitives(
                     content_frame.height,
                 ),
                 color: base_color,
+                force_color: false,
                 font_family: Some(resolved.primary_font),
                 font_size,
                 font_weight: text.font_weight.unwrap_or(default_text_style.weight),
@@ -3514,25 +3523,14 @@ fn push_checkbox_primitives(
     );
 
     if checked {
-        let checkmark = Text::new("\u{2713}").font_size(checkbox_style.text_style.size);
-        push_text_primitives(
-            &checkmark,
+        push_checkbox_checkmark_primitives(
             box_frame,
-            font_manager,
-            theme,
-            units,
-            animations,
-            now,
-            scene,
-            false,
-            true,
-            Insets::ZERO,
-            None,
-            None,
-            checkbox_style.checkmark,
+            checkbox_style,
             opacity,
-            widget_id,
+            font_manager,
+            units,
             clip_rect,
+            scene,
         );
     }
 
@@ -3565,6 +3563,56 @@ fn push_checkbox_primitives(
             clip_rect,
         );
     }
+}
+
+fn push_checkbox_checkmark_primitives(
+    box_frame: Rect,
+    checkbox_style: &crate::ui::theme::CheckboxStyle,
+    opacity: f32,
+    font_manager: &FontManager,
+    units: UnitContext,
+    clip_rect: Option<Rect>,
+    scene: &mut ScenePrimitives,
+) {
+    let font_size = units
+        .resolve_sp(checkbox_style.text_style.size)
+        .min(box_frame.width.get())
+        .min(box_frame.height.get())
+        .max(1.0);
+    let line_height = font_size;
+    let letter_spacing = 0.0;
+    let text_request = TextFontRequest {
+        preferred_font: Some(ICON_FONT_FAMILY),
+        weight: checkbox_style.text_style.weight,
+    };
+    let resolved = font_manager.resolve_text(CHECKBOX_CHECKMARK_ICON, text_request.clone());
+    let layout = font_manager.measure_text_layout(
+        CHECKBOX_CHECKMARK_ICON,
+        text_request,
+        font_size,
+        line_height,
+        letter_spacing,
+    );
+    let icon_frame = centered_text_frame(
+        box_frame,
+        layout.width.max(font_size),
+        layout.height.max(line_height),
+        line_height,
+        true,
+    );
+
+    scene.push_text(TextPrimitive {
+        content: CHECKBOX_CHECKMARK_ICON.to_string(),
+        frame: icon_frame,
+        color: CHECKBOX_CHECKMARK_COLOR.with_alpha_factor(opacity),
+        force_color: true,
+        font_family: Some(resolved.primary_font),
+        font_size,
+        font_weight: checkbox_style.text_style.weight,
+        line_height,
+        letter_spacing,
+        clip_rect,
+    });
 }
 
 fn push_radio_primitives(
@@ -5686,11 +5734,19 @@ mod tests {
             .shapes
             .iter()
             .any(|shape| shape.color == checked_style.background));
-        assert!(rendered
+        let checkmark = rendered
             .primitives
             .texts
             .iter()
-            .any(|text| text.content == "\u{2713}" && text.color == checked_style.checkmark));
+            .find(|text| text.content == super::CHECKBOX_CHECKMARK_ICON)
+            .expect("checked checkbox should render checkmark icon");
+        assert_eq!(checkmark.color, Color::WHITE);
+        assert!(checkmark.force_color);
+        assert!(checkmark.font_family.is_some());
+        let checkmark_center_x = checkmark.frame.x + checkmark.frame.width / 2.0;
+        let checkmark_center_y = checkmark.frame.y + checkmark.frame.height / 2.0;
+        assert!((checkmark_center_x - Dp::new(8.0)).abs().get() < 0.01);
+        assert!((checkmark_center_y - Dp::new(20.0)).abs().get() < 0.01);
     }
 
     #[test]
@@ -5745,7 +5801,7 @@ mod tests {
             .primitives
             .texts
             .iter()
-            .all(|text| text.content != "\u{2713}"));
+            .all(|text| text.content != super::CHECKBOX_CHECKMARK_ICON));
     }
 
     #[test]

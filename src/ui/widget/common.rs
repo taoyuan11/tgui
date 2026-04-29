@@ -559,6 +559,7 @@ pub struct TextPrimitive {
     pub content: String,
     pub frame: Rect,
     pub color: Color,
+    pub force_color: bool,
     pub font_family: Option<String>,
     pub font_size: f32,
     pub font_weight: FontWeight,

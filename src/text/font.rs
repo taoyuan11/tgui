@@ -7,6 +7,9 @@ use cosmic_text::fontdb::{Family, Query, Stretch, Style, Weight, ID};
 use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
 
+pub(crate) const ICON_FONT_FAMILY: &str = "tgui-icons";
+const ICON_FONT_BYTES: &[u8] = include_bytes!("../assets/iconfont.ttf");
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FontWeight {
     Thin,
@@ -41,10 +44,21 @@ impl Default for FontWeight {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct FontCatalog {
     named_fonts: Vec<NamedFont>,
     default_font: Option<String>,
+}
+
+impl Default for FontCatalog {
+    fn default() -> Self {
+        let mut catalog = Self {
+            named_fonts: Vec::new(),
+            default_font: None,
+        };
+        catalog.register_font(ICON_FONT_FAMILY, ICON_FONT_BYTES);
+        catalog
+    }
 }
 
 impl FontCatalog {
