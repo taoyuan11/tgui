@@ -8,6 +8,7 @@ mod core;
 mod image;
 mod input;
 mod radio;
+mod select;
 mod switch;
 mod text;
 #[cfg(feature = "video")]
@@ -41,6 +42,7 @@ pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use image::Image;
 pub use input::Input;
 pub use radio::{Radio, RadioGroup, RadioOption};
+pub use select::{Select, SelectOption};
 pub use switch::Switch;
 pub use text::Text;
 #[cfg(feature = "video")]

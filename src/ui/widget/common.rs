@@ -930,6 +930,30 @@ pub(crate) enum WidgetKind<VM> {
         on_change: Option<ValueCommand<VM, String>>,
         disabled: Value<bool>,
     },
+    Select {
+        selected_label: Value<Option<String>>,
+        placeholder: Text,
+        options: Vec<SelectOptionState<VM>>,
+        disabled: Value<bool>,
+    },
+}
+
+pub(crate) struct SelectOptionState<VM> {
+    pub label: Text,
+    pub selected: Value<bool>,
+    pub disabled: Value<bool>,
+    pub on_select: Option<Command<VM>>,
+}
+
+impl<VM> Clone for SelectOptionState<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            label: self.label.clone(),
+            selected: self.selected.clone(),
+            disabled: self.disabled.clone(),
+            on_select: self.on_select.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1021,6 +1045,17 @@ impl<VM> Clone for WidgetKind<VM> {
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
             },
+            Self::Select {
+                selected_label,
+                placeholder,
+                options,
+                disabled,
+            } => Self::Select {
+                selected_label: selected_label.clone(),
+                placeholder: placeholder.clone(),
+                options: options.clone(),
+                disabled: disabled.clone(),
+            },
         }
     }
 }
@@ -1050,6 +1085,10 @@ pub(crate) enum MeasureContext {
     },
     Input {
         text: Text,
+        placeholder: Text,
+    },
+    Select {
+        selected_label: Option<String>,
         placeholder: Text,
     },
 }
@@ -1103,6 +1142,16 @@ pub(crate) enum HitInteraction<VM> {
         interactions: InteractionHandlers<VM>,
         on_change: Option<ValueCommand<VM, bool>>,
         current: bool,
+    },
+    SelectTrigger {
+        id: WidgetId,
+        interactions: InteractionHandlers<VM>,
+    },
+    SelectOption {
+        id: WidgetId,
+        option_index: usize,
+        interactions: InteractionHandlers<VM>,
+        on_select: Option<Command<VM>>,
     },
     CanvasItem {
         id: WidgetId,
@@ -1191,6 +1240,21 @@ impl<VM> Clone for HitInteraction<VM> {
                 on_change: on_change.clone(),
                 current: *current,
             },
+            Self::SelectTrigger { id, interactions } => Self::SelectTrigger {
+                id: *id,
+                interactions: interactions.clone(),
+            },
+            Self::SelectOption {
+                id,
+                option_index,
+                interactions,
+                on_select,
+            } => Self::SelectOption {
+                id: *id,
+                option_index: *option_index,
+                interactions: interactions.clone(),
+                on_select: on_select.clone(),
+            },
             Self::CanvasItem {
                 id,
                 item_id,
@@ -1217,7 +1281,14 @@ impl<VM> HitInteraction<VM> {
             | Self::SelectableText { id, .. }
             | Self::Switch { id, .. }
             | Self::Checkbox { id, .. }
-            | Self::Radio { id, .. } => HitTargetId::Widget(*id),
+            | Self::Radio { id, .. }
+            | Self::SelectTrigger { id, .. } => HitTargetId::Widget(*id),
+            Self::SelectOption {
+                id, option_index, ..
+            } => HitTargetId::SelectOption {
+                widget_id: *id,
+                option_index: *option_index,
+            },
             Self::CanvasItem { id, item_id, .. } => HitTargetId::CanvasItem {
                 widget_id: *id,
                 item_id: *item_id,
@@ -1229,6 +1300,10 @@ impl<VM> HitInteraction<VM> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum HitTargetId {
     Widget(WidgetId),
+    SelectOption {
+        widget_id: WidgetId,
+        option_index: usize,
+    },
     CanvasItem {
         widget_id: WidgetId,
         item_id: CanvasItemId,
@@ -1308,6 +1383,7 @@ pub(crate) struct ScrollbarHandle {
 pub(crate) struct ComputedScene<VM> {
     pub scene: ScenePrimitives,
     pub hit_regions: Vec<HitRegion<VM>>,
+    pub overlay_hit_regions: Vec<HitRegion<VM>>,
     pub scroll_regions: Vec<ScrollRegion>,
     pub ime_cursor_area: Option<Rect>,
 }
@@ -1315,6 +1391,7 @@ pub(crate) struct ComputedScene<VM> {
 #[derive(Clone, Default)]
 pub(crate) struct WidgetStateMap {
     states: HashMap<WidgetId, WidgetState>,
+    select_option_states: HashMap<(WidgetId, usize), WidgetState>,
 }
 
 impl WidgetStateMap {
@@ -1325,6 +1402,27 @@ impl WidgetStateMap {
     pub(crate) fn get(&self, id: WidgetId) -> WidgetState {
         self.states.get(&id).copied().unwrap_or_default()
     }
+
+    pub(crate) fn set_select_option(
+        &mut self,
+        widget_id: WidgetId,
+        option_index: usize,
+        state: WidgetState,
+    ) {
+        self.select_option_states
+            .insert((widget_id, option_index), state);
+    }
+
+    pub(crate) fn get_select_option(
+        &self,
+        widget_id: WidgetId,
+        option_index: usize,
+    ) -> WidgetState {
+        self.select_option_states
+            .get(&(widget_id, option_index))
+            .copied()
+            .unwrap_or_default()
+    }
 }
 
 impl<VM> Default for ComputedScene<VM> {
@@ -1332,6 +1430,7 @@ impl<VM> Default for ComputedScene<VM> {
         Self {
             scene: ScenePrimitives::default(),
             hit_regions: Vec::new(),
+            overlay_hit_regions: Vec::new(),
             scroll_regions: Vec::new(),
             ime_cursor_area: None,
         }

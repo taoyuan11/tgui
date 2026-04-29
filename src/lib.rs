@@ -177,8 +177,9 @@ pub mod prelude {
     };
     pub use crate::theme::{
         BorderScale, CheckboxStyle, CheckboxTheme, ColorScheme, ComponentTheme, ElevationScale,
-        FontWeight, MotionScale, RadioStyle, RadioTheme, RadiusScale, Shadow, SpaceScale, Stateful,
-        TextStyle, Theme, ThemeMode, ThemeSet, ThemeStore, TypeScale, WidgetState,
+        FontWeight, MotionScale, RadioStyle, RadioTheme, RadiusScale, SelectStyle, SelectTheme,
+        Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet, ThemeStore, TypeScale,
+        WidgetState,
     };
     #[cfg(feature = "video")]
     pub use crate::video::{
@@ -187,7 +188,8 @@ pub mod prelude {
     pub use crate::widgets::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, Checkbox, CursorStyle, Element, Image, Input, Radio,
-        RadioGroup, RadioOption, Switch, Text, WidgetCommand, WidgetEventResult, WidgetTree,
+        RadioGroup, RadioOption, Select, SelectOption, Switch, Text, WidgetCommand,
+        WidgetEventResult, WidgetTree,
     };
 }
 
@@ -195,8 +197,9 @@ pub mod prelude {
 pub mod theme {
     pub use crate::ui::theme::{
         BorderScale, CheckboxStyle, CheckboxTheme, ColorScheme, ComponentTheme, ElevationScale,
-        FontWeight, MotionScale, RadioStyle, RadioTheme, RadiusScale, Shadow, SpaceScale, Stateful,
-        TextStyle, Theme, ThemeMode, ThemeSet, ThemeStore, TypeScale, WidgetState,
+        FontWeight, MotionScale, RadioStyle, RadioTheme, RadiusScale, SelectStyle, SelectTheme,
+        Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet, ThemeStore, TypeScale,
+        WidgetState,
     };
 }
 
@@ -206,7 +209,8 @@ pub mod widgets {
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, Checkbox, CursorStyle, Element, Image, Input, Radio,
-        RadioGroup, RadioOption, Switch, Text, WidgetCommand, WidgetEventResult, WidgetTree,
+        RadioGroup, RadioOption, Select, SelectOption, Switch, Text, WidgetCommand,
+        WidgetEventResult, WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

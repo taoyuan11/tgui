@@ -8,6 +8,7 @@ struct App {
     checkbox: Observable<bool>,
     radio: Observable<bool>,
     contact_method: Observable<String>,
+    select_action: Observable<Option<String>>,
 }
 
 impl ViewModel for App {
@@ -18,6 +19,7 @@ impl ViewModel for App {
             checkbox: context.observable(false),
             radio: context.observable(false),
             contact_method: context.observable(String::from("email")),
+            select_action: context.observable(None),
         }
     }
 
@@ -93,6 +95,23 @@ impl ViewModel for App {
                     .horizontal()
                     .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
                         app.contact_method.set(key)
+                    })),
+                ),
+                component_card(
+                    "Select",
+                    Select::new(
+                        vec![
+                            SelectOption::new("archive".to_string(), "归档".to_string()),
+                            SelectOption::new("delete".to_string(), "删除".to_string())
+                                .disable(true),
+                            SelectOption::new("share".to_string(), "分享".to_string()),
+                        ],
+                        self.select_action.binding(),
+                    )
+                    .placeholder_with_str("请选择操作")
+                    .width(dp(220.0))
+                    .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
+                        app.select_action.set(Some(key))
                     })),
                 ),
                 component_card(
