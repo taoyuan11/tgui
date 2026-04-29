@@ -4145,9 +4145,9 @@ mod tests {
         BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient, BackgroundRadialGradient,
     };
     use crate::ui::widget::{
-        Canvas, CanvasItem, CanvasPath, CanvasStroke, Checkbox, Element, Image, Input,
-        InputEditState, PathBuilder, Point, ScrollbarAxis, ScrollbarHandle, Stack, Switch, Text,
-        WidgetStateMap, WidgetTree,
+        Canvas, CanvasItem, CanvasPath, CanvasStroke, Checkbox, CompositionState, Element, Image,
+        Input, InputEditState, PathBuilder, Point, ScrollbarAxis, ScrollbarHandle, Stack, Switch,
+        Text, WidgetStateMap, WidgetTree,
     };
     #[cfg(feature = "video")]
     use crate::video::backend::{
@@ -6927,6 +6927,45 @@ mod tests {
             .filter(|primitive| primitive.content == "hello")
             .collect();
         assert_eq!(texts.len(), 1);
+    }
+
+    #[test]
+    fn focused_input_composition_clamps_to_utf8_boundaries() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let content = "输入框示例输入框示例输入框示例";
+        let input: Element<()> = Input::new(Text::new(content)).width(dp(160.0)).into();
+        let input_id = input.id;
+        let tree = WidgetTree::new(input);
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 160.0, 40.0),
+            Some(input_id),
+            Some(&InputEditState {
+                cursor: 25,
+                anchor: 25,
+                composition: Some(CompositionState {
+                    replace_range: (25, 25),
+                    text: "示".to_string(),
+                    cursor: Some((1, 1)),
+                }),
+                scroll_x: Dp::ZERO,
+            }),
+            None,
+            None,
+            true,
+        );
+
+        assert!(!rendered.primitives.texts.is_empty());
     }
 
     #[test]

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use tgui::prelude::*;
 
 struct App {
+    content: Observable<String>,
     switch: Observable<bool>,
     checkbox: Observable<bool>,
 }
@@ -10,6 +11,7 @@ struct App {
 impl ViewModel for App {
     fn new(context: &ViewModelContext) -> Self {
         Self {
+            content: context.observable(String::from("输入框示例输入框示例输入框示例")),
             switch: context.observable(false),
             checkbox: context.observable(false),
         }
@@ -39,14 +41,18 @@ impl ViewModel for App {
                             Flex::new(Axis::Horizontal).gap(dp(10.0)).child(el![
                                 Button::new(Text::new("普通按钮")).primary(),
                                 Button::new(Text::new("次要按钮")).secondary(),
+                                Button::new(Text::new("幽灵按钮")).ghost(),
                                 Button::new(Text::new("危险按钮")).danger(),
                             ]),
                         ),
                         component_card(
                             "Input",
-                            Input::new(Text::new("输入框示例输入框示例输入框示例"))
+                            Input::new(Text::new(self.content.binding()))
                                 .placeholder_with_str("请输入内容")
-                                .width(dp(260.0)),
+                                .width(dp(260.0))
+                                .on_change(ValueCommand::new(|app: &mut App, text| {
+                                    app.content.set(text)
+                                }))
                         ),
                         component_card(
                             "Switch",
