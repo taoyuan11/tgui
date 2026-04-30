@@ -49,6 +49,36 @@ impl ThemeSelection {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{Application, WindowSpec};
+
+    #[test]
+    fn application_decorations_updates_config() {
+        let config = Application::new().decorations(false).config();
+
+        assert!(!config.decorations);
+    }
+
+    #[test]
+    fn window_spec_decorations_override_application_default() {
+        let app_config = Application::new().decorations(true).config();
+        let window_config = WindowSpec::<()>::main("main")
+            .decorations(false)
+            .resolved_config(&app_config);
+
+        assert!(!window_config.decorations);
+    }
+
+    #[test]
+    fn window_spec_decorations_inherit_application_default() {
+        let app_config = Application::new().decorations(false).config();
+        let window_config = WindowSpec::<()>::main("main").resolved_config(&app_config);
+
+        assert!(!window_config.decorations);
+    }
+}
+
 #[derive(Debug, Clone)]
 /// Entry point for configuring and launching a `tgui` application.
 ///
@@ -98,6 +128,7 @@ pub struct Application {
     clear_color: Color,
     clear_color_overridden: bool,
     close_children_with_main: bool,
+    decorations: bool,
     fonts: FontCatalog,
     theme: ThemeSelection,
     theme_set: ThemeSet,
@@ -117,6 +148,7 @@ impl Application {
             clear_color: Theme::default().colors.background,
             clear_color_overridden: false,
             close_children_with_main: true,
+            decorations: true,
             fonts: FontCatalog::default(),
             theme: ThemeSelection::System,
             theme_set: ThemeSet::default(),
@@ -167,6 +199,14 @@ impl Application {
     /// Defaults to `true`.
     pub fn close_children_with_main(mut self, close_children_with_main: bool) -> Self {
         self.close_children_with_main = close_children_with_main;
+        self
+    }
+
+    /// Sets whether the native window should use system decorations.
+    ///
+    /// Defaults to `true`. Set this to `false` to draw a custom title bar.
+    pub fn decorations(mut self, decorations: bool) -> Self {
+        self.decorations = decorations;
         self
     }
 
@@ -245,6 +285,7 @@ impl Application {
             clear_color: self.clear_color,
             clear_color_overridden: self.clear_color_overridden,
             close_children_with_main: self.close_children_with_main,
+            decorations: self.decorations,
             fonts: self.fonts.clone(),
             theme: self.theme.clone(),
             theme_set: self.theme_set.clone(),
@@ -270,6 +311,7 @@ pub(crate) struct ApplicationConfig {
     pub(crate) clear_color: Color,
     pub(crate) clear_color_overridden: bool,
     pub(crate) close_children_with_main: bool,
+    pub(crate) decorations: bool,
     pub(crate) fonts: FontCatalog,
     pub(crate) theme: ThemeSelection,
     pub(crate) theme_set: ThemeSet,
@@ -320,6 +362,7 @@ pub struct WindowSpec<VM> {
     pub(crate) size: Option<LogicalSize<f64>>,
     pub(crate) min_size: Option<LogicalSize<f64>>,
     pub(crate) max_size: Option<LogicalSize<f64>>,
+    pub(crate) decorations: Option<bool>,
     pub(crate) title_binding: Option<TitleBinding<VM>>,
     pub(crate) clear_color_binding: Option<ClearColorBinding<VM>>,
     pub(crate) theme_set_binding: Option<ThemeSetBinding<VM>>,
@@ -344,6 +387,7 @@ impl<VM> WindowSpec<VM> {
             size: None,
             min_size: None,
             max_size: None,
+            decorations: None,
             title_binding: None,
             clear_color_binding: None,
             theme_set_binding: None,
@@ -367,6 +411,7 @@ impl<VM> WindowSpec<VM> {
             size: None,
             min_size: None,
             max_size: None,
+            decorations: None,
             title_binding: None,
             clear_color_binding: None,
             theme_set_binding: None,
@@ -398,6 +443,14 @@ impl<VM> WindowSpec<VM> {
     /// Sets the maximum resizable native window size in logical pixels.
     pub fn max_window_size(mut self, width: Dp, height: Dp) -> Self {
         self.max_size = Some(logical_window_size(width, height));
+        self
+    }
+
+    /// Sets whether this native window should use system decorations.
+    ///
+    /// If unset, the application-level setting is used.
+    pub fn decorations(mut self, decorations: bool) -> Self {
+        self.decorations = Some(decorations);
         self
     }
 
@@ -482,6 +535,9 @@ impl<VM> WindowSpec<VM> {
         }
         if let Some(max_size) = self.max_size {
             config.max_size = Some(max_size);
+        }
+        if let Some(decorations) = self.decorations {
+            config.decorations = decorations;
         }
         config.normalize_size_constraints();
         config
@@ -755,6 +811,7 @@ where
                         size: Some(main_config.size),
                         min_size: main_config.min_size,
                         max_size: main_config.max_size,
+                        decorations: Some(main_config.decorations),
                         title_binding: title_binding.clone(),
                         clear_color_binding: clear_color_binding.clone(),
                         theme_set_binding: theme_set_binding.clone(),

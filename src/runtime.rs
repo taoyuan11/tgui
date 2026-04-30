@@ -11,6 +11,7 @@ use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
+use crate::foundation::window_control::{WindowControl, WindowRequest, WindowRequestQueue};
 use crate::log::Log;
 use crate::media::MediaManager;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -31,7 +32,7 @@ use crate::platform::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use crate::platform::ohos::{OhosApp, WindowExtOhos};
 use crate::platform::window::{
     ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeRequestData,
-    Theme as WindowTheme, WindowAttributes, WindowId,
+    ResizeDirection, Theme as WindowTheme, WindowAttributes, WindowId,
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::{FontManager, TextFontRequest};
@@ -353,6 +354,7 @@ pub struct BoundRuntimeHandler<VM> {
     scroll_epoch: u64,
     media_event_states: HashMap<WidgetId, DispatchedMediaState>,
     media_manager: MediaManager,
+    window_requests: WindowRequestQueue,
     window: Option<Arc<dyn Window>>,
     renderer: Option<Renderer>,
     window_id: Option<WindowId>,
@@ -633,6 +635,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             scroll_epoch: 0,
             media_event_states: HashMap::new(),
             media_manager: MediaManager::new(invalidation.clone()),
+            window_requests: WindowRequestQueue::default(),
             window: None,
             renderer: None,
             window_id: None,
@@ -652,6 +655,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn command_context(&self) -> CommandContext<VM> {
+        let window = self.window.clone();
         CommandContext::new(
             Dialogs::from_runtime(
                 self.window_key.clone(),
@@ -659,6 +663,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.window.as_ref(),
                 self.dialog_dispatcher.clone(),
             ),
+            WindowControl::new(self.window_requests.clone(), move || {
+                window
+                    .as_ref()
+                    .map(|window| window.is_maximized())
+                    .unwrap_or(false)
+            }),
             Log::default(),
         )
     }
@@ -682,6 +692,60 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         });
         self.invalidate_scene();
         self.invalidation.mark_dirty();
+    }
+
+    fn drain_window_requests(&mut self) -> bool {
+        let requests = self.window_requests.drain();
+        if requests.is_empty() {
+            return false;
+        }
+
+        let mut close_requested = false;
+        for request in requests {
+            match request {
+                WindowRequest::Drag => {
+                    if let Some(window) = self.window.as_ref() {
+                        if let Err(error) = window.drag_window() {
+                            Log::with_tag("tgui-runtime")
+                                .warn(format!("window drag request failed: {error}"));
+                        }
+                    }
+                }
+                WindowRequest::DragResize(direction) => {
+                    if let Some(window) = self.window.as_ref() {
+                        if let Err(error) = window.drag_resize_window(direction.into()) {
+                            Log::with_tag("tgui-runtime")
+                                .warn(format!("window resize request failed: {error}"));
+                        }
+                    }
+                }
+                WindowRequest::Minimize => {
+                    if let Some(window) = self.window.as_ref() {
+                        window.set_minimized(true);
+                    }
+                }
+                WindowRequest::Maximize => {
+                    if let Some(window) = self.window.as_ref() {
+                        window.set_maximized(true);
+                    }
+                }
+                WindowRequest::Restore => {
+                    if let Some(window) = self.window.as_ref() {
+                        window.set_maximized(false);
+                    }
+                }
+                WindowRequest::ToggleMaximize => {
+                    if let Some(window) = self.window.as_ref() {
+                        window.set_maximized(!window.is_maximized());
+                    }
+                }
+                WindowRequest::Close => {
+                    close_requested |= self.close_policy() == WindowClosePolicy::Close;
+                }
+            }
+        }
+
+        close_requested
     }
 
     fn execute_hover_transition_handler(
@@ -763,6 +827,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) {
         self.role = role;
         let font_manager = FontManager::new(&config.fonts);
+        if let Some(window) = self.window.as_ref() {
+            if window.is_decorated() != config.decorations {
+                window.set_decorations(config.decorations);
+            }
+        }
         self.config = config;
         self.font_manager = font_manager;
         self.window_bindings = window_bindings;
@@ -3158,6 +3227,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let mut attributes = WindowAttributes::default()
             .with_transparent(!cfg!(all(target_env = "ohos", feature = "ohos")))
+            .with_decorations(self.config.decorations)
             .with_title(self.config.title.clone())
             .with_surface_size(self.config.size)
             .with_visible(false);
@@ -3342,6 +3412,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
+        if self.drain_window_requests() {
+            return true;
+        }
+
         match event {
             WindowEvent::CloseRequested => return self.close_policy() == WindowClosePolicy::Close,
             WindowEvent::Focused(false) => {
@@ -3426,7 +3500,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         false
     }
 
-    fn handle_bound_about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
+    fn handle_bound_about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) -> bool {
         let now = Instant::now();
         let theme_changed = self.refresh_platform_theme();
         let drag_scrolled = self.handle_input_selection_drag();
@@ -3450,6 +3524,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if theme_changed || animation_frame_advanced {
             self.render_immediately(event_loop);
         }
+        self.drain_window_requests()
     }
 }
 
@@ -3802,17 +3877,39 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
 
         let keys: Vec<String> = self.windows_by_key.keys().cloned().collect();
         for key in keys {
-            if let Some(window) = self.windows_by_key.get_mut(&key) {
-                window.handle_bound_about_to_wait(event_loop);
-                if let Some(error) = window.error.take() {
-                    self.fail(event_loop, error);
+            let (close_requested, is_main_window) =
+                if let Some(window) = self.windows_by_key.get_mut(&key) {
+                    let close_requested = window.handle_bound_about_to_wait(event_loop);
+                    let is_main_window = window.is_main_window();
+                    if let Some(error) = window.error.take() {
+                        self.fail(event_loop, error);
+                        return;
+                    }
+                    self.window_keys_by_id
+                        .retain(|_, existing_key| existing_key != &key);
+                    if let Some(window_id) = window.window_id() {
+                        self.window_keys_by_id.insert(window_id, key.clone());
+                    }
+                    (close_requested, is_main_window)
+                } else {
+                    (false, false)
+                };
+
+            if close_requested {
+                if is_main_window && self.config.close_children_with_main {
+                    self.shutting_down = true;
+                    self.windows_by_key.clear();
+                    self.window_keys_by_id.clear();
+                    event_loop.exit();
                     return;
                 }
-                self.window_keys_by_id
-                    .retain(|_, existing_key| existing_key != &key);
-                if let Some(window_id) = window.window_id() {
-                    self.window_keys_by_id.insert(window_id, key.clone());
+
+                self.closed_window_keys.insert(key.clone());
+                self.remove_window(&key);
+                if self.windows_by_key.is_empty() {
+                    event_loop.exit();
                 }
+                return;
             }
         }
     }
@@ -3829,8 +3926,11 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
         self.create_or_resume_surface(event_loop);
     }
 
-    fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {
+    fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.drain_dialog_completions();
+        if self.drain_window_requests() {
+            event_loop.exit();
+        }
     }
 
     fn window_event(
@@ -3850,7 +3950,9 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
 
     fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.drain_dialog_completions();
-        self.handle_bound_about_to_wait(event_loop);
+        if self.handle_bound_about_to_wait(event_loop) {
+            event_loop.exit();
+        }
     }
 
     fn suspended(&mut self, _event_loop: &dyn ActiveEventLoop) {
@@ -3903,6 +4005,21 @@ fn cursor_icon(cursor_style: crate::ui::widget::CursorStyle) -> CursorIcon {
         crate::ui::widget::CursorStyle::NsResize => CursorIcon::NsResize,
         crate::ui::widget::CursorStyle::NeswResize => CursorIcon::NeswResize,
         crate::ui::widget::CursorStyle::NwseResize => CursorIcon::NwseResize,
+    }
+}
+
+impl From<crate::foundation::window_control::WindowResizeDirection> for ResizeDirection {
+    fn from(direction: crate::foundation::window_control::WindowResizeDirection) -> Self {
+        match direction {
+            crate::foundation::window_control::WindowResizeDirection::East => Self::East,
+            crate::foundation::window_control::WindowResizeDirection::North => Self::North,
+            crate::foundation::window_control::WindowResizeDirection::NorthEast => Self::NorthEast,
+            crate::foundation::window_control::WindowResizeDirection::NorthWest => Self::NorthWest,
+            crate::foundation::window_control::WindowResizeDirection::South => Self::South,
+            crate::foundation::window_control::WindowResizeDirection::SouthEast => Self::SouthEast,
+            crate::foundation::window_control::WindowResizeDirection::SouthWest => Self::SouthWest,
+            crate::foundation::window_control::WindowResizeDirection::West => Self::West,
+        }
     }
 }
 
@@ -4484,6 +4601,7 @@ mod tests {
             clear_color: Color::BLACK,
             clear_color_overridden: true,
             close_children_with_main: true,
+            decorations: true,
             fonts: FontCatalog::default(),
             theme: ThemeSelection::System,
             theme_set: ThemeSet::default(),
@@ -4500,6 +4618,7 @@ mod tests {
             clear_color: Color::BLACK,
             clear_color_overridden: true,
             close_children_with_main: true,
+            decorations: true,
             fonts: FontCatalog::default(),
             theme,
             theme_set,
@@ -4568,6 +4687,18 @@ mod tests {
         dark.colors.background = Color::hexa(0x06101DFF);
         dark.colors.primary = Color::hexa(0x66D9E8FF);
         (ThemeSet::new(light.clone(), dark.clone()), light, dark)
+    }
+
+    #[test]
+    fn window_control_close_request_marks_handler_for_close() {
+        let invalidation = InvalidationSignal::new();
+        let mut handler = test_handler(None, invalidation);
+        let context = handler.command_context();
+
+        context.window().close();
+
+        assert!(handler.drain_window_requests());
+        assert!(!handler.drain_window_requests());
     }
 
     #[test]

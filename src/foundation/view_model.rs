@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::dialog::Dialogs;
 use crate::foundation::binding::ViewModelContext;
+use crate::foundation::window_control::WindowControl;
 use crate::log::Log;
 use crate::ui::widget::Element;
 
@@ -18,6 +19,7 @@ pub trait ViewModel: Send + 'static {
 
 pub struct CommandContext<T> {
     dialogs: Dialogs<T>,
+    window: WindowControl,
     log: Log,
 }
 
@@ -25,6 +27,7 @@ impl<T> Clone for CommandContext<T> {
     fn clone(&self) -> Self {
         Self {
             dialogs: self.dialogs.clone(),
+            window: self.window.clone(),
             log: self.log.clone(),
         }
     }
@@ -35,23 +38,39 @@ impl<T: 'static> CommandContext<T> {
         self.dialogs.clone()
     }
 
+    pub fn window(&self) -> WindowControl {
+        self.window.clone()
+    }
+
     pub fn log(&self) -> Log {
         self.log.clone()
     }
 
-    pub(crate) fn new(dialogs: Dialogs<T>, log: Log) -> Self {
-        Self { dialogs, log }
+    pub(crate) fn new(dialogs: Dialogs<T>, window: WindowControl, log: Log) -> Self {
+        Self {
+            dialogs,
+            window,
+            log,
+        }
     }
 
     pub(crate) fn detached() -> Self {
-        Self::new(Dialogs::detached(), Log::default())
+        Self::new(
+            Dialogs::detached(),
+            WindowControl::default(),
+            Log::default(),
+        )
     }
 
     pub(crate) fn scope<ChildVm: 'static>(
         &self,
         selector: Arc<dyn for<'a> Fn(&'a mut T) -> &'a mut ChildVm + Send + Sync>,
     ) -> CommandContext<ChildVm> {
-        CommandContext::new(self.dialogs.scope(selector), self.log.clone())
+        CommandContext::new(
+            self.dialogs.scope(selector),
+            self.window.clone(),
+            self.log.clone(),
+        )
     }
 }
 
