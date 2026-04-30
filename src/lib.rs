@@ -66,6 +66,7 @@ pub mod dialog;
 mod foundation;
 mod log;
 pub mod media;
+pub mod notification;
 pub mod platform;
 mod rendering;
 mod runtime;
@@ -176,6 +177,10 @@ pub mod prelude {
     pub use crate::mvvm::{
         Binding, Command, CommandContext, Observable, ValueCommand, ViewModel, ViewModelContext,
         WindowControl, WindowResizeDirection,
+    };
+    pub use crate::notification::{
+        NotificationAction, NotificationActionEvent, NotificationError, NotificationOptions,
+        NotificationPermission, Notifications,
     };
     pub use crate::theme::{
         BorderScale, CheckboxStyle, CheckboxTheme, ColorScheme, ComponentTheme, ElevationScale,

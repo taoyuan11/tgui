@@ -77,6 +77,21 @@ mod tests {
 
         assert!(!window_config.decorations);
     }
+
+    #[test]
+    fn application_app_id_updates_config() {
+        let config = Application::new().app_id("com.tgui.test").config();
+
+        assert_eq!(config.app_id.as_deref(), Some("com.tgui.test"));
+    }
+
+    #[test]
+    fn window_spec_inherits_application_app_id() {
+        let app_config = Application::new().app_id("com.tgui.test").config();
+        let window_config = WindowSpec::<()>::main("main").resolved_config(&app_config);
+
+        assert_eq!(window_config.app_id.as_deref(), Some("com.tgui.test"));
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +135,7 @@ mod tests {
 /// }
 /// ```
 pub struct Application {
+    app_id: Option<String>,
     title: String,
     width: Dp,
     height: Dp,
@@ -140,6 +156,7 @@ impl Application {
     /// and an empty font catalog.
     pub fn new() -> Self {
         Self {
+            app_id: None,
             title: "tgui".to_string(),
             width: Dp::new(800.0),
             height: Dp::new(600.0),
@@ -154,6 +171,12 @@ impl Application {
             theme_set: ThemeSet::default(),
             window_icon: None,
         }
+    }
+
+    /// Sets the stable application identifier used by platform services such as notifications.
+    pub fn app_id(mut self, app_id: impl Into<String>) -> Self {
+        self.app_id = Some(app_id.into());
+        self
     }
 
     /// Sets the initial window title.
@@ -278,6 +301,7 @@ impl Application {
 
     pub(crate) fn config(&self) -> ApplicationConfig {
         let mut config = ApplicationConfig {
+            app_id: self.app_id.clone(),
             title: self.title.clone(),
             size: LogicalSize::new(self.width.get() as f64, self.height.get() as f64),
             min_size: self.min_size,
@@ -304,6 +328,7 @@ impl Default for Application {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ApplicationConfig {
+    pub(crate) app_id: Option<String>,
     pub(crate) title: String,
     pub(crate) size: LogicalSize<f64>,
     pub(crate) min_size: Option<LogicalSize<f64>>,
