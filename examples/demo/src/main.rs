@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use tgui::prelude::*;
 
 struct App {
+    theme: Observable<ThemeMode>,
     content: Observable<String>,
     switch: Observable<bool>,
     checkbox: Observable<bool>,
@@ -14,11 +15,12 @@ struct App {
 impl ViewModel for App {
     fn new(context: &ViewModelContext) -> Self {
         Self {
+            theme: context.observable(ThemeMode::System),
             content: context.observable(String::from("输入框示例输入框示例输入框示例")),
             switch: context.observable(false),
             checkbox: context.observable(false),
             radio: context.observable(false),
-            contact_method: context.observable(String::from("email")),
+            contact_method: context.observable(String::from("system")),
             select_action: context.observable(None),
             notification_status: context.observable(String::from("尚未发送通知")),
         }
@@ -33,14 +35,13 @@ impl ViewModel for App {
             .child(el![
                 Text::new("TGUI 组件列表示例")
                     .font_size(sp(28.0))
-                    .width(pct(100.0))
-                    .color(Color::WHITE),
+                    .font_weight(FontWeight::Medium)
+                    .width(pct(100.0)),
                 component_card(
                     "Text",
                     Text::new("这是一段可直接渲染、可复制的文本组件")
                         .user_select(true)
-                        .font_size(sp(16.0))
-                        .color(Color::rgb(240, 244, 255)),
+                        .font_size(sp(16.0)),
                 ),
                 component_card(
                     "Input",
@@ -64,7 +65,7 @@ impl ViewModel for App {
                 component_card(
                     "Switch",
                     Switch::new(self.switch.binding()).on_change(ValueCommand::new(
-                        |app: &mut App, enable| app.switch.set(enable),
+                        |app: &mut App, enable| app.switch.set(enable)
                     )),
                 ),
                 component_card(
@@ -87,14 +88,21 @@ impl ViewModel for App {
                     "RadioGroup",
                     RadioGroup::new(
                         vec![
-                            RadioOption::new("email".to_string(), "邮件".to_string()).disable(true),
-                            RadioOption::new("sms".to_string(), "短信".to_string()),
-                            RadioOption::new("phone".to_string(), "电话".to_string()),
+                            RadioOption::new("system".to_string(), "跟随系统".to_string()),
+                            RadioOption::new("light".to_string(), "明亮".to_string()),
+                            RadioOption::new("dark".to_string(), "暗淡".to_string()),
                         ],
                         self.contact_method.binding(),
                     )
                     .horizontal()
                     .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
+                        if key == "system" {
+                            app.theme.set(ThemeMode::System)
+                        } else if key == "light" {
+                            app.theme.set(ThemeMode::Light)
+                        } else {
+                            app.theme.set(ThemeMode::Dark);
+                        }
                         app.contact_method.set(key)
                     })),
                 ),
@@ -136,8 +144,7 @@ impl ViewModel for App {
                             ),
                         ]),
                         Text::new(self.notification_status.binding())
-                            .font_size(sp(14.0))
-                            .color(Color::rgb(203, 213, 225)),
+                            .font_size(sp(14.0)),
                     ]),
                 ),
                 component_card(
@@ -156,13 +163,12 @@ fn component_card(title: &str, content: impl Into<Element<App>>) -> Element<App>
     Flex::vertical()
         .gap(dp(10.0))
         .padding(Insets::all(dp(14.0)))
-        .background(Color::rgb(23, 28, 38))
+        .background_blur(dp(12.0))
         .border(dp(1.0), Color::rgb(48, 58, 76))
         .border_radius(dp(14.0))
         .child(el![
             Text::new(title)
-                .font_size(sp(18.0))
-                .color(Color::rgb(255, 255, 255)),
+                .font_size(sp(18.0)),
             content.into(),
         ])
         .into()
@@ -266,12 +272,17 @@ impl App {
         });
     }
 
+    fn theme_binding(&self) -> Binding<ThemeMode> {
+        self.theme.binding()
+    }
+
     fn run() -> Result<(), TguiError> {
         Application::new()
             .window_icon(include_bytes!("../../background_effects/assets/juequling_shushu.jpg"))
             .app_id("com.tgui.demo")
             .with_view_model(App::new)
             .root_view(App::view)
+            .bind_theme_mode(App::theme_binding)
             .run()
     }
 }

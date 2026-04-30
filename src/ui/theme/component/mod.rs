@@ -54,6 +54,11 @@ impl ComponentTheme {
 
         let disabled_surface = colors.disabled;
         let disabled_content = colors.on_disabled;
+        let switch_track = if is_light_scheme(colors) {
+            Color::hexa(0xBFBFBFFF)
+        } else {
+            Color::hexa(0x4F4F4FFF)
+        };
         Self {
             button: ButtonTheme {
                 primary: ButtonVariant {
@@ -369,31 +374,31 @@ impl ComponentTheme {
             },
             switch: SwitchTheme {
                 track: Stateful {
-                    normal: colors.surface_high,
-                    hovered: colors.surface_high.lighten(SURFACE_HOVER_LIGHTEN),
-                    pressed: colors.surface_high.darken(SURFACE_HOVER_LIGHTEN),
-                    focused: colors.surface_overlay,
+                    normal: switch_track,
+                    hovered: switch_track,
+                    pressed: switch_track,
+                    focused: switch_track,
                     disabled: colors.disabled,
                 },
                 track_checked: Stateful {
                     normal: colors.primary,
-                    hovered: colors.primary.lighten(HOVER_LIGHTEN),
-                    pressed: colors.primary.darken(HOVER_LIGHTEN),
+                    hovered: colors.primary,
+                    pressed: colors.primary,
                     focused: colors.primary,
                     disabled: colors.disabled,
                 },
                 thumb: Stateful {
-                    normal: colors.on_surface,
-                    hovered: colors.on_surface,
-                    pressed: colors.on_surface,
-                    focused: colors.on_surface,
+                    normal: Color::WHITE,
+                    hovered: Color::WHITE,
+                    pressed: Color::WHITE,
+                    focused: Color::WHITE,
                     disabled: colors.on_disabled,
                 },
                 thumb_checked: Stateful {
-                    normal: colors.on_primary,
-                    hovered: colors.on_primary,
-                    pressed: colors.on_primary,
-                    focused: colors.on_primary,
+                    normal: Color::WHITE,
+                    hovered: Color::WHITE,
+                    pressed: Color::WHITE,
+                    focused: Color::WHITE,
                     disabled: colors.on_disabled,
                 },
                 border: Stateful {
@@ -442,4 +447,11 @@ impl ComponentTheme {
             },
         }
     }
+}
+
+fn is_light_scheme(colors: &ColorScheme) -> bool {
+    let r = colors.background.r as u32;
+    let g = colors.background.g as u32;
+    let b = colors.background.b as u32;
+    (r * 299 + g * 587 + b * 114) > 127_500
 }

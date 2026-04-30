@@ -1122,6 +1122,30 @@ impl Animatable for Color {
                 .clamp(0.0, 255.0) as u8
         }
 
+        fn lerp_unit(from: f32, to: f32, progress: f32) -> f32 {
+            from + (to - from) * progress
+        }
+
+        let from_alpha = from.a as f32 / 255.0;
+        let to_alpha = to.a as f32 / 255.0;
+        let alpha = lerp_unit(from_alpha, to_alpha, progress).clamp(0.0, 1.0);
+        if alpha > f32::EPSILON {
+            let channel = |from_channel: u8, to_channel: u8| {
+                let from_premultiplied = (from_channel as f32 / 255.0) * from_alpha;
+                let to_premultiplied = (to_channel as f32 / 255.0) * to_alpha;
+                ((lerp_unit(from_premultiplied, to_premultiplied, progress) / alpha) * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8
+            };
+
+            return Self::rgba(
+                channel(from.r, to.r),
+                channel(from.g, to.g),
+                channel(from.b, to.b),
+                (alpha * 255.0).round().clamp(0.0, 255.0) as u8,
+            );
+        }
+
         Self::rgba(
             lerp_channel(from.r, to.r, progress),
             lerp_channel(from.g, to.g, progress),
@@ -1501,6 +1525,37 @@ mod tests {
             Color::WHITE
         );
         assert!(!engine.has_active_animations());
+    }
+
+    #[test]
+    fn transparent_color_animation_preserves_visible_target_hue() {
+        let mut engine = AnimationEngine::default();
+        let transition = Transition::linear(Duration::from_millis(100));
+        let start = Instant::now();
+        let target = Color::hexa(0xEEF2F8FF);
+
+        engine.resolve_color(
+            key(WidgetProperty::Background),
+            Color::TRANSPARENT,
+            Some(transition),
+            start,
+        );
+        engine.resolve_color(
+            key(WidgetProperty::Background),
+            target,
+            Some(transition),
+            start + Duration::from_millis(1),
+        );
+
+        let mid = engine.resolve_color(
+            key(WidgetProperty::Background),
+            target,
+            Some(transition),
+            start + Duration::from_millis(51),
+        );
+
+        assert_eq!((mid.r, mid.g, mid.b), (target.r, target.g, target.b));
+        assert!(mid.a > 0 && mid.a < target.a);
     }
 
     #[test]
