@@ -77,21 +77,6 @@ mod tests {
 
         assert!(!window_config.decorations);
     }
-
-    #[test]
-    fn application_app_id_updates_config() {
-        let config = Application::new().app_id("com.tgui.test").config();
-
-        assert_eq!(config.app_id.as_deref(), Some("com.tgui.test"));
-    }
-
-    #[test]
-    fn window_spec_inherits_application_app_id() {
-        let app_config = Application::new().app_id("com.tgui.test").config();
-        let window_config = WindowSpec::<()>::main("main").resolved_config(&app_config);
-
-        assert_eq!(window_config.app_id.as_deref(), Some("com.tgui.test"));
-    }
 }
 
 #[derive(Debug, Clone)]

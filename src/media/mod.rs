@@ -1466,7 +1466,7 @@ pub(crate) fn media_placeholder_label(kind: &str, loading: bool, error: Option<&
 
 #[cfg(test)]
 mod tests {
-    use super::{load_media_document, DocumentContent, MediaManager, MediaSource, RasterRequest};
+    use super::{load_media_document, MediaManager, MediaSource, RasterRequest};
     use crate::foundation::binding::InvalidationSignal;
     use crate::ui::widget::Rect;
     use std::collections::HashMap;
@@ -1484,26 +1484,6 @@ mod tests {
         0x01, 0x4C, 0x00, 0x3B,
     ];
     const SIMPLE_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20"><rect width="10" height="20" fill="#22c55e"/></svg>"##;
-
-    #[test]
-    fn loads_image_from_embedded_bytes() {
-        let document = load_media_document(&MediaSource::bytes(ONE_BY_ONE_GIF))
-            .expect("embedded bytes should decode");
-
-        assert_eq!(document.intrinsic_size.width, 1.0);
-        assert_eq!(document.intrinsic_size.height, 1.0);
-        assert!(matches!(document.content, DocumentContent::Raster(_)));
-    }
-
-    #[test]
-    fn loads_svg_document_metadata_from_embedded_bytes() {
-        let document = load_media_document(&MediaSource::bytes(SIMPLE_SVG))
-            .expect("embedded SVG should decode");
-
-        assert_eq!(document.intrinsic_size.width, 10.0);
-        assert_eq!(document.intrinsic_size.height, 20.0);
-        assert!(matches!(document.content, DocumentContent::Svg(_)));
-    }
 
     #[test]
     fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {

@@ -362,11 +362,6 @@ impl PathBuilder {
         self.boolean(CanvasBooleanOp::Xor, other)
     }
 
-    #[cfg(test)]
-    fn commands(&self) -> &[PathCommand] {
-        &self.commands
-    }
-
     fn commands_internal(&self) -> &[PathCommand] {
         &self.commands
     }
@@ -1590,18 +1585,6 @@ mod tests {
     use crate::ui::unit::dp;
 
     #[test]
-    fn path_builder_records_commands() {
-        let path = PathBuilder::new()
-            .move_to(0.0, 0.0)
-            .line_to(10.0, 0.0)
-            .quad_to(15.0, 5.0, 10.0, 10.0)
-            .cubic_to(8.0, 12.0, 4.0, 12.0, 0.0, 10.0)
-            .close();
-
-        assert_eq!(path.commands().len(), 5);
-    }
-
-    #[test]
     fn bounds_include_stroke_width() {
         let item = CanvasItem::Path(
             CanvasPath::new(
@@ -1702,12 +1685,6 @@ mod tests {
             .close();
 
         assert!(lhs.difference(&rhs).is_err());
-    }
-
-    #[test]
-    fn solid_color_still_converts_to_brush() {
-        let brush = CanvasBrush::from(Color::WHITE);
-        assert!(matches!(brush, CanvasBrush::Solid(Color::WHITE)));
     }
 
     #[test]

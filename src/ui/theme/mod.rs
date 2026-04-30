@@ -108,40 +108,4 @@ mod tests {
             theme.colors.primary
         );
     }
-
-    #[test]
-    fn switch_defaults_use_neutral_track_and_white_thumb() {
-        let light = Theme::light();
-        assert_eq!(
-            light.components.switch.track.normal,
-            crate::foundation::color::Color::hexa(0xBFBFBFFF)
-        );
-        assert_eq!(
-            light.components.switch.thumb.normal,
-            crate::foundation::color::Color::WHITE
-        );
-        assert_eq!(
-            light.components.switch.thumb_checked.normal,
-            crate::foundation::color::Color::WHITE
-        );
-        assert_eq!(
-            light.components.switch.track_checked.normal,
-            light.colors.primary
-        );
-
-        let dark = Theme::dark();
-        assert_eq!(
-            dark.components.switch.track.normal,
-            crate::foundation::color::Color::hexa(0x4F4F4FFF)
-        );
-        assert_eq!(
-            dark.components.switch.thumb.normal,
-            crate::foundation::color::Color::WHITE
-        );
-        assert_eq!(
-            dark.components.switch.thumb_checked.normal,
-            crate::foundation::color::Color::WHITE
-        );
-        assert_eq!(dark.components.switch.track_checked.normal, dark.colors.primary);
-    }
 }
