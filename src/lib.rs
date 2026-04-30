@@ -104,8 +104,17 @@ pub mod video;
 /// ]).into();
 /// ```
 macro_rules! el {
+    () => {
+        ::std::vec::Vec::new()
+    };
     ($($child:expr),* $(,)?) => {
-        ::std::vec![$($crate::widgets::Element::from($child)),*]
+        {
+            let mut children = ::std::vec::Vec::new();
+            $(
+                children.push($crate::widgets::Element::from($child));
+            )*
+            children
+        }
     };
 }
 

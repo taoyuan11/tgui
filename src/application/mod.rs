@@ -366,6 +366,30 @@ type ThemeModeBinding<VM> = Arc<dyn Fn(&VM) -> Binding<ThemeMode> + Send + Sync>
 type RootViewFactory<VM> = Arc<dyn Fn(&VM) -> Element<VM> + Send + Sync>;
 type WindowsFactory<VM> = Box<dyn Fn(&VM) -> Vec<WindowSpec<VM>> + Send + Sync>;
 
+fn build_root_element<VM>(root_view: &RootViewFactory<VM>, view_model: &VM) -> Element<VM> {
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    ))]
+    {
+        const ROOT_VIEW_STACK_SIZE: usize = 8 * 1024 * 1024;
+        const ROOT_VIEW_STACK_RED_ZONE: usize = ROOT_VIEW_STACK_SIZE;
+        stacker::maybe_grow(ROOT_VIEW_STACK_RED_ZONE, ROOT_VIEW_STACK_SIZE, || {
+            root_view(view_model)
+        })
+    }
+
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    )))]
+    {
+        root_view(view_model)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WindowClosePolicy {
     /// Close the native window and keep the rest of the application running.
@@ -592,7 +616,7 @@ impl<VM> WindowSpec<VM> {
     pub(crate) fn build_widget_tree(&self, view_model: &VM) -> Option<WidgetTree<VM>> {
         self.root_view
             .as_ref()
-            .map(|root_view| WidgetTree::new(root_view(view_model)))
+            .map(|root_view| WidgetTree::new(build_root_element(root_view, view_model)))
     }
 }
 
