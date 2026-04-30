@@ -2351,6 +2351,12 @@ fn default_backends() -> wgpu::Backends {
         )
     ))]
     {
+        #[cfg(target_os = "windows")]
+        {
+            return wgpu::Backends::DX12 | wgpu::Backends::VULKAN;
+        }
+
+        #[cfg(not(target_os = "windows"))]
         return wgpu::Backends::VULKAN;
     }
 
@@ -2591,5 +2597,28 @@ impl TextVertex {
                 _padding: 0.0,
             },
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_default_backends_include_dx12_surface_support() {
+        let backends = default_backends();
+
+        assert!(backends.contains(wgpu::Backends::DX12));
+        assert!(backends.contains(wgpu::Backends::VULKAN));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn transparent_windows_surfaces_still_use_dx12_visual_swapchain() {
+        assert_eq!(
+            instance_backends(TguiColor::TRANSPARENT),
+            wgpu::Backends::DX12
+        );
     }
 }
