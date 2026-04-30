@@ -34,7 +34,7 @@
 ### 布局与组件
 
 - 布局：`Stack`、`Grid`、`Flex`
-- 基础组件：`Text`、`Button`、`Input`、`Radio`、`Checkbox`、`Image`
+- 基础组件：`Text`、`Button`、`Input`、`Radio`、`Checkbox`、`Select`、`Image`
 - 画布：`Canvas`、`CanvasPath`、`PathBuilder`、渐变/阴影/布尔运算
 - 视频：`VideoSurface`、`VideoController`、`VideoSource`（需启用 `video` feature）
 
