@@ -13,6 +13,12 @@
 
 适合做桌面 GUI、工具型应用、可视化面板，以及需要较强自定义绘制能力的界面。
 
+## 项目状态
+
+`tgui` 目前已经能够基本使用：应用启动、窗口管理、MVVM 状态绑定、常用布局、基础控件、主题、动画、图片、Canvas、自定义窗口 chrome、对话框以及可选视频播放等核心链路已经打通，并配有多个可运行示例。
+
+当前版本仍处于 `0.x` 阶段，公共 API 还可能根据真实应用反馈继续调整。它已经适合用于原型、内部工具、小型桌面应用、可视化面板和自定义绘制界面的探索；如果用于长期维护的生产项目，建议固定 crate 版本，并在升级前阅读 README、示例和变更记录。
+
 ## 当前能力概览
 
 ### 应用与窗口
@@ -342,6 +348,38 @@ Button::new(Text::new("Close"))
 - `src/ui/widget/*`：组件与布局实现
 - `examples/frameless_window/src/main.rs`：无边框窗口和窗口控制参考
 - `examples/*`：最直接的上手参考
+
+## 贡献指南
+
+欢迎提交 issue、示例、文档和代码改进。`tgui` 的目标是保持 API 易用、行为可预测，同时保留足够强的自定义绘制能力；贡献时建议优先围绕真实使用场景描述问题和改动动机。
+
+提交代码前建议至少运行：
+
+```bash
+cargo fmt
+cargo check
+cargo test
+```
+
+如果改动涉及特定 feature 或平台，请尽量补充对应检查：
+
+```bash
+cargo check --features video
+cargo check --features android
+cargo check --features ohos
+```
+
+贡献时请注意：
+
+- 公共 API 变更需要同步更新 README、示例和 `src/lib.rs` 中的 re-export。
+- 新增 widget 或样式能力时，优先复用现有 `Element`、布局、事件、主题和 `Value<T>` / `Binding<T>` 模式。
+- 修改 `src/runtime.rs`、`src/ui/widget/core.rs`、渲染 primitive、文本输入、媒体加载或窗口控制时，建议补充针对性的单元测试。
+- 新增示例时保持示例独立、可运行，并同步更新 README 中的示例列表。
+- 视频相关改动需要考虑 `video` / `video-static` feature，以及本机 FFmpeg 链接环境差异。
+- Android / OHOS / 桌面平台相关改动请使用 `cfg` 明确隔离，避免影响其他平台构建。
+- 文档和示例同样重要；如果你发现某个 API 已经可用但缺少说明，欢迎直接补充。
+
+较大的功能改动建议先开 issue 讨论设计方向，尤其是涉及公开 API、运行时事件、布局行为、渲染管线或平台抽象的改动。
 
 ## License
 
