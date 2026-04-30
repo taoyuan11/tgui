@@ -51,6 +51,7 @@ cpal = "0.17.1"
 log = "0.4.29"
 raw-window-handle = "0.6"
 rfd = "0.17"
+stacker = "0.1.24"
 windows = { version = "0.62.2", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"] }
 winit-win32 = "0.31.0-beta.2"
 
@@ -63,6 +64,7 @@ objc2-foundation = "0.3"
 objc2-user-notifications = "0.3.2"
 raw-window-handle = "0.6"
 rfd = "0.17"
+stacker = "0.1.24"
 winit-appkit = "0.31.0-beta.2"
 
 [target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
@@ -72,6 +74,7 @@ log = "0.4.29"
 notify-rust = "4"
 raw-window-handle = "0.6"
 rfd = "0.17"
+stacker = "0.1.24"
 winit-wayland = "0.31.0-beta.2"
 winit-x11 = "0.31.0-beta.2"
 

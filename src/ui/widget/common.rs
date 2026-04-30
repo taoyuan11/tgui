@@ -842,7 +842,7 @@ impl<VM> ChildSource<VM> {
     pub(crate) fn resolve(&self) -> Vec<super::core::Element<VM>> {
         match self {
             Self::Static(children) => children.clone(),
-            Self::Dynamic(resolver) => resolver(),
+            Self::Dynamic(resolver) => resolve_dynamic_children(resolver),
         }
     }
 
@@ -867,6 +867,34 @@ impl<VM> ChildSource<VM> {
                     .collect()
             })),
         }
+    }
+}
+
+fn resolve_dynamic_children<VM>(
+    resolver: &Arc<dyn Fn() -> Vec<super::core::Element<VM>> + Send + Sync>,
+) -> Vec<super::core::Element<VM>> {
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    ))]
+    {
+        const CHILD_RESOLVER_STACK_SIZE: usize = 8 * 1024 * 1024;
+        const CHILD_RESOLVER_STACK_RED_ZONE: usize = CHILD_RESOLVER_STACK_SIZE;
+        stacker::maybe_grow(
+            CHILD_RESOLVER_STACK_RED_ZONE,
+            CHILD_RESOLVER_STACK_SIZE,
+            || resolver(),
+        )
+    }
+
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    )))]
+    {
+        resolver()
     }
 }
 

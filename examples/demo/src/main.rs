@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::path::PathBuf;
 use tgui::prelude::*;
 
 struct App {
@@ -26,26 +27,129 @@ impl ViewModel for App {
     }
 
     fn view(&self) -> Element<Self> {
-        let mut children = Vec::new();
-        children.push(self.title());
-        children.push(self.text_card());
-        children.push(self.input_card());
-        children.push(self.button_card());
-        children.push(self.switch_card());
-        children.push(self.checkbox_card());
-        children.push(self.radio_card());
-        children.push(self.radio_group_card());
-        children.push(self.select_card());
-        children.push(self.notification_card());
-        children.push(self.image_card());
-        children.push(self.canvas_card());
-
         Flex::horizontal()
             .wrap(Wrap::Wrap)
             .padding(Insets::all(dp(20.0)))
             .gap(dp(10.0))
             .overflow_y(Overflow::Scroll)
-            .child(children)
+            .child(el![
+                Text::new("TGUI 组件列表示例")
+                    .font_size(sp(28.0))
+                    .width(pct(100.0))
+                    .color(Color::WHITE),
+                component_card(
+                    "Text",
+                    Text::new("这是一段可直接渲染、可复制的文本组件")
+                        .user_select(true)
+                        .font_size(sp(16.0))
+                        .color(Color::rgb(240, 244, 255)),
+                ),
+                component_card(
+                    "Input",
+                    Input::new(Text::new(self.content.binding()))
+                        .placeholder_with_str("请输入内容")
+                        .width(dp(260.0))
+                        .on_change(ValueCommand::new(|app: &mut App, text| {
+                            app.content.set(text)
+                        }))
+                ),
+                component_card(
+                    "Button",
+                    Flex::new(Axis::Horizontal).gap(dp(10.0)).child(el![
+                        Button::new(Text::new("普通按钮")).primary(),
+                        Button::new(Text::new("次要按钮")).secondary(),
+                        Button::new(Text::new("幽灵按钮")).ghost(),
+                        Button::new(Text::new("危险按钮")).danger(),
+                        Button::new(Text::new("禁用按钮")).disable(true),
+                    ]),
+                ),
+                component_card(
+                    "Switch",
+                    Switch::new(self.switch.binding()).on_change(ValueCommand::new(
+                        |app: &mut App, enable| app.switch.set(enable),
+                    )),
+                ),
+                component_card(
+                    "Checkbox",
+                    Checkbox::new(self.checkbox.binding())
+                        .label(Text::new("接收通知"))
+                        .on_change(ValueCommand::new(|app: &mut App, checked| {
+                            app.checkbox.set(checked)
+                        })),
+                ),
+                component_card(
+                    "Radio",
+                    Radio::new(self.radio.binding())
+                        .label(Text::new("单个单选框"))
+                        .on_change(ValueCommand::new(|app: &mut App, checked| {
+                            app.radio.set(checked)
+                        })),
+                ),
+                component_card(
+                    "RadioGroup",
+                    RadioGroup::new(
+                        vec![
+                            RadioOption::new("email".to_string(), "邮件".to_string()).disable(true),
+                            RadioOption::new("sms".to_string(), "短信".to_string()),
+                            RadioOption::new("phone".to_string(), "电话".to_string()),
+                        ],
+                        self.contact_method.binding(),
+                    )
+                    .horizontal()
+                    .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
+                        app.contact_method.set(key)
+                    })),
+                ),
+                component_card(
+                    "Select",
+                    Select::new(
+                        vec![
+                            SelectOption::new("archive".to_string(), "归档".to_string()),
+                            SelectOption::new("delete".to_string(), "删除".to_string())
+                                .disable(true),
+                            SelectOption::new("share".to_string(), "分享".to_string()),
+                        ],
+                        self.select_action.binding(),
+                    )
+                    .placeholder_with_str("请选择操作")
+                    .width(dp(220.0))
+                    .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
+                        app.select_action.set(Some(key))
+                    })),
+                ),
+                component_card(
+                    "Notification",
+                    Flex::vertical().gap(dp(10.0)).child(el![
+                        Flex::horizontal().gap(dp(10.0)).wrap(Wrap::Wrap).child(el![
+                            Button::new(Text::new("请求通知权限")).on_click(
+                                Command::new_with_context(|_: &mut App, ctx| {
+                                    App::request_notification_permission(ctx)
+                                }),
+                            ),
+                            Button::new(Text::new("发送普通通知")).on_click(
+                                Command::new_with_context(|app: &mut App, ctx| {
+                                    app.send_plain_notification(ctx)
+                                }),
+                            ),
+                            Button::new(Text::new("发送动作通知")).on_click(
+                                Command::new_with_context(|app: &mut App, ctx| {
+                                    app.send_action_notification(ctx)
+                                }),
+                            ),
+                        ]),
+                        Text::new(self.notification_status.binding())
+                            .font_size(sp(14.0))
+                            .color(Color::rgb(203, 213, 225)),
+                    ]),
+                ),
+                component_card(
+                    "Image",
+                    Image::from_path(demo_image_path())
+                        .size(dp(220.0), dp(120.0))
+                        .border_radius(dp(12.0)),
+                ),
+                component_card("Canvas", demo_canvas()),
+            ])
             .into()
     }
 }
@@ -116,152 +220,6 @@ fn demo_canvas() -> Element<App> {
 }
 
 impl App {
-    fn title(&self) -> Element<Self> {
-        Text::new("TGUI 组件列表示例")
-            .font_size(sp(28.0))
-            .width(pct(100.0))
-            .color(Color::WHITE)
-            .into()
-    }
-
-    fn text_card(&self) -> Element<Self> {
-        component_card(
-            "Text",
-            Text::new("这是一段可直接渲染、可复制的文本组件")
-                .user_select(true)
-                .font_size(sp(16.0))
-                .color(Color::rgb(240, 244, 255)),
-        )
-    }
-
-    fn input_card(&self) -> Element<Self> {
-        component_card(
-            "Input",
-            Input::new(Text::new(self.content.binding()))
-                .placeholder_with_str("请输入内容")
-                .width(dp(260.0))
-                .on_change(ValueCommand::new(|app: &mut App, text| {
-                    app.content.set(text)
-                })),
-        )
-    }
-
-    fn button_card(&self) -> Element<Self> {
-        component_card(
-            "Button",
-            Flex::new(Axis::Horizontal).gap(dp(10.0)).child(el![
-                Button::new(Text::new("普通按钮")).primary(),
-                Button::new(Text::new("次要按钮")).secondary(),
-                Button::new(Text::new("幽灵按钮")).ghost(),
-                Button::new(Text::new("危险按钮")).danger(),
-                Button::new(Text::new("禁用按钮")).disable(true),
-            ]),
-        )
-    }
-
-    fn switch_card(&self) -> Element<Self> {
-        component_card(
-            "Switch",
-            Switch::new(self.switch.binding()).on_change(ValueCommand::new(
-                |app: &mut App, enable| app.switch.set(enable),
-            )),
-        )
-    }
-
-    fn checkbox_card(&self) -> Element<Self> {
-        component_card(
-            "Checkbox",
-            Checkbox::new(self.checkbox.binding())
-                .label(Text::new("接收通知"))
-                .on_change(ValueCommand::new(|app: &mut App, checked| {
-                    app.checkbox.set(checked)
-                })),
-        )
-    }
-
-    fn radio_card(&self) -> Element<Self> {
-        component_card(
-            "Radio",
-            Radio::new(self.radio.binding())
-                .label(Text::new("单个单选框"))
-                .on_change(ValueCommand::new(|app: &mut App, checked| {
-                    app.radio.set(checked)
-                })),
-        )
-    }
-
-    fn radio_group_card(&self) -> Element<Self> {
-        component_card(
-            "RadioGroup",
-            RadioGroup::new(
-                vec![
-                    RadioOption::new("email".to_string(), "邮件".to_string()).disable(true),
-                    RadioOption::new("sms".to_string(), "短信".to_string()),
-                    RadioOption::new("phone".to_string(), "电话".to_string()),
-                ],
-                self.contact_method.binding(),
-            )
-            .horizontal()
-            .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
-                app.contact_method.set(key)
-            })),
-        )
-    }
-
-    fn select_card(&self) -> Element<Self> {
-        component_card(
-            "Select",
-            Select::new(
-                vec![
-                    SelectOption::new("archive".to_string(), "归档".to_string()),
-                    SelectOption::new("delete".to_string(), "删除".to_string()).disable(true),
-                    SelectOption::new("share".to_string(), "分享".to_string()),
-                ],
-                self.select_action.binding(),
-            )
-            .placeholder_with_str("请选择操作")
-            .width(dp(220.0))
-            .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
-                app.select_action.set(Some(key))
-            })),
-        )
-    }
-
-    fn notification_card(&self) -> Element<Self> {
-        component_card(
-            "Notification",
-            Flex::vertical().gap(dp(10.0)).child(el![
-                Flex::horizontal().gap(dp(10.0)).wrap(Wrap::Wrap).child(el![
-                    Button::new(Text::new("请求通知权限")).on_click(Command::new_with_context(
-                        |_: &mut App, ctx| App::request_notification_permission(ctx),
-                    )),
-                    Button::new(Text::new("发送普通通知")).on_click(Command::new_with_context(
-                        |app: &mut App, ctx| app.send_plain_notification(ctx),
-                    )),
-                    Button::new(Text::new("发送动作通知")).on_click(Command::new_with_context(
-                        |app: &mut App, ctx| app.send_action_notification(ctx),
-                    )),
-                ]),
-                Text::new(self.notification_status.binding())
-                    .font_size(sp(14.0))
-                    .color(Color::rgb(203, 213, 225)),
-            ]),
-        )
-    }
-
-    fn image_card(&self) -> Element<Self> {
-        component_card(
-            "Image",
-            Image::from_path(demo_image_path())
-                .size(dp(220.0), dp(120.0))
-                .border_radius(dp(12.0)),
-        )
-    }
-
-    fn canvas_card(&self) -> Element<Self> {
-        component_card("Canvas", demo_canvas())
-    }
-
     fn request_notification_permission(ctx: &CommandContext<Self>) {
         let _ = ctx.notifications().request_permission(ValueCommand::new(
             |app: &mut App, result| {

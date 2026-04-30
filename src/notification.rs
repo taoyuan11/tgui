@@ -472,6 +472,23 @@ fn validate_app_id(app_id: Option<&str>) -> Result<&str, NotificationError> {
         })
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) fn prepare_platform_notifications(
+    app_id: Option<&str>,
+    display_name: &str,
+) -> Result<(), NotificationError> {
+    let app_id = validate_app_id(app_id)?;
+    ensure_windows_notification_identity(app_id, display_name, true)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn prepare_platform_notifications(
+    _app_id: Option<&str>,
+    _display_name: &str,
+) -> Result<(), NotificationError> {
+    Ok(())
+}
+
 #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn platform_send(
     options: NotificationOptions,
@@ -523,9 +540,10 @@ fn platform_send(
     };
 
     let app_id = validate_app_id(app_id)?;
-    ensure_windows_notification_shortcut(
+    ensure_windows_notification_identity(
         app_id,
         options.app_name.as_deref().unwrap_or(&options.title),
+        false,
     )?;
     let xml = windows_toast_xml(&options);
     let document = XmlDocument::new().map_err(windows_error)?;
@@ -578,16 +596,32 @@ const WINDOWS_APP_USER_MODEL_ID_KEY: windows::Win32::Foundation::PROPERTYKEY =
     };
 
 #[cfg(target_os = "windows")]
+fn ensure_windows_notification_identity(
+    app_id: &str,
+    display_name: &str,
+    force_shortcut_update: bool,
+) -> Result<(), NotificationError> {
+    use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+
+    unsafe {
+        SetCurrentProcessExplicitAppUserModelID(&windows::core::HSTRING::from(app_id))
+            .map_err(windows_error)?;
+    }
+    ensure_windows_notification_shortcut(app_id, display_name, force_shortcut_update)
+}
+
+#[cfg(target_os = "windows")]
 fn ensure_windows_notification_shortcut(
     app_id: &str,
     display_name: &str,
+    force_update: bool,
 ) -> Result<(), NotificationError> {
     use windows::core::Interface;
-    use windows::Win32::System::Com::{
-        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
-        CoUninitialize, IPersistFile,
-    };
     use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
     use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
@@ -612,7 +646,11 @@ fn ensure_windows_notification_shortcut(
     };
 
     let shortcut_path = windows_notification_shortcut_path(display_name)?;
-    let legacy_shortcut_path = windows_notification_shortcut_path(app_id)?;
+    if shortcut_path.exists() && !force_update {
+        return Ok(());
+    }
+
+    let app_id_shortcut_path = windows_notification_shortcut_path(app_id)?;
     if let Some(parent) = shortcut_path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             NotificationError::Backend(format!(
@@ -620,8 +658,8 @@ fn ensure_windows_notification_shortcut(
             ))
         })?;
     }
-    if legacy_shortcut_path != shortcut_path && legacy_shortcut_path.exists() {
-        let _ = fs::remove_file(&legacy_shortcut_path);
+    if app_id_shortcut_path != shortcut_path && app_id_shortcut_path.exists() {
+        let _ = fs::remove_file(&app_id_shortcut_path);
     }
 
     let exe_path = env::current_exe().map_err(|error| {
@@ -672,10 +710,11 @@ fn ensure_windows_notification_shortcut(
 #[cfg(target_os = "windows")]
 fn windows_notification_shortcut_path(shortcut_name: &str) -> Result<PathBuf, NotificationError> {
     use windows::Win32::System::Com::CoTaskMemFree;
-    use windows::Win32::UI::Shell::{FOLDERID_Programs, KNOWN_FOLDER_FLAG, SHGetKnownFolderPath};
+    use windows::Win32::UI::Shell::{FOLDERID_Programs, SHGetKnownFolderPath, KNOWN_FOLDER_FLAG};
 
     let programs_dir = unsafe {
-        SHGetKnownFolderPath(&FOLDERID_Programs, KNOWN_FOLDER_FLAG(0), None).map_err(windows_error)?
+        SHGetKnownFolderPath(&FOLDERID_Programs, KNOWN_FOLDER_FLAG(0), None)
+            .map_err(windows_error)?
     };
     let programs_path = unsafe { programs_dir.to_string() }.map_err(|error| {
         NotificationError::Backend(format!(
@@ -686,9 +725,10 @@ fn windows_notification_shortcut_path(shortcut_name: &str) -> Result<PathBuf, No
         CoTaskMemFree(Some(programs_dir.0 as _));
     }
 
-    Ok(PathBuf::from(programs_path)
-        .join("tgui")
-        .join(format!("{}.lnk", sanitize_windows_shortcut_file_name(shortcut_name))))
+    Ok(PathBuf::from(programs_path).join("tgui").join(format!(
+        "{}.lnk",
+        sanitize_windows_shortcut_file_name(shortcut_name)
+    )))
 }
 
 fn sanitize_windows_shortcut_file_name(app_id: &str) -> String {

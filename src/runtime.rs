@@ -14,6 +14,8 @@ use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewM
 use crate::foundation::window_control::{WindowControl, WindowRequest, WindowRequestQueue};
 use crate::log::Log;
 use crate::media::MediaManager;
+#[cfg(target_os = "windows")]
+use crate::notification::prepare_platform_notifications;
 use crate::notification::{
     async_notification_channel, AsyncNotificationDispatcher, AsyncNotificationReceiver,
     Notifications,
@@ -183,6 +185,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
     }
 
     pub fn run(self) -> Result<(), TguiError> {
+        prepare_notifications_for_runtime(&self.config);
         if self.windows.is_some() {
             let (mut event_loop, mut handler) = self.into_parts();
             event_loop.run_app_on_demand(&mut handler)?;
@@ -271,6 +274,18 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             self.android_app,
         );
         (self.event_loop, handler)
+    }
+}
+
+fn prepare_notifications_for_runtime(config: &ApplicationConfig) {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(app_id) = config.app_id.as_deref() {
+            if let Err(error) = prepare_platform_notifications(Some(app_id), &config.title) {
+                Log::with_tag("tgui-runtime")
+                    .warn(format!("failed to prepare Windows notifications: {error}"));
+            }
+        }
     }
 }
 
