@@ -145,6 +145,7 @@ pub mod logging {
 pub mod mvvm {
     pub use crate::foundation::binding::{Binding, Observable, ViewModelContext};
     pub use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
+    pub use crate::foundation::window_control::{WindowControl, WindowResizeDirection};
 }
 
 /// Convenient imports for small applications and examples.
@@ -174,6 +175,7 @@ pub mod prelude {
     pub use crate::media::{ContentFit, MediaBytes, MediaSource};
     pub use crate::mvvm::{
         Binding, Command, CommandContext, Observable, ValueCommand, ViewModel, ViewModelContext,
+        WindowControl, WindowResizeDirection,
     };
     pub use crate::theme::{
         BorderScale, CheckboxStyle, CheckboxTheme, ColorScheme, ComponentTheme, ElevationScale,

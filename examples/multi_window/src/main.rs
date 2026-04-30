@@ -157,12 +157,10 @@ impl MultiWindowVm {
             .child(
                 Flex::new(Axis::Vertical)
                     .gap(dp(12.0))
-                    .child(
+                    .child(el![
                         Text::new(self.document_title(id))
                             .font_size(sp(26.0))
                             .color(Color::hexa(0xF8FAFCFF)),
-                    )
-                    .child(
                         Text::new(
                             self.documents
                                 .binding()
@@ -170,28 +168,30 @@ impl MultiWindowVm {
                         )
                         .font_size(sp(15.0))
                         .color(Color::hexa(0x93C5FDFF)),
-                    )
-                    .child(
                         Text::new(
                             "Each document window owns its own renderer, focus state, scroll state, and animation state, but still reads from the same shared view model.",
                         )
                         .font_size(sp(14.0))
                         .color(Color::hexa(0xCBD5E1FF)),
-                    ),
+                        Button::new(Text::new("Close"))
+                            .danger()
+                            .border_radius(dp(12.0))
+                            .on_click(Command::new_with_context(|_, context| {
+                                context.window().close()
+                            })),
+                    ])
             )
             .into()
     }
 
     fn windows(&self) -> Vec<WindowSpec<Self>> {
-        let mut windows = vec![
-            WindowSpec::main("main")
-                .title("tgui multi-window")
-                .window_size(dp(980.0), dp(700.0))
-                .min_window_size(dp(760.0), dp(520.0))
-                .max_window_size(dp(1280.0), dp(900.0))
-                .bind_title(Self::main_title)
-                .root_view(Self::main_view),
-        ];
+        let mut windows = vec![WindowSpec::main("main")
+            .title("tgui multi-window")
+            .window_size(dp(980.0), dp(700.0))
+            .min_window_size(dp(760.0), dp(520.0))
+            .max_window_size(dp(1280.0), dp(900.0))
+            .bind_title(Self::main_title)
+            .root_view(Self::main_view)];
 
         if self.inspector_open.get() {
             windows.push(

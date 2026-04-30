@@ -1,4 +1,4 @@
 interface:
   display_name: "TGUI Developer"
-  short_description: "Build and maintain the tgui Rust GUI crate"
+  short_description: "Build and maintain tgui, including MVVM, widgets, rendering, and window controls"
   default_prompt: "Use $tgui-developer to implement or review a tgui framework change."

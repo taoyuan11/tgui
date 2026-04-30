@@ -164,13 +164,7 @@ impl Renderer {
         let size = window.surface_size();
         let instance = create_instance(clear_color);
         let surface = create_surface(&instance, window.clone())?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: adapter_power_preference(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
-            .await?;
+        let adapter = request_adapter(&instance, &surface, clear_color).await?;
         let required_limits = required_device_limits(&adapter);
 
         let (device, queue) = adapter
@@ -193,7 +187,7 @@ impl Renderer {
             .or_else(|| caps.formats.first().copied())
             .ok_or(TguiError::NoSurfaceFormat)?;
 
-        let alpha_mode = surface_alpha_mode(&caps.alpha_modes);
+        let alpha_mode = surface_alpha_mode(&caps.alpha_modes, clear_color);
         let msaa_sample_count = surface_msaa_sample_count(&adapter, format);
 
         let config = wgpu::SurfaceConfiguration {
@@ -520,7 +514,7 @@ impl Renderer {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -2137,6 +2131,13 @@ fn scale_gradient_pair(mut pair: [f32; 4], scale_factor: f32) -> [f32; 4] {
 fn instance_descriptor(clear_color: TguiColor) -> wgpu::InstanceDescriptor {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = instance_backends(clear_color);
+    #[cfg(target_os = "windows")]
+    {
+        if clear_color.a < 255 {
+            descriptor.backend_options.dx12.presentation_system =
+                wgpu::Dx12SwapchainKind::DxgiFromVisual;
+        }
+    }
     #[cfg(all(target_os = "android", feature = "android"))]
     {
         descriptor.flags = wgpu::InstanceFlags::empty();
@@ -2148,6 +2149,34 @@ fn instance_descriptor(clear_color: TguiColor) -> wgpu::InstanceDescriptor {
 fn create_instance(clear_color: TguiColor) -> wgpu::Instance {
     let descriptor = instance_descriptor(clear_color);
     wgpu::Instance::new(descriptor)
+}
+
+async fn request_adapter(
+    instance: &wgpu::Instance,
+    surface: &wgpu::Surface<'_>,
+    clear_color: TguiColor,
+) -> Result<wgpu::Adapter, TguiError> {
+    #[cfg(target_os = "windows")]
+    {
+        if clear_color.a < 255 {
+            if let Some(adapter) = instance
+                .enumerate_adapters(wgpu::Backends::DX12)
+                .await
+                .into_iter()
+                .find(|adapter| adapter.is_surface_supported(surface))
+            {
+                return Ok(adapter);
+            }
+        }
+    }
+
+    Ok(instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: adapter_power_preference(),
+            compatible_surface: Some(surface),
+            force_fallback_adapter: false,
+        })
+        .await?)
 }
 
 fn create_surface(
@@ -2285,7 +2314,7 @@ fn instance_backends(_clear_color: TguiColor) -> wgpu::Backends {
     #[cfg(target_os = "windows")]
     {
         if _clear_color.a < 255 {
-            return wgpu::Backends::PRIMARY;
+            return wgpu::Backends::DX12;
         }
     }
 
@@ -2373,7 +2402,10 @@ fn surface_present_mode(modes: &[wgpu::PresentMode]) -> wgpu::PresentMode {
     }
 }
 
-fn surface_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::CompositeAlphaMode {
+fn surface_alpha_mode(
+    modes: &[wgpu::CompositeAlphaMode],
+    clear_color: TguiColor,
+) -> wgpu::CompositeAlphaMode {
     #[cfg(all(target_env = "ohos", feature = "ohos"))]
     {
         return modes
@@ -2385,12 +2417,44 @@ fn surface_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::CompositeAlph
 
     #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
     {
+        if clear_color.a < 255 {
+            return transparent_surface_alpha_mode(modes);
+        }
+
         modes
             .iter()
             .copied()
-            .find(|mode| *mode != wgpu::CompositeAlphaMode::Opaque)
+            .find(|mode| *mode == wgpu::CompositeAlphaMode::Opaque)
             .unwrap_or(wgpu::CompositeAlphaMode::Auto)
     }
+}
+
+fn transparent_surface_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::CompositeAlphaMode {
+    #[cfg(target_os = "macos")]
+    const PREFERRED: &[wgpu::CompositeAlphaMode] = &[
+        wgpu::CompositeAlphaMode::PostMultiplied,
+        wgpu::CompositeAlphaMode::PreMultiplied,
+        wgpu::CompositeAlphaMode::Inherit,
+    ];
+
+    #[cfg(not(target_os = "macos"))]
+    const PREFERRED: &[wgpu::CompositeAlphaMode] = &[
+        wgpu::CompositeAlphaMode::PreMultiplied,
+        wgpu::CompositeAlphaMode::PostMultiplied,
+        wgpu::CompositeAlphaMode::Inherit,
+    ];
+
+    PREFERRED
+        .iter()
+        .copied()
+        .find(|mode| modes.contains(mode))
+        .or_else(|| {
+            modes
+                .iter()
+                .copied()
+                .find(|mode| *mode != wgpu::CompositeAlphaMode::Opaque)
+        })
+        .unwrap_or(wgpu::CompositeAlphaMode::Auto)
 }
 
 fn surface_clear_color(color: TguiColor) -> wgpu::Color {
