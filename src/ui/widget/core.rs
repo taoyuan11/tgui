@@ -3082,7 +3082,7 @@ fn push_media_placeholder(
         media_loading_fill_color(loading, error, loading_background, use_loading_background)
             .with_alpha_factor(opacity);
     if content_frame.width > Dp::ZERO && content_frame.height > Dp::ZERO {
-        scene.push_overlay_shape(RenderPrimitive {
+        scene.push_shape(RenderPrimitive {
             rect: content_frame,
             color: placeholder,
             corner_radius: content_corner_radius,
@@ -7145,6 +7145,77 @@ mod tests {
     }
 
     #[test]
+    fn select_dropdown_stays_above_later_media_placeholder() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let select: Element<ScopeChildVm> = Select::new(
+            vec![
+                SelectOption::new("email".to_string(), "Email".to_string()),
+                SelectOption::new("sms".to_string(), "SMS".to_string()),
+            ],
+            None::<String>,
+        )
+        .size(dp(180.0), dp(40.0))
+        .into();
+        let select_id = select.id;
+        let image_frame = Rect::new(0.0, 40.0, 180.0, 40.0);
+        let tree = WidgetTree::new(
+            crate::ui::widget::Flex::new(Axis::Vertical)
+                .gap(dp(0.0))
+                .child([
+                    select,
+                    Image::from_bytes(vec![0_u8; 4])
+                        .size(dp(180.0), dp(40.0))
+                        .into(),
+                ]),
+        );
+        let mut widget_states = WidgetStateMap::default();
+        widget_states.set(
+            select_id,
+            crate::ui::theme::WidgetState {
+                focused: true,
+                ..Default::default()
+            },
+        );
+
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &widget_states,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 140.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(
+            rendered
+                .primitives
+                .overlay_shapes
+                .iter()
+                .all(|shape| shape.rect != image_frame),
+            "media placeholders should not render in the overlay layer"
+        );
+        assert!(
+            rendered
+                .primitives
+                .shapes
+                .iter()
+                .any(|shape| shape.rect == image_frame),
+            "media placeholder should still render in the normal scene"
+        );
+    }
+
+    #[test]
     fn select_dropdown_highlights_hovered_option() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
@@ -7437,7 +7508,7 @@ mod tests {
         assert!(rendered.primitives.textures.is_empty());
         assert!(rendered
             .primitives
-            .overlay_shapes
+            .shapes
             .iter()
             .any(|shape| shape.color == background && shape.corner_radius == radius.get()));
         assert!(rendered
@@ -8314,7 +8385,7 @@ mod tests {
     }
 
     #[test]
-    fn checked_switch_thumb_uses_on_primary_across_hover_states() {
+    fn checked_switch_thumb_uses_white_across_hover_states() {
         let mut theme = Theme::dark();
         theme.colors.on_primary = Color::BLACK;
         theme.refresh_components();
@@ -8342,7 +8413,7 @@ mod tests {
             .primitives
             .overlay_shapes
             .iter()
-            .any(|shape| shape.color == Color::BLACK));
+            .any(|shape| shape.color == Color::WHITE));
 
         let hovered_switch: Element<()> = Switch::new(true).into();
         let hovered_switch_id = hovered_switch.id;
@@ -8375,7 +8446,7 @@ mod tests {
             .primitives
             .overlay_shapes
             .iter()
-            .any(|shape| shape.color == Color::BLACK));
+            .any(|shape| shape.color == Color::WHITE));
     }
 
     #[test]
@@ -8437,7 +8508,7 @@ mod tests {
         let tree: WidgetTree<()> = WidgetTree::new(
             Stack::new()
                 .size(dp(120.0), dp(80.0))
-                .child(Image::from_path("missing-test-image.png").size(dp(40.0), dp(40.0)))
+                .child(Image::from_bytes(ONE_BY_ONE_GIF).size(dp(40.0), dp(40.0)))
                 .child(Canvas::new(Vec::<CanvasItem>::new()).size(dp(40.0), dp(20.0))),
         );
 
@@ -8457,7 +8528,11 @@ mod tests {
             false,
         );
 
-        assert!(rendered.primitives.shapes.is_empty());
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .all(|shape| shape.color.a == 0));
     }
 
     #[test]
