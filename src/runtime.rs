@@ -14,6 +14,10 @@ use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewM
 use crate::foundation::window_control::{WindowControl, WindowRequest, WindowRequestQueue};
 use crate::log::Log;
 use crate::media::MediaManager;
+use crate::notification::{
+    async_notification_channel, AsyncNotificationDispatcher, AsyncNotificationReceiver,
+    Notifications,
+};
 #[cfg(all(target_os = "android", feature = "android"))]
 use crate::platform::android::activity::ndk::configuration::UiModeNight;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -209,6 +213,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
         animations: AnimationCoordinator,
     ) -> BoundRuntimeHandler<VM> {
         let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
+        let (notification_dispatcher, notification_receiver) = async_notification_channel();
         BoundRuntimeHandler::new(
             "main".to_string(),
             1,
@@ -222,6 +227,8 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             animations,
             dialog_dispatcher,
             Some(dialog_receiver),
+            notification_dispatcher,
+            Some(notification_receiver),
             #[cfg(all(target_os = "android", feature = "android"))]
             None,
         )
@@ -244,6 +251,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             .single_window
             .expect("single-window runtime requires a window definition");
         let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
+        let (notification_dispatcher, notification_receiver) = async_notification_channel();
         let handler = BoundRuntimeHandler::new(
             single_window.key,
             1,
@@ -257,6 +265,8 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             self.animations,
             dialog_dispatcher,
             Some(dialog_receiver),
+            notification_dispatcher,
+            Some(notification_receiver),
             #[cfg(all(target_os = "android", feature = "android"))]
             self.android_app,
         );
@@ -361,6 +371,8 @@ pub struct BoundRuntimeHandler<VM> {
     error: Option<TguiError>,
     dialog_dispatcher: AsyncDialogDispatcher<VM>,
     dialog_receiver: Option<AsyncDialogReceiver<VM>>,
+    notification_dispatcher: AsyncNotificationDispatcher<VM>,
+    notification_receiver: Option<AsyncNotificationReceiver<VM>>,
     #[cfg(all(target_os = "android", feature = "android"))]
     android_app: Option<AndroidApp>,
     #[cfg(all(target_os = "android", feature = "android"))]
@@ -585,6 +597,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         animations: AnimationCoordinator,
         dialog_dispatcher: AsyncDialogDispatcher<VM>,
         dialog_receiver: Option<AsyncDialogReceiver<VM>>,
+        notification_dispatcher: AsyncNotificationDispatcher<VM>,
+        notification_receiver: Option<AsyncNotificationReceiver<VM>>,
         #[cfg(all(target_os = "android", feature = "android"))] android_app: Option<AndroidApp>,
     ) -> Self {
         let font_manager = FontManager::new(&config.fonts);
@@ -642,6 +656,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             error: None,
             dialog_dispatcher,
             dialog_receiver,
+            notification_dispatcher,
+            notification_receiver,
             #[cfg(all(target_os = "android", feature = "android"))]
             android_app,
             #[cfg(all(target_os = "android", feature = "android"))]
@@ -663,6 +679,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.window.as_ref(),
                 self.dialog_dispatcher.clone(),
             ),
+            Notifications::from_runtime(
+                self.window_key.clone(),
+                self.window_instance_id,
+                self.config.app_id.clone(),
+                self.notification_dispatcher.clone(),
+            ),
             WindowControl::new(self.window_requests.clone(), move || {
                 window
                     .as_ref()
@@ -675,6 +697,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn set_dialog_proxy(&self, event_loop: &dyn ActiveEventLoop) {
         self.dialog_dispatcher.set_proxy(event_loop.create_proxy());
+        self.notification_dispatcher
+            .set_proxy(event_loop.create_proxy());
         self.invalidation.set_proxy(event_loop.create_proxy());
     }
 
@@ -792,6 +816,34 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn drain_dialog_completions(&mut self) -> bool {
         let completions: Vec<_> = self
             .dialog_receiver
+            .as_ref()
+            .map(|receiver| receiver.try_iter().collect())
+            .unwrap_or_default();
+
+        if completions.is_empty() {
+            return false;
+        }
+
+        for completion in completions {
+            if completion.window_instance_id != self.window_instance_id {
+                continue;
+            }
+            let context = self.command_context();
+            self.with_view_model(|view_model| (completion.callback)(view_model, &context));
+            self.invalidate_scene();
+            self.invalidation.mark_dirty();
+        }
+
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+
+        true
+    }
+
+    fn drain_notification_completions(&mut self) -> bool {
+        let completions: Vec<_> = self
+            .notification_receiver
             .as_ref()
             .map(|receiver| receiver.try_iter().collect())
             .unwrap_or_default();
@@ -3546,6 +3598,8 @@ struct MultiWindowHandler<VM> {
     animations: AnimationCoordinator,
     dialog_dispatcher: AsyncDialogDispatcher<VM>,
     dialog_receiver: AsyncDialogReceiver<VM>,
+    notification_dispatcher: AsyncNotificationDispatcher<VM>,
+    notification_receiver: AsyncNotificationReceiver<VM>,
     next_window_instance_id: u64,
     windows_by_key: HashMap<String, BoundRuntimeHandler<VM>>,
     window_keys_by_id: HashMap<WindowId, String>,
@@ -3565,6 +3619,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
         animations: AnimationCoordinator,
     ) -> Self {
         let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
+        let (notification_dispatcher, notification_receiver) = async_notification_channel();
         Self {
             config,
             view_model,
@@ -3573,6 +3628,8 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
             animations,
             dialog_dispatcher,
             dialog_receiver,
+            notification_dispatcher,
+            notification_receiver,
             next_window_instance_id: 1,
             windows_by_key: HashMap::new(),
             window_keys_by_id: HashMap::new(),
@@ -3598,11 +3655,33 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
 
     fn set_dialog_proxy(&self, event_loop: &dyn ActiveEventLoop) {
         self.dialog_dispatcher.set_proxy(event_loop.create_proxy());
+        self.notification_dispatcher
+            .set_proxy(event_loop.create_proxy());
         self.invalidation.set_proxy(event_loop.create_proxy());
     }
 
     fn drain_dialog_completions(&mut self) {
         let completions: Vec<_> = self.dialog_receiver.try_iter().collect();
+        for completion in completions {
+            let Some(window) = self.windows_by_key.get_mut(&completion.window_key) else {
+                continue;
+            };
+            if completion.window_instance_id != window.window_instance_id {
+                continue;
+            }
+
+            let context = window.command_context();
+            window.with_view_model(|view_model| (completion.callback)(view_model, &context));
+            window.invalidate_scene();
+            self.invalidation.mark_dirty();
+            if let Some(native_window) = window.window.as_ref() {
+                native_window.request_redraw();
+            }
+        }
+    }
+
+    fn drain_notification_completions(&mut self) {
+        let completions: Vec<_> = self.notification_receiver.try_iter().collect();
         for completion in completions {
             let Some(window) = self.windows_by_key.get_mut(&completion.window_key) else {
                 continue;
@@ -3754,6 +3833,8 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
                     self.animations.clone(),
                     self.dialog_dispatcher.clone(),
                     None,
+                    self.notification_dispatcher.clone(),
+                    None,
                     #[cfg(all(target_os = "android", feature = "android"))]
                     None,
                 );
@@ -3808,6 +3889,7 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
 
     fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.drain_dialog_completions();
+        self.drain_notification_completions();
     }
 
     fn window_event(
@@ -3870,6 +3952,7 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
         }
 
         self.drain_dialog_completions();
+        self.drain_notification_completions();
         self.sync_windows(event_loop, false);
         if self.error.is_some() {
             return;
@@ -3928,6 +4011,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
 
     fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.drain_dialog_completions();
+        self.drain_notification_completions();
         if self.drain_window_requests() {
             event_loop.exit();
         }
@@ -3950,6 +4034,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
 
     fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.drain_dialog_completions();
+        self.drain_notification_completions();
         if self.handle_bound_about_to_wait(event_loop) {
             event_loop.exit();
         }
@@ -4564,6 +4649,7 @@ mod tests {
 
     #[cfg(feature = "video")]
     use crate::media::TextureFrame;
+    use crate::notification::async_notification_channel;
     #[cfg(feature = "video")]
     use crate::video::backend::{
         BackendSharedState, VideoBackend, DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
@@ -4594,6 +4680,7 @@ mod tests {
 
     fn test_config() -> ApplicationConfig {
         ApplicationConfig {
+            app_id: None,
             title: "test".to_string(),
             size: LogicalSize::new(200.0, 120.0),
             min_size: None,
@@ -4611,6 +4698,7 @@ mod tests {
 
     fn test_config_with_theme(theme: ThemeSelection, theme_set: ThemeSet) -> ApplicationConfig {
         ApplicationConfig {
+            app_id: None,
             title: "test".to_string(),
             size: LogicalSize::new(200.0, 120.0),
             min_size: None,
@@ -4648,6 +4736,7 @@ mod tests {
         config: ApplicationConfig,
     ) -> BoundRuntimeHandler<VM> {
         let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
+        let (notification_dispatcher, notification_receiver) = async_notification_channel();
         BoundRuntimeHandler::new(
             "test".to_string(),
             1,
@@ -4661,6 +4750,8 @@ mod tests {
             AnimationCoordinator::default(),
             dialog_dispatcher,
             Some(dialog_receiver),
+            notification_dispatcher,
+            Some(notification_receiver),
             #[cfg(all(target_os = "android", feature = "android"))]
             None,
         )
