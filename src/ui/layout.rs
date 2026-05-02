@@ -87,6 +87,42 @@ impl Insets {
             bottom: vertical,
         }
     }
+
+    pub fn top(value: Dp) -> Self {
+        Self {
+            left: Dp::ZERO,
+            top: value,
+            right: Dp::ZERO,
+            bottom: Dp::ZERO,
+        }
+    }
+
+    pub fn bottom(value: Dp) -> Self {
+        Self {
+            left: Dp::ZERO,
+            top: Dp::ZERO,
+            right: Dp::ZERO,
+            bottom: value,
+        }
+    }
+
+    pub fn right(value: Dp) -> Self {
+        Self {
+            left: Dp::ZERO,
+            top: Dp::ZERO,
+            right: value,
+            bottom: Dp::ZERO,
+        }
+    }
+
+    pub fn left(value: Dp) -> Self {
+        Self {
+            left: value,
+            top: Dp::ZERO,
+            right: Dp::ZERO,
+            bottom: Dp::ZERO,
+        }
+    }
 }
 
 impl Default for Insets {

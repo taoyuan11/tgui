@@ -1070,6 +1070,7 @@ fn build_mesh_primitive(
         vertices: Arc::from(vertices),
         triangles: Arc::from(triangles),
         clip_rect,
+        clip_mask: None,
     })
 }
 
@@ -1296,6 +1297,7 @@ fn shadow_texture_for_path(
         frame,
         corner_radius: 0.0,
         clip_rect,
+        clip_mask: None,
     })
 }
 

@@ -15,8 +15,8 @@ use crate::platform::dpi::PhysicalSize;
 use crate::text::font::{FontCatalog, FontWeight};
 use crate::ui::unit::Dp;
 use crate::ui::widget::{
-    BackdropBlurPrimitive, BrushPrimitiveData, MeshVertex as SceneMeshVertex, Rect, RenderCommand,
-    RenderPrimitive, ScenePrimitives, TextPrimitive,
+    BackdropBlurPrimitive, BrushPrimitiveData, ClipMask, MeshVertex as SceneMeshVertex, Rect,
+    RenderCommand, RenderPrimitive, ScenePrimitives, TextPrimitive,
 };
 
 pub enum RenderStatus {
@@ -785,6 +785,7 @@ impl Renderer {
                         logical_width,
                         logical_height,
                         primitive.corner_radius,
+                        primitive.clip_mask,
                     );
                     let composite_buffer =
                         self.device
@@ -884,6 +885,7 @@ impl Renderer {
                             logical_width,
                             logical_height,
                             texture.corner_radius,
+                            texture.clip_mask,
                             physical_width,
                             physical_height,
                             scale_factor,
@@ -910,6 +912,7 @@ impl Renderer {
                             logical_width,
                             logical_height,
                             0.0,
+                            text.clip_mask,
                             physical_width,
                             physical_height,
                             scale_factor,
@@ -1141,6 +1144,7 @@ impl Renderer {
             self.config.width as f32 / self.scale_factor,
             self.config.height as f32 / self.scale_factor,
             0.0,
+            None,
             self.config.width as f32,
             self.config.height as f32,
             1.0,
@@ -1345,6 +1349,7 @@ impl Renderer {
             self.config.width as f32 / self.scale_factor,
             self.config.height as f32 / self.scale_factor,
             0.0,
+            None,
             self.config.width as f32,
             self.config.height as f32,
             1.0,
@@ -1685,6 +1690,75 @@ fn blend_pixel(pixels: &mut [u8], width: u32, x: u32, y: u32, src: [u8; 4]) {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+struct ClipMaskVertexData {
+    clip_local_position: [f32; 2],
+    clip_rect_size: [f32; 2],
+    clip_corner_radius: f32,
+    clip_enabled: f32,
+}
+
+fn physical_clip_mask_data(
+    clip_mask: Option<ClipMask>,
+    rect_origin_physical: [f32; 2],
+    local_position: [f32; 2],
+    scale_factor: f32,
+) -> ClipMaskVertexData {
+    clip_mask
+        .map(|clip_mask| {
+            let rect = clip_mask.rect;
+            let clip_origin = [rect.x.get() * scale_factor, rect.y.get() * scale_factor];
+            let clip_rect_size = [
+                rect.width.max(0.0).get() * scale_factor,
+                rect.height.max(0.0).get() * scale_factor,
+            ];
+            let clip_corner_radius = (clip_mask.corner_radius.max(0.0) * scale_factor)
+                .min(clip_rect_size[0] * 0.5)
+                .min(clip_rect_size[1] * 0.5);
+            ClipMaskVertexData {
+                clip_local_position: [
+                    rect_origin_physical[0] - clip_origin[0] + local_position[0],
+                    rect_origin_physical[1] - clip_origin[1] + local_position[1],
+                ],
+                clip_rect_size,
+                clip_corner_radius,
+                clip_enabled: 1.0,
+            }
+        })
+        .unwrap_or(ClipMaskVertexData {
+            clip_local_position: [0.0, 0.0],
+            clip_rect_size: [0.0, 0.0],
+            clip_corner_radius: 0.0,
+            clip_enabled: 0.0,
+        })
+}
+
+fn logical_clip_mask_data(clip_mask: Option<ClipMask>, position: [f32; 2]) -> ClipMaskVertexData {
+    clip_mask
+        .map(|clip_mask| {
+            let rect = clip_mask.rect;
+            let clip_rect_size = [rect.width.max(0.0).get(), rect.height.max(0.0).get()];
+            let clip_corner_radius = clip_mask
+                .corner_radius
+                .max(0.0)
+                .min(clip_rect_size[0] * 0.5)
+                .min(clip_rect_size[1] * 0.5);
+            ClipMaskVertexData {
+                clip_local_position: [position[0] - rect.x.get(), position[1] - rect.y.get()],
+                clip_rect_size,
+                clip_corner_radius,
+                clip_enabled: 1.0,
+            }
+        })
+        .unwrap_or(ClipMaskVertexData {
+            clip_local_position: [0.0, 0.0],
+            clip_rect_size: [0.0, 0.0],
+            clip_corner_radius: 0.0,
+            clip_enabled: 0.0,
+        })
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 struct RectVertex {
     position: [f32; 2],
     color: [f32; 4],
@@ -1692,55 +1766,30 @@ struct RectVertex {
     rect_size: [f32; 2],
     corner_radius: f32,
     stroke_width: f32,
+    clip_local_position: [f32; 2],
+    clip_rect_size: [f32; 2],
+    clip_corner_radius: f32,
+    clip_enabled: f32,
 }
 
 impl RectVertex {
     fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        const ATTRIBUTES: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
+            0 => Float32x2,
+            1 => Float32x4,
+            2 => Float32x2,
+            3 => Float32x2,
+            4 => Float32,
+            5 => Float32,
+            6 => Float32x2,
+            7 => Float32x2,
+            8 => Float32,
+            9 => Float32
+        ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: std::mem::size_of::<[f32; 2]>() as u64,
-                    shader_location: 1,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: (std::mem::size_of::<[f32; 2]>() + std::mem::size_of::<[f32; 4]>())
-                        as u64,
-                    shader_location: 2,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: (std::mem::size_of::<[f32; 2]>()
-                        + std::mem::size_of::<[f32; 4]>()
-                        + std::mem::size_of::<[f32; 2]>()) as u64,
-                    shader_location: 3,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32,
-                    offset: (std::mem::size_of::<[f32; 2]>()
-                        + std::mem::size_of::<[f32; 4]>()
-                        + std::mem::size_of::<[f32; 2]>()
-                        + std::mem::size_of::<[f32; 2]>()) as u64,
-                    shader_location: 4,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32,
-                    offset: (std::mem::size_of::<[f32; 2]>()
-                        + std::mem::size_of::<[f32; 4]>()
-                        + std::mem::size_of::<[f32; 2]>()
-                        + std::mem::size_of::<[f32; 2]>()
-                        + std::mem::size_of::<f32>()) as u64,
-                    shader_location: 5,
-                },
-            ],
+            attributes: &ATTRIBUTES,
         }
     }
 
@@ -1766,56 +1815,36 @@ impl RectVertex {
         let stroke_width = (primitive.stroke_width.max(0.0) * scale_factor)
             .min(rect_size[0] * 0.5)
             .min(rect_size[1] * 0.5);
+        let rect_origin = [rect_x, rect_y];
+
+        let build = |position: [f32; 2], local_position: [f32; 2]| {
+            let clip_mask = physical_clip_mask_data(
+                primitive.clip_mask,
+                rect_origin,
+                local_position,
+                scale_factor,
+            );
+            Self {
+                position,
+                color,
+                local_position,
+                rect_size,
+                corner_radius: radius,
+                stroke_width,
+                clip_local_position: clip_mask.clip_local_position,
+                clip_rect_size: clip_mask.clip_rect_size,
+                clip_corner_radius: clip_mask.clip_corner_radius,
+                clip_enabled: clip_mask.clip_enabled,
+            }
+        };
 
         [
-            Self {
-                position: [x0, y0],
-                color,
-                local_position: [0.0, 0.0],
-                rect_size,
-                corner_radius: radius,
-                stroke_width,
-            },
-            Self {
-                position: [x1, y0],
-                color,
-                local_position: [rect_size[0], 0.0],
-                rect_size,
-                corner_radius: radius,
-                stroke_width,
-            },
-            Self {
-                position: [x1, y1],
-                color,
-                local_position: [rect_size[0], rect_size[1]],
-                rect_size,
-                corner_radius: radius,
-                stroke_width,
-            },
-            Self {
-                position: [x0, y0],
-                color,
-                local_position: [0.0, 0.0],
-                rect_size,
-                corner_radius: radius,
-                stroke_width,
-            },
-            Self {
-                position: [x1, y1],
-                color,
-                local_position: [rect_size[0], rect_size[1]],
-                rect_size,
-                corner_radius: radius,
-                stroke_width,
-            },
-            Self {
-                position: [x0, y1],
-                color,
-                local_position: [0.0, rect_size[1]],
-                rect_size,
-                corner_radius: radius,
-                stroke_width,
-            },
+            build([x0, y0], [0.0, 0.0]),
+            build([x1, y0], [rect_size[0], 0.0]),
+            build([x1, y1], [rect_size[0], rect_size[1]]),
+            build([x0, y0], [0.0, 0.0]),
+            build([x1, y1], [rect_size[0], rect_size[1]]),
+            build([x0, y1], [0.0, rect_size[1]]),
         ]
     }
 }
@@ -1842,98 +1871,27 @@ struct MeshVertex {
 
 impl MeshVertex {
     fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        const ATTRIBUTES: [wgpu::VertexAttribute; 15] = wgpu::vertex_attr_array![
+            0 => Float32x2,
+            1 => Float32x2,
+            2 => Float32x4,
+            3 => Float32x4,
+            4 => Float32x4,
+            5 => Float32x4,
+            6 => Float32x4,
+            7 => Float32x4,
+            8 => Float32x4,
+            9 => Float32x4,
+            10 => Float32x4,
+            11 => Float32x4,
+            12 => Float32x4,
+            13 => Float32x4,
+            14 => Float32x4
+        ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: std::mem::size_of::<[f32; 2]>() as u64,
-                    shader_location: 1,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2) as u64,
-                    shader_location: 2,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2 + std::mem::size_of::<[f32; 4]>())
-                        as u64,
-                    shader_location: 3,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2
-                        + std::mem::size_of::<[f32; 4]>() * 2) as u64,
-                    shader_location: 4,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2
-                        + std::mem::size_of::<[f32; 4]>() * 3) as u64,
-                    shader_location: 5,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2
-                        + std::mem::size_of::<[f32; 4]>() * 4) as u64,
-                    shader_location: 6,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2
-                        + std::mem::size_of::<[f32; 4]>() * 5) as u64,
-                    shader_location: 7,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2
-                        + std::mem::size_of::<[f32; 4]>() * 6) as u64,
-                    shader_location: 8,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2
-                        + std::mem::size_of::<[f32; 4]>() * 7) as u64,
-                    shader_location: 9,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2
-                        + std::mem::size_of::<[f32; 4]>() * 8) as u64,
-                    shader_location: 10,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2
-                        + std::mem::size_of::<[f32; 4]>() * 9) as u64,
-                    shader_location: 11,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2
-                        + std::mem::size_of::<[f32; 4]>() * 10) as u64,
-                    shader_location: 12,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2
-                        + std::mem::size_of::<[f32; 4]>() * 11) as u64,
-                    shader_location: 13,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2
-                        + std::mem::size_of::<[f32; 4]>() * 12) as u64,
-                    shader_location: 14,
-                },
-            ],
+            attributes: &ATTRIBUTES,
         }
     }
 
@@ -2067,16 +2025,24 @@ struct CompositeVertex {
     local_position: [f32; 2],
     rect_size: [f32; 2],
     corner_radius: f32,
+    clip_local_position: [f32; 2],
+    clip_rect_size: [f32; 2],
+    clip_corner_radius: f32,
+    clip_enabled: f32,
 }
 
 impl CompositeVertex {
     fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
-        const ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+        const ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
             0 => Float32x2,
             1 => Float32x2,
             2 => Float32x2,
             3 => Float32x2,
-            4 => Float32
+            4 => Float32,
+            5 => Float32x2,
+            6 => Float32x2,
+            7 => Float32,
+            8 => Float32
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as u64,
@@ -2085,7 +2051,13 @@ impl CompositeVertex {
         }
     }
 
-    fn quad(rect: Rect, width: f32, height: f32, corner_radius: f32) -> [Self; 6] {
+    fn quad(
+        rect: Rect,
+        width: f32,
+        height: f32,
+        corner_radius: f32,
+        clip_mask: Option<ClipMask>,
+    ) -> [Self; 6] {
         let rect_x = rect.x.get();
         let rect_y = rect.y.get();
         let rect_width = rect.width.get();
@@ -2100,13 +2072,27 @@ impl CompositeVertex {
         let uv_y1 = (rect_y + rect_height) / height;
         let rect_size = [rect_width, rect_height];
         let radius = corner_radius.min(rect_width * 0.5).min(rect_height * 0.5);
+        let rect_origin = [rect_x, rect_y];
 
-        let build = |position: [f32; 2], uv: [f32; 2], local_position: [f32; 2]| Self {
-            position,
-            uv,
-            local_position,
-            rect_size,
-            corner_radius: radius,
+        let build = |position: [f32; 2], uv: [f32; 2], local_position: [f32; 2]| {
+            let clip_mask = logical_clip_mask_data(
+                clip_mask,
+                [
+                    rect_origin[0] + local_position[0],
+                    rect_origin[1] + local_position[1],
+                ],
+            );
+            Self {
+                position,
+                uv,
+                local_position,
+                rect_size,
+                corner_radius: radius,
+                clip_local_position: clip_mask.clip_local_position,
+                clip_rect_size: clip_mask.clip_rect_size,
+                clip_corner_radius: clip_mask.clip_corner_radius,
+                clip_enabled: clip_mask.clip_enabled,
+            }
         };
 
         [
@@ -2481,41 +2467,29 @@ struct TextVertex {
     local_position: [f32; 2],
     rect_size: [f32; 2],
     corner_radius: f32,
-    _padding: f32,
+    clip_local_position: [f32; 2],
+    clip_rect_size: [f32; 2],
+    clip_corner_radius: f32,
+    clip_enabled: f32,
 }
 
 impl TextVertex {
     fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        const ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
+            0 => Float32x2,
+            1 => Float32x2,
+            2 => Float32x2,
+            3 => Float32x2,
+            4 => Float32,
+            5 => Float32x2,
+            6 => Float32x2,
+            7 => Float32,
+            8 => Float32
+        ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: std::mem::size_of::<[f32; 2]>() as u64,
-                    shader_location: 1,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 2) as u64,
-                    shader_location: 2,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 3) as u64,
-                    shader_location: 3,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32,
-                    offset: (std::mem::size_of::<[f32; 2]>() * 4) as u64,
-                    shader_location: 4,
-                },
-            ],
+            attributes: &ATTRIBUTES,
         }
     }
 
@@ -2524,8 +2498,9 @@ impl TextVertex {
         width: f32,
         height: f32,
         corner_radius: f32,
-        physical_width: f32,
-        physical_height: f32,
+        clip_mask: Option<ClipMask>,
+        _physical_width: f32,
+        _physical_height: f32,
         scale_factor: f32,
     ) -> [Self; 6] {
         let rect_x = rect.x.get();
@@ -2546,56 +2521,31 @@ impl TextVertex {
         let local_tr = [rect_size[0], 0.0];
         let local_br = [rect_size[0], rect_size[1]];
         let local_bl = [0.0, rect_size[1]];
+        let rect_origin = [rect_x * scale_factor, rect_y * scale_factor];
+
+        let build = |position: [f32; 2], uv: [f32; 2], local_position: [f32; 2]| {
+            let clip_mask =
+                physical_clip_mask_data(clip_mask, rect_origin, local_position, scale_factor);
+            Self {
+                position,
+                uv,
+                local_position,
+                rect_size,
+                corner_radius: radius,
+                clip_local_position: clip_mask.clip_local_position,
+                clip_rect_size: clip_mask.clip_rect_size,
+                clip_corner_radius: clip_mask.clip_corner_radius,
+                clip_enabled: clip_mask.clip_enabled,
+            }
+        };
 
         [
-            Self {
-                position: [x0, y0],
-                uv: [0.0, 0.0],
-                local_position: local_tl,
-                rect_size,
-                corner_radius: radius,
-                _padding: physical_width + physical_height - (physical_width + physical_height),
-            },
-            Self {
-                position: [x1, y0],
-                uv: [1.0, 0.0],
-                local_position: local_tr,
-                rect_size,
-                corner_radius: radius,
-                _padding: 0.0,
-            },
-            Self {
-                position: [x1, y1],
-                uv: [1.0, 1.0],
-                local_position: local_br,
-                rect_size,
-                corner_radius: radius,
-                _padding: 0.0,
-            },
-            Self {
-                position: [x0, y0],
-                uv: [0.0, 0.0],
-                local_position: local_tl,
-                rect_size,
-                corner_radius: radius,
-                _padding: 0.0,
-            },
-            Self {
-                position: [x1, y1],
-                uv: [1.0, 1.0],
-                local_position: local_br,
-                rect_size,
-                corner_radius: radius,
-                _padding: 0.0,
-            },
-            Self {
-                position: [x0, y1],
-                uv: [0.0, 1.0],
-                local_position: local_bl,
-                rect_size,
-                corner_radius: radius,
-                _padding: 0.0,
-            },
+            build([x0, y0], [0.0, 0.0], local_tl),
+            build([x1, y0], [1.0, 0.0], local_tr),
+            build([x1, y1], [1.0, 1.0], local_br),
+            build([x0, y0], [0.0, 0.0], local_tl),
+            build([x1, y1], [1.0, 1.0], local_br),
+            build([x0, y1], [0.0, 1.0], local_bl),
         ]
     }
 }

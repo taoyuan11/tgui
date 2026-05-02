@@ -5,6 +5,10 @@ struct VertexInput {
     @location(3) rect_size: vec2<f32>,
     @location(4) corner_radius: f32,
     @location(5) stroke_width: f32,
+    @location(6) clip_local_position: vec2<f32>,
+    @location(7) clip_rect_size: vec2<f32>,
+    @location(8) clip_corner_radius: f32,
+    @location(9) clip_enabled: f32,
 };
 
 struct VertexOutput {
@@ -14,6 +18,10 @@ struct VertexOutput {
     @location(2) rect_size: vec2<f32>,
     @location(3) corner_radius: f32,
     @location(4) stroke_width: f32,
+    @location(5) clip_local_position: vec2<f32>,
+    @location(6) clip_rect_size: vec2<f32>,
+    @location(7) clip_corner_radius: f32,
+    @location(8) clip_enabled: f32,
 };
 
 fn rounded_box_sdf(local_position: vec2<f32>, rect_size: vec2<f32>, radius: f32) -> f32 {
@@ -26,6 +34,20 @@ fn rounded_box_sdf(local_position: vec2<f32>, rect_size: vec2<f32>, radius: f32)
     return outside + inside - radius;
 }
 
+fn clip_mask_alpha(
+    local_position: vec2<f32>,
+    rect_size: vec2<f32>,
+    radius: f32,
+    enabled: f32,
+) -> f32 {
+    if enabled < 0.5 {
+        return 1.0;
+    }
+
+    let distance = rounded_box_sdf(local_position, rect_size, radius);
+    return clamp(0.5 - distance, 0.0, 1.0);
+}
+
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
@@ -35,6 +57,10 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.rect_size = input.rect_size;
     output.corner_radius = input.corner_radius;
     output.stroke_width = input.stroke_width;
+    output.clip_local_position = input.clip_local_position;
+    output.clip_rect_size = input.clip_rect_size;
+    output.clip_corner_radius = input.clip_corner_radius;
+    output.clip_enabled = input.clip_enabled;
     return output;
 }
 
@@ -53,5 +79,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         alpha = outer_alpha * inner_alpha;
     }
 
-    return vec4<f32>(input.color.rgb, input.color.a * alpha);
+    let clip_alpha = clip_mask_alpha(
+        input.clip_local_position,
+        input.clip_rect_size,
+        input.clip_corner_radius,
+        input.clip_enabled,
+    );
+
+    return vec4<f32>(input.color.rgb, input.color.a * alpha * clip_alpha);
 }

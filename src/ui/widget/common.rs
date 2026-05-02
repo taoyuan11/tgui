@@ -536,6 +536,7 @@ pub struct RenderPrimitive {
     pub corner_radius: f32,
     pub stroke_width: f32,
     pub clip_rect: Option<Rect>,
+    pub clip_mask: Option<ClipMask>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -544,6 +545,7 @@ pub struct BrushPrimitive {
     pub brush: BackgroundBrush,
     pub corner_radius: f32,
     pub clip_rect: Option<Rect>,
+    pub clip_mask: Option<ClipMask>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -552,6 +554,7 @@ pub struct BackdropBlurPrimitive {
     pub corner_radius: f32,
     pub blur_radius: f32,
     pub clip_rect: Option<Rect>,
+    pub clip_mask: Option<ClipMask>,
 }
 
 #[derive(Clone)]
@@ -566,6 +569,7 @@ pub struct TextPrimitive {
     pub line_height: f32,
     pub letter_spacing: f32,
     pub clip_rect: Option<Rect>,
+    pub clip_mask: Option<ClipMask>,
 }
 
 #[derive(Clone)]
@@ -574,6 +578,13 @@ pub struct TexturePrimitive {
     pub frame: Rect,
     pub corner_radius: f32,
     pub clip_rect: Option<Rect>,
+    pub clip_mask: Option<ClipMask>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClipMask {
+    pub rect: Rect,
+    pub corner_radius: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -593,6 +604,8 @@ pub struct MeshPrimitive {
     pub vertices: Arc<[MeshVertex]>,
     pub(crate) triangles: Arc<[[Point; 3]]>,
     pub clip_rect: Option<Rect>,
+    #[allow(dead_code)]
+    pub clip_mask: Option<ClipMask>,
 }
 
 #[derive(Clone)]

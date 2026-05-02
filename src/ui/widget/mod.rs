@@ -26,9 +26,10 @@ pub use canvas::{
 };
 pub use checkbox::Checkbox;
 pub(crate) use common::{
-    BackdropBlurPrimitive, BrushPrimitiveData, CompositionState, ComputedScene, HitInteraction,
-    InputEditState, InputSnapshot, InteractionHandlers, MediaEventPhase, MediaEventState,
-    MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
+    BackdropBlurPrimitive, BrushPrimitiveData, ClipMask, CompositionState, ComputedScene,
+    HitInteraction, InputEditState, InputSnapshot, InteractionHandlers, MediaEventPhase,
+    MediaEventState, MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
+    WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,

@@ -30,12 +30,12 @@ use super::canvas::{canvas_bounds, CanvasItem};
 #[cfg(test)]
 use super::common::RenderedWidgetScene;
 use super::common::{
-    BackdropBlurPrimitive, BrushPrimitive, ButtonVariantKind, ComputedScene, ContainerKind,
-    ContainerLayout, CursorStyle, HitGeometry, HitInteraction, HitRegion, InputEditState,
-    InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext, MediaEventHandlers,
-    MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive, ScenePrimitives, ScrollRegion,
-    ScrollbarAxis, ScrollbarHandle, SelectOptionState, TextPrimitive, TexturePrimitive,
-    VisualStyle, WidgetId, WidgetKind, WidgetStateMap,
+    BackdropBlurPrimitive, BrushPrimitive, ButtonVariantKind, ClipMask, ComputedScene,
+    ContainerKind, ContainerLayout, CursorStyle, HitGeometry, HitInteraction, HitRegion,
+    InputEditState, InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext,
+    MediaEventHandlers, MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive,
+    ScenePrimitives, ScrollRegion, ScrollbarAxis, ScrollbarHandle, SelectOptionState,
+    TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind, WidgetStateMap,
 };
 use super::text::Text;
 
@@ -276,6 +276,7 @@ struct VisualContext {
     origin: Point,
     opacity: f32,
     clip_rect: Rect,
+    clip_mask: Option<ClipMask>,
 }
 
 #[derive(Clone)]
@@ -1411,6 +1412,7 @@ impl<VM> ResolvedElement<VM> {
         let background_frame = frame.inset(Insets::all(Dp::new(background_inset)));
         let background_radius = (border_radius - background_inset).max(0.0);
         let primitive_clip = Some(visual_context.clip_rect);
+        let primitive_clip_mask = visual_context.clip_mask;
         let background_blur = self
             .visual
             .background_blur
@@ -1442,6 +1444,7 @@ impl<VM> ResolvedElement<VM> {
                 corner_radius: background_radius,
                 blur_radius: background_blur,
                 clip_rect: primitive_clip,
+                clip_mask: primitive_clip_mask,
             });
         }
 
@@ -1459,6 +1462,7 @@ impl<VM> ResolvedElement<VM> {
                     corner_radius: background_radius,
                     stroke_width: 0.0,
                     clip_rect: primitive_clip,
+                    clip_mask: primitive_clip_mask,
                 });
             }
 
@@ -1469,6 +1473,7 @@ impl<VM> ResolvedElement<VM> {
                     background_frame,
                     background_radius,
                     primitive_clip,
+                    primitive_clip_mask,
                     context,
                     computed,
                 );
@@ -1480,6 +1485,7 @@ impl<VM> ResolvedElement<VM> {
                     brush,
                     corner_radius: background_radius,
                     clip_rect: primitive_clip,
+                    clip_mask: primitive_clip_mask,
                 });
             }
         }
@@ -1491,6 +1497,7 @@ impl<VM> ResolvedElement<VM> {
             border_color,
             border_radius,
             primitive_clip,
+            primitive_clip_mask,
         );
 
         if disabled {
@@ -1554,6 +1561,13 @@ impl<VM> ResolvedElement<VM> {
                     layout.overflow_x,
                     layout.overflow_y,
                 );
+                let child_clip_mask = apply_overflow_clip_mask(
+                    visual_context.clip_mask,
+                    background_frame,
+                    background_radius,
+                    layout.overflow_x,
+                    layout.overflow_y,
+                );
                 let scrollbar_geometry = compute_scrollbar_geometry(
                     background_frame,
                     content_bounds,
@@ -1588,6 +1602,7 @@ impl<VM> ResolvedElement<VM> {
                             },
                             opacity,
                             clip_rect: child_clip_rect,
+                            clip_mask: child_clip_mask,
                         },
                         context,
                         computed,
@@ -1639,6 +1654,7 @@ impl<VM> ResolvedElement<VM> {
                     opacity,
                     self.id,
                     primitive_clip,
+                    primitive_clip_mask,
                 );
                 if text.user_select && !disabled {
                     computed.hit_regions.push(HitRegion {
@@ -1678,6 +1694,7 @@ impl<VM> ResolvedElement<VM> {
                     background_frame,
                     background_radius,
                     primitive_clip,
+                    primitive_clip_mask,
                     opacity,
                     loading_background,
                     context,
@@ -1819,6 +1836,7 @@ impl<VM> ResolvedElement<VM> {
                     opacity,
                     self.id,
                     primitive_clip,
+                    primitive_clip_mask,
                 );
             }
             ResolvedWidgetKind::Checkbox {
@@ -1840,6 +1858,7 @@ impl<VM> ResolvedElement<VM> {
                     opacity,
                     self.id,
                     primitive_clip,
+                    primitive_clip_mask,
                     context.font_manager,
                     context.theme,
                     context.units,
@@ -1880,6 +1899,7 @@ impl<VM> ResolvedElement<VM> {
                     opacity,
                     self.id,
                     primitive_clip,
+                    primitive_clip_mask,
                     context.font_manager,
                     context.theme,
                     context.units,
@@ -1942,6 +1962,7 @@ impl<VM> ResolvedElement<VM> {
                     opacity,
                     self.id,
                     primitive_clip,
+                    primitive_clip_mask,
                     context.animations,
                     &mut computed.scene,
                     context.now,
@@ -1994,6 +2015,7 @@ impl<VM> ResolvedElement<VM> {
                     input_state,
                     active && context.caret_visible && !disabled,
                     primitive_clip,
+                    primitive_clip_mask,
                 );
                 if active {
                     computed.ime_cursor_area = ime_cursor_area;
@@ -2039,6 +2061,7 @@ impl<VM> ResolvedElement<VM> {
                     opacity,
                     self.id,
                     primitive_clip,
+                    primitive_clip_mask,
                 );
                 if active && !disabled {
                     push_select_menu_primitives(
@@ -2316,6 +2339,28 @@ fn apply_overflow_clip(
     Rect::new(x, y, (right - x).max(0.0), (bottom - y).max(0.0))
 }
 
+fn apply_overflow_clip_mask(
+    parent_clip_mask: Option<ClipMask>,
+    frame: Rect,
+    corner_radius: f32,
+    overflow_x: Overflow,
+    overflow_y: Overflow,
+) -> Option<ClipMask> {
+    if matches!(overflow_x, Overflow::Hidden | Overflow::Scroll)
+        && matches!(overflow_y, Overflow::Hidden | Overflow::Scroll)
+        && corner_radius > 0.0
+        && frame.width > Dp::ZERO
+        && frame.height > Dp::ZERO
+    {
+        return Some(ClipMask {
+            rect: frame,
+            corner_radius,
+        });
+    }
+
+    parent_clip_mask
+}
+
 #[derive(Clone, Copy, Default)]
 struct ScrollbarGeometry {
     horizontal_track: Option<Rect>,
@@ -2476,6 +2521,7 @@ fn push_scrollbar_primitives(
             corner_radius: radius,
             stroke_width: 0.0,
             clip_rect: track_clip,
+            clip_mask: None,
         });
         let thumb = geometry
             .vertical_thumb
@@ -2486,6 +2532,7 @@ fn push_scrollbar_primitives(
             corner_radius: radius,
             stroke_width: 0.0,
             clip_rect: track_clip,
+            clip_mask: None,
         });
     }
 
@@ -2496,6 +2543,7 @@ fn push_scrollbar_primitives(
             corner_radius: radius,
             stroke_width: 0.0,
             clip_rect: track_clip,
+            clip_mask: None,
         });
         let thumb = geometry
             .horizontal_thumb
@@ -2506,6 +2554,7 @@ fn push_scrollbar_primitives(
             corner_radius: radius,
             stroke_width: 0.0,
             clip_rect: track_clip,
+            clip_mask: None,
         });
     }
 }
@@ -2946,6 +2995,7 @@ fn push_media_texture_or_placeholder<VM>(
     content_frame: Rect,
     content_corner_radius: f32,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
     opacity: f32,
     loading_background: Color,
     context: &mut CollectContext<'_, '_>,
@@ -2968,6 +3018,7 @@ fn push_media_texture_or_placeholder<VM>(
             frame: target_frame,
             corner_radius: content_corner_radius,
             clip_rect,
+            clip_mask,
         });
         return;
     }
@@ -2977,6 +3028,7 @@ fn push_media_texture_or_placeholder<VM>(
         content_frame,
         content_corner_radius,
         clip_rect,
+        clip_mask,
         opacity,
         context,
         &mut computed.scene,
@@ -2995,6 +3047,7 @@ fn push_background_media_texture<VM>(
     content_frame: Rect,
     content_corner_radius: f32,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
     context: &mut CollectContext<'_, '_>,
     computed: &mut ComputedScene<VM>,
 ) {
@@ -3014,6 +3067,7 @@ fn push_background_media_texture<VM>(
             frame: target_frame,
             corner_radius: content_corner_radius,
             clip_rect,
+            clip_mask,
         });
     }
 }
@@ -3026,6 +3080,7 @@ fn push_video_texture_or_placeholder<VM>(
     content_frame: Rect,
     content_corner_radius: f32,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
     opacity: f32,
     loading_background: Color,
     context: &mut CollectContext<'_, '_>,
@@ -3042,6 +3097,7 @@ fn push_video_texture_or_placeholder<VM>(
             frame: target_frame,
             corner_radius: content_corner_radius,
             clip_rect,
+            clip_mask,
         });
         return;
     }
@@ -3051,6 +3107,7 @@ fn push_video_texture_or_placeholder<VM>(
         content_frame,
         content_corner_radius,
         clip_rect,
+        clip_mask,
         opacity,
         context,
         &mut computed.scene,
@@ -3068,6 +3125,7 @@ fn push_media_placeholder(
     content_frame: Rect,
     content_corner_radius: f32,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
     opacity: f32,
     context: &mut CollectContext<'_, '_>,
     scene: &mut ScenePrimitives,
@@ -3088,6 +3146,7 @@ fn push_media_placeholder(
             corner_radius: content_corner_radius,
             stroke_width: 0.0,
             clip_rect,
+            clip_mask,
         });
     }
 
@@ -3112,6 +3171,7 @@ fn push_media_placeholder(
         opacity,
         widget_id,
         clip_rect,
+        clip_mask,
     );
 }
 
@@ -3146,6 +3206,7 @@ fn push_text_primitives(
     opacity: f32,
     widget_id: WidgetId,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
 ) {
     let content = text.content.resolve();
     let default_style = &theme.components.text.default;
@@ -3203,6 +3264,7 @@ fn push_text_primitives(
                 corner_radius: 4.0,
                 stroke_width: 0.0,
                 clip_rect,
+                clip_mask,
             });
         }
     }
@@ -3218,6 +3280,7 @@ fn push_text_primitives(
         line_height,
         letter_spacing,
         clip_rect,
+        clip_mask,
     });
 
     if show_caret {
@@ -3246,6 +3309,7 @@ fn push_text_primitives(
             corner_radius: 0.0,
             stroke_width: 0.0,
             clip_rect,
+            clip_mask,
         });
     }
 }
@@ -3269,6 +3333,7 @@ fn push_input_primitives(
     edit_state: Option<&InputEditState>,
     show_caret: bool,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
 ) -> Option<Rect> {
     let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
     let default_text_style = &theme.components.text.default;
@@ -3348,6 +3413,7 @@ fn push_input_primitives(
             line_height: placeholder_line_height,
             letter_spacing: placeholder_letter_spacing,
             clip_rect: input_clip_rect,
+            clip_mask,
         });
 
         let caret_rect = Rect::new(
@@ -3363,6 +3429,7 @@ fn push_input_primitives(
                 corner_radius: 0.0,
                 stroke_width: 0.0,
                 clip_rect: input_clip_rect,
+                clip_mask,
             });
         }
 
@@ -3525,6 +3592,7 @@ fn push_input_primitives(
                     corner_radius: 4.0,
                     stroke_width: 0.0,
                     clip_rect: input_clip_rect,
+                    clip_mask,
                 });
             }
         }
@@ -3548,6 +3616,7 @@ fn push_input_primitives(
             line_height,
             letter_spacing,
             clip_rect: input_clip_rect,
+            clip_mask,
         });
     } else {
         let mut cursor_x = content_frame.x;
@@ -3568,6 +3637,7 @@ fn push_input_primitives(
                 line_height,
                 letter_spacing,
                 clip_rect: input_clip_rect,
+                clip_mask,
             });
             cursor_x += prefix_width;
         }
@@ -3589,6 +3659,7 @@ fn push_input_primitives(
                 line_height,
                 letter_spacing,
                 clip_rect: input_clip_rect,
+                clip_mask,
             });
             scene.push_overlay_shape(RenderPrimitive {
                 rect: Rect::new(
@@ -3601,6 +3672,7 @@ fn push_input_primitives(
                 corner_radius: 0.0,
                 stroke_width: 0.0,
                 clip_rect: input_clip_rect,
+                clip_mask,
             });
             cursor_x += preedit_width;
         }
@@ -3630,6 +3702,7 @@ fn push_input_primitives(
                 line_height,
                 letter_spacing,
                 clip_rect: input_clip_rect,
+                clip_mask,
             });
         }
     }
@@ -3652,6 +3725,7 @@ fn push_input_primitives(
             corner_radius: 0.0,
             stroke_width: 0.0,
             clip_rect: input_clip_rect,
+            clip_mask,
         });
     }
 
@@ -3722,6 +3796,7 @@ fn push_select_primitives(
     opacity: f32,
     widget_id: WidgetId,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
 ) {
     let arrow_width = dp(24.0);
     let text_frame = Rect::new(
@@ -3745,6 +3820,7 @@ fn push_select_primitives(
             opacity,
             widget_id,
             clip_rect,
+            clip_mask,
             false,
         ),
         None => push_select_text(
@@ -3761,6 +3837,7 @@ fn push_select_primitives(
             opacity,
             widget_id,
             clip_rect,
+            clip_mask,
             false,
         ),
     }
@@ -3778,6 +3855,7 @@ fn push_select_primitives(
         scene,
         opacity,
         clip_rect,
+        clip_mask,
     );
 }
 
@@ -3828,6 +3906,7 @@ fn push_select_menu_primitives<VM>(
         corner_radius: context.units.resolve_dp(select_style.radius),
         stroke_width: 0.0,
         clip_rect: menu_clip,
+        clip_mask: None,
     });
 
     let option_padding = Insets::symmetric(select_style.padding_x, Dp::ZERO);
@@ -3866,6 +3945,7 @@ fn push_select_menu_primitives<VM>(
                 corner_radius: 0.0,
                 stroke_width: 0.0,
                 clip_rect: menu_clip,
+                clip_mask: None,
             });
         }
 
@@ -3887,6 +3967,7 @@ fn push_select_menu_primitives<VM>(
             opacity,
             widget_id,
             menu_clip,
+            None,
             true,
         );
 
@@ -3923,6 +4004,7 @@ fn push_select_text(
     opacity: f32,
     widget_id: WidgetId,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
     overlay: bool,
 ) {
     let content = text.content.resolve();
@@ -3962,6 +4044,7 @@ fn push_select_text(
         line_height,
         letter_spacing,
         clip_rect,
+        clip_mask,
     };
     if overlay {
         scene.push_overlay_text(primitive);
@@ -3978,6 +4061,7 @@ fn push_select_icon(
     scene: &mut ScenePrimitives,
     opacity: f32,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
 ) {
     let font_size = units
         .resolve_sp(select_style.text_style.size)
@@ -4017,6 +4101,7 @@ fn push_select_icon(
         line_height,
         letter_spacing,
         clip_rect,
+        clip_mask,
     });
 }
 
@@ -4032,6 +4117,7 @@ fn push_checkbox_primitives(
     opacity: f32,
     widget_id: WidgetId,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
     font_manager: &FontManager,
     theme: &Theme,
     units: UnitContext,
@@ -4053,6 +4139,7 @@ fn push_checkbox_primitives(
         corner_radius: radius,
         stroke_width: 0.0,
         clip_rect,
+        clip_mask,
     });
     let border_width = units.resolve_dp(checkbox_style.border_width);
     push_border_primitives(
@@ -4062,6 +4149,7 @@ fn push_checkbox_primitives(
         checkbox_style.border.with_alpha_factor(opacity),
         radius,
         clip_rect,
+        clip_mask,
     );
 
     if checked {
@@ -4072,6 +4160,7 @@ fn push_checkbox_primitives(
             font_manager,
             units,
             clip_rect,
+            clip_mask,
             scene,
         );
     }
@@ -4103,6 +4192,7 @@ fn push_checkbox_primitives(
             opacity,
             widget_id,
             clip_rect,
+            clip_mask,
         );
     }
 }
@@ -4114,6 +4204,7 @@ fn push_checkbox_checkmark_primitives(
     font_manager: &FontManager,
     units: UnitContext,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
     scene: &mut ScenePrimitives,
 ) {
     let font_size = units
@@ -4154,6 +4245,7 @@ fn push_checkbox_checkmark_primitives(
         line_height,
         letter_spacing,
         clip_rect,
+        clip_mask,
     });
 }
 
@@ -4165,6 +4257,7 @@ fn push_radio_primitives(
     opacity: f32,
     widget_id: WidgetId,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
     font_manager: &FontManager,
     theme: &Theme,
     units: UnitContext,
@@ -4189,6 +4282,7 @@ fn push_radio_primitives(
         corner_radius: radius,
         stroke_width: 0.0,
         clip_rect,
+        clip_mask,
     });
     push_border_primitives(
         scene,
@@ -4197,6 +4291,7 @@ fn push_radio_primitives(
         radio_style.border.with_alpha_factor(opacity),
         radius,
         clip_rect,
+        clip_mask,
     );
 
     if checked {
@@ -4212,6 +4307,7 @@ fn push_radio_primitives(
                 corner_radius: indicator_radius,
                 stroke_width: 0.0,
                 clip_rect,
+                clip_mask,
             });
         }
     }
@@ -4243,6 +4339,7 @@ fn push_radio_primitives(
             opacity,
             widget_id,
             clip_rect,
+            clip_mask,
         );
     }
 }
@@ -4257,6 +4354,7 @@ fn push_switch_primitives(
     opacity: f32,
     widget_id: WidgetId,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
     animations: &mut AnimationEngine,
     scene: &mut ScenePrimitives,
     now: std::time::Instant,
@@ -4306,6 +4404,7 @@ fn push_switch_primitives(
         corner_radius: (thumb_diameter.get() * 0.5).min(background_radius),
         stroke_width: 0.0,
         clip_rect,
+        clip_mask,
     });
 }
 
@@ -4359,6 +4458,7 @@ fn push_border_primitives(
     border_color: Color,
     border_radius: f32,
     clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
 ) {
     if border_color.a == 0 {
         return;
@@ -4378,6 +4478,7 @@ fn push_border_primitives(
         corner_radius: border_radius,
         stroke_width: thickness,
         clip_rect,
+        clip_mask,
     });
 }
 
@@ -4629,6 +4730,7 @@ impl<VM> WidgetTree<VM> {
                 },
                 opacity: 1.0,
                 clip_rect: viewport,
+                clip_mask: None,
             },
             &mut context,
             &mut computed,
@@ -4977,9 +5079,10 @@ mod tests {
         BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient, BackgroundRadialGradient,
     };
     use crate::ui::widget::{
-        Canvas, CanvasItem, CanvasPath, CanvasStroke, Checkbox, CompositionState, Element, Image,
-        Input, InputEditState, PathBuilder, Point, Radio, RadioGroup, RadioOption, ScrollbarAxis,
-        ScrollbarHandle, Select, SelectOption, Stack, Switch, Text, WidgetStateMap, WidgetTree,
+        Canvas, CanvasItem, CanvasPath, CanvasStroke, Checkbox, ClipMask, CompositionState,
+        Element, Image, Input, InputEditState, PathBuilder, Point, Radio, RadioGroup, RadioOption,
+        ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack, Switch, Text, WidgetStateMap,
+        WidgetTree,
     };
     #[cfg(feature = "video")]
     use crate::video::backend::{
@@ -5910,6 +6013,56 @@ mod tests {
             .find(|primitive| primitive.color == crate::foundation::color::Color::BLACK)
             .expect("child shape should exist");
         assert_eq!(child_shape.clip_rect, Some(Rect::new(4.0, 4.0, 92.0, 92.0)));
+    }
+
+    #[test]
+    fn rounded_overflow_clips_children_with_parent_corner_mask() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree = WidgetTree::new(
+            Stack::<()>::new()
+                .size(dp(100.0), dp(100.0))
+                .background(crate::foundation::color::Color::WHITE)
+                .border_radius(dp(18.0))
+                .overflow(Overflow::Hidden)
+                .child(
+                    Stack::new()
+                        .size(dp(100.0), dp(40.0))
+                        .background(crate::foundation::color::Color::BLACK),
+                ),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        let child_shape = rendered
+            .primitives
+            .shapes
+            .iter()
+            .find(|primitive| primitive.color == crate::foundation::color::Color::BLACK)
+            .expect("child shape should exist");
+        assert_eq!(
+            child_shape.clip_mask,
+            Some(ClipMask {
+                rect: Rect::new(0.0, 0.0, 100.0, 100.0),
+                corner_radius: 18.0,
+            })
+        );
     }
 
     #[test]
