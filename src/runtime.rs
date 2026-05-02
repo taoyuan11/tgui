@@ -29,7 +29,7 @@ use crate::platform::backend::event_loop::{ActiveEventLoop, ControlFlow};
 use crate::platform::backend::window::Window;
 use crate::platform::backend::EventLoop;
 use crate::platform::cursor::{Cursor, CursorIcon};
-use crate::platform::dpi::{PhysicalPosition, PhysicalSize};
+use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use crate::platform::event::{
     ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
@@ -55,16 +55,126 @@ use crate::ui::widget::{
 use image::GenericImageView;
 #[cfg(all(target_os = "android", feature = "android"))]
 use jni::{jni_sig, jni_str, objects::JObject, JValue, JavaVM};
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation;
 use winit_core::icon::{Icon, RgbaIcon};
+#[cfg(target_os = "windows")]
+use winit_win32::{WindowAttributesWindows, WindowExtWindows};
 
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 #[cfg(all(target_os = "android", feature = "android"))]
 const ANDROID_SYSTEM_THEME_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[derive(Clone, Copy)]
+struct NativeModalParent {
+    window: RawWindowHandle,
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+impl NativeModalParent {
+    fn from_window(window: &dyn Window) -> Option<Self> {
+        Some(Self {
+            window: window.window_handle().ok()?.as_raw(),
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn configure_native_modal_window(
+    attributes: WindowAttributes,
+    parent: &dyn Window,
+) -> WindowAttributes {
+    let Some(parent) = NativeModalParent::from_window(parent) else {
+        return attributes;
+    };
+
+    match parent.window {
+        RawWindowHandle::Win32(handle) => attributes.with_platform_attributes(Box::new(
+            WindowAttributesWindows::default()
+                .with_owner_window(handle.hwnd.get() as *mut core::ffi::c_void),
+        )),
+        _ => attributes,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn configure_native_modal_window(
+    attributes: WindowAttributes,
+    parent: &dyn Window,
+) -> WindowAttributes {
+    let Some(parent) = NativeModalParent::from_window(parent) else {
+        return attributes;
+    };
+
+    unsafe { attributes.with_parent_window(Some(parent.window)) }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn configure_native_modal_window(
+    attributes: WindowAttributes,
+    _parent: &dyn Window,
+) -> WindowAttributes {
+    attributes
+}
+
+fn window_sync_priority(role: WindowRole) -> u8 {
+    match role {
+        WindowRole::Main => 0,
+        WindowRole::Child { .. } => 1,
+    }
+}
+
+fn centered_window_position_for_monitor(
+    monitor_position: Option<PhysicalPosition<i32>>,
+    monitor_size: PhysicalSize<u32>,
+    monitor_scale_factor: f64,
+    window_size: LogicalSize<f64>,
+) -> Option<PhysicalPosition<i32>> {
+    let monitor_position = monitor_position?;
+    let monitor_scale_factor = if monitor_scale_factor.is_finite() && monitor_scale_factor > 0.0 {
+        monitor_scale_factor
+    } else {
+        1.0
+    };
+
+    let window_width = (window_size.width.max(1.0) * monitor_scale_factor).round() as i64;
+    let window_height = (window_size.height.max(1.0) * monitor_scale_factor).round() as i64;
+    let horizontal_gap = (i64::from(monitor_size.width) - window_width).max(0);
+    let vertical_gap = (i64::from(monitor_size.height) - window_height).max(0);
+
+    let x = i64::from(monitor_position.x) + horizontal_gap / 2;
+    let y = i64::from(monitor_position.y) + vertical_gap / 2;
+
+    Some(PhysicalPosition::new(
+        x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+    ))
+}
+
+fn default_window_position(
+    event_loop: &dyn ActiveEventLoop,
+    window_size: LogicalSize<f64>,
+) -> Option<PhysicalPosition<i32>> {
+    let monitor = event_loop
+        .primary_monitor()
+        .or_else(|| event_loop.available_monitors().next())?;
+    let monitor_size = monitor
+        .current_video_mode()
+        .map(|mode| mode.size())
+        .or_else(|| monitor.video_modes().next().map(|mode| mode.size()))?;
+    centered_window_position_for_monitor(
+        monitor.position(),
+        monitor_size,
+        monitor.scale_factor(),
+        window_size,
+    )
+}
 
 #[cfg(all(target_os = "android", feature = "android"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3280,7 +3390,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.window_id
     }
 
-    fn create_or_resume_surface(&mut self, event_loop: &dyn ActiveEventLoop) {
+    fn create_or_resume_surface(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        modal_parent: Option<&Arc<dyn Window>>,
+    ) {
         self.set_dialog_proxy(event_loop);
 
         if self.window.is_some() && self.renderer.is_some() {
@@ -3307,6 +3421,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             attributes = attributes.with_max_surface_size(max_size);
         }
 
+        if let Some(position) = default_window_position(event_loop, self.config.size) {
+            attributes = attributes.with_position(position);
+        }
+
         if let Some(icon_bytes) = self.config.window_icon {
             match image::load_from_memory(icon_bytes) {
                 Ok(image) => {
@@ -3326,6 +3444,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 Err(err) => {
                     self.fail(event_loop, TguiError::Icon(err.to_string()));
                 }
+            }
+        }
+
+        if self.blocks_main_window() {
+            if let Some(parent) = modal_parent {
+                attributes = configure_native_modal_window(attributes, parent.as_ref());
             }
         }
 
@@ -3622,6 +3746,8 @@ struct MultiWindowHandler<VM> {
     last_window_sync_revision: u64,
     windows_need_sync: bool,
     shutting_down: bool,
+    #[cfg(target_os = "windows")]
+    main_window_disabled_for_modal: bool,
     error: Option<TguiError>,
 }
 
@@ -3652,6 +3778,8 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
             last_window_sync_revision: 0,
             windows_need_sync: true,
             shutting_down: false,
+            #[cfg(target_os = "windows")]
+            main_window_disabled_for_modal: false,
             error: None,
         }
     }
@@ -3667,6 +3795,37 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
         self.next_window_instance_id = self.next_window_instance_id.wrapping_add(1);
         next
     }
+
+    fn main_window_key(&self) -> Option<&str> {
+        self.windows_by_key.iter().find_map(|(key, window)| {
+            if window.is_main_window() {
+                Some(key.as_str())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn main_window_ref(&self) -> Option<&Arc<dyn Window>> {
+        let key = self.main_window_key()?;
+        self.windows_by_key.get(key)?.window.as_ref()
+    }
+
+    #[cfg(target_os = "windows")]
+    fn sync_native_modal_state(&mut self) {
+        let should_disable_main = self.main_window_is_blocked();
+        if self.main_window_disabled_for_modal == should_disable_main {
+            return;
+        }
+
+        if let Some(window) = self.main_window_ref() {
+            window.set_enable(!should_disable_main);
+            self.main_window_disabled_for_modal = should_disable_main;
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn sync_native_modal_state(&mut self) {}
 
     fn set_dialog_proxy(&self, event_loop: &dyn ActiveEventLoop) {
         self.dialog_dispatcher.set_proxy(event_loop.create_proxy());
@@ -3797,13 +3956,15 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
             return;
         }
 
-        let resolved = match self.resolve_windows() {
+        let mut resolved = match self.resolve_windows() {
             Ok(resolved) => resolved,
             Err(error) => {
                 self.fail(event_loop, error);
                 return;
             }
         };
+
+        resolved.sort_by_key(|window| window_sync_priority(window.role));
 
         let desired_keys: HashSet<String> =
             resolved.iter().map(|window| window.key.clone()).collect();
@@ -3816,6 +3977,16 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
             }
 
             let key = resolved_window.key.clone();
+            let modal_parent = if matches!(
+                resolved_window.role,
+                WindowRole::Child {
+                    blocks_main_window: true
+                }
+            ) {
+                self.main_window_ref().cloned()
+            } else {
+                None
+            };
             if let Some(window) = self.windows_by_key.get_mut(&key) {
                 window.set_definition(
                     resolved_window.role,
@@ -3824,7 +3995,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
                     resolved_window.commands,
                     resolved_window.close_policy,
                 );
-                window.create_or_resume_surface(event_loop);
+                window.create_or_resume_surface(event_loop, modal_parent.as_ref());
                 if let Some(error) = window.error.take() {
                     self.fail(event_loop, error);
                     return;
@@ -3854,7 +4025,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
                     None,
                 );
                 window.close_policy = resolved_window.close_policy;
-                window.create_or_resume_surface(event_loop);
+                window.create_or_resume_surface(event_loop, modal_parent.as_ref());
                 if let Some(error) = window.error.take() {
                     self.fail(event_loop, error);
                     return;
@@ -3878,6 +4049,8 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
         for key in stale_keys {
             self.remove_window(&key);
         }
+
+        self.sync_native_modal_state();
 
         if self.windows_by_key.is_empty() {
             event_loop.exit();
@@ -3954,6 +4127,7 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
 
             self.closed_window_keys.insert(key.clone());
             self.remove_window(&key);
+            self.sync_native_modal_state();
             if self.windows_by_key.is_empty() {
                 event_loop.exit();
             }
@@ -4004,6 +4178,7 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
 
                 self.closed_window_keys.insert(key.clone());
                 self.remove_window(&key);
+                self.sync_native_modal_state();
                 if self.windows_by_key.is_empty() {
                     event_loop.exit();
                 }
@@ -4021,7 +4196,7 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
 
 impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
     fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
-        self.create_or_resume_surface(event_loop);
+        self.create_or_resume_surface(event_loop, None);
     }
 
     fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
@@ -4632,9 +4807,9 @@ fn is_light_color(color: Color) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        input_cursor_index_at_point_with_state, next_grapheme_boundary, normalize_single_line_text,
-        previous_grapheme_boundary, text_cursor_index_at_point, BoundRuntimeHandler, CachedScene,
-        WindowBindings,
+        centered_window_position_for_monitor, input_cursor_index_at_point_with_state,
+        next_grapheme_boundary, normalize_single_line_text, previous_grapheme_boundary,
+        text_cursor_index_at_point, BoundRuntimeHandler, CachedScene, WindowBindings,
     };
     use crate::animation::AnimationCoordinator;
     use crate::application::{ApplicationConfig, ThemeSelection, WindowRole};
@@ -4643,7 +4818,7 @@ mod tests {
     use crate::foundation::binding::{Binding, InvalidationSignal};
     use crate::foundation::color::Color;
     use crate::foundation::view_model::{Command, ValueCommand};
-    use crate::platform::dpi::LogicalSize;
+    use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
     use crate::platform::event::{ElementState, KeyEvent};
     use crate::platform::keyboard::{Key, KeyCode, KeyLocation, NamedKey, PhysicalKey};
     use crate::text::font::{FontCatalog, TextFontRequest};
@@ -4793,6 +4968,30 @@ mod tests {
         dark.colors.background = Color::hexa(0x06101DFF);
         dark.colors.primary = Color::hexa(0x66D9E8FF);
         (ThemeSet::new(light.clone(), dark.clone()), light, dark)
+    }
+
+    #[test]
+    fn centered_window_position_uses_monitor_center() {
+        let position = centered_window_position_for_monitor(
+            Some(PhysicalPosition::new(-1920, 0)),
+            PhysicalSize::new(1920, 1080),
+            1.0,
+            LogicalSize::new(960.0, 540.0),
+        );
+
+        assert_eq!(position, Some(PhysicalPosition::new(-1440, 270)));
+    }
+
+    #[test]
+    fn centered_window_position_clamps_to_monitor_origin_for_oversized_window() {
+        let position = centered_window_position_for_monitor(
+            Some(PhysicalPosition::new(100, 200)),
+            PhysicalSize::new(800, 600),
+            1.0,
+            LogicalSize::new(1200.0, 700.0),
+        );
+
+        assert_eq!(position, Some(PhysicalPosition::new(100, 200)));
     }
 
     #[test]
