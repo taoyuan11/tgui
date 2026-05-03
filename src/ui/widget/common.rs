@@ -1017,6 +1017,19 @@ pub(crate) enum WidgetKind<VM> {
         placeholder: Text,
         on_change: Option<ValueCommand<VM, String>>,
         disabled: Value<bool>,
+        readonly: Value<bool>,
+    },
+    TextArea {
+        text: Text,
+        placeholder: Text,
+        on_change: Option<ValueCommand<VM, String>>,
+        on_submit: Option<Command<VM>>,
+        disabled: Value<bool>,
+        readonly: Value<bool>,
+        rows: u16,
+        min_rows: Option<u16>,
+        max_rows: Option<u16>,
+        submit_on_enter: Value<bool>,
     },
     Select {
         selected_label: Value<Option<String>>,
@@ -1127,11 +1140,36 @@ impl<VM> Clone for WidgetKind<VM> {
                 placeholder,
                 on_change,
                 disabled,
+                readonly,
             } => Self::Input {
                 text: text.clone(),
                 placeholder: placeholder.clone(),
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
+                readonly: readonly.clone(),
+            },
+            Self::TextArea {
+                text,
+                placeholder,
+                on_change,
+                on_submit,
+                disabled,
+                readonly,
+                rows,
+                min_rows,
+                max_rows,
+                submit_on_enter,
+            } => Self::TextArea {
+                text: text.clone(),
+                placeholder: placeholder.clone(),
+                on_change: on_change.clone(),
+                on_submit: on_submit.clone(),
+                disabled: disabled.clone(),
+                readonly: readonly.clone(),
+                rows: *rows,
+                min_rows: *min_rows,
+                max_rows: *max_rows,
+                submit_on_enter: submit_on_enter.clone(),
             },
             Self::Select {
                 selected_label,
@@ -1175,6 +1213,13 @@ pub(crate) enum MeasureContext {
         text: Text,
         placeholder: Text,
     },
+    TextArea {
+        text: Text,
+        placeholder: Text,
+        rows: u16,
+        min_rows: Option<u16>,
+        max_rows: Option<u16>,
+    },
     Select {
         selected_label: Option<String>,
         placeholder: Text,
@@ -1202,6 +1247,9 @@ pub(crate) enum HitInteraction<VM> {
         padding: Insets,
         interactions: InteractionHandlers<VM>,
         on_change: Option<ValueCommand<VM, String>>,
+        on_submit: Option<Command<VM>>,
+        multiline: bool,
+        submit_on_enter: bool,
         text_style: Text,
         text: String,
     },
@@ -1270,6 +1318,9 @@ impl<VM> Clone for HitInteraction<VM> {
                 padding,
                 interactions,
                 on_change,
+                on_submit,
+                multiline,
+                submit_on_enter,
                 text_style,
                 text,
             } => Self::FocusInput {
@@ -1278,6 +1329,9 @@ impl<VM> Clone for HitInteraction<VM> {
                 padding: *padding,
                 interactions: interactions.clone(),
                 on_change: on_change.clone(),
+                on_submit: on_submit.clone(),
+                multiline: *multiline,
+                submit_on_enter: *submit_on_enter,
                 text_style: text_style.clone(),
                 text: text.clone(),
             },
@@ -1429,6 +1483,7 @@ pub(crate) struct HitRegion<VM> {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ScrollRegion {
     pub id: WidgetId,
+    pub source: ScrollRegionSource,
     pub content_viewport: Rect,
     pub visible_frame: Rect,
     pub content_bounds: Rect,
@@ -1439,6 +1494,12 @@ pub(crate) struct ScrollRegion {
     pub horizontal_thumb: Option<Rect>,
     pub vertical_track: Option<Rect>,
     pub vertical_thumb: Option<Rect>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScrollRegionSource {
+    Container,
+    Input { widget_id: WidgetId },
 }
 
 impl ScrollRegion {
@@ -1577,6 +1638,8 @@ pub(crate) struct InputEditState {
     pub anchor: usize,
     pub composition: Option<CompositionState>,
     pub scroll_x: Dp,
+    pub scroll_y: Dp,
+    pub preferred_column_x: Option<f32>,
 }
 
 impl InputEditState {
@@ -1587,6 +1650,8 @@ impl InputEditState {
             anchor: end,
             composition: None,
             scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
         }
     }
 
@@ -1616,6 +1681,10 @@ impl InputEditState {
             }
         }
         self.scroll_x = self.scroll_x.max(Dp::ZERO);
+        self.scroll_y = self.scroll_y.max(Dp::ZERO);
+        if let Some(preferred_column_x) = self.preferred_column_x {
+            self.preferred_column_x = preferred_column_x.is_finite().then_some(preferred_column_x.max(0.0));
+        }
         self
     }
 }
@@ -1653,6 +1722,8 @@ mod tests {
                 cursor: Some((1, 4)),
             }),
             scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
         }
         .clamped_to(text);
 
@@ -1679,6 +1750,10 @@ mod tests {
 pub(crate) struct InputSnapshot<VM> {
     pub id: WidgetId,
     pub on_change: Option<ValueCommand<VM, String>>,
+    pub on_submit: Option<Command<VM>>,
+    pub multiline: bool,
+    pub submit_on_enter: bool,
+    pub readonly: bool,
     pub text: String,
 }
 

@@ -11,11 +11,11 @@ use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, 
 use super::core::Element;
 use super::text::Text;
 
-pub struct Input<VM> {
+pub struct TextArea<VM> {
     element: Element<VM>,
 }
 
-macro_rules! impl_input_layout_api {
+macro_rules! impl_textarea_layout_api {
     () => {
         pub fn size(mut self, width: impl IntoLengthValue, height: impl IntoLengthValue) -> Self {
             set_layout_lengths(&mut self.element.layout, width, height);
@@ -147,7 +147,7 @@ macro_rules! impl_input_layout_api {
     };
 }
 
-impl<VM> Input<VM> {
+impl<VM> TextArea<VM> {
     pub fn new(text: Text) -> Self {
         Self {
             element: Element {
@@ -157,21 +157,26 @@ impl<VM> Input<VM> {
                 interactions: InteractionHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
-                kind: WidgetKind::Input {
+                kind: WidgetKind::TextArea {
                     text,
                     placeholder: Text::new(String::new()),
                     on_change: None,
+                    on_submit: None,
                     disabled: Value::Static(false),
                     readonly: Value::Static(false),
+                    rows: 3,
+                    min_rows: None,
+                    max_rows: None,
+                    submit_on_enter: Value::Static(false),
                 },
             },
         }
     }
 
-    impl_input_layout_api!();
+    impl_textarea_layout_api!();
 
     pub fn placeholder_with_text(mut self, placeholder: Text) -> Self {
-        if let WidgetKind::Input {
+        if let WidgetKind::TextArea {
             placeholder: value, ..
         } = &mut self.element.kind
         {
@@ -183,7 +188,7 @@ impl<VM> Input<VM> {
     pub fn placeholder_with_str(mut self, placeholder: &str) -> Self {
         let text = Text::new(placeholder.to_string()).into();
 
-        if let WidgetKind::Input {
+        if let WidgetKind::TextArea {
             placeholder: value, ..
         } = &mut self.element.kind
         {
@@ -244,8 +249,47 @@ impl<VM> Input<VM> {
     }
 
     pub fn on_change(mut self, command: ValueCommand<VM, String>) -> Self {
-        if let WidgetKind::Input { on_change, .. } = &mut self.element.kind {
+        if let WidgetKind::TextArea { on_change, .. } = &mut self.element.kind {
             *on_change = Some(command);
+        }
+        self
+    }
+
+    pub fn on_submit(mut self, command: Command<VM>) -> Self {
+        if let WidgetKind::TextArea { on_submit, .. } = &mut self.element.kind {
+            *on_submit = Some(command);
+        }
+        self
+    }
+
+    pub fn rows(mut self, rows: u16) -> Self {
+        if let WidgetKind::TextArea { rows: value, .. } = &mut self.element.kind {
+            *value = rows.max(1);
+        }
+        self
+    }
+
+    pub fn min_rows(mut self, rows: u16) -> Self {
+        if let WidgetKind::TextArea { min_rows, .. } = &mut self.element.kind {
+            *min_rows = Some(rows.max(1));
+        }
+        self
+    }
+
+    pub fn max_rows(mut self, rows: u16) -> Self {
+        if let WidgetKind::TextArea { max_rows, .. } = &mut self.element.kind {
+            *max_rows = Some(rows.max(1));
+        }
+        self
+    }
+
+    pub fn submit_on_enter(mut self, submit_on_enter: impl Into<Value<bool>>) -> Self {
+        if let WidgetKind::TextArea {
+            submit_on_enter: value,
+            ..
+        } = &mut self.element.kind
+        {
+            *value = submit_on_enter.into();
         }
         self
     }
@@ -286,14 +330,14 @@ impl<VM> Input<VM> {
     }
 
     pub fn disable(mut self, disable: impl Into<Value<bool>>) -> Self {
-        if let WidgetKind::Input { disabled, .. } = &mut self.element.kind {
+        if let WidgetKind::TextArea { disabled, .. } = &mut self.element.kind {
             *disabled = disable.into();
         }
         self
     }
 
     pub fn readonly(mut self, readonly: impl Into<Value<bool>>) -> Self {
-        if let WidgetKind::Input { readonly: value, .. } = &mut self.element.kind {
+        if let WidgetKind::TextArea { readonly: value, .. } = &mut self.element.kind {
             *value = readonly.into();
         }
         self
@@ -309,8 +353,8 @@ impl<VM> Input<VM> {
     }
 }
 
-impl<VM> From<Input<VM>> for Element<VM> {
-    fn from(value: Input<VM>) -> Self {
+impl<VM> From<TextArea<VM>> for Element<VM> {
+    fn from(value: TextArea<VM>) -> Self {
         value.element
     }
 }

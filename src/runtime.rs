@@ -51,8 +51,8 @@ use crate::ui::widget::{
     CanvasDragEvent, CanvasItemId, CanvasItemInteractionHandlers, CanvasMouseButton,
     CanvasMouseEvent, CanvasPointerEvent, CanvasWheelEvent, ComputedScene, HitInteraction,
     InputEditState, InputSnapshot, InteractionHandlers, MediaEventPhase, MediaEventState, Point,
-    Rect, ResolvedSceneLayout, ScrollRegion, ScrollbarAxis, ScrollbarHandle, Text, WidgetId,
-    WidgetStateMap, WidgetTree,
+    Rect, ResolvedSceneLayout, ScrollRegion, ScrollRegionSource, ScrollbarAxis, ScrollbarHandle,
+    Text, WidgetId, WidgetStateMap, WidgetTree,
 };
 use image::GenericImageView;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -66,6 +66,9 @@ use unicode_segmentation::UnicodeSegmentation;
 use winit_core::icon::{Icon, RgbaIcon};
 #[cfg(target_os = "windows")]
 use winit_win32::{WindowAttributesWindows, WindowExtWindows};
+
+#[cfg(test)]
+mod textarea_tests;
 
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
@@ -674,6 +677,7 @@ struct TextSelectionDrag {
     widget_id: WidgetId,
     frame: Rect,
     padding: crate::ui::layout::Insets,
+    multiline: bool,
     text_style: Text,
     text: String,
 }
@@ -682,6 +686,7 @@ struct TextSelectionDrag {
 struct InputLayoutMetrics {
     frame: Rect,
     padding: crate::ui::layout::Insets,
+    multiline: bool,
     text_style: Text,
     text: String,
 }
@@ -2068,6 +2073,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         widget_id: WidgetId,
         frame: Rect,
         padding: crate::ui::layout::Insets,
+        multiline: bool,
         text_style: Text,
         text: String,
         cursor: usize,
@@ -2076,6 +2082,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             widget_id,
             frame,
             padding,
+            multiline,
             text_style,
             text: text.clone(),
         });
@@ -2084,6 +2091,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             state.anchor = cursor;
             state.composition = None;
         });
+        if multiline {
+            self.keep_input_caret_visible(widget_id, &text);
+        }
     }
 
     fn handle_input_selection_drag(&mut self) -> bool {
@@ -2099,15 +2109,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
         let inner = drag.frame.inset(drag.padding);
-        let overflow_left = (inner.x - point.x).max(0.0);
-        let overflow_right = (point.x - inner.right()).max(0.0);
-        if overflow_left > Dp::ZERO || overflow_right > Dp::ZERO {
-            let delta = if overflow_left > Dp::ZERO {
-                -overflow_left.get().max(1.0)
-            } else {
-                overflow_right.get().max(1.0)
-            };
-            next_state.scroll_x = (next_state.scroll_x + delta).max(Dp::ZERO);
+        if drag.multiline {
+            let overflow_top = (inner.y - point.y).max(0.0);
+            let overflow_bottom = (point.y - inner.bottom()).max(0.0);
+            if overflow_top > Dp::ZERO || overflow_bottom > Dp::ZERO {
+                let delta = if overflow_top > Dp::ZERO {
+                    -overflow_top.get().max(1.0)
+                } else {
+                    overflow_bottom.get().max(1.0)
+                };
+                next_state.scroll_y = (next_state.scroll_y + delta).max(Dp::ZERO);
+            }
+        } else {
+            let overflow_left = (inner.x - point.x).max(0.0);
+            let overflow_right = (point.x - inner.right()).max(0.0);
+            if overflow_left > Dp::ZERO || overflow_right > Dp::ZERO {
+                let delta = if overflow_left > Dp::ZERO {
+                    -overflow_left.get().max(1.0)
+                } else {
+                    overflow_right.get().max(1.0)
+                };
+                next_state.scroll_x = (next_state.scroll_x + delta).max(Dp::ZERO);
+            }
         }
         let cursor = input_cursor_index_at_point_with_state(
             &self.font_manager,
@@ -2117,6 +2140,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             drag.padding,
             &drag.text_style,
             &drag.text,
+            drag.multiline,
             Some(&next_state),
             point,
         );
@@ -2153,6 +2177,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             widget_id,
             frame,
             padding,
+            multiline: false,
             text_style,
             text: text.clone(),
         });
@@ -2230,7 +2255,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn sync_ime_allowed(&mut self) {
-        let request = if self.focused_input.is_some() {
+        let request = if self
+            .focused_input_snapshot()
+            .is_some_and(|snapshot| !snapshot.readonly)
+        {
             self.ime_enable_request().map(ImeRequest::Enable)
         } else {
             Some(ImeRequest::Disable)
@@ -2273,12 +2301,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     id,
                     frame,
                     padding,
+                    multiline,
                     text_style,
                     text,
                     ..
                 } if *id == widget_id => Some(InputLayoutMetrics {
                     frame: *frame,
                     padding: *padding,
+                    multiline: *multiline,
                     text_style: text_style.clone(),
                     text: text.clone(),
                 }),
@@ -2290,59 +2320,53 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         &self,
         metrics: &InputLayoutMetrics,
         state: &InputEditState,
-    ) -> Option<Dp> {
+    ) -> Option<Point> {
         if metrics.text.is_empty() {
-            return Some(Dp::ZERO);
+            return Some(Point::ZERO);
         }
 
-        let units = self.unit_context();
-        let theme_text = &self.theme.components.text.default;
-        let font_size = units.resolve_sp(
-            metrics
-                .text_style
-                .font_size
-                .unwrap_or(theme_text.size.max(sp(1.0))),
-        );
-        let line_height =
-            units.resolve_sp(theme_text.line_height.unwrap_or(theme_text.size * 1.25));
-        let line_height = line_height.max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(
-            metrics
-                .text_style
-                .letter_spacing
-                .unwrap_or(theme_text.letter_spacing.unwrap_or(Sp::ZERO)),
-        );
-        let request = TextFontRequest {
-            preferred_font: metrics.text_style.font_family.as_deref().or(self
-                .theme
-                .components
-                .text
-                .default
-                .font_family
-                .as_deref()),
-            weight: metrics.text_style.font_weight.unwrap_or(theme_text.weight),
-        };
-        let layout = self.font_manager.measure_text_layout(
-            &metrics.text,
-            request,
-            font_size,
-            line_height,
-            letter_spacing,
-        );
         let inner = metrics.frame.inset(metrics.padding);
-        let caret_boundary = layout.x_for_index(state.cursor.min(metrics.text.len()));
-        let caret_padding = if state.cursor >= metrics.text.len() {
-            1.0
+        let wrap_width = inner.width.get().max(1.0);
+        let (layout, _, line_height) = input_text_layout(
+            &self.font_manager,
+            &self.theme,
+            self.unit_context(),
+            &metrics.text_style,
+            &metrics.text,
+            metrics.multiline,
+            wrap_width,
+        );
+        let (caret_x, caret_y) = layout.point_for_index(state.cursor.min(metrics.text.len()));
+        let caret_padding = if state.cursor >= metrics.text.len() { 1.0 } else { 0.0 };
+        let scroll_x = if metrics.multiline {
+            Dp::ZERO
         } else {
-            0.0
+            Dp::new(input_scroll_offset(
+                inner,
+                layout.width,
+                caret_x,
+                caret_x + caret_padding + 2.0,
+                state.scroll_x.get(),
+            ))
         };
-        Some(Dp::new(input_scroll_offset(
-            inner,
-            layout.width,
-            caret_boundary,
-            caret_boundary + caret_padding + 2.0,
-            state.scroll_x.get(),
-        )))
+        let scroll_y = if metrics.multiline {
+            let viewport_height = inner.height.get().max(line_height);
+            let caret_top = caret_y;
+            let caret_bottom = caret_y + line_height;
+            Dp::new(
+                if caret_top < state.scroll_y.get() {
+                    caret_top
+                } else if caret_bottom > state.scroll_y.get() + viewport_height {
+                    caret_bottom - viewport_height
+                } else {
+                    state.scroll_y.get()
+                }
+                .max(0.0),
+            )
+        } else {
+            Dp::ZERO
+        };
+        Some(Point::new(scroll_x, scroll_y))
     }
 
     fn keep_input_caret_visible(&mut self, widget_id: WidgetId, text: &str) {
@@ -2353,14 +2377,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         };
         state = state.clamped_to(text);
-        let Some(scroll_x) = self.input_scroll_offset_for_state(&metrics, &state) else {
+        let Some(scroll_offset) = self.input_scroll_offset_for_state(&metrics, &state) else {
             return;
         };
-        if state.scroll_x == scroll_x {
+        if state.scroll_x == scroll_offset.x && state.scroll_y == scroll_offset.y {
             return;
         }
         self.update_input_state(widget_id, text, |edit| {
-            edit.scroll_x = scroll_x;
+            edit.scroll_x = scroll_offset.x;
+            edit.scroll_y = scroll_offset.y;
         });
     }
 
@@ -2388,11 +2413,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         new_text: String,
         new_cursor: usize,
     ) {
+        if snapshot.readonly {
+            return;
+        }
+
         {
             let state = self.ensure_input_state(snapshot.id, &new_text);
             state.cursor = new_cursor.min(new_text.len());
             state.anchor = state.cursor;
             state.composition = None;
+            state.preferred_column_x = None;
         }
         self.keep_input_caret_visible(snapshot.id, &new_text);
         self.reset_caret_blink(Instant::now());
@@ -2408,11 +2438,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn insert_input_text(&mut self, snapshot: &InputSnapshot<VM>, inserted: &str) {
-        if snapshot.on_change.is_none() || inserted.is_empty() {
+        if snapshot.readonly || snapshot.on_change.is_none() || inserted.is_empty() {
             return;
         }
 
-        let sanitized = normalize_single_line_text(inserted);
+        let sanitized = if snapshot.multiline {
+            inserted.replace("\r\n", "\n").replace('\r', "\n")
+        } else {
+            normalize_single_line_text(inserted)
+        };
         if sanitized.is_empty() {
             return;
         }
@@ -2435,6 +2469,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         };
         let current_text = snapshot.text.clone();
+        if snapshot.readonly {
+            match ime {
+                Ime::Enabled => self.sync_ime_allowed(),
+                Ime::Disabled => self.clear_input_composition(snapshot.id, &current_text),
+                Ime::Preedit(_, _) | Ime::Commit(_) | Ime::DeleteSurrounding { .. } => {}
+            }
+            return;
+        }
         let state = self
             .focused_input_state(snapshot.id)
             .cloned()
@@ -2480,7 +2522,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             .selection_range()
                             .unwrap_or((state.cursor, state.cursor))
                     });
-                let sanitized = normalize_single_line_text(&text);
+                let sanitized = if snapshot.multiline {
+                    text.replace("\r\n", "\n").replace('\r', "\n")
+                } else {
+                    normalize_single_line_text(&text)
+                };
                 let mut next_text = current_text.clone();
                 next_text.replace_range(replace_range.0..replace_range.1, &sanitized);
                 self.apply_input_text_change(
@@ -2525,6 +2571,128 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or_else(|| InputEditState::caret_at(&text))
             .clamped_to(&text);
         let extend_selection = self.modifiers.shift_key();
+        let is_enter_key = matches!(
+            event.physical_key,
+            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
+        );
+
+        if snapshot.multiline && is_enter_key {
+            let should_submit = snapshot.submit_on_enter
+                && !self.modifiers.shift_key()
+                && !self.modifiers.alt_key()
+                && !is_primary_shortcut_modifier(self.modifiers);
+            if should_submit {
+                if let Some(command) = snapshot.on_submit.clone() {
+                    self.execute_command(&command);
+                }
+                self.invalidate_scene();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            } else if !snapshot.readonly {
+                self.insert_input_text(&snapshot, "\n");
+            }
+            return;
+        }
+
+        if snapshot.multiline && !is_primary_shortcut_modifier(self.modifiers) {
+            let handled = match event.physical_key {
+                PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::ArrowDown) => {
+                    let Some(metrics) = self.focused_input_layout_metrics(snapshot.id) else {
+                        return;
+                    };
+                    let inner = metrics.frame.inset(metrics.padding);
+                    let wrap_width = inner.width.get().max(1.0);
+                    let (layout, line_height, _) = input_text_layout(
+                        &self.font_manager,
+                        &self.theme,
+                        self.unit_context(),
+                        &metrics.text_style,
+                        &text,
+                        true,
+                        wrap_width,
+                    );
+                    let target_x = state
+                        .preferred_column_x
+                        .unwrap_or_else(|| layout.point_for_index(state.cursor).0);
+                    let delta = if matches!(event.physical_key, PhysicalKey::Code(KeyCode::ArrowUp))
+                    {
+                        -1
+                    } else {
+                        1
+                    };
+                    let next = layout.move_vertical(state.cursor, target_x, delta);
+                    move_cursor(&mut state, next, extend_selection);
+                    state.preferred_column_x = Some(target_x);
+                    let (_, caret_y) = layout.point_for_index(state.cursor);
+                    let caret_top = caret_y;
+                    let caret_bottom = caret_y + line_height;
+                    let viewport_top = state.scroll_y.get();
+                    let viewport_height = inner.height.get().max(line_height);
+                    let viewport_bottom = viewport_top + viewport_height;
+                    state.scroll_y = Dp::new(
+                        if caret_top < viewport_top {
+                            caret_top
+                        } else if caret_bottom > viewport_bottom {
+                            caret_bottom - viewport_height
+                        } else {
+                            viewport_top
+                        }
+                        .max(0.0),
+                    );
+                    true
+                }
+                PhysicalKey::Code(KeyCode::Home) | PhysicalKey::Code(KeyCode::End) => {
+                    let Some(metrics) = self.focused_input_layout_metrics(snapshot.id) else {
+                        return;
+                    };
+                    let inner = metrics.frame.inset(metrics.padding);
+                    let wrap_width = inner.width.get().max(1.0);
+                    let (layout, line_height, _) = input_text_layout(
+                        &self.font_manager,
+                        &self.theme,
+                        self.unit_context(),
+                        &metrics.text_style,
+                        &text,
+                        true,
+                        wrap_width,
+                    );
+                    let next = if matches!(event.physical_key, PhysicalKey::Code(KeyCode::Home)) {
+                        layout.line_start_for_index(state.cursor)
+                    } else {
+                        layout.line_end_for_index(state.cursor)
+                    };
+                    move_cursor(&mut state, next, extend_selection);
+                    let (_, caret_y) = layout.point_for_index(state.cursor);
+                    let caret_top = caret_y;
+                    let caret_bottom = caret_y + line_height;
+                    let viewport_top = state.scroll_y.get();
+                    let viewport_height = inner.height.get().max(line_height);
+                    let viewport_bottom = viewport_top + viewport_height;
+                    state.scroll_y = Dp::new(
+                        if caret_top < viewport_top {
+                            caret_top
+                        } else if caret_bottom > viewport_bottom {
+                            caret_bottom - viewport_height
+                        } else {
+                            viewport_top
+                        }
+                        .max(0.0),
+                    );
+                    true
+                }
+                _ => false,
+            };
+
+            if handled {
+                self.input_states.insert(snapshot.id, state);
+                self.invalidate_scene();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                return;
+            }
+        }
 
         if is_primary_shortcut_modifier(self.modifiers) {
             match event.physical_key {
@@ -2540,6 +2708,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     }
                 }
                 PhysicalKey::Code(KeyCode::KeyX) => {
+                    if snapshot.readonly {
+                        return;
+                    }
                     if let Some((start, end)) = state.selection_range() {
                         self.clipboard.set_text(text[start..end].to_string());
                         if snapshot.on_change.is_some() {
@@ -2630,11 +2801,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 | PhysicalKey::Code(KeyCode::Home)
                 | PhysicalKey::Code(KeyCode::End)
         ) {
-            if let Some(scroll_x) = self
+            if let Some(scroll_offset) = self
                 .focused_input_layout_metrics(snapshot.id)
                 .and_then(|metrics| self.input_scroll_offset_for_state(&metrics, &state))
             {
-                state.scroll_x = scroll_x;
+                state.scroll_x = scroll_offset.x;
+                state.scroll_y = scroll_offset.y;
             }
         }
 
@@ -2889,7 +3061,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if (next_offset.x - region.scroll_offset.x).abs() > 0.01
                 || (next_offset.y - region.scroll_offset.y).abs() > 0.01
             {
-                self.set_scroll_offset(region.id, next_offset);
+                self.apply_scroll_region_offset(region, next_offset);
                 return true;
             }
         }
@@ -3027,12 +3199,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let previous = self
-            .scroll_states
-            .get(&drag.handle.id)
+            .scroll_regions()
+            .iter()
             .copied()
+            .find(|region| region.id == drag.handle.id)
+            .map(|region| region.scroll_offset)
             .unwrap_or(Point::ZERO);
         if (previous.x - next_offset.x).abs() > 0.01 || (previous.y - next_offset.y).abs() > 0.01 {
-            self.set_scroll_offset(drag.handle.id, next_offset);
+            if let Some(region) = self
+                .scroll_regions()
+                .iter()
+                .copied()
+                .find(|region| region.id == drag.handle.id)
+            {
+                self.apply_scroll_region_offset(region, next_offset);
+            }
             return true;
         }
 
@@ -3141,6 +3322,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.scroll_epoch = self.scroll_epoch.wrapping_add(1);
         self.invalidate_scene();
+    }
+
+    fn apply_scroll_region_offset(&mut self, region: ScrollRegion, offset: Point) {
+        match region.source {
+            ScrollRegionSource::Container => self.set_scroll_offset(region.id, offset),
+            ScrollRegionSource::Input { widget_id } => {
+                if let Some(snapshot) = self
+                    .widget_tree
+                    .as_ref()
+                    .and_then(|tree| tree.input_snapshot(widget_id))
+                {
+                    self.update_input_state(widget_id, &snapshot.text, |state| {
+                        state.scroll_x = offset.x.max(Dp::ZERO);
+                        state.scroll_y = offset.y.max(Dp::ZERO);
+                    });
+                }
+            }
+        }
     }
 
     fn update_focus(
@@ -3416,6 +3615,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 id,
                 frame,
                 padding,
+                multiline,
                 interactions,
                 text_style,
                 text,
@@ -3430,6 +3630,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         padding,
                         &text_style,
                         &text,
+                        multiline,
                         self.focused_input_state(id),
                         point,
                     )
@@ -3443,7 +3644,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     interactions.on_click.clone().map(ClickHandler::Command),
                     Some(text.clone()),
                     cursor,
-                    cursor.map(|cursor| (id, frame, padding, text_style, text, cursor)),
+                cursor.map(|cursor| (id, frame, padding, multiline, text_style, text, cursor)),
                     None,
                 )
             }
@@ -3603,11 +3804,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     state.anchor = cursor;
                     state.composition = None;
                 });
+                self.keep_input_caret_visible(input_id, text);
             }
         }
 
-        if let Some((widget_id, frame, padding, text_style, text, cursor)) = input_selection {
-            self.begin_input_selection(widget_id, frame, padding, text_style, text, cursor);
+        if let Some((widget_id, frame, padding, multiline, text_style, text, cursor)) =
+            input_selection
+        {
+            self.begin_input_selection(
+                widget_id,
+                frame,
+                padding,
+                multiline,
+                text_style,
+                text,
+                cursor,
+            );
         }
 
         if let Some((widget_id, frame, padding, text_style, text, cursor)) = selectable_text {
@@ -4621,22 +4833,18 @@ fn move_cursor(state: &mut InputEditState, next: usize, extend_selection: bool) 
         state.anchor = next;
     }
     state.composition = None;
+    state.preferred_column_x = None;
 }
 
-fn text_cursor_index_at_point(
+fn input_text_layout(
     font_manager: &FontManager,
     theme: &Theme,
     units: UnitContext,
-    frame: Rect,
-    padding: crate::ui::layout::Insets,
     text_style: &Text,
     current_text: &str,
-    point: Point,
-) -> usize {
-    if current_text.is_empty() {
-        return 0;
-    }
-
+    multiline: bool,
+    wrap_width: f32,
+) -> (crate::text::font::TextLayoutInfo, f32, f32) {
     let default_style = &theme.components.text.default;
     let font_size = units.resolve_sp(
         text_style
@@ -4656,13 +4864,50 @@ fn text_cursor_index_at_point(
             .or(default_style.font_family.as_deref()),
         weight: text_style.font_weight.unwrap_or(default_style.weight),
     };
+    let layout = if multiline {
+        font_manager.measure_text_layout_wrapped(
+            current_text,
+            text_request,
+            font_size,
+            line_height,
+            letter_spacing,
+            wrap_width,
+        )
+    } else {
+        font_manager.measure_text_layout(
+            current_text,
+            text_request,
+            font_size,
+            line_height,
+            letter_spacing,
+        )
+    };
+    (layout, font_size, line_height)
+}
+
+fn text_cursor_index_at_point(
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+    frame: Rect,
+    padding: crate::ui::layout::Insets,
+    text_style: &Text,
+    current_text: &str,
+    point: Point,
+) -> usize {
+    if current_text.is_empty() {
+        return 0;
+    }
+
     let inner = frame.inset(padding);
-    let layout = font_manager.measure_text_layout(
+    let (layout, _font_size, line_height) = input_text_layout(
+        font_manager,
+        theme,
+        units,
+        text_style,
         current_text,
-        text_request,
-        font_size,
-        line_height,
-        letter_spacing,
+        false,
+        inner.width.get(),
     );
     let content_height = inner
         .height
@@ -4686,6 +4931,7 @@ fn input_cursor_index_at_point_with_state(
     padding: crate::ui::layout::Insets,
     text_style: &Text,
     current_text: &str,
+    multiline: bool,
     edit_state: Option<&InputEditState>,
     point: Point,
 ) -> usize {
@@ -4693,32 +4939,15 @@ fn input_cursor_index_at_point_with_state(
         return 0;
     }
 
-    let default_style = &theme.components.text.default;
-    let font_size = units.resolve_sp(
-        text_style
-            .font_size
-            .unwrap_or(default_style.size.max(sp(1.0))),
-    );
-    let line_height = (font_size * 1.25).max(font_size + 4.0);
-    let letter_spacing = units.resolve_sp(
-        text_style
-            .letter_spacing
-            .unwrap_or(default_style.letter_spacing.unwrap_or(Sp::ZERO)),
-    );
-    let text_request = TextFontRequest {
-        preferred_font: text_style
-            .font_family
-            .as_deref()
-            .or(default_style.font_family.as_deref()),
-        weight: text_style.font_weight.unwrap_or(default_style.weight),
-    };
     let inner = frame.inset(padding);
-    let layout = font_manager.measure_text_layout(
+    let (layout, _font_size, line_height) = input_text_layout(
+        font_manager,
+        theme,
+        units,
+        text_style,
         current_text,
-        text_request,
-        font_size,
-        line_height,
-        letter_spacing,
+        multiline,
+        inner.width.get(),
     );
     let state = edit_state
         .cloned()
@@ -4730,6 +4959,12 @@ fn input_cursor_index_at_point_with_state(
     } else {
         0.0
     };
+    if multiline {
+        let local_x = (point.x - inner.x).max(0.0).get();
+        let local_y = (point.y - inner.y).max(0.0).get() + state.scroll_y.get();
+        return layout.index_for_point(local_x, local_y);
+    }
+
     let scrollable_width = layout
         .width
         .max(caret_boundary + caret_padding + 2.0 + INPUT_CARET_EDGE_GAP);
@@ -5137,7 +5372,7 @@ mod tests {
     use crate::foundation::view_model::{Command, ValueCommand};
     use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
     use crate::platform::event::{ElementState, KeyEvent, MouseScrollDelta};
-    use crate::platform::keyboard::{Key, KeyCode, KeyLocation, NamedKey, PhysicalKey};
+    use crate::platform::keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey};
     use crate::text::font::{FontCatalog, TextFontRequest};
     use crate::ui::layout::Axis;
     use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
@@ -5145,7 +5380,8 @@ mod tests {
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent, CanvasShadow,
         CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, Input, InputEditState,
-        PathBuilder, Point, Select, SelectOption, Text, WidgetTree, INPUT_CARET_EDGE_GAP,
+        PathBuilder, Point, Select, SelectOption, Text, TextArea, WidgetTree,
+        INPUT_CARET_EDGE_GAP,
     };
     use crate::ui::widget::{Element, Stack, WidgetId};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -5274,6 +5510,19 @@ mod tests {
             repeat: false,
             text_with_all_modifiers: None,
             key_without_modifiers: Key::Named(named),
+        }
+    }
+
+    fn character_key_press_event(code: KeyCode, text: &str) -> KeyEvent {
+        KeyEvent {
+            physical_key: PhysicalKey::Code(code),
+            logical_key: Key::Character(text.into()),
+            text: Some(text.into()),
+            location: KeyLocation::Standard,
+            state: ElementState::Pressed,
+            repeat: false,
+            text_with_all_modifiers: Some(text.into()),
+            key_without_modifiers: Key::Character(text.into()),
         }
     }
 
@@ -5691,6 +5940,8 @@ mod tests {
                 anchor: 6,
                 composition: None,
                 scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             },
         );
 
@@ -5877,6 +6128,7 @@ mod tests {
                 padding,
                 &text_style,
                 &content,
+                false,
                 None,
                 point,
             ),
@@ -6085,6 +6337,8 @@ mod tests {
                 anchor: target_cursor,
                 composition: None,
                 scroll_x,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             },
         );
 
@@ -6100,6 +6354,7 @@ mod tests {
             padding,
             &text_style,
             &text,
+            false,
             handler.input_states.get(&input_id),
             visible_right,
         );
@@ -6183,6 +6438,8 @@ mod tests {
                 anchor: target_cursor,
                 composition: None,
                 scroll_x,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             },
         );
         handler.cursor_position = Some(Point {
@@ -6197,6 +6454,7 @@ mod tests {
             padding,
             &text_style,
             &text,
+            false,
             handler.input_states.get(&input_id),
             handler
                 .cursor_position
@@ -6239,6 +6497,8 @@ mod tests {
                 anchor: 0,
                 composition: None,
                 scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             },
         );
 
@@ -6336,6 +6596,8 @@ mod tests {
                 anchor: cursor,
                 composition: None,
                 scroll_x,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             },
         );
 
@@ -6387,6 +6649,8 @@ mod tests {
                 anchor: 0,
                 composition: None,
                 scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             },
         );
 
@@ -6436,6 +6700,8 @@ mod tests {
                 anchor: content.len(),
                 composition: None,
                 scroll_x: dp(240.0),
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             },
         );
 
@@ -6496,6 +6762,260 @@ mod tests {
             .expect("input state should be recorded");
         assert!(state.scroll_x > Dp::ZERO);
         assert!(state.cursor > state.anchor);
+    }
+
+    #[derive(Default)]
+    struct TextAreaSubmitVm {
+        text: String,
+        submits: usize,
+    }
+
+    impl crate::foundation::view_model::ViewModel for TextAreaSubmitVm {
+        fn new(_context: &ViewModelContext) -> Self {
+            todo!()
+        }
+
+        fn view(&self) -> Element<Self>
+        where
+            Self: Sized,
+        {
+            todo!()
+        }
+    }
+
+    #[test]
+    fn textarea_enter_inserts_newline_when_submit_on_enter_is_disabled() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(
+            TextArea::new(Text::new("alpha"))
+                .width(dp(180.0))
+                .rows(3)
+                .on_change(ValueCommand::new(|vm: &mut TextAreaSubmitVm, value| {
+                    vm.text = value;
+                })),
+        );
+        let mut handler = test_handler_with_vm(
+            TextAreaSubmitVm {
+                text: "alpha".to_string(),
+                submits: 0,
+            },
+            Some(tree),
+            invalidation,
+        );
+
+        let input_id = {
+            let computed = handler.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::FocusInput { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .expect("textarea hit region should exist")
+        };
+        handler.focused_input = Some(input_id);
+        handler.input_states.insert(input_id, InputEditState::caret_at("alpha"));
+
+        handler.handle_input_keyboard_event(&key_press_event(KeyCode::Enter, NamedKey::Enter));
+
+        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha\n");
+        assert_eq!(handler.with_view_model(|vm| vm.submits), 0);
+        let state = handler
+            .input_states
+            .get(&input_id)
+            .expect("textarea state should be recorded");
+        assert_eq!(state.cursor, "alpha\n".len());
+        assert_eq!(state.anchor, "alpha\n".len());
+    }
+
+    #[test]
+    fn textarea_submit_on_enter_submits_but_primary_modifier_keeps_newline_semantics() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(
+            TextArea::new(Text::new("alpha"))
+                .width(dp(180.0))
+                .rows(3)
+                .submit_on_enter(true)
+                .on_change(ValueCommand::new(|vm: &mut TextAreaSubmitVm, value| {
+                    vm.text = value;
+                }))
+                .on_submit(Command::new(|vm: &mut TextAreaSubmitVm| {
+                    vm.submits += 1;
+                })),
+        );
+        let mut handler = test_handler_with_vm(
+            TextAreaSubmitVm {
+                text: "alpha".to_string(),
+                submits: 0,
+            },
+            Some(tree),
+            invalidation,
+        );
+
+        let input_id = {
+            let computed = handler.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::FocusInput { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .expect("textarea hit region should exist")
+        };
+        handler.focused_input = Some(input_id);
+        handler.input_states.insert(input_id, InputEditState::caret_at("alpha"));
+
+        handler.handle_input_keyboard_event(&key_press_event(KeyCode::Enter, NamedKey::Enter));
+
+        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha");
+        assert_eq!(handler.with_view_model(|vm| vm.submits), 1);
+        let state = handler
+            .input_states
+            .get(&input_id)
+            .expect("textarea state should be recorded");
+        assert_eq!(state.cursor, "alpha".len());
+        assert_eq!(state.anchor, "alpha".len());
+
+        handler.modifiers = ModifiersState::CONTROL;
+        handler.handle_input_keyboard_event(&key_press_event(KeyCode::Enter, NamedKey::Enter));
+
+        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha\n");
+        assert_eq!(handler.with_view_model(|vm| vm.submits), 1);
+    }
+
+    #[test]
+    fn textarea_submit_on_enter_binding_re_resolves_after_invalidation() {
+        let invalidation = InvalidationSignal::new();
+        let submit_on_enter = Arc::new(Mutex::new(false));
+        let binding = {
+            let submit_on_enter = submit_on_enter.clone();
+            Binding::new(move || {
+                *submit_on_enter
+                    .lock()
+                    .expect("submit_on_enter binding mutex should not be poisoned")
+            })
+        };
+        let tree = WidgetTree::new(
+            TextArea::<TestVm>::new(Text::new("alpha"))
+                .width(dp(180.0))
+                .rows(3)
+                .submit_on_enter(binding),
+        );
+        let mut handler = test_handler(Some(tree), invalidation);
+
+        let resolve_submit_on_enter = |handler: &mut BoundRuntimeHandler<TestVm>| {
+            handler
+                .computed_scene()
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::FocusInput {
+                        submit_on_enter, ..
+                    } => Some(*submit_on_enter),
+                    _ => None,
+                })
+                .expect("textarea hit region should exist")
+        };
+
+        assert!(!resolve_submit_on_enter(&mut handler));
+
+        *submit_on_enter
+            .lock()
+            .expect("submit_on_enter binding mutex should not be poisoned") = true;
+        handler.invalidate_scene();
+
+        assert!(resolve_submit_on_enter(&mut handler));
+    }
+
+    #[test]
+    fn readonly_input_blocks_backspace_and_paste_changes() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(
+            Input::new(Text::new("alpha"))
+                .width(dp(180.0))
+                .readonly(true)
+                .on_change(ValueCommand::new(|vm: &mut TextAreaSubmitVm, value| {
+                    vm.text = value;
+                })),
+        );
+        let mut handler = test_handler_with_vm(
+            TextAreaSubmitVm {
+                text: "alpha".to_string(),
+                submits: 0,
+            },
+            Some(tree),
+            invalidation,
+        );
+
+        let input_id = {
+            let computed = handler.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::FocusInput { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .expect("input hit region should exist")
+        };
+        handler.focused_input = Some(input_id);
+        handler.input_states.insert(input_id, InputEditState::caret_at("alpha"));
+
+        handler.handle_input_keyboard_event(&key_press_event(KeyCode::Backspace, NamedKey::Backspace));
+        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha");
+
+        handler.clipboard.set_text("beta".to_string());
+        handler.modifiers = ModifiersState::CONTROL;
+        handler.handle_input_keyboard_event(&character_key_press_event(KeyCode::KeyV, "v"));
+
+        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha");
+    }
+
+    #[test]
+    fn readonly_textarea_skips_newline_insert_but_still_allows_submit() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(
+            TextArea::new(Text::new("alpha"))
+                .width(dp(180.0))
+                .rows(3)
+                .readonly(true)
+                .submit_on_enter(true)
+                .on_change(ValueCommand::new(|vm: &mut TextAreaSubmitVm, value| {
+                    vm.text = value;
+                }))
+                .on_submit(Command::new(|vm: &mut TextAreaSubmitVm| {
+                    vm.submits += 1;
+                })),
+        );
+        let mut handler = test_handler_with_vm(
+            TextAreaSubmitVm {
+                text: "alpha".to_string(),
+                submits: 0,
+            },
+            Some(tree),
+            invalidation,
+        );
+
+        let input_id = {
+            let computed = handler.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::FocusInput { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .expect("textarea hit region should exist")
+        };
+        handler.focused_input = Some(input_id);
+        handler.input_states.insert(input_id, InputEditState::caret_at("alpha"));
+
+        handler.handle_input_keyboard_event(&key_press_event(KeyCode::Enter, NamedKey::Enter));
+
+        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha");
+        assert_eq!(handler.with_view_model(|vm| vm.submits), 1);
     }
 
     #[derive(Default)]

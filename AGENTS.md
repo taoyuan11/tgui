@@ -4,12 +4,12 @@
 
 ## 项目定位
 
-`tgui` 是一个 Rust GUI 框架 crate，目标是提供基于 `wgpu` 的 GPU 加速渲染、MVVM 状态模型、`taffy` 布局、声明式组件树、主题系统、动画、媒体加载、对话框、自定义窗口 chrome / 原生窗口控制以及可选视频播放能力。
+`tgui` 是一个 Rust GUI 框架 crate，目标是提供基于 `wgpu` 的 GPU 加速渲染、MVVM 状态模型、`taffy` 布局、声明式组件树、主题系统、动画、媒体加载、单行 / 多行文本输入、系统通知、对话框、自定义窗口 chrome / 原生窗口控制以及可选视频播放能力。
 
 crate 信息：
 
 - 包名：`tgui`
-- 当前版本：`0.1.6`
+- 当前版本：`0.1.7`
 - Rust edition：`2021`
 - License：MIT
 - 主要依赖：`wgpu`、`winit-core` 及平台后端、`taffy`、`cosmic-text`、`image`、`resvg`、`reqwest`、`lyon`
@@ -18,14 +18,16 @@ crate 信息：
 ## 重要目录和文件
 
 - `Cargo.toml`：crate 元数据、features、平台依赖和发布排除规则。
-- `src/lib.rs`：公共 API 总出口，按 `application`、`mvvm`、`layout`、`widgets`、`canvas`、`theme`、`core`、`media`、`dialog`、`logging`、`platform`、`video` 分组导出。
+- `src/lib.rs`：公共 API 总出口，按 `application`、`mvvm`、`layout`、`widgets`、`canvas`、`theme`、`core`、`media`、`dialog`、`notification`、`logging`、`platform`、`video` 分组导出。
 - `src/application/mod.rs`：`Application`、`ApplicationBuilder`、`WindowSpec`、多窗口声明、窗口装饰开关与运行入口。
+- `src/notification.rs`：系统通知抽象，包含通知选项、权限状态、动作回调分发与平台后端实现。
 - `src/runtime.rs`：运行时核心，管理事件循环、窗口生命周期、输入、焦点、滚动、文本编辑、命令派发、窗口控制请求、异步对话框回调、主题绑定、动画刷新、媒体状态和渲染调度。
 - `src/foundation/`：基础能力，包括 `Observable`、`Binding`、`ViewModelContext`、`Command`、`ValueCommand`、`WindowControl`、`InputTrigger`、`TguiError`、`Color`。
 - `src/foundation/window_control.rs`：命令上下文中的运行时窗口控制，封装拖拽、拖拽调整大小、最小化、最大化、还原、关闭和最大化状态查询。
 - `src/ui/layout.rs`：布局基础类型，封装 `Length`、`Track`、`Insets`、`Align`、`Justify`、`Axis`、`Overflow` 等。
 - `src/ui/widget/`：组件和场景构建。`core.rs` 很大，负责元素树解析、Taffy 布局、渲染 primitive 收集、命中区域、输入/选择文本等大量逻辑；其他文件提供具体 widget builder。
 - `src/ui/theme/`：主题 token、组件主题、状态解析、light/dark/system 模式。
+- `src/ui/theme/component/textarea.rs`：`TextAreaTheme` / `TextAreaStyle`，定义多行文本域的背景、边框、滚动条和文本 token。
 - `src/rendering/renderer.rs`：`wgpu` 渲染器，包含矩形、渐变/brush、mesh、文字、纹理、透明窗口 surface、backdrop blur 等 pipeline。
 - `src/rendering/shader/`：WGSL shader。
 - `src/media/mod.rs`：图片、SVG、网络/本地/内存媒体加载，纹理缓存，SVG 栅格化，canvas shadow 缓存。
@@ -33,6 +35,7 @@ crate 信息：
 - `src/platform.rs`：平台抽象和不同 winit 后端的选择。
 - `src/video/`：启用 `video` feature 后的 `VideoController`、`VideoSurface`、FFmpeg 后端。
 - `examples/`：独立 Cargo 示例工程。
+- `examples/text_area/`：`TextArea` 多行输入、自动增高、内部滚动与提交语义示例。
 - `docs/images/tgui_logo.png`：README 使用的 logo。
 
 ## Features 和平台
@@ -61,11 +64,12 @@ Windows 下启用 `video` feature 时，`build.rs` 会额外链接 `strmiids` �
 - `application`：`Application`、`WindowSpec`、`WindowRole`、`WindowClosePolicy`。
 - `mvvm`：`ViewModel`、`ViewModelContext`、`Observable`、`Binding`、`Command`、`ValueCommand`、`CommandContext`、`WindowControl`、`WindowResizeDirection`。
 - `layout`：`Flex`、`Grid`、`Stack` 以及布局尺寸和对齐类型。
-- `widgets`：`Button`、`Text`、`Input`、`Image`、`Checkbox`、`Radio`、`Select`、`Switch`、`Element`、`WidgetTree` 等。
+- `widgets`：`Button`、`Text`、`Input`、`TextArea`、`Image`、`Checkbox`、`Radio`、`Select`、`Switch`、`Element`、`WidgetTree` 等。
 - `canvas`：`Canvas`、`PathBuilder`、路径、渐变、阴影、布尔运算、画布事件。
 - `theme`：`Theme`、`ThemeMode`、`ThemeSet`、组件主题和设计 token。
 - `media`：`MediaSource`、`MediaBytes`、`ContentFit`。
 - `dialog`：文件选择和消息框。
+- `notification`：`NotificationOptions`、`NotificationAction`、`Notifications`、权限查询和动作回调。
 - `video`：仅在 `video` feature 下导出。
 
 ## 应用启动模型
@@ -74,6 +78,7 @@ Windows 下启用 `video` feature 时，`build.rs` 会额外链接 `strmiids` �
 
 ```rust
 Application::new()
+    .app_id("com.example.demo")
     .title("demo")
     .window_size(dp(960.0), dp(640.0))
     .with_view_model(AppVm::new)
@@ -88,8 +93,9 @@ Application::new()
 - `Observable::set/update` 会标记 invalidation 并唤醒事件循环。
 - `Binding<T>` 是惰性读取值，可 `map` 派生，也可 `.animated(...)` 给支持的属性添加声明式过渡。
 - `Command<T>` 处理无 payload 事件；`ValueCommand<T, V>` 处理带 payload 事件。
-- `Command::new_with_context` / `ValueCommand::new_with_context` 可访问运行时服务，例如 `ctx.dialogs()` 和 `ctx.log()`。
+- `Command::new_with_context` / `ValueCommand::new_with_context` 可访问运行时服务，例如 `ctx.dialogs()`、`ctx.notifications()` 和 `ctx.log()`。
 - `CommandContext::window()` 返回当前命令所属窗口的 `WindowControl`，可请求原生窗口拖拽、拖拽调整大小、最小化、最大化 / 还原、关闭以及查询最大化状态。
+- 需要系统通知时，优先在 `Application` 上设置稳定的 `app_id`；Windows 下这是通知身份初始化的前置条件。
 - `Application::decorations(false)` 和 `WindowSpec::decorations(false)` 可关闭系统标题栏，用于自绘窗口 chrome；无边框透明窗口通常还需要 `clear_color(Color::TRANSPARENT)`。
 
 ## 渲染和布局流程
@@ -126,6 +132,13 @@ Application::new()
 
 如果新增 widget，优先复用现有 `Element`、`WidgetKind`、`InteractionHandlers`、`MediaEventHandlers`、`VisualStyle`、`LayoutStyle` 模式，而不是另起一套事件或布局系统。
 
+对于文本输入组件，当前约定是：
+
+- `Input` 用于单行输入；`TextArea` 用于多行输入。
+- `TextArea` 支持 `rows`、`min_rows`、`max_rows`、`submit_on_enter`、`on_submit`。
+- `submit_on_enter(true)` 时，裸 `Enter` 触发提交；带主快捷键修饰符或 `Shift` / `Alt` 时仍插入换行。
+- `TextArea` 超过 `max_rows` 后通过内部滚动继续编辑，需要同步关注滚动条样式、caret 可见性和命中测试。
+
 ## 动画系统
 
 动画分两类：
@@ -149,6 +162,22 @@ Application::new()
 - raster 图片会按物理像素请求异步栅格化，保留旧纹理作为加载中的 fallback。
 - 媒体加载失败会产生 placeholder 颜色和标签。
 - 网络加载使用 `reqwest` blocking client 和 rustls ring provider。
+
+## 通知系统
+
+通知能力位于 `src/notification.rs`，通过 `CommandContext::notifications()` 暴露给命令处理：
+
+- `Notifications::send`：发送普通系统通知。
+- `Notifications::send_with_actions`：发送最多两个 action 的交互式通知，并把结果回调到 ViewModel。
+- `Notifications::request_permission` / `permission_status`：查询或请求通知权限。
+- `NotificationOptions` 支持 title、body、subtitle、app name、icon、声音开关和 action。
+
+平台差异：
+
+- Windows：要求 `Application::app_id(...)`，运行时会准备通知身份。
+- Linux：当前通过 `notify-rust` 发送通知并监听 action。
+- macOS：接口已公开，但当前仍依赖 UserNotifications bridge，调用时可能返回 backend error。
+- Android / OHOS：当前返回 unsupported。
 
 ## 视频系统
 
@@ -174,6 +203,7 @@ Application::new()
 - `background_effects`
 - `frameless_window`
 - `demo`
+- `text_area`
 - `multiple_vm_examples`
 - `android_basic_window`
 - `ohos_basic_window`
@@ -185,6 +215,7 @@ cargo run --manifest-path examples/basic_window/Cargo.toml
 cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 cargo run --manifest-path examples/canvas/Cargo.toml
 cargo run --manifest-path examples/frameless_window/Cargo.toml
+cargo run --manifest-path examples/text_area/Cargo.toml
 ```
 
 README 中提到的一些示例名称未必都在当前工作区存在；维护文档时以实际 `examples/` 目录为准。
@@ -225,12 +256,13 @@ cargo run --manifest-path examples/<example_name>/Cargo.toml
 - `src/ui/widget/core.rs`：布局、渲染 primitive、输入、选择、滚动、组件状态。
 - `src/runtime.rs`：事件、焦点、输入编辑、滚动条、命令派发、canvas/video 命中等运行时行为。
 - `src/application/mod.rs`、`src/foundation/window_control.rs`：窗口配置、装饰开关、命令上下文窗口控制。
+- `src/notification.rs`：通知选项校验、平台分发、异步 action completion 回调。
 - `src/media/mod.rs`：图片/SVG 加载、栅格化、缓存、外部资源解析。
 - `src/animation.rs`：属性动画和 timeline 行为。
 - `src/video/backend/ffmpeg/*`：视频后端内部逻辑，需 feature/环境支持。
 - `src/ui/widget/canvas.rs`、`src/ui/widget/common.rs`、`src/ui/theme/mod.rs`、`src/text/font.rs` 等也有局部测试。
 
-修改共享行为时，不要只跑示例；至少跑相关模块测试。修改 `runtime.rs`、`ui/widget/core.rs` 或渲染 primitive 时，优先补充小型单元测试。
+修改共享行为时，不要只跑示例；至少跑相关模块测试。修改 `runtime.rs`、`ui/widget/core.rs` 或渲染 primitive 时，优先补充小型单元测试。`TextArea` 行为变更优先覆盖提交语义、换行、选择与滚动；通知变更优先覆盖 options 校验、平台约束和 completion 回调。
 
 ## 维护注意事项
 
@@ -243,7 +275,9 @@ cargo run --manifest-path examples/<example_name>/Cargo.toml
 - 新增视觉属性时通常需要同时考虑：widget builder、`VisualStyle` 或相关状态、scene primitive、动画 key、renderer/shader。
 - 新增绑定属性时优先接受 `impl Into<Value<T>>`，这样静态值和 `Binding<T>` 都可用。
 - 新增交互事件时要检查 hover/focus/pressed 状态、命中区域、命令 scope、运行时事件派发以及缓存失效。
+- 新增或修改 `TextArea` 能力时，要同时检查 widget builder、`WidgetKind`、布局测量、scroll region、caret/selection、键盘事件和主题 token，而不是只改渲染或只改输入。
 - 文本相关修改要注意 UTF-8 边界、IME composition、选择区间、caret 可见性和横向滚动。
+- 通知相关改动要同步检查 `Application::app_id`、`CommandContext::notifications()`、平台后端限制、action 数量约束以及异步回调回到 ViewModel 的路径。
 - 媒体和异步加载修改要确保完成后调用 invalidation，避免 UI 不刷新。
 - 对话框异步回调通过 runtime dispatcher 回到 ViewModel；不要在线程里直接持有或修改 ViewModel。
 - 当前工作区存在未跟踪的 `Video.md`，不要在无明确需求时删除、重命名或覆盖它。
@@ -258,7 +292,9 @@ cargo run --manifest-path examples/<example_name>/Cargo.toml
 4. `src/application/mod.rs`
 5. `src/foundation/binding.rs`
 6. `src/foundation/view_model.rs`
-7. 涉及窗口控制时读 `src/foundation/window_control.rs` 和 `examples/frameless_window/src/main.rs`
-8. `src/ui/widget/core.rs` 中的 `Element`、`WidgetTree`、布局和渲染输出相关部分
-9. `src/runtime.rs` 的 `BoundRuntime`、`BoundRuntimeHandler` 和事件处理部分
-10. 需要改渲染时再读 `src/rendering/renderer.rs` 与 `src/rendering/shader/*`
+7. 涉及文本输入时读 `src/ui/widget/input.rs`、`src/ui/widget/textarea.rs` 和 `examples/text_area/src/main.rs`
+8. 涉及通知时读 `src/notification.rs`、`src/foundation/view_model.rs` 中的 `CommandContext`，以及 `examples/demo/src/main.rs`
+9. 涉及窗口控制时读 `src/foundation/window_control.rs` 和 `examples/frameless_window/src/main.rs`
+10. `src/ui/widget/core.rs` 中的 `Element`、`WidgetTree`、布局和渲染输出相关部分
+11. `src/runtime.rs` 的 `BoundRuntime`、`BoundRuntimeHandler` 和事件处理部分
+12. 需要改渲染时再读 `src/rendering/renderer.rs` 与 `src/rendering/shader/*`

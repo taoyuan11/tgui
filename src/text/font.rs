@@ -127,7 +127,9 @@ pub struct ResolvedText {
 pub(crate) struct TextLayoutInfo {
     pub width: f32,
     pub height: f32,
+    pub line_height: f32,
     boundaries: Vec<TextBoundary>,
+    lines: Vec<TextLineLayoutInfo>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -136,8 +138,148 @@ struct TextBoundary {
     x: f32,
 }
 
+#[derive(Debug, Clone)]
+struct TextLineLayoutInfo {
+    start_index: usize,
+    end_index: usize,
+    top: f32,
+    height: f32,
+    width: f32,
+    boundaries: Vec<TextBoundary>,
+}
+
 impl TextLayoutInfo {
     pub(crate) fn x_for_index(&self, index: usize) -> f32 {
+        self.line_for_index(index).x_for_index(index)
+    }
+
+    pub(crate) fn index_for_x(&self, x: f32) -> usize {
+        self.lines
+            .first()
+            .map(|line| line.index_for_x(x))
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn point_for_index(&self, index: usize) -> (f32, f32) {
+        let line = self.line_for_index(index);
+        (line.x_for_index(index), line.top)
+    }
+
+    pub(crate) fn index_for_point(&self, x: f32, y: f32) -> usize {
+        self.line_for_y(y).index_for_x(x)
+    }
+
+    pub(crate) fn line_start_for_index(&self, index: usize) -> usize {
+        self.line_for_index(index).start_index
+    }
+
+    pub(crate) fn line_end_for_index(&self, index: usize) -> usize {
+        self.line_for_index(index).end_index
+    }
+
+    pub(crate) fn line_index_for_index(&self, index: usize) -> usize {
+        self.find_line_index_for_index(index)
+    }
+
+    pub(crate) fn line_count(&self) -> usize {
+        self.lines.len()
+    }
+
+    pub(crate) fn line_top(&self, line_index: usize) -> f32 {
+        self.lines
+            .get(line_index)
+            .map(|line| line.top)
+            .unwrap_or(0.0)
+    }
+
+    pub(crate) fn move_vertical(&self, index: usize, target_x: f32, delta: i32) -> usize {
+        let current = self.find_line_index_for_index(index);
+        let next = (current as i32 + delta).clamp(0, self.lines.len().saturating_sub(1) as i32);
+        self.lines[next as usize].index_for_x(target_x)
+    }
+
+    pub(crate) fn selection_rects(&self, start: usize, end: usize) -> Vec<(f32, f32, f32, f32)> {
+        if start == end || self.lines.is_empty() {
+            return Vec::new();
+        }
+
+        let range_start = start.min(end);
+        let range_end = start.max(end);
+        let mut rects = Vec::new();
+        for (line_index, line) in self.lines.iter().enumerate() {
+            let next_start = self
+                .lines
+                .get(line_index + 1)
+                .map(|next| next.start_index)
+                .unwrap_or(usize::MAX);
+            if range_end <= line.start_index || range_start >= next_start {
+                continue;
+            }
+
+            let local_start = range_start.max(line.start_index).min(next_start);
+            let local_end = range_end.min(next_start).max(local_start);
+            let x0 = line.x_for_index(local_start);
+            let x1 = if range_end > line.end_index {
+                line.width
+            } else {
+                line.x_for_index(local_end.min(line.end_index))
+            };
+            rects.push((x0.min(x1), line.top, (x1 - x0).abs(), line.height));
+        }
+
+        rects
+    }
+
+    fn find_line_index_for_index(&self, index: usize) -> usize {
+        if self.lines.is_empty() {
+            return 0;
+        }
+
+        for (line_index, line) in self.lines.iter().enumerate() {
+            let next_start = self
+                .lines
+                .get(line_index + 1)
+                .map(|next| next.start_index)
+                .unwrap_or(usize::MAX);
+            if index < next_start {
+                return line_index;
+            }
+        }
+
+        self.lines.len() - 1
+    }
+
+    fn line_for_index(&self, index: usize) -> &TextLineLayoutInfo {
+        let line_index = self.find_line_index_for_index(index);
+        self.lines
+            .get(line_index)
+            .or_else(|| self.lines.first())
+            .expect("text layout should always contain at least one line")
+    }
+
+    fn line_for_y(&self, y: f32) -> &TextLineLayoutInfo {
+        if self.lines.is_empty() {
+            return self
+                .lines
+                .first()
+                .expect("text layout should always contain at least one line");
+        }
+
+        let local_y = y.max(0.0);
+        for line in &self.lines {
+            if local_y < line.top + line.height {
+                return line;
+            }
+        }
+
+        self.lines
+            .last()
+            .expect("text layout should always contain at least one line")
+    }
+}
+
+impl TextLineLayoutInfo {
+    fn x_for_index(&self, index: usize) -> f32 {
         if self.boundaries.is_empty() {
             return 0.0;
         }
@@ -152,9 +294,9 @@ impl TextLayoutInfo {
         x
     }
 
-    pub(crate) fn index_for_x(&self, x: f32) -> usize {
+    fn index_for_x(&self, x: f32) -> usize {
         if self.boundaries.len() <= 1 {
-            return 0;
+            return self.start_index;
         }
 
         let local_x = x.max(0.0);
@@ -169,7 +311,7 @@ impl TextLayoutInfo {
         self.boundaries
             .last()
             .map(|boundary| boundary.index)
-            .unwrap_or(0)
+            .unwrap_or(self.end_index)
     }
 }
 
@@ -284,11 +426,195 @@ impl FontManager {
         line_height: f32,
         letter_spacing: f32,
     ) -> TextLayoutInfo {
+        self.measure_text_layout_unwrapped(text, request, font_size, line_height, letter_spacing)
+    }
+
+    pub(crate) fn measure_text_layout_wrapped(
+        &self,
+        text: &str,
+        request: TextFontRequest<'_>,
+        font_size: f32,
+        line_height: f32,
+        letter_spacing: f32,
+        max_width: f32,
+    ) -> TextLayoutInfo {
         if text.is_empty() {
             return TextLayoutInfo {
                 width: 0.0,
                 height: line_height,
+                line_height,
                 boundaries: vec![TextBoundary { index: 0, x: 0.0 }],
+                lines: vec![TextLineLayoutInfo {
+                    start_index: 0,
+                    end_index: 0,
+                    top: 0.0,
+                    height: line_height,
+                    width: 0.0,
+                    boundaries: vec![TextBoundary { index: 0, x: 0.0 }],
+                }],
+            };
+        }
+
+        let wrap_width = if max_width.is_finite() && max_width > 0.0 {
+            Some(max_width)
+        } else {
+            None
+        };
+        if wrap_width.is_none() && !text.contains('\n') {
+            return self.measure_text_layout_unwrapped(
+                text,
+                request,
+                font_size,
+                line_height,
+                letter_spacing,
+            );
+        }
+
+        let graphemes = text
+            .grapheme_indices(true)
+            .map(|(start, grapheme)| (start, start + grapheme.len(), grapheme))
+            .collect::<Vec<_>>();
+        let mut lines = Vec::new();
+        let mut line_start = 0usize;
+
+        while line_start < text.len() {
+            let mut current_end = line_start;
+            let mut last_break = None;
+            let mut wrapped = false;
+            let mut explicit_newline_end = None;
+
+            for (start, end, grapheme) in graphemes.iter().copied() {
+                if start < line_start {
+                    continue;
+                }
+                if grapheme.contains('\n') {
+                    explicit_newline_end = Some((start, end));
+                    break;
+                }
+
+                let candidate_end = end;
+                if let Some(limit) = wrap_width {
+                    let candidate = self.measure_text_layout_unwrapped(
+                        &text[line_start..candidate_end],
+                        request.clone(),
+                        font_size,
+                        line_height,
+                        letter_spacing,
+                    );
+                    if candidate.width > limit && current_end > line_start {
+                        let break_at = last_break.unwrap_or(current_end);
+                        lines.push(build_wrapped_line(
+                            self,
+                            text,
+                            request.clone(),
+                            font_size,
+                            line_height,
+                            letter_spacing,
+                            line_start,
+                            break_at,
+                            lines.len() as f32 * line_height,
+                        ));
+                        line_start = break_at;
+                        wrapped = true;
+                        break;
+                    }
+                }
+
+                current_end = candidate_end;
+                if grapheme.chars().all(char::is_whitespace) {
+                    last_break = Some(candidate_end);
+                }
+            }
+
+            if wrapped {
+                continue;
+            }
+
+            if let Some((newline_start, newline_end)) = explicit_newline_end {
+                lines.push(build_wrapped_line(
+                    self,
+                    text,
+                    request.clone(),
+                    font_size,
+                    line_height,
+                    letter_spacing,
+                    line_start,
+                    newline_start,
+                    lines.len() as f32 * line_height,
+                ));
+                line_start = newline_end;
+                continue;
+            }
+
+            lines.push(build_wrapped_line(
+                self,
+                text,
+                request.clone(),
+                font_size,
+                line_height,
+                letter_spacing,
+                line_start,
+                current_end,
+                lines.len() as f32 * line_height,
+            ));
+            line_start = current_end;
+        }
+
+        if text.ends_with('\n') {
+            lines.push(build_wrapped_line(
+                self,
+                text,
+                request,
+                font_size,
+                line_height,
+                letter_spacing,
+                text.len(),
+                text.len(),
+                lines.len() as f32 * line_height,
+            ));
+        }
+
+        let width = lines.iter().map(|line| line.width).fold(0.0, f32::max);
+        let height = lines
+            .last()
+            .map(|line| line.top + line.height)
+            .unwrap_or(line_height);
+        let boundaries = lines
+            .first()
+            .map(|line| line.boundaries.clone())
+            .unwrap_or_else(|| vec![TextBoundary { index: 0, x: 0.0 }]);
+
+        TextLayoutInfo {
+            width,
+            height,
+            line_height,
+            boundaries,
+            lines,
+        }
+    }
+
+    fn measure_text_layout_unwrapped(
+        &self,
+        text: &str,
+        request: TextFontRequest<'_>,
+        font_size: f32,
+        line_height: f32,
+        letter_spacing: f32,
+    ) -> TextLayoutInfo {
+        if text.is_empty() {
+            return TextLayoutInfo {
+                width: 0.0,
+                height: line_height,
+                line_height,
+                boundaries: vec![TextBoundary { index: 0, x: 0.0 }],
+                lines: vec![TextLineLayoutInfo {
+                    start_index: 0,
+                    end_index: 0,
+                    top: 0.0,
+                    height: line_height,
+                    width: 0.0,
+                    boundaries: vec![TextBoundary { index: 0, x: 0.0 }],
+                }],
             };
         }
 
@@ -332,7 +658,16 @@ impl FontManager {
                 TextLayoutInfo {
                     width: width.max(0.0),
                     height: height.max(line_height),
-                    boundaries,
+                    line_height,
+                    boundaries: boundaries.clone(),
+                    lines: vec![TextLineLayoutInfo {
+                        start_index: 0,
+                        end_index: text.len(),
+                        top: 0.0,
+                        height: height.max(line_height),
+                        width: width.max(0.0),
+                        boundaries,
+                    }],
                 }
             },
         )
@@ -416,6 +751,43 @@ fn push_boundary(boundaries: &mut Vec<TextBoundary>, index: usize, x: f32) {
     }
 
     boundaries.push(TextBoundary { index, x });
+}
+
+fn build_wrapped_line(
+    manager: &FontManager,
+    text: &str,
+    request: TextFontRequest<'_>,
+    font_size: f32,
+    line_height: f32,
+    letter_spacing: f32,
+    start_index: usize,
+    end_index: usize,
+    top: f32,
+) -> TextLineLayoutInfo {
+    let layout = manager.measure_text_layout_unwrapped(
+        &text[start_index..end_index],
+        request,
+        font_size,
+        line_height,
+        letter_spacing,
+    );
+    let boundaries = layout
+        .boundaries
+        .into_iter()
+        .map(|boundary| TextBoundary {
+            index: boundary.index + start_index,
+            x: boundary.x,
+        })
+        .collect::<Vec<_>>();
+
+    TextLineLayoutInfo {
+        start_index,
+        end_index,
+        top,
+        height: layout.height.max(line_height),
+        width: layout.width,
+        boundaries,
+    }
 }
 
 #[cfg(test)]
