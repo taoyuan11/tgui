@@ -4,12 +4,14 @@ use tgui::prelude::*;
 struct App {
     theme: Observable<ThemeMode>,
     content: Observable<String>,
+    notes: Observable<String>,
     switch: Observable<bool>,
     checkbox: Observable<bool>,
     radio: Observable<bool>,
     contact_method: Observable<String>,
     select_action: Observable<Option<String>>,
     notification_status: Observable<String>,
+    textarea_status: Observable<String>,
 }
 
 impl ViewModel for App {
@@ -17,12 +19,16 @@ impl ViewModel for App {
         Self {
             theme: context.observable(ThemeMode::System),
             content: context.observable(String::from("输入框示例输入框示例输入框示例")),
+            notes: context.observable(String::from(
+                "这是一个多行文本域示例。\n默认 Enter 会换行。\n开启 submit_on_enter 后，单独 Enter 会提交。",
+            )),
             switch: context.observable(false),
             checkbox: context.observable(false),
             radio: context.observable(false),
             contact_method: context.observable(String::from("system")),
             select_action: context.observable(None),
             notification_status: context.observable(String::from("尚未发送通知")),
+            textarea_status: context.observable(String::from("尚未提交")),
         }
     }
 
@@ -51,6 +57,26 @@ impl ViewModel for App {
                         .on_change(ValueCommand::new(|app: &mut App, text| {
                             app.content.set(text)
                         }))
+                ),
+                component_card(
+                    "TextArea",
+                    Flex::vertical().gap(dp(10.0)).child(el![
+                        TextArea::new(Text::new(self.notes.binding()))
+                            .placeholder_with_str("请输入多行内容")
+                            .width(dp(320.0))
+                            .rows(4)
+                            .min_rows(3)
+                            .max_rows(6)
+                            .submit_on_enter(true)
+                            .on_change(ValueCommand::new(|app: &mut App, text| {
+                                app.notes.set(text);
+                                app.textarea_status.set("编辑中，Enter 将提交".to_string());
+                            }))
+                            .on_submit(Command::new(|app: &mut App| {
+                                app.textarea_status.set("已通过 Enter 提交".to_string());
+                            })),
+                        Text::new(self.textarea_status.binding()).font_size(sp(13.0)),
+                    ]),
                 ),
                 component_card(
                     "Button",

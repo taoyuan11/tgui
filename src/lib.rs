@@ -8,7 +8,7 @@
 //! - [`mvvm::Binding`] derives UI-facing values from state and can opt into declarative transitions.
 //! - [`mvvm::Command`] and [`mvvm::ValueCommand`] connect widget events back to your view model.
 //! - Layout and widgets such as [`layout::Flex`], [`widgets::Button`], [`widgets::Input`],
-//!   and [`widgets::Text`] build the widget tree.
+//!   [`widgets::TextArea`], and [`widgets::Text`] build the widget tree.
 //!
 //! Applications are always backed by an explicit view model:
 //!
@@ -204,8 +204,8 @@ pub mod prelude {
     pub use crate::theme::{
         BorderScale, CheckboxStyle, CheckboxTheme, ColorScheme, ComponentTheme, ElevationScale,
         FontWeight, MotionScale, RadioStyle, RadioTheme, RadiusScale, SelectStyle, SelectTheme,
-        Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet, ThemeStore, TypeScale,
-        WidgetState,
+        Shadow, SpaceScale, Stateful, TextAreaStyle, TextAreaTheme, TextStyle, Theme, ThemeMode,
+        ThemeSet, ThemeStore, TypeScale, WidgetState,
     };
     #[cfg(feature = "video")]
     pub use crate::video::{
@@ -214,7 +214,7 @@ pub mod prelude {
     pub use crate::widgets::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, Checkbox, CursorStyle, Element, Image, Input, Radio,
-        RadioGroup, RadioOption, Select, SelectOption, Switch, Text, WidgetCommand,
+        RadioGroup, RadioOption, Select, SelectOption, Switch, Text, TextArea, WidgetCommand,
         WidgetEventResult, WidgetTree,
     };
 }
@@ -224,8 +224,8 @@ pub mod theme {
     pub use crate::ui::theme::{
         BorderScale, CheckboxStyle, CheckboxTheme, ColorScheme, ComponentTheme, ElevationScale,
         FontWeight, MotionScale, RadioStyle, RadioTheme, RadiusScale, SelectStyle, SelectTheme,
-        Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet, ThemeStore, TypeScale,
-        WidgetState,
+        Shadow, SpaceScale, Stateful, TextAreaStyle, TextAreaTheme, TextStyle, Theme, ThemeMode,
+        ThemeSet, ThemeStore, TypeScale, WidgetState,
     };
 }
 
@@ -235,7 +235,7 @@ pub mod widgets {
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, Checkbox, CursorStyle, Element, Image, Input, Radio,
-        RadioGroup, RadioOption, Select, SelectOption, Switch, Text, WidgetCommand,
+        RadioGroup, RadioOption, Select, SelectOption, Switch, Text, TextArea, WidgetCommand,
         WidgetEventResult, WidgetTree,
     };
     #[cfg(feature = "video")]

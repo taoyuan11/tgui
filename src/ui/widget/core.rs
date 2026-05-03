@@ -21,7 +21,7 @@ use crate::text::font::{FontManager, TextFontRequest, ICON_FONT_FAMILY};
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, Track, Value, Wrap,
 };
-use crate::ui::theme::{Theme, WidgetState};
+use crate::ui::theme::{ScrollbarTheme, TextAreaStyle, Theme, WidgetState};
 use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface as PublicVideoSurface;
@@ -34,10 +34,13 @@ use super::common::{
     ContainerKind, ContainerLayout, CursorStyle, HitGeometry, HitInteraction, HitRegion,
     InputEditState, InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext,
     MediaEventHandlers, MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive,
-    ScenePrimitives, ScrollRegion, ScrollbarAxis, ScrollbarHandle, SelectOptionState,
+    ScenePrimitives, ScrollRegion, ScrollRegionSource, ScrollbarAxis, ScrollbarHandle, SelectOptionState,
     TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind, WidgetStateMap,
 };
 use super::text::Text;
+
+#[cfg(test)]
+mod textarea_tests;
 
 /// Caret width in logical pixels.
 /// 光标的像素宽度
@@ -242,6 +245,19 @@ enum ResolvedWidgetKind<VM> {
         placeholder: Text,
         on_change: Option<ValueCommand<VM, String>>,
         disabled: Value<bool>,
+        readonly: Value<bool>,
+    },
+    TextArea {
+        text: Text,
+        placeholder: Text,
+        on_change: Option<ValueCommand<VM, String>>,
+        on_submit: Option<Command<VM>>,
+        disabled: Value<bool>,
+        readonly: Value<bool>,
+        rows: u16,
+        min_rows: Option<u16>,
+        max_rows: Option<u16>,
+        submit_on_enter: Value<bool>,
     },
     Select {
         selected_label: Value<Option<String>>,
@@ -382,11 +398,36 @@ impl<VM> Element<VM> {
                 placeholder,
                 on_change,
                 disabled,
+                readonly,
             } => WidgetKind::Input {
                 text,
                 placeholder,
                 on_change: on_change.map(|command| command.scope(selector.clone())),
                 disabled,
+                readonly,
+            },
+            WidgetKind::TextArea {
+                text,
+                placeholder,
+                on_change,
+                on_submit,
+                disabled,
+                readonly,
+                rows,
+                min_rows,
+                max_rows,
+                submit_on_enter,
+            } => WidgetKind::TextArea {
+                text,
+                placeholder,
+                on_change: on_change.map(|command| command.scope(selector.clone())),
+                on_submit: on_submit.map(|command| command.scope(selector.clone())),
+                disabled,
+                readonly,
+                rows,
+                min_rows,
+                max_rows,
+                submit_on_enter,
             },
             WidgetKind::Select {
                 selected_label,
@@ -561,11 +602,36 @@ impl<VM> Element<VM> {
                 placeholder,
                 on_change,
                 disabled,
+                readonly,
             } => ResolvedWidgetKind::Input {
                 text: text.clone(),
                 placeholder: placeholder.clone(),
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
+                readonly: readonly.clone(),
+            },
+            WidgetKind::TextArea {
+                text,
+                placeholder,
+                on_change,
+                on_submit,
+                disabled,
+                readonly,
+                rows,
+                min_rows,
+                max_rows,
+                submit_on_enter,
+            } => ResolvedWidgetKind::TextArea {
+                text: text.clone(),
+                placeholder: placeholder.clone(),
+                on_change: on_change.clone(),
+                on_submit: on_submit.clone(),
+                disabled: disabled.clone(),
+                readonly: readonly.clone(),
+                rows: *rows,
+                min_rows: *min_rows,
+                max_rows: *max_rows,
+                submit_on_enter: submit_on_enter.clone(),
             },
             WidgetKind::Select {
                 selected_label,
@@ -623,6 +689,20 @@ impl<VM> ResolvedElement<VM> {
             } => MeasureContext::Input {
                 text: text.clone(),
                 placeholder: placeholder.clone(),
+            },
+            ResolvedWidgetKind::TextArea {
+                text,
+                placeholder,
+                rows,
+                min_rows,
+                max_rows,
+                ..
+            } => MeasureContext::TextArea {
+                text: text.clone(),
+                placeholder: placeholder.clone(),
+                rows: *rows,
+                min_rows: *min_rows,
+                max_rows: *max_rows,
             },
             ResolvedWidgetKind::Select {
                 selected_label,
@@ -699,7 +779,9 @@ impl<VM> ResolvedElement<VM> {
         now: std::time::Instant,
     ) -> TaffyStyle {
         let default_min_width = match &self.kind {
-            ResolvedWidgetKind::Input { .. } | ResolvedWidgetKind::Select { .. }
+            ResolvedWidgetKind::Input { .. }
+                | ResolvedWidgetKind::TextArea { .. }
+                | ResolvedWidgetKind::Select { .. }
                 if self.layout.min_width.is_none() =>
             {
                 Dimension::from_length(0.0)
@@ -982,6 +1064,7 @@ impl<VM> ResolvedElement<VM> {
             | ResolvedWidgetKind::Radio { disabled, .. }
             | ResolvedWidgetKind::Switch { disabled, .. }
             | ResolvedWidgetKind::Input { disabled, .. }
+            | ResolvedWidgetKind::TextArea { disabled, .. }
             | ResolvedWidgetKind::Select { disabled, .. } => disabled.resolve(),
             _ => false,
         };
@@ -1153,12 +1236,15 @@ impl<VM> ResolvedElement<VM> {
                         .resolve(widget_state)
                         .radius,
                 ),
-                ResolvedWidgetKind::Input { .. } => context
-                    .units
-                    .resolve_dp(context.theme.components.input.resolve(widget_state).radius),
-                ResolvedWidgetKind::Select { .. } => context
-                    .units
-                    .resolve_dp(context.theme.components.select.resolve(widget_state).radius),
+                        ResolvedWidgetKind::Input { .. } => context
+                            .units
+                            .resolve_dp(context.theme.components.input.resolve(widget_state).radius),
+                        ResolvedWidgetKind::TextArea { .. } => context.units.resolve_dp(
+                            context.theme.components.textarea.resolve(widget_state).radius,
+                        ),
+                        ResolvedWidgetKind::Select { .. } => context
+                            .units
+                            .resolve_dp(context.theme.components.select.resolve(widget_state).radius),
                 ResolvedWidgetKind::Checkbox { checked, .. } => context.units.resolve_dp(
                     context
                         .theme
@@ -1581,6 +1667,7 @@ impl<VM> ResolvedElement<VM> {
                     .unwrap_or(Rect::new(frame.x, frame.y, 0.0, 0.0));
                 computed.scroll_regions.push(ScrollRegion {
                     id: self.id,
+                    source: ScrollRegionSource::Container,
                     content_viewport: background_frame,
                     visible_frame,
                     content_bounds,
@@ -2002,6 +2089,77 @@ impl<VM> ResolvedElement<VM> {
                     });
                 }
             }
+            ResolvedWidgetKind::TextArea {
+                text,
+                placeholder,
+                on_change,
+                on_submit,
+                rows,
+                min_rows,
+                max_rows,
+                submit_on_enter,
+                ..
+            } => {
+                let active = context.focused_input == Some(self.id);
+                let textarea_style = context.theme.components.textarea.resolve(widget_state);
+                let current_text = text.content.resolve();
+                let padding = Insets::symmetric(textarea_style.padding_x, textarea_style.padding_y);
+                let input_state = if active {
+                    context.focused_input_state
+                } else {
+                    None
+                };
+                let textarea_render = push_textarea_primitives(
+                    frame,
+                    text,
+                    placeholder,
+                    &current_text,
+                    context.font_manager,
+                    context.theme,
+                    context.units,
+                    context.animations,
+                    context.now,
+                    &mut computed.scene,
+                    padding,
+                    &textarea_style,
+                    opacity,
+                    self.id,
+                    input_state,
+                    active && context.caret_visible && !disabled,
+                    primitive_clip,
+                    primitive_clip_mask,
+                    *rows,
+                    *min_rows,
+                    *max_rows,
+                    context.hovered_scrollbar,
+                    context.active_scrollbar,
+                );
+                if active {
+                    computed.ime_cursor_area = textarea_render.ime_cursor_area;
+                }
+                if let Some(scroll_region) = textarea_render.scroll_region {
+                    computed.scroll_regions.push(scroll_region);
+                }
+                if !disabled {
+                    computed.hit_regions.push(HitRegion {
+                        rect: frame,
+                        clip_rect: primitive_clip,
+                        geometry: HitGeometry::Rect,
+                        interaction: HitInteraction::FocusInput {
+                            id: self.id,
+                            frame,
+                            padding,
+                            interactions: self.interactions.clone(),
+                            on_change: on_change.clone(),
+                            on_submit: on_submit.clone(),
+                            multiline: true,
+                            submit_on_enter: submit_on_enter.resolve(),
+                            text_style: text.clone(),
+                            text: current_text,
+                        },
+                    });
+                }
+            }
             ResolvedWidgetKind::Input {
                 text,
                 placeholder,
@@ -2052,6 +2210,9 @@ impl<VM> ResolvedElement<VM> {
                             padding,
                             interactions: self.interactions.clone(),
                             on_change: on_change.clone(),
+                            on_submit: None,
+                            multiline: false,
+                            submit_on_enter: false,
                             text_style: text.clone(),
                             text: current_text,
                         },
@@ -2116,14 +2277,40 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Container { children, .. } => {
                 children.iter().find_map(|child| child.input_snapshot(id))
             }
-            ResolvedWidgetKind::Input { disabled, .. } if self.id == id && disabled.resolve() => {
+            ResolvedWidgetKind::Input { disabled, .. }
+            | ResolvedWidgetKind::TextArea { disabled, .. }
+                if self.id == id && disabled.resolve() =>
+            {
                 None
             }
             ResolvedWidgetKind::Input {
-                text, on_change, ..
+                text,
+                on_change,
+                readonly,
+                ..
             } if self.id == id => Some(InputSnapshot {
                 id,
                 on_change: on_change.clone(),
+                on_submit: None,
+                multiline: false,
+                submit_on_enter: false,
+                readonly: readonly.resolve(),
+                text: text.content.resolve(),
+            }),
+            ResolvedWidgetKind::TextArea {
+                text,
+                on_change,
+                on_submit,
+                readonly,
+                submit_on_enter,
+                ..
+            } if self.id == id => Some(InputSnapshot {
+                id,
+                on_change: on_change.clone(),
+                on_submit: on_submit.clone(),
+                multiline: true,
+                submit_on_enter: submit_on_enter.resolve(),
+                readonly: readonly.resolve(),
                 text: text.content.resolve(),
             }),
             _ => None,
@@ -2801,6 +2988,77 @@ fn measure_node(
             let placeholder_size = measure_text_content(placeholder, font_manager, theme, units);
             (INPUT_DEFAULT_WIDTH, text_size.1.max(placeholder_size.1))
         }
+        Some(MeasureContext::TextArea {
+            text,
+            placeholder,
+            rows,
+            min_rows,
+            max_rows,
+        }) => {
+            let textarea_style = theme.components.textarea.resolve(Default::default());
+                let (font_size, line_height, letter_spacing) =
+                    resolved_text_metrics(text, theme, units);
+            let target_rows = usize::from((*rows).max(1));
+            let min_rows = min_rows
+                .as_ref()
+                .map(|value| usize::from((*value).max(1)))
+                .unwrap_or(target_rows);
+            let max_rows = max_rows
+                .as_ref()
+                .map(|value| usize::from((*value).max(1)))
+                .unwrap_or(target_rows.max(min_rows));
+                let base_rows = target_rows.max(min_rows).max(1);
+                let wrap_width = known_dimensions
+                    .width
+                    .map(|width| {
+                        (width
+                            - units.resolve_dp(textarea_style.padding_x) * 2.0
+                            - textarea_style
+                                .scrollbar
+                                .as_ref()
+                                .map(|scrollbar| units.resolve_dp(scrollbar.width))
+                                .unwrap_or_else(|| {
+                                    units.resolve_dp(theme.components.scrollbar.width)
+                                }))
+                        .max(1.0)
+                    })
+                    .unwrap_or_else(|| {
+                        (INPUT_DEFAULT_WIDTH
+                            - units.resolve_dp(textarea_style.padding_x) * 2.0)
+                            .max(1.0)
+                    });
+                let content = text.content.resolve();
+                let placeholder_content = placeholder.content.resolve();
+                let sample = if content.is_empty() {
+                    placeholder_content.as_str()
+                } else {
+                    content.as_str()
+                };
+                let default_text_style = &theme.components.text.default;
+                let text_request = TextFontRequest {
+                    preferred_font: text
+                        .font_family
+                        .as_deref()
+                        .or(default_text_style.font_family.as_deref()),
+                    weight: text.font_weight.unwrap_or(default_text_style.weight),
+                };
+                let layout = font_manager.measure_text_layout_wrapped(
+                    sample,
+                    text_request,
+                    font_size,
+                    line_height,
+                    letter_spacing,
+                    wrap_width,
+                );
+                let content_rows = layout.line_count().max(1);
+                let visible_rows = content_rows.max(base_rows).min(max_rows.max(base_rows));
+                (
+                    INPUT_DEFAULT_WIDTH,
+                    (line_height * visible_rows as f32
+                        + units.resolve_dp(textarea_style.padding_y) * 2.0)
+                        .max(units.resolve_dp(textarea_style.min_height)),
+                )
+        }
         Some(MeasureContext::Select {
             selected_label,
             placeholder,
@@ -2939,13 +3197,17 @@ fn default_layout_padding<VM>(element: &ResolvedElement<VM>, theme: &Theme) -> I
             let variant_theme = button_variant_theme(&theme.components.button, *variant);
             Insets::symmetric(variant_theme.padding_x, variant_theme.padding_y)
         }
-        ResolvedWidgetKind::Input { .. } => {
-            let input_style = theme.components.input.resolve(Default::default());
-            Insets::symmetric(input_style.padding_x, input_style.padding_y)
-        }
-        ResolvedWidgetKind::Select { .. } => {
-            let select_style = theme.components.select.resolve(Default::default());
-            Insets::symmetric(select_style.padding_x, select_style.padding_y)
+            ResolvedWidgetKind::Input { .. } => {
+                let input_style = theme.components.input.resolve(Default::default());
+                Insets::symmetric(input_style.padding_x, input_style.padding_y)
+            }
+            ResolvedWidgetKind::TextArea { .. } => {
+                let textarea_style = theme.components.textarea.resolve(Default::default());
+                Insets::symmetric(textarea_style.padding_x, textarea_style.padding_y)
+            }
+            ResolvedWidgetKind::Select { .. } => {
+                let select_style = theme.components.select.resolve(Default::default());
+                Insets::symmetric(select_style.padding_x, select_style.padding_y)
         }
         ResolvedWidgetKind::Switch { checked, .. } => {
             theme
@@ -3332,6 +3594,281 @@ fn push_text_primitives(
             clip_rect,
             clip_mask,
         });
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct TextAreaRenderResult {
+    ime_cursor_area: Option<Rect>,
+    scroll_region: Option<ScrollRegion>,
+}
+
+fn textarea_scrollbar_theme<'a>(
+    textarea_style: &'a TextAreaStyle,
+    theme: &'a Theme,
+) -> &'a ScrollbarTheme {
+    textarea_style
+        .scrollbar
+        .as_ref()
+        .unwrap_or(&theme.components.scrollbar)
+}
+
+fn push_textarea_primitives(
+    frame: Rect,
+    text: &Text,
+    placeholder: &Text,
+    current_text: &str,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+    animations: &mut AnimationEngine,
+    now: std::time::Instant,
+    scene: &mut ScenePrimitives,
+    padding: Insets,
+    textarea_style: &TextAreaStyle,
+    opacity: f32,
+    widget_id: WidgetId,
+    edit_state: Option<&InputEditState>,
+    show_caret: bool,
+    clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
+    _rows: u16,
+    _min_rows: Option<u16>,
+    _max_rows: Option<u16>,
+    hovered_scrollbar: Option<ScrollbarHandle>,
+    active_scrollbar: Option<ScrollbarHandle>,
+) -> TextAreaRenderResult {
+    let inner = frame.inset(padding);
+    if inner.is_empty() {
+        return TextAreaRenderResult::default();
+    }
+
+    let input_clip_rect = clip_rect
+        .map(|parent_clip| {
+            parent_clip.intersect(inner).unwrap_or(Rect::new(
+                parent_clip.x.max(inner.x),
+                parent_clip.y.max(inner.y),
+                0.0,
+                0.0,
+            ))
+        })
+        .unwrap_or(inner);
+    let input_clip_rect = Some(input_clip_rect);
+    let state = edit_state
+        .cloned()
+        .unwrap_or_default()
+        .clamped_to(current_text);
+    let show_placeholder = current_text.is_empty()
+        && state
+            .composition
+            .as_ref()
+            .map(|composition| composition.text.is_empty())
+            .unwrap_or(true);
+
+    let default_text_style = &theme.components.text.default;
+    let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
+    let text_request = TextFontRequest {
+        preferred_font: text
+            .font_family
+            .as_deref()
+            .or(default_text_style.font_family.as_deref()),
+        weight: text.font_weight.unwrap_or(default_text_style.weight),
+    };
+    let placeholder_request = TextFontRequest {
+        preferred_font: placeholder
+            .font_family
+            .as_deref()
+            .or(default_text_style.font_family.as_deref()),
+        weight: placeholder
+            .font_weight
+            .unwrap_or(default_text_style.weight),
+    };
+    let scrollbar_theme = textarea_scrollbar_theme(textarea_style, theme);
+    let scrollbar_width = units.resolve_dp(scrollbar_theme.width.max(dp(2.0)));
+
+    let mut wrap_width = inner.width.get().max(1.0);
+    let mut layout = font_manager.measure_text_layout_wrapped(
+        current_text,
+        text_request.clone(),
+        font_size,
+        line_height,
+        letter_spacing,
+        wrap_width,
+    );
+    let mut needs_scrollbar = layout.height > inner.height.get().max(line_height) + 0.5;
+    if needs_scrollbar && inner.width.get() > scrollbar_width + 1.0 {
+        wrap_width = (inner.width.get() - scrollbar_width).max(1.0);
+        layout = font_manager.measure_text_layout_wrapped(
+            current_text,
+            text_request.clone(),
+            font_size,
+            line_height,
+            letter_spacing,
+            wrap_width,
+        );
+        needs_scrollbar = layout.height > inner.height.get().max(line_height) + 0.5;
+    }
+
+    let viewport_height = inner.height.get().max(line_height);
+    let content_height = layout.height.max(line_height);
+    let max_scroll_y = (content_height - viewport_height).max(0.0);
+    let scroll_y = state.scroll_y.get().clamp(0.0, max_scroll_y);
+    let text_frame = Rect::new(inner.x, inner.y - scroll_y, wrap_width, content_height);
+
+    if show_placeholder {
+        let placeholder_color = placeholder
+            .color
+            .as_ref()
+            .map(|color| {
+                color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now)
+            })
+            .unwrap_or(textarea_style.placeholder)
+            .with_alpha_factor(opacity);
+        scene.push_text(TextPrimitive {
+            content: placeholder.content.resolve(),
+            frame: Rect::new(inner.x, inner.y, wrap_width, line_height),
+            color: placeholder_color,
+            force_color: false,
+            font_family: placeholder_request.preferred_font.map(str::to_string),
+            font_size,
+            font_weight: placeholder_request.weight,
+            line_height,
+            letter_spacing,
+            clip_rect: input_clip_rect,
+            clip_mask,
+        });
+    } else {
+        if let Some((selection_start, selection_end)) = state.selection_range() {
+            for (x, y, width, height) in layout.selection_rects(selection_start, selection_end) {
+                if width <= 0.0 || height <= 0.0 {
+                    continue;
+                }
+                scene.push_shape(RenderPrimitive {
+                    rect: Rect::new(inner.x + x, inner.y + y - scroll_y, width, height),
+                    color: textarea_style.selection.with_alpha_factor(opacity),
+                    corner_radius: 4.0,
+                    stroke_width: 0.0,
+                    clip_rect: input_clip_rect,
+                    clip_mask,
+                });
+            }
+        }
+
+        let text_color = text
+            .color
+            .as_ref()
+            .map(|color| color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now))
+            .unwrap_or(textarea_style.text)
+            .with_alpha_factor(opacity);
+        scene.push_text(TextPrimitive {
+            content: current_text.to_string(),
+            frame: text_frame,
+            color: text_color,
+            force_color: false,
+            font_family: text_request.preferred_font.map(str::to_string),
+            font_size,
+            font_weight: text_request.weight,
+            line_height,
+            letter_spacing,
+            clip_rect: input_clip_rect,
+            clip_mask,
+        });
+    }
+
+    let mut ime_cursor_area = None;
+    if show_caret {
+        let (caret_x, caret_y) = layout.point_for_index(state.cursor.min(current_text.len()));
+        let caret_rect = Rect::new(
+            inner.x + caret_x,
+            inner.y + caret_y - scroll_y,
+            CARET_WIDTH,
+            line_height,
+        );
+        scene.push_overlay_shape(RenderPrimitive {
+            rect: caret_rect,
+            color: textarea_style.cursor.with_alpha_factor(opacity),
+            corner_radius: 0.0,
+            stroke_width: 0.0,
+            clip_rect: input_clip_rect,
+            clip_mask,
+        });
+        ime_cursor_area = Some(caret_rect);
+    }
+
+    let scroll_region = if needs_scrollbar && max_scroll_y > 0.0 {
+        let track = Rect::new(
+            (inner.right() - scrollbar_width).max(inner.x),
+            inner.y,
+            scrollbar_width,
+            inner.height,
+        );
+        scene.push_shape(RenderPrimitive {
+            rect: track,
+            color: textarea_style.scroll_background.with_alpha_factor(opacity),
+            corner_radius: scrollbar_theme.radius.get().min(scrollbar_width * 0.5),
+            stroke_width: 0.0,
+            clip_rect,
+            clip_mask,
+        });
+        scene.push_shape(RenderPrimitive {
+            rect: Rect::new(track.x, track.y, dp(1.0), track.height),
+            color: textarea_style.scroll_shadow.with_alpha_factor(opacity),
+            corner_radius: 0.0,
+            stroke_width: 0.0,
+            clip_rect,
+            clip_mask,
+        });
+
+        let thumb_height = ((viewport_height / content_height) * track.height.get())
+            .clamp(scrollbar_width, track.height.get());
+        let thumb_y = if max_scroll_y <= 0.0 {
+            track.y
+        } else {
+            track.y + (scroll_y / max_scroll_y) * (track.height.get() - thumb_height)
+        };
+        let thumb = Rect::new(track.x, thumb_y, track.width, thumb_height);
+        let handle = ScrollbarHandle {
+            id: widget_id,
+            axis: ScrollbarAxis::Vertical,
+        };
+        let mut scrollbar_state = WidgetState::default();
+        if active_scrollbar == Some(handle) {
+            scrollbar_state.pressed = true;
+        } else if hovered_scrollbar == Some(handle) {
+            scrollbar_state.hovered = true;
+        }
+        scene.push_shape(RenderPrimitive {
+            rect: thumb,
+            color: scrollbar_theme.thumb_color(scrollbar_state).with_alpha_factor(opacity),
+            corner_radius: scrollbar_theme.radius.get().min(scrollbar_width * 0.5),
+            stroke_width: 0.0,
+            clip_rect,
+            clip_mask,
+        });
+
+        Some(ScrollRegion {
+            id: widget_id,
+            source: ScrollRegionSource::Input { widget_id },
+            content_viewport: Rect::new(inner.x, inner.y, wrap_width, inner.height),
+            visible_frame: frame.intersect(clip_rect.unwrap_or(frame)).unwrap_or(Rect::new(
+                frame.x, frame.y, 0.0, 0.0,
+            )),
+            content_bounds: Rect::new(inner.x, inner.y, wrap_width, content_height),
+            scroll_offset: Point::new(Dp::ZERO, scroll_y),
+            overflow_x: Overflow::Hidden,
+            overflow_y: Overflow::Scroll,
+            horizontal_track: None,
+            horizontal_thumb: None,
+            vertical_track: Some(track),
+            vertical_thumb: Some(thumb),
+        })
+    } else {
+        None
+    };
+
+    TextAreaRenderResult {
+        ime_cursor_area,
+        scroll_region,
     }
 }
 
@@ -8867,6 +9404,8 @@ mod tests {
                 anchor: 1,
                 composition: None,
                 scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             }),
             false,
         );
@@ -8903,6 +9442,8 @@ mod tests {
                 anchor: 2,
                 composition: None,
                 scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             }),
             None,
             None,
@@ -8948,6 +9489,8 @@ mod tests {
                     cursor: Some((1, 1)),
                 }),
                 scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             }),
             None,
             None,
@@ -9010,6 +9553,8 @@ mod tests {
                 anchor: 5,
                 composition: None,
                 scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             }),
             None,
             None,
@@ -9040,6 +9585,8 @@ mod tests {
                 anchor: 5,
                 composition: None,
                 scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             }),
             None,
             None,
@@ -9070,6 +9617,8 @@ mod tests {
                 anchor: 5,
                 composition: None,
                 scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             }),
             None,
             None,
@@ -9130,6 +9679,8 @@ mod tests {
                 anchor: 5,
                 composition: None,
                 scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             }),
             None,
             None,
@@ -9192,6 +9743,8 @@ mod tests {
                 anchor: 0,
                 composition: None,
                 scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
             }),
             None,
             None,

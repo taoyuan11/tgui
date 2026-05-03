@@ -25,6 +25,7 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 2. `basic_window`
 3. `animation_showcase`
 4. `multi_window`
+5. `text_area`
 
 ## 桌面示例说明
 
@@ -104,6 +105,22 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 
 适合参考运行时服务如何注入到命令处理逻辑中。
 
+### `text_area`
+
+多行文本输入示例。演示：
+
+- `TextArea`
+- `rows` / `min_rows` / `max_rows`
+- 自动增高与内部滚动
+- `submit_on_enter(true)` 与 `on_submit`
+- 受控多行文本绑定
+
+运行方式：
+
+```bash
+cargo run --manifest-path examples/text_area/Cargo.toml
+```
+
 ### `animation_showcase`
 
 声明式动画示例。核心是 `Binding::animated(...)`，演示属性值变化时自动过渡，例如：
@@ -138,6 +155,16 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 - 多个文档窗口
 
 核心类型是 `WindowSpec`，适合做文档型应用、浮动工具面板或 inspector 模式界面。
+
+### `demo`
+
+综合展示示例，当前覆盖：
+
+- `Input` / `TextArea`
+- `Button` / `Switch` / `Checkbox` / `Radio` / `Select`
+- `CommandContext::notifications()`
+- `Image`
+- `Canvas`
 
 ## 平台示例
 

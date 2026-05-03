@@ -10,6 +10,7 @@ mod input;
 mod radio;
 mod select;
 mod switch;
+mod textarea;
 mod text;
 #[cfg(feature = "video")]
 mod video;
@@ -34,7 +35,7 @@ pub(crate) use common::{
     BackdropBlurPrimitive, BrushPrimitiveData, CanvasItemInteractionHandlers, ClipMask,
     CompositionState, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
     InteractionHandlers, MediaEventPhase, MediaEventState, MeshVertex, RenderCommand,
-    ScrollRegion, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
+    ScrollRegion, ScrollRegionSource, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,
@@ -50,6 +51,7 @@ pub use input::Input;
 pub use radio::{Radio, RadioGroup, RadioOption};
 pub use select::{Select, SelectOption};
 pub use switch::Switch;
+pub use textarea::TextArea;
 pub use text::Text;
 #[cfg(feature = "video")]
 pub use video::VideoSurface;

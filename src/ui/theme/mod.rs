@@ -14,7 +14,7 @@ pub use color::ColorScheme;
 pub use component::{
     ButtonStyle, ButtonTheme, ButtonVariant, CheckboxStyle, CheckboxTheme, ComponentTheme,
     InputStyle, InputTheme, RadioStyle, RadioTheme, ScrollbarTheme, SelectStyle, SelectTheme,
-    SwitchStyle, SwitchTheme, TextTheme,
+    SwitchStyle, SwitchTheme, TextAreaStyle, TextAreaTheme, TextTheme,
 };
 pub use mode::ThemeMode;
 pub use motion::MotionScale;
