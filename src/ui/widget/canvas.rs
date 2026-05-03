@@ -19,14 +19,16 @@ use crate::foundation::binding::Binding;
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::view_model::ValueCommand;
-use crate::media::{MediaManager, TextureFrame};
+use crate::media::{resolve_media_rect, ContentFit, MediaManager, MediaSource, RasterRequest, TextureFrame};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
-use crate::ui::unit::{Dp, UnitContext};
+use crate::ui::unit::{Dp, Sp, UnitContext};
+use crate::text::font::FontWeight;
 
 use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
-    CanvasItemInteractionHandlers, CursorStyle, InteractionHandlers, MediaEventHandlers,
-    MeshPrimitive, MeshVertex, Point, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
+    CanvasItemInteractionHandlers, ClipMask, CursorStyle, InteractionHandlers, MediaEventHandlers,
+    MeshPrimitive, MeshVertex, Point, Rect, TextPrimitive, TexturePrimitive, VisualStyle,
+    WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -67,10 +69,46 @@ impl From<usize> for CanvasItemId {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CanvasPointerEvent {
+pub enum CanvasMouseButton {
+    Left,
+    Right,
+    Middle,
+    Back,
+    Forward,
+    Other(u16),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CanvasMouseEvent {
     pub item_id: CanvasItemId,
+    pub button: Option<CanvasMouseButton>,
     pub canvas_position: Point,
+    pub scene_position: Point,
     pub local_position: Point,
+}
+
+pub type CanvasPointerEvent = CanvasMouseEvent;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CanvasWheelEvent {
+    pub item_id: CanvasItemId,
+    pub delta: Point,
+    pub canvas_position: Point,
+    pub scene_position: Point,
+    pub local_position: Point,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CanvasDragEvent {
+    pub item_id: CanvasItemId,
+    pub button: CanvasMouseButton,
+    pub start_canvas_position: Point,
+    pub start_scene_position: Point,
+    pub start_local_position: Point,
+    pub canvas_position: Point,
+    pub scene_position: Point,
+    pub local_position: Point,
+    pub delta: Point,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -205,6 +243,151 @@ impl CanvasShadow {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CanvasBlendMode {
+    #[default]
+    Normal,
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+    Plus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CanvasFillRule {
+    #[default]
+    NonZero,
+    EvenOdd,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CanvasStrokeCap {
+    #[default]
+    Butt,
+    Square,
+    Round,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CanvasStrokeJoin {
+    #[default]
+    Miter,
+    Bevel,
+    Round,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CanvasStrokeAlignment {
+    #[default]
+    Center,
+    Inside,
+    Outside,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CanvasTransform2D {
+    pub matrix: [f32; 6],
+}
+
+impl Default for CanvasTransform2D {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+impl CanvasTransform2D {
+    pub const IDENTITY: Self = Self {
+        matrix: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+    };
+
+    pub const fn from_matrix(matrix: [f32; 6]) -> Self {
+        Self { matrix }
+    }
+
+    pub fn translate(x: impl Into<Dp>, y: impl Into<Dp>) -> Self {
+        Self::from_matrix([1.0, 0.0, 0.0, 1.0, x.into().get(), y.into().get()])
+    }
+
+    pub fn scale(x: f32, y: f32) -> Self {
+        Self::from_matrix([x, 0.0, 0.0, y, 0.0, 0.0])
+    }
+
+    pub fn rotate(radians: f32) -> Self {
+        let (sin, cos) = radians.sin_cos();
+        Self::from_matrix([cos, sin, -sin, cos, 0.0, 0.0])
+    }
+
+    pub fn then(self, other: Self) -> Self {
+        let [a1, b1, c1, d1, e1, f1] = self.matrix;
+        let [a2, b2, c2, d2, e2, f2] = other.matrix;
+        Self::from_matrix([
+            a1 * a2 + c1 * b2,
+            b1 * a2 + d1 * b2,
+            a1 * c2 + c1 * d2,
+            b1 * c2 + d1 * d2,
+            a1 * e2 + c1 * f2 + e1,
+            b1 * e2 + d1 * f2 + f1,
+        ])
+    }
+
+    pub fn apply(self, point_value: Point) -> Point {
+        let [a, b, c, d, e, f] = self.matrix;
+        let x = point_value.x.get();
+        let y = point_value.y.get();
+        Point::new(a * x + c * y + e, b * x + d * y + f)
+    }
+
+    pub fn inverse(self) -> Option<Self> {
+        let [a, b, c, d, e, f] = self.matrix;
+        let det = a * d - b * c;
+        if det.abs() <= f32::EPSILON {
+            return None;
+        }
+        let inv_det = 1.0 / det;
+        Some(Self::from_matrix([
+            d * inv_det,
+            -b * inv_det,
+            -c * inv_det,
+            a * inv_det,
+            (c * f - d * e) * inv_det,
+            (b * e - a * f) * inv_det,
+        ]))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanvasItemStyle {
+    pub id: CanvasItemId,
+    pub transform: CanvasTransform2D,
+    pub opacity: f32,
+    pub blend_mode: CanvasBlendMode,
+    pub cursor: Option<CursorStyle>,
+    pub visible: bool,
+    pub hit_test: bool,
+}
+
+impl CanvasItemStyle {
+    pub fn new(id: impl Into<CanvasItemId>) -> Self {
+        Self {
+            id: id.into(),
+            transform: CanvasTransform2D::IDENTITY,
+            opacity: 1.0,
+            blend_mode: CanvasBlendMode::Normal,
+            cursor: None,
+            visible: true,
+            hit_test: true,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CanvasBooleanOp {
     Union,
@@ -219,12 +402,19 @@ pub enum CanvasPathOpError {
     InvalidGeometry,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CanvasSvgPathError(pub String);
+
 #[derive(Clone, Debug)]
 pub struct CanvasStroke {
     pub width: Dp,
     pub brush: Value<CanvasBrush>,
     pub dash_pattern: Option<Vec<Dp>>,
     pub dash_offset: Dp,
+    pub line_cap: CanvasStrokeCap,
+    pub line_join: CanvasStrokeJoin,
+    pub miter_limit: f32,
+    pub alignment: CanvasStrokeAlignment,
 }
 
 impl CanvasStroke {
@@ -238,6 +428,10 @@ impl CanvasStroke {
             brush: brush.into(),
             dash_pattern: None,
             dash_offset: Dp::ZERO,
+            line_cap: CanvasStrokeCap::Butt,
+            line_join: CanvasStrokeJoin::Miter,
+            miter_limit: StrokeOptions::DEFAULT_MITER_LIMIT,
+            alignment: CanvasStrokeAlignment::Center,
         }
     }
 
@@ -252,6 +446,26 @@ impl CanvasStroke {
 
     pub fn dash_offset(mut self, offset: impl Into<Dp>) -> Self {
         self.dash_offset = offset.into();
+        self
+    }
+
+    pub fn line_cap(mut self, line_cap: CanvasStrokeCap) -> Self {
+        self.line_cap = line_cap;
+        self
+    }
+
+    pub fn line_join(mut self, line_join: CanvasStrokeJoin) -> Self {
+        self.line_join = line_join;
+        self
+    }
+
+    pub fn miter_limit(mut self, miter_limit: f32) -> Self {
+        self.miter_limit = miter_limit.max(0.0);
+        self
+    }
+
+    pub fn alignment(mut self, alignment: CanvasStrokeAlignment) -> Self {
+        self.alignment = alignment;
         self
     }
 }
@@ -328,6 +542,280 @@ impl PathBuilder {
     pub fn close(mut self) -> Self {
         self.commands.push(PathCommand::Close);
         self
+    }
+
+    pub fn rect(
+        self,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+        width: impl Into<Dp>,
+        height: impl Into<Dp>,
+    ) -> Self {
+        let x = x.into();
+        let y = y.into();
+        let width = width.into().max(Dp::ZERO);
+        let height = height.into().max(Dp::ZERO);
+        self.move_to(x, y)
+            .line_to(x + width, y)
+            .line_to(x + width, y + height)
+            .line_to(x, y + height)
+            .close()
+    }
+
+    pub fn rounded_rect(
+        self,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+        width: impl Into<Dp>,
+        height: impl Into<Dp>,
+        radius: impl Into<Dp>,
+    ) -> Self {
+        let x = x.into();
+        let y = y.into();
+        let width = width.into().max(Dp::ZERO);
+        let height = height.into().max(Dp::ZERO);
+        let radius = radius
+            .into()
+            .max(Dp::ZERO)
+            .min(width * 0.5)
+            .min(height * 0.5);
+        if radius <= Dp::ZERO {
+            return self.rect(x, y, width, height);
+        }
+
+        let right = x + width;
+        let bottom = y + height;
+        let r = radius.get();
+        let mut builder = self.move_to(x + radius, y);
+        builder = append_arc_segments(builder, Point::new(right - radius, y + radius), r, -std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2, false);
+        builder = append_arc_segments(builder, Point::new(right - radius, bottom - radius), r, 0.0, std::f32::consts::FRAC_PI_2, true);
+        builder = append_arc_segments(builder, Point::new(x + radius, bottom - radius), r, std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2, true);
+        builder = append_arc_segments(builder, Point::new(x + radius, y + radius), r, std::f32::consts::PI, std::f32::consts::FRAC_PI_2, true);
+        builder.close()
+    }
+
+    pub fn circle(
+        self,
+        center_x: impl Into<Dp>,
+        center_y: impl Into<Dp>,
+        radius: impl Into<Dp>,
+    ) -> Self {
+        let radius = radius.into();
+        self.ellipse(center_x, center_y, radius, radius)
+    }
+
+    pub fn ellipse(
+        self,
+        center_x: impl Into<Dp>,
+        center_y: impl Into<Dp>,
+        radius_x: impl Into<Dp>,
+        radius_y: impl Into<Dp>,
+    ) -> Self {
+        let center = Point::new(center_x, center_y);
+        let radius_x = radius_x.into().max(Dp::ZERO).get();
+        let radius_y = radius_y.into().max(Dp::ZERO).get();
+        if radius_x <= 0.0 || radius_y <= 0.0 {
+            return self;
+        }
+
+        let segments = 32usize;
+        let mut builder = self.move_to(center.x.get() + radius_x, center.y.get());
+        for index in 1..segments {
+            let angle = (index as f32 / segments as f32) * std::f32::consts::TAU;
+            builder = builder.line_to(
+                center.x.get() + angle.cos() * radius_x,
+                center.y.get() + angle.sin() * radius_y,
+            );
+        }
+        builder.close()
+    }
+
+    pub fn arc(
+        self,
+        center_x: impl Into<Dp>,
+        center_y: impl Into<Dp>,
+        radius: impl Into<Dp>,
+        start_angle: f32,
+        sweep_angle: f32,
+    ) -> Self {
+        let center = Point::new(center_x, center_y);
+        let connect_with_line = !self.commands.is_empty();
+        append_arc_segments(
+            self,
+            center,
+            radius.into().max(Dp::ZERO).get(),
+            start_angle,
+            sweep_angle,
+            connect_with_line,
+        )
+    }
+
+    pub fn arc_to(
+        self,
+        ctrl_x: impl Into<Dp>,
+        ctrl_y: impl Into<Dp>,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+        radius: impl Into<Dp>,
+    ) -> Self {
+        let Some(PathCommand::MoveTo(from) | PathCommand::LineTo(from)) = self.commands.last().copied() else {
+            return self.move_to(ctrl_x, ctrl_y).line_to(x, y);
+        };
+
+        let ctrl = Point::new(ctrl_x, ctrl_y);
+        let to = Point::new(x, y);
+        let radius = radius.into().max(Dp::ZERO).get();
+        if radius <= 0.0 {
+            return self.line_to(ctrl.x, ctrl.y).line_to(to.x, to.y);
+        }
+
+        let p0 = (from.x.get(), from.y.get());
+        let p1 = (ctrl.x.get(), ctrl.y.get());
+        let p2 = (to.x.get(), to.y.get());
+        let v1 = normalize_vec((p0.0 - p1.0, p0.1 - p1.1));
+        let v2 = normalize_vec((p2.0 - p1.0, p2.1 - p1.1));
+        let dot = (v1.0 * v2.0 + v1.1 * v2.1).clamp(-1.0, 1.0);
+        let angle = dot.acos();
+        if angle <= 1e-3 || (std::f32::consts::PI - angle).abs() <= 1e-3 {
+            return self.line_to(ctrl.x, ctrl.y).line_to(to.x, to.y);
+        }
+
+        let tangent = radius / (angle * 0.5).tan();
+        let start = (p1.0 + v1.0 * tangent, p1.1 + v1.1 * tangent);
+        let end = (p1.0 + v2.0 * tangent, p1.1 + v2.1 * tangent);
+        let bisector = normalize_vec((v1.0 + v2.0, v1.1 + v2.1));
+        let center_distance = radius / (angle * 0.5).sin();
+        let center = (
+            p1.0 + bisector.0 * center_distance,
+            p1.1 + bisector.1 * center_distance,
+        );
+        let start_angle = (start.1 - center.1).atan2(start.0 - center.0);
+        let mut sweep = (end.1 - center.1).atan2(end.0 - center.0) - start_angle;
+        if sweep <= -std::f32::consts::PI {
+            sweep += std::f32::consts::TAU;
+        } else if sweep > std::f32::consts::PI {
+            sweep -= std::f32::consts::TAU;
+        }
+
+        append_arc_segments(
+            self.line_to(start.0, start.1),
+            Point::new(center.0, center.1),
+            radius,
+            start_angle,
+            sweep,
+            true,
+        )
+    }
+
+    pub fn svg_path(mut self, data: &str) -> Result<Self, CanvasSvgPathError> {
+        let mut current = (0.0_f32, 0.0_f32);
+        let mut subpath_start = (0.0_f32, 0.0_f32);
+        let mut last_cubic_ctrl: Option<(f32, f32)> = None;
+        let mut last_quad_ctrl: Option<(f32, f32)> = None;
+
+        for segment in svgtypes::PathParser::from(data) {
+            let segment = segment.map_err(|error| CanvasSvgPathError(error.to_string()))?;
+            match segment {
+                svgtypes::PathSegment::MoveTo { abs, x, y } => {
+                    let point_value = svg_point(abs, current, x as f32, y as f32);
+                    self = self.move_to(point_value.0, point_value.1);
+                    current = point_value;
+                    subpath_start = point_value;
+                    last_cubic_ctrl = None;
+                    last_quad_ctrl = None;
+                }
+                svgtypes::PathSegment::LineTo { abs, x, y } => {
+                    let point_value = svg_point(abs, current, x as f32, y as f32);
+                    self = self.line_to(point_value.0, point_value.1);
+                    current = point_value;
+                    last_cubic_ctrl = None;
+                    last_quad_ctrl = None;
+                }
+                svgtypes::PathSegment::HorizontalLineTo { abs, x } => {
+                    let point_value = if abs {
+                        (x as f32, current.1)
+                    } else {
+                        (current.0 + x as f32, current.1)
+                    };
+                    self = self.line_to(point_value.0, point_value.1);
+                    current = point_value;
+                    last_cubic_ctrl = None;
+                    last_quad_ctrl = None;
+                }
+                svgtypes::PathSegment::VerticalLineTo { abs, y } => {
+                    let point_value = if abs {
+                        (current.0, y as f32)
+                    } else {
+                        (current.0, current.1 + y as f32)
+                    };
+                    self = self.line_to(point_value.0, point_value.1);
+                    current = point_value;
+                    last_cubic_ctrl = None;
+                    last_quad_ctrl = None;
+                }
+                svgtypes::PathSegment::CurveTo {
+                    abs,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    x,
+                    y,
+                } => {
+                    let ctrl1 = svg_point(abs, current, x1 as f32, y1 as f32);
+                    let ctrl2 = svg_point(abs, current, x2 as f32, y2 as f32);
+                    let to = svg_point(abs, current, x as f32, y as f32);
+                    self = self.cubic_to(ctrl1.0, ctrl1.1, ctrl2.0, ctrl2.1, to.0, to.1);
+                    current = to;
+                    last_cubic_ctrl = Some(ctrl2);
+                    last_quad_ctrl = None;
+                }
+                svgtypes::PathSegment::SmoothCurveTo { abs, x2, y2, x, y } => {
+                    let ctrl1 = last_cubic_ctrl
+                        .map(|prev| (current.0 * 2.0 - prev.0, current.1 * 2.0 - prev.1))
+                        .unwrap_or(current);
+                    let ctrl2 = svg_point(abs, current, x2 as f32, y2 as f32);
+                    let to = svg_point(abs, current, x as f32, y as f32);
+                    self = self.cubic_to(ctrl1.0, ctrl1.1, ctrl2.0, ctrl2.1, to.0, to.1);
+                    current = to;
+                    last_cubic_ctrl = Some(ctrl2);
+                    last_quad_ctrl = None;
+                }
+                svgtypes::PathSegment::Quadratic { abs, x1, y1, x, y } => {
+                    let ctrl = svg_point(abs, current, x1 as f32, y1 as f32);
+                    let to = svg_point(abs, current, x as f32, y as f32);
+                    self = self.quad_to(ctrl.0, ctrl.1, to.0, to.1);
+                    current = to;
+                    last_quad_ctrl = Some(ctrl);
+                    last_cubic_ctrl = None;
+                }
+                svgtypes::PathSegment::SmoothQuadratic { abs, x, y } => {
+                    let ctrl = last_quad_ctrl
+                        .map(|prev| (current.0 * 2.0 - prev.0, current.1 * 2.0 - prev.1))
+                        .unwrap_or(current);
+                    let to = svg_point(abs, current, x as f32, y as f32);
+                    self = self.quad_to(ctrl.0, ctrl.1, to.0, to.1);
+                    current = to;
+                    last_quad_ctrl = Some(ctrl);
+                    last_cubic_ctrl = None;
+                }
+                svgtypes::PathSegment::EllipticalArc { abs, x, y, .. } => {
+                    let to = svg_point(abs, current, x as f32, y as f32);
+                    self = self.line_to(to.0, to.1);
+                    current = to;
+                    last_cubic_ctrl = None;
+                    last_quad_ctrl = None;
+                }
+                svgtypes::PathSegment::ClosePath { .. } => {
+                    self = self.close();
+                    current = subpath_start;
+                    last_cubic_ctrl = None;
+                    last_quad_ctrl = None;
+                }
+            }
+        }
+
+        Ok(self)
     }
 
     pub fn boolean(
@@ -492,9 +980,10 @@ impl PathBuilder {
 
 #[derive(Clone, Debug)]
 pub struct CanvasPath {
-    pub id: CanvasItemId,
+    pub style: CanvasItemStyle,
     pub path: PathBuilder,
     pub fill: Option<Value<CanvasBrush>>,
+    pub fill_rule: CanvasFillRule,
     pub stroke: Option<CanvasStroke>,
     pub shadow: Option<Value<CanvasShadow>>,
 }
@@ -502,9 +991,10 @@ pub struct CanvasPath {
 impl CanvasPath {
     pub fn new(id: impl Into<CanvasItemId>, path: PathBuilder) -> Self {
         Self {
-            id: id.into(),
+            style: CanvasItemStyle::new(id),
             path,
             fill: None,
+            fill_rule: CanvasFillRule::NonZero,
             stroke: None,
             shadow: None,
         }
@@ -520,8 +1010,396 @@ impl CanvasPath {
         self
     }
 
+    pub fn fill_rule(mut self, fill_rule: CanvasFillRule) -> Self {
+        self.fill_rule = fill_rule;
+        self
+    }
+
     pub fn shadow(mut self, shadow: impl Into<Value<CanvasShadow>>) -> Self {
         self.shadow = Some(shadow.into());
+        self
+    }
+
+    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
+        self.style.transform = transform;
+        self
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.style.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn blend_mode(mut self, blend_mode: CanvasBlendMode) -> Self {
+        self.style.blend_mode = blend_mode;
+        self
+    }
+
+    pub fn cursor(mut self, cursor: CursorStyle) -> Self {
+        self.style.cursor = Some(cursor);
+        self
+    }
+
+    pub fn visible(mut self, visible: bool) -> Self {
+        self.style.visible = visible;
+        self
+    }
+
+    pub fn hit_test(mut self, hit_test: bool) -> Self {
+        self.style.hit_test = hit_test;
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanvasTextStyle {
+    pub font_family: Option<String>,
+    pub color: Color,
+    pub font_size: Sp,
+    pub font_weight: FontWeight,
+    pub line_height: Option<Sp>,
+    pub letter_spacing: Sp,
+}
+
+impl Default for CanvasTextStyle {
+    fn default() -> Self {
+        Self {
+            font_family: None,
+            color: Color::BLACK,
+            font_size: Sp::new(14.0),
+            font_weight: FontWeight::NORMAL,
+            line_height: None,
+            letter_spacing: Sp::ZERO,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CanvasTextWrap {
+    #[default]
+    Word,
+    Glyph,
+    None,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CanvasTextHorizontalAlign {
+    #[default]
+    Start,
+    Center,
+    End,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CanvasTextVerticalAlign {
+    #[default]
+    Start,
+    Center,
+    End,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CanvasTextOverflow {
+    #[default]
+    Clip,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanvasParagraphStyle {
+    pub wrap: CanvasTextWrap,
+    pub horizontal_align: CanvasTextHorizontalAlign,
+    pub vertical_align: CanvasTextVerticalAlign,
+    pub overflow: CanvasTextOverflow,
+}
+
+impl Default for CanvasParagraphStyle {
+    fn default() -> Self {
+        Self {
+            wrap: CanvasTextWrap::Word,
+            horizontal_align: CanvasTextHorizontalAlign::Start,
+            vertical_align: CanvasTextVerticalAlign::Start,
+            overflow: CanvasTextOverflow::Clip,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CanvasText {
+    pub style: CanvasItemStyle,
+    pub frame: Rect,
+    pub content: String,
+    pub text_style: CanvasTextStyle,
+    pub paragraph_style: CanvasParagraphStyle,
+}
+
+impl CanvasText {
+    pub fn new(id: impl Into<CanvasItemId>, frame: Rect, content: impl Into<String>) -> Self {
+        Self {
+            style: CanvasItemStyle::new(id),
+            frame,
+            content: content.into(),
+            text_style: CanvasTextStyle::default(),
+            paragraph_style: CanvasParagraphStyle::default(),
+        }
+    }
+
+    pub fn text_style(mut self, text_style: CanvasTextStyle) -> Self {
+        self.text_style = text_style;
+        self
+    }
+
+    pub fn paragraph_style(mut self, paragraph_style: CanvasParagraphStyle) -> Self {
+        self.paragraph_style = paragraph_style;
+        self
+    }
+
+    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
+        self.style.transform = transform;
+        self
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.style.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn blend_mode(mut self, blend_mode: CanvasBlendMode) -> Self {
+        self.style.blend_mode = blend_mode;
+        self
+    }
+
+    pub fn cursor(mut self, cursor: CursorStyle) -> Self {
+        self.style.cursor = Some(cursor);
+        self
+    }
+
+    pub fn visible(mut self, visible: bool) -> Self {
+        self.style.visible = visible;
+        self
+    }
+
+    pub fn hit_test(mut self, hit_test: bool) -> Self {
+        self.style.hit_test = hit_test;
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CanvasImage {
+    pub style: CanvasItemStyle,
+    pub frame: Rect,
+    pub source: MediaSource,
+    pub fit: ContentFit,
+    pub corner_radius: Dp,
+}
+
+impl CanvasImage {
+    pub fn new(id: impl Into<CanvasItemId>, frame: Rect, source: impl Into<MediaSource>) -> Self {
+        Self {
+            style: CanvasItemStyle::new(id),
+            frame,
+            source: source.into(),
+            fit: ContentFit::Contain,
+            corner_radius: Dp::ZERO,
+        }
+    }
+
+    pub fn fit(mut self, fit: ContentFit) -> Self {
+        self.fit = fit;
+        self
+    }
+
+    pub fn corner_radius(mut self, corner_radius: impl Into<Dp>) -> Self {
+        self.corner_radius = corner_radius.into().max(Dp::ZERO);
+        self
+    }
+
+    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
+        self.style.transform = transform;
+        self
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.style.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn blend_mode(mut self, blend_mode: CanvasBlendMode) -> Self {
+        self.style.blend_mode = blend_mode;
+        self
+    }
+
+    pub fn cursor(mut self, cursor: CursorStyle) -> Self {
+        self.style.cursor = Some(cursor);
+        self
+    }
+
+    pub fn visible(mut self, visible: bool) -> Self {
+        self.style.visible = visible;
+        self
+    }
+
+    pub fn hit_test(mut self, hit_test: bool) -> Self {
+        self.style.hit_test = hit_test;
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CanvasGroup {
+    pub style: CanvasItemStyle,
+    pub items: Vec<CanvasItem>,
+}
+
+impl CanvasGroup {
+    pub fn new(id: impl Into<CanvasItemId>, items: impl Into<Vec<CanvasItem>>) -> Self {
+        Self {
+            style: CanvasItemStyle::new(id),
+            items: items.into(),
+        }
+    }
+
+    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
+        self.style.transform = transform;
+        self
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.style.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn blend_mode(mut self, blend_mode: CanvasBlendMode) -> Self {
+        self.style.blend_mode = blend_mode;
+        self
+    }
+
+    pub fn visible(mut self, visible: bool) -> Self {
+        self.style.visible = visible;
+        self
+    }
+
+    pub fn hit_test(mut self, hit_test: bool) -> Self {
+        self.style.hit_test = hit_test;
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum CanvasClipShape {
+    Rect(Rect),
+    RoundedRect { rect: Rect, radius: Dp },
+    Path(PathBuilder),
+}
+
+#[derive(Clone, Debug)]
+pub struct CanvasClip {
+    pub style: CanvasItemStyle,
+    pub clip: CanvasClipShape,
+    pub items: Vec<CanvasItem>,
+}
+
+impl CanvasClip {
+    pub fn new(
+        id: impl Into<CanvasItemId>,
+        clip: CanvasClipShape,
+        items: impl Into<Vec<CanvasItem>>,
+    ) -> Self {
+        Self {
+            style: CanvasItemStyle::new(id),
+            clip,
+            items: items.into(),
+        }
+    }
+
+    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
+        self.style.transform = transform;
+        self
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.style.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn visible(mut self, visible: bool) -> Self {
+        self.style.visible = visible;
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CanvasLayer {
+    pub style: CanvasItemStyle,
+    pub items: Vec<CanvasItem>,
+}
+
+impl CanvasLayer {
+    pub fn new(id: impl Into<CanvasItemId>, items: impl Into<Vec<CanvasItem>>) -> Self {
+        Self {
+            style: CanvasItemStyle::new(id),
+            items: items.into(),
+        }
+    }
+
+    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
+        self.style.transform = transform;
+        self
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.style.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn blend_mode(mut self, blend_mode: CanvasBlendMode) -> Self {
+        self.style.blend_mode = blend_mode;
+        self
+    }
+
+    pub fn visible(mut self, visible: bool) -> Self {
+        self.style.visible = visible;
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CanvasMask {
+    pub style: CanvasItemStyle,
+    pub mask: Vec<CanvasItem>,
+    pub content: Vec<CanvasItem>,
+}
+
+impl CanvasMask {
+    pub fn new(
+        id: impl Into<CanvasItemId>,
+        mask: impl Into<Vec<CanvasItem>>,
+        content: impl Into<Vec<CanvasItem>>,
+    ) -> Self {
+        Self {
+            style: CanvasItemStyle::new(id),
+            mask: mask.into(),
+            content: content.into(),
+        }
+    }
+
+    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
+        self.style.transform = transform;
+        self
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.style.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn blend_mode(mut self, blend_mode: CanvasBlendMode) -> Self {
+        self.style.blend_mode = blend_mode;
+        self
+    }
+
+    pub fn visible(mut self, visible: bool) -> Self {
+        self.style.visible = visible;
         self
     }
 }
@@ -529,6 +1407,12 @@ impl CanvasPath {
 #[derive(Clone, Debug)]
 pub enum CanvasItem {
     Path(CanvasPath),
+    Text(CanvasText),
+    Image(CanvasImage),
+    Group(CanvasGroup),
+    Clip(CanvasClip),
+    Layer(CanvasLayer),
+    Mask(CanvasMask),
 }
 
 impl CanvasItem {
@@ -536,14 +1420,36 @@ impl CanvasItem {
         Self::Path(CanvasPath::new(id, path))
     }
 
+    pub fn text(id: impl Into<CanvasItemId>, frame: Rect, content: impl Into<String>) -> Self {
+        Self::Text(CanvasText::new(id, frame, content))
+    }
+
+    pub fn image(
+        id: impl Into<CanvasItemId>,
+        frame: Rect,
+        source: impl Into<MediaSource>,
+    ) -> Self {
+        Self::Image(CanvasImage::new(id, frame, source))
+    }
+
+    pub fn group(id: impl Into<CanvasItemId>, items: impl Into<Vec<CanvasItem>>) -> Self {
+        Self::Group(CanvasGroup::new(id, items))
+    }
+
     pub(crate) fn id(&self) -> CanvasItemId {
         match self {
-            Self::Path(path) => path.id,
+            Self::Path(path) => path.style.id,
+            Self::Text(text) => text.style.id,
+            Self::Image(image) => image.style.id,
+            Self::Group(group) => group.style.id,
+            Self::Clip(clip) => clip.style.id,
+            Self::Layer(layer) => layer.style.id,
+            Self::Mask(mask) => mask.style.id,
         }
     }
 
     pub(crate) fn layout_bounds(&self) -> Option<RectBounds> {
-        match self {
+        let bounds = match self {
             Self::Path(path) => {
                 let mut rect = path_base_bounds(path)?;
                 if let Some(shadow) = path.shadow.as_ref().map(Value::resolve) {
@@ -551,25 +1457,103 @@ impl CanvasItem {
                 }
                 Some(rect)
             }
-        }
+            Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
+            Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
+            Self::Group(group) => canvas_bounds(&group.items),
+            Self::Clip(clip) => clip_shape_bounds(&clip.clip).or_else(|| canvas_bounds(&clip.items)),
+            Self::Layer(layer) => canvas_bounds(&layer.items),
+            Self::Mask(mask) => canvas_bounds(&mask.content),
+        }?;
+        Some(transform_bounds(bounds, self.style().transform))
     }
 
     pub(crate) fn hit_bounds(&self) -> Option<RectBounds> {
-        match self {
-            Self::Path(path) => path_base_bounds(path),
+        if !self.style().hit_test || !self.style().visible {
+            return None;
         }
+        let bounds = match self {
+            Self::Path(path) => path_base_bounds(path),
+            Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
+            Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
+            Self::Group(group) => canvas_bounds(&group.items),
+            Self::Clip(clip) => clip_shape_bounds(&clip.clip).or_else(|| canvas_bounds(&clip.items)),
+            Self::Layer(layer) => canvas_bounds(&layer.items),
+            Self::Mask(mask) => canvas_bounds(&mask.content),
+        }?;
+        Some(transform_bounds(bounds, self.style().transform))
     }
 
     pub(crate) fn tessellate(
         &self,
         origin: Point,
         opacity: f32,
-        clip_rect: Option<super::common::Rect>,
+        clip_context: CanvasClipContext,
         media: &MediaManager,
         units: UnitContext,
     ) -> CanvasRenderOutput {
+        if !self.style().visible {
+            return CanvasRenderOutput::default();
+        }
+
+        let mut output = match self {
+            Self::Path(path) => tessellate_path(path, origin, opacity, clip_context, media, units),
+            Self::Text(text) => tessellate_text(text, origin, opacity, clip_context),
+            Self::Image(image) => {
+                tessellate_image(image, origin, opacity, clip_context, media, units)
+            }
+            Self::Group(group) => tessellate_items(
+                &group.items,
+                origin,
+                opacity * group.style.opacity,
+                clip_context,
+                media,
+                units,
+            ),
+            Self::Clip(clip) => {
+                let nested_clip = CanvasClipContext {
+                    clip_rect: compose_clip_rect(clip_context.clip_rect, clip_shape_clip_rect(&clip.clip, origin)),
+                    clip_mask: clip_context.clip_mask,
+                };
+                tessellate_items(
+                    &clip.items,
+                    origin,
+                    opacity * clip.style.opacity,
+                    nested_clip,
+                    media,
+                    units,
+                )
+            }
+            Self::Layer(layer) => tessellate_items(
+                &layer.items,
+                origin,
+                opacity * layer.style.opacity,
+                clip_context,
+                media,
+                units,
+            ),
+            Self::Mask(mask) => tessellate_items(
+                &mask.content,
+                origin,
+                opacity * mask.style.opacity,
+                clip_context,
+                media,
+                units,
+            ),
+        };
+
+        apply_transform_to_output(&mut output, self.style().transform, origin);
+        output
+    }
+
+    pub(crate) fn style(&self) -> &CanvasItemStyle {
         match self {
-            Self::Path(path) => tessellate_path(path, origin, opacity, clip_rect, media, units),
+            Self::Path(path) => &path.style,
+            Self::Text(text) => &text.style,
+            Self::Image(image) => &image.style,
+            Self::Group(group) => &group.style,
+            Self::Clip(clip) => &clip.style,
+            Self::Layer(layer) => &layer.style,
+            Self::Mask(mask) => &mask.style,
         }
     }
 }
@@ -590,6 +1574,15 @@ impl RectBounds {
             max_x,
             max_y,
         }
+    }
+
+    pub(crate) fn from_rect(rect: Rect) -> Self {
+        Self::from_min_max(
+            rect.x.get(),
+            rect.y.get(),
+            rect.right().get(),
+            rect.bottom().get(),
+        )
     }
 
     pub(crate) fn width(self) -> f32 {
@@ -627,6 +1620,210 @@ impl RectBounds {
             max_y: self.max_y.max(other.max_y),
         }
     }
+}
+
+fn transform_bounds(bounds: RectBounds, transform: CanvasTransform2D) -> RectBounds {
+    let corners = [
+        Point::new(bounds.min_x, bounds.min_y),
+        Point::new(bounds.max_x, bounds.min_y),
+        Point::new(bounds.max_x, bounds.max_y),
+        Point::new(bounds.min_x, bounds.max_y),
+    ];
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for corner in corners {
+        let transformed = transform.apply(corner);
+        min_x = min_x.min(transformed.x.get());
+        min_y = min_y.min(transformed.y.get());
+        max_x = max_x.max(transformed.x.get());
+        max_y = max_y.max(transformed.y.get());
+    }
+    RectBounds::from_min_max(min_x, min_y, max_x, max_y)
+}
+
+fn clip_shape_bounds(shape: &CanvasClipShape) -> Option<RectBounds> {
+    match shape {
+        CanvasClipShape::Rect(rect) => Some(RectBounds::from_rect(*rect)),
+        CanvasClipShape::RoundedRect { rect, .. } => Some(RectBounds::from_rect(*rect)),
+        CanvasClipShape::Path(path) => path
+            .control_bounds()
+            .map(|bounds| RectBounds::from_min_max(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y)),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct CanvasClipContext {
+    pub(crate) clip_rect: Option<Rect>,
+    pub(crate) clip_mask: Option<ClipMask>,
+}
+
+fn clip_shape_clip_rect(shape: &CanvasClipShape, origin: Point) -> Option<Rect> {
+    match shape {
+        CanvasClipShape::Rect(rect) => Some(offset_rect(*rect, origin)),
+        CanvasClipShape::RoundedRect { rect, .. } => Some(offset_rect(*rect, origin)),
+        CanvasClipShape::Path(path) => path.control_bounds().map(|bounds| {
+            Rect::new(
+                origin.x + bounds.min.x,
+                origin.y + bounds.min.y,
+                bounds.max.x - bounds.min.x,
+                bounds.max.y - bounds.min.y,
+            )
+        }),
+    }
+}
+
+fn compose_clip_rect(lhs: Option<Rect>, rhs: Option<Rect>) -> Option<Rect> {
+    match (lhs, rhs) {
+        (Some(lhs), Some(rhs)) => lhs.intersect(rhs),
+        (Some(lhs), None) => Some(lhs),
+        (None, Some(rhs)) => Some(rhs),
+        (None, None) => None,
+    }
+}
+
+fn offset_rect(rect: Rect, origin: Point) -> Rect {
+    Rect::new(origin.x + rect.x, origin.y + rect.y, rect.width, rect.height)
+}
+
+fn tessellate_items(
+    items: &[CanvasItem],
+    origin: Point,
+    opacity: f32,
+    clip: CanvasClipContext,
+    media: &MediaManager,
+    units: UnitContext,
+) -> CanvasRenderOutput {
+    let mut output = CanvasRenderOutput::default();
+    for item in items {
+        let rendered = item.tessellate(origin, opacity, clip, media, units);
+        output.meshes.extend(rendered.meshes);
+        output.textures.extend(rendered.textures);
+        output.texts.extend(rendered.texts);
+    }
+    output
+}
+
+fn tessellate_text(
+    text: &CanvasText,
+    origin: Point,
+    opacity: f32,
+    clip: CanvasClipContext,
+) -> CanvasRenderOutput {
+    let frame = offset_rect(text.frame, origin);
+    let line_height = text
+        .text_style
+        .line_height
+        .unwrap_or(Sp::new(text.text_style.font_size.get() * 1.2));
+    CanvasRenderOutput {
+        texts: vec![TextPrimitive {
+            content: text.content.clone(),
+            frame,
+            color: text.text_style.color.with_alpha_factor(opacity * text.style.opacity),
+            force_color: true,
+            font_family: text.text_style.font_family.clone(),
+            font_size: text.text_style.font_size.get(),
+            font_weight: text.text_style.font_weight,
+            line_height: line_height.get(),
+            letter_spacing: text.text_style.letter_spacing.get(),
+            clip_rect: clip.clip_rect,
+            clip_mask: clip.clip_mask,
+        }],
+        ..Default::default()
+    }
+}
+
+fn tessellate_image(
+    image: &CanvasImage,
+    origin: Point,
+    _opacity: f32,
+    clip: CanvasClipContext,
+    media: &MediaManager,
+    units: UnitContext,
+) -> CanvasRenderOutput {
+    let frame = offset_rect(image.frame, origin);
+    let metadata = media.image_snapshot(&image.source, None);
+    let target_frame = resolve_media_rect(frame, metadata.intrinsic_size, image.fit);
+    let snapshot = if let Some(raster_request) =
+        RasterRequest::from_frame(target_frame, units.scale_factor())
+    {
+        media.image_snapshot(&image.source, Some(raster_request))
+    } else {
+        metadata
+    };
+    let Some(texture) = snapshot.texture else {
+        return CanvasRenderOutput::default();
+    };
+
+    CanvasRenderOutput {
+        textures: vec![TexturePrimitive {
+            texture,
+            frame: target_frame,
+            corner_radius: image.corner_radius.get(),
+            clip_rect: clip.clip_rect,
+            clip_mask: clip.clip_mask,
+        }],
+        ..Default::default()
+    }
+}
+
+fn apply_transform_to_output(output: &mut CanvasRenderOutput, transform: CanvasTransform2D, origin: Point) {
+    if transform == CanvasTransform2D::IDENTITY {
+        return;
+    }
+
+    for mesh in &mut output.meshes {
+        let mut vertices = mesh.vertices.to_vec();
+        for vertex in &mut vertices {
+            let point_value = transform.apply(Point::new(
+                vertex.position[0] - origin.x.get(),
+                vertex.position[1] - origin.y.get(),
+            ));
+            vertex.position = [
+                origin.x.get() + point_value.x.get(),
+                origin.y.get() + point_value.y.get(),
+            ];
+        }
+        mesh.vertices = Arc::from(vertices);
+
+        let mut triangles = mesh.triangles.to_vec();
+        for triangle in &mut triangles {
+            for point_value in triangle.iter_mut() {
+                let transformed = transform.apply(Point::new(
+                    point_value.x - origin.x,
+                    point_value.y - origin.y,
+                ));
+                *point_value = Point::new(origin.x + transformed.x, origin.y + transformed.y);
+            }
+        }
+        mesh.triangles = Arc::from(triangles);
+    }
+
+    for texture in &mut output.textures {
+        if let Some(rect) = transform_axis_aligned_rect(texture.frame, transform) {
+            texture.frame = rect;
+        }
+    }
+
+    for text in &mut output.texts {
+        if let Some(rect) = transform_axis_aligned_rect(text.frame, transform) {
+            text.frame = rect;
+        }
+    }
+}
+
+fn transform_axis_aligned_rect(rect: Rect, transform: CanvasTransform2D) -> Option<Rect> {
+    let [a, b, c, d, e, f] = transform.matrix;
+    if b.abs() > 1e-4 || c.abs() > 1e-4 {
+        return None;
+    }
+    Some(Rect::new(
+        rect.x.get() * a + e,
+        rect.y.get() * d + f,
+        rect.width.get() * a.abs(),
+        rect.height.get() * d.abs(),
+    ))
 }
 
 pub(crate) fn canvas_bounds(items: &[CanvasItem]) -> Option<RectBounds> {
@@ -874,7 +2071,7 @@ impl<VM> Canvas<VM> {
         self
     }
 
-    pub fn on_item_click(mut self, command: ValueCommand<VM, CanvasPointerEvent>) -> Self {
+    pub fn on_item_click(mut self, command: ValueCommand<VM, CanvasMouseEvent>) -> Self {
         if let WidgetKind::Canvas {
             item_interactions, ..
         } = &mut self.element.kind
@@ -884,7 +2081,37 @@ impl<VM> Canvas<VM> {
         self
     }
 
-    pub fn on_item_mouse_enter(mut self, command: ValueCommand<VM, CanvasPointerEvent>) -> Self {
+    pub fn on_item_double_click(mut self, command: ValueCommand<VM, CanvasMouseEvent>) -> Self {
+        if let WidgetKind::Canvas {
+            item_interactions, ..
+        } = &mut self.element.kind
+        {
+            item_interactions.on_double_click = Some(command);
+        }
+        self
+    }
+
+    pub fn on_item_mouse_down(mut self, command: ValueCommand<VM, CanvasMouseEvent>) -> Self {
+        if let WidgetKind::Canvas {
+            item_interactions, ..
+        } = &mut self.element.kind
+        {
+            item_interactions.on_mouse_down = Some(command);
+        }
+        self
+    }
+
+    pub fn on_item_mouse_up(mut self, command: ValueCommand<VM, CanvasMouseEvent>) -> Self {
+        if let WidgetKind::Canvas {
+            item_interactions, ..
+        } = &mut self.element.kind
+        {
+            item_interactions.on_mouse_up = Some(command);
+        }
+        self
+    }
+
+    pub fn on_item_mouse_enter(mut self, command: ValueCommand<VM, CanvasMouseEvent>) -> Self {
         if let WidgetKind::Canvas {
             item_interactions, ..
         } = &mut self.element.kind
@@ -894,7 +2121,7 @@ impl<VM> Canvas<VM> {
         self
     }
 
-    pub fn on_item_mouse_leave(mut self, command: ValueCommand<VM, CanvasPointerEvent>) -> Self {
+    pub fn on_item_mouse_leave(mut self, command: ValueCommand<VM, CanvasMouseEvent>) -> Self {
         if let WidgetKind::Canvas {
             item_interactions, ..
         } = &mut self.element.kind
@@ -904,12 +2131,52 @@ impl<VM> Canvas<VM> {
         self
     }
 
-    pub fn on_item_mouse_move(mut self, command: ValueCommand<VM, CanvasPointerEvent>) -> Self {
+    pub fn on_item_mouse_move(mut self, command: ValueCommand<VM, CanvasMouseEvent>) -> Self {
         if let WidgetKind::Canvas {
             item_interactions, ..
         } = &mut self.element.kind
         {
             item_interactions.on_mouse_move = Some(command);
+        }
+        self
+    }
+
+    pub fn on_item_wheel(mut self, command: ValueCommand<VM, CanvasWheelEvent>) -> Self {
+        if let WidgetKind::Canvas {
+            item_interactions, ..
+        } = &mut self.element.kind
+        {
+            item_interactions.on_wheel = Some(command);
+        }
+        self
+    }
+
+    pub fn on_item_drag_start(mut self, command: ValueCommand<VM, CanvasDragEvent>) -> Self {
+        if let WidgetKind::Canvas {
+            item_interactions, ..
+        } = &mut self.element.kind
+        {
+            item_interactions.on_drag_start = Some(command);
+        }
+        self
+    }
+
+    pub fn on_item_drag(mut self, command: ValueCommand<VM, CanvasDragEvent>) -> Self {
+        if let WidgetKind::Canvas {
+            item_interactions, ..
+        } = &mut self.element.kind
+        {
+            item_interactions.on_drag = Some(command);
+        }
+        self
+    }
+
+    pub fn on_item_drag_end(mut self, command: ValueCommand<VM, CanvasDragEvent>) -> Self {
+        if let WidgetKind::Canvas {
+            item_interactions, ..
+        } = &mut self.element.kind
+        {
+            item_interactions.on_drag_end = Some(command);
         }
         self
     }
@@ -930,13 +2197,19 @@ impl<VM> From<Canvas<VM>> for Element<VM> {
 pub(crate) struct CanvasRenderOutput {
     pub textures: Vec<TexturePrimitive>,
     pub meshes: Vec<MeshPrimitive>,
+    pub texts: Vec<TextPrimitive>,
 }
 
 fn path_base_bounds(path: &CanvasPath) -> Option<RectBounds> {
     let bounds = path.path.control_bounds()?;
     let mut rect = RectBounds::from_min_max(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y);
     if let Some(stroke) = path.stroke.as_ref() {
-        rect = rect.expand(stroke.width.get() * 0.5);
+        let expansion = match stroke.alignment {
+            CanvasStrokeAlignment::Center => stroke.width.get() * 0.5,
+            CanvasStrokeAlignment::Inside => 0.0,
+            CanvasStrokeAlignment::Outside => stroke.width.get(),
+        };
+        rect = rect.expand(expansion);
     }
     Some(rect)
 }
@@ -945,7 +2218,7 @@ fn tessellate_path(
     path: &CanvasPath,
     origin: Point,
     opacity: f32,
-    clip_rect: Option<super::common::Rect>,
+    clip: CanvasClipContext,
     media: &MediaManager,
     units: UnitContext,
 ) -> CanvasRenderOutput {
@@ -963,7 +2236,7 @@ fn tessellate_path(
             shadow,
             opacity,
             origin,
-            clip_rect,
+            clip,
             media,
             units,
         ) {
@@ -972,13 +2245,20 @@ fn tessellate_path(
     }
 
     if let Some(fill_brush) = fill.as_ref() {
-        if let Some(mesh) = tessellate_fill(&lyon_path, fill_brush, opacity, origin, clip_rect) {
+        if let Some(mesh) = tessellate_fill(
+            &lyon_path,
+            fill_brush,
+            path.fill_rule,
+            opacity,
+            origin,
+            clip,
+        ) {
             output.meshes.push(mesh);
         }
     }
 
     if let Some(stroke) = stroke.as_ref() {
-        if let Some(mesh) = tessellate_stroke(&lyon_path, stroke, opacity, origin, clip_rect) {
+        if let Some(mesh) = tessellate_stroke(&lyon_path, stroke, opacity, origin, clip) {
             output.meshes.push(mesh);
         }
     }
@@ -989,22 +2269,28 @@ fn tessellate_path(
 fn tessellate_fill(
     path: &Path,
     brush: &CanvasBrush,
+    fill_rule: CanvasFillRule,
     opacity: f32,
     origin: Point,
-    clip_rect: Option<super::common::Rect>,
+    clip: CanvasClipContext,
 ) -> Option<MeshPrimitive> {
     let brush_data = CanvasBrushData::from_brush(brush, opacity)?;
     let mut geometry = VertexBuffers::<[f32; 2], u32>::new();
     let mut tessellator = FillTessellator::new();
+    let mut options = FillOptions::default();
+    options.fill_rule = match fill_rule {
+        CanvasFillRule::NonZero => lyon::path::FillRule::NonZero,
+        CanvasFillRule::EvenOdd => lyon::path::FillRule::EvenOdd,
+    };
     tessellator
         .tessellate_path(
             path,
-            &FillOptions::default(),
+            &options,
             &mut BuffersBuilder::new(&mut geometry, FillVertexCtor),
         )
         .ok()?;
 
-    build_mesh_primitive(geometry, brush_data, origin, clip_rect)
+    build_mesh_primitive(geometry, brush_data, origin, clip.clip_rect, clip.clip_mask)
 }
 
 fn tessellate_stroke(
@@ -1012,7 +2298,7 @@ fn tessellate_stroke(
     stroke: &CanvasStroke,
     opacity: f32,
     origin: Point,
-    clip_rect: Option<super::common::Rect>,
+    clip: CanvasClipContext,
 ) -> Option<MeshPrimitive> {
     let brush = stroke.brush.resolve();
     let brush_data = CanvasBrushData::from_brush(&brush, opacity)?;
@@ -1023,6 +2309,18 @@ fn tessellate_stroke(
     let mut tessellator = StrokeTessellator::new();
     let mut options = StrokeOptions::default();
     options.line_width = stroke.width.get().max(0.0);
+    options.start_cap = match stroke.line_cap {
+        CanvasStrokeCap::Butt => lyon::tessellation::LineCap::Butt,
+        CanvasStrokeCap::Square => lyon::tessellation::LineCap::Square,
+        CanvasStrokeCap::Round => lyon::tessellation::LineCap::Round,
+    };
+    options.end_cap = options.start_cap;
+    options.line_join = match stroke.line_join {
+        CanvasStrokeJoin::Miter => lyon::tessellation::LineJoin::Miter,
+        CanvasStrokeJoin::Bevel => lyon::tessellation::LineJoin::Bevel,
+        CanvasStrokeJoin::Round => lyon::tessellation::LineJoin::Round,
+    };
+    options.miter_limit = stroke.miter_limit.max(0.0);
     tessellator
         .tessellate_path(
             source_path,
@@ -1031,7 +2329,7 @@ fn tessellate_stroke(
         )
         .ok()?;
 
-    build_mesh_primitive(geometry, brush_data, origin, clip_rect)
+    build_mesh_primitive(geometry, brush_data, origin, clip.clip_rect, clip.clip_mask)
 }
 
 fn build_mesh_primitive(
@@ -1039,6 +2337,7 @@ fn build_mesh_primitive(
     brush: CanvasBrushData,
     origin: Point,
     clip_rect: Option<super::common::Rect>,
+    clip_mask: Option<ClipMask>,
 ) -> Option<MeshPrimitive> {
     if geometry.indices.is_empty() {
         return None;
@@ -1070,7 +2369,7 @@ fn build_mesh_primitive(
         vertices: Arc::from(vertices),
         triangles: Arc::from(triangles),
         clip_rect,
-        clip_mask: None,
+        clip_mask,
     })
 }
 
@@ -1164,10 +2463,6 @@ fn normalized_gradient_stops(
     stops: &[CanvasGradientStop],
     opacity: f32,
 ) -> Option<Vec<(f32, [f32; 4])>> {
-    if stops.len() > MAX_CANVAS_GRADIENT_STOPS {
-        return None;
-    }
-
     let mut normalized = stops
         .iter()
         .map(|stop| {
@@ -1181,6 +2476,19 @@ fn normalized_gradient_stops(
 
     if normalized.is_empty() {
         normalized.push((0.0, color_to_f32(Color::TRANSPARENT)));
+    }
+
+    if normalized.len() > MAX_CANVAS_GRADIENT_STOPS {
+        let mut compressed = Vec::with_capacity(MAX_CANVAS_GRADIENT_STOPS);
+        for index in 0..MAX_CANVAS_GRADIENT_STOPS {
+            let offset = if MAX_CANVAS_GRADIENT_STOPS == 1 {
+                0.0
+            } else {
+                index as f32 / (MAX_CANVAS_GRADIENT_STOPS - 1) as f32
+            };
+            compressed.push((offset, sample_gradient_color(&normalized, offset)));
+        }
+        return Some(compressed);
     }
 
     Some(normalized)
@@ -1254,7 +2562,7 @@ fn shadow_texture_for_path(
     shadow: CanvasShadow,
     opacity: f32,
     origin: Point,
-    clip_rect: Option<super::common::Rect>,
+    clip: CanvasClipContext,
     media: &MediaManager,
     units: UnitContext,
 ) -> Option<TexturePrimitive> {
@@ -1296,8 +2604,8 @@ fn shadow_texture_for_path(
         texture,
         frame,
         corner_radius: 0.0,
-        clip_rect,
-        clip_mask: None,
+        clip_rect: clip.clip_rect,
+        clip_mask: clip.clip_mask,
     })
 }
 
@@ -1339,6 +2647,17 @@ fn rasterize_canvas_shadow(
     if let Some(stroke) = stroke {
         let mut stroke_style = tiny_skia::Stroke::default();
         stroke_style.width = stroke.width.get().max(0.0) * scale_factor;
+        stroke_style.line_cap = match stroke.line_cap {
+            CanvasStrokeCap::Butt => tiny_skia::LineCap::Butt,
+            CanvasStrokeCap::Square => tiny_skia::LineCap::Square,
+            CanvasStrokeCap::Round => tiny_skia::LineCap::Round,
+        };
+        stroke_style.line_join = match stroke.line_join {
+            CanvasStrokeJoin::Miter => tiny_skia::LineJoin::Miter,
+            CanvasStrokeJoin::Bevel => tiny_skia::LineJoin::Bevel,
+            CanvasStrokeJoin::Round => tiny_skia::LineJoin::Round,
+        };
+        stroke_style.miter_limit = stroke.miter_limit.max(0.0);
         if let Some(pattern) = stroke
             .dash_pattern
             .as_ref()
@@ -1505,6 +2824,84 @@ fn color_to_f32(color: Color) -> [f32; 4] {
     color.to_linear_rgba_f32()
 }
 
+fn sample_gradient_color(stops: &[(f32, [f32; 4])], offset: f32) -> [f32; 4] {
+    if stops.is_empty() {
+        return [0.0; 4];
+    }
+    if offset <= stops[0].0 {
+        return stops[0].1;
+    }
+    if offset >= stops[stops.len() - 1].0 {
+        return stops[stops.len() - 1].1;
+    }
+
+    for pair in stops.windows(2) {
+        let (start_offset, start_color) = pair[0];
+        let (end_offset, end_color) = pair[1];
+        if offset <= end_offset {
+            let span = (end_offset - start_offset).max(f32::EPSILON);
+            let t = ((offset - start_offset) / span).clamp(0.0, 1.0);
+            let mut color = [0.0; 4];
+            for index in 0..4 {
+                color[index] = start_color[index] + (end_color[index] - start_color[index]) * t;
+            }
+            return color;
+        }
+    }
+
+    stops[stops.len() - 1].1
+}
+
+fn append_arc_segments(
+    mut builder: PathBuilder,
+    center: Point,
+    radius: f32,
+    start_angle: f32,
+    sweep_angle: f32,
+    connect_with_line: bool,
+) -> PathBuilder {
+    if radius <= 0.0 || sweep_angle.abs() <= f32::EPSILON {
+        return builder;
+    }
+
+    let steps = ((sweep_angle.abs() / std::f32::consts::FRAC_PI_8).ceil() as usize).max(1);
+    for index in 0..=steps {
+        let t = index as f32 / steps as f32;
+        let angle = start_angle + sweep_angle * t;
+        let point_value = Point::new(
+            center.x.get() + angle.cos() * radius,
+            center.y.get() + angle.sin() * radius,
+        );
+        if index == 0 {
+            builder = if connect_with_line {
+                builder.line_to(point_value.x, point_value.y)
+            } else {
+                builder.move_to(point_value.x, point_value.y)
+            };
+        } else {
+            builder = builder.line_to(point_value.x, point_value.y);
+        }
+    }
+    builder
+}
+
+fn normalize_vec(value: (f32, f32)) -> (f32, f32) {
+    let length = (value.0 * value.0 + value.1 * value.1).sqrt();
+    if length <= f32::EPSILON {
+        (0.0, 0.0)
+    } else {
+        (value.0 / length, value.1 / length)
+    }
+}
+
+fn svg_point(abs: bool, current: (f32, f32), x: f32, y: f32) -> (f32, f32) {
+    if abs {
+        (x, y)
+    } else {
+        (current.0 + x, current.1 + y)
+    }
+}
+
 fn points_approx_equal(lhs: lyon::math::Point, rhs: lyon::math::Point) -> bool {
     (lhs.x - rhs.x).abs() <= 1e-3 && (lhs.y - rhs.y).abs() <= 1e-3
 }
@@ -1579,12 +2976,10 @@ impl StrokeVertexConstructor<[f32; 2]> for StrokeVertexCtor {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        canvas_bounds, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasPath,
-        CanvasShadow, CanvasStroke, PathBuilder,
-    };
+    use super::{canvas_bounds, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasPath, CanvasShadow, CanvasStroke, PathBuilder};
     use crate::foundation::color::Color;
     use crate::ui::unit::dp;
+    use crate::ui::widget::Point;
 
     #[test]
     fn bounds_include_stroke_width() {
@@ -1690,7 +3085,7 @@ mod tests {
     }
 
     #[test]
-    fn gradient_stop_count_limit_is_enforced() {
+    fn gradients_with_many_stops_are_compressed_for_rendering() {
         let stops = (0..9)
             .map(|index| CanvasGradientStop::new(index as f32 / 8.0, Color::WHITE))
             .collect::<Vec<_>>();
@@ -1700,7 +3095,7 @@ mod tests {
             stops,
         ));
 
-        assert!(super::CanvasBrushData::from_brush(&gradient, 1.0).is_none());
+        assert!(super::CanvasBrushData::from_brush(&gradient, 1.0).is_some());
     }
 
     #[test]
@@ -1716,17 +3111,18 @@ mod tests {
         assert!(super::tessellate_fill(
             &path,
             &CanvasBrush::Solid(Color::WHITE),
+            super::CanvasFillRule::NonZero,
             1.0,
-            crate::ui::widget::Point::ZERO,
-            None
+            Point::ZERO,
+            super::CanvasClipContext::default()
         )
         .is_some());
         assert!(super::tessellate_stroke(
             &path,
             &CanvasStroke::new(dp(4.0), Color::WHITE),
             1.0,
-            crate::ui::widget::Point::ZERO,
-            None
+            Point::ZERO,
+            super::CanvasClipContext::default()
         )
         .is_some());
     }

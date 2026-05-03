@@ -121,9 +121,14 @@ macro_rules! el {
 /// Canvas drawing widgets and drawing primitives.
 pub mod canvas {
     pub use crate::ui::widget::{
-        Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasItemId,
-        CanvasLinearGradient, CanvasPath, CanvasPathOpError, CanvasPointerEvent,
-        CanvasRadialGradient, CanvasShadow, CanvasStroke, PathBuilder,
+        Canvas, CanvasBlendMode, CanvasBooleanOp, CanvasBrush, CanvasClip, CanvasClipShape,
+        CanvasDragEvent, CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasImage, CanvasItem,
+        CanvasItemId, CanvasItemStyle, CanvasLayer, CanvasLinearGradient, CanvasMask,
+        CanvasMouseButton, CanvasMouseEvent, CanvasParagraphStyle, CanvasPath, CanvasPathOpError,
+        CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke,
+        CanvasStrokeAlignment, CanvasStrokeCap, CanvasStrokeJoin, CanvasSvgPathError, CanvasText,
+        CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextStyle, CanvasTextVerticalAlign,
+        CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent, PathBuilder,
     };
 }
 
@@ -167,9 +172,14 @@ pub mod prelude {
     };
     pub use crate::application::{Application, WindowClosePolicy, WindowRole, WindowSpec};
     pub use crate::canvas::{
-        Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasItemId,
-        CanvasLinearGradient, CanvasPath, CanvasPathOpError, CanvasPointerEvent,
-        CanvasRadialGradient, CanvasShadow, CanvasStroke, PathBuilder,
+        Canvas, CanvasBlendMode, CanvasBooleanOp, CanvasBrush, CanvasClip, CanvasClipShape,
+        CanvasDragEvent, CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasImage, CanvasItem,
+        CanvasItemId, CanvasItemStyle, CanvasLayer, CanvasLinearGradient, CanvasMask,
+        CanvasMouseButton, CanvasMouseEvent, CanvasParagraphStyle, CanvasPath, CanvasPathOpError,
+        CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke,
+        CanvasStrokeAlignment, CanvasStrokeCap, CanvasStrokeJoin, CanvasSvgPathError, CanvasText,
+        CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextStyle, CanvasTextVerticalAlign,
+        CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent, PathBuilder,
     };
     pub use crate::core::{dp, sp, Color, Dp, InputTrigger, Point, Rect, Sp, TguiError, WidgetId};
     pub use crate::dialog::{

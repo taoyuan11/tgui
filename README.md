@@ -207,7 +207,7 @@ Keyframes<T>
 - `timeline_controller`：时间线动画控制器
 - `multi_window`：共享 ViewModel 的多窗口
 - `dialogs`：同步/异步文件选择与消息框
-- `canvas`：路径绘制、渐变、阴影、布尔运算、命中事件
+- `canvas`：scene-style 画布，支持 path/text/image/group/clip、渐变、阴影、布尔运算和 item 事件
 - `background_effects`：通用渐变背景和 backdrop blur
 - `frameless_window`：关闭系统装饰后的自绘标题栏、拖拽、拉伸和窗口按钮
 - `demo`：综合展示常用布局、组件和样式
@@ -250,12 +250,17 @@ README 中的示例名称以当前 `examples/` 目录为准；如果新增或删
 
 - `PathBuilder`
 - `CanvasPath`
+- `CanvasText`
+- `CanvasImage`
+- `CanvasGroup` / `CanvasClip` / `CanvasLayer` / `CanvasMask`
 - `CanvasStroke`
+- `CanvasFillRule`
+- `CanvasTransform2D`
 - `CanvasLinearGradient`
 - `CanvasRadialGradient`
 - `CanvasShadow`
 - `CanvasBooleanOp`
-- `CanvasPointerEvent`
+- `CanvasMouseEvent` / `CanvasWheelEvent` / `CanvasDragEvent`
 
 ### 通用背景
 

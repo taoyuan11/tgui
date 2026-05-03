@@ -26,7 +26,7 @@ use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface as PublicVideoSurface;
 
-use super::canvas::{canvas_bounds, CanvasItem};
+use super::canvas::{canvas_bounds, CanvasClipContext, CanvasItem};
 #[cfg(test)]
 use super::common::RenderedWidgetScene;
 use super::common::{
@@ -1721,6 +1721,17 @@ impl<VM> ResolvedElement<VM> {
                     .unwrap_or(Insets::ZERO);
                 let canvas_frame = background_frame.inset(padding);
                 let canvas_clip = primitive_clip.and_then(|clip| clip.intersect(canvas_frame));
+                let canvas_clip_mask = if background_radius > 0.0
+                    && canvas_frame.width > Dp::ZERO
+                    && canvas_frame.height > Dp::ZERO
+                {
+                    Some(ClipMask {
+                        rect: canvas_frame,
+                        corner_radius: background_radius,
+                    })
+                } else {
+                    primitive_clip_mask
+                };
                 let canvas_origin = Point::new(canvas_frame.x, canvas_frame.y);
 
                 if canvas_frame.width > Dp::ZERO && canvas_frame.height > Dp::ZERO {
@@ -1728,13 +1739,19 @@ impl<VM> ResolvedElement<VM> {
                         let rendered = item.tessellate(
                             canvas_origin,
                             opacity,
-                            canvas_clip,
+                            CanvasClipContext {
+                                clip_rect: canvas_clip,
+                                clip_mask: canvas_clip_mask,
+                            },
                             context.media,
                             context.units,
                         );
                         let meshes = rendered.meshes;
                         for texture in rendered.textures {
                             computed.scene.push_texture(texture);
+                        }
+                        for text in rendered.texts {
+                            computed.scene.push_text(text);
                         }
                         for mesh in &meshes {
                             computed.scene.push_mesh(mesh.clone());
@@ -1746,28 +1763,32 @@ impl<VM> ResolvedElement<VM> {
                                     .iter()
                                     .flat_map(|mesh| mesh.triangles.iter().copied())
                                     .collect::<Vec<_>>();
-                                if !triangles.is_empty() {
-                                    computed.hit_regions.push(HitRegion {
-                                        rect: Rect::new(
+                                let geometry = if triangles.is_empty() {
+                                    HitGeometry::Rect
+                                } else {
+                                    HitGeometry::Triangles(Arc::from(triangles))
+                                };
+                                computed.hit_regions.push(HitRegion {
+                                    rect: Rect::new(
+                                        canvas_frame.x + bounds.min_x,
+                                        canvas_frame.y + bounds.min_y,
+                                        bounds.width(),
+                                        bounds.height(),
+                                    ),
+                                    clip_rect: canvas_clip,
+                                    geometry,
+                                    interaction: HitInteraction::CanvasItem {
+                                        id: self.id,
+                                        item_id: item.id(),
+                                        item_interactions: item_interactions.clone(),
+                                        cursor_style: item.style().cursor,
+                                        canvas_origin,
+                                        item_origin: Point::new(
                                             canvas_frame.x + bounds.min_x,
                                             canvas_frame.y + bounds.min_y,
-                                            bounds.width(),
-                                            bounds.height(),
                                         ),
-                                        clip_rect: canvas_clip,
-                                        geometry: HitGeometry::Triangles(Arc::from(triangles)),
-                                        interaction: HitInteraction::CanvasItem {
-                                            id: self.id,
-                                            item_id: item.id(),
-                                            item_interactions: item_interactions.clone(),
-                                            canvas_origin,
-                                            item_origin: Point::new(
-                                                canvas_frame.x + bounds.min_x,
-                                                canvas_frame.y + bounds.min_y,
-                                            ),
-                                        },
-                                    });
-                                }
+                                    },
+                                });
                             }
                         }
                     }
@@ -5609,6 +5630,47 @@ mod tests {
     }
 
     #[test]
+    fn canvas_border_radius_clips_item_meshes() {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Canvas::new(vec![CanvasItem::Path(
+                CanvasPath::new(1_u64, PathBuilder::new().rect(0.0, 0.0, 120.0, 80.0))
+                    .fill(Color::hexa(0x22C55EFF)),
+            )])
+            .size(dp(120.0), dp(80.0))
+            .border_radius(dp(18.0)),
+        );
+
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 80.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(!rendered.primitives.meshes.is_empty());
+        assert!(rendered.primitives.meshes.iter().all(|mesh| {
+            mesh.clip_mask
+                == Some(ClipMask {
+                    rect: Rect::new(0.0, 0.0, 120.0, 80.0),
+                    corner_radius: 18.0,
+                })
+        }));
+    }
+
+    #[test]
     fn canvas_hit_testing_prefers_topmost_item() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
@@ -7513,7 +7575,9 @@ mod tests {
                     &mut vm,
                     crate::ui::widget::CanvasPointerEvent {
                         item_id: 1_u64.into(),
+                        button: None,
                         canvas_position: Point::ZERO,
+                        scene_position: Point::ZERO,
                         local_position: Point::ZERO,
                     },
                 ),

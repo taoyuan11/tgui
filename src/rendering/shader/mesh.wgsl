@@ -16,6 +16,11 @@ struct VertexInput {
     @location(14) stop_color7: vec4<f32>,
 };
 
+struct ClipMaskUniform {
+    data0: vec4<f32>,
+    data1: vec4<f32>,
+};
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) local_position: vec2<f32>,
@@ -33,6 +38,32 @@ struct VertexOutput {
     @location(12) stop_color6: vec4<f32>,
     @location(13) stop_color7: vec4<f32>,
 };
+
+@group(0) @binding(0) var<uniform> clip_mask: ClipMaskUniform;
+
+fn rounded_box_sdf(local_position: vec2<f32>, rect_size: vec2<f32>, radius: f32) -> f32 {
+    let half_size = rect_size * 0.5;
+    let center_relative = local_position - half_size;
+    let inner_half = max(half_size - vec2<f32>(radius, radius), vec2<f32>(0.0, 0.0));
+    let delta = abs(center_relative) - inner_half;
+    let outside = length(max(delta, vec2<f32>(0.0, 0.0)));
+    let inside = min(max(delta.x, delta.y), 0.0);
+    return outside + inside - radius;
+}
+
+fn clip_mask_alpha(
+    local_position: vec2<f32>,
+    rect_size: vec2<f32>,
+    radius: f32,
+    enabled: f32,
+) -> f32 {
+    if enabled < 0.5 {
+        return 1.0;
+    }
+
+    let distance = rounded_box_sdf(local_position, rect_size, radius);
+    return clamp(0.5 - distance, 0.0, 1.0);
+}
 
 fn stop_offset(input: VertexOutput, index: i32) -> f32 {
     switch index {
@@ -118,21 +149,31 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let brush_kind = i32(input.brush_meta.x);
+    var color = vec4<f32>(0.0);
     if brush_kind == 0 {
-        return input.stop_color0;
-    }
-
-    if brush_kind == 1 {
+        color = input.stop_color0;
+    } else if brush_kind == 1 {
         let start = input.gradient_data0.xy;
         let end = input.gradient_data0.zw;
         let axis = end - start;
         let axis_length_sq = max(dot(axis, axis), 0.0001);
         let t = dot(input.local_position - start, axis) / axis_length_sq;
-        return gradient_color(input, t);
+        color = gradient_color(input, t);
+    } else {
+        let center = input.gradient_data1.xy;
+        let radius = max(input.gradient_data1.z, 0.0001);
+        let t = distance(input.local_position, center) / radius;
+        color = gradient_color(input, t);
     }
 
-    let center = input.gradient_data1.xy;
-    let radius = max(input.gradient_data1.z, 0.0001);
-    let t = distance(input.local_position, center) / radius;
-    return gradient_color(input, t);
+    let clip_alpha = clip_mask_alpha(
+        input.position.xy - clip_mask.data0.xy,
+        clip_mask.data0.zw,
+        clip_mask.data1.x,
+        clip_mask.data1.y,
+    );
+    if clip_alpha <= 0.0 {
+        discard;
+    }
+    return vec4<f32>(color.rgb, color.a * clip_alpha);
 }

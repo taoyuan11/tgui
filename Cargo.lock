@@ -3963,6 +3963,7 @@ dependencies = [
  "rfd",
  "rustls",
  "stacker",
+ "svgtypes",
  "taffy",
  "tgui-winit-ohos",
  "unicode-segmentation",
