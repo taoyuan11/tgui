@@ -19,7 +19,9 @@ use crate::ui::unit::{Dp, UnitContext};
 use crate::video::VideoSurface;
 
 use super::background::{BackgroundBrush, BackgroundGradientStop, BackgroundImage};
-use super::canvas::{CanvasItem, CanvasItemId, CanvasPointerEvent};
+use super::canvas::{
+    CanvasDragEvent, CanvasItem, CanvasItemId, CanvasMouseEvent, CanvasWheelEvent,
+};
 use super::image::Image;
 use super::text::Text;
 
@@ -171,10 +173,17 @@ pub(crate) struct InteractionHandlers<VM> {
 }
 
 pub(crate) struct CanvasItemInteractionHandlers<VM> {
-    pub on_click: Option<ValueCommand<VM, CanvasPointerEvent>>,
-    pub on_mouse_enter: Option<ValueCommand<VM, CanvasPointerEvent>>,
-    pub on_mouse_leave: Option<ValueCommand<VM, CanvasPointerEvent>>,
-    pub on_mouse_move: Option<ValueCommand<VM, CanvasPointerEvent>>,
+    pub on_click: Option<ValueCommand<VM, CanvasMouseEvent>>,
+    pub on_double_click: Option<ValueCommand<VM, CanvasMouseEvent>>,
+    pub on_mouse_down: Option<ValueCommand<VM, CanvasMouseEvent>>,
+    pub on_mouse_up: Option<ValueCommand<VM, CanvasMouseEvent>>,
+    pub on_mouse_enter: Option<ValueCommand<VM, CanvasMouseEvent>>,
+    pub on_mouse_leave: Option<ValueCommand<VM, CanvasMouseEvent>>,
+    pub on_mouse_move: Option<ValueCommand<VM, CanvasMouseEvent>>,
+    pub on_wheel: Option<ValueCommand<VM, CanvasWheelEvent>>,
+    pub on_drag_start: Option<ValueCommand<VM, CanvasDragEvent>>,
+    pub on_drag: Option<ValueCommand<VM, CanvasDragEvent>>,
+    pub on_drag_end: Option<ValueCommand<VM, CanvasDragEvent>>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -260,9 +269,16 @@ impl<VM> Clone for CanvasItemInteractionHandlers<VM> {
     fn clone(&self) -> Self {
         Self {
             on_click: self.on_click.clone(),
+            on_double_click: self.on_double_click.clone(),
+            on_mouse_down: self.on_mouse_down.clone(),
+            on_mouse_up: self.on_mouse_up.clone(),
             on_mouse_enter: self.on_mouse_enter.clone(),
             on_mouse_leave: self.on_mouse_leave.clone(),
             on_mouse_move: self.on_mouse_move.clone(),
+            on_wheel: self.on_wheel.clone(),
+            on_drag_start: self.on_drag_start.clone(),
+            on_drag: self.on_drag.clone(),
+            on_drag_end: self.on_drag_end.clone(),
         }
     }
 }
@@ -286,9 +302,16 @@ impl<VM> Default for CanvasItemInteractionHandlers<VM> {
     fn default() -> Self {
         Self {
             on_click: None,
+            on_double_click: None,
+            on_mouse_down: None,
+            on_mouse_up: None,
             on_mouse_enter: None,
             on_mouse_leave: None,
             on_mouse_move: None,
+            on_wheel: None,
+            on_drag_start: None,
+            on_drag: None,
+            on_drag_end: None,
         }
     }
 }
@@ -338,13 +361,30 @@ impl<VM: 'static> CanvasItemInteractionHandlers<VM> {
     ) -> CanvasItemInteractionHandlers<RootVm> {
         CanvasItemInteractionHandlers {
             on_click: self.on_click.map(|command| command.scope(selector.clone())),
+            on_double_click: self
+                .on_double_click
+                .map(|command| command.scope(selector.clone())),
+            on_mouse_down: self
+                .on_mouse_down
+                .map(|command| command.scope(selector.clone())),
+            on_mouse_up: self
+                .on_mouse_up
+                .map(|command| command.scope(selector.clone())),
             on_mouse_enter: self
                 .on_mouse_enter
                 .map(|command| command.scope(selector.clone())),
             on_mouse_leave: self
                 .on_mouse_leave
                 .map(|command| command.scope(selector.clone())),
-            on_mouse_move: self.on_mouse_move.map(|command| command.scope(selector)),
+            on_mouse_move: self
+                .on_mouse_move
+                .map(|command| command.scope(selector.clone())),
+            on_wheel: self.on_wheel.map(|command| command.scope(selector.clone())),
+            on_drag_start: self
+                .on_drag_start
+                .map(|command| command.scope(selector.clone())),
+            on_drag: self.on_drag.map(|command| command.scope(selector.clone())),
+            on_drag_end: self.on_drag_end.map(|command| command.scope(selector)),
         }
     }
 }
@@ -352,9 +392,16 @@ impl<VM: 'static> CanvasItemInteractionHandlers<VM> {
 impl<VM> CanvasItemInteractionHandlers<VM> {
     pub(crate) fn has_any(&self) -> bool {
         self.on_click.is_some()
+            || self.on_double_click.is_some()
+            || self.on_mouse_down.is_some()
+            || self.on_mouse_up.is_some()
             || self.on_mouse_enter.is_some()
             || self.on_mouse_leave.is_some()
             || self.on_mouse_move.is_some()
+            || self.on_wheel.is_some()
+            || self.on_drag_start.is_some()
+            || self.on_drag.is_some()
+            || self.on_drag_end.is_some()
     }
 }
 
@@ -1198,6 +1245,7 @@ pub(crate) enum HitInteraction<VM> {
         id: WidgetId,
         item_id: CanvasItemId,
         item_interactions: CanvasItemInteractionHandlers<VM>,
+        cursor_style: Option<CursorStyle>,
         canvas_origin: Point,
         item_origin: Point,
     },
@@ -1300,12 +1348,14 @@ impl<VM> Clone for HitInteraction<VM> {
                 id,
                 item_id,
                 item_interactions,
+                cursor_style,
                 canvas_origin,
                 item_origin,
             } => Self::CanvasItem {
                 id: *id,
                 item_id: *item_id,
                 item_interactions: item_interactions.clone(),
+                cursor_style: *cursor_style,
                 canvas_origin: *canvas_origin,
                 item_origin: *item_origin,
             },

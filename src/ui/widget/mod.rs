@@ -20,16 +20,21 @@ pub use background::{
 };
 pub use button::Button;
 pub use canvas::{
-    Canvas, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasItemId,
-    CanvasLinearGradient, CanvasPath, CanvasPathOpError, CanvasPointerEvent, CanvasRadialGradient,
-    CanvasShadow, CanvasStroke, PathBuilder,
+    Canvas, CanvasBlendMode, CanvasBooleanOp, CanvasBrush, CanvasClip, CanvasClipShape,
+    CanvasDragEvent, CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasImage, CanvasItem,
+    CanvasItemId, CanvasItemStyle, CanvasLayer, CanvasLinearGradient, CanvasMask,
+    CanvasMouseButton, CanvasMouseEvent, CanvasParagraphStyle, CanvasPath, CanvasPathOpError,
+    CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke,
+    CanvasStrokeAlignment, CanvasStrokeCap, CanvasStrokeJoin, CanvasSvgPathError, CanvasText,
+    CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextStyle, CanvasTextVerticalAlign,
+    CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent, PathBuilder,
 };
 pub use checkbox::Checkbox;
 pub(crate) use common::{
-    BackdropBlurPrimitive, BrushPrimitiveData, ClipMask, CompositionState, ComputedScene,
-    HitInteraction, InputEditState, InputSnapshot, InteractionHandlers, MediaEventPhase,
-    MediaEventState, MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    WidgetStateMap,
+    BackdropBlurPrimitive, BrushPrimitiveData, CanvasItemInteractionHandlers, ClipMask,
+    CompositionState, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
+    InteractionHandlers, MediaEventPhase, MediaEventState, MeshVertex, RenderCommand,
+    ScrollRegion, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,

@@ -39,6 +39,7 @@ pub struct Renderer {
     backdrop_blur_pipeline: wgpu::RenderPipeline,
     backdrop_composite_pipeline: wgpu::RenderPipeline,
     text_bind_group_layout: wgpu::BindGroupLayout,
+    mesh_clip_bind_group_layout: wgpu::BindGroupLayout,
     backdrop_blur_bind_group_layout: wgpu::BindGroupLayout,
     backdrop_composite_bind_group_layout: wgpu::BindGroupLayout,
     text_sampler: wgpu::Sampler,
@@ -84,6 +85,7 @@ struct PreparedBrush {
 
 struct PreparedMesh {
     clip_rect: Option<Rect>,
+    clip_bind_group: wgpu::BindGroup,
     vertex_buffer: wgpu::Buffer,
     vertex_count: u32,
 }
@@ -313,9 +315,24 @@ impl Renderer {
             cache: None,
         });
 
+        let mesh_clip_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("tgui-mesh-clip-bind-group-layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let mesh_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("tgui-mesh-pipeline-layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[Some(&mesh_clip_bind_group_layout)],
             immediate_size: 0,
         });
 
@@ -640,6 +657,7 @@ impl Renderer {
             backdrop_blur_pipeline,
             backdrop_composite_pipeline,
             text_bind_group_layout,
+            mesh_clip_bind_group_layout,
             backdrop_blur_bind_group_layout,
             backdrop_composite_bind_group_layout,
             text_sampler,
@@ -872,8 +890,27 @@ impl Renderer {
                                 contents: bytemuck::cast_slice(&vertices),
                                 usage: wgpu::BufferUsages::VERTEX,
                             });
+                    let clip_buffer =
+                        self.device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("tgui-mesh-clip-uniform"),
+                                contents: bytemuck::bytes_of(&physical_mesh_clip_mask_data(
+                                    primitive.clip_mask,
+                                    scale_factor,
+                                )),
+                                usage: wgpu::BufferUsages::UNIFORM,
+                            });
+                    let clip_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("tgui-mesh-clip-bind-group"),
+                        layout: &self.mesh_clip_bind_group_layout,
+                        entries: &[wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: clip_buffer.as_entire_binding(),
+                        }],
+                    });
                     prepared.push(PreparedCommand::Mesh(PreparedMesh {
                         clip_rect: primitive.clip_rect,
+                        clip_bind_group,
                         vertex_buffer,
                         vertex_count: vertices.len() as u32,
                     }));
@@ -1060,6 +1097,7 @@ impl Renderer {
                     PreparedCommand::Mesh(batch) => {
                         if self.apply_scissor(&mut pass, batch.clip_rect) {
                             pass.set_pipeline(&self.mesh_pipeline);
+                            pass.set_bind_group(0, &batch.clip_bind_group, &[]);
                             pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
                             pass.draw(0..batch.vertex_count, 0..1);
                         }
@@ -1697,6 +1735,13 @@ struct ClipMaskVertexData {
     clip_enabled: f32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct MeshClipMaskUniformData {
+    data0: [f32; 4],
+    data1: [f32; 4],
+}
+
 fn physical_clip_mask_data(
     clip_mask: Option<ClipMask>,
     rect_origin_physical: [f32; 2],
@@ -1729,6 +1774,36 @@ fn physical_clip_mask_data(
             clip_rect_size: [0.0, 0.0],
             clip_corner_radius: 0.0,
             clip_enabled: 0.0,
+        })
+}
+
+fn physical_mesh_clip_mask_data(
+    clip_mask: Option<ClipMask>,
+    scale_factor: f32,
+) -> MeshClipMaskUniformData {
+    clip_mask
+        .map(|clip_mask| {
+            let rect = clip_mask.rect;
+            let clip_rect_size = [
+                rect.width.max(0.0).get() * scale_factor,
+                rect.height.max(0.0).get() * scale_factor,
+            ];
+            let clip_corner_radius = (clip_mask.corner_radius.max(0.0) * scale_factor)
+                .min(clip_rect_size[0] * 0.5)
+                .min(clip_rect_size[1] * 0.5);
+            MeshClipMaskUniformData {
+                data0: [
+                    rect.x.get() * scale_factor,
+                    rect.y.get() * scale_factor,
+                    clip_rect_size[0],
+                    clip_rect_size[1],
+                ],
+                data1: [clip_corner_radius, 1.0, 0.0, 0.0],
+            }
+        })
+        .unwrap_or(MeshClipMaskUniformData {
+            data0: [0.0; 4],
+            data1: [0.0; 4],
         })
 }
 

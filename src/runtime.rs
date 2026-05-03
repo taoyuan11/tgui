@@ -48,9 +48,11 @@ use crate::ui::widget::{
     input_scroll_offset, input_text_viewport, InputViewport, INPUT_CARET_EDGE_GAP,
 };
 use crate::ui::widget::{
-    CanvasItemId, CanvasPointerEvent, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
-    InteractionHandlers, MediaEventPhase, MediaEventState, Point, Rect, ResolvedSceneLayout,
-    ScrollRegion, ScrollbarAxis, ScrollbarHandle, Text, WidgetId, WidgetStateMap, WidgetTree,
+    CanvasDragEvent, CanvasItemId, CanvasItemInteractionHandlers, CanvasMouseButton,
+    CanvasMouseEvent, CanvasPointerEvent, CanvasWheelEvent, ComputedScene, HitInteraction,
+    InputEditState, InputSnapshot, InteractionHandlers, MediaEventPhase, MediaEventState, Point,
+    Rect, ResolvedSceneLayout, ScrollRegion, ScrollbarAxis, ScrollbarHandle, Text, WidgetId,
+    WidgetStateMap, WidgetTree,
 };
 use image::GenericImageView;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -473,6 +475,7 @@ pub struct BoundRuntimeHandler<VM> {
     hovered_widgets: Vec<HoveredWidget<VM>>,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
+    active_canvas_drag: Option<ActiveCanvasDrag<VM>>,
     pending_click: Option<PendingClick<VM>>,
     pressed_widget: Option<WidgetId>,
     focused_widget: Option<FocusedWidget<VM>>,
@@ -542,16 +545,61 @@ struct CanvasPointerContext {
 }
 
 impl CanvasPointerContext {
-    fn pointer_event(self, position: Point) -> CanvasPointerEvent {
-        CanvasPointerEvent {
+    fn mouse_event(
+        self,
+        position: Point,
+        button: Option<CanvasMouseButton>,
+    ) -> CanvasMouseEvent {
+        CanvasMouseEvent {
             item_id: self.item_id,
+            button,
             canvas_position: Point::new(
                 position.x - self.canvas_origin.x,
                 position.y - self.canvas_origin.y,
             ),
+            scene_position: position,
             local_position: Point::new(
                 position.x - self.item_origin.x,
                 position.y - self.item_origin.y,
+            ),
+        }
+    }
+
+    fn pointer_event(self, position: Point) -> CanvasPointerEvent {
+        self.mouse_event(position, None)
+    }
+
+    fn wheel_event(self, position: Point, delta: Point) -> CanvasWheelEvent {
+        let mouse = self.mouse_event(position, None);
+        CanvasWheelEvent {
+            item_id: mouse.item_id,
+            delta,
+            canvas_position: mouse.canvas_position,
+            scene_position: mouse.scene_position,
+            local_position: mouse.local_position,
+        }
+    }
+
+    fn drag_event(
+        self,
+        start_position: Point,
+        position: Point,
+        button: CanvasMouseButton,
+    ) -> CanvasDragEvent {
+        let start = self.mouse_event(start_position, Some(button));
+        let current = self.mouse_event(position, Some(button));
+        CanvasDragEvent {
+            item_id: self.item_id,
+            button,
+            start_canvas_position: start.canvas_position,
+            start_scene_position: start.scene_position,
+            start_local_position: start.local_position,
+            canvas_position: current.canvas_position,
+            scene_position: current.scene_position,
+            local_position: current.local_position,
+            delta: Point::new(
+                current.scene_position.x - start.scene_position.x,
+                current.scene_position.y - start.scene_position.y,
             ),
         }
     }
@@ -562,13 +610,28 @@ enum ClickHandler<VM> {
     Command(Command<VM>),
     Toggle(ValueCommand<VM, bool>, bool),
     SelectOption(Option<Command<VM>>),
-    Canvas(ValueCommand<VM, CanvasPointerEvent>, CanvasPointerContext),
+    Canvas(
+        ValueCommand<VM, CanvasMouseEvent>,
+        CanvasPointerContext,
+        Option<CanvasMouseButton>,
+    ),
 }
 
 struct PendingClick<VM> {
     target_id: HoverTargetId,
     deadline: Instant,
     command: Option<ClickHandler<VM>>,
+}
+
+struct ActiveCanvasDrag<VM> {
+    button: CanvasMouseButton,
+    context: CanvasPointerContext,
+    start_position: Point,
+    started: bool,
+    on_mouse_up: Option<ValueCommand<VM, CanvasMouseEvent>>,
+    on_drag_start: Option<ValueCommand<VM, CanvasDragEvent>>,
+    on_drag: Option<ValueCommand<VM, CanvasDragEvent>>,
+    on_drag_end: Option<ValueCommand<VM, CanvasDragEvent>>,
 }
 
 struct FocusedWidget<VM> {
@@ -758,6 +821,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             hovered_widgets: Vec::new(),
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
+            active_canvas_drag: None,
             pending_click: None,
             pressed_widget: None,
             focused_widget: None,
@@ -930,12 +994,43 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     self.execute_command(command);
                 }
             }
-            ClickHandler::Canvas(command, context) => {
+            ClickHandler::Canvas(command, context, button) => {
                 if let Some(position) = position {
-                    self.execute_value_command(command, context.pointer_event(position));
+                    self.execute_value_command(command, context.mouse_event(position, *button));
                 }
             }
         }
+    }
+
+    fn execute_canvas_mouse_command(
+        &mut self,
+        command: &ValueCommand<VM, CanvasMouseEvent>,
+        context: CanvasPointerContext,
+        position: Point,
+        button: Option<CanvasMouseButton>,
+    ) {
+        self.execute_value_command(command, context.mouse_event(position, button));
+    }
+
+    fn execute_canvas_wheel_command(
+        &mut self,
+        command: &ValueCommand<VM, CanvasWheelEvent>,
+        context: CanvasPointerContext,
+        position: Point,
+        delta: Point,
+    ) {
+        self.execute_value_command(command, context.wheel_event(position, delta));
+    }
+
+    fn execute_canvas_drag_command(
+        &mut self,
+        command: &ValueCommand<VM, CanvasDragEvent>,
+        context: CanvasPointerContext,
+        start_position: Point,
+        position: Point,
+        button: CanvasMouseButton,
+    ) {
+        self.execute_value_command(command, context.drag_event(start_position, position, button));
     }
 
     fn drain_dialog_completions(&mut self) -> bool {
@@ -2656,6 +2751,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     id,
                     item_id,
                     item_interactions,
+                    cursor_style,
                     canvas_origin,
                     item_origin,
                 } => {
@@ -2669,7 +2765,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             widget_id: id,
                             item_id,
                         },
-                        cursor_style: None,
+                        cursor_style,
                         on_mouse_enter: item_interactions
                             .on_mouse_enter
                             .map(|command| HoverTransitionHandler::Canvas(command, context)),
@@ -2748,6 +2844,31 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         if scroll_delta.x.abs() <= f32::EPSILON && scroll_delta.y.abs() <= f32::EPSILON {
             return false;
+        }
+
+        for interaction in self.hit_path(self.viewport_rect()).into_iter().rev() {
+            if let HitInteraction::CanvasItem {
+                item_id,
+                item_interactions,
+                canvas_origin,
+                item_origin,
+                ..
+            } = interaction
+            {
+                if let Some(command) = item_interactions.on_wheel {
+                    self.execute_canvas_wheel_command(
+                        &command,
+                        CanvasPointerContext {
+                            item_id,
+                            canvas_origin,
+                            item_origin,
+                        },
+                        cursor_position,
+                        scroll_delta,
+                    );
+                    return true;
+                }
+            }
         }
 
         let scroll_regions = self.scroll_regions();
@@ -2918,12 +3039,67 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         false
     }
 
+    fn handle_canvas_drag(&mut self) -> bool {
+        let Some(cursor_position) = self.cursor_position else {
+            return false;
+        };
+
+        let Some(mut drag) = self.active_canvas_drag.take() else {
+            return false;
+        };
+
+        if !drag.started {
+            if let Some(command) = drag.on_drag_start.clone() {
+                self.execute_canvas_drag_command(
+                    &command,
+                    drag.context,
+                    drag.start_position,
+                    cursor_position,
+                    drag.button,
+                );
+            }
+            drag.started = true;
+        }
+
+        if let Some(command) = drag.on_drag.clone() {
+            self.execute_canvas_drag_command(
+                &command,
+                drag.context,
+                drag.start_position,
+                cursor_position,
+                drag.button,
+            );
+        }
+
+        self.active_canvas_drag = Some(drag);
+        true
+    }
+
     fn end_scrollbar_drag(&mut self) -> bool {
         if self.active_scrollbar_drag.take().is_none() {
             return false;
         }
         self.sync_scrollbar_hover();
         self.invalidate_scene();
+        true
+    }
+
+    fn end_canvas_drag(&mut self) -> bool {
+        let Some(drag) = self.active_canvas_drag.take() else {
+            return false;
+        };
+        let Some(cursor_position) = self.cursor_position else {
+            return false;
+        };
+        if let Some(command) = drag.on_drag_end {
+            self.execute_canvas_drag_command(
+                &command,
+                drag.context,
+                drag.start_position,
+                cursor_position,
+                drag.button,
+            );
+        }
         true
     }
 
@@ -3057,7 +3233,60 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
-    fn handle_mouse_press(&mut self, viewport: Rect, now: Instant) {
+    fn dispatch_canvas_click(
+        &mut self,
+        target_id: HoverTargetId,
+        item_interactions: &CanvasItemInteractionHandlers<VM>,
+        context: CanvasPointerContext,
+        now: Instant,
+        button: CanvasMouseButton,
+    ) -> bool {
+        let is_double_click = self
+            .pending_click
+            .as_ref()
+            .map(|pending| pending.target_id == target_id && pending.deadline > now)
+            .unwrap_or(false);
+
+        if is_double_click {
+            self.pending_click = None;
+            if let Some(command) = item_interactions
+                .on_double_click
+                .clone()
+                .or(item_interactions.on_click.clone())
+            {
+                self.execute_click_handler(
+                    &ClickHandler::Canvas(command, context, Some(button)),
+                    self.cursor_position,
+                );
+                return true;
+            }
+            return false;
+        }
+
+        if item_interactions.on_double_click.is_some() {
+            self.pending_click = Some(PendingClick {
+                target_id,
+                deadline: now + DOUBLE_CLICK_THRESHOLD,
+                command: item_interactions
+                    .on_click
+                    .clone()
+                    .map(|command| ClickHandler::Canvas(command, context, Some(button))),
+            });
+            return true;
+        }
+
+        if let Some(command) = item_interactions.on_click.clone() {
+            self.execute_click_handler(
+                &ClickHandler::Canvas(command, context, Some(button)),
+                self.cursor_position,
+            );
+            return true;
+        }
+
+        false
+    }
+
+    fn handle_mouse_press(&mut self, viewport: Rect, now: Instant, button: CanvasMouseButton) {
         self.flush_pending_click_if_due(now);
 
         let hit_path = self.hit_path(viewport);
@@ -3083,28 +3312,61 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.end_input_selection_drag();
             self.clear_selected_text();
             self.update_focus(None, None, None, None);
-            self.pending_click = None;
             self.pressed_widget = None;
 
             for interaction in hit_path.into_iter().rev() {
                 match interaction {
                     HitInteraction::CanvasItem {
+                        id,
                         item_id,
                         item_interactions,
                         canvas_origin,
                         item_origin,
                         ..
                     } => {
-                        if let Some(command) = item_interactions.on_click {
-                            let context = CanvasPointerContext {
-                                item_id,
-                                canvas_origin,
-                                item_origin,
-                            };
-                            self.execute_click_handler(
-                                &ClickHandler::Canvas(command, context),
-                                self.cursor_position,
+                        let context = CanvasPointerContext {
+                            item_id,
+                            canvas_origin,
+                            item_origin,
+                        };
+                        if let (Some(position), Some(command)) =
+                            (self.cursor_position, item_interactions.on_mouse_down.clone())
+                        {
+                            self.execute_canvas_mouse_command(
+                                &command,
+                                context,
+                                position,
+                                Some(button),
                             );
+                        }
+                        if self.active_canvas_drag.is_none()
+                            && (item_interactions.on_drag_start.is_some()
+                                || item_interactions.on_drag.is_some()
+                                || item_interactions.on_drag_end.is_some())
+                        {
+                            if let Some(position) = self.cursor_position {
+                                self.active_canvas_drag = Some(ActiveCanvasDrag {
+                                    button,
+                                    context,
+                                    start_position: position,
+                                    started: false,
+                                    on_mouse_up: item_interactions.on_mouse_up.clone(),
+                                    on_drag_start: item_interactions.on_drag_start.clone(),
+                                    on_drag: item_interactions.on_drag.clone(),
+                                    on_drag_end: item_interactions.on_drag_end.clone(),
+                                });
+                            }
+                        }
+                        if self.dispatch_canvas_click(
+                            HoverTargetId::CanvasItem {
+                                widget_id: id,
+                                item_id,
+                            },
+                            &item_interactions,
+                            context,
+                            now,
+                            button,
+                        ) {
                             return;
                         }
                     }
@@ -3117,6 +3379,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     _ => {}
                 }
             }
+            self.pending_click = None;
             return;
         }
 
@@ -3386,6 +3649,43 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
+    fn handle_canvas_mouse_release(&mut self, button: CanvasMouseButton) {
+        if let Some(position) = self.cursor_position {
+            if let Some(drag) = self.active_canvas_drag.as_ref() {
+                let context = drag.context;
+                if let Some(command) = drag.on_mouse_up.clone() {
+                    self.execute_canvas_mouse_command(&command, context, position, Some(button));
+                }
+            } else {
+                for interaction in self.hit_path(self.viewport_rect()).into_iter().rev() {
+                    if let HitInteraction::CanvasItem {
+                        item_id,
+                        item_interactions,
+                        canvas_origin,
+                        item_origin,
+                        ..
+                    } = interaction
+                    {
+                        if let Some(command) = item_interactions.on_mouse_up {
+                            self.execute_canvas_mouse_command(
+                                &command,
+                                CanvasPointerContext {
+                                    item_id,
+                                    canvas_origin,
+                                    item_origin,
+                                },
+                                position,
+                                Some(button),
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        self.end_canvas_drag();
+    }
+
     fn window_id(&self) -> Option<WindowId> {
         self.window_id
     }
@@ -3536,6 +3836,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         needs_redraw |= self.handle_scrollbar_drag();
                         needs_redraw |= self.sync_scrollbar_hover();
                         needs_redraw |= self.update_cursor_icon();
+                    } else if self.active_canvas_drag.is_some() {
+                        needs_redraw |= self.handle_canvas_drag();
+                        needs_redraw |= self.handle_hover(viewport);
                     } else if self.active_input_selection.is_some() {
                         needs_redraw |= self.handle_input_selection_drag();
                         needs_redraw |= self.handle_hover(viewport);
@@ -3555,14 +3858,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     button,
                     ..
                 } => {
-                    if button.clone().mouse_button() == Some(MouseButton::Left) {
-                        self.set_pointer_position(*position);
-                        if !self.begin_scrollbar_drag() {
-                            self.handle_mouse_press(viewport, Instant::now());
-                        } else {
-                            needs_redraw = true;
-                            needs_redraw |= self.update_cursor_icon();
-                        }
+                    self.set_pointer_position(*position);
+                    let canvas_button = canvas_mouse_button(button.clone().mouse_button());
+                    if button.clone().mouse_button() == Some(MouseButton::Left)
+                        && self.begin_scrollbar_drag()
+                    {
+                        needs_redraw = true;
+                        needs_redraw |= self.update_cursor_icon();
+                    } else if let Some(canvas_button) = canvas_button {
+                        self.handle_mouse_press(viewport, Instant::now(), canvas_button);
                     }
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
@@ -3611,6 +3915,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             WindowEvent::CloseRequested => return self.close_policy() == WindowClosePolicy::Close,
             WindowEvent::Focused(false) => {
                 self.end_scrollbar_drag();
+                self.end_canvas_drag();
                 self.pressed_widget = None;
                 self.update_focus(None, None, None, None);
                 if let Some(window) = self.window.as_ref() {
@@ -3643,17 +3948,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 button,
                 ..
             } => {
-                if button.clone().mouse_button() == Some(MouseButton::Left) {
-                    self.set_pointer_position(position);
-                    self.end_scrollbar_drag();
-                    self.pressed_widget = None;
-                    self.end_input_selection_drag();
-                    self.end_text_selection_drag();
-                    self.handle_hover(self.viewport_rect());
-                    self.update_cursor_icon();
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
-                    }
+                self.set_pointer_position(position);
+                if let Some(canvas_button) = canvas_mouse_button(button.clone().mouse_button()) {
+                    self.handle_canvas_mouse_release(canvas_button);
+                }
+                self.end_scrollbar_drag();
+                self.pressed_widget = None;
+                self.end_input_selection_drag();
+                self.end_text_selection_drag();
+                self.handle_hover(self.viewport_rect());
+                self.update_cursor_icon();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
                 }
             }
             WindowEvent::SurfaceResized(size) => {
@@ -4266,6 +4572,17 @@ fn mouse_scroll_delta(delta: MouseScrollDelta) -> Point {
     }
 }
 
+fn canvas_mouse_button(button: Option<MouseButton>) -> Option<CanvasMouseButton> {
+    match button? {
+        MouseButton::Left => Some(CanvasMouseButton::Left),
+        MouseButton::Right => Some(CanvasMouseButton::Right),
+        MouseButton::Middle => Some(CanvasMouseButton::Middle),
+        MouseButton::Back => Some(CanvasMouseButton::Back),
+        MouseButton::Forward => Some(CanvasMouseButton::Forward),
+        other => Some(CanvasMouseButton::Other(other as u16)),
+    }
+}
+
 fn cursor_icon(cursor_style: crate::ui::widget::CursorStyle) -> CursorIcon {
     match cursor_style {
         crate::ui::widget::CursorStyle::Default => CursorIcon::Default,
@@ -4819,16 +5136,16 @@ mod tests {
     use crate::foundation::color::Color;
     use crate::foundation::view_model::{Command, ValueCommand};
     use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-    use crate::platform::event::{ElementState, KeyEvent};
+    use crate::platform::event::{ElementState, KeyEvent, MouseScrollDelta};
     use crate::platform::keyboard::{Key, KeyCode, KeyLocation, NamedKey, PhysicalKey};
     use crate::text::font::{FontCatalog, TextFontRequest};
     use crate::ui::layout::Axis;
     use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
     use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
     use crate::ui::widget::{
-        Canvas, CanvasItem, CanvasPath, CanvasPointerEvent, CanvasShadow, CanvasStroke, Checkbox,
-        CursorStyle, Flex, HitInteraction, Input, InputEditState, PathBuilder, Point, Select,
-        SelectOption, Text, WidgetTree, INPUT_CARET_EDGE_GAP,
+        Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent, CanvasShadow,
+        CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, Input, InputEditState,
+        PathBuilder, Point, Select, SelectOption, Text, WidgetTree, INPUT_CARET_EDGE_GAP,
     };
     use crate::ui::widget::{Element, Stack, WidgetId};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -5279,10 +5596,10 @@ mod tests {
         let viewport = handler.viewport_rect();
 
         handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
-        handler.handle_mouse_press(viewport, Instant::now());
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
         assert_eq!(handler.focused_widget_id(), Some(select_id));
 
-        handler.handle_mouse_press(viewport, Instant::now());
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
         assert_eq!(handler.focused_widget_id(), None);
     }
 
@@ -5316,7 +5633,7 @@ mod tests {
             x: frame.x + 1.0,
             y: frame.y + (frame.height * 0.5),
         });
-        handler.handle_mouse_press(viewport, Instant::now());
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
 
         handler.cursor_position = Some(Point {
             x: frame.x + frame.width - 1.0,
@@ -5461,7 +5778,7 @@ mod tests {
             x: left + before_target + ((after_target - before_target) * 0.25),
             y: frame.y + (frame.height * 0.5),
         });
-        handler.handle_mouse_press(viewport, Instant::now());
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
 
         let input_id = handler.focused_input.expect("input should be focused");
         let state = handler
@@ -5668,7 +5985,7 @@ mod tests {
             x: left + before_start + ((after_start - before_start) * 0.25),
             y: frame.y + (frame.height * 0.5),
         });
-        handler.handle_mouse_press(viewport, Instant::now());
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
 
         handler.cursor_position = Some(Point {
             x: left + before_end + ((after_end - before_end) * 0.25),
@@ -5886,7 +6203,7 @@ mod tests {
                 .expect("cursor position should be set"),
         );
 
-        handler.handle_mouse_press(viewport, Instant::now());
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
 
         let state = handler
             .input_states
@@ -6165,7 +6482,7 @@ mod tests {
             x: frame.inset(padding).x + dp(4.0),
             y: frame.y + (frame.height * 0.5),
         });
-        handler.handle_mouse_press(viewport, Instant::now());
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
 
         handler.cursor_position = Some(Point {
             x: frame.right() + dp(40.0),
@@ -6228,7 +6545,7 @@ mod tests {
             x: frame.x + (frame.width * 0.5),
             y: frame.y + (frame.height * 0.5),
         });
-        handler.handle_mouse_press(viewport, Instant::now());
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
 
         let checked = handler.with_view_model(|vm| vm.checked);
         assert!(checked);
@@ -6264,7 +6581,7 @@ mod tests {
             x: frame.x + (frame.width * 0.5),
             y: frame.y + (frame.height * 0.5),
         });
-        handler.handle_mouse_press(viewport, Instant::now());
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
 
         let checked = handler.with_view_model(|vm| vm.checked);
         assert!(checked);
@@ -6300,7 +6617,7 @@ mod tests {
             x: frame.x + (frame.width * 0.5),
             y: frame.y + (frame.height * 0.5),
         });
-        handler.handle_mouse_press(viewport, Instant::now());
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
 
         let checked = handler.with_view_model(|vm| vm.checked);
         assert!(!checked);
@@ -6372,6 +6689,11 @@ mod tests {
         hover_events: Vec<CanvasPointerEvent>,
         clicks: usize,
         widget_clicks: usize,
+        mouse_downs: usize,
+        mouse_ups: usize,
+        wheel_events: usize,
+        drag_events: usize,
+        drag_end_events: usize,
     }
 
     impl crate::foundation::view_model::ViewModel for CanvasEventVm {
@@ -6380,6 +6702,11 @@ mod tests {
                 hover_events: vec![],
                 clicks: 0,
                 widget_clicks: 0,
+                mouse_downs: 0,
+                mouse_ups: 0,
+                wheel_events: 0,
+                drag_events: 0,
+                drag_end_events: 0,
             }
         }
 
@@ -6462,7 +6789,11 @@ mod tests {
         let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
         handler.cursor_position = Some(Point::new(dp(20.0), dp(20.0)));
 
-        handler.handle_mouse_press(handler.viewport_rect(), Instant::now());
+        handler.handle_mouse_press(
+            handler.viewport_rect(),
+            Instant::now(),
+            CanvasMouseButton::Left,
+        );
 
         let view_model = handler
             .view_model
@@ -6470,6 +6801,60 @@ mod tests {
             .expect("view model lock should not be poisoned");
         assert_eq!(view_model.clicks, 1);
         assert_eq!(view_model.widget_clicks, 0);
+    }
+
+    #[test]
+    fn canvas_item_mouse_down_up_wheel_and_drag_dispatch() {
+        let invalidation = InvalidationSignal::new();
+        let tree = WidgetTree::new(
+            Canvas::new(vec![CanvasItem::Path(
+                CanvasPath::new(
+                    12_u64,
+                    PathBuilder::new()
+                        .move_to(10.0, 10.0)
+                        .line_to(60.0, 10.0)
+                        .line_to(60.0, 40.0)
+                        .line_to(10.0, 40.0)
+                        .close(),
+                )
+                .fill(Color::WHITE),
+            )])
+            .size(dp(100.0), dp(80.0))
+            .on_item_mouse_down(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+                vm.mouse_downs += 1;
+            }))
+            .on_item_mouse_up(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+                vm.mouse_ups += 1;
+            }))
+            .on_item_wheel(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+                vm.wheel_events += 1;
+            }))
+            .on_item_drag(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+                vm.drag_events += 1;
+            }))
+            .on_item_drag_end(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+                vm.drag_end_events += 1;
+            })),
+        );
+        let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+        let viewport = handler.viewport_rect();
+        handler.cursor_position = Some(Point::new(dp(20.0), dp(20.0)));
+
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+        handler.cursor_position = Some(Point::new(dp(36.0), dp(28.0)));
+        assert!(handler.handle_canvas_drag());
+        assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -1.0)));
+        handler.handle_canvas_mouse_release(CanvasMouseButton::Left);
+
+        let view_model = handler
+            .view_model
+            .lock()
+            .expect("view model lock should not be poisoned");
+        assert_eq!(view_model.mouse_downs, 1);
+        assert_eq!(view_model.mouse_ups, 1);
+        assert_eq!(view_model.wheel_events, 1);
+        assert_eq!(view_model.drag_events, 1);
+        assert_eq!(view_model.drag_end_events, 1);
     }
 
     #[test]
