@@ -1019,18 +1019,6 @@ pub(crate) enum WidgetKind<VM> {
         disabled: Value<bool>,
         readonly: Value<bool>,
     },
-    TextArea {
-        text: Text,
-        placeholder: Text,
-        on_change: Option<ValueCommand<VM, String>>,
-        on_submit: Option<Command<VM>>,
-        disabled: Value<bool>,
-        readonly: Value<bool>,
-        rows: u16,
-        min_rows: Option<u16>,
-        max_rows: Option<u16>,
-        submit_on_enter: Value<bool>,
-    },
     Select {
         selected_label: Value<Option<String>>,
         placeholder: Text,
@@ -1148,29 +1136,6 @@ impl<VM> Clone for WidgetKind<VM> {
                 disabled: disabled.clone(),
                 readonly: readonly.clone(),
             },
-            Self::TextArea {
-                text,
-                placeholder,
-                on_change,
-                on_submit,
-                disabled,
-                readonly,
-                rows,
-                min_rows,
-                max_rows,
-                submit_on_enter,
-            } => Self::TextArea {
-                text: text.clone(),
-                placeholder: placeholder.clone(),
-                on_change: on_change.clone(),
-                on_submit: on_submit.clone(),
-                disabled: disabled.clone(),
-                readonly: readonly.clone(),
-                rows: *rows,
-                min_rows: *min_rows,
-                max_rows: *max_rows,
-                submit_on_enter: submit_on_enter.clone(),
-            },
             Self::Select {
                 selected_label,
                 placeholder,
@@ -1212,13 +1177,6 @@ pub(crate) enum MeasureContext {
     Input {
         text: Text,
         placeholder: Text,
-    },
-    TextArea {
-        text: Text,
-        placeholder: Text,
-        rows: u16,
-        min_rows: Option<u16>,
-        max_rows: Option<u16>,
     },
     Select {
         selected_label: Option<String>,
@@ -1499,7 +1457,6 @@ pub(crate) struct ScrollRegion {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ScrollRegionSource {
     Container,
-    Input { widget_id: WidgetId },
 }
 
 impl ScrollRegion {
@@ -1683,7 +1640,9 @@ impl InputEditState {
         self.scroll_x = self.scroll_x.max(Dp::ZERO);
         self.scroll_y = self.scroll_y.max(Dp::ZERO);
         if let Some(preferred_column_x) = self.preferred_column_x {
-            self.preferred_column_x = preferred_column_x.is_finite().then_some(preferred_column_x.max(0.0));
+            self.preferred_column_x = preferred_column_x
+                .is_finite()
+                .then_some(preferred_column_x.max(0.0));
         }
         self
     }

@@ -11,7 +11,7 @@ use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, 
 use super::core::Element;
 use super::text::Text;
 
-pub struct Input<VM> {
+pub(crate) struct Input<VM> {
     element: Element<VM>,
 }
 
@@ -293,7 +293,10 @@ impl<VM> Input<VM> {
     }
 
     pub fn readonly(mut self, readonly: impl Into<Value<bool>>) -> Self {
-        if let WidgetKind::Input { readonly: value, .. } = &mut self.element.kind {
+        if let WidgetKind::Input {
+            readonly: value, ..
+        } = &mut self.element.kind
+        {
             *value = readonly.into();
         }
         self

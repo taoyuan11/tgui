@@ -6,11 +6,11 @@ mod common;
 mod container;
 mod core;
 mod image;
+#[cfg(test)]
 mod input;
 mod radio;
 mod select;
 mod switch;
-mod textarea;
 mod text;
 #[cfg(feature = "video")]
 mod video;
@@ -25,17 +25,17 @@ pub use canvas::{
     CanvasDragEvent, CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasImage, CanvasItem,
     CanvasItemId, CanvasItemStyle, CanvasLayer, CanvasLinearGradient, CanvasMask,
     CanvasMouseButton, CanvasMouseEvent, CanvasParagraphStyle, CanvasPath, CanvasPathOpError,
-    CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke,
-    CanvasStrokeAlignment, CanvasStrokeCap, CanvasStrokeJoin, CanvasSvgPathError, CanvasText,
-    CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextStyle, CanvasTextVerticalAlign,
-    CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent, PathBuilder,
+    CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke, CanvasStrokeAlignment,
+    CanvasStrokeCap, CanvasStrokeJoin, CanvasSvgPathError, CanvasText, CanvasTextHorizontalAlign,
+    CanvasTextOverflow, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap,
+    CanvasTransform2D, CanvasWheelEvent, PathBuilder,
 };
 pub use checkbox::Checkbox;
 pub(crate) use common::{
     BackdropBlurPrimitive, BrushPrimitiveData, CanvasItemInteractionHandlers, ClipMask,
     CompositionState, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
-    InteractionHandlers, MediaEventPhase, MediaEventState, MeshVertex, RenderCommand,
-    ScrollRegion, ScrollRegionSource, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
+    InteractionHandlers, MediaEventPhase, MediaEventState, MeshVertex, RenderCommand, ScrollRegion,
+    ScrollRegionSource, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,
@@ -47,11 +47,11 @@ pub(crate) use core::{
 };
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use image::Image;
-pub use input::Input;
+#[cfg(test)]
+pub(crate) use input::Input;
 pub use radio::{Radio, RadioGroup, RadioOption};
 pub use select::{Select, SelectOption};
 pub use switch::Switch;
-pub use textarea::TextArea;
 pub use text::Text;
 #[cfg(feature = "video")]
 pub use video::VideoSurface;

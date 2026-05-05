@@ -67,9 +67,6 @@ use winit_core::icon::{Icon, RgbaIcon};
 #[cfg(target_os = "windows")]
 use winit_win32::{WindowAttributesWindows, WindowExtWindows};
 
-#[cfg(test)]
-mod textarea_tests;
-
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -548,11 +545,7 @@ struct CanvasPointerContext {
 }
 
 impl CanvasPointerContext {
-    fn mouse_event(
-        self,
-        position: Point,
-        button: Option<CanvasMouseButton>,
-    ) -> CanvasMouseEvent {
+    fn mouse_event(self, position: Point, button: Option<CanvasMouseButton>) -> CanvasMouseEvent {
         CanvasMouseEvent {
             item_id: self.item_id,
             button,
@@ -1035,7 +1028,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         position: Point,
         button: CanvasMouseButton,
     ) {
-        self.execute_value_command(command, context.drag_event(start_position, position, button));
+        self.execute_value_command(
+            command,
+            context.drag_event(start_position, position, button),
+        );
     }
 
     fn drain_dialog_completions(&mut self) -> bool {
@@ -2337,7 +2333,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             wrap_width,
         );
         let (caret_x, caret_y) = layout.point_for_index(state.cursor.min(metrics.text.len()));
-        let caret_padding = if state.cursor >= metrics.text.len() { 1.0 } else { 0.0 };
+        let caret_padding = if state.cursor >= metrics.text.len() {
+            1.0
+        } else {
+            0.0
+        };
         let scroll_x = if metrics.multiline {
             Dp::ZERO
         } else {
@@ -3327,18 +3327,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn apply_scroll_region_offset(&mut self, region: ScrollRegion, offset: Point) {
         match region.source {
             ScrollRegionSource::Container => self.set_scroll_offset(region.id, offset),
-            ScrollRegionSource::Input { widget_id } => {
-                if let Some(snapshot) = self
-                    .widget_tree
-                    .as_ref()
-                    .and_then(|tree| tree.input_snapshot(widget_id))
-                {
-                    self.update_input_state(widget_id, &snapshot.text, |state| {
-                        state.scroll_x = offset.x.max(Dp::ZERO);
-                        state.scroll_y = offset.y.max(Dp::ZERO);
-                    });
-                }
-            }
         }
     }
 
@@ -3528,9 +3516,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             canvas_origin,
                             item_origin,
                         };
-                        if let (Some(position), Some(command)) =
-                            (self.cursor_position, item_interactions.on_mouse_down.clone())
-                        {
+                        if let (Some(position), Some(command)) = (
+                            self.cursor_position,
+                            item_interactions.on_mouse_down.clone(),
+                        ) {
                             self.execute_canvas_mouse_command(
                                 &command,
                                 context,
@@ -3644,7 +3633,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     interactions.on_click.clone().map(ClickHandler::Command),
                     Some(text.clone()),
                     cursor,
-                cursor.map(|cursor| (id, frame, padding, multiline, text_style, text, cursor)),
+                    cursor.map(|cursor| (id, frame, padding, multiline, text_style, text, cursor)),
                     None,
                 )
             }
@@ -3812,13 +3801,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             input_selection
         {
             self.begin_input_selection(
-                widget_id,
-                frame,
-                padding,
-                multiline,
-                text_style,
-                text,
-                cursor,
+                widget_id, frame, padding, multiline, text_style, text, cursor,
             );
         }
 
@@ -5372,7 +5355,9 @@ mod tests {
     use crate::foundation::view_model::{Command, ValueCommand};
     use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
     use crate::platform::event::{ElementState, KeyEvent, MouseScrollDelta};
-    use crate::platform::keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey};
+    use crate::platform::keyboard::{
+        Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey,
+    };
     use crate::text::font::{FontCatalog, TextFontRequest};
     use crate::ui::layout::Axis;
     use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
@@ -5380,8 +5365,7 @@ mod tests {
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent, CanvasShadow,
         CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, Input, InputEditState,
-        PathBuilder, Point, Select, SelectOption, Text, TextArea, WidgetTree,
-        INPUT_CARET_EDGE_GAP,
+        PathBuilder, Point, Select, SelectOption, Text, WidgetTree, INPUT_CARET_EDGE_GAP,
     };
     use crate::ui::widget::{Element, Stack, WidgetId};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -6765,12 +6749,11 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct TextAreaSubmitVm {
+    struct ReadonlyInputVm {
         text: String,
-        submits: usize,
     }
 
-    impl crate::foundation::view_model::ViewModel for TextAreaSubmitVm {
+    impl crate::foundation::view_model::ViewModel for ReadonlyInputVm {
         fn new(_context: &ViewModelContext) -> Self {
             todo!()
         }
@@ -6784,166 +6767,19 @@ mod tests {
     }
 
     #[test]
-    fn textarea_enter_inserts_newline_when_submit_on_enter_is_disabled() {
-        let invalidation = InvalidationSignal::new();
-        let tree = WidgetTree::new(
-            TextArea::new(Text::new("alpha"))
-                .width(dp(180.0))
-                .rows(3)
-                .on_change(ValueCommand::new(|vm: &mut TextAreaSubmitVm, value| {
-                    vm.text = value;
-                })),
-        );
-        let mut handler = test_handler_with_vm(
-            TextAreaSubmitVm {
-                text: "alpha".to_string(),
-                submits: 0,
-            },
-            Some(tree),
-            invalidation,
-        );
-
-        let input_id = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput { id, .. } => Some(*id),
-                    _ => None,
-                })
-                .expect("textarea hit region should exist")
-        };
-        handler.focused_input = Some(input_id);
-        handler.input_states.insert(input_id, InputEditState::caret_at("alpha"));
-
-        handler.handle_input_keyboard_event(&key_press_event(KeyCode::Enter, NamedKey::Enter));
-
-        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha\n");
-        assert_eq!(handler.with_view_model(|vm| vm.submits), 0);
-        let state = handler
-            .input_states
-            .get(&input_id)
-            .expect("textarea state should be recorded");
-        assert_eq!(state.cursor, "alpha\n".len());
-        assert_eq!(state.anchor, "alpha\n".len());
-    }
-
-    #[test]
-    fn textarea_submit_on_enter_submits_but_primary_modifier_keeps_newline_semantics() {
-        let invalidation = InvalidationSignal::new();
-        let tree = WidgetTree::new(
-            TextArea::new(Text::new("alpha"))
-                .width(dp(180.0))
-                .rows(3)
-                .submit_on_enter(true)
-                .on_change(ValueCommand::new(|vm: &mut TextAreaSubmitVm, value| {
-                    vm.text = value;
-                }))
-                .on_submit(Command::new(|vm: &mut TextAreaSubmitVm| {
-                    vm.submits += 1;
-                })),
-        );
-        let mut handler = test_handler_with_vm(
-            TextAreaSubmitVm {
-                text: "alpha".to_string(),
-                submits: 0,
-            },
-            Some(tree),
-            invalidation,
-        );
-
-        let input_id = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput { id, .. } => Some(*id),
-                    _ => None,
-                })
-                .expect("textarea hit region should exist")
-        };
-        handler.focused_input = Some(input_id);
-        handler.input_states.insert(input_id, InputEditState::caret_at("alpha"));
-
-        handler.handle_input_keyboard_event(&key_press_event(KeyCode::Enter, NamedKey::Enter));
-
-        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha");
-        assert_eq!(handler.with_view_model(|vm| vm.submits), 1);
-        let state = handler
-            .input_states
-            .get(&input_id)
-            .expect("textarea state should be recorded");
-        assert_eq!(state.cursor, "alpha".len());
-        assert_eq!(state.anchor, "alpha".len());
-
-        handler.modifiers = ModifiersState::CONTROL;
-        handler.handle_input_keyboard_event(&key_press_event(KeyCode::Enter, NamedKey::Enter));
-
-        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha\n");
-        assert_eq!(handler.with_view_model(|vm| vm.submits), 1);
-    }
-
-    #[test]
-    fn textarea_submit_on_enter_binding_re_resolves_after_invalidation() {
-        let invalidation = InvalidationSignal::new();
-        let submit_on_enter = Arc::new(Mutex::new(false));
-        let binding = {
-            let submit_on_enter = submit_on_enter.clone();
-            Binding::new(move || {
-                *submit_on_enter
-                    .lock()
-                    .expect("submit_on_enter binding mutex should not be poisoned")
-            })
-        };
-        let tree = WidgetTree::new(
-            TextArea::<TestVm>::new(Text::new("alpha"))
-                .width(dp(180.0))
-                .rows(3)
-                .submit_on_enter(binding),
-        );
-        let mut handler = test_handler(Some(tree), invalidation);
-
-        let resolve_submit_on_enter = |handler: &mut BoundRuntimeHandler<TestVm>| {
-            handler
-                .computed_scene()
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput {
-                        submit_on_enter, ..
-                    } => Some(*submit_on_enter),
-                    _ => None,
-                })
-                .expect("textarea hit region should exist")
-        };
-
-        assert!(!resolve_submit_on_enter(&mut handler));
-
-        *submit_on_enter
-            .lock()
-            .expect("submit_on_enter binding mutex should not be poisoned") = true;
-        handler.invalidate_scene();
-
-        assert!(resolve_submit_on_enter(&mut handler));
-    }
-
-    #[test]
     fn readonly_input_blocks_backspace_and_paste_changes() {
         let invalidation = InvalidationSignal::new();
         let tree = WidgetTree::new(
             Input::new(Text::new("alpha"))
                 .width(dp(180.0))
                 .readonly(true)
-                .on_change(ValueCommand::new(|vm: &mut TextAreaSubmitVm, value| {
+                .on_change(ValueCommand::new(|vm: &mut ReadonlyInputVm, value| {
                     vm.text = value;
                 })),
         );
         let mut handler = test_handler_with_vm(
-            TextAreaSubmitVm {
+            ReadonlyInputVm {
                 text: "alpha".to_string(),
-                submits: 0,
             },
             Some(tree),
             invalidation,
@@ -6961,9 +6797,12 @@ mod tests {
                 .expect("input hit region should exist")
         };
         handler.focused_input = Some(input_id);
-        handler.input_states.insert(input_id, InputEditState::caret_at("alpha"));
+        handler
+            .input_states
+            .insert(input_id, InputEditState::caret_at("alpha"));
 
-        handler.handle_input_keyboard_event(&key_press_event(KeyCode::Backspace, NamedKey::Backspace));
+        handler
+            .handle_input_keyboard_event(&key_press_event(KeyCode::Backspace, NamedKey::Backspace));
         assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha");
 
         handler.clipboard.set_text("beta".to_string());
@@ -6971,51 +6810,6 @@ mod tests {
         handler.handle_input_keyboard_event(&character_key_press_event(KeyCode::KeyV, "v"));
 
         assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha");
-    }
-
-    #[test]
-    fn readonly_textarea_skips_newline_insert_but_still_allows_submit() {
-        let invalidation = InvalidationSignal::new();
-        let tree = WidgetTree::new(
-            TextArea::new(Text::new("alpha"))
-                .width(dp(180.0))
-                .rows(3)
-                .readonly(true)
-                .submit_on_enter(true)
-                .on_change(ValueCommand::new(|vm: &mut TextAreaSubmitVm, value| {
-                    vm.text = value;
-                }))
-                .on_submit(Command::new(|vm: &mut TextAreaSubmitVm| {
-                    vm.submits += 1;
-                })),
-        );
-        let mut handler = test_handler_with_vm(
-            TextAreaSubmitVm {
-                text: "alpha".to_string(),
-                submits: 0,
-            },
-            Some(tree),
-            invalidation,
-        );
-
-        let input_id = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput { id, .. } => Some(*id),
-                    _ => None,
-                })
-                .expect("textarea hit region should exist")
-        };
-        handler.focused_input = Some(input_id);
-        handler.input_states.insert(input_id, InputEditState::caret_at("alpha"));
-
-        handler.handle_input_keyboard_event(&key_press_event(KeyCode::Enter, NamedKey::Enter));
-
-        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha");
-        assert_eq!(handler.with_view_model(|vm| vm.submits), 1);
     }
 
     #[derive(Default)]

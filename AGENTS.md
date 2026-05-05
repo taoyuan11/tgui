@@ -4,7 +4,7 @@
 
 ## 项目定位
 
-`tgui` 是一个 Rust GUI 框架 crate，目标是提供基于 `wgpu` 的 GPU 加速渲染、MVVM 状态模型、`taffy` 布局、声明式组件树、主题系统、动画、媒体加载、单行 / 多行文本输入、系统通知、对话框、自定义窗口 chrome / 原生窗口控制以及可选视频播放能力。
+`tgui` 是一个 Rust GUI 框架 crate，目标是提供基于 `wgpu` 的 GPU 加速渲染、MVVM 状态模型、`taffy` 布局、声明式组件树、主题系统、动画、媒体加载、系统通知、对话框、自定义窗口 chrome / 原生窗口控制以及可选视频播放能力。
 
 crate 信息：
 
@@ -64,7 +64,7 @@ Windows 下启用 `video` feature 时，`build.rs` 会额外链接 `strmiids` �
 - `application`：`Application`、`WindowSpec`、`WindowRole`、`WindowClosePolicy`。
 - `mvvm`：`ViewModel`、`ViewModelContext`、`Observable`、`Binding`、`Command`、`ValueCommand`、`CommandContext`、`WindowControl`、`WindowResizeDirection`。
 - `layout`：`Flex`、`Grid`、`Stack` 以及布局尺寸和对齐类型。
-- `widgets`：`Button`、`Text`、`Input`、`TextArea`、`Image`、`Checkbox`、`Radio`、`Select`、`Switch`、`Element`、`WidgetTree` 等。
+- `widgets`：`Button`、`Text`、`Image`、`Checkbox`、`Radio`、`Select`、`Switch`、`Element`、`WidgetTree` 等。
 - `canvas`：`Canvas`、`PathBuilder`、路径、渐变、阴影、布尔运算、画布事件。
 - `theme`：`Theme`、`ThemeMode`、`ThemeSet`、组件主题和设计 token。
 - `media`：`MediaSource`、`MediaBytes`、`ContentFit`。
@@ -132,12 +132,7 @@ Application::new()
 
 如果新增 widget，优先复用现有 `Element`、`WidgetKind`、`InteractionHandlers`、`MediaEventHandlers`、`VisualStyle`、`LayoutStyle` 模式，而不是另起一套事件或布局系统。
 
-对于文本输入组件，当前约定是：
-
-- `Input` 用于单行输入；`TextArea` 用于多行输入。
-- `TextArea` 支持 `rows`、`min_rows`、`max_rows`、`submit_on_enter`、`on_submit`。
-- `submit_on_enter(true)` 时，裸 `Enter` 触发提交；带主快捷键修饰符或 `Shift` / `Alt` 时仍插入换行。
-- `TextArea` 超过 `max_rows` 后通过内部滚动继续编辑，需要同步关注滚动条样式、caret 可见性和命中测试。
+当前仓库不再提供公开的文本输入组件支持。处理历史输入逻辑、遗留测试或相关运行时代码时，先确认它是否仍然属于对外能力的一部分，再决定是清理还是保留为内部实现细节。
 
 ## 动画系统
 

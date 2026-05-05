@@ -127,7 +127,6 @@ pub struct ResolvedText {
 pub(crate) struct TextLayoutInfo {
     pub width: f32,
     pub height: f32,
-    pub line_height: f32,
     boundaries: Vec<TextBoundary>,
     lines: Vec<TextLineLayoutInfo>,
 }
@@ -177,57 +176,10 @@ impl TextLayoutInfo {
         self.line_for_index(index).end_index
     }
 
-    pub(crate) fn line_index_for_index(&self, index: usize) -> usize {
-        self.find_line_index_for_index(index)
-    }
-
-    pub(crate) fn line_count(&self) -> usize {
-        self.lines.len()
-    }
-
-    pub(crate) fn line_top(&self, line_index: usize) -> f32 {
-        self.lines
-            .get(line_index)
-            .map(|line| line.top)
-            .unwrap_or(0.0)
-    }
-
     pub(crate) fn move_vertical(&self, index: usize, target_x: f32, delta: i32) -> usize {
         let current = self.find_line_index_for_index(index);
         let next = (current as i32 + delta).clamp(0, self.lines.len().saturating_sub(1) as i32);
         self.lines[next as usize].index_for_x(target_x)
-    }
-
-    pub(crate) fn selection_rects(&self, start: usize, end: usize) -> Vec<(f32, f32, f32, f32)> {
-        if start == end || self.lines.is_empty() {
-            return Vec::new();
-        }
-
-        let range_start = start.min(end);
-        let range_end = start.max(end);
-        let mut rects = Vec::new();
-        for (line_index, line) in self.lines.iter().enumerate() {
-            let next_start = self
-                .lines
-                .get(line_index + 1)
-                .map(|next| next.start_index)
-                .unwrap_or(usize::MAX);
-            if range_end <= line.start_index || range_start >= next_start {
-                continue;
-            }
-
-            let local_start = range_start.max(line.start_index).min(next_start);
-            let local_end = range_end.min(next_start).max(local_start);
-            let x0 = line.x_for_index(local_start);
-            let x1 = if range_end > line.end_index {
-                line.width
-            } else {
-                line.x_for_index(local_end.min(line.end_index))
-            };
-            rects.push((x0.min(x1), line.top, (x1 - x0).abs(), line.height));
-        }
-
-        rects
     }
 
     fn find_line_index_for_index(&self, index: usize) -> usize {
@@ -235,7 +187,7 @@ impl TextLayoutInfo {
             return 0;
         }
 
-        for (line_index, line) in self.lines.iter().enumerate() {
+        for line_index in 0..self.lines.len() {
             let next_start = self
                 .lines
                 .get(line_index + 1)
@@ -442,7 +394,6 @@ impl FontManager {
             return TextLayoutInfo {
                 width: 0.0,
                 height: line_height,
-                line_height,
                 boundaries: vec![TextBoundary { index: 0, x: 0.0 }],
                 lines: vec![TextLineLayoutInfo {
                     start_index: 0,
@@ -587,7 +538,6 @@ impl FontManager {
         TextLayoutInfo {
             width,
             height,
-            line_height,
             boundaries,
             lines,
         }
@@ -605,7 +555,6 @@ impl FontManager {
             return TextLayoutInfo {
                 width: 0.0,
                 height: line_height,
-                line_height,
                 boundaries: vec![TextBoundary { index: 0, x: 0.0 }],
                 lines: vec![TextLineLayoutInfo {
                     start_index: 0,
@@ -658,7 +607,6 @@ impl FontManager {
                 TextLayoutInfo {
                     width: width.max(0.0),
                     height: height.max(line_height),
-                    line_height,
                     boundaries: boundaries.clone(),
                     lines: vec![TextLineLayoutInfo {
                         start_index: 0,

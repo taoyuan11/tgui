@@ -900,14 +900,15 @@ impl Renderer {
                                 )),
                                 usage: wgpu::BufferUsages::UNIFORM,
                             });
-                    let clip_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("tgui-mesh-clip-bind-group"),
-                        layout: &self.mesh_clip_bind_group_layout,
-                        entries: &[wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: clip_buffer.as_entire_binding(),
-                        }],
-                    });
+                    let clip_bind_group =
+                        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("tgui-mesh-clip-bind-group"),
+                            layout: &self.mesh_clip_bind_group_layout,
+                            entries: &[wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: clip_buffer.as_entire_binding(),
+                            }],
+                        });
                     prepared.push(PreparedCommand::Mesh(PreparedMesh {
                         clip_rect: primitive.clip_rect,
                         clip_bind_group,

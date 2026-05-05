@@ -19,16 +19,18 @@ use crate::foundation::binding::Binding;
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::view_model::ValueCommand;
-use crate::media::{resolve_media_rect, ContentFit, MediaManager, MediaSource, RasterRequest, TextureFrame};
+use crate::media::{
+    resolve_media_rect, ContentFit, MediaManager, MediaSource, RasterRequest, TextureFrame,
+};
+use crate::text::font::FontWeight;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{Dp, Sp, UnitContext};
-use crate::text::font::FontWeight;
 
 use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     CanvasItemInteractionHandlers, ClipMask, CursorStyle, InteractionHandlers, MediaEventHandlers,
-    MeshPrimitive, MeshVertex, Point, Rect, TextPrimitive, TexturePrimitive, VisualStyle,
-    WidgetId, WidgetKind,
+    MeshPrimitive, MeshVertex, Point, Rect, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId,
+    WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -587,10 +589,38 @@ impl PathBuilder {
         let bottom = y + height;
         let r = radius.get();
         let mut builder = self.move_to(x + radius, y);
-        builder = append_arc_segments(builder, Point::new(right - radius, y + radius), r, -std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2, false);
-        builder = append_arc_segments(builder, Point::new(right - radius, bottom - radius), r, 0.0, std::f32::consts::FRAC_PI_2, true);
-        builder = append_arc_segments(builder, Point::new(x + radius, bottom - radius), r, std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2, true);
-        builder = append_arc_segments(builder, Point::new(x + radius, y + radius), r, std::f32::consts::PI, std::f32::consts::FRAC_PI_2, true);
+        builder = append_arc_segments(
+            builder,
+            Point::new(right - radius, y + radius),
+            r,
+            -std::f32::consts::FRAC_PI_2,
+            std::f32::consts::FRAC_PI_2,
+            false,
+        );
+        builder = append_arc_segments(
+            builder,
+            Point::new(right - radius, bottom - radius),
+            r,
+            0.0,
+            std::f32::consts::FRAC_PI_2,
+            true,
+        );
+        builder = append_arc_segments(
+            builder,
+            Point::new(x + radius, bottom - radius),
+            r,
+            std::f32::consts::FRAC_PI_2,
+            std::f32::consts::FRAC_PI_2,
+            true,
+        );
+        builder = append_arc_segments(
+            builder,
+            Point::new(x + radius, y + radius),
+            r,
+            std::f32::consts::PI,
+            std::f32::consts::FRAC_PI_2,
+            true,
+        );
         builder.close()
     }
 
@@ -658,7 +688,9 @@ impl PathBuilder {
         y: impl Into<Dp>,
         radius: impl Into<Dp>,
     ) -> Self {
-        let Some(PathCommand::MoveTo(from) | PathCommand::LineTo(from)) = self.commands.last().copied() else {
+        let Some(PathCommand::MoveTo(from) | PathCommand::LineTo(from)) =
+            self.commands.last().copied()
+        else {
             return self.move_to(ctrl_x, ctrl_y).line_to(x, y);
         };
 
@@ -1424,11 +1456,7 @@ impl CanvasItem {
         Self::Text(CanvasText::new(id, frame, content))
     }
 
-    pub fn image(
-        id: impl Into<CanvasItemId>,
-        frame: Rect,
-        source: impl Into<MediaSource>,
-    ) -> Self {
+    pub fn image(id: impl Into<CanvasItemId>, frame: Rect, source: impl Into<MediaSource>) -> Self {
         Self::Image(CanvasImage::new(id, frame, source))
     }
 
@@ -1460,7 +1488,9 @@ impl CanvasItem {
             Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
             Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
             Self::Group(group) => canvas_bounds(&group.items),
-            Self::Clip(clip) => clip_shape_bounds(&clip.clip).or_else(|| canvas_bounds(&clip.items)),
+            Self::Clip(clip) => {
+                clip_shape_bounds(&clip.clip).or_else(|| canvas_bounds(&clip.items))
+            }
             Self::Layer(layer) => canvas_bounds(&layer.items),
             Self::Mask(mask) => canvas_bounds(&mask.content),
         }?;
@@ -1476,7 +1506,9 @@ impl CanvasItem {
             Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
             Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
             Self::Group(group) => canvas_bounds(&group.items),
-            Self::Clip(clip) => clip_shape_bounds(&clip.clip).or_else(|| canvas_bounds(&clip.items)),
+            Self::Clip(clip) => {
+                clip_shape_bounds(&clip.clip).or_else(|| canvas_bounds(&clip.items))
+            }
             Self::Layer(layer) => canvas_bounds(&layer.items),
             Self::Mask(mask) => canvas_bounds(&mask.content),
         }?;
@@ -1511,7 +1543,10 @@ impl CanvasItem {
             ),
             Self::Clip(clip) => {
                 let nested_clip = CanvasClipContext {
-                    clip_rect: compose_clip_rect(clip_context.clip_rect, clip_shape_clip_rect(&clip.clip, origin)),
+                    clip_rect: compose_clip_rect(
+                        clip_context.clip_rect,
+                        clip_shape_clip_rect(&clip.clip, origin),
+                    ),
                     clip_mask: clip_context.clip_mask,
                 };
                 tessellate_items(
@@ -1647,9 +1682,9 @@ fn clip_shape_bounds(shape: &CanvasClipShape) -> Option<RectBounds> {
     match shape {
         CanvasClipShape::Rect(rect) => Some(RectBounds::from_rect(*rect)),
         CanvasClipShape::RoundedRect { rect, .. } => Some(RectBounds::from_rect(*rect)),
-        CanvasClipShape::Path(path) => path
-            .control_bounds()
-            .map(|bounds| RectBounds::from_min_max(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y)),
+        CanvasClipShape::Path(path) => path.control_bounds().map(|bounds| {
+            RectBounds::from_min_max(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y)
+        }),
     }
 }
 
@@ -1684,7 +1719,12 @@ fn compose_clip_rect(lhs: Option<Rect>, rhs: Option<Rect>) -> Option<Rect> {
 }
 
 fn offset_rect(rect: Rect, origin: Point) -> Rect {
-    Rect::new(origin.x + rect.x, origin.y + rect.y, rect.width, rect.height)
+    Rect::new(
+        origin.x + rect.x,
+        origin.y + rect.y,
+        rect.width,
+        rect.height,
+    )
 }
 
 fn tessellate_items(
@@ -1720,7 +1760,10 @@ fn tessellate_text(
         texts: vec![TextPrimitive {
             content: text.content.clone(),
             frame,
-            color: text.text_style.color.with_alpha_factor(opacity * text.style.opacity),
+            color: text
+                .text_style
+                .color
+                .with_alpha_factor(opacity * text.style.opacity),
             force_color: true,
             font_family: text.text_style.font_family.clone(),
             font_size: text.text_style.font_size.get(),
@@ -1768,7 +1811,11 @@ fn tessellate_image(
     }
 }
 
-fn apply_transform_to_output(output: &mut CanvasRenderOutput, transform: CanvasTransform2D, origin: Point) {
+fn apply_transform_to_output(
+    output: &mut CanvasRenderOutput,
+    transform: CanvasTransform2D,
+    origin: Point,
+) {
     if transform == CanvasTransform2D::IDENTITY {
         return;
     }
@@ -2976,7 +3023,10 @@ impl StrokeVertexConstructor<[f32; 2]> for StrokeVertexCtor {
 
 #[cfg(test)]
 mod tests {
-    use super::{canvas_bounds, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasPath, CanvasShadow, CanvasStroke, PathBuilder};
+    use super::{
+        canvas_bounds, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasPath,
+        CanvasShadow, CanvasStroke, PathBuilder,
+    };
     use crate::foundation::color::Color;
     use crate::ui::unit::dp;
     use crate::ui::widget::Point;
