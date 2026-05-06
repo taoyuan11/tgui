@@ -1012,13 +1012,6 @@ pub(crate) enum WidgetKind<VM> {
         inactive_thumb_color: Option<Value<Color>>,
         disabled: Value<bool>,
     },
-    Input {
-        text: Text,
-        placeholder: Text,
-        on_change: Option<ValueCommand<VM, String>>,
-        disabled: Value<bool>,
-        readonly: Value<bool>,
-    },
     Select {
         selected_label: Value<Option<String>>,
         placeholder: Text,
@@ -1123,19 +1116,6 @@ impl<VM> Clone for WidgetKind<VM> {
                 inactive_thumb_color: inactive_thumb_color.clone(),
                 disabled: disabled.clone(),
             },
-            Self::Input {
-                text,
-                placeholder,
-                on_change,
-                disabled,
-                readonly,
-            } => Self::Input {
-                text: text.clone(),
-                placeholder: placeholder.clone(),
-                on_change: on_change.clone(),
-                disabled: disabled.clone(),
-                readonly: readonly.clone(),
-            },
             Self::Select {
                 selected_label,
                 placeholder,
@@ -1174,10 +1154,6 @@ pub(crate) enum MeasureContext {
     Switch {
         checked: bool,
     },
-    Input {
-        text: Text,
-        placeholder: Text,
-    },
     Select {
         selected_label: Option<String>,
         placeholder: Text,
@@ -1198,18 +1174,6 @@ pub(crate) enum HitInteraction<VM> {
         id: WidgetId,
         interactions: InteractionHandlers<VM>,
         focusable: bool,
-    },
-    FocusInput {
-        id: WidgetId,
-        frame: Rect,
-        padding: Insets,
-        interactions: InteractionHandlers<VM>,
-        on_change: Option<ValueCommand<VM, String>>,
-        on_submit: Option<Command<VM>>,
-        multiline: bool,
-        submit_on_enter: bool,
-        text_style: Text,
-        text: String,
     },
     SelectableText {
         id: WidgetId,
@@ -1269,29 +1233,6 @@ impl<VM> Clone for HitInteraction<VM> {
                 id: *id,
                 interactions: interactions.clone(),
                 focusable: *focusable,
-            },
-            Self::FocusInput {
-                id,
-                frame,
-                padding,
-                interactions,
-                on_change,
-                on_submit,
-                multiline,
-                submit_on_enter,
-                text_style,
-                text,
-            } => Self::FocusInput {
-                id: *id,
-                frame: *frame,
-                padding: *padding,
-                interactions: interactions.clone(),
-                on_change: on_change.clone(),
-                on_submit: on_submit.clone(),
-                multiline: *multiline,
-                submit_on_enter: *submit_on_enter,
-                text_style: text_style.clone(),
-                text: text.clone(),
             },
             Self::SelectableText {
                 id,
@@ -1380,7 +1321,6 @@ impl<VM> HitInteraction<VM> {
         match self {
             Self::Disabled { id }
             | Self::Widget { id, .. }
-            | Self::FocusInput { id, .. }
             | Self::SelectableText { id, .. }
             | Self::Switch { id, .. }
             | Self::Checkbox { id, .. }
@@ -1703,17 +1643,6 @@ mod tests {
             Some((0, 3))
         );
     }
-}
-
-#[derive(Clone)]
-pub(crate) struct InputSnapshot<VM> {
-    pub id: WidgetId,
-    pub on_change: Option<ValueCommand<VM, String>>,
-    pub on_submit: Option<Command<VM>>,
-    pub multiline: bool,
-    pub submit_on_enter: bool,
-    pub readonly: bool,
-    pub text: String,
 }
 
 #[cfg(test)]

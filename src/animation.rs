@@ -1097,8 +1097,6 @@ pub(crate) enum WindowProperty {
     ThemePrimaryContainer,
     ThemeFocusRing,
     ThemeSelection,
-    ThemeInputBackground,
-    ThemeInputBorder,
     ThemeButtonPrimary,
     ThemeButtonSecondary,
     ThemeScrollbarThumb,

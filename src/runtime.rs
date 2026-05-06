@@ -30,29 +30,23 @@ use crate::platform::backend::window::Window;
 use crate::platform::backend::EventLoop;
 use crate::platform::cursor::{Cursor, CursorIcon};
 use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-use crate::platform::event::{
-    ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
-};
+use crate::platform::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use crate::platform::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 #[cfg(all(target_env = "ohos", feature = "ohos"))]
 use crate::platform::ohos::{OhosApp, WindowExtOhos};
 use crate::platform::window::{
-    ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeRequestData,
-    ResizeDirection, Theme as WindowTheme, WindowAttributes, WindowId,
+    ImeRequest, ImeRequestData, ResizeDirection, Theme as WindowTheme, WindowAttributes, WindowId,
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::{FontManager, TextFontRequest};
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet, ThemeStore};
 use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 use crate::ui::widget::{
-    input_scroll_offset, input_text_viewport, InputViewport, INPUT_CARET_EDGE_GAP,
-};
-use crate::ui::widget::{
     CanvasDragEvent, CanvasItemId, CanvasItemInteractionHandlers, CanvasMouseButton,
     CanvasMouseEvent, CanvasPointerEvent, CanvasWheelEvent, ComputedScene, HitInteraction,
-    InputEditState, InputSnapshot, InteractionHandlers, MediaEventPhase, MediaEventState, Point,
-    Rect, ResolvedSceneLayout, ScrollRegion, ScrollRegionSource, ScrollbarAxis, ScrollbarHandle,
-    Text, WidgetId, WidgetStateMap, WidgetTree,
+    InputEditState, InteractionHandlers, MediaEventPhase, MediaEventState, Point, Rect,
+    ResolvedSceneLayout, ScrollRegion, ScrollRegionSource, ScrollbarAxis, ScrollbarHandle, Text,
+    WidgetId, WidgetStateMap, WidgetTree,
 };
 use image::GenericImageView;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -62,13 +56,11 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use unicode_segmentation::UnicodeSegmentation;
 use winit_core::icon::{Icon, RgbaIcon};
 #[cfg(target_os = "windows")]
 use winit_win32::{WindowAttributesWindows, WindowExtWindows};
 
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
-const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 #[cfg(all(target_os = "android", feature = "android"))]
 const ANDROID_SYSTEM_THEME_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -469,7 +461,6 @@ pub struct BoundRuntimeHandler<VM> {
     animation_engine: AnimationEngine,
     animation_epoch: u64,
     hover_epoch: u64,
-    caret_blink_started_at: Option<Instant>,
     cursor_position: Option<Point>,
     modifiers: ModifiersState,
     hovered_widgets: Vec<HoveredWidget<VM>>,
@@ -479,11 +470,8 @@ pub struct BoundRuntimeHandler<VM> {
     pending_click: Option<PendingClick<VM>>,
     pressed_widget: Option<WidgetId>,
     focused_widget: Option<FocusedWidget<VM>>,
-    focused_input: Option<WidgetId>,
-    input_states: HashMap<WidgetId, InputEditState>,
     selected_text: Option<WidgetId>,
     selected_text_states: HashMap<WidgetId, InputEditState>,
-    active_input_selection: Option<TextSelectionDrag>,
     active_text_selection: Option<TextSelectionDrag>,
     clipboard: ClipboardService,
     cached_scene: Option<CachedScene<VM>>,
@@ -511,7 +499,6 @@ struct CachedScene<VM> {
     viewport: Rect,
     units: UnitContext,
     focused_widget: Option<WidgetId>,
-    focused_input: Option<WidgetId>,
     pressed_widget: Option<WidgetId>,
     selected_text: Option<WidgetId>,
     caret_visible: bool,
@@ -670,16 +657,6 @@ struct TextSelectionDrag {
     widget_id: WidgetId,
     frame: Rect,
     padding: crate::ui::layout::Insets,
-    multiline: bool,
-    text_style: Text,
-    text: String,
-}
-
-#[derive(Clone)]
-struct InputLayoutMetrics {
-    frame: Rect,
-    padding: crate::ui::layout::Insets,
-    multiline: bool,
     text_style: Text,
     text: String,
 }
@@ -732,26 +709,6 @@ struct ClipboardService {
 }
 
 impl ClipboardService {
-    fn get_text(&mut self) -> Option<String> {
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            all(target_os = "linux", not(target_env = "ohos"))
-        ))]
-        {
-            if self.inner.is_none() {
-                self.inner = arboard::Clipboard::new().ok();
-            }
-            return self
-                .inner
-                .as_mut()
-                .and_then(|clipboard| clipboard.get_text().ok());
-        }
-
-        #[allow(unreachable_code)]
-        None
-    }
-
     fn set_text(&mut self, _text: String) {
         #[cfg(any(
             target_os = "windows",
@@ -813,7 +770,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             animation_engine: AnimationEngine::default(),
             animation_epoch: 0,
             hover_epoch: 0,
-            caret_blink_started_at: None,
             cursor_position: None,
             modifiers: ModifiersState::default(),
             hovered_widgets: Vec::new(),
@@ -823,11 +779,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             pending_click: None,
             pressed_widget: None,
             focused_widget: None,
-            focused_input: None,
-            input_states: HashMap::new(),
             selected_text: None,
             selected_text_states: HashMap::new(),
-            active_input_selection: None,
             active_text_selection: None,
             clipboard: ClipboardService::default(),
             cached_scene: None,
@@ -1281,7 +1234,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         cached.viewport == viewport
             && cached.units == units
             && cached.focused_widget == self.focused_widget_id()
-            && cached.focused_input == self.focused_input
             && cached.pressed_widget == self.pressed_widget
             && cached.selected_text == self.selected_text
             && cached.caret_visible == caret_visible
@@ -1302,7 +1254,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         cached.viewport == viewport
             && cached.units == units
             && cached.focused_widget == self.focused_widget_id()
-            && cached.focused_input == self.focused_input
             && cached.pressed_widget == self.pressed_widget
             && cached.selected_text == self.selected_text
             && cached.caret_visible == caret_visible
@@ -1313,12 +1264,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn computed_scene(&mut self) -> &ComputedScene<VM> {
         let viewport = self.viewport_rect();
         let units = self.unit_context();
-        let caret_visible = self.input_caret_visible(Instant::now());
+        let caret_visible = false;
         let active_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
-        let focused_input_state = self
-            .focused_input
-            .and_then(|id| self.focused_input_state(id))
-            .cloned();
         let selected_text_state = self
             .selected_text
             .and_then(|id| self.selected_text_state(id))
@@ -1363,8 +1310,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 &widget_states,
                                 &self.scroll_states,
                                 viewport,
-                                self.focused_input,
-                                focused_input_state.as_ref(),
+                                None,
+                                None,
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 caret_visible,
@@ -1392,8 +1339,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             &widget_states,
                             &self.scroll_states,
                             viewport,
-                            self.focused_input,
-                            focused_input_state.as_ref(),
+                            None,
+                            None,
                             self.selected_text,
                             selected_text_state.as_ref(),
                             caret_visible,
@@ -1407,7 +1354,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 viewport,
                 units,
                 focused_widget: self.focused_widget_id(),
-                focused_input: self.focused_input,
                 pressed_widget: self.pressed_widget,
                 selected_text: self.selected_text,
                 caret_visible,
@@ -1457,11 +1403,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if let Some(id) = self.pressed_widget {
             let mut state = states.get(id);
             state.pressed = true;
-            states.set(id, state);
-        }
-        if let Some(id) = self.focused_input {
-            let mut state = states.get(id);
-            state.focused = true;
             states.set(id, state);
         }
         if let Some(focused) = self.focused_widget.as_ref() {
@@ -1858,18 +1799,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             transition,
             now,
         );
-        let input_background = self.resolve_theme_color(
-            WindowProperty::ThemeInputBackground,
-            theme.components.input.background.normal,
-            transition,
-            now,
-        );
-        let input_border = self.resolve_theme_color(
-            WindowProperty::ThemeInputBorder,
-            theme.components.input.border.normal,
-            transition,
-            now,
-        );
         let button_primary = self.resolve_theme_color(
             WindowProperty::ThemeButtonPrimary,
             theme.components.button.primary.container.normal,
@@ -1897,8 +1826,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             &theme.elevation,
             &theme.motion,
         );
-        theme.components.input.background.normal = input_background;
-        theme.components.input.border.normal = input_border;
         theme.components.button.primary.container.normal = button_primary;
         theme.components.button.secondary.container.normal = button_secondary;
         theme.components.scrollbar.thumb.normal = scrollbar_thumb;
@@ -1919,49 +1846,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn next_deadline(&self, now: Instant) -> Option<Instant> {
         let animation_deadline = self.animation_engine.next_frame_deadline(now);
         let controller_deadline = self.animations.next_frame_deadline(now);
-        let caret_deadline = self.next_caret_blink_deadline(now);
         let click_deadline = self.pending_click.as_ref().map(|pending| pending.deadline);
-        [
-            animation_deadline,
-            controller_deadline,
-            caret_deadline,
-            click_deadline,
-        ]
-        .into_iter()
-        .flatten()
-        .min()
-    }
-
-    fn reset_caret_blink(&mut self, now: Instant) {
-        if self.focused_input.is_some() {
-            self.caret_blink_started_at = Some(now);
-            self.invalidate_scene();
-        }
-    }
-
-    fn input_caret_visible(&self, now: Instant) -> bool {
-        let Some(_) = self.focused_input else {
-            return false;
-        };
-        let Some(started_at) = self.caret_blink_started_at else {
-            return true;
-        };
-        let phase = now.saturating_duration_since(started_at).as_millis()
-            / CARET_BLINK_INTERVAL.as_millis().max(1);
-        phase % 2 == 0
-    }
-
-    fn next_caret_blink_deadline(&self, now: Instant) -> Option<Instant> {
-        let Some(_) = self.focused_input else {
-            return None;
-        };
-        let Some(started_at) = self.caret_blink_started_at else {
-            return Some(now + CARET_BLINK_INTERVAL);
-        };
-        let interval_ms = CARET_BLINK_INTERVAL.as_millis().max(1);
-        let elapsed_ms = now.saturating_duration_since(started_at).as_millis();
-        let next_boundary_ms = ((elapsed_ms / interval_ms) + 1) * interval_ms;
-        Some(started_at + Duration::from_millis(next_boundary_ms as u64))
+        [animation_deadline, controller_deadline, click_deadline]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     fn flush_pending_click_if_due(&mut self, now: Instant) {
@@ -1981,17 +1870,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
-    fn focused_input_state(&self, id: WidgetId) -> Option<&InputEditState> {
-        self.input_states.get(&id)
-    }
-
     fn selected_text_state(&self, id: WidgetId) -> Option<&InputEditState> {
         self.selected_text_states.get(&id)
-    }
-
-    fn focused_input_snapshot(&self) -> Option<InputSnapshot<VM>> {
-        let id = self.focused_input?;
-        self.widget_tree.as_ref()?.input_snapshot(id)
     }
 
     fn update_selected_text_state(
@@ -2064,101 +1944,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         false
     }
 
-    fn begin_input_selection(
-        &mut self,
-        widget_id: WidgetId,
-        frame: Rect,
-        padding: crate::ui::layout::Insets,
-        multiline: bool,
-        text_style: Text,
-        text: String,
-        cursor: usize,
-    ) {
-        self.active_input_selection = Some(TextSelectionDrag {
-            widget_id,
-            frame,
-            padding,
-            multiline,
-            text_style,
-            text: text.clone(),
-        });
-        self.update_input_state(widget_id, &text, |state| {
-            state.cursor = cursor;
-            state.anchor = cursor;
-            state.composition = None;
-        });
-        if multiline {
-            self.keep_input_caret_visible(widget_id, &text);
-        }
-    }
-
-    fn handle_input_selection_drag(&mut self) -> bool {
-        let Some(drag) = self.active_input_selection.clone() else {
-            return false;
-        };
-        let Some(point) = self.cursor_position else {
-            return false;
-        };
-
-        let before = self.focused_input_state(drag.widget_id).cloned();
-        let Some(mut next_state) = before.clone() else {
-            return false;
-        };
-        let inner = drag.frame.inset(drag.padding);
-        if drag.multiline {
-            let overflow_top = (inner.y - point.y).max(0.0);
-            let overflow_bottom = (point.y - inner.bottom()).max(0.0);
-            if overflow_top > Dp::ZERO || overflow_bottom > Dp::ZERO {
-                let delta = if overflow_top > Dp::ZERO {
-                    -overflow_top.get().max(1.0)
-                } else {
-                    overflow_bottom.get().max(1.0)
-                };
-                next_state.scroll_y = (next_state.scroll_y + delta).max(Dp::ZERO);
-            }
-        } else {
-            let overflow_left = (inner.x - point.x).max(0.0);
-            let overflow_right = (point.x - inner.right()).max(0.0);
-            if overflow_left > Dp::ZERO || overflow_right > Dp::ZERO {
-                let delta = if overflow_left > Dp::ZERO {
-                    -overflow_left.get().max(1.0)
-                } else {
-                    overflow_right.get().max(1.0)
-                };
-                next_state.scroll_x = (next_state.scroll_x + delta).max(Dp::ZERO);
-            }
-        }
-        let cursor = input_cursor_index_at_point_with_state(
-            &self.font_manager,
-            &self.theme,
-            self.unit_context(),
-            drag.frame,
-            drag.padding,
-            &drag.text_style,
-            &drag.text,
-            drag.multiline,
-            Some(&next_state),
-            point,
-        );
-        next_state.cursor = cursor;
-        next_state.composition = None;
-        if before.as_ref() == Some(&next_state) {
-            return false;
-        }
-        self.update_input_state(drag.widget_id, &drag.text, |state| {
-            *state = next_state;
-        });
-        true
-    }
-
-    fn end_input_selection_drag(&mut self) -> bool {
-        if self.active_input_selection.take().is_some() {
-            self.invalidate_scene();
-            return true;
-        }
-        false
-    }
-
     fn begin_text_selection(
         &mut self,
         widget_id: WidgetId,
@@ -2173,7 +1958,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             widget_id,
             frame,
             padding,
-            multiline: false,
             text_style,
             text: text.clone(),
         });
@@ -2238,310 +2022,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         )
     }
 
-    fn ime_enable_request(&mut self) -> Option<ImeEnableRequest> {
-        let request_data =
-            Self::ime_cursor_request_data(self.ime_cursor_area()?, self.unit_context())
-                .with_hint_and_purpose(ImeHint::NONE, ImePurpose::Normal);
-        ImeEnableRequest::new(
-            ImeCapabilities::new()
-                .with_cursor_area()
-                .with_hint_and_purpose(),
-            request_data,
-        )
-    }
-
-    fn sync_ime_allowed(&mut self) {
-        let request = if self
-            .focused_input_snapshot()
-            .is_some_and(|snapshot| !snapshot.readonly)
-        {
-            self.ime_enable_request().map(ImeRequest::Enable)
-        } else {
-            Some(ImeRequest::Disable)
-        };
-
-        if let (Some(window), Some(request)) = (self.window.as_ref(), request) {
-            let _ = window.request_ime_update(request);
-        }
-    }
-
-    fn ensure_input_state(&mut self, widget_id: WidgetId, text: &str) -> &mut InputEditState {
-        self.input_states
-            .entry(widget_id)
-            .and_modify(|state| *state = state.clone().clamped_to(text))
-            .or_insert_with(|| InputEditState::caret_at(text))
-    }
-
-    fn update_input_state(
-        &mut self,
-        widget_id: WidgetId,
-        text: &str,
-        update: impl FnOnce(&mut InputEditState),
-    ) {
-        let state = self.ensure_input_state(widget_id, text);
-        update(state);
-        *state = state.clone().clamped_to(text);
-        if self.focused_input == Some(widget_id) {
-            self.reset_caret_blink(Instant::now());
-        }
-        self.invalidate_scene();
-    }
-
-    fn focused_input_layout_metrics(&mut self, widget_id: WidgetId) -> Option<InputLayoutMetrics> {
-        let computed = self.computed_scene();
-        computed
-            .hit_regions
-            .iter()
-            .find_map(|region| match &region.interaction {
-                HitInteraction::FocusInput {
-                    id,
-                    frame,
-                    padding,
-                    multiline,
-                    text_style,
-                    text,
-                    ..
-                } if *id == widget_id => Some(InputLayoutMetrics {
-                    frame: *frame,
-                    padding: *padding,
-                    multiline: *multiline,
-                    text_style: text_style.clone(),
-                    text: text.clone(),
-                }),
-                _ => None,
-            })
-    }
-
-    fn input_scroll_offset_for_state(
-        &self,
-        metrics: &InputLayoutMetrics,
-        state: &InputEditState,
-    ) -> Option<Point> {
-        if metrics.text.is_empty() {
-            return Some(Point::ZERO);
-        }
-
-        let inner = metrics.frame.inset(metrics.padding);
-        let wrap_width = inner.width.get().max(1.0);
-        let (layout, _, line_height) = input_text_layout(
-            &self.font_manager,
-            &self.theme,
-            self.unit_context(),
-            &metrics.text_style,
-            &metrics.text,
-            metrics.multiline,
-            wrap_width,
-        );
-        let (caret_x, caret_y) = layout.point_for_index(state.cursor.min(metrics.text.len()));
-        let caret_padding = if state.cursor >= metrics.text.len() {
-            1.0
-        } else {
-            0.0
-        };
-        let scroll_x = if metrics.multiline {
-            Dp::ZERO
-        } else {
-            Dp::new(input_scroll_offset(
-                inner,
-                layout.width,
-                caret_x,
-                caret_x + caret_padding + 2.0,
-                state.scroll_x.get(),
-            ))
-        };
-        let scroll_y = if metrics.multiline {
-            let viewport_height = inner.height.get().max(line_height);
-            let caret_top = caret_y;
-            let caret_bottom = caret_y + line_height;
-            Dp::new(
-                if caret_top < state.scroll_y.get() {
-                    caret_top
-                } else if caret_bottom > state.scroll_y.get() + viewport_height {
-                    caret_bottom - viewport_height
-                } else {
-                    state.scroll_y.get()
-                }
-                .max(0.0),
-            )
-        } else {
-            Dp::ZERO
-        };
-        Some(Point::new(scroll_x, scroll_y))
-    }
-
-    fn keep_input_caret_visible(&mut self, widget_id: WidgetId, text: &str) {
-        let Some(metrics) = self.focused_input_layout_metrics(widget_id) else {
-            return;
-        };
-        let Some(mut state) = self.focused_input_state(widget_id).cloned() else {
-            return;
-        };
-        state = state.clamped_to(text);
-        let Some(scroll_offset) = self.input_scroll_offset_for_state(&metrics, &state) else {
-            return;
-        };
-        if state.scroll_x == scroll_offset.x && state.scroll_y == scroll_offset.y {
-            return;
-        }
-        self.update_input_state(widget_id, text, |edit| {
-            edit.scroll_x = scroll_offset.x;
-            edit.scroll_y = scroll_offset.y;
-        });
-    }
-
-    fn set_input_focus_state(&mut self, widget_id: WidgetId, text: &str) {
-        let state = self.ensure_input_state(widget_id, text);
-        *state = state.clone().clamped_to(text);
-        self.caret_blink_started_at = Some(Instant::now());
-        self.invalidate_scene();
-    }
-
-    fn clear_input_composition(&mut self, widget_id: WidgetId, text: &str) {
-        if let Some(state) = self.input_states.get_mut(&widget_id) {
-            state.composition = None;
-            *state = state.clone().clamped_to(text);
-            if self.focused_input == Some(widget_id) {
-                self.reset_caret_blink(Instant::now());
-            }
-            self.invalidate_scene();
-        }
-    }
-
-    fn apply_input_text_change(
-        &mut self,
-        snapshot: &InputSnapshot<VM>,
-        new_text: String,
-        new_cursor: usize,
-    ) {
-        if snapshot.readonly {
-            return;
-        }
-
-        {
-            let state = self.ensure_input_state(snapshot.id, &new_text);
-            state.cursor = new_cursor.min(new_text.len());
-            state.anchor = state.cursor;
-            state.composition = None;
-            state.preferred_column_x = None;
-        }
-        self.keep_input_caret_visible(snapshot.id, &new_text);
-        self.reset_caret_blink(Instant::now());
-
-        if let Some(command) = snapshot.on_change.clone() {
-            self.execute_value_command(&command, new_text);
-        }
-
-        self.invalidate_scene();
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
-        }
-    }
-
-    fn insert_input_text(&mut self, snapshot: &InputSnapshot<VM>, inserted: &str) {
-        if snapshot.readonly || snapshot.on_change.is_none() || inserted.is_empty() {
-            return;
-        }
-
-        let sanitized = if snapshot.multiline {
-            inserted.replace("\r\n", "\n").replace('\r', "\n")
-        } else {
-            normalize_single_line_text(inserted)
-        };
-        if sanitized.is_empty() {
-            return;
-        }
-
-        let state = self
-            .focused_input_state(snapshot.id)
-            .cloned()
-            .unwrap_or_else(|| InputEditState::caret_at(&snapshot.text))
-            .clamped_to(&snapshot.text);
-        let replace_range = state
-            .selection_range()
-            .unwrap_or((state.cursor, state.cursor));
-        let mut next_text = snapshot.text.clone();
-        next_text.replace_range(replace_range.0..replace_range.1, &sanitized);
-        self.apply_input_text_change(snapshot, next_text, replace_range.0 + sanitized.len());
-    }
-
-    fn handle_input_ime(&mut self, ime: Ime) {
-        let Some(snapshot) = self.focused_input_snapshot() else {
-            return;
-        };
-        let current_text = snapshot.text.clone();
-        if snapshot.readonly {
-            match ime {
-                Ime::Enabled => self.sync_ime_allowed(),
-                Ime::Disabled => self.clear_input_composition(snapshot.id, &current_text),
-                Ime::Preedit(_, _) | Ime::Commit(_) | Ime::DeleteSurrounding { .. } => {}
-            }
-            return;
-        }
-        let state = self
-            .focused_input_state(snapshot.id)
-            .cloned()
-            .unwrap_or_else(|| InputEditState::caret_at(&current_text))
-            .clamped_to(&current_text);
-
-        match ime {
-            Ime::Enabled => {
-                self.sync_ime_allowed();
-            }
-            Ime::Preedit(text, cursor) => {
-                let replace_range = state
-                    .composition
-                    .as_ref()
-                    .map(|composition| composition.replace_range)
-                    .unwrap_or_else(|| {
-                        state
-                            .selection_range()
-                            .unwrap_or((state.cursor, state.cursor))
-                    });
-                self.update_input_state(snapshot.id, &current_text, |edit| {
-                    if text.is_empty() {
-                        edit.composition = None;
-                    } else {
-                        edit.composition = Some(crate::ui::widget::CompositionState {
-                            replace_range,
-                            text,
-                            cursor,
-                        });
-                    }
-                });
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
-            }
-            Ime::Commit(text) => {
-                let replace_range = state
-                    .composition
-                    .as_ref()
-                    .map(|composition| composition.replace_range)
-                    .unwrap_or_else(|| {
-                        state
-                            .selection_range()
-                            .unwrap_or((state.cursor, state.cursor))
-                    });
-                let sanitized = if snapshot.multiline {
-                    text.replace("\r\n", "\n").replace('\r', "\n")
-                } else {
-                    normalize_single_line_text(&text)
-                };
-                let mut next_text = current_text.clone();
-                next_text.replace_range(replace_range.0..replace_range.1, &sanitized);
-                self.apply_input_text_change(
-                    &snapshot,
-                    next_text,
-                    replace_range.0 + sanitized.len(),
-                );
-            }
-            Ime::Disabled => {
-                self.clear_input_composition(snapshot.id, &current_text);
-            }
-            Ime::DeleteSurrounding { .. } => {}
-        }
-    }
-
     fn handle_selected_text_keyboard_event(&mut self, event: &KeyEvent) -> bool {
         if event.state != ElementState::Pressed || !is_primary_shortcut_modifier(self.modifiers) {
             return false;
@@ -2550,270 +2030,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         match event.physical_key {
             PhysicalKey::Code(KeyCode::KeyC) => self.copy_selected_text_to_clipboard(),
             _ => false,
-        }
-    }
-
-    fn handle_input_keyboard_event(&mut self, event: &KeyEvent) {
-        let Some(snapshot) = self.focused_input_snapshot() else {
-            return;
-        };
-
-        if event.state != ElementState::Pressed {
-            return;
-        }
-
-        self.reset_caret_blink(Instant::now());
-
-        let text = snapshot.text.clone();
-        let mut state = self
-            .focused_input_state(snapshot.id)
-            .cloned()
-            .unwrap_or_else(|| InputEditState::caret_at(&text))
-            .clamped_to(&text);
-        let extend_selection = self.modifiers.shift_key();
-        let is_enter_key = matches!(
-            event.physical_key,
-            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
-        );
-
-        if snapshot.multiline && is_enter_key {
-            let should_submit = snapshot.submit_on_enter
-                && !self.modifiers.shift_key()
-                && !self.modifiers.alt_key()
-                && !is_primary_shortcut_modifier(self.modifiers);
-            if should_submit {
-                if let Some(command) = snapshot.on_submit.clone() {
-                    self.execute_command(&command);
-                }
-                self.invalidate_scene();
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
-            } else if !snapshot.readonly {
-                self.insert_input_text(&snapshot, "\n");
-            }
-            return;
-        }
-
-        if snapshot.multiline && !is_primary_shortcut_modifier(self.modifiers) {
-            let handled = match event.physical_key {
-                PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::ArrowDown) => {
-                    let Some(metrics) = self.focused_input_layout_metrics(snapshot.id) else {
-                        return;
-                    };
-                    let inner = metrics.frame.inset(metrics.padding);
-                    let wrap_width = inner.width.get().max(1.0);
-                    let (layout, line_height, _) = input_text_layout(
-                        &self.font_manager,
-                        &self.theme,
-                        self.unit_context(),
-                        &metrics.text_style,
-                        &text,
-                        true,
-                        wrap_width,
-                    );
-                    let target_x = state
-                        .preferred_column_x
-                        .unwrap_or_else(|| layout.point_for_index(state.cursor).0);
-                    let delta = if matches!(event.physical_key, PhysicalKey::Code(KeyCode::ArrowUp))
-                    {
-                        -1
-                    } else {
-                        1
-                    };
-                    let next = layout.move_vertical(state.cursor, target_x, delta);
-                    move_cursor(&mut state, next, extend_selection);
-                    state.preferred_column_x = Some(target_x);
-                    let (_, caret_y) = layout.point_for_index(state.cursor);
-                    let caret_top = caret_y;
-                    let caret_bottom = caret_y + line_height;
-                    let viewport_top = state.scroll_y.get();
-                    let viewport_height = inner.height.get().max(line_height);
-                    let viewport_bottom = viewport_top + viewport_height;
-                    state.scroll_y = Dp::new(
-                        if caret_top < viewport_top {
-                            caret_top
-                        } else if caret_bottom > viewport_bottom {
-                            caret_bottom - viewport_height
-                        } else {
-                            viewport_top
-                        }
-                        .max(0.0),
-                    );
-                    true
-                }
-                PhysicalKey::Code(KeyCode::Home) | PhysicalKey::Code(KeyCode::End) => {
-                    let Some(metrics) = self.focused_input_layout_metrics(snapshot.id) else {
-                        return;
-                    };
-                    let inner = metrics.frame.inset(metrics.padding);
-                    let wrap_width = inner.width.get().max(1.0);
-                    let (layout, line_height, _) = input_text_layout(
-                        &self.font_manager,
-                        &self.theme,
-                        self.unit_context(),
-                        &metrics.text_style,
-                        &text,
-                        true,
-                        wrap_width,
-                    );
-                    let next = if matches!(event.physical_key, PhysicalKey::Code(KeyCode::Home)) {
-                        layout.line_start_for_index(state.cursor)
-                    } else {
-                        layout.line_end_for_index(state.cursor)
-                    };
-                    move_cursor(&mut state, next, extend_selection);
-                    let (_, caret_y) = layout.point_for_index(state.cursor);
-                    let caret_top = caret_y;
-                    let caret_bottom = caret_y + line_height;
-                    let viewport_top = state.scroll_y.get();
-                    let viewport_height = inner.height.get().max(line_height);
-                    let viewport_bottom = viewport_top + viewport_height;
-                    state.scroll_y = Dp::new(
-                        if caret_top < viewport_top {
-                            caret_top
-                        } else if caret_bottom > viewport_bottom {
-                            caret_bottom - viewport_height
-                        } else {
-                            viewport_top
-                        }
-                        .max(0.0),
-                    );
-                    true
-                }
-                _ => false,
-            };
-
-            if handled {
-                self.input_states.insert(snapshot.id, state);
-                self.invalidate_scene();
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
-                return;
-            }
-        }
-
-        if is_primary_shortcut_modifier(self.modifiers) {
-            match event.physical_key {
-                PhysicalKey::Code(KeyCode::KeyA) => {
-                    state.cursor = text.len();
-                    state.anchor = 0;
-                    self.input_states.insert(snapshot.id, state);
-                    self.invalidate_scene();
-                }
-                PhysicalKey::Code(KeyCode::KeyC) => {
-                    if let Some((start, end)) = state.selection_range() {
-                        self.clipboard.set_text(text[start..end].to_string());
-                    }
-                }
-                PhysicalKey::Code(KeyCode::KeyX) => {
-                    if snapshot.readonly {
-                        return;
-                    }
-                    if let Some((start, end)) = state.selection_range() {
-                        self.clipboard.set_text(text[start..end].to_string());
-                        if snapshot.on_change.is_some() {
-                            let mut next_text = text.clone();
-                            next_text.replace_range(start..end, "");
-                            self.apply_input_text_change(&snapshot, next_text, start);
-                        }
-                    }
-                }
-                PhysicalKey::Code(KeyCode::KeyV) => {
-                    if let Some(clipboard_text) = self.clipboard.get_text() {
-                        self.insert_input_text(&snapshot, &clipboard_text);
-                    }
-                }
-                _ => {}
-            }
-            return;
-        }
-
-        match event.physical_key {
-            PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                let next = if !extend_selection {
-                    state.selection_range().map(|(start, _)| start)
-                } else {
-                    None
-                }
-                .unwrap_or_else(|| previous_grapheme_boundary(&text, state.cursor));
-                move_cursor(&mut state, next, extend_selection);
-            }
-            PhysicalKey::Code(KeyCode::ArrowRight) => {
-                let next = if !extend_selection {
-                    state.selection_range().map(|(_, end)| end)
-                } else {
-                    None
-                }
-                .unwrap_or_else(|| next_grapheme_boundary(&text, state.cursor));
-                move_cursor(&mut state, next, extend_selection);
-            }
-            PhysicalKey::Code(KeyCode::Home) => move_cursor(&mut state, 0, extend_selection),
-            PhysicalKey::Code(KeyCode::End) => {
-                move_cursor(&mut state, text.len(), extend_selection)
-            }
-            PhysicalKey::Code(KeyCode::Backspace) => {
-                if snapshot.on_change.is_none() {
-                    return;
-                }
-                let (start, end) = state.selection_range().unwrap_or_else(|| {
-                    let previous = previous_grapheme_boundary(&text, state.cursor);
-                    (previous, state.cursor)
-                });
-                if start == end {
-                    return;
-                }
-                let mut next_text = text.clone();
-                next_text.replace_range(start..end, "");
-                self.apply_input_text_change(&snapshot, next_text, start);
-                return;
-            }
-            PhysicalKey::Code(KeyCode::Delete) => {
-                if snapshot.on_change.is_none() {
-                    return;
-                }
-                let (start, end) = state.selection_range().unwrap_or_else(|| {
-                    let next = next_grapheme_boundary(&text, state.cursor);
-                    (state.cursor, next)
-                });
-                if start == end {
-                    return;
-                }
-                let mut next_text = text.clone();
-                next_text.replace_range(start..end, "");
-                self.apply_input_text_change(&snapshot, next_text, start);
-                return;
-            }
-            _ => {
-                if let Some(input) = event.text.as_ref() {
-                    self.insert_input_text(&snapshot, input);
-                    return;
-                }
-                return;
-            }
-        }
-
-        if matches!(
-            event.physical_key,
-            PhysicalKey::Code(KeyCode::ArrowLeft)
-                | PhysicalKey::Code(KeyCode::ArrowRight)
-                | PhysicalKey::Code(KeyCode::Home)
-                | PhysicalKey::Code(KeyCode::End)
-        ) {
-            if let Some(scroll_offset) = self
-                .focused_input_layout_metrics(snapshot.id)
-                .and_then(|metrics| self.input_scroll_offset_for_state(&metrics, &state))
-            {
-                state.scroll_x = scroll_offset.x;
-                state.scroll_y = scroll_offset.y;
-            }
-        }
-
-        self.input_states.insert(snapshot.id, state);
-        self.invalidate_scene();
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
         }
     }
 
@@ -2840,22 +2056,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 } => HoveredWidget {
                     target_id: HoverTargetId::Widget(id),
                     cursor_style: interactions.cursor_style.map(|c| c.resolve()),
-                    on_mouse_enter: interactions
-                        .on_mouse_enter
-                        .map(HoverTransitionHandler::Command),
-                    on_mouse_leave: interactions
-                        .on_mouse_leave
-                        .map(HoverTransitionHandler::Command),
-                    on_mouse_move: interactions.on_mouse_move.map(HoverMoveHandler::Point),
-                },
-                HitInteraction::FocusInput {
-                    id, interactions, ..
-                } => HoveredWidget {
-                    target_id: HoverTargetId::Widget(id),
-                    cursor_style: interactions
-                        .cursor_style
-                        .map(|c| c.resolve())
-                        .or(Some(crate::ui::widget::CursorStyle::Text)),
                     on_mouse_enter: interactions
                         .on_mouse_enter
                         .map(HoverTransitionHandler::Command),
@@ -3288,8 +2488,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let next_icon = if self.active_scrollbar_drag.is_some() || self.hovered_scrollbar.is_some()
         {
             CursorIcon::Pointer
-        } else if self.active_input_selection.is_some() {
-            CursorIcon::Text
         } else if self.active_text_selection.is_some() {
             CursorIcon::Text
         } else if let Some(cursor_style) = self
@@ -3333,9 +2531,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn update_focus(
         &mut self,
         next_widget: Option<FocusedWidget<VM>>,
-        next_input: Option<WidgetId>,
         on_focus: Option<Command<VM>>,
-        input_text: Option<&str>,
     ) {
         let current_id = self
             .focused_widget
@@ -3344,24 +2540,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let next_id = next_widget.as_ref().map(|focused| focused.widget_id);
 
         if current_id == next_id {
-            let previous_input = self.focused_input;
-            self.focused_input = next_input;
-            self.caret_blink_started_at = next_input.map(|_| Instant::now());
-            self.sync_ime_allowed();
-            if previous_input != self.focused_input {
-                self.invalidate_scene();
-            }
             return;
-        }
-
-        if let Some(previous_input) = self.focused_input {
-            if let Some(snapshot) = self
-                .widget_tree
-                .as_ref()
-                .and_then(|tree| tree.input_snapshot(previous_input))
-            {
-                self.clear_input_composition(previous_input, &snapshot.text);
-            }
         }
 
         if let Some(previous) = self.focused_widget.take() {
@@ -3371,12 +2550,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         self.focused_widget = next_widget;
-        self.focused_input = next_input;
-        self.caret_blink_started_at = next_input.map(|_| Instant::now());
-        if let (Some(input_id), Some(text)) = (next_input, input_text) {
-            self.set_input_focus_state(input_id, text);
-        }
-        self.sync_ime_allowed();
 
         if let Some(command) = on_focus {
             if next_id.is_some() {
@@ -3478,27 +2651,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let hit_path = self.hit_path(viewport);
         let Some(hit) = hit_path.last().cloned() else {
-            self.end_input_selection_drag();
             self.clear_selected_text();
-            self.update_focus(None, None, None, None);
+            self.update_focus(None, None);
             self.pending_click = None;
             self.pressed_widget = None;
             return;
         };
 
         if matches!(hit, HitInteraction::Disabled { .. }) {
-            self.end_input_selection_drag();
             self.clear_selected_text();
-            self.update_focus(None, None, None, None);
+            self.update_focus(None, None);
             self.pending_click = None;
             self.pressed_widget = None;
             return;
         }
 
         if matches!(hit, HitInteraction::CanvasItem { .. }) {
-            self.end_input_selection_drag();
             self.clear_selected_text();
-            self.update_focus(None, None, None, None);
+            self.update_focus(None, None);
             self.pressed_widget = None;
 
             for interaction in hit_path.into_iter().rev() {
@@ -3572,203 +2742,125 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let pointer_position = self.cursor_position;
-        let (
-            widget_id,
-            interactions,
-            focus_target,
-            focus_input,
-            focus_command,
-            click_handler,
-            input_text,
-            input_cursor,
-            input_selection,
-            selectable_text,
-        ) = match hit {
-            HitInteraction::Widget {
-                id,
-                interactions,
-                focusable,
-            } => (
-                id,
-                interactions.clone(),
-                focusable.then_some(id),
-                None,
-                focusable.then_some(interactions.on_focus.clone()).flatten(),
-                interactions.on_click.clone().map(ClickHandler::Command),
-                None,
-                None,
-                None,
-                None,
-            ),
-            HitInteraction::FocusInput {
-                id,
-                frame,
-                padding,
-                multiline,
-                interactions,
-                text_style,
-                text,
-                ..
-            } => {
-                let cursor = pointer_position.map(|point| {
-                    input_cursor_index_at_point_with_state(
-                        &self.font_manager,
-                        &self.theme,
-                        self.unit_context(),
-                        frame,
-                        padding,
-                        &text_style,
-                        &text,
-                        multiline,
-                        self.focused_input_state(id),
-                        point,
-                    )
-                });
-                (
+        let (widget_id, interactions, focus_target, focus_command, click_handler, selectable_text) =
+            match hit {
+                HitInteraction::Widget {
+                    id,
+                    interactions,
+                    focusable,
+                } => (
                     id,
                     interactions.clone(),
-                    Some(id),
+                    focusable.then_some(id),
+                    focusable.then_some(interactions.on_focus.clone()).flatten(),
+                    interactions.on_click.clone().map(ClickHandler::Command),
+                    None,
+                ),
+                HitInteraction::SelectableText {
+                    id,
+                    frame,
+                    padding,
+                    interactions,
+                    text_style,
+                    text,
+                } => {
+                    let cursor = pointer_position.map(|point| {
+                        text_cursor_index_at_point(
+                            &self.font_manager,
+                            &self.theme,
+                            self.unit_context(),
+                            frame,
+                            padding,
+                            &text_style,
+                            &text,
+                            point,
+                        )
+                    });
+                    (
+                        id,
+                        interactions.clone(),
+                        None,
+                        None,
+                        interactions.on_click.clone().map(ClickHandler::Command),
+                        cursor.map(|cursor| (id, frame, padding, text_style, text, cursor)),
+                    )
+                }
+                HitInteraction::Switch {
+                    id,
+                    interactions,
+                    on_change,
+                    current,
+                } => (
+                    id,
+                    interactions.clone(),
                     Some(id),
                     interactions.on_focus.clone(),
-                    interactions.on_click.clone().map(ClickHandler::Command),
-                    Some(text.clone()),
-                    cursor,
-                    cursor.map(|cursor| (id, frame, padding, multiline, text_style, text, cursor)),
+                    on_change
+                        .clone()
+                        .map(|command| ClickHandler::Toggle(command, !current))
+                        .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
                     None,
-                )
-            }
-            HitInteraction::SelectableText {
-                id,
-                frame,
-                padding,
-                interactions,
-                text_style,
-                text,
-            } => {
-                let cursor = pointer_position.map(|point| {
-                    text_cursor_index_at_point(
-                        &self.font_manager,
-                        &self.theme,
-                        self.unit_context(),
-                        frame,
-                        padding,
-                        &text_style,
-                        &text,
-                        point,
+                ),
+                HitInteraction::Checkbox {
+                    id,
+                    interactions,
+                    on_change,
+                    current,
+                } => (
+                    id,
+                    interactions.clone(),
+                    Some(id),
+                    interactions.on_focus.clone(),
+                    on_change
+                        .clone()
+                        .map(|command| ClickHandler::Toggle(command, !current))
+                        .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
+                    None,
+                ),
+                HitInteraction::Radio {
+                    id,
+                    interactions,
+                    on_change,
+                    current,
+                } => (
+                    id,
+                    interactions.clone(),
+                    Some(id),
+                    interactions.on_focus.clone(),
+                    on_change
+                        .clone()
+                        .map(|command| ClickHandler::Toggle(command, !current))
+                        .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
+                    None,
+                ),
+                HitInteraction::SelectTrigger { id, interactions } => {
+                    let is_open = self.focused_widget_id() == Some(id);
+                    (
+                        id,
+                        interactions.clone(),
+                        (!is_open).then_some(id),
+                        (!is_open).then(|| interactions.on_focus.clone()).flatten(),
+                        interactions.on_click.clone().map(ClickHandler::Command),
+                        None,
                     )
-                });
-                (
+                }
+                HitInteraction::SelectOption {
+                    id,
+                    option_index: _,
+                    interactions,
+                    on_select,
+                } => (
                     id,
                     interactions.clone(),
                     None,
                     None,
+                    Some(ClickHandler::SelectOption(on_select.clone())),
                     None,
-                    interactions.on_click.clone().map(ClickHandler::Command),
-                    None,
-                    None,
-                    None,
-                    cursor.map(|cursor| (id, frame, padding, text_style, text, cursor)),
-                )
-            }
-            HitInteraction::Switch {
-                id,
-                interactions,
-                on_change,
-                current,
-            } => (
-                id,
-                interactions.clone(),
-                Some(id),
-                None,
-                interactions.on_focus.clone(),
-                on_change
-                    .clone()
-                    .map(|command| ClickHandler::Toggle(command, !current))
-                    .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
-                None,
-                None,
-                None,
-                None,
-            ),
-            HitInteraction::Checkbox {
-                id,
-                interactions,
-                on_change,
-                current,
-            } => (
-                id,
-                interactions.clone(),
-                Some(id),
-                None,
-                interactions.on_focus.clone(),
-                on_change
-                    .clone()
-                    .map(|command| ClickHandler::Toggle(command, !current))
-                    .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
-                None,
-                None,
-                None,
-                None,
-            ),
-            HitInteraction::Radio {
-                id,
-                interactions,
-                on_change,
-                current,
-            } => (
-                id,
-                interactions.clone(),
-                Some(id),
-                None,
-                interactions.on_focus.clone(),
-                on_change
-                    .clone()
-                    .map(|command| ClickHandler::Toggle(command, !current))
-                    .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
-                None,
-                None,
-                None,
-                None,
-            ),
-            HitInteraction::SelectTrigger { id, interactions } => {
-                let is_open = self.focused_widget_id() == Some(id);
-                (
-                    id,
-                    interactions.clone(),
-                    (!is_open).then_some(id),
-                    None,
-                    (!is_open).then(|| interactions.on_focus.clone()).flatten(),
-                    interactions.on_click.clone().map(ClickHandler::Command),
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-            }
-            HitInteraction::SelectOption {
-                id,
-                option_index: _,
-                interactions,
-                on_select,
-            } => (
-                id,
-                interactions.clone(),
-                None,
-                None,
-                None,
-                Some(ClickHandler::SelectOption(on_select.clone())),
-                None,
-                None,
-                None,
-                None,
-            ),
-            HitInteraction::Disabled { .. } => unreachable!("disabled hit handled above"),
-            HitInteraction::CanvasItem { .. } => unreachable!("canvas item handled above"),
-        };
+                ),
+                HitInteraction::Disabled { .. } => unreachable!("disabled hit handled above"),
+                HitInteraction::CanvasItem { .. } => unreachable!("canvas item handled above"),
+            };
 
-        if input_selection.is_none() {
-            self.end_input_selection_drag();
-        }
         if selectable_text.is_none() {
             self.clear_selected_text();
         }
@@ -3778,32 +2870,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 widget_id: id,
                 on_blur: interactions.on_blur.clone(),
             }),
-            focus_input,
             focus_command,
-            input_text.as_deref(),
         );
         self.pressed_widget = Some(widget_id);
-
-        if input_selection.is_none() {
-            if let (Some(input_id), Some(text), Some(cursor)) =
-                (focus_input, input_text.as_deref(), input_cursor)
-            {
-                self.update_input_state(input_id, text, |state| {
-                    state.cursor = cursor;
-                    state.anchor = cursor;
-                    state.composition = None;
-                });
-                self.keep_input_caret_visible(input_id, text);
-            }
-        }
-
-        if let Some((widget_id, frame, padding, multiline, text_style, text, cursor)) =
-            input_selection
-        {
-            self.begin_input_selection(
-                widget_id, frame, padding, multiline, text_style, text, cursor,
-            );
-        }
 
         if let Some((widget_id, frame, padding, text_style, text, cursor)) = selectable_text {
             self.begin_text_selection(widget_id, frame, padding, text_style, text, cursor);
@@ -4021,7 +3090,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         if Self::should_dispatch_widget_event(&event) {
             let viewport = self.viewport_rect();
-            let previous_focus = self.focused_input;
             let revision_before = self.invalidation.revision();
             let mut needs_redraw = !matches!(event, WindowEvent::PointerMoved { .. });
 
@@ -4033,9 +3101,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         needs_redraw |= self.update_cursor_icon();
                     } else if self.active_canvas_drag.is_some() {
                         needs_redraw |= self.handle_canvas_drag();
-                        needs_redraw |= self.handle_hover(viewport);
-                    } else if self.active_input_selection.is_some() {
-                        needs_redraw |= self.handle_input_selection_drag();
                         needs_redraw |= self.handle_hover(viewport);
                     } else if self.active_text_selection.is_some() {
                         needs_redraw |= self.handle_text_selection_drag();
@@ -4065,18 +3130,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     }
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
-                    if self.focused_input.is_some() {
-                        self.handle_input_keyboard_event(event);
-                    } else {
-                        self.handle_selected_text_keyboard_event(event);
-                    }
+                    self.handle_selected_text_keyboard_event(event);
                 }
                 _ => {}
-            }
-
-            if self.focused_input != previous_focus {
-                self.invalidate_scene();
-                needs_redraw = true;
             }
 
             if self.invalidation.revision() != revision_before {
@@ -4112,7 +3168,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.end_scrollbar_drag();
                 self.end_canvas_drag();
                 self.pressed_widget = None;
-                self.update_focus(None, None, None, None);
+                self.update_focus(None, None);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
@@ -4134,9 +3190,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     window.request_redraw();
                 }
             }
-            WindowEvent::Ime(ime) => {
-                self.handle_input_ime(ime);
-            }
+            WindowEvent::Ime(_) => {}
             WindowEvent::PointerButton {
                 state: ElementState::Released,
                 position,
@@ -4149,7 +3203,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
                 self.end_scrollbar_drag();
                 self.pressed_widget = None;
-                self.end_input_selection_drag();
                 self.end_text_selection_drag();
                 self.handle_hover(self.viewport_rect());
                 self.update_cursor_icon();
@@ -4195,14 +3248,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn handle_bound_about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) -> bool {
         let now = Instant::now();
         let theme_changed = self.refresh_platform_theme();
-        let drag_scrolled = self.handle_input_selection_drag();
         if theme_changed {
             self.sync_bindings(now);
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
-            }
-        }
-        if drag_scrolled {
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
@@ -4748,16 +3795,6 @@ fn is_primary_shortcut_modifier(modifiers: ModifiersState) -> bool {
     }
 }
 
-fn normalize_single_line_text(text: &str) -> String {
-    text.chars()
-        .map(|ch| match ch {
-            '\r' | '\n' => ' ',
-            other => other,
-        })
-        .filter(|ch| !ch.is_control() || *ch == ' ')
-        .collect()
-}
-
 fn mouse_scroll_delta(delta: MouseScrollDelta) -> Point {
     const LINE_SCROLL_STEP: f32 = 40.0;
 
@@ -4808,15 +3845,6 @@ impl From<crate::foundation::window_control::WindowResizeDirection> for ResizeDi
             crate::foundation::window_control::WindowResizeDirection::West => Self::West,
         }
     }
-}
-
-fn move_cursor(state: &mut InputEditState, next: usize, extend_selection: bool) {
-    state.cursor = next;
-    if !extend_selection {
-        state.anchor = next;
-    }
-    state.composition = None;
-    state.preferred_column_x = None;
 }
 
 fn input_text_layout(
@@ -4904,89 +3932,6 @@ fn text_cursor_index_at_point(
     );
     let local_x = (point.x - content_frame.x).max(0.0);
     layout.index_for_x(local_x.get())
-}
-
-fn input_cursor_index_at_point_with_state(
-    font_manager: &FontManager,
-    theme: &Theme,
-    units: UnitContext,
-    frame: Rect,
-    padding: crate::ui::layout::Insets,
-    text_style: &Text,
-    current_text: &str,
-    multiline: bool,
-    edit_state: Option<&InputEditState>,
-    point: Point,
-) -> usize {
-    if current_text.is_empty() {
-        return 0;
-    }
-
-    let inner = frame.inset(padding);
-    let (layout, _font_size, line_height) = input_text_layout(
-        font_manager,
-        theme,
-        units,
-        text_style,
-        current_text,
-        multiline,
-        inner.width.get(),
-    );
-    let state = edit_state
-        .cloned()
-        .unwrap_or_default()
-        .clamped_to(current_text);
-    let caret_boundary = layout.x_for_index(state.cursor.min(current_text.len()));
-    let caret_padding = if state.cursor >= current_text.len() {
-        1.0
-    } else {
-        0.0
-    };
-    if multiline {
-        let local_x = (point.x - inner.x).max(0.0).get();
-        let local_y = (point.y - inner.y).max(0.0).get() + state.scroll_y.get();
-        return layout.index_for_point(local_x, local_y);
-    }
-
-    let scrollable_width = layout
-        .width
-        .max(caret_boundary + caret_padding + 2.0 + INPUT_CARET_EDGE_GAP);
-    let InputViewport {
-        frame: content_frame,
-        ..
-    } = input_text_viewport(
-        inner,
-        layout.width,
-        layout.height,
-        line_height,
-        state.scroll_x.get(),
-        scrollable_width,
-    );
-    let local_x = (point.x - content_frame.x).max(0.0);
-    layout.index_for_x(local_x.get())
-}
-
-fn grapheme_boundaries(text: &str) -> Vec<usize> {
-    let mut boundaries = vec![0];
-    for (index, grapheme) in text.grapheme_indices(true) {
-        boundaries.push(index + grapheme.len());
-    }
-    boundaries
-}
-
-fn previous_grapheme_boundary(text: &str, cursor: usize) -> usize {
-    grapheme_boundaries(text)
-        .into_iter()
-        .take_while(|boundary| *boundary < cursor)
-        .last()
-        .unwrap_or(0)
-}
-
-fn next_grapheme_boundary(text: &str, cursor: usize) -> usize {
-    grapheme_boundaries(text)
-        .into_iter()
-        .find(|boundary| *boundary > cursor)
-        .unwrap_or(text.len())
 }
 
 fn resolve_theme(
@@ -5342,9 +4287,8 @@ fn is_light_color(color: Color) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        centered_window_position_for_monitor, input_cursor_index_at_point_with_state,
-        next_grapheme_boundary, normalize_single_line_text, previous_grapheme_boundary,
-        text_cursor_index_at_point, BoundRuntimeHandler, CachedScene, WindowBindings,
+        centered_window_position_for_monitor, text_cursor_index_at_point, BoundRuntimeHandler,
+        CachedScene, WindowBindings,
     };
     use crate::animation::AnimationCoordinator;
     use crate::application::{ApplicationConfig, ThemeSelection, WindowRole};
@@ -5354,18 +4298,15 @@ mod tests {
     use crate::foundation::color::Color;
     use crate::foundation::view_model::{Command, ValueCommand};
     use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-    use crate::platform::event::{ElementState, KeyEvent, MouseScrollDelta};
-    use crate::platform::keyboard::{
-        Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey,
-    };
-    use crate::text::font::{FontCatalog, TextFontRequest};
+    use crate::platform::event::MouseScrollDelta;
+    use crate::text::font::FontCatalog;
     use crate::ui::layout::Axis;
     use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
-    use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
+    use crate::ui::unit::{dp, Dp, UnitContext};
     use crate::ui::widget::{
         Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent, CanvasShadow,
-        CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, Input, InputEditState,
-        PathBuilder, Point, Select, SelectOption, Text, WidgetTree, INPUT_CARET_EDGE_GAP,
+        CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, InputEditState, PathBuilder,
+        Point, Select, SelectOption, Text, WidgetTree,
     };
     use crate::ui::widget::{Element, Stack, WidgetId};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -5484,32 +4425,6 @@ mod tests {
         )
     }
 
-    fn key_press_event(code: KeyCode, named: NamedKey) -> KeyEvent {
-        KeyEvent {
-            physical_key: PhysicalKey::Code(code),
-            logical_key: Key::Named(named),
-            text: None,
-            location: KeyLocation::Standard,
-            state: ElementState::Pressed,
-            repeat: false,
-            text_with_all_modifiers: None,
-            key_without_modifiers: Key::Named(named),
-        }
-    }
-
-    fn character_key_press_event(code: KeyCode, text: &str) -> KeyEvent {
-        KeyEvent {
-            physical_key: PhysicalKey::Code(code),
-            logical_key: Key::Character(text.into()),
-            text: Some(text.into()),
-            location: KeyLocation::Standard,
-            state: ElementState::Pressed,
-            repeat: false,
-            text_with_all_modifiers: Some(text.into()),
-            key_without_modifiers: Key::Character(text.into()),
-        }
-    }
-
     fn custom_theme_set() -> (ThemeSet, Theme, Theme) {
         let mut light = Theme::light();
         light.colors.background = Color::hexa(0xEAF4FFFF);
@@ -5625,24 +4540,6 @@ mod tests {
     }
 
     #[test]
-    fn grapheme_navigation_keeps_emoji_cluster_intact() {
-        let text = "A👨‍👩‍👧‍👦中";
-        let emoji_start = previous_grapheme_boundary(text, text.len());
-        let end = next_grapheme_boundary(text, 1);
-
-        assert_eq!(&text[1..end], "👨‍👩‍👧‍👦");
-        assert_eq!(emoji_start, end);
-    }
-
-    #[test]
-    fn normalize_single_line_text_replaces_newlines_with_spaces() {
-        assert_eq!(
-            normalize_single_line_text("hello\r\nworld\t!"),
-            "hello  world!"
-        );
-    }
-
-    #[test]
     fn hover_path_reuses_cached_computed_scene() {
         let invalidation = InvalidationSignal::new();
         let resolve_count = Arc::new(AtomicUsize::new(0));
@@ -5694,7 +4591,6 @@ mod tests {
             viewport,
             units: UnitContext::new(1.0, 1.0),
             focused_widget: None,
-            focused_input: None,
             pressed_widget: None,
             selected_text: None,
             caret_visible: false,
@@ -5725,7 +4621,6 @@ mod tests {
             viewport,
             units: UnitContext::new(1.0, 1.0),
             focused_widget: None,
-            focused_input: None,
             pressed_widget: None,
             selected_text: None,
             caret_visible: false,
@@ -5758,7 +4653,6 @@ mod tests {
             viewport,
             units: UnitContext::new(1.0, 1.0),
             focused_widget: None,
-            focused_input: None,
             pressed_widget: None,
             selected_text: None,
             caret_visible: false,
@@ -5930,886 +4824,6 @@ mod tests {
         );
 
         assert_eq!(handler.selected_text_for_copy().as_deref(), Some("world"));
-    }
-
-    #[test]
-    fn clicking_input_moves_caret_to_pointer_position() {
-        let invalidation = InvalidationSignal::new();
-        let tree = WidgetTree::new(Input::new(Text::new("hello")).width(dp(220.0)));
-        let mut handler = test_handler(Some(tree), invalidation);
-        let viewport = handler.viewport_rect();
-
-        let (frame, padding, text_style, content) = {
-            let computed = handler.computed_scene();
-            let region = computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput {
-                        frame,
-                        padding,
-                        text_style,
-                        text,
-                        ..
-                    } => Some((*frame, *padding, text_style.clone(), text.clone())),
-                    _ => None,
-                })
-                .expect("input hit region should exist");
-            region
-        };
-        let units = handler.unit_context();
-        let font_size = units.resolve_sp(
-            text_style
-                .font_size
-                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
-        );
-        let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(
-            text_style.letter_spacing.unwrap_or(
-                handler
-                    .theme
-                    .components
-                    .text
-                    .default
-                    .letter_spacing
-                    .unwrap_or(Sp::ZERO),
-            ),
-        );
-        let request = TextFontRequest {
-            preferred_font: text_style.font_family.as_deref().or(handler
-                .theme
-                .components
-                .text
-                .default
-                .font_family
-                .as_deref()),
-            weight: text_style
-                .font_weight
-                .unwrap_or(handler.theme.components.text.default.weight),
-        };
-        let left = frame.x + padding.left.get();
-        let before_target = handler
-            .font_manager
-            .measure_text_raw(
-                &content[..2],
-                request.clone(),
-                font_size,
-                line_height,
-                letter_spacing,
-            )
-            .0;
-        let after_target = handler
-            .font_manager
-            .measure_text_raw(
-                &content[..3],
-                request,
-                font_size,
-                line_height,
-                letter_spacing,
-            )
-            .0;
-
-        handler.cursor_position = Some(Point {
-            x: left + before_target + ((after_target - before_target) * 0.25),
-            y: frame.y + (frame.height * 0.5),
-        });
-        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
-
-        let input_id = handler.focused_input.expect("input should be focused");
-        let state = handler
-            .input_states
-            .get(&input_id)
-            .expect("input state should be recorded");
-        assert_eq!(state.cursor, 2);
-        assert_eq!(state.anchor, 2);
-    }
-
-    #[test]
-    fn input_cursor_hit_testing_respects_font_scale() {
-        let invalidation = InvalidationSignal::new();
-        let tree = WidgetTree::new(Input::new(Text::new("hello")).width(dp(220.0)));
-        let mut handler = test_handler(Some(tree), invalidation);
-
-        let (frame, padding, text_style, content) = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput {
-                        frame,
-                        padding,
-                        text_style,
-                        text,
-                        ..
-                    } => Some((*frame, *padding, text_style.clone(), text.clone())),
-                    _ => None,
-                })
-                .expect("input hit region should exist")
-        };
-        let units = UnitContext::new(1.0, 1.5);
-        let font_size = units.resolve_sp(
-            text_style
-                .font_size
-                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
-        );
-        let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(
-            text_style.letter_spacing.unwrap_or(
-                handler
-                    .theme
-                    .components
-                    .text
-                    .default
-                    .letter_spacing
-                    .unwrap_or(Sp::ZERO),
-            ),
-        );
-        let request = TextFontRequest {
-            preferred_font: text_style.font_family.as_deref().or(handler
-                .theme
-                .components
-                .text
-                .default
-                .font_family
-                .as_deref()),
-            weight: text_style
-                .font_weight
-                .unwrap_or(handler.theme.components.text.default.weight),
-        };
-        let left = frame.x + padding.left.get();
-        let before_target = handler
-            .font_manager
-            .measure_text_raw(
-                &content[..2],
-                request.clone(),
-                font_size,
-                line_height,
-                letter_spacing,
-            )
-            .0;
-        let after_target = handler
-            .font_manager
-            .measure_text_raw(
-                &content[..3],
-                request,
-                font_size,
-                line_height,
-                letter_spacing,
-            )
-            .0;
-        let point = Point {
-            x: left + before_target + ((after_target - before_target) * 0.25),
-            y: frame.y + (frame.height * 0.5),
-        };
-
-        assert_eq!(
-            input_cursor_index_at_point_with_state(
-                &handler.font_manager,
-                &handler.theme,
-                units,
-                frame,
-                padding,
-                &text_style,
-                &content,
-                false,
-                None,
-                point,
-            ),
-            2
-        );
-    }
-
-    #[test]
-    fn dragging_input_updates_selection_range() {
-        let invalidation = InvalidationSignal::new();
-        let tree = WidgetTree::new(Input::new(Text::new("hello")).width(dp(220.0)));
-        let mut handler = test_handler(Some(tree), invalidation);
-        let viewport = handler.viewport_rect();
-
-        let (input_id, frame, padding, text_style, content) = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput {
-                        id,
-                        frame,
-                        padding,
-                        text_style,
-                        text,
-                        ..
-                    } => Some((*id, *frame, *padding, text_style.clone(), text.clone())),
-                    _ => None,
-                })
-                .expect("input hit region should exist")
-        };
-        let units = handler.unit_context();
-        let font_size = units.resolve_sp(
-            text_style
-                .font_size
-                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
-        );
-        let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(
-            text_style.letter_spacing.unwrap_or(
-                handler
-                    .theme
-                    .components
-                    .text
-                    .default
-                    .letter_spacing
-                    .unwrap_or(Sp::ZERO),
-            ),
-        );
-        let request = TextFontRequest {
-            preferred_font: text_style.font_family.as_deref().or(handler
-                .theme
-                .components
-                .text
-                .default
-                .font_family
-                .as_deref()),
-            weight: text_style
-                .font_weight
-                .unwrap_or(handler.theme.components.text.default.weight),
-        };
-        let left = frame.x + padding.left.get();
-        let before_start = handler
-            .font_manager
-            .measure_text_raw(
-                &content[..2],
-                request.clone(),
-                font_size,
-                line_height,
-                letter_spacing,
-            )
-            .0;
-        let after_start = handler
-            .font_manager
-            .measure_text_raw(
-                &content[..3],
-                request.clone(),
-                font_size,
-                line_height,
-                letter_spacing,
-            )
-            .0;
-        let before_end = handler
-            .font_manager
-            .measure_text_raw(
-                &content[..4],
-                request.clone(),
-                font_size,
-                line_height,
-                letter_spacing,
-            )
-            .0;
-        let after_end = handler
-            .font_manager
-            .measure_text_raw(
-                &content[..5],
-                request,
-                font_size,
-                line_height,
-                letter_spacing,
-            )
-            .0;
-
-        handler.cursor_position = Some(Point {
-            x: left + before_start + ((after_start - before_start) * 0.25),
-            y: frame.y + (frame.height * 0.5),
-        });
-        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
-
-        handler.cursor_position = Some(Point {
-            x: left + before_end + ((after_end - before_end) * 0.25),
-            y: frame.y + (frame.height * 0.5),
-        });
-        assert!(handler.handle_input_selection_drag());
-        assert_eq!(
-            handler.focused_input,
-            Some(input_id),
-            "input should stay focused while selecting"
-        );
-
-        let state = handler
-            .input_states
-            .get(&input_id)
-            .expect("input state should be recorded");
-        assert_eq!(state.anchor, 2);
-        assert_eq!(state.cursor, 4);
-        assert_eq!(state.selection_range(), Some((2, 4)));
-    }
-
-    #[test]
-    fn long_input_clicking_visible_text_uses_scrolled_viewport() {
-        let invalidation = InvalidationSignal::new();
-        let content = "https://example.com/a/very/long/input/value/that/needs/horizontal/scrolling";
-        let tree = WidgetTree::new(Input::new(Text::new(content)).width(dp(180.0)));
-        let mut handler = test_handler(Some(tree), invalidation);
-
-        let (input_id, frame, padding, text_style, text) = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput {
-                        id,
-                        frame,
-                        padding,
-                        text_style,
-                        text,
-                        ..
-                    } => Some((*id, *frame, *padding, text_style.clone(), text.clone())),
-                    _ => None,
-                })
-                .expect("input hit region should exist")
-        };
-
-        let units = handler.unit_context();
-        let font_size = units.resolve_sp(
-            text_style
-                .font_size
-                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
-        );
-        let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(
-            text_style.letter_spacing.unwrap_or(
-                handler
-                    .theme
-                    .components
-                    .text
-                    .default
-                    .letter_spacing
-                    .unwrap_or(Sp::ZERO),
-            ),
-        );
-        let request = TextFontRequest {
-            preferred_font: text_style.font_family.as_deref().or(handler
-                .theme
-                .components
-                .text
-                .default
-                .font_family
-                .as_deref()),
-            weight: text_style
-                .font_weight
-                .unwrap_or(handler.theme.components.text.default.weight),
-        };
-        let layout = handler.font_manager.measure_text_layout(
-            &text,
-            request.clone(),
-            font_size,
-            line_height,
-            letter_spacing,
-        );
-        let visible_cursor = text.len().saturating_sub(10);
-        let target_cursor = text.len();
-        let scroll_x = Dp::new(
-            layout
-                .x_for_index(visible_cursor)
-                .max(layout.x_for_index(target_cursor) - frame.inset(padding).width.get() + 8.0),
-        );
-        handler.focused_input = Some(input_id);
-        handler.input_states.insert(
-            input_id,
-            InputEditState {
-                cursor: target_cursor,
-                anchor: target_cursor,
-                composition: None,
-                scroll_x,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            },
-        );
-
-        let visible_right = Point {
-            x: frame.right() - dp(8.0),
-            y: frame.y + (frame.height * 0.5),
-        };
-        let target = input_cursor_index_at_point_with_state(
-            &handler.font_manager,
-            &handler.theme,
-            handler.unit_context(),
-            frame,
-            padding,
-            &text_style,
-            &text,
-            false,
-            handler.input_states.get(&input_id),
-            visible_right,
-        );
-
-        assert!(target >= visible_cursor);
-    }
-
-    #[test]
-    fn clicking_scrolled_input_keeps_scroll_offset() {
-        let invalidation = InvalidationSignal::new();
-        let content = "https://example.com/a/very/long/input/value/that/needs/horizontal/scrolling";
-        let tree = WidgetTree::new(Input::new(Text::new(content)).width(dp(180.0)));
-        let mut handler = test_handler(Some(tree), invalidation);
-        let viewport = handler.viewport_rect();
-
-        let (input_id, frame, padding, text_style, text) = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput {
-                        id,
-                        frame,
-                        padding,
-                        text_style,
-                        text,
-                        ..
-                    } => Some((*id, *frame, *padding, text_style.clone(), text.clone())),
-                    _ => None,
-                })
-                .expect("input hit region should exist")
-        };
-        let units = handler.unit_context();
-        let font_size = units.resolve_sp(
-            text_style
-                .font_size
-                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
-        );
-        let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(
-            text_style.letter_spacing.unwrap_or(
-                handler
-                    .theme
-                    .components
-                    .text
-                    .default
-                    .letter_spacing
-                    .unwrap_or(Sp::ZERO),
-            ),
-        );
-        let request = TextFontRequest {
-            preferred_font: text_style.font_family.as_deref().or(handler
-                .theme
-                .components
-                .text
-                .default
-                .font_family
-                .as_deref()),
-            weight: text_style
-                .font_weight
-                .unwrap_or(handler.theme.components.text.default.weight),
-        };
-        let layout = handler.font_manager.measure_text_layout(
-            &text,
-            request.clone(),
-            font_size,
-            line_height,
-            letter_spacing,
-        );
-        let target_cursor = text.len().saturating_sub(8);
-        let next_cursor = text.len().saturating_sub(6);
-        let scroll_x = Dp::new((layout.x_for_index(target_cursor) - 24.0).max(0.0));
-        let visible_x = frame.inset(padding).x + layout.x_for_index(next_cursor) - scroll_x;
-
-        handler.focused_input = Some(input_id);
-        handler.input_states.insert(
-            input_id,
-            InputEditState {
-                cursor: target_cursor,
-                anchor: target_cursor,
-                composition: None,
-                scroll_x,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            },
-        );
-        handler.cursor_position = Some(Point {
-            x: visible_x,
-            y: frame.y + (frame.height * 0.5),
-        });
-        let expected_cursor = input_cursor_index_at_point_with_state(
-            &handler.font_manager,
-            &handler.theme,
-            handler.unit_context(),
-            frame,
-            padding,
-            &text_style,
-            &text,
-            false,
-            handler.input_states.get(&input_id),
-            handler
-                .cursor_position
-                .expect("cursor position should be set"),
-        );
-
-        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
-
-        let state = handler
-            .input_states
-            .get(&input_id)
-            .expect("input state should be recorded");
-        assert_eq!(state.cursor, expected_cursor);
-        assert_eq!(state.scroll_x, scroll_x);
-    }
-
-    #[test]
-    fn keyboard_navigation_scrolls_input_to_keep_caret_visible() {
-        let invalidation = InvalidationSignal::new();
-        let content = "https://example.com/a/very/long/input/value/that/needs/horizontal/scrolling";
-        let tree = WidgetTree::new(Input::new(Text::new(content)).width(dp(180.0)));
-        let mut handler = test_handler(Some(tree), invalidation);
-
-        let input_id = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput { id, .. } => Some(*id),
-                    _ => None,
-                })
-                .expect("input hit region should exist")
-        };
-        handler.focused_input = Some(input_id);
-        handler.input_states.insert(
-            input_id,
-            InputEditState {
-                cursor: 0,
-                anchor: 0,
-                composition: None,
-                scroll_x: Dp::ZERO,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            },
-        );
-
-        for _ in 0..content.len().min(48) {
-            handler.handle_input_keyboard_event(&key_press_event(
-                KeyCode::ArrowRight,
-                NamedKey::ArrowRight,
-            ));
-        }
-
-        let state = handler
-            .input_states
-            .get(&input_id)
-            .expect("input state should be recorded");
-        assert!(state.cursor > 0);
-        assert!(state.scroll_x > Dp::ZERO);
-    }
-
-    #[test]
-    fn keyboard_navigation_keeps_scroll_when_caret_stays_visible() {
-        let invalidation = InvalidationSignal::new();
-        let content = "https://example.com/a/very/long/input/value/that/needs/horizontal/scrolling";
-        let tree = WidgetTree::new(Input::new(Text::new(content)).width(dp(180.0)));
-        let mut handler = test_handler(Some(tree), invalidation);
-
-        let (input_id, frame, padding, text_style, text) = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput {
-                        id,
-                        frame,
-                        padding,
-                        text_style,
-                        text,
-                        ..
-                    } => Some((*id, *frame, *padding, text_style.clone(), text.clone())),
-                    _ => None,
-                })
-                .expect("input hit region should exist")
-        };
-
-        let units = handler.unit_context();
-        let font_size = units.resolve_sp(
-            text_style
-                .font_size
-                .unwrap_or(handler.theme.components.text.default.size.max(sp(1.0))),
-        );
-        let line_height = (font_size * 1.25).max(font_size + 4.0);
-        let letter_spacing = units.resolve_sp(
-            text_style.letter_spacing.unwrap_or(
-                handler
-                    .theme
-                    .components
-                    .text
-                    .default
-                    .letter_spacing
-                    .unwrap_or(Sp::ZERO),
-            ),
-        );
-        let request = TextFontRequest {
-            preferred_font: text_style.font_family.as_deref().or(handler
-                .theme
-                .components
-                .text
-                .default
-                .font_family
-                .as_deref()),
-            weight: text_style
-                .font_weight
-                .unwrap_or(handler.theme.components.text.default.weight),
-        };
-        let layout = handler.font_manager.measure_text_layout(
-            &text,
-            request,
-            font_size,
-            line_height,
-            letter_spacing,
-        );
-        let cursor = text
-            .char_indices()
-            .nth(36)
-            .map(|(index, _)| index)
-            .unwrap_or(text.len());
-        let scroll_x =
-            Dp::new((layout.x_for_index(cursor) - frame.inset(padding).width.get() * 0.5).max(0.0));
-
-        handler.focused_input = Some(input_id);
-        handler.input_states.insert(
-            input_id,
-            InputEditState {
-                cursor,
-                anchor: cursor,
-                composition: None,
-                scroll_x,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            },
-        );
-
-        handler
-            .handle_input_keyboard_event(&key_press_event(KeyCode::ArrowLeft, NamedKey::ArrowLeft));
-        let state = handler
-            .input_states
-            .get(&input_id)
-            .expect("input state should be recorded");
-        assert_eq!(state.scroll_x, scroll_x);
-
-        handler.handle_input_keyboard_event(&key_press_event(
-            KeyCode::ArrowRight,
-            NamedKey::ArrowRight,
-        ));
-        let state = handler
-            .input_states
-            .get(&input_id)
-            .expect("input state should be recorded");
-        assert_eq!(state.scroll_x, scroll_x);
-    }
-
-    #[test]
-    fn end_key_keeps_long_input_caret_visible_with_right_gap() {
-        let invalidation = InvalidationSignal::new();
-        let content = "https://example.com/a/very/long/input/value/that/needs/horizontal/scrolling";
-        let tree = WidgetTree::new(Input::new(Text::new(content)).width(dp(180.0)));
-        let mut handler = test_handler(Some(tree), invalidation);
-
-        let (input_id, frame, padding) = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput {
-                        id, frame, padding, ..
-                    } => Some((*id, *frame, *padding)),
-                    _ => None,
-                })
-                .expect("input hit region should exist")
-        };
-        handler.focused_input = Some(input_id);
-        handler.caret_blink_started_at = None;
-        handler.input_states.insert(
-            input_id,
-            InputEditState {
-                cursor: 0,
-                anchor: 0,
-                composition: None,
-                scroll_x: Dp::ZERO,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            },
-        );
-
-        handler.handle_input_keyboard_event(&key_press_event(KeyCode::End, NamedKey::End));
-
-        let caret = handler
-            .computed_scene()
-            .ime_cursor_area
-            .expect("focused input should expose caret rect");
-        let input_clip = frame.inset(padding);
-        assert!(caret.right() <= input_clip.right() - dp(INPUT_CARET_EDGE_GAP));
-        assert!(caret.x >= input_clip.x);
-        let state = handler
-            .input_states
-            .get(&input_id)
-            .expect("input state should be recorded");
-        assert_eq!(state.cursor, content.len());
-        assert!(state.scroll_x > Dp::ZERO);
-    }
-
-    #[test]
-    fn home_key_returns_long_input_scroll_to_start() {
-        let invalidation = InvalidationSignal::new();
-        let content = "https://example.com/a/very/long/input/value/that/needs/horizontal/scrolling";
-        let tree = WidgetTree::new(Input::new(Text::new(content)).width(dp(180.0)));
-        let mut handler = test_handler(Some(tree), invalidation);
-
-        let (input_id, frame, padding) = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput {
-                        id, frame, padding, ..
-                    } => Some((*id, *frame, *padding)),
-                    _ => None,
-                })
-                .expect("input hit region should exist")
-        };
-        handler.focused_input = Some(input_id);
-        handler.caret_blink_started_at = None;
-        handler.input_states.insert(
-            input_id,
-            InputEditState {
-                cursor: content.len(),
-                anchor: content.len(),
-                composition: None,
-                scroll_x: dp(240.0),
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            },
-        );
-
-        handler.handle_input_keyboard_event(&key_press_event(KeyCode::Home, NamedKey::Home));
-
-        let caret = handler
-            .computed_scene()
-            .ime_cursor_area
-            .expect("focused input should expose caret rect");
-        let input_clip = frame.inset(padding);
-        assert!(caret.x >= input_clip.x);
-        assert!(caret.x <= input_clip.x + dp(INPUT_CARET_EDGE_GAP));
-        let state = handler
-            .input_states
-            .get(&input_id)
-            .expect("input state should be recorded");
-        assert_eq!(state.cursor, 0);
-        assert_eq!(state.scroll_x, Dp::ZERO);
-    }
-
-    #[test]
-    fn dragging_input_beyond_right_edge_scrolls_horizontally() {
-        let invalidation = InvalidationSignal::new();
-        let content = "https://example.com/a/very/long/input/value/that/needs/horizontal/scrolling";
-        let tree = WidgetTree::new(Input::new(Text::new(content)).width(dp(180.0)));
-        let mut handler = test_handler(Some(tree), invalidation);
-        let viewport = handler.viewport_rect();
-
-        let (input_id, frame, padding) = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput {
-                        id, frame, padding, ..
-                    } => Some((*id, *frame, *padding)),
-                    _ => None,
-                })
-                .expect("input hit region should exist")
-        };
-
-        handler.cursor_position = Some(Point {
-            x: frame.inset(padding).x + dp(4.0),
-            y: frame.y + (frame.height * 0.5),
-        });
-        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
-
-        handler.cursor_position = Some(Point {
-            x: frame.right() + dp(40.0),
-            y: frame.y + (frame.height * 0.5),
-        });
-        assert!(handler.handle_input_selection_drag());
-
-        let state = handler
-            .input_states
-            .get(&input_id)
-            .expect("input state should be recorded");
-        assert!(state.scroll_x > Dp::ZERO);
-        assert!(state.cursor > state.anchor);
-    }
-
-    #[derive(Default)]
-    struct ReadonlyInputVm {
-        text: String,
-    }
-
-    impl crate::foundation::view_model::ViewModel for ReadonlyInputVm {
-        fn new(_context: &ViewModelContext) -> Self {
-            todo!()
-        }
-
-        fn view(&self) -> Element<Self>
-        where
-            Self: Sized,
-        {
-            todo!()
-        }
-    }
-
-    #[test]
-    fn readonly_input_blocks_backspace_and_paste_changes() {
-        let invalidation = InvalidationSignal::new();
-        let tree = WidgetTree::new(
-            Input::new(Text::new("alpha"))
-                .width(dp(180.0))
-                .readonly(true)
-                .on_change(ValueCommand::new(|vm: &mut ReadonlyInputVm, value| {
-                    vm.text = value;
-                })),
-        );
-        let mut handler = test_handler_with_vm(
-            ReadonlyInputVm {
-                text: "alpha".to_string(),
-            },
-            Some(tree),
-            invalidation,
-        );
-
-        let input_id = {
-            let computed = handler.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::FocusInput { id, .. } => Some(*id),
-                    _ => None,
-                })
-                .expect("input hit region should exist")
-        };
-        handler.focused_input = Some(input_id);
-        handler
-            .input_states
-            .insert(input_id, InputEditState::caret_at("alpha"));
-
-        handler
-            .handle_input_keyboard_event(&key_press_event(KeyCode::Backspace, NamedKey::Backspace));
-        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha");
-
-        handler.clipboard.set_text("beta".to_string());
-        handler.modifiers = ModifiersState::CONTROL;
-        handler.handle_input_keyboard_event(&character_key_press_event(KeyCode::KeyV, "v"));
-
-        assert_eq!(handler.with_view_model(|vm| vm.text.clone()), "alpha");
     }
 
     #[derive(Default)]

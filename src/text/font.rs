@@ -159,29 +159,6 @@ impl TextLayoutInfo {
             .unwrap_or(0)
     }
 
-    pub(crate) fn point_for_index(&self, index: usize) -> (f32, f32) {
-        let line = self.line_for_index(index);
-        (line.x_for_index(index), line.top)
-    }
-
-    pub(crate) fn index_for_point(&self, x: f32, y: f32) -> usize {
-        self.line_for_y(y).index_for_x(x)
-    }
-
-    pub(crate) fn line_start_for_index(&self, index: usize) -> usize {
-        self.line_for_index(index).start_index
-    }
-
-    pub(crate) fn line_end_for_index(&self, index: usize) -> usize {
-        self.line_for_index(index).end_index
-    }
-
-    pub(crate) fn move_vertical(&self, index: usize, target_x: f32, delta: i32) -> usize {
-        let current = self.find_line_index_for_index(index);
-        let next = (current as i32 + delta).clamp(0, self.lines.len().saturating_sub(1) as i32);
-        self.lines[next as usize].index_for_x(target_x)
-    }
-
     fn find_line_index_for_index(&self, index: usize) -> usize {
         if self.lines.is_empty() {
             return 0;
@@ -209,25 +186,6 @@ impl TextLayoutInfo {
             .expect("text layout should always contain at least one line")
     }
 
-    fn line_for_y(&self, y: f32) -> &TextLineLayoutInfo {
-        if self.lines.is_empty() {
-            return self
-                .lines
-                .first()
-                .expect("text layout should always contain at least one line");
-        }
-
-        let local_y = y.max(0.0);
-        for line in &self.lines {
-            if local_y < line.top + line.height {
-                return line;
-            }
-        }
-
-        self.lines
-            .last()
-            .expect("text layout should always contain at least one line")
-    }
 }
 
 impl TextLineLayoutInfo {

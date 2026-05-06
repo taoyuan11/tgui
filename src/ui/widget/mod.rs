@@ -6,8 +6,6 @@ mod common;
 mod container;
 mod core;
 mod image;
-#[cfg(test)]
-mod input;
 mod radio;
 mod select;
 mod switch;
@@ -33,22 +31,17 @@ pub use canvas::{
 pub use checkbox::Checkbox;
 pub(crate) use common::{
     BackdropBlurPrimitive, BrushPrimitiveData, CanvasItemInteractionHandlers, ClipMask,
-    CompositionState, ComputedScene, HitInteraction, InputEditState, InputSnapshot,
-    InteractionHandlers, MediaEventPhase, MediaEventState, MeshVertex, RenderCommand, ScrollRegion,
-    ScrollRegionSource, ScrollbarAxis, ScrollbarHandle, WidgetStateMap,
+    ComputedScene, HitInteraction, InputEditState, InteractionHandlers, MediaEventPhase,
+    MediaEventState, MeshVertex, RenderCommand, ScrollRegion, ScrollRegionSource, ScrollbarAxis,
+    ScrollbarHandle, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,
 };
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
-pub(crate) use core::{
-    input_scroll_offset, input_text_viewport, InputViewport, ResolvedSceneLayout,
-    INPUT_CARET_EDGE_GAP,
-};
+pub(crate) use core::ResolvedSceneLayout;
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use image::Image;
-#[cfg(test)]
-pub(crate) use input::Input;
 pub use radio::{Radio, RadioGroup, RadioOption};
 pub use select::{Select, SelectOption};
 pub use switch::Switch;

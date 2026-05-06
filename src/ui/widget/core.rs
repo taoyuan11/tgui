@@ -32,11 +32,10 @@ use super::common::RenderedWidgetScene;
 use super::common::{
     BackdropBlurPrimitive, BrushPrimitive, ButtonVariantKind, ClipMask, ComputedScene,
     ContainerKind, ContainerLayout, CursorStyle, HitGeometry, HitInteraction, HitRegion,
-    InputEditState, InputSnapshot, InteractionHandlers, LayoutNode, MeasureContext,
-    MediaEventHandlers, MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive,
-    ScenePrimitives, ScrollRegion, ScrollRegionSource, ScrollbarAxis, ScrollbarHandle,
-    SelectOptionState, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
-    WidgetStateMap,
+    InputEditState, InteractionHandlers, LayoutNode, MeasureContext, MediaEventHandlers,
+    MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive, ScenePrimitives,
+    ScrollRegion, ScrollRegionSource, ScrollbarAxis, ScrollbarHandle, SelectOptionState,
+    TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind, WidgetStateMap,
 };
 use super::text::Text;
 
@@ -48,114 +47,11 @@ const CARET_WIDTH: f32 = 2.0;
 /// 光标末尾间隔
 const CARET_END_GAP: f32 = 1.0;
 
-/// Minimum visible gap around the input caret while horizontally scrolling.
-/// 输入框横向滚动时光标边缘的最小可见间距
-pub(crate) const INPUT_CARET_EDGE_GAP: f32 = 8.0;
-
-/// Caret width in logical pixels when input is empty.
-/// 当输入为空时光标像素宽度
-const INPUT_EMPTY_CARET_INSET: f32 = 1.0;
-
-/// Default intrinsic width for single-line inputs when no explicit width is set.
-const INPUT_DEFAULT_WIDTH: f32 = 160.0;
+/// Default intrinsic width for selects when no explicit width is set.
+const SELECT_DEFAULT_WIDTH: f32 = 160.0;
 
 const CHECKBOX_CHECKMARK_ICON: &str = "\u{e687}";
 const SELECT_ARROW_ICON: &str = "\u{e686}";
-
-#[derive(Clone, Copy)]
-pub(crate) struct InputViewport {
-    pub frame: Rect,
-}
-
-pub(crate) fn input_max_scroll(inner: Rect, scrollable_width: f32) -> f32 {
-    let viewport_width = inner.width.get().max(0.0);
-    if viewport_width <= 0.0 {
-        return 0.0;
-    }
-
-    (scrollable_width - viewport_width).max(0.0)
-}
-
-pub(crate) fn input_scroll_offset_for_caret(
-    inner: Rect,
-    content_width: f32,
-    caret_start: f32,
-    caret_end: f32,
-    current_scroll_x: f32,
-) -> f32 {
-    let viewport_width = inner.width.get().max(0.0);
-    if viewport_width <= 0.0 {
-        return 0.0;
-    }
-
-    let scrollable_width = content_width.max(caret_end + INPUT_CARET_EDGE_GAP);
-    let max_scroll = input_max_scroll(inner, scrollable_width);
-    if max_scroll <= 0.0 {
-        return 0.0;
-    }
-
-    let caret_start = caret_start.max(0.0);
-    let caret_end = caret_end.max(caret_start);
-    if caret_end - caret_start >= viewport_width {
-        return caret_start.clamp(0.0, max_scroll);
-    }
-
-    let gap = INPUT_CARET_EDGE_GAP.min(viewport_width * 0.5);
-    let safe_start = current_scroll_x + gap;
-    let safe_end = current_scroll_x + viewport_width - gap;
-    if caret_start >= safe_start && caret_end <= safe_end {
-        return current_scroll_x.clamp(0.0, max_scroll);
-    }
-
-    let min_scroll = (caret_end + gap - viewport_width).max(0.0);
-    let max_scroll_for_caret = (caret_start - gap).max(0.0).min(max_scroll);
-    if caret_start < safe_start {
-        max_scroll_for_caret.clamp(0.0, max_scroll)
-    } else {
-        min_scroll.clamp(0.0, max_scroll)
-    }
-}
-
-pub(crate) fn clamp_input_scroll_offset(inner: Rect, scrollable_width: f32, scroll_x: f32) -> f32 {
-    scroll_x.clamp(0.0, input_max_scroll(inner, scrollable_width))
-}
-
-pub(crate) fn input_scroll_offset(
-    inner: Rect,
-    content_width: f32,
-    caret_start: f32,
-    caret_end: f32,
-    current_scroll_x: f32,
-) -> f32 {
-    input_scroll_offset_for_caret(
-        inner,
-        content_width,
-        caret_start,
-        caret_end,
-        current_scroll_x,
-    )
-}
-
-pub(crate) fn input_text_viewport(
-    inner: Rect,
-    content_width: f32,
-    content_height: f32,
-    line_height: f32,
-    scroll_x: f32,
-    scrollable_width: f32,
-) -> InputViewport {
-    let content_frame =
-        centered_text_frame(inner, content_width, content_height, line_height, false);
-    let scroll_x = clamp_input_scroll_offset(inner, scrollable_width, scroll_x);
-    InputViewport {
-        frame: Rect::new(
-            inner.x - scroll_x,
-            content_frame.y,
-            content_width.max(content_frame.width.get()),
-            content_frame.height,
-        ),
-    }
-}
 
 pub struct Element<VM> {
     pub(crate) id: WidgetId,
@@ -238,13 +134,6 @@ enum ResolvedWidgetKind<VM> {
         inactive_thumb_color: Option<Value<Color>>,
         disabled: Value<bool>,
     },
-    Input {
-        text: Text,
-        placeholder: Text,
-        on_change: Option<ValueCommand<VM, String>>,
-        disabled: Value<bool>,
-        readonly: Value<bool>,
-    },
     Select {
         selected_label: Value<Option<String>>,
         placeholder: Text,
@@ -258,11 +147,8 @@ struct CollectContext<'a, 'b> {
     font_manager: &'a FontManager,
     theme: &'a Theme,
     media: &'a MediaManager,
-    focused_input: Option<WidgetId>,
-    focused_input_state: Option<&'a InputEditState>,
     selected_text: Option<WidgetId>,
     selected_text_state: Option<&'a InputEditState>,
-    caret_visible: bool,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar: Option<ScrollbarHandle>,
     widget_states: &'a WidgetStateMap,
@@ -378,19 +264,6 @@ impl<VM> Element<VM> {
                 active_thumb_color,
                 inactive_thumb_color,
                 disabled,
-            },
-            WidgetKind::Input {
-                text,
-                placeholder,
-                on_change,
-                disabled,
-                readonly,
-            } => WidgetKind::Input {
-                text,
-                placeholder,
-                on_change: on_change.map(|command| command.scope(selector.clone())),
-                disabled,
-                readonly,
             },
             WidgetKind::Select {
                 selected_label,
@@ -560,19 +433,6 @@ impl<VM> Element<VM> {
                 inactive_thumb_color: inactive_thumb_color.clone(),
                 disabled: disabled.clone(),
             },
-            WidgetKind::Input {
-                text,
-                placeholder,
-                on_change,
-                disabled,
-                readonly,
-            } => ResolvedWidgetKind::Input {
-                text: text.clone(),
-                placeholder: placeholder.clone(),
-                on_change: on_change.clone(),
-                disabled: disabled.clone(),
-                readonly: readonly.clone(),
-            },
             WidgetKind::Select {
                 selected_label,
                 placeholder,
@@ -623,12 +483,6 @@ impl<VM> ResolvedElement<VM> {
             },
             ResolvedWidgetKind::Switch { checked, .. } => MeasureContext::Switch {
                 checked: checked.resolve(),
-            },
-            ResolvedWidgetKind::Input {
-                text, placeholder, ..
-            } => MeasureContext::Input {
-                text: text.clone(),
-                placeholder: placeholder.clone(),
             },
             ResolvedWidgetKind::Select {
                 selected_label,
@@ -705,9 +559,7 @@ impl<VM> ResolvedElement<VM> {
         now: std::time::Instant,
     ) -> TaffyStyle {
         let default_min_width = match &self.kind {
-            ResolvedWidgetKind::Input { .. } | ResolvedWidgetKind::Select { .. }
-                if self.layout.min_width.is_none() =>
-            {
+            ResolvedWidgetKind::Select { .. } if self.layout.min_width.is_none() => {
                 Dimension::from_length(0.0)
             }
             _ => Dimension::AUTO,
@@ -987,7 +839,6 @@ impl<VM> ResolvedElement<VM> {
             | ResolvedWidgetKind::Checkbox { disabled, .. }
             | ResolvedWidgetKind::Radio { disabled, .. }
             | ResolvedWidgetKind::Switch { disabled, .. }
-            | ResolvedWidgetKind::Input { disabled, .. }
             | ResolvedWidgetKind::Select { disabled, .. } => disabled.resolve(),
             _ => false,
         };
@@ -1027,20 +878,6 @@ impl<VM> ResolvedElement<VM> {
                     })
                     .unwrap_or_else(|| context.units.resolve_dp(button_style.border_width))
             }
-            ResolvedWidgetKind::Input { .. } => self
-                .visual
-                .border_width
-                .as_ref()
-                .map(|width| {
-                    width.resolve_widget_to_logical(
-                        context.animations,
-                        self.id,
-                        WidgetProperty::BorderWidth,
-                        context.now,
-                        context.units,
-                    )
-                })
-                .unwrap_or_else(|| context.units.resolve_dp(context.theme.border.normal)),
             ResolvedWidgetKind::Select { .. } => self
                 .visual
                 .border_width
@@ -1159,9 +996,6 @@ impl<VM> ResolvedElement<VM> {
                         .resolve(widget_state)
                         .radius,
                 ),
-                ResolvedWidgetKind::Input { .. } => context
-                    .units
-                    .resolve_dp(context.theme.components.input.resolve(widget_state).radius),
                 ResolvedWidgetKind::Select { .. } => context
                     .units
                     .resolve_dp(context.theme.components.select.resolve(widget_state).radius),
@@ -1214,31 +1048,6 @@ impl<VM> ResolvedElement<VM> {
                                 property: WidgetProperty::BorderColor,
                             },
                             button_style.border_color,
-                            Some(Transition::default()),
-                            context.now,
-                        )
-                    })
-            }
-            ResolvedWidgetKind::Input { .. } => {
-                let input_style = context.theme.components.input.resolve(widget_state);
-                self.visual
-                    .border_color
-                    .as_ref()
-                    .map(|color| {
-                        color.resolve_widget(
-                            context.animations,
-                            self.id,
-                            WidgetProperty::BorderColor,
-                            context.now,
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        context.animations.resolve_color(
-                            crate::animation::AnimationKey::Widget {
-                                id: self.id.raw(),
-                                property: WidgetProperty::BorderColor,
-                            },
-                            input_style.border,
                             Some(Transition::default()),
                             context.now,
                         )
@@ -1328,25 +1137,6 @@ impl<VM> ResolvedElement<VM> {
                         context.now,
                     )
                 }),
-            ResolvedWidgetKind::Input { .. } => self
-                .background
-                .as_ref()
-                .map(|background| {
-                    background.resolve_widget(
-                        context.animations,
-                        self.id,
-                        WidgetProperty::Background,
-                        context.now,
-                    )
-                })
-                .unwrap_or(
-                    context
-                        .theme
-                        .components
-                        .input
-                        .resolve(widget_state)
-                        .background,
-                ),
             ResolvedWidgetKind::Select { .. } => self
                 .background
                 .as_ref()
@@ -2009,65 +1799,6 @@ impl<VM> ResolvedElement<VM> {
                     });
                 }
             }
-            ResolvedWidgetKind::Input {
-                text,
-                placeholder,
-                on_change,
-                ..
-            } => {
-                let active = context.focused_input == Some(self.id);
-                let input_style = context.theme.components.input.resolve(widget_state);
-                let current_text = text.content.resolve();
-                let padding = Insets::symmetric(input_style.padding_x, input_style.padding_y);
-                let input_state = if active {
-                    context.focused_input_state
-                } else {
-                    None
-                };
-                let ime_cursor_area = push_input_primitives(
-                    frame,
-                    text,
-                    placeholder,
-                    &current_text,
-                    context.font_manager,
-                    context.theme,
-                    context.units,
-                    context.animations,
-                    context.now,
-                    &mut computed.scene,
-                    padding,
-                    input_style.text,
-                    input_style.placeholder,
-                    opacity,
-                    self.id,
-                    input_state,
-                    active && context.caret_visible && !disabled,
-                    primitive_clip,
-                    primitive_clip_mask,
-                );
-                if active {
-                    computed.ime_cursor_area = ime_cursor_area;
-                }
-                if !disabled {
-                    computed.hit_regions.push(HitRegion {
-                        rect: frame,
-                        clip_rect: primitive_clip,
-                        geometry: HitGeometry::Rect,
-                        interaction: HitInteraction::FocusInput {
-                            id: self.id,
-                            frame,
-                            padding,
-                            interactions: self.interactions.clone(),
-                            on_change: on_change.clone(),
-                            on_submit: None,
-                            multiline: false,
-                            submit_on_enter: false,
-                            text_style: text.clone(),
-                            text: current_text,
-                        },
-                    });
-                }
-            }
             ResolvedWidgetKind::Select {
                 selected_label,
                 placeholder,
@@ -2118,32 +1849,6 @@ impl<VM> ResolvedElement<VM> {
                     });
                 }
             }
-        }
-    }
-
-    fn input_snapshot(&self, id: WidgetId) -> Option<InputSnapshot<VM>> {
-        match &self.kind {
-            ResolvedWidgetKind::Container { children, .. } => {
-                children.iter().find_map(|child| child.input_snapshot(id))
-            }
-            ResolvedWidgetKind::Input { disabled, .. } if self.id == id && disabled.resolve() => {
-                None
-            }
-            ResolvedWidgetKind::Input {
-                text,
-                on_change,
-                readonly,
-                ..
-            } if self.id == id => Some(InputSnapshot {
-                id,
-                on_change: on_change.clone(),
-                on_submit: None,
-                multiline: false,
-                submit_on_enter: false,
-                readonly: readonly.resolve(),
-                text: text.content.resolve(),
-            }),
-            _ => None,
         }
     }
 
@@ -2813,11 +2518,6 @@ fn measure_node(
             let radio_style = theme.components.radio.resolve(Default::default(), *checked);
             measure_radio_content(label.as_ref(), &radio_style, font_manager, theme, units)
         }
-        Some(MeasureContext::Input { text, placeholder }) => {
-            let text_size = measure_text_content(text, font_manager, theme, units);
-            let placeholder_size = measure_text_content(placeholder, font_manager, theme, units);
-            (INPUT_DEFAULT_WIDTH, text_size.1.max(placeholder_size.1))
-        }
         Some(MeasureContext::Select {
             selected_label,
             placeholder,
@@ -2955,10 +2655,6 @@ fn default_layout_padding<VM>(element: &ResolvedElement<VM>, theme: &Theme) -> I
         ResolvedWidgetKind::Button { variant, .. } => {
             let variant_theme = button_variant_theme(&theme.components.button, *variant);
             Insets::symmetric(variant_theme.padding_x, variant_theme.padding_y)
-        }
-        ResolvedWidgetKind::Input { .. } => {
-            let input_style = theme.components.input.resolve(Default::default());
-            Insets::symmetric(input_style.padding_x, input_style.padding_y)
         }
         ResolvedWidgetKind::Select { .. } => {
             let select_style = theme.components.select.resolve(Default::default());
@@ -3352,433 +3048,6 @@ fn push_text_primitives(
     }
 }
 
-fn push_input_primitives(
-    frame: Rect,
-    text: &Text,
-    placeholder: &Text,
-    current_text: &str,
-    font_manager: &FontManager,
-    theme: &Theme,
-    units: UnitContext,
-    animations: &mut AnimationEngine,
-    now: std::time::Instant,
-    scene: &mut ScenePrimitives,
-    padding: Insets,
-    text_color: Color,
-    placeholder_color: Color,
-    opacity: f32,
-    widget_id: WidgetId,
-    edit_state: Option<&InputEditState>,
-    show_caret: bool,
-    clip_rect: Option<Rect>,
-    clip_mask: Option<ClipMask>,
-) -> Option<Rect> {
-    let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
-    let default_text_style = &theme.components.text.default;
-    let text_request = TextFontRequest {
-        preferred_font: text
-            .font_family
-            .as_deref()
-            .or(default_text_style.font_family.as_deref()),
-        weight: text.font_weight.unwrap_or(default_text_style.weight),
-    };
-    let inner = frame.inset(padding);
-    let input_clip_rect = clip_rect
-        .map(|parent_clip| {
-            parent_clip.intersect(inner).unwrap_or(Rect::new(
-                parent_clip.x.max(inner.x),
-                parent_clip.y.max(inner.y),
-                0.0,
-                0.0,
-            ))
-        })
-        .unwrap_or(inner);
-    let input_clip_rect = Some(input_clip_rect);
-    let state = edit_state
-        .cloned()
-        .unwrap_or_default()
-        .clamped_to(current_text);
-
-    let composition = state.composition.clone();
-    let show_placeholder = current_text.is_empty()
-        && composition
-            .as_ref()
-            .map(|composition| composition.text.is_empty())
-            .unwrap_or(true);
-
-    if show_placeholder {
-        let placeholder_color = placeholder
-            .color
-            .as_ref()
-            .map(|color| {
-                color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now)
-            })
-            .unwrap_or(placeholder_color)
-            .with_alpha_factor(opacity);
-        let placeholder_request = TextFontRequest {
-            preferred_font: placeholder
-                .font_family
-                .as_deref()
-                .or(default_text_style.font_family.as_deref()),
-            weight: placeholder.font_weight.unwrap_or(default_text_style.weight),
-        };
-        let placeholder_content = placeholder.content.resolve();
-        let resolved = font_manager.resolve_text(&placeholder_content, placeholder_request.clone());
-        let (placeholder_size, placeholder_line_height, placeholder_letter_spacing) =
-            resolved_text_metrics(placeholder, theme, units);
-        let (measured_width, measured_height) = font_manager.measure_text_raw(
-            &placeholder_content,
-            placeholder_request,
-            placeholder_size,
-            placeholder_line_height,
-            placeholder_letter_spacing,
-        );
-        let content_frame = centered_text_frame(
-            inner,
-            measured_width,
-            measured_height,
-            placeholder_line_height,
-            false,
-        );
-        scene.push_text(TextPrimitive {
-            content: placeholder_content,
-            frame: content_frame,
-            color: placeholder_color,
-            force_color: false,
-            font_family: Some(resolved.primary_font),
-            font_size: placeholder_size,
-            font_weight: placeholder.font_weight.unwrap_or(default_text_style.weight),
-            line_height: placeholder_line_height,
-            letter_spacing: placeholder_letter_spacing,
-            clip_rect: input_clip_rect,
-            clip_mask,
-        });
-
-        let caret_rect = Rect::new(
-            inner.x + INPUT_EMPTY_CARET_INSET,
-            content_frame.y,
-            CARET_WIDTH,
-            content_frame.height.max(Dp::new(placeholder_line_height)),
-        );
-        if show_caret {
-            scene.push_overlay_shape(RenderPrimitive {
-                rect: caret_rect,
-                color: theme.components.input.cursor.with_alpha_factor(opacity),
-                corner_radius: 0.0,
-                stroke_width: 0.0,
-                clip_rect: input_clip_rect,
-                clip_mask,
-            });
-        }
-
-        return Some(caret_rect);
-    }
-
-    let composition_range = composition
-        .as_ref()
-        .map(|composition| composition.replace_range)
-        .unwrap_or((state.cursor, state.cursor));
-    let composition_start = composition_range.0.min(current_text.len());
-    let composition_end = composition_range.1.min(current_text.len());
-    let prefix_text = &current_text[..composition_start];
-    let suffix_text = &current_text[composition_end..];
-    let preedit_text = composition
-        .as_ref()
-        .map(|composition| composition.text.as_str())
-        .unwrap_or("");
-
-    let display_text = if composition.is_some() {
-        format!("{prefix_text}{preedit_text}{suffix_text}")
-    } else {
-        current_text.to_string()
-    };
-    let (display_width, display_height) = font_manager.measure_text_raw(
-        &display_text,
-        text_request.clone(),
-        font_size,
-        line_height,
-        letter_spacing,
-    );
-
-    let base_color = text
-        .color
-        .as_ref()
-        .map(|color| color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now))
-        .unwrap_or(text_color)
-        .with_alpha_factor(opacity);
-    let preedit_color = theme
-        .components
-        .input
-        .placeholder
-        .normal
-        .with_alpha_factor(opacity);
-    let resolved = font_manager.resolve_text(current_text, text_request.clone());
-
-    let current_layout = composition.is_none().then(|| {
-        font_manager.measure_text_layout(
-            current_text,
-            text_request.clone(),
-            font_size,
-            line_height,
-            letter_spacing,
-        )
-    });
-    let prefix_width = measure_segment(
-        font_manager,
-        prefix_text,
-        text_request.clone(),
-        font_size,
-        line_height,
-        letter_spacing,
-    );
-    let preedit_width = measure_segment(
-        font_manager,
-        preedit_text,
-        text_request.clone(),
-        font_size,
-        line_height,
-        letter_spacing,
-    );
-    let full_text_width = current_layout
-        .as_ref()
-        .map(|layout| layout.width)
-        .unwrap_or_else(|| {
-            measure_segment(
-                font_manager,
-                current_text,
-                text_request.clone(),
-                font_size,
-                line_height,
-                letter_spacing,
-            )
-        });
-
-    let caret_boundary = composition
-        .as_ref()
-        .map(|composition| {
-            let visual_cursor = composition
-                .cursor
-                .map(|(_, end)| end.min(composition.text.len()))
-                .unwrap_or(composition.text.len());
-            prefix_width
-                + measure_segment(
-                    font_manager,
-                    &composition.text[..visual_cursor],
-                    text_request.clone(),
-                    font_size,
-                    line_height,
-                    letter_spacing,
-                )
-        })
-        .unwrap_or_else(|| {
-            current_layout
-                .as_ref()
-                .map(|layout| layout.x_for_index(state.cursor.min(current_text.len())))
-                .unwrap_or(0.0)
-        });
-    let caret_padding = if composition.is_none() && state.cursor >= current_text.len() {
-        CARET_END_GAP
-    } else {
-        0.0
-    };
-    let caret_end = caret_boundary + caret_padding + CARET_WIDTH;
-    let scrollable_width = display_width.max(caret_end + INPUT_CARET_EDGE_GAP);
-    let scroll_x = if composition.is_some() {
-        input_scroll_offset_for_caret(
-            inner,
-            display_width,
-            caret_boundary,
-            caret_end,
-            state.scroll_x.get(),
-        )
-    } else {
-        clamp_input_scroll_offset(inner, scrollable_width, state.scroll_x.get())
-    };
-    let viewport = input_text_viewport(
-        inner,
-        display_width,
-        display_height,
-        line_height,
-        scroll_x,
-        scrollable_width,
-    );
-    let content_frame = viewport.frame;
-
-    if composition.is_none() {
-        if let Some((selection_start, selection_end)) = state.selection_range() {
-            let selection_start = selection_start.min(current_text.len());
-            let selection_end = selection_end.min(current_text.len());
-            let selection_start_x = current_layout
-                .as_ref()
-                .map(|layout| layout.x_for_index(selection_start))
-                .unwrap_or(0.0);
-            let selection_end_x = current_layout
-                .as_ref()
-                .map(|layout| layout.x_for_index(selection_end))
-                .unwrap_or(selection_start_x);
-            let selection_x = content_frame.x + selection_start_x;
-            let selection_width = (selection_end_x - selection_start_x).max(0.0);
-            if selection_width > 0.0 {
-                scene.push_shape(RenderPrimitive {
-                    rect: Rect::new(
-                        selection_x,
-                        content_frame.y,
-                        selection_width,
-                        content_frame.height.max(Dp::new(line_height)),
-                    ),
-                    color: theme.components.input.selection.with_alpha_factor(opacity),
-                    corner_radius: 4.0,
-                    stroke_width: 0.0,
-                    clip_rect: input_clip_rect,
-                    clip_mask,
-                });
-            }
-        }
-    }
-
-    if composition.is_none() {
-        let resolved_weight = text.font_weight.unwrap_or(default_text_style.weight);
-        scene.push_text(TextPrimitive {
-            content: current_text.to_string(),
-            frame: Rect::new(
-                content_frame.x,
-                content_frame.y,
-                full_text_width,
-                content_frame.height,
-            ),
-            color: base_color,
-            force_color: false,
-            font_family: Some(resolved.primary_font),
-            font_size,
-            font_weight: resolved_weight,
-            line_height,
-            letter_spacing,
-            clip_rect: input_clip_rect,
-            clip_mask,
-        });
-    } else {
-        let mut cursor_x = content_frame.x;
-        if !prefix_text.is_empty() {
-            scene.push_text(TextPrimitive {
-                content: prefix_text.to_string(),
-                frame: Rect::new(
-                    cursor_x,
-                    content_frame.y,
-                    prefix_width,
-                    content_frame.height,
-                ),
-                color: base_color,
-                force_color: false,
-                font_family: Some(resolved.primary_font.clone()),
-                font_size,
-                font_weight: text.font_weight.unwrap_or(default_text_style.weight),
-                line_height,
-                letter_spacing,
-                clip_rect: input_clip_rect,
-                clip_mask,
-            });
-            cursor_x += prefix_width;
-        }
-
-        if !preedit_text.is_empty() {
-            scene.push_text(TextPrimitive {
-                content: preedit_text.to_string(),
-                frame: Rect::new(
-                    cursor_x,
-                    content_frame.y,
-                    preedit_width,
-                    content_frame.height,
-                ),
-                color: preedit_color,
-                force_color: false,
-                font_family: Some(resolved.primary_font.clone()),
-                font_size,
-                font_weight: text.font_weight.unwrap_or(default_text_style.weight),
-                line_height,
-                letter_spacing,
-                clip_rect: input_clip_rect,
-                clip_mask,
-            });
-            scene.push_overlay_shape(RenderPrimitive {
-                rect: Rect::new(
-                    cursor_x,
-                    (content_frame.y + content_frame.height - 1.0).max(content_frame.y),
-                    preedit_width.max(1.0),
-                    1.0,
-                ),
-                color: preedit_color,
-                corner_radius: 0.0,
-                stroke_width: 0.0,
-                clip_rect: input_clip_rect,
-                clip_mask,
-            });
-            cursor_x += preedit_width;
-        }
-
-        if !suffix_text.is_empty() {
-            let suffix_width = measure_segment(
-                font_manager,
-                suffix_text,
-                text_request.clone(),
-                font_size,
-                line_height,
-                letter_spacing,
-            );
-            scene.push_text(TextPrimitive {
-                content: suffix_text.to_string(),
-                frame: Rect::new(
-                    cursor_x,
-                    content_frame.y,
-                    suffix_width,
-                    content_frame.height,
-                ),
-                color: base_color,
-                force_color: false,
-                font_family: Some(resolved.primary_font),
-                font_size,
-                font_weight: text.font_weight.unwrap_or(default_text_style.weight),
-                line_height,
-                letter_spacing,
-                clip_rect: input_clip_rect,
-                clip_mask,
-            });
-        }
-    }
-
-    let caret_rect = Rect::new(
-        (content_frame.x + caret_boundary + caret_padding).max(inner.x),
-        content_frame.y,
-        CARET_WIDTH,
-        content_frame.height.max(Dp::new(line_height)),
-    );
-
-    let hide_caret = composition
-        .as_ref()
-        .map(|composition| composition.cursor.is_none())
-        .unwrap_or(false);
-    if show_caret && !hide_caret {
-        scene.push_overlay_shape(RenderPrimitive {
-            rect: caret_rect,
-            color: theme.components.input.cursor.with_alpha_factor(opacity),
-            corner_radius: 0.0,
-            stroke_width: 0.0,
-            clip_rect: input_clip_rect,
-            clip_mask,
-        });
-    }
-
-    Some(if composition.is_some() || full_text_width > 0.0 {
-        caret_rect
-    } else {
-        Rect::new(
-            inner.x + CARET_END_GAP,
-            content_frame.y,
-            CARET_WIDTH,
-            content_frame.height.max(Dp::new(line_height)),
-        )
-    })
-}
-
 fn measure_select_content(
     selected_label: Option<&str>,
     placeholder: &Text,
@@ -3794,7 +3063,7 @@ fn measure_select_content(
     let horizontal = units.resolve_dp(select_style.padding_x) * 2.0 + units.resolve_dp(dp(24.0));
     let vertical = units.resolve_dp(select_style.padding_y) * 2.0;
     (
-        INPUT_DEFAULT_WIDTH.max(text_size.0 + horizontal),
+        SELECT_DEFAULT_WIDTH.max(text_size.0 + horizontal),
         text_size
             .1
             .max(units.resolve_dp(select_style.min_height))
@@ -4446,23 +3715,6 @@ fn push_switch_primitives(
     });
 }
 
-fn measure_segment(
-    font_manager: &FontManager,
-    text: &str,
-    request: TextFontRequest<'_>,
-    font_size: f32,
-    line_height: f32,
-    letter_spacing: f32,
-) -> f32 {
-    if text.is_empty() {
-        0.0
-    } else {
-        font_manager
-            .measure_text_raw(text, request, font_size, line_height, letter_spacing)
-            .0
-    }
-}
-
 fn centered_text_frame(
     inner: Rect,
     measured_width: f32,
@@ -4540,11 +3792,11 @@ impl<VM> WidgetTree<VM> {
         active_scrollbar: Option<ScrollbarHandle>,
         scroll_offsets: &HashMap<WidgetId, Point>,
         viewport: Rect,
-        focused_input: Option<WidgetId>,
-        focused_input_state: Option<&InputEditState>,
+        _focused_input: Option<WidgetId>,
+        _focused_input_state: Option<&InputEditState>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&InputEditState>,
-        caret_visible: bool,
+        _caret_visible: bool,
     ) -> ComputedScene<VM> {
         self.compute_scene_with_widget_state(
             font_manager,
@@ -4556,11 +3808,11 @@ impl<VM> WidgetTree<VM> {
             &WidgetStateMap::default(),
             scroll_offsets,
             viewport,
-            focused_input,
-            focused_input_state,
+            _focused_input,
+            _focused_input_state,
             selected_text,
             selected_text_state,
-            caret_visible,
+            _caret_visible,
         )
     }
 
@@ -4575,11 +3827,11 @@ impl<VM> WidgetTree<VM> {
         widget_states: &WidgetStateMap,
         scroll_offsets: &HashMap<WidgetId, Point>,
         viewport: Rect,
-        focused_input: Option<WidgetId>,
-        focused_input_state: Option<&InputEditState>,
+        _focused_input: Option<WidgetId>,
+        _focused_input_state: Option<&InputEditState>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&InputEditState>,
-        caret_visible: bool,
+        _caret_visible: bool,
     ) -> ComputedScene<VM> {
         self.compute_scene_with_units_and_widget_state(
             font_manager,
@@ -4592,11 +3844,11 @@ impl<VM> WidgetTree<VM> {
             widget_states,
             scroll_offsets,
             viewport,
-            focused_input,
-            focused_input_state,
+            _focused_input,
+            _focused_input_state,
             selected_text,
             selected_text_state,
-            caret_visible,
+            _caret_visible,
         )
     }
 
@@ -4612,11 +3864,11 @@ impl<VM> WidgetTree<VM> {
         active_scrollbar: Option<ScrollbarHandle>,
         scroll_offsets: &HashMap<WidgetId, Point>,
         viewport: Rect,
-        focused_input: Option<WidgetId>,
-        focused_input_state: Option<&InputEditState>,
+        _focused_input: Option<WidgetId>,
+        _focused_input_state: Option<&InputEditState>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&InputEditState>,
-        caret_visible: bool,
+        _caret_visible: bool,
     ) -> ComputedScene<VM> {
         self.compute_scene_with_units_and_widget_state(
             font_manager,
@@ -4629,11 +3881,11 @@ impl<VM> WidgetTree<VM> {
             &WidgetStateMap::default(),
             scroll_offsets,
             viewport,
-            focused_input,
-            focused_input_state,
+            _focused_input,
+            _focused_input_state,
             selected_text,
             selected_text_state,
-            caret_visible,
+            _caret_visible,
         )
     }
 
@@ -4649,11 +3901,11 @@ impl<VM> WidgetTree<VM> {
         widget_states: &WidgetStateMap,
         scroll_offsets: &HashMap<WidgetId, Point>,
         viewport: Rect,
-        focused_input: Option<WidgetId>,
-        focused_input_state: Option<&InputEditState>,
+        _focused_input: Option<WidgetId>,
+        _focused_input_state: Option<&InputEditState>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&InputEditState>,
-        caret_visible: bool,
+        _caret_visible: bool,
     ) -> ComputedScene<VM> {
         let layout =
             self.build_scene_layout(font_manager, theme, media, animations, units, viewport);
@@ -4668,11 +3920,11 @@ impl<VM> WidgetTree<VM> {
             widget_states,
             scroll_offsets,
             viewport,
-            focused_input,
-            focused_input_state,
+            _focused_input,
+            _focused_input_state,
             selected_text,
             selected_text_state,
-            caret_visible,
+            _caret_visible,
         )
     }
 
@@ -4733,11 +3985,11 @@ impl<VM> WidgetTree<VM> {
         widget_states: &WidgetStateMap,
         scroll_offsets: &HashMap<WidgetId, Point>,
         viewport: Rect,
-        focused_input: Option<WidgetId>,
-        focused_input_state: Option<&InputEditState>,
+        _focused_input: Option<WidgetId>,
+        _focused_input_state: Option<&InputEditState>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&InputEditState>,
-        caret_visible: bool,
+        _caret_visible: bool,
     ) -> ComputedScene<VM> {
         let mut computed = ComputedScene::default();
         let mut context = CollectContext {
@@ -4745,11 +3997,8 @@ impl<VM> WidgetTree<VM> {
             font_manager,
             theme,
             media,
-            focused_input,
-            focused_input_state,
             selected_text,
             selected_text_state,
-            caret_visible,
             hovered_scrollbar,
             active_scrollbar,
             widget_states,
@@ -5083,10 +4332,6 @@ impl<VM> WidgetTree<VM> {
         )
     }
 
-    pub(crate) fn input_snapshot(&self, id: WidgetId) -> Option<InputSnapshot<VM>> {
-        self.root.resolve().input_snapshot(id)
-    }
-
     pub(crate) fn media_event_states(&self, media: &MediaManager) -> Vec<MediaEventState<VM>> {
         let mut states = Vec::new();
         self.root
@@ -5098,12 +4343,10 @@ impl<VM> WidgetTree<VM> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        centered_text_frame, input_text_viewport, resolved_text_metrics, SELECT_ARROW_ICON,
-    };
+    use super::{centered_text_frame, resolved_text_metrics, SELECT_ARROW_ICON};
     use std::collections::HashMap;
 
-    use crate::animation::{default_theme_transition, AnimationCoordinator, AnimationEngine};
+    use crate::animation::{AnimationCoordinator, AnimationEngine};
     use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
     use crate::foundation::color::Color;
     use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
@@ -5117,10 +4360,9 @@ mod tests {
         BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient, BackgroundRadialGradient,
     };
     use crate::ui::widget::{
-        Canvas, CanvasItem, CanvasPath, CanvasStroke, Checkbox, ClipMask, CompositionState,
-        Element, Image, Input, InputEditState, PathBuilder, Point, Radio, RadioGroup, RadioOption,
-        ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack, Switch, Text, WidgetStateMap,
-        WidgetTree,
+        Canvas, CanvasItem, CanvasPath, CanvasStroke, Checkbox, ClipMask, Element, Image,
+        InputEditState, PathBuilder, Point, Radio, RadioGroup, RadioOption, ScrollbarAxis,
+        ScrollbarHandle, Select, SelectOption, Stack, Switch, Text, WidgetStateMap, WidgetTree,
     };
     #[cfg(feature = "video")]
     use crate::video::backend::{
@@ -6350,51 +5592,9 @@ mod tests {
         assert!(hit.is_none());
     }
 
-    #[test]
-    fn input_and_media_traversal_use_current_children() {
-        let context = test_context();
-        let show_input = context.observable(true);
-        let input: Element<()> = Input::new(Text::new("hello")).into();
-        let input_id = input.id;
-        let placeholder: Element<()> = Text::new("placeholder").into();
-        let input_tree = WidgetTree::new(Stack::<()>::new().child(show_input.binding().map(
-            move |value| {
-                if value {
-                    vec![input.clone()]
-                } else {
-                    vec![placeholder.clone()]
-                }
-            },
-        )));
-
-        assert!(input_tree.input_snapshot(input_id).is_some());
-        show_input.set(false);
-        assert!(input_tree.input_snapshot(input_id).is_none());
-
-        let show_media = context.observable(true);
-        let image: Element<()> = Image::from_path("missing-test-image.png").into();
-        let image = image.on_loading(Command::new(|_: &mut ()| {}));
-        let media_placeholder: Element<()> = Text::new("no media").into();
-        let media_tree = WidgetTree::new(Stack::<()>::new().child(show_media.binding().map(
-            move |value| {
-                if value {
-                    vec![image.clone()]
-                } else {
-                    vec![media_placeholder.clone()]
-                }
-            },
-        )));
-        let media = test_media();
-
-        assert_eq!(media_tree.media_event_states(&media).len(), 1);
-        show_media.set(false);
-        assert_eq!(media_tree.media_event_states(&media).len(), 0);
-    }
-
     #[derive(Default)]
     struct ScopeChildVm {
         count: i32,
-        text: String,
         checked: bool,
         selected_key: String,
         selected_value: String,
@@ -7512,23 +6712,8 @@ mod tests {
     }
 
     #[test]
-    fn scoped_value_commands_cover_input_switch_canvas_and_media() {
-        let input: Element<ScopeChildVm> = Input::new(Text::new("initial"))
-            .on_change(ValueCommand::new(|vm: &mut ScopeChildVm, value| {
-                vm.text = value;
-            }))
-            .into();
-        let input_id = input.id;
-        let input_tree = WidgetTree::new(input.scope(scope_child));
-        let snapshot = input_tree.input_snapshot(input_id).expect("input snapshot");
-
+    fn scoped_value_commands_cover_switch_canvas_and_media() {
         let mut vm = ScopeRootVm::default();
-        snapshot
-            .on_change
-            .expect("input on_change")
-            .execute(&mut vm, "updated".to_string());
-        assert_eq!(vm.child.text, "updated");
-
         let switch: Element<ScopeChildVm> = Switch::new(false)
             .on_change(ValueCommand::new(|vm: &mut ScopeChildVm, value| {
                 vm.checked = value;
@@ -8389,33 +7574,6 @@ mod tests {
     }
 
     #[test]
-    fn disabled_input_is_not_focusable_or_snapshotted() {
-        let input: Element<()> = Input::new(Text::new("hello")).disable(true).into();
-        let input_id = input.id;
-        let tree = WidgetTree::new(input);
-
-        assert!(tree.input_snapshot(input_id).is_none());
-
-        let theme = Theme::default();
-        let font_manager = FontManager::new(&FontCatalog::default());
-        let media = test_media();
-        let mut animations = AnimationEngine::default();
-        let hit = tree.hit_test(
-            &font_manager,
-            &theme,
-            &media,
-            &mut animations,
-            None,
-            None,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 160.0, 40.0),
-            Some(Point::new(dp(10.0), dp(10.0))),
-            None,
-        );
-        assert!(matches!(hit, Some(super::HitInteraction::Disabled { .. })));
-    }
-
-    #[test]
     fn switch_renders_custom_track_and_thumb_colors() {
         let theme = Theme::default();
         let font_manager = FontManager::new(&FontCatalog::default());
@@ -8897,483 +8055,6 @@ mod tests {
             .any(|primitive| { primitive.color == theme.colors.selection.with_alpha_factor(1.0) }));
     }
 
-    #[test]
-    fn focused_input_renders_plain_text_as_single_primitive() {
-        let theme = Theme::default();
-        let font_manager = FontManager::new(&FontCatalog::default());
-        let media = test_media();
-        let mut animations = AnimationEngine::default();
-        let input: Element<()> = Input::new(Text::new("hello")).width(dp(160.0)).into();
-        let input_id = input.id;
-        let tree = WidgetTree::new(input);
-
-        let rendered = tree.render_output(
-            &font_manager,
-            &theme,
-            &media,
-            &mut animations,
-            None,
-            None,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 160.0, 40.0),
-            Some(input_id),
-            Some(&InputEditState {
-                cursor: 2,
-                anchor: 2,
-                composition: None,
-                scroll_x: Dp::ZERO,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            }),
-            None,
-            None,
-            true,
-        );
-
-        let texts: Vec<_> = rendered
-            .primitives
-            .texts
-            .iter()
-            .filter(|primitive| primitive.content == "hello")
-            .collect();
-        assert_eq!(texts.len(), 1);
-    }
-
-    #[test]
-    fn focused_input_composition_clamps_to_utf8_boundaries() {
-        let theme = Theme::default();
-        let font_manager = FontManager::new(&FontCatalog::default());
-        let media = test_media();
-        let mut animations = AnimationEngine::default();
-        let content = "输入框示例输入框示例输入框示例";
-        let input: Element<()> = Input::new(Text::new(content)).width(dp(160.0)).into();
-        let input_id = input.id;
-        let tree = WidgetTree::new(input);
-
-        let rendered = tree.render_output(
-            &font_manager,
-            &theme,
-            &media,
-            &mut animations,
-            None,
-            None,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 160.0, 40.0),
-            Some(input_id),
-            Some(&InputEditState {
-                cursor: 25,
-                anchor: 25,
-                composition: Some(CompositionState {
-                    replace_range: (25, 25),
-                    text: "示".to_string(),
-                    cursor: Some((1, 1)),
-                }),
-                scroll_x: Dp::ZERO,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            }),
-            None,
-            None,
-            true,
-        );
-
-        assert!(!rendered.primitives.texts.is_empty());
-    }
-
-    #[test]
-    fn focused_input_border_color_uses_theme_transition() {
-        let theme = Theme::default();
-        let font_manager = FontManager::new(&FontCatalog::default());
-        let media = test_media();
-        let mut animations = AnimationEngine::default();
-        let input: Element<()> = Input::new(Text::new("hello")).width(dp(160.0)).into();
-        let input_id = input.id;
-        let tree = WidgetTree::new(input);
-        let mut focused_states = WidgetStateMap::default();
-        let mut input_state = focused_states.get(input_id);
-        input_state.focused = true;
-        focused_states.set(input_id, input_state);
-
-        let unfocused = tree.render_output(
-            &font_manager,
-            &theme,
-            &media,
-            &mut animations,
-            None,
-            None,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 160.0, 40.0),
-            None,
-            None,
-            None,
-            None,
-            false,
-        );
-        let start_border = unfocused
-            .primitives
-            .shapes
-            .iter()
-            .find(|shape| shape.stroke_width > 0.0)
-            .expect("input should render a border")
-            .color;
-
-        let focused = tree.render_output_with_widget_state(
-            &font_manager,
-            &theme,
-            &media,
-            &mut animations,
-            None,
-            None,
-            &focused_states,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 160.0, 40.0),
-            Some(input_id),
-            Some(&InputEditState {
-                cursor: 5,
-                anchor: 5,
-                composition: None,
-                scroll_x: Dp::ZERO,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            }),
-            None,
-            None,
-            true,
-        );
-        let immediate_border = focused
-            .primitives
-            .shapes
-            .iter()
-            .find(|shape| shape.stroke_width > 0.0)
-            .expect("focused input should render a border")
-            .color;
-
-        std::thread::sleep(default_theme_transition().duration() / 2);
-        let mid = tree.render_output_with_widget_state(
-            &font_manager,
-            &theme,
-            &media,
-            &mut animations,
-            None,
-            None,
-            &focused_states,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 160.0, 40.0),
-            Some(input_id),
-            Some(&InputEditState {
-                cursor: 5,
-                anchor: 5,
-                composition: None,
-                scroll_x: Dp::ZERO,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            }),
-            None,
-            None,
-            true,
-        );
-        let mid_border = mid
-            .primitives
-            .shapes
-            .iter()
-            .find(|shape| shape.stroke_width > 0.0)
-            .expect("focused input should keep rendering a border")
-            .color;
-
-        std::thread::sleep(default_theme_transition().duration());
-        let settled = tree.render_output_with_widget_state(
-            &font_manager,
-            &theme,
-            &media,
-            &mut animations,
-            None,
-            None,
-            &focused_states,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 160.0, 40.0),
-            Some(input_id),
-            Some(&InputEditState {
-                cursor: 5,
-                anchor: 5,
-                composition: None,
-                scroll_x: Dp::ZERO,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            }),
-            None,
-            None,
-            true,
-        );
-        let settled_border = settled
-            .primitives
-            .shapes
-            .iter()
-            .find(|shape| shape.stroke_width > 0.0)
-            .expect("focused input should render a border after transition")
-            .color;
-
-        assert_eq!(start_border, theme.components.input.border.normal);
-        assert_eq!(immediate_border, start_border);
-        assert_ne!(mid_border, start_border);
-        assert_ne!(mid_border, theme.components.input.border.focused);
-        assert_eq!(settled_border, theme.components.input.border.focused);
-    }
-
-    #[test]
-    fn focused_input_colors_take_priority_over_pressed_and_hovered() {
-        let mut theme = Theme::default();
-        theme.components.input.background.focused = Color::hexa(0x102030FF);
-        theme.components.input.border.focused = Color::hexa(0x405060FF);
-        theme.components.input.text.focused = Color::hexa(0x708090FF);
-        theme.components.input.placeholder.focused = Color::hexa(0x90A0B0FF);
-
-        let font_manager = FontManager::new(&FontCatalog::default());
-        let media = test_media();
-        let input: Element<()> = Input::new(Text::new("hello")).width(dp(160.0)).into();
-        let input_id = input.id;
-        let tree = WidgetTree::new(input);
-        let mut state = WidgetStateMap::default();
-        state.set(
-            input_id,
-            crate::ui::theme::WidgetState {
-                hovered: true,
-                pressed: true,
-                focused: true,
-                ..Default::default()
-            },
-        );
-
-        let rendered = tree.render_output_with_widget_state(
-            &font_manager,
-            &theme,
-            &media,
-            &mut AnimationEngine::default(),
-            None,
-            None,
-            &state,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 160.0, 40.0),
-            Some(input_id),
-            Some(&InputEditState {
-                cursor: 5,
-                anchor: 5,
-                composition: None,
-                scroll_x: Dp::ZERO,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            }),
-            None,
-            None,
-            true,
-        );
-
-        assert!(rendered
-            .primitives
-            .shapes
-            .iter()
-            .any(|shape| shape.stroke_width == 0.0
-                && shape.color == theme.components.input.background.focused));
-        assert!(rendered
-            .primitives
-            .shapes
-            .iter()
-            .any(|shape| shape.stroke_width > 0.0
-                && shape.color == theme.components.input.border.focused));
-        assert!(rendered.primitives.texts.iter().any(
-            |text| text.content == "hello" && text.color == theme.components.input.text.focused
-        ));
-    }
-
-    #[test]
-    fn focused_input_placeholder_uses_focused_color() {
-        let mut theme = Theme::default();
-        theme.components.input.placeholder.focused = Color::hexa(0x90A0B0FF);
-
-        let font_manager = FontManager::new(&FontCatalog::default());
-        let media = test_media();
-        let input: Element<()> = Input::new(Text::new(""))
-            .placeholder_with_str("hint")
-            .into();
-        let input_id = input.id;
-        let tree = WidgetTree::new(input);
-        let mut state = WidgetStateMap::default();
-        state.set(
-            input_id,
-            crate::ui::theme::WidgetState {
-                hovered: true,
-                pressed: true,
-                focused: true,
-                ..Default::default()
-            },
-        );
-
-        let rendered = tree.render_output_with_widget_state(
-            &font_manager,
-            &theme,
-            &media,
-            &mut AnimationEngine::default(),
-            None,
-            None,
-            &state,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 160.0, 40.0),
-            Some(input_id),
-            Some(&InputEditState {
-                cursor: 0,
-                anchor: 0,
-                composition: None,
-                scroll_x: Dp::ZERO,
-                scroll_y: Dp::ZERO,
-                preferred_column_x: None,
-            }),
-            None,
-            None,
-            true,
-        );
-
-        assert!(rendered
-            .primitives
-            .texts
-            .iter()
-            .any(|text| text.content == "hint"
-                && text.color == theme.components.input.placeholder.focused));
-    }
-
-    #[test]
-    fn input_viewport_scrolls_long_content_to_keep_caret_visible() {
-        let inner = Rect::new(12.0, 8.0, 100.0, 24.0);
-        let viewport = input_text_viewport(inner, 220.0, 18.0, 18.0, 120.0, 220.0);
-
-        assert!(viewport.frame.x < inner.x);
-        assert!(190.0 >= (inner.x - viewport.frame.x).get());
-        assert!(193.0 <= (inner.x - viewport.frame.x + inner.width).get() + 0.1);
-    }
-
-    #[test]
-    fn input_defaults_to_zero_min_width_inside_flex_layout() {
-        let theme = Theme::default();
-        let font_manager = FontManager::new(&FontCatalog::default());
-        let media = test_media();
-        let mut animations = AnimationEngine::default();
-
-        let tree = WidgetTree::new(
-            crate::ui::widget::Flex::<()>::new(crate::ui::layout::Axis::Horizontal)
-                .width(dp(220.0))
-                .gap(dp(10.0))
-                .child(Input::new(Text::new(
-                    "https://example.com/a/very/long/path/that/should/not/push/the/button/outside",
-                ))
-                .grow(1.0))
-                .child(crate::ui::widget::Button::new(Text::new("LoadSource"))),
-        );
-
-        let computed = tree.compute_scene(
-            &font_manager,
-            &theme,
-            &media,
-            &mut animations,
-            None,
-            None,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 220.0, 40.0),
-            None,
-            None,
-            None,
-            None,
-            false,
-        );
-
-        let mut regions = computed.hit_regions.iter();
-        let input_region = regions
-            .find(|region| matches!(region.interaction, super::HitInteraction::FocusInput { .. }))
-            .expect("input hit region should exist");
-        let button_region = computed
-            .hit_regions
-            .iter()
-            .find(|region| matches!(region.interaction, super::HitInteraction::Widget { .. }))
-            .expect("button hit region should exist");
-
-        assert!(button_region.rect.right() <= Rect::new(0.0, 0.0, 220.0, 40.0).right());
-        assert!(input_region.rect.right() <= button_region.rect.x);
-    }
-
-    #[test]
-    fn input_text_is_clipped_to_input_bounds_inside_flex_row() {
-        let theme = Theme::default();
-        let font_manager = FontManager::new(&FontCatalog::default());
-        let media = test_media();
-        let mut animations = AnimationEngine::default();
-
-        let tree = WidgetTree::new(
-            crate::ui::widget::Flex::<()>::new(crate::ui::layout::Axis::Horizontal)
-                .width(dp(220.0))
-                .gap(dp(10.0))
-                .child(Input::new(Text::new(
-                    "https://example.com/a/very/long/path/that/should/be/clipped/inside/the/input",
-                ))
-                .grow(1.0))
-                .child(
-                    crate::ui::widget::Button::new(Text::new("LoadSource"))
-                        .background(crate::foundation::color::Color::TRANSPARENT),
-                ),
-        );
-
-        let computed = tree.compute_scene(
-            &font_manager,
-            &theme,
-            &media,
-            &mut animations,
-            None,
-            None,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 220.0, 40.0),
-            None,
-            None,
-            None,
-            None,
-            false,
-        );
-        let rendered = tree.render_output(
-            &font_manager,
-            &theme,
-            &media,
-            &mut animations,
-            None,
-            None,
-            &HashMap::new(),
-            Rect::new(0.0, 0.0, 220.0, 40.0),
-            None,
-            None,
-            None,
-            None,
-            false,
-        );
-
-        let input_region = computed
-            .hit_regions
-            .iter()
-            .find(|region| matches!(region.interaction, super::HitInteraction::FocusInput { .. }))
-            .expect("input hit region should exist");
-        let button_region = computed
-            .hit_regions
-            .iter()
-            .find(|region| matches!(region.interaction, super::HitInteraction::Widget { .. }))
-            .expect("button hit region should exist");
-        let input_clip = match &input_region.interaction {
-            super::HitInteraction::FocusInput { frame, padding, .. } => frame.inset(*padding),
-            _ => panic!("expected focus input interaction"),
-        };
-        let input_text = rendered
-            .primitives
-            .texts
-            .iter()
-            .find(|primitive| primitive.content.contains("https://example.com"))
-            .expect("input text primitive should exist");
-
-        assert_eq!(input_text.clip_rect, Some(input_clip));
-        assert!(input_text.frame.right() > input_clip.right());
-        assert!(input_clip.right() <= button_region.rect.x);
-    }
 }
 
 pub enum WidgetCommand<VM> {
