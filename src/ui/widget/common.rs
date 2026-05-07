@@ -23,6 +23,7 @@ use super::canvas::{
     CanvasDragEvent, CanvasItem, CanvasItemId, CanvasMouseEvent, CanvasWheelEvent,
 };
 use super::image::Image;
+use super::style::{InputStyle as WidgetInputStyle, TextareaStyle as WidgetTextareaStyle};
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle;
 use super::style::{
@@ -1035,6 +1036,20 @@ pub(crate) enum WidgetKind<VM> {
         disabled: Value<bool>,
         style: Option<StyleResolver<WidgetSelectStyle>>,
     },
+    Input {
+        value: Value<String>,
+        placeholder: Value<String>,
+        on_change: Option<ValueCommand<VM, String>>,
+        disabled: Value<bool>,
+        style: Option<StyleResolver<WidgetInputStyle>>,
+    },
+    Textarea {
+        value: Value<String>,
+        placeholder: Value<String>,
+        on_change: Option<ValueCommand<VM, String>>,
+        disabled: Value<bool>,
+        style: Option<StyleResolver<WidgetTextareaStyle>>,
+    },
 }
 
 pub(crate) struct SelectOptionState<VM> {
@@ -1166,6 +1181,32 @@ impl<VM> Clone for WidgetKind<VM> {
                 disabled: disabled.clone(),
                 style: style.clone(),
             },
+            Self::Input {
+                value,
+                placeholder,
+                on_change,
+                disabled,
+                style,
+            } => Self::Input {
+                value: value.clone(),
+                placeholder: placeholder.clone(),
+                on_change: on_change.clone(),
+                disabled: disabled.clone(),
+                style: style.clone(),
+            },
+            Self::Textarea {
+                value,
+                placeholder,
+                on_change,
+                disabled,
+                style,
+            } => Self::Textarea {
+                value: value.clone(),
+                placeholder: placeholder.clone(),
+                on_change: on_change.clone(),
+                disabled: disabled.clone(),
+                style: style.clone(),
+            },
         }
     }
 }
@@ -1197,6 +1238,12 @@ pub(crate) enum MeasureContext {
         selected_label: Option<String>,
         placeholder: Value<String>,
         style: crate::ui::widget::SelectStyle,
+    },
+    Input {
+        value: String,
+        placeholder: String,
+        style: crate::ui::widget::InputStyle,
+        multiline: bool,
     },
 }
 
@@ -1246,6 +1293,17 @@ pub(crate) enum HitInteraction<VM> {
         interactions: InteractionHandlers<VM>,
         on_open_change: Option<ValueCommand<VM, bool>>,
         is_open: bool,
+    },
+    TextInput {
+        id: WidgetId,
+        interactions: InteractionHandlers<VM>,
+        value: String,
+        placeholder: String,
+        on_change: Option<ValueCommand<VM, String>>,
+        multiline: bool,
+        frame: Rect,
+        padding: Insets,
+        text_style: Text,
     },
     SelectOption {
         id: WidgetId,
@@ -1336,6 +1394,27 @@ impl<VM> Clone for HitInteraction<VM> {
                 on_open_change: on_open_change.clone(),
                 is_open: *is_open,
             },
+            Self::TextInput {
+                id,
+                interactions,
+                value,
+                placeholder,
+                on_change,
+                multiline,
+                frame,
+                padding,
+                text_style,
+            } => Self::TextInput {
+                id: *id,
+                interactions: interactions.clone(),
+                value: value.clone(),
+                placeholder: placeholder.clone(),
+                on_change: on_change.clone(),
+                multiline: *multiline,
+                frame: *frame,
+                padding: *padding,
+                text_style: text_style.clone(),
+            },
             Self::SelectOption {
                 id,
                 option_index,
@@ -1377,7 +1456,8 @@ impl<VM> HitInteraction<VM> {
             | Self::Switch { id, .. }
             | Self::Checkbox { id, .. }
             | Self::Radio { id, .. }
-            | Self::SelectTrigger { id, .. } => HitTargetId::Widget(*id),
+            | Self::SelectTrigger { id, .. }
+            | Self::TextInput { id, .. } => HitTargetId::Widget(*id),
             Self::SelectOption {
                 id, option_index, ..
             } => HitTargetId::SelectOption {

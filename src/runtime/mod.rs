@@ -41,7 +41,8 @@ use crate::platform::keyboard::ModifiersState;
 #[cfg(all(target_env = "ohos", feature = "ohos"))]
 use crate::platform::ohos::{OhosApp, WindowExtOhos};
 use crate::platform::window::{
-    ImeRequest, ResizeDirection, Theme as WindowTheme, WindowAttributes, WindowId,
+    ImeCapabilities, ImeEnableRequest, ImeRequest, ImeSurroundingText, ResizeDirection,
+    Theme as WindowTheme, WindowAttributes, WindowId,
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::{FontManager, TextFontRequest};
@@ -710,6 +711,24 @@ struct ClipboardService {
 }
 
 impl ClipboardService {
+    fn get_text(&mut self) -> Option<String> {
+        #[cfg(any(
+            target_os = "windows",
+            target_os = "macos",
+            all(target_os = "linux", not(target_env = "ohos"))
+        ))]
+        {
+            if self.inner.is_none() {
+                self.inner = arboard::Clipboard::new().ok();
+            }
+            if let Some(clipboard) = self.inner.as_mut() {
+                return clipboard.get_text().ok();
+            }
+        }
+
+        None
+    }
+
     fn set_text(&mut self, _text: String) {
         #[cfg(any(
             target_os = "windows",
@@ -728,6 +747,74 @@ impl ClipboardService {
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    fn focused_text_input_id(&mut self) -> Option<WidgetId> {
+        let focused = self.focused_widget_id()?;
+        let computed = self.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .find_map(|region| match &region.interaction {
+                crate::ui::widget::HitInteraction::TextInput { id, .. } if *id == focused => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+    }
+
+    fn ime_request_data_for_text_input(&mut self) -> Option<crate::platform::window::ImeRequestData> {
+        let id = self.focused_text_input_id()?;
+        let region = {
+            let computed = self.computed_scene();
+            let ime_cursor_area = computed.ime_cursor_area;
+            computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .find_map(|region| match &region.interaction {
+                crate::ui::widget::HitInteraction::TextInput {
+                    id: hit_id,
+                    value,
+                    ..
+                } if *hit_id == id => Some((ime_cursor_area, value.clone())),
+                _ => None,
+            })?
+        };
+        let state = self
+            .text_edit_state(id)
+            .cloned()
+            .unwrap_or_else(|| TextEditState::caret_at(&region.1));
+        let surrounding = ImeSurroundingText::new(region.1, state.cursor, state.anchor).ok();
+        let mut data = crate::platform::window::ImeRequestData::default();
+        if let Some(rect) = region.0 {
+            data = Self::ime_cursor_request_data(rect, self.unit_context());
+        }
+        if let Some(surrounding) = surrounding {
+            data = data.with_surrounding_text(surrounding);
+        }
+        Some(data)
+    }
+
+    fn sync_ime_state(&mut self) {
+        if let Some(request_data) = self.ime_request_data_for_text_input() {
+            let capabilities = ImeCapabilities::new()
+                .with_cursor_area()
+                .with_surrounding_text();
+            if let Some(enable) = ImeEnableRequest::new(capabilities, request_data.clone()) {
+                if let Some(window) = self.window.as_ref() {
+                    let _ = window.request_ime_update(ImeRequest::Enable(enable));
+                }
+            }
+            if let Some(window) = self.window.as_ref() {
+                let _ = window.request_ime_update(ImeRequest::Update(request_data));
+            }
+        } else {
+            if let Some(window) = self.window.as_ref() {
+                let _ = window.request_ime_update(ImeRequest::Disable);
+            }
+        }
+    }
+
     fn new(
         window_key: String,
         window_instance_id: u64,
@@ -1035,7 +1122,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn computed_scene(&mut self) -> &ComputedScene<VM> {
         let viewport = self.viewport_rect();
         let units = self.unit_context();
-        let caret_visible = false;
+        let focused_input = self.focused_widget_id();
+        let focused_text_state = focused_input.and_then(|id| self.text_edit_state(id)).cloned();
+        let caret_visible = focused_text_state.is_some();
         let active_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
         let selected_text_state = self
             .selected_text
@@ -1082,8 +1171,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 &self.select_open_states,
                                 &self.scroll_states,
                                 viewport,
-                                None,
-                                None,
+                                focused_input,
+                                focused_text_state.as_ref(),
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 caret_visible,
@@ -1112,8 +1201,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             &self.select_open_states,
                             &self.scroll_states,
                             viewport,
-                            None,
-                            None,
+                            focused_input,
+                            focused_text_state.as_ref(),
                             self.selected_text,
                             selected_text_state.as_ref(),
                             caret_visible,

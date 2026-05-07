@@ -26,6 +26,7 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 3. `animation_showcase`
 4. `multi_window`
 5. `demo`
+6. `text_area`
 
 ## 桌面示例说明
 
@@ -145,9 +146,14 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 综合展示示例，当前覆盖：
 
 - `Button` / `Switch` / `Checkbox` / `Radio` / `Select`
+- `Input` / `Textarea`
 - `CommandContext::notifications()`
 - `Image`
 - `Canvas`
+
+### `text_area`
+
+`Textarea` 专项示例。启动时读取自身 `src/main.rs` 到受控文本状态中，界面里可自由编辑，但不会保存修改到磁盘。
 
 ## 平台示例
 

@@ -20,11 +20,11 @@ impl<VM> WidgetTree<VM> {
         active_scrollbar: Option<ScrollbarHandle>,
         scroll_offsets: &HashMap<WidgetId, Point>,
         viewport: Rect,
-        _focused_input: Option<WidgetId>,
-        _focused_text_state: Option<&TextEditState>,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
-        _caret_visible: bool,
+        caret_visible: bool,
     ) -> ComputedScene<VM> {
         self.compute_scene_with_widget_state(
             font_manager,
@@ -37,11 +37,11 @@ impl<VM> WidgetTree<VM> {
             &HashMap::new(),
             scroll_offsets,
             viewport,
-            _focused_input,
-            _focused_text_state,
+            focused_input,
+            focused_text_state,
             selected_text,
             selected_text_state,
-            _caret_visible,
+            caret_visible,
         )
     }
 
@@ -57,11 +57,11 @@ impl<VM> WidgetTree<VM> {
         select_open_states: &HashMap<WidgetId, bool>,
         scroll_offsets: &HashMap<WidgetId, Point>,
         viewport: Rect,
-        _focused_input: Option<WidgetId>,
-        _focused_text_state: Option<&TextEditState>,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
-        _caret_visible: bool,
+        caret_visible: bool,
     ) -> ComputedScene<VM> {
         self.compute_scene_with_units_and_widget_state(
             font_manager,
@@ -75,11 +75,11 @@ impl<VM> WidgetTree<VM> {
             select_open_states,
             scroll_offsets,
             viewport,
-            _focused_input,
-            _focused_text_state,
+            focused_input,
+            focused_text_state,
             selected_text,
             selected_text_state,
-            _caret_visible,
+            caret_visible,
         )
     }
 
@@ -95,11 +95,11 @@ impl<VM> WidgetTree<VM> {
         active_scrollbar: Option<ScrollbarHandle>,
         scroll_offsets: &HashMap<WidgetId, Point>,
         viewport: Rect,
-        _focused_input: Option<WidgetId>,
-        _focused_text_state: Option<&TextEditState>,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
-        _caret_visible: bool,
+        caret_visible: bool,
     ) -> ComputedScene<VM> {
         self.compute_scene_with_units_and_widget_state(
             font_manager,
@@ -113,11 +113,11 @@ impl<VM> WidgetTree<VM> {
             &HashMap::new(),
             scroll_offsets,
             viewport,
-            _focused_input,
-            _focused_text_state,
+            focused_input,
+            focused_text_state,
             selected_text,
             selected_text_state,
-            _caret_visible,
+            caret_visible,
         )
     }
 
@@ -134,11 +134,11 @@ impl<VM> WidgetTree<VM> {
         select_open_states: &HashMap<WidgetId, bool>,
         scroll_offsets: &HashMap<WidgetId, Point>,
         viewport: Rect,
-        _focused_input: Option<WidgetId>,
-        _focused_text_state: Option<&TextEditState>,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
-        _caret_visible: bool,
+        caret_visible: bool,
     ) -> ComputedScene<VM> {
         let layout =
             self.build_scene_layout(font_manager, theme, media, animations, units, viewport);
@@ -154,11 +154,11 @@ impl<VM> WidgetTree<VM> {
             select_open_states,
             scroll_offsets,
             viewport,
-            _focused_input,
-            _focused_text_state,
+            focused_input,
+            focused_text_state,
             selected_text,
             selected_text_state,
-            _caret_visible,
+            caret_visible,
         )
     }
 
@@ -220,11 +220,11 @@ impl<VM> WidgetTree<VM> {
         select_open_states: &HashMap<WidgetId, bool>,
         scroll_offsets: &HashMap<WidgetId, Point>,
         viewport: Rect,
-        _focused_input: Option<WidgetId>,
-        _focused_text_state: Option<&TextEditState>,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
-        _caret_visible: bool,
+        caret_visible: bool,
     ) -> ComputedScene<VM> {
         let mut computed = ComputedScene::default();
         let mut context = CollectContext {
@@ -232,6 +232,9 @@ impl<VM> WidgetTree<VM> {
             font_manager,
             theme,
             media,
+            focused_input,
+            focused_text_state,
+            caret_visible,
             selected_text,
             selected_text_state,
             hovered_scrollbar,

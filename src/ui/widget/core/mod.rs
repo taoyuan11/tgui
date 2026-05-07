@@ -41,7 +41,8 @@ use super::common::{
 use super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::style::{
     ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
-    RadioStyle as WidgetRadioStyle, SelectStyle as WidgetSelectStyle,
+    InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
+    SelectStyle as WidgetSelectStyle, TextareaStyle as WidgetTextareaStyle,
     SwitchStyle as WidgetSwitchStyle,
 };
 use super::text::Text;
@@ -166,6 +167,20 @@ enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         style: WidgetSelectStyle,
     },
+    Input {
+        value: Value<String>,
+        placeholder: Value<String>,
+        on_change: Option<ValueCommand<VM, String>>,
+        disabled: Value<bool>,
+        style: WidgetInputStyle,
+    },
+    Textarea {
+        value: Value<String>,
+        placeholder: Value<String>,
+        on_change: Option<ValueCommand<VM, String>>,
+        disabled: Value<bool>,
+        style: WidgetTextareaStyle,
+    },
 }
 
 struct CollectContext<'a, 'b> {
@@ -173,6 +188,9 @@ struct CollectContext<'a, 'b> {
     font_manager: &'a FontManager,
     theme: &'a Theme,
     media: &'a MediaManager,
+    focused_input: Option<WidgetId>,
+    focused_text_state: Option<&'a TextEditState>,
+    caret_visible: bool,
     selected_text: Option<WidgetId>,
     selected_text_state: Option<&'a TextEditState>,
     hovered_scrollbar: Option<ScrollbarHandle>,

@@ -4,13 +4,13 @@ use std::time::Instant;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::platform::cursor::{Cursor, CursorIcon};
 use crate::platform::dpi::{PhysicalPosition, PhysicalSize};
-use crate::platform::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
-use crate::platform::keyboard::{KeyCode, PhysicalKey};
+use crate::platform::event::{ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
+use crate::platform::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 use crate::platform::window::ImeRequestData;
 use crate::ui::unit::{Dp, UnitContext};
 use crate::ui::widget::{
     CanvasItemInteractionHandlers, CanvasMouseButton, HitInteraction, InteractionHandlers, Point,
-    Rect, ScrollRegion, ScrollbarAxis, ScrollbarHandle, Text, WidgetId, WidgetTree,
+    Rect, ScrollRegion, ScrollbarAxis, ScrollbarHandle, Text, TextEditState, WidgetId, WidgetTree,
 };
 
 use super::{
@@ -23,6 +23,320 @@ use crate::platform::backend::event_loop::ActiveEventLoop;
 use crate::rendering::renderer::RenderStatus;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    fn text_input_region(
+        &mut self,
+        widget_id: WidgetId,
+    ) -> Option<(String, bool, Option<ValueCommand<VM, String>>)> {
+        let computed = self.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    id,
+                    value,
+                    multiline,
+                    on_change,
+                    ..
+                } if *id == widget_id => Some((value.clone(), *multiline, on_change.clone())),
+                _ => None,
+            })
+    }
+
+    fn commit_text_input_value(&mut self, widget_id: WidgetId, next_value: String) -> bool {
+        let Some((current, _multiline, on_change)) = self.text_input_region(widget_id) else {
+            return false;
+        };
+        if current == next_value {
+            return false;
+        }
+        if let Some(command) = on_change {
+            self.execute_value_command(&command, next_value);
+            return true;
+        }
+        false
+    }
+
+    fn replace_text_range(text: &str, start: usize, end: usize, replacement: &str) -> String {
+        let mut next = String::with_capacity(text.len() + replacement.len());
+        next.push_str(&text[..start]);
+        next.push_str(replacement);
+        next.push_str(&text[end..]);
+        next
+    }
+
+    fn previous_char_boundary(text: &str, index: usize) -> usize {
+        if index == 0 {
+            return 0;
+        }
+        let mut current = index.min(text.len()) - 1;
+        while current > 0 && !text.is_char_boundary(current) {
+            current -= 1;
+        }
+        current
+    }
+
+    fn next_char_boundary(text: &str, index: usize) -> usize {
+        let mut current = index.min(text.len());
+        if current >= text.len() {
+            return text.len();
+        }
+        current += 1;
+        while current < text.len() && !text.is_char_boundary(current) {
+            current += 1;
+        }
+        current
+    }
+
+    fn edit_focused_text_input(
+        &mut self,
+        edit: impl FnOnce(&str, &TextEditState) -> Option<(String, TextEditState)>,
+    ) -> bool {
+        let Some(widget_id) = self.focused_text_input_id() else {
+            return false;
+        };
+        let Some((value, _, _)) = self.text_input_region(widget_id) else {
+            return false;
+        };
+        let state = self
+            .text_edit_state(widget_id)
+            .cloned()
+            .unwrap_or_else(|| TextEditState::caret_at(&value))
+            .clamped_to(&value);
+        let Some((next_value, next_state)) = edit(&value, &state) else {
+            return false;
+        };
+        let changed = self.commit_text_input_value(widget_id, next_value.clone());
+        self.text_edit_states.insert(widget_id, next_state.clamped_to(&next_value));
+        self.invalidate_scene();
+        self.sync_ime_state();
+        changed
+    }
+
+    fn insert_text_at_focused_input(&mut self, inserted: &str) -> bool {
+        if inserted.is_empty() {
+            return false;
+        }
+        self.edit_focused_text_input(|value: &str, state: &TextEditState| {
+            let (start, end) = state
+                .selection_range()
+                .unwrap_or((state.cursor, state.cursor));
+            let next_value = Self::replace_text_range(value, start, end, inserted);
+            let cursor = start + inserted.len();
+            Some((
+                next_value,
+                TextEditState {
+                    cursor,
+                    anchor: cursor,
+                    composition: None,
+                    scroll_x: state.scroll_x,
+                    scroll_y: state.scroll_y,
+                    preferred_column_x: None,
+                },
+            ))
+        })
+    }
+
+    fn delete_backward_at_focused_input(&mut self) -> bool {
+        self.edit_focused_text_input(|value: &str, state: &TextEditState| {
+            let (start, end) = if let Some(range) = state.selection_range() {
+                range
+            } else if state.cursor > 0 {
+                (Self::previous_char_boundary(value, state.cursor), state.cursor)
+            } else {
+                return None;
+            };
+            let next_value = Self::replace_text_range(value, start, end, "");
+            Some((
+                next_value,
+                TextEditState {
+                    cursor: start,
+                    anchor: start,
+                    composition: None,
+                    scroll_x: state.scroll_x,
+                    scroll_y: state.scroll_y,
+                    preferred_column_x: None,
+                },
+            ))
+        })
+    }
+
+    fn delete_forward_at_focused_input(&mut self) -> bool {
+        self.edit_focused_text_input(|value: &str, state: &TextEditState| {
+            let (start, end) = if let Some(range) = state.selection_range() {
+                range
+            } else if state.cursor < value.len() {
+                (state.cursor, Self::next_char_boundary(value, state.cursor))
+            } else {
+                return None;
+            };
+            let next_value = Self::replace_text_range(value, start, end, "");
+            Some((
+                next_value,
+                TextEditState {
+                    cursor: start,
+                    anchor: start,
+                    composition: None,
+                    scroll_x: state.scroll_x,
+                    scroll_y: state.scroll_y,
+                    preferred_column_x: None,
+                },
+            ))
+        })
+    }
+
+    fn move_focused_input_cursor(
+        &mut self,
+        next_index: impl FnOnce(&str, &TextEditState) -> usize,
+        extend_selection: bool,
+    ) -> bool {
+        let Some(widget_id) = self.focused_text_input_id() else {
+            return false;
+        };
+        let Some((value, _, _)) = self.text_input_region(widget_id) else {
+            return false;
+        };
+        let state = self
+            .text_edit_state(widget_id)
+            .cloned()
+            .unwrap_or_else(|| TextEditState::caret_at(&value))
+            .clamped_to(&value);
+        let cursor = next_index(&value, &state);
+        let anchor = if extend_selection { state.anchor } else { cursor };
+        self.text_edit_states.insert(
+            widget_id,
+            TextEditState {
+                cursor,
+                anchor,
+                composition: None,
+                scroll_x: state.scroll_x,
+                scroll_y: state.scroll_y,
+                preferred_column_x: None,
+            },
+        );
+        self.invalidate_scene();
+        self.sync_ime_state();
+        true
+    }
+
+    fn select_all_focused_input(&mut self) -> bool {
+        let Some(widget_id) = self.focused_text_input_id() else {
+            return false;
+        };
+        let Some((value, _, _)) = self.text_input_region(widget_id) else {
+            return false;
+        };
+        self.text_edit_states.insert(
+            widget_id,
+            TextEditState {
+                cursor: value.len(),
+                anchor: 0,
+                composition: None,
+                scroll_x: Dp::ZERO,
+                scroll_y: Dp::ZERO,
+                preferred_column_x: None,
+            },
+        );
+        self.selected_text = Some(widget_id);
+        self.invalidate_scene();
+        self.sync_ime_state();
+        true
+    }
+
+    fn paste_into_focused_input(&mut self) -> bool {
+        let Some(text) = self.clipboard.get_text() else {
+            return false;
+        };
+        self.insert_text_at_focused_input(&text)
+    }
+
+    fn cut_selected_text_from_input(&mut self) -> bool {
+        let Some(selected) = self.selected_text_for_copy() else {
+            return false;
+        };
+        self.clipboard.set_text(selected);
+        self.delete_backward_at_focused_input()
+    }
+
+    fn update_focused_input_composition(
+        &mut self,
+        text: String,
+        cursor: Option<(usize, usize)>,
+    ) -> bool {
+        let Some(widget_id) = self.focused_text_input_id() else {
+            return false;
+        };
+        let Some((value, _, _)) = self.text_input_region(widget_id) else {
+            return false;
+        };
+        let changed = self.update_text_edit_state(widget_id, &value, |state| {
+            let replace_range = state.selection_range().unwrap_or((state.cursor, state.cursor));
+            state.composition = if text.is_empty() {
+                None
+            } else {
+                Some(crate::ui::widget::CompositionState {
+                    replace_range,
+                    text,
+                    cursor,
+                })
+            };
+        });
+        if changed {
+            self.sync_ime_state();
+        }
+        changed
+    }
+
+    fn clear_focused_input_composition(&mut self) -> bool {
+        let Some(widget_id) = self.focused_text_input_id() else {
+            return false;
+        };
+        let Some((value, _, _)) = self.text_input_region(widget_id) else {
+            return false;
+        };
+        self.update_text_edit_state(widget_id, &value, |state| {
+            state.composition = None;
+        })
+    }
+
+    fn handle_ime_event(&mut self, event: &Ime) -> bool {
+        match event {
+            Ime::Enabled => {
+                self.sync_ime_state();
+                false
+            }
+            Ime::Preedit(text, cursor) => self.update_focused_input_composition(text.clone(), *cursor),
+            Ime::Commit(text) => {
+                let _ = self.clear_focused_input_composition();
+                self.insert_text_at_focused_input(text)
+            }
+            Ime::DeleteSurrounding {
+                before_bytes,
+                after_bytes,
+            } => self.edit_focused_text_input(|value: &str, state: &TextEditState| {
+                let start = state.cursor.saturating_sub(*before_bytes);
+                let end = (state.cursor + *after_bytes).min(value.len());
+                if start >= end {
+                    return None;
+                }
+                let next_value = Self::replace_text_range(value, start, end, "");
+                Some((
+                    next_value,
+                    TextEditState {
+                        cursor: start,
+                        anchor: start,
+                        composition: None,
+                        scroll_x: state.scroll_x,
+                        scroll_y: state.scroll_y,
+                        preferred_column_x: None,
+                    },
+                ))
+            }),
+            Ime::Disabled => self.clear_focused_input_composition(),
+        }
+    }
+
     pub(super) fn flush_pending_click_if_due(&mut self, now: Instant) {
         let should_flush = self
             .pending_click
@@ -190,6 +504,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 | HitInteraction::Radio {
                     id, interactions, ..
                 }
+                | HitInteraction::TextInput {
+                    id, interactions, ..
+                }
                 | HitInteraction::SelectTrigger {
                     id, interactions, ..
                 } => Some(FocusedWidget {
@@ -252,8 +569,83 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             {
                 self.advance_focus(self.modifiers.shift_key())
             }
+            PhysicalKey::Code(KeyCode::Backspace) => self.delete_backward_at_focused_input(),
+            PhysicalKey::Code(KeyCode::Delete) => self.delete_forward_at_focused_input(),
+            PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                let extend = self.modifiers.shift_key();
+                self.move_focused_input_cursor(
+                |value: &str, state: &TextEditState| {
+                    if let Some((start, _)) = state.selection_range() {
+                        if extend {
+                            Self::previous_char_boundary(value, state.cursor)
+                        } else {
+                            start
+                        }
+                    } else {
+                        Self::previous_char_boundary(value, state.cursor)
+                    }
+                },
+                extend,
+            )
+            }
+            PhysicalKey::Code(KeyCode::ArrowRight) => {
+                let extend = self.modifiers.shift_key();
+                self.move_focused_input_cursor(
+                |value: &str, state: &TextEditState| {
+                    if let Some((_, end)) = state.selection_range() {
+                        if extend {
+                            Self::next_char_boundary(value, state.cursor)
+                        } else {
+                            end
+                        }
+                    } else {
+                        Self::next_char_boundary(value, state.cursor)
+                    }
+                },
+                extend,
+            )
+            }
+            PhysicalKey::Code(KeyCode::Home) => {
+                self.move_focused_input_cursor(|_, _| 0, self.modifiers.shift_key())
+            }
+            PhysicalKey::Code(KeyCode::End) => self.move_focused_input_cursor(
+                |value: &str, _state: &TextEditState| value.len(),
+                self.modifiers.shift_key(),
+            ),
+            PhysicalKey::Code(KeyCode::KeyA) if is_primary_shortcut_modifier(self.modifiers) => {
+                self.select_all_focused_input()
+            }
             PhysicalKey::Code(KeyCode::KeyC) if is_primary_shortcut_modifier(self.modifiers) => {
                 self.copy_selected_text_to_clipboard()
+            }
+            PhysicalKey::Code(KeyCode::KeyV) if is_primary_shortcut_modifier(self.modifiers) => {
+                self.paste_into_focused_input()
+            }
+            PhysicalKey::Code(KeyCode::KeyX) if is_primary_shortcut_modifier(self.modifiers) => {
+                self.cut_selected_text_from_input()
+            }
+            _ if !is_primary_shortcut_modifier(self.modifiers)
+                && !self.modifiers.alt_key()
+                && self.focused_text_input_id().is_some() =>
+            {
+                match &event.logical_key {
+                    Key::Named(NamedKey::Enter) => {
+                        let Some(id) = self.focused_text_input_id() else {
+                            return false;
+                        };
+                        let Some((_, multiline, _)) = self.text_input_region(id) else {
+                            return false;
+                        };
+                        multiline && self.insert_text_at_focused_input("\n")
+                    }
+                    _ => event
+                        .text
+                        .as_ref()
+                        .map(|text| text.as_str())
+                        .filter(|text| !text.is_empty() && *text != "\r" && *text != "\u{8}")
+                        .map(|text| self.insert_text_at_focused_input(text))
+                        .unwrap_or(false),
+                }
             }
             _ => false,
         }
@@ -375,6 +767,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     id, interactions, ..
                 }
                 | HitInteraction::Radio {
+                    id, interactions, ..
+                }
+                | HitInteraction::TextInput {
                     id, interactions, ..
                 }
                 | HitInteraction::SelectTrigger {
@@ -1093,6 +1488,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             &hit,
             HitInteraction::SelectTrigger { .. } | HitInteraction::SelectOption { .. }
         );
+        let text_input_hit = matches!(&hit, HitInteraction::TextInput { .. });
         let (
             widget_id,
             interactions,
@@ -1213,12 +1609,43 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     None,
                 )
             }
+            HitInteraction::TextInput {
+                id,
+                interactions,
+                value,
+                placeholder: _,
+                on_change: _,
+                multiline: _,
+                frame,
+                padding,
+                text_style,
+            } => (
+                id,
+                interactions.clone(),
+                Some(id),
+                interactions.on_focus.clone(),
+                interactions.on_click.clone().map(ClickHandler::Command),
+                None,
+                pointer_position.map(|point| {
+                    let cursor = text_cursor_index_at_point(
+                        &self.font_manager,
+                        &self.theme,
+                        self.unit_context(),
+                        frame,
+                        padding,
+                        &text_style,
+                        &value,
+                        point,
+                    );
+                    (id, frame, padding, text_style, value, cursor)
+                }),
+            ),
             HitInteraction::SelectOption {
                 id,
                 option_index: _,
                 interactions,
                 on_select,
-                on_open_change,
+                ref on_open_change,
             } => (
                 id,
                 interactions.clone(),
@@ -1250,8 +1677,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 on_blur: interactions.on_blur.clone(),
             }),
             focus_command,
-            false,
+            !text_input_hit,
         );
+        if text_input_hit {
+            self.focus_visible = true;
+            self.sync_ime_state();
+        }
         if let Some((select_id, next_open, on_open_change)) = select_toggle {
             self.close_all_open_selects_except(next_open.then_some(select_id));
             let _ = self.set_select_open_state(select_id, next_open, on_open_change.as_ref());
@@ -1458,7 +1889,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     window.request_redraw();
                 }
             }
-            WindowEvent::Ime(_) => {}
+            WindowEvent::Ime(event) => {
+                let needs_redraw = self.handle_ime_event(&event);
+                if needs_redraw {
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+            }
             WindowEvent::PointerButton {
                 state: ElementState::Released,
                 position,

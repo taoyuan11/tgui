@@ -18,8 +18,8 @@ use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::{dp, Dp, UnitContext};
 use crate::ui::widget::{
     Button, Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent, CanvasShadow,
-    CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, PathBuilder, Point, Select,
-    SelectOption, Text, TextEditState, WidgetTree,
+    CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, Input, PathBuilder, Point, Select,
+    SelectOption, Text, TextEditState, Textarea, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -154,6 +154,19 @@ fn pressed_key_event(physical_key: PhysicalKey) -> KeyEvent {
             PhysicalKey::Code(KeyCode::Tab) => Key::Named(NamedKey::Tab),
             _ => Key::Character(" ".into()),
         },
+    }
+}
+
+fn text_key_event(text: &str) -> KeyEvent {
+    KeyEvent {
+        physical_key: PhysicalKey::Code(KeyCode::KeyA),
+        logical_key: Key::Character(text.into()),
+        text: Some(text.into()),
+        location: KeyLocation::Standard,
+        state: ElementState::Pressed,
+        repeat: false,
+        text_with_all_modifiers: None,
+        key_without_modifiers: Key::Character(text.into()),
     }
 }
 
@@ -671,6 +684,24 @@ struct SwitchVm {
     checked: bool,
 }
 
+#[derive(Default)]
+struct TextInputVm {
+    value: String,
+}
+
+impl crate::foundation::view_model::ViewModel for TextInputVm {
+    fn new(_context: &ViewModelContext) -> Self {
+        todo!()
+    }
+
+    fn view(&self) -> Element<Self>
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
+}
+
 impl crate::foundation::view_model::ViewModel for SwitchVm {
     fn new(_context: &ViewModelContext) -> Self {
         todo!()
@@ -753,6 +784,66 @@ fn clicking_checkbox_dispatches_toggled_value() {
 
     let checked = handler.with_view_model(|vm| vm.checked);
     assert!(checked);
+}
+
+#[test]
+fn input_builder_creates_text_input_hit_region() {
+    let invalidation = InvalidationSignal::new();
+    let tree: WidgetTree<TestVm> = WidgetTree::new(Input::<TestVm>::new("hello"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let has_input = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .any(|region| matches!(region.interaction, HitInteraction::TextInput { multiline: false, .. }));
+    assert!(has_input);
+}
+
+#[test]
+fn textarea_builder_creates_multiline_text_input_hit_region() {
+    let invalidation = InvalidationSignal::new();
+    let tree: WidgetTree<TestVm> =
+        WidgetTree::new(Textarea::<TestVm>::new("hello").height(dp(80.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let has_textarea = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .any(|region| matches!(region.interaction, HitInteraction::TextInput { multiline: true, .. }));
+    assert!(has_textarea);
+}
+
+#[test]
+fn focused_input_receives_inserted_text_via_on_change() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Input::new("hi").on_change(ValueCommand::new(|vm: &mut TextInputVm, value| {
+            vm.value = value;
+        })),
+    );
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&text_key_event("a"));
+
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value, "hia");
 }
 
 #[test]

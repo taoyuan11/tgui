@@ -36,6 +36,42 @@ impl<VM> ResolvedElement<VM> {
                 placeholder: placeholder.clone(),
                 style: style.clone(),
             },
+            ResolvedWidgetKind::Input {
+                value,
+                placeholder,
+                style,
+                ..
+            } => MeasureContext::Input {
+                value: value.resolve(),
+                placeholder: placeholder.resolve(),
+                style: style.clone(),
+                multiline: false,
+            },
+            ResolvedWidgetKind::Textarea {
+                value,
+                placeholder,
+                style,
+                ..
+            } => MeasureContext::Input {
+                value: value.resolve(),
+                placeholder: placeholder.resolve(),
+                style: crate::ui::widget::InputStyle {
+                    surface: style.surface.clone(),
+                    background: style.background.clone(),
+                    text: style.text.clone(),
+                    placeholder: style.placeholder.clone(),
+                    border: style.border.clone(),
+                    selection: style.selection.clone(),
+                    caret: style.caret.clone(),
+                    border_width: style.border_width.clone(),
+                    radius: style.radius.clone(),
+                    padding_x: style.padding_x,
+                    padding_y: style.padding_y,
+                    min_height: style.min_height,
+                    text_style: style.text_style.clone(),
+                },
+                multiline: true,
+            },
         }
     }
 
@@ -383,7 +419,9 @@ impl<VM> ResolvedElement<VM> {
             | ResolvedWidgetKind::Checkbox { disabled, .. }
             | ResolvedWidgetKind::Radio { disabled, .. }
             | ResolvedWidgetKind::Switch { disabled, .. }
-            | ResolvedWidgetKind::Select { disabled, .. } => disabled.resolve(),
+            | ResolvedWidgetKind::Select { disabled, .. }
+            | ResolvedWidgetKind::Input { disabled, .. }
+            | ResolvedWidgetKind::Textarea { disabled, .. } => disabled.resolve(),
             _ => false,
         };
         let widget_state = if disabled {
@@ -413,6 +451,15 @@ impl<VM> ResolvedElement<VM> {
         let select_style = match &self.kind {
             ResolvedWidgetKind::Select { style, .. } => {
                 Some(resolve_select_style(style, widget_state, context.theme))
+            }
+            _ => None,
+        };
+        let input_style = match &self.kind {
+            ResolvedWidgetKind::Input { style, .. } => {
+                Some(resolve_input_style(style, widget_state))
+            }
+            ResolvedWidgetKind::Textarea { style, .. } => {
+                Some(resolve_textarea_style(style, widget_state))
             }
             _ => None,
         };
@@ -469,6 +516,27 @@ impl<VM> ResolvedElement<VM> {
                         select_style
                             .as_ref()
                             .expect("select style should be resolved for select widgets")
+                            .border_width,
+                    )
+                }),
+            ResolvedWidgetKind::Input { .. } | ResolvedWidgetKind::Textarea { .. } => self
+                .visual
+                .border_width
+                .as_ref()
+                .map(|width| {
+                    width.resolve_widget_to_logical(
+                        context.animations,
+                        self.id,
+                        WidgetProperty::BorderWidth,
+                        context.now,
+                        context.units,
+                    )
+                })
+                .unwrap_or_else(|| {
+                    context.units.resolve_dp(
+                        input_style
+                            .as_ref()
+                            .expect("input style should be resolved for input widgets")
                             .border_width,
                     )
                 }),
@@ -570,6 +638,14 @@ impl<VM> ResolvedElement<VM> {
                         .expect("select style should be resolved for select widgets")
                         .radius,
                 ),
+                ResolvedWidgetKind::Input { .. } | ResolvedWidgetKind::Textarea { .. } => {
+                    context.units.resolve_dp(
+                        input_style
+                            .as_ref()
+                            .expect("input style should be resolved for input widgets")
+                            .radius,
+                    )
+                }
                 ResolvedWidgetKind::Checkbox { .. } => context.units.resolve_dp(
                     checkbox_style
                         .as_ref()
@@ -638,6 +714,33 @@ impl<VM> ResolvedElement<VM> {
                                 property: WidgetProperty::BorderColor,
                             },
                             select_style.border,
+                            Some(Transition::default()),
+                            context.now,
+                        )
+                    })
+            }
+            ResolvedWidgetKind::Input { .. } | ResolvedWidgetKind::Textarea { .. } => {
+                let input_style = input_style
+                    .as_ref()
+                    .expect("input style should be resolved for input widgets");
+                self.visual
+                    .border_color
+                    .as_ref()
+                    .map(|color| {
+                        color.resolve_widget(
+                            context.animations,
+                            self.id,
+                            WidgetProperty::BorderColor,
+                            context.now,
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        context.animations.resolve_color(
+                            crate::animation::AnimationKey::Widget {
+                                id: self.id.raw(),
+                                property: WidgetProperty::BorderColor,
+                            },
+                            input_style.border,
                             Some(Transition::default()),
                             context.now,
                         )
@@ -719,6 +822,23 @@ impl<VM> ResolvedElement<VM> {
                     select_style
                         .as_ref()
                         .expect("select style should be resolved for select widgets")
+                        .background,
+                ),
+            ResolvedWidgetKind::Input { .. } | ResolvedWidgetKind::Textarea { .. } => self
+                .background
+                .as_ref()
+                .map(|background| {
+                    background.resolve_widget(
+                        context.animations,
+                        self.id,
+                        WidgetProperty::Background,
+                        context.now,
+                    )
+                })
+                .unwrap_or(
+                    input_style
+                        .as_ref()
+                        .expect("input style should be resolved for input widgets")
                         .background,
                 ),
             ResolvedWidgetKind::Switch {
@@ -863,6 +983,7 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Select { .. } => select_style
                 .as_ref()
                 .and_then(|style| style.focus_ring.clone()),
+            ResolvedWidgetKind::Input { .. } | ResolvedWidgetKind::Textarea { .. } => None,
             ResolvedWidgetKind::Switch { style, .. } => {
                 resolve_focus_ring(context.theme, style.focus_ring.as_ref(), widget_state)
             }
@@ -901,6 +1022,8 @@ impl<VM> ResolvedElement<VM> {
                             | ResolvedWidgetKind::Radio { .. }
                             | ResolvedWidgetKind::Switch { .. }
                             | ResolvedWidgetKind::Select { .. }
+                            | ResolvedWidgetKind::Input { .. }
+                            | ResolvedWidgetKind::Textarea { .. }
                     ),
                 },
             });
@@ -1422,6 +1545,124 @@ impl<VM> ResolvedElement<VM> {
                             interactions: self.interactions.clone(),
                             on_open_change: on_open_change.clone(),
                             is_open: active,
+                        },
+                    });
+                }
+            }
+            ResolvedWidgetKind::Input {
+                value,
+                placeholder,
+                on_change,
+                ..
+            } => {
+                let input_style = input_style
+                    .as_ref()
+                    .expect("input style should be resolved for input widgets");
+                let padding = Insets::symmetric(input_style.padding_x, input_style.padding_y);
+                let resolved_value = value.resolve();
+                let display_value = if resolved_value.is_empty() {
+                    placeholder.resolve()
+                } else {
+                    resolved_value.clone()
+                };
+                let mut text = text_with_typography(display_value.clone(), &input_style.text_style);
+                text.color = Some(Value::Static(input_style.text));
+                push_text_primitives(
+                    &text,
+                    frame,
+                    context.font_manager,
+                    context.theme,
+                    context.units,
+                    context.animations,
+                    context.now,
+                    &mut computed.scene,
+                    context.caret_visible && context.focused_input == Some(self.id),
+                    false,
+                    padding,
+                    Some(&resolved_value),
+                    context
+                        .focused_text_state
+                        .filter(|_| context.focused_input == Some(self.id)),
+                    input_style.placeholder,
+                    opacity,
+                    self.id,
+                    primitive_clip,
+                    primitive_clip_mask,
+                );
+                if !disabled {
+                    computed.hit_regions.push(HitRegion {
+                        rect: frame,
+                        clip_rect: primitive_clip,
+                        geometry: HitGeometry::Rect,
+                        interaction: HitInteraction::TextInput {
+                            id: self.id,
+                            interactions: self.interactions.clone(),
+                            value: resolved_value,
+                            placeholder: placeholder.resolve(),
+                            on_change: on_change.clone(),
+                            multiline: false,
+                            frame,
+                            padding,
+                            text_style: text,
+                        },
+                    });
+                }
+            }
+            ResolvedWidgetKind::Textarea {
+                value,
+                placeholder,
+                on_change,
+                ..
+            } => {
+                let input_style = input_style
+                    .as_ref()
+                    .expect("input style should be resolved for input widgets");
+                let padding = Insets::symmetric(input_style.padding_x, input_style.padding_y);
+                let resolved_value = value.resolve();
+                let display_value = if resolved_value.is_empty() {
+                    placeholder.resolve()
+                } else {
+                    resolved_value.clone()
+                };
+                let mut text = text_with_typography(display_value.clone(), &input_style.text_style);
+                text.color = Some(Value::Static(input_style.text));
+                push_text_primitives(
+                    &text,
+                    frame,
+                    context.font_manager,
+                    context.theme,
+                    context.units,
+                    context.animations,
+                    context.now,
+                    &mut computed.scene,
+                    context.caret_visible && context.focused_input == Some(self.id),
+                    false,
+                    padding,
+                    Some(&resolved_value),
+                    context
+                        .focused_text_state
+                        .filter(|_| context.focused_input == Some(self.id)),
+                    input_style.placeholder,
+                    opacity,
+                    self.id,
+                    primitive_clip,
+                    primitive_clip_mask,
+                );
+                if !disabled {
+                    computed.hit_regions.push(HitRegion {
+                        rect: frame,
+                        clip_rect: primitive_clip,
+                        geometry: HitGeometry::Rect,
+                        interaction: HitInteraction::TextInput {
+                            id: self.id,
+                            interactions: self.interactions.clone(),
+                            value: resolved_value,
+                            placeholder: placeholder.resolve(),
+                            on_change: on_change.clone(),
+                            multiline: true,
+                            frame,
+                            padding,
+                            text_style: text,
                         },
                     });
                 }

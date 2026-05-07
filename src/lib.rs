@@ -213,10 +213,10 @@ pub mod prelude {
     pub use crate::widgets::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
-        ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Radio,
-        RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle, Switch,
-        SwitchStyle, Text, TextWidgetStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
-        WidgetSurfaceStyle, WidgetTree,
+        ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Input,
+        InputStyle, Radio, RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle,
+        Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle, VideoSurfaceStyle,
+        WidgetCommand, WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
     };
 }
 
@@ -235,10 +235,10 @@ pub mod widgets {
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
-        ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Radio,
-        RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle, Switch,
-        SwitchStyle, Text, TextWidgetStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
-        WidgetSurfaceStyle, WidgetTree,
+        ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Input,
+        InputStyle, Radio, RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle,
+        Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle, VideoSurfaceStyle,
+        WidgetCommand, WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

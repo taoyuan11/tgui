@@ -640,6 +640,33 @@ pub(super) fn measure_node(
             theme,
             units,
         ),
+        Some(MeasureContext::Input {
+            value,
+            placeholder,
+            style,
+            multiline,
+        }) => {
+            let content = if value.is_empty() { placeholder } else { value };
+            let text = text_with_typography(Value::Static(content.clone()), &style.text_style);
+            let text_size = if *multiline {
+                let (_, line_height, _) = resolved_text_metrics(&text, theme, units);
+                (
+                    SELECT_DEFAULT_WIDTH,
+                    line_height.max(units.resolve_dp(style.min_height)),
+                )
+            } else {
+                measure_text_content(&text, font_manager, theme, units)
+            };
+            let horizontal = units.resolve_dp(style.padding_x) * 2.0;
+            let vertical = units.resolve_dp(style.padding_y) * 2.0;
+            (
+                SELECT_DEFAULT_WIDTH.max(text_size.0 + horizontal),
+                text_size
+                    .1
+                    .max(units.resolve_dp(style.min_height))
+                    .max(text_size.1 + vertical),
+            )
+        }
         Some(MeasureContext::None) | None => (0.0, 0.0),
     };
 
@@ -768,6 +795,12 @@ pub(super) fn default_layout_padding<VM>(element: &ResolvedElement<VM>, _theme: 
             Insets::symmetric(style.padding_x, style.padding_y)
         }
         ResolvedWidgetKind::Select { style, .. } => {
+            Insets::symmetric(style.padding_x, style.padding_y)
+        }
+        ResolvedWidgetKind::Input { style, .. } => {
+            Insets::symmetric(style.padding_x, style.padding_y)
+        }
+        ResolvedWidgetKind::Textarea { style, .. } => {
             Insets::symmetric(style.padding_x, style.padding_y)
         }
         ResolvedWidgetKind::Switch { style, .. } => style.padding,

@@ -132,6 +132,32 @@ impl<VM> Element<VM> {
                 disabled,
                 style,
             },
+            WidgetKind::Input {
+                value,
+                placeholder,
+                on_change,
+                disabled,
+                style,
+            } => WidgetKind::Input {
+                value,
+                placeholder,
+                on_change: on_change.map(|command| command.scope(selector.clone())),
+                disabled,
+                style,
+            },
+            WidgetKind::Textarea {
+                value,
+                placeholder,
+                on_change,
+                disabled,
+                style,
+            } => WidgetKind::Textarea {
+                value,
+                placeholder,
+                on_change: on_change.map(|command| command.scope(selector.clone())),
+                disabled,
+                style,
+            },
         };
 
         Element {
@@ -318,6 +344,32 @@ impl<VM> Element<VM> {
                 on_open_change: on_open_change.clone(),
                 disabled: disabled.clone(),
                 style: resolved_select_style(style.as_ref(), theme),
+            },
+            WidgetKind::Input {
+                value,
+                placeholder,
+                on_change,
+                disabled,
+                style,
+            } => ResolvedWidgetKind::Input {
+                value: value.clone(),
+                placeholder: placeholder.clone(),
+                on_change: on_change.clone(),
+                disabled: disabled.clone(),
+                style: resolved_input_style(style.as_ref(), theme),
+            },
+            WidgetKind::Textarea {
+                value,
+                placeholder,
+                on_change,
+                disabled,
+                style,
+            } => ResolvedWidgetKind::Textarea {
+                value: value.clone(),
+                placeholder: placeholder.clone(),
+                on_change: on_change.clone(),
+                disabled: disabled.clone(),
+                style: resolved_textarea_style(style.as_ref(), theme),
             },
         };
 

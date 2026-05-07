@@ -7,8 +7,8 @@ use crate::ui::unit::Dp;
 use super::super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::super::style::{
     infer_theme_mode, ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
-    FocusRingOverride, RadioStyle as WidgetRadioStyle, SelectStyle as WidgetSelectStyle,
-    TextWidgetStyle,
+    FocusRingOverride, InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
+    SelectStyle as WidgetSelectStyle, TextWidgetStyle, TextareaStyle as WidgetTextareaStyle,
 };
 use super::{Text, VisualStyle};
 
@@ -72,6 +72,21 @@ pub(super) struct ResolvedSelectStyle {
     pub(super) text_style: crate::ui::theme::TextStyle,
 }
 
+#[derive(Clone)]
+pub(super) struct ResolvedInputStyle {
+    pub(super) background: Color,
+    pub(super) text: Color,
+    pub(super) placeholder: Color,
+    pub(super) border: Color,
+    pub(super) selection: Option<Color>,
+    pub(super) caret: Option<Color>,
+    pub(super) border_width: Dp,
+    pub(super) radius: Dp,
+    pub(super) padding_x: Dp,
+    pub(super) padding_y: Dp,
+    pub(super) text_style: crate::ui::theme::TextStyle,
+}
+
 pub(super) fn resolved_button_style(
     style: Option<&super::super::style::StyleResolver<WidgetButtonStyle>>,
     theme: &Theme,
@@ -116,6 +131,24 @@ pub(super) fn resolved_select_style(
     style
         .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
         .unwrap_or_else(|| WidgetSelectStyle::default_for(infer_theme_mode(theme)))
+}
+
+pub(super) fn resolved_input_style(
+    style: Option<&super::super::style::StyleResolver<WidgetInputStyle>>,
+    theme: &Theme,
+) -> WidgetInputStyle {
+    style
+        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
+        .unwrap_or_else(|| WidgetInputStyle::default_for(infer_theme_mode(theme)))
+}
+
+pub(super) fn resolved_textarea_style(
+    style: Option<&super::super::style::StyleResolver<WidgetTextareaStyle>>,
+    theme: &Theme,
+) -> WidgetTextareaStyle {
+    style
+        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
+        .unwrap_or_else(|| WidgetTextareaStyle::default_for(infer_theme_mode(theme)))
 }
 
 pub(super) fn resolved_container_style(
@@ -322,6 +355,44 @@ pub(super) fn resolve_select_style(
         min_height: style.min_height,
         option_height: style.option_height,
         menu_gap: style.menu_gap,
+        text_style: style.text_style.clone(),
+    }
+}
+
+pub(super) fn resolve_input_style(
+    style: &WidgetInputStyle,
+    state: WidgetState,
+) -> ResolvedInputStyle {
+    ResolvedInputStyle {
+        background: resolve_stateful_widget_color(&style.background, state),
+        text: resolve_stateful_widget_color(&style.text, state),
+        placeholder: resolve_stateful_widget_color(&style.placeholder, state),
+        border: resolve_stateful_widget_color(&style.border, state),
+        selection: style.selection.as_ref().map(Value::resolve),
+        caret: style.caret.as_ref().map(Value::resolve),
+        border_width: style.border_width.resolve(),
+        radius: style.radius.resolve(),
+        padding_x: style.padding_x,
+        padding_y: style.padding_y,
+        text_style: style.text_style.clone(),
+    }
+}
+
+pub(super) fn resolve_textarea_style(
+    style: &WidgetTextareaStyle,
+    state: WidgetState,
+) -> ResolvedInputStyle {
+    ResolvedInputStyle {
+        background: resolve_stateful_widget_color(&style.background, state),
+        text: resolve_stateful_widget_color(&style.text, state),
+        placeholder: resolve_stateful_widget_color(&style.placeholder, state),
+        border: resolve_stateful_widget_color(&style.border, state),
+        selection: style.selection.as_ref().map(Value::resolve),
+        caret: style.caret.as_ref().map(Value::resolve),
+        border_width: style.border_width.resolve(),
+        radius: style.radius.resolve(),
+        padding_x: style.padding_x,
+        padding_y: style.padding_y,
         text_style: style.text_style.clone(),
     }
 }

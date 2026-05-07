@@ -6,10 +6,12 @@ mod common;
 mod container;
 mod core;
 mod image;
+mod input;
 mod radio;
 mod select;
 mod style;
 mod switch;
+mod textarea;
 mod text;
 #[cfg(feature = "video")]
 mod video;
@@ -32,9 +34,9 @@ pub use canvas::{
 pub use checkbox::Checkbox;
 pub(crate) use common::{
     BackdropBlurPrimitive, BrushPrimitiveData, CanvasItemInteractionHandlers, ClipMask,
-    ComputedScene, HitInteraction, InteractionHandlers, MediaEventPhase, MediaEventState,
-    MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextEditState,
-    WidgetStateMap,
+    CompositionState, ComputedScene, HitInteraction, InteractionHandlers, MediaEventPhase,
+    MediaEventState, MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
+    TextEditState, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,
@@ -43,13 +45,16 @@ pub use container::{Flex, Grid, IntoLengthValue, Stack};
 pub(crate) use core::ResolvedSceneLayout;
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use image::Image;
+pub use input::Input;
 pub use radio::{Radio, RadioGroup, RadioOption};
 pub use select::{Select, SelectOption};
 pub use style::{
     ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, FocusRingOverride, ImageStyle,
-    RadioStyle, SelectStyle, SwitchStyle, TextWidgetStyle, VideoSurfaceStyle, WidgetSurfaceStyle,
+    InputStyle, RadioStyle, SelectStyle, SwitchStyle, TextWidgetStyle, TextareaStyle,
+    VideoSurfaceStyle, WidgetSurfaceStyle,
 };
 pub use switch::Switch;
+pub use textarea::Textarea;
 pub use text::Text;
 #[cfg(feature = "video")]
 pub use video::VideoSurface;

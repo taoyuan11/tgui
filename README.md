@@ -218,6 +218,7 @@ Keyframes<T>
 - `background_effects`：通用渐变背景和 backdrop blur
 - `frameless_window`：关闭系统装饰后的自绘标题栏、拖拽、拉伸和窗口按钮
 - `demo`：综合展示常用布局、组件、通知和画布
+- `text_area`：受控 `Textarea` 编辑示例，读取自身源码但不保存
 - `multiple_vm_examples`：多页面 / 多 ViewModel 示例
 - `android_basic_window`：Android 入口示例
 - `ohos_basic_window`：OpenHarmony / HarmonyOS 入口示例
