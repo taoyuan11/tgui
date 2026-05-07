@@ -23,7 +23,6 @@ use super::canvas::{
     CanvasDragEvent, CanvasItem, CanvasItemId, CanvasMouseEvent, CanvasWheelEvent,
 };
 use super::image::Image;
-use super::style::{InputStyle as WidgetInputStyle, TextareaStyle as WidgetTextareaStyle};
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle;
 use super::style::{
@@ -31,6 +30,7 @@ use super::style::{
     ContainerStyle, SelectStyle as WidgetSelectStyle, StyleResolver,
     SwitchStyle as WidgetSwitchStyle,
 };
+use super::style::{InputStyle as WidgetInputStyle, TextareaStyle as WidgetTextareaStyle};
 use super::text::Text;
 
 static NEXT_WIDGET_ID: AtomicU64 = AtomicU64::new(1);

@@ -11,8 +11,8 @@ mod radio;
 mod select;
 mod style;
 mod switch;
-mod textarea;
 mod text;
+mod textarea;
 #[cfg(feature = "video")]
 mod video;
 
@@ -54,7 +54,7 @@ pub use style::{
     VideoSurfaceStyle, WidgetSurfaceStyle,
 };
 pub use switch::Switch;
-pub use textarea::Textarea;
 pub use text::Text;
+pub use textarea::Textarea;
 #[cfg(feature = "video")]
 pub use video::VideoSurface;

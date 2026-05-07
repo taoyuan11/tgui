@@ -17,9 +17,9 @@ use crate::ui::widget::{
 };
 use crate::ui::widget::{
     ButtonStyle, Canvas, CanvasItem, CanvasPath, CanvasStroke, CanvasStyle, Checkbox, ClipMask,
-    ContainerStyle, Element, Image, PathBuilder, Point, Radio, RadioGroup, RadioOption,
-    ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack, Switch, SwitchStyle, Text,
-    TextEditState, TextWidgetStyle, WidgetStateMap, WidgetTree,
+    ContainerStyle, Element, Image, Input, InputStyle, PathBuilder, Point, Radio, RadioGroup,
+    RadioOption, ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack, Switch, SwitchStyle,
+    Text, TextEditState, TextWidgetStyle, Textarea, WidgetStateMap, WidgetTree,
 };
 #[cfg(feature = "video")]
 use crate::video::backend::{
@@ -4365,4 +4365,184 @@ fn selectable_text_renders_selection_highlight() {
         .shapes
         .iter()
         .any(|primitive| { primitive.color == theme.colors.selection.with_alpha_factor(1.0) }));
+}
+
+#[test]
+fn textarea_renders_multiline_caret_on_second_line() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let text: Element<()> = Textarea::new("hello\nworld").height(dp(120.0)).into();
+    let text_id = text.id;
+    let tree = WidgetTree::new(text);
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 120.0),
+        Some(text_id),
+        Some(&TextEditState {
+            cursor: "hello\nwo".len(),
+            anchor: "hello\nwo".len(),
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        }),
+        Some(text_id),
+        Some(&TextEditState::caret_at("hello\nworld")),
+        true,
+    );
+
+    let caret = rendered
+        .primitives
+        .overlay_shapes
+        .last()
+        .expect("caret should be rendered");
+    assert!(caret.rect.y > dp(20.0));
+}
+
+#[test]
+fn input_renders_composition_preview_text() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let text: Element<()> = Input::new("abc").into();
+    let text_id = text.id;
+    let tree = WidgetTree::new(text);
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 60.0),
+        Some(text_id),
+        Some(&TextEditState {
+            cursor: 2,
+            anchor: 2,
+            composition: Some(crate::ui::widget::CompositionState {
+                replace_range: (1, 2),
+                text: "XYZ".to_string(),
+                cursor: Some((0, 2)),
+            }),
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        }),
+        Some(text_id),
+        Some(&TextEditState::caret_at("abc")),
+        true,
+    );
+
+    assert!(rendered
+        .primitives
+        .texts
+        .iter()
+        .any(|primitive| primitive.content == "aXYZc"));
+}
+
+#[test]
+fn input_uses_custom_selection_and_caret_colors() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let selection = Color::hexa(0x11AA33FF);
+    let caret = Color::hexa(0xCC2211FF);
+    let tree: WidgetTree<()> = WidgetTree::new(Input::new("hello").style(move |mode| {
+        let mut style = InputStyle::default_for(mode);
+        style.selection = Some(selection.into());
+        style.caret = Some(caret.into());
+        style
+    }));
+    let text_id = tree.root.id;
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 60.0),
+        Some(text_id),
+        Some(&TextEditState {
+            cursor: 4,
+            anchor: 1,
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        }),
+        Some(text_id),
+        Some(&TextEditState::caret_at("hello")),
+        true,
+    );
+
+    assert!(rendered
+        .primitives
+        .shapes
+        .iter()
+        .any(|primitive| primitive.color == selection.with_alpha_factor(1.0)));
+    assert!(rendered
+        .primitives
+        .overlay_shapes
+        .iter()
+        .any(|primitive| primitive.color == caret.with_alpha_factor(1.0)));
+}
+
+#[test]
+fn single_line_input_scroll_clips_text_to_inner_content_rect() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> =
+        WidgetTree::new(Input::new("0123456789abcdef0123456789").size(dp(96.0), dp(40.0)));
+    let text_id = tree.root.id;
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 96.0, 40.0),
+        Some(text_id),
+        Some(&TextEditState {
+            cursor: "0123456789abcdef0123456789".len(),
+            anchor: "0123456789abcdef0123456789".len(),
+            composition: None,
+            scroll_x: dp(80.0),
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        }),
+        Some(text_id),
+        Some(&TextEditState::caret_at("0123456789abcdef0123456789")),
+        true,
+    );
+
+    let text = rendered
+        .primitives
+        .texts
+        .last()
+        .expect("input text should be rendered");
+    let expected_clip = Rect::new(12.0, 8.0, 72.0, 24.0);
+    assert_eq!(text.clip_rect, Some(expected_clip));
+    assert!(text.frame.x < expected_clip.x);
+    assert!(text.frame.width > expected_clip.width);
 }

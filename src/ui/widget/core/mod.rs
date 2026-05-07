@@ -42,8 +42,8 @@ use super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::style::{
     ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
     InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
-    SelectStyle as WidgetSelectStyle, TextareaStyle as WidgetTextareaStyle,
-    SwitchStyle as WidgetSwitchStyle,
+    SelectStyle as WidgetSelectStyle, SwitchStyle as WidgetSwitchStyle,
+    TextareaStyle as WidgetTextareaStyle,
 };
 use super::text::Text;
 

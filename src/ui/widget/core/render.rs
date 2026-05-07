@@ -327,6 +327,238 @@ pub(super) fn push_text_primitives(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(super) fn push_text_input_primitives(
+    text: &Text,
+    frame: Rect,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+    animations: &mut AnimationEngine,
+    now: std::time::Instant,
+    scene: &mut ScenePrimitives,
+    show_caret: bool,
+    multiline: bool,
+    padding: Insets,
+    edit_state: Option<&TextEditState>,
+    fallback_color: Color,
+    selection_color: Option<Color>,
+    caret_color: Option<Color>,
+    opacity: f32,
+    widget_id: WidgetId,
+    clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
+) -> Option<Rect> {
+    let resolved_content = text.content.resolve();
+    let default_style = &theme.typography.body;
+    let text_request = TextFontRequest {
+        preferred_font: text
+            .font_family
+            .as_deref()
+            .or(default_style.font_family.as_deref()),
+        weight: text.font_weight.unwrap_or(default_style.weight),
+    };
+    let resolved_font = font_manager.resolve_text(&resolved_content, text_request.clone());
+
+    let text_color = text
+        .color
+        .as_ref()
+        .map(|color| color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now))
+        .unwrap_or(fallback_color);
+    let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
+    let inner = frame.inset(padding);
+    let content_clip_rect = clip_rect
+        .map(|clip| clip.intersect(inner))
+        .unwrap_or(Some(inner));
+    let wrap_width = inner.width.get().max(0.0);
+    let base_state = edit_state
+        .cloned()
+        .unwrap_or_else(|| TextEditState::caret_at(&resolved_content))
+        .clamped_to(&resolved_content);
+
+    let (display_content, display_state, composition_range) =
+        if let Some(composition) = base_state.composition.as_ref() {
+            let start = composition.replace_range.0.min(resolved_content.len());
+            let end = composition.replace_range.1.min(resolved_content.len());
+            let mut display = String::with_capacity(
+                resolved_content.len() + composition.text.len().saturating_sub(end - start),
+            );
+            display.push_str(&resolved_content[..start]);
+            display.push_str(&composition.text);
+            display.push_str(&resolved_content[end..]);
+            let composition_end = start + composition.text.len();
+            let caret_offset = composition
+                .cursor
+                .map(|(_, end)| end.min(composition.text.len()))
+                .unwrap_or(composition.text.len());
+            let caret = start + caret_offset;
+            (
+                display,
+                TextEditState {
+                    cursor: caret,
+                    anchor: caret,
+                    composition: None,
+                    scroll_x: base_state.scroll_x,
+                    scroll_y: base_state.scroll_y,
+                    preferred_column_x: base_state.preferred_column_x,
+                },
+                Some((start, composition_end)),
+            )
+        } else {
+            (resolved_content.clone(), base_state.clone(), None)
+        };
+
+    let layout = if multiline {
+        font_manager.measure_text_layout_wrapped(
+            &display_content,
+            text_request.clone(),
+            font_size,
+            line_height,
+            letter_spacing,
+            wrap_width,
+        )
+    } else {
+        font_manager.measure_text_layout(
+            &display_content,
+            text_request.clone(),
+            font_size,
+            line_height,
+            letter_spacing,
+        )
+    };
+
+    let content_width = if multiline {
+        inner.width.max(0.0)
+    } else {
+        Dp::new(layout.width.max(inner.width.get() + CARET_WIDTH))
+    };
+    let content_height = if multiline {
+        Dp::new(layout.height.max(line_height))
+    } else {
+        inner
+            .height
+            .min(layout.height.max(line_height))
+            .max(Dp::new(line_height))
+    };
+    let scroll_x = if multiline {
+        Dp::ZERO
+    } else {
+        display_state.scroll_x.clamp(
+            0.0,
+            (layout.width + CARET_WIDTH - inner.width.get()).max(0.0),
+        )
+    };
+    let scroll_y = if multiline {
+        display_state
+            .scroll_y
+            .clamp(0.0, (layout.height - inner.height.get()).max(0.0))
+    } else {
+        Dp::ZERO
+    };
+    let content_frame = Rect::new(
+        inner.x - scroll_x,
+        if multiline {
+            inner.y - scroll_y
+        } else {
+            inner.y + ((inner.height - content_height).max(0.0) * 0.5)
+        },
+        content_width,
+        content_height,
+    );
+
+    let selection_fill = selection_color.unwrap_or(theme.colors.selection);
+    let caret_fill = caret_color.unwrap_or(theme.colors.on_surface);
+    let mut selection_segments = Vec::new();
+    if let Some((selection_start, selection_end)) = display_state.selection_range() {
+        let start = selection_start.min(display_content.len());
+        let end = selection_end.min(display_content.len());
+        if start < end {
+            let start_line = layout.line_index_for_index(start);
+            let end_line = layout.line_index_for_index(end);
+            for line_index in start_line..=end_line {
+                let line_start = start.max(layout.line_start(line_index));
+                let line_end = end.min(layout.line_end(line_index));
+                let x0 = layout.x_for_index(line_start);
+                let x1 = layout.x_for_index(line_end);
+                let width = (x1 - x0).max(0.0);
+                if width <= 0.0 {
+                    continue;
+                }
+                selection_segments.push(Rect::new(
+                    content_frame.x + x0,
+                    content_frame.y + Dp::new(layout.line_top(line_index)),
+                    width,
+                    Dp::new(layout.line_height(line_index)),
+                ));
+            }
+        }
+    }
+    if let Some((composition_start, composition_end)) = composition_range {
+        let start_line = layout.line_index_for_index(composition_start);
+        let end_line = layout.line_index_for_index(composition_end);
+        for line_index in start_line..=end_line {
+            let line_start = composition_start.max(layout.line_start(line_index));
+            let line_end = composition_end.min(layout.line_end(line_index));
+            let x0 = layout.x_for_index(line_start);
+            let x1 = layout.x_for_index(line_end);
+            let width = (x1 - x0).max(0.0);
+            if width <= 0.0 {
+                continue;
+            }
+            selection_segments.push(Rect::new(
+                content_frame.x + x0,
+                content_frame.y + Dp::new(layout.line_top(line_index)),
+                width,
+                Dp::new(layout.line_height(line_index)),
+            ));
+        }
+    }
+    for segment in selection_segments {
+        scene.push_shape(RenderPrimitive {
+            rect: segment,
+            color: selection_fill.with_alpha_factor(opacity),
+            corner_radius: 4.0,
+            stroke_width: 0.0,
+            clip_rect: content_clip_rect,
+            clip_mask,
+        });
+    }
+
+    scene.push_text(TextPrimitive {
+        content: display_content.clone(),
+        frame: content_frame,
+        color: text_color.with_alpha_factor(opacity),
+        force_color: false,
+        font_family: Some(resolved_font.primary_font),
+        font_size,
+        font_weight: text.font_weight.unwrap_or(default_style.weight),
+        line_height,
+        letter_spacing,
+        clip_rect: content_clip_rect,
+        clip_mask,
+    });
+
+    let mut ime_cursor_area = None;
+    if show_caret {
+        let caret_index = display_state.cursor.min(display_content.len());
+        let caret_x = content_frame.x + layout.x_for_index(caret_index);
+        let caret_y = content_frame.y + Dp::new(layout.top_for_index(caret_index));
+        let caret_height = Dp::new(layout.line_height_for_index(caret_index).max(line_height));
+        let caret_rect = Rect::new(caret_x, caret_y, CARET_WIDTH, caret_height);
+        ime_cursor_area = Some(caret_rect);
+        scene.push_overlay_shape(RenderPrimitive {
+            rect: caret_rect,
+            color: caret_fill.with_alpha_factor(opacity),
+            corner_radius: 0.0,
+            stroke_width: 0.0,
+            clip_rect: content_clip_rect,
+            clip_mask,
+        });
+    }
+
+    ime_cursor_area
+}
+
 pub(super) fn measure_select_content(
     selected_label: Option<&str>,
     placeholder: &Value<String>,

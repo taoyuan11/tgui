@@ -152,11 +152,63 @@ impl TextLayoutInfo {
         self.line_for_index(index).x_for_index(index)
     }
 
+    pub(crate) fn top_for_index(&self, index: usize) -> f32 {
+        self.line_for_index(index).top
+    }
+
+    pub(crate) fn line_height_for_index(&self, index: usize) -> f32 {
+        self.line_for_index(index).height
+    }
+
     pub(crate) fn index_for_x(&self, x: f32) -> usize {
         self.lines
             .first()
             .map(|line| line.index_for_x(x))
             .unwrap_or(0)
+    }
+
+    pub(crate) fn index_for_point(&self, x: f32, y: f32) -> usize {
+        self.line_for_y(y).index_for_x(x)
+    }
+
+    pub(crate) fn line_index_for_index(&self, index: usize) -> usize {
+        self.find_line_index_for_index(index)
+    }
+
+    pub(crate) fn line_count(&self) -> usize {
+        self.lines.len()
+    }
+
+    pub(crate) fn line_start(&self, line_index: usize) -> usize {
+        self.lines
+            .get(line_index)
+            .or_else(|| self.lines.last())
+            .map(|line| line.start_index)
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn line_end(&self, line_index: usize) -> usize {
+        self.lines
+            .get(line_index)
+            .or_else(|| self.lines.last())
+            .map(|line| line.end_index)
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn line_top(&self, line_index: usize) -> f32 {
+        self.lines
+            .get(line_index)
+            .or_else(|| self.lines.last())
+            .map(|line| line.top)
+            .unwrap_or(0.0)
+    }
+
+    pub(crate) fn line_height(&self, line_index: usize) -> f32 {
+        self.lines
+            .get(line_index)
+            .or_else(|| self.lines.last())
+            .map(|line| line.height)
+            .unwrap_or(0.0)
     }
 
     fn find_line_index_for_index(&self, index: usize) -> usize {
@@ -183,6 +235,19 @@ impl TextLayoutInfo {
         self.lines
             .get(line_index)
             .or_else(|| self.lines.first())
+            .expect("text layout should always contain at least one line")
+    }
+
+    fn line_for_y(&self, y: f32) -> &TextLineLayoutInfo {
+        if self.lines.is_empty() {
+            panic!("text layout should always contain at least one line");
+        }
+
+        let local_y = y.max(0.0);
+        self.lines
+            .iter()
+            .find(|line| local_y < line.top + line.height)
+            .or_else(|| self.lines.last())
             .expect("text layout should always contain at least one line")
     }
 }

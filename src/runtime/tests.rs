@@ -10,7 +10,7 @@ use crate::foundation::binding::{Binding, InvalidationSignal};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-use crate::platform::event::{ElementState, KeyEvent, MouseScrollDelta};
+use crate::platform::event::{ElementState, Ime, KeyEvent, MouseScrollDelta};
 use crate::platform::keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey};
 use crate::text::font::FontCatalog;
 use crate::ui::layout::Axis;
@@ -157,6 +157,12 @@ fn pressed_key_event(physical_key: PhysicalKey) -> KeyEvent {
     }
 }
 
+fn repeated_pressed_key_event(physical_key: PhysicalKey) -> KeyEvent {
+    let mut event = pressed_key_event(physical_key);
+    event.repeat = true;
+    event
+}
+
 fn text_key_event(text: &str) -> KeyEvent {
     KeyEvent {
         physical_key: PhysicalKey::Code(KeyCode::KeyA),
@@ -168,6 +174,12 @@ fn text_key_event(text: &str) -> KeyEvent {
         text_with_all_modifiers: None,
         key_without_modifiers: Key::Character(text.into()),
     }
+}
+
+fn repeated_text_key_event(text: &str) -> KeyEvent {
+    let mut event = text_key_event(text);
+    event.repeat = true;
+    event
 }
 
 fn custom_theme_set() -> (ThemeSet, Theme, Theme) {
@@ -638,6 +650,8 @@ fn dragging_selectable_text_updates_selection_range() {
             padding,
             &text_style,
             &text,
+            false,
+            Point::ZERO,
             Point {
                 x: frame.x + frame.width - 1.0,
                 y: frame.y + (frame.height * 0.5),
@@ -791,11 +805,15 @@ fn input_builder_creates_text_input_hit_region() {
     let invalidation = InvalidationSignal::new();
     let tree: WidgetTree<TestVm> = WidgetTree::new(Input::<TestVm>::new("hello"));
     let mut handler = test_handler(Some(tree), invalidation);
-    let has_input = handler
-        .computed_scene()
-        .hit_regions
-        .iter()
-        .any(|region| matches!(region.interaction, HitInteraction::TextInput { multiline: false, .. }));
+    let has_input = handler.computed_scene().hit_regions.iter().any(|region| {
+        matches!(
+            region.interaction,
+            HitInteraction::TextInput {
+                multiline: false,
+                ..
+            }
+        )
+    });
     assert!(has_input);
 }
 
@@ -805,22 +823,26 @@ fn textarea_builder_creates_multiline_text_input_hit_region() {
     let tree: WidgetTree<TestVm> =
         WidgetTree::new(Textarea::<TestVm>::new("hello").height(dp(80.0)));
     let mut handler = test_handler(Some(tree), invalidation);
-    let has_textarea = handler
-        .computed_scene()
-        .hit_regions
-        .iter()
-        .any(|region| matches!(region.interaction, HitInteraction::TextInput { multiline: true, .. }));
+    let has_textarea = handler.computed_scene().hit_regions.iter().any(|region| {
+        matches!(
+            region.interaction,
+            HitInteraction::TextInput {
+                multiline: true,
+                ..
+            }
+        )
+    });
     assert!(has_textarea);
 }
 
 #[test]
 fn focused_input_receives_inserted_text_via_on_change() {
     let invalidation = InvalidationSignal::new();
-    let tree = WidgetTree::new(
-        Input::new("hi").on_change(ValueCommand::new(|vm: &mut TextInputVm, value| {
+    let tree = WidgetTree::new(Input::new("hi").on_change(ValueCommand::new(
+        |vm: &mut TextInputVm, value| {
             vm.value = value;
-        })),
-    );
+        },
+    )));
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
     let viewport = handler.viewport_rect();
     let frame = {
@@ -844,6 +866,844 @@ fn focused_input_receives_inserted_text_via_on_change() {
 
     let value = handler.with_view_model(|vm| vm.value.clone());
     assert_eq!(value, "hia");
+}
+
+#[test]
+fn focused_input_accepts_repeated_text_input() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Input::new("hi").on_change(ValueCommand::new(
+        |vm: &mut TextInputVm, value| {
+            vm.value = value;
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&repeated_text_key_event("a"));
+
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value, "hia");
+}
+
+#[test]
+fn input_backspace_preserves_multibyte_boundaries_with_rope_buffer() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Input::new("a中🙂b").on_change(ValueCommand::new(
+        |vm: &mut TextInputVm, value| {
+            vm.value = value;
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: false, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: "a中🙂".len(),
+            anchor: "a中🙂".len(),
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Backspace)));
+
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value, "a中b");
+}
+
+#[test]
+fn input_backspace_repeats_while_key_is_held() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Input::new("abcd").on_change(ValueCommand::new(
+        |vm: &mut TextInputVm, value| {
+            vm.value = value;
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    handler.handle_keyboard_input(&repeated_pressed_key_event(PhysicalKey::Code(
+        KeyCode::Backspace,
+    )));
+
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value, "abc");
+}
+
+#[test]
+fn textarea_replaces_multibyte_selection_via_rope_buffer() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Textarea::new("ab中🙂cd").on_change(ValueCommand::new(
+        |vm: &mut TextInputVm, value| {
+            vm.value = value;
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: "ab中🙂".len(),
+            anchor: "ab".len(),
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    handler.handle_keyboard_input(&text_key_event("X"));
+
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value, "abXcd");
+}
+
+#[test]
+fn ime_commit_replaces_multibyte_selection_with_rope_buffer() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Input::new("你a好").on_change(ValueCommand::new(
+        |vm: &mut TextInputVm, value| {
+            vm.value = value;
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: "你a".len(),
+            anchor: "你".len(),
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    assert!(handler.handle_ime_event(&Ime::Preedit("🙂".to_string(), Some((0, "🙂".len())))));
+    let composition = handler
+        .text_edit_states
+        .get(&text_id)
+        .and_then(|state| state.composition.as_ref())
+        .expect("composition state should be stored");
+    assert_eq!(composition.replace_range, ("你".len(), "你a".len()));
+
+    assert!(handler.handle_ime_event(&Ime::Commit("🙂".to_string())));
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value, "你🙂好");
+}
+
+#[test]
+fn external_bound_value_rebuilds_text_input_buffer_and_clamps_state() {
+    let invalidation = InvalidationSignal::new();
+    let value = Arc::new(Mutex::new("hello🙂world".to_string()));
+    let binding = {
+        let value = value.clone();
+        Binding::new(move || value.lock().expect("value lock poisoned").clone())
+    };
+    let tree: WidgetTree<TestVm> = WidgetTree::new(Input::<TestVm>::new(binding));
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: "hello🙂world".len(),
+            anchor: "hello🙂world".len(),
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    handler.sync_text_input_buffer(text_id);
+    assert_eq!(
+        handler
+            .text_input_buffers
+            .get(&text_id)
+            .expect("text input buffer should exist")
+            .source_value,
+        "hello🙂world"
+    );
+
+    *value.lock().expect("value lock poisoned") = "中".to_string();
+    invalidation.mark_dirty();
+    handler.request_redraw_if_dirty(Instant::now());
+    let _ = handler.computed_scene();
+    handler.sync_text_input_buffer(text_id);
+
+    let buffer_state = handler
+        .text_input_buffers
+        .get_mut(&text_id)
+        .expect("text input buffer should be rebuilt");
+    assert_eq!(buffer_state.source_value, "中");
+    assert_eq!(buffer_state.buffer.materialize_string(), "中");
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("text edit state should still exist");
+    assert_eq!(state.cursor, "中".len());
+    assert_eq!(state.anchor, "中".len());
+}
+
+#[test]
+fn textarea_large_text_edit_smoke_uses_rope_buffer() {
+    let invalidation = InvalidationSignal::new();
+    let initial = "0123456789abcdef\n".repeat(2048);
+    let tree = WidgetTree::new(Textarea::new(initial.clone()).on_change(ValueCommand::new(
+        |vm: &mut TextInputVm, value| {
+            vm.value = value;
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: 0,
+            anchor: 0,
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    handler.handle_keyboard_input(&text_key_event("中"));
+
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value.len(), initial.len() + "中".len());
+    assert!(value.starts_with("中0123456789abcdef"));
+}
+
+#[test]
+fn focused_text_input_schedules_caret_blink_deadline() {
+    let invalidation = InvalidationSignal::new();
+    let tree: WidgetTree<TestVm> = WidgetTree::new(Input::<TestVm>::new("hello"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + (frame.width * 0.5),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let deadline = handler.next_deadline(Instant::now());
+    assert!(deadline.is_some());
+
+    handler.update_focus(None, None, false);
+    let deadline = handler.next_deadline(Instant::now());
+    assert!(deadline.is_none());
+}
+
+#[test]
+fn clicking_text_input_renders_caret_on_first_focused_frame() {
+    let invalidation = InvalidationSignal::new();
+    let tree: WidgetTree<TestVm> = WidgetTree::new(Input::<TestVm>::new("hello"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let computed = handler.computed_scene();
+    assert!(
+        computed.ime_cursor_area.is_some(),
+        "focused input should expose a caret rect on the first focused frame"
+    );
+    assert!(
+        !computed.scene.overlay_shapes.is_empty(),
+        "focused input should render the caret immediately after click"
+    );
+}
+
+#[test]
+fn single_line_input_scrolls_horizontally_to_keep_caret_visible() {
+    let invalidation = InvalidationSignal::new();
+    let value = "0123456789abcdef0123456789";
+    let tree = WidgetTree::new(Input::<TestVm>::new(value).size(dp(96.0), dp(40.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let (frame, padding) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { frame, padding, .. } => Some((*frame, *padding)),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::End)));
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should exist");
+    assert!(state.scroll_x > Dp::ZERO);
+
+    let inner = frame.inset(padding);
+    let caret = handler
+        .computed_scene()
+        .ime_cursor_area
+        .expect("focused input should expose a caret rect");
+    assert!(caret.x >= inner.x);
+    assert!(caret.right() <= inner.right() + dp(1.0));
+}
+
+#[test]
+fn ime_preedit_scrolls_single_line_input_to_keep_composition_caret_visible() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Input::<TestVm>::new("").size(dp(96.0), dp(40.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let composition = "0123456789abcdef".repeat(3);
+    let (frame, padding) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { frame, padding, .. } => Some((*frame, *padding)),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert!(handler.handle_ime_event(&Ime::Preedit(
+        composition.clone(),
+        Some((0, composition.len())),
+    )));
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should exist");
+    assert!(state.scroll_x > Dp::ZERO);
+
+    let inner = frame.inset(padding);
+    let caret = handler
+        .computed_scene()
+        .ime_cursor_area
+        .expect("focused input should expose a caret rect");
+    assert!(caret.x >= inner.x);
+    assert!(caret.right() <= inner.right() + dp(1.0));
+}
+
+#[test]
+fn single_line_input_blur_resets_scroll_and_caret_to_start() {
+    let invalidation = InvalidationSignal::new();
+    let value = "0123456789abcdef0123456789";
+    let tree = WidgetTree::new(Input::<TestVm>::new(value).size(dp(96.0), dp(40.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let (frame, padding) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { frame, padding, .. } => Some((*frame, *padding)),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::End)));
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    let scrolled_state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should exist");
+    assert!(scrolled_state.scroll_x > Dp::ZERO);
+    assert!(scrolled_state.cursor > 0);
+
+    handler.update_focus(None, None, false);
+
+    let blurred_state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should still exist after blur");
+    assert_eq!(blurred_state.cursor, 0);
+    assert_eq!(blurred_state.anchor, 0);
+    assert_eq!(blurred_state.scroll_x, Dp::ZERO);
+    assert_eq!(blurred_state.scroll_y, Dp::ZERO);
+    assert!(!handler.scroll_states.contains_key(&text_id));
+
+    let next_focus = handler
+        .focusable_widgets_in_tab_order()
+        .into_iter()
+        .find(|candidate| candidate.widget_id == text_id)
+        .expect("input should remain focusable");
+    handler.update_focus(Some(next_focus), None, true);
+
+    let inner = frame.inset(padding);
+    let caret = handler
+        .computed_scene()
+        .ime_cursor_area
+        .expect("refocused input should expose a caret rect");
+    assert!(caret.x >= inner.x);
+    assert!(caret.x <= inner.x + dp(1.0));
+}
+
+#[test]
+fn single_line_input_blur_resets_scroll_even_without_cached_scene() {
+    let invalidation = InvalidationSignal::new();
+    let value = "0123456789abcdef0123456789";
+    let tree = WidgetTree::new(Input::<TestVm>::new(value).size(dp(96.0), dp(40.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::End)));
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    assert!(
+        handler
+            .text_edit_states
+            .get(&text_id)
+            .expect("input edit state should exist")
+            .scroll_x
+            > Dp::ZERO
+    );
+
+    handler.cached_scene = None;
+    handler.update_focus(None, None, false);
+
+    let blurred_state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should still exist after blur");
+    assert_eq!(blurred_state.cursor, 0);
+    assert_eq!(blurred_state.anchor, 0);
+    assert_eq!(blurred_state.scroll_x, Dp::ZERO);
+    assert_eq!(blurred_state.scroll_y, Dp::ZERO);
+    assert!(!handler.scroll_states.contains_key(&text_id));
+}
+
+#[test]
+fn textarea_arrow_down_moves_caret_to_next_visual_line() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Textarea::<TestVm>::new("hello\nworld").height(dp(120.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown)));
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("textarea edit state should exist");
+    assert!(state.cursor > "hello\n".len() - 1);
+}
+
+#[test]
+fn repeated_tab_does_not_advance_focus() {
+    let invalidation = InvalidationSignal::new();
+    let first: Element<TestVm> = Input::<TestVm>::new("first").into();
+    let second: Element<TestVm> = Input::<TestVm>::new("second").into();
+    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child([first, second]));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let initial_focus = handler.focused_widget_id();
+
+    assert!(!handler
+        .handle_keyboard_input(&repeated_pressed_key_event(PhysicalKey::Code(KeyCode::Tab),)));
+    assert_eq!(handler.focused_widget_id(), initial_focus);
+}
+
+#[test]
+fn repeated_arrow_right_moves_single_line_input_cursor() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Input::<TestVm>::new("hello"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: 0,
+            anchor: 0,
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    handler.handle_keyboard_input(&repeated_pressed_key_event(PhysicalKey::Code(
+        KeyCode::ArrowRight,
+    )));
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should exist");
+    assert_eq!(state.cursor, "h".len());
+    assert_eq!(state.anchor, "h".len());
+}
+
+#[test]
+fn textarea_arrow_down_scrolls_caret_into_vertical_view() {
+    let invalidation = InvalidationSignal::new();
+    let value = "line 0\nline 1\nline 2\nline 3\nline 4";
+    let tree = WidgetTree::new(Textarea::<TestVm>::new(value).height(dp(52.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    for _ in 0..4 {
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown)));
+    }
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("textarea edit state should exist");
+    let scroll_y = handler
+        .scroll_states
+        .get(&text_id)
+        .map(|offset| offset.y)
+        .unwrap_or(Dp::ZERO);
+
+    assert!(state.cursor >= "line 0\nline 1\nline 2\n".len());
+    assert!(scroll_y > Dp::ZERO);
+}
+
+#[test]
+fn textarea_arrow_up_reduces_vertical_scroll_in_long_text() {
+    let invalidation = InvalidationSignal::new();
+    let value = "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6";
+    let tree = WidgetTree::new(Textarea::<TestVm>::new(value).height(dp(52.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    for _ in 0..6 {
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown)));
+    }
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    let scrolled_down = handler
+        .scroll_states
+        .get(&text_id)
+        .map(|offset| offset.y)
+        .unwrap_or(Dp::ZERO);
+    assert!(scrolled_down > Dp::ZERO);
+
+    for _ in 0..6 {
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowUp)));
+    }
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("textarea edit state should exist");
+    let scrolled_up = handler
+        .scroll_states
+        .get(&text_id)
+        .map(|offset| offset.y)
+        .unwrap_or(Dp::ZERO);
+
+    assert!(state.cursor < "line 0\n".len());
+    assert!(scrolled_up < scrolled_down);
 }
 
 #[test]

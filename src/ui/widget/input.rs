@@ -173,7 +173,8 @@ impl<VM> Input<VM> {
 
     pub fn placeholder(mut self, placeholder: impl Into<Value<String>>) -> Self {
         if let WidgetKind::Input {
-            placeholder: target, ..
+            placeholder: target,
+            ..
         } = &mut self.element.kind
         {
             *target = placeholder.into();

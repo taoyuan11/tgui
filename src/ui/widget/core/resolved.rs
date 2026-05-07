@@ -1567,7 +1567,7 @@ impl<VM> ResolvedElement<VM> {
                 };
                 let mut text = text_with_typography(display_value.clone(), &input_style.text_style);
                 text.color = Some(Value::Static(input_style.text));
-                push_text_primitives(
+                let ime_cursor_area = push_text_input_primitives(
                     &text,
                     frame,
                     context.font_manager,
@@ -1579,16 +1579,20 @@ impl<VM> ResolvedElement<VM> {
                     context.caret_visible && context.focused_input == Some(self.id),
                     false,
                     padding,
-                    Some(&resolved_value),
                     context
                         .focused_text_state
                         .filter(|_| context.focused_input == Some(self.id)),
                     input_style.placeholder,
+                    input_style.selection,
+                    input_style.caret,
                     opacity,
                     self.id,
                     primitive_clip,
                     primitive_clip_mask,
                 );
+                if context.focused_input == Some(self.id) {
+                    computed.ime_cursor_area = ime_cursor_area;
+                }
                 if !disabled {
                     computed.hit_regions.push(HitRegion {
                         rect: frame,
@@ -1626,7 +1630,7 @@ impl<VM> ResolvedElement<VM> {
                 };
                 let mut text = text_with_typography(display_value.clone(), &input_style.text_style);
                 text.color = Some(Value::Static(input_style.text));
-                push_text_primitives(
+                let ime_cursor_area = push_text_input_primitives(
                     &text,
                     frame,
                     context.font_manager,
@@ -1636,18 +1640,22 @@ impl<VM> ResolvedElement<VM> {
                     context.now,
                     &mut computed.scene,
                     context.caret_visible && context.focused_input == Some(self.id),
-                    false,
+                    true,
                     padding,
-                    Some(&resolved_value),
                     context
                         .focused_text_state
                         .filter(|_| context.focused_input == Some(self.id)),
                     input_style.placeholder,
+                    input_style.selection,
+                    input_style.caret,
                     opacity,
                     self.id,
                     primitive_clip,
                     primitive_clip_mask,
                 );
+                if context.focused_input == Some(self.id) {
+                    computed.ime_cursor_area = ime_cursor_area;
+                }
                 if !disabled {
                     computed.hit_regions.push(HitRegion {
                         rect: frame,
