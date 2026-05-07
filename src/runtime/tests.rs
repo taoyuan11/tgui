@@ -1,0 +1,1113 @@
+use super::{
+    centered_window_position_for_monitor, text_cursor_index_at_point, BoundRuntimeHandler,
+    CachedScene, WindowBindings,
+};
+use crate::animation::AnimationCoordinator;
+use crate::application::{ApplicationConfig, ThemeSelection, WindowRole};
+use crate::dialog::async_dialog_channel;
+use crate::foundation::binding::ViewModelContext;
+use crate::foundation::binding::{Binding, InvalidationSignal};
+use crate::foundation::color::Color;
+use crate::foundation::view_model::{Command, ValueCommand};
+use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
+use crate::platform::event::{ElementState, KeyEvent, MouseScrollDelta};
+use crate::platform::keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey};
+use crate::text::font::FontCatalog;
+use crate::ui::layout::Axis;
+use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
+use crate::ui::unit::{dp, Dp, UnitContext};
+use crate::ui::widget::{
+    Button, Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent,
+    CanvasShadow, CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, PathBuilder,
+    Point, Select, SelectOption, Text, TextEditState, WidgetTree,
+};
+use crate::ui::widget::{Element, Stack, WidgetId};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+#[cfg(feature = "video")]
+use std::time::Duration;
+use std::time::Instant;
+
+#[cfg(feature = "video")]
+use crate::media::TextureFrame;
+use crate::notification::async_notification_channel;
+#[cfg(feature = "video")]
+use crate::video::backend::{
+    BackendSharedState, VideoBackend, DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
+};
+#[cfg(feature = "video")]
+use crate::video::{
+    PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
+    VideoSurfaceSnapshot,
+};
+#[cfg(feature = "video")]
+use crate::ViewModelContext;
+
+#[derive(Default)]
+struct TestVm;
+
+impl crate::foundation::view_model::ViewModel for TestVm {
+    fn new(_context: &ViewModelContext) -> Self {
+        todo!()
+    }
+
+    fn view(&self) -> Element<Self>
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
+}
+
+fn test_config() -> ApplicationConfig {
+    ApplicationConfig {
+        app_id: None,
+        title: "test".to_string(),
+        size: LogicalSize::new(200.0, 120.0),
+        min_size: None,
+        max_size: None,
+        clear_color: Color::BLACK,
+        clear_color_overridden: true,
+        close_children_with_main: true,
+        decorations: true,
+        fonts: FontCatalog::default(),
+        theme: ThemeSelection::System,
+        theme_set: ThemeSet::default(),
+        window_icon: None,
+    }
+}
+
+fn test_config_with_theme(theme: ThemeSelection, theme_set: ThemeSet) -> ApplicationConfig {
+    ApplicationConfig {
+        app_id: None,
+        title: "test".to_string(),
+        size: LogicalSize::new(200.0, 120.0),
+        min_size: None,
+        max_size: None,
+        clear_color: Color::BLACK,
+        clear_color_overridden: true,
+        close_children_with_main: true,
+        decorations: true,
+        fonts: FontCatalog::default(),
+        theme,
+        theme_set,
+        window_icon: None,
+    }
+}
+
+fn test_handler(
+    widget_tree: Option<WidgetTree<TestVm>>,
+    invalidation: InvalidationSignal,
+) -> BoundRuntimeHandler<TestVm> {
+    test_handler_with_vm(TestVm, widget_tree, invalidation)
+}
+
+fn test_handler_with_vm<VM: crate::foundation::view_model::ViewModel>(
+    view_model: VM,
+    widget_tree: Option<WidgetTree<VM>>,
+    invalidation: InvalidationSignal,
+) -> BoundRuntimeHandler<VM> {
+    test_handler_with_config(view_model, widget_tree, invalidation, test_config())
+}
+
+fn test_handler_with_config<VM: crate::foundation::view_model::ViewModel>(
+    view_model: VM,
+    widget_tree: Option<WidgetTree<VM>>,
+    invalidation: InvalidationSignal,
+    config: ApplicationConfig,
+) -> BoundRuntimeHandler<VM> {
+    let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
+    let (notification_dispatcher, notification_receiver) = async_notification_channel();
+    BoundRuntimeHandler::new(
+        "test".to_string(),
+        1,
+        WindowRole::Main,
+        config,
+        Arc::new(Mutex::new(view_model)),
+        WindowBindings::default(),
+        widget_tree,
+        Vec::new(),
+        invalidation,
+        AnimationCoordinator::default(),
+        dialog_dispatcher,
+        Some(dialog_receiver),
+        notification_dispatcher,
+        Some(notification_receiver),
+        #[cfg(all(target_os = "android", feature = "android"))]
+        None,
+    )
+}
+
+fn pressed_key_event(physical_key: PhysicalKey) -> KeyEvent {
+    KeyEvent {
+        physical_key,
+        logical_key: match physical_key {
+            PhysicalKey::Code(KeyCode::Tab) => Key::Named(NamedKey::Tab),
+            _ => Key::Character(" ".into()),
+        },
+        text: None,
+        location: KeyLocation::Standard,
+        state: ElementState::Pressed,
+        repeat: false,
+        text_with_all_modifiers: None,
+        key_without_modifiers: match physical_key {
+            PhysicalKey::Code(KeyCode::Tab) => Key::Named(NamedKey::Tab),
+            _ => Key::Character(" ".into()),
+        },
+    }
+}
+
+fn custom_theme_set() -> (ThemeSet, Theme, Theme) {
+    let mut light = Theme::light();
+    light.colors.background = Color::hexa(0xEAF4FFFF);
+    light.colors.primary = Color::hexa(0x3366CCFF);
+    let mut dark = Theme::dark();
+    dark.colors.background = Color::hexa(0x06101DFF);
+    dark.colors.primary = Color::hexa(0x66D9E8FF);
+    (ThemeSet::new(light.clone(), dark.clone()), light, dark)
+}
+
+#[test]
+fn centered_window_position_uses_monitor_center() {
+    let position = centered_window_position_for_monitor(
+        Some(PhysicalPosition::new(-1920, 0)),
+        PhysicalSize::new(1920, 1080),
+        1.0,
+        LogicalSize::new(960.0, 540.0),
+    );
+
+    assert_eq!(position, Some(PhysicalPosition::new(-1440, 270)));
+}
+
+#[test]
+fn centered_window_position_clamps_to_monitor_origin_for_oversized_window() {
+    let position = centered_window_position_for_monitor(
+        Some(PhysicalPosition::new(100, 200)),
+        PhysicalSize::new(800, 600),
+        1.0,
+        LogicalSize::new(1200.0, 700.0),
+    );
+
+    assert_eq!(position, Some(PhysicalPosition::new(100, 200)));
+}
+
+#[test]
+fn window_control_close_request_marks_handler_for_close() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    let context = handler.command_context();
+
+    context.window().close();
+
+    assert!(handler.drain_window_requests());
+    assert!(!handler.drain_window_requests());
+}
+
+#[test]
+fn bound_theme_modes_resolve_through_configured_theme_set() {
+    let invalidation = InvalidationSignal::new();
+    let (theme_set, light, dark) = custom_theme_set();
+    let mode = Binding::new(|| ThemeMode::Light);
+    let mut handler = test_handler_with_config(
+        TestVm,
+        None,
+        invalidation,
+        test_config_with_theme(ThemeSelection::System, theme_set),
+    );
+    handler.window_bindings.theme_mode = Some(mode);
+
+    handler.sync_theme_binding();
+    assert_eq!(handler.theme, light);
+
+    handler.window_bindings.theme_mode = Some(Binding::new(|| ThemeMode::Dark));
+    handler.sync_theme_binding();
+    assert_eq!(handler.theme, dark);
+}
+
+#[test]
+fn bound_theme_set_updates_current_theme_without_mode_change() {
+    let invalidation = InvalidationSignal::new();
+    let (theme_set, light, _dark) = custom_theme_set();
+    let themes = Arc::new(Mutex::new(theme_set));
+    let theme_binding = {
+        let themes = themes.clone();
+        Binding::new(move || themes.lock().expect("theme set lock poisoned").clone())
+    };
+    let mut handler = test_handler_with_config(
+        TestVm,
+        None,
+        invalidation,
+        test_config_with_theme(ThemeSelection::System, ThemeSet::default()),
+    );
+    handler.window_bindings.theme_mode = Some(Binding::new(|| ThemeMode::Light));
+    handler.window_bindings.theme_set = Some(theme_binding);
+
+    handler.sync_theme_binding();
+    assert_eq!(handler.theme, light);
+
+    let mut updated_light = Theme::light();
+    updated_light.colors.background = Color::hexa(0xFFFFFFFF);
+    updated_light.colors.primary = Color::hexa(0xFFAA00FF);
+    themes.lock().expect("theme set lock poisoned").light = Arc::new(updated_light.clone());
+
+    handler.sync_theme_binding();
+    assert_eq!(handler.theme, updated_light);
+}
+
+#[test]
+fn hover_path_reuses_cached_computed_scene() {
+    let invalidation = InvalidationSignal::new();
+    let resolve_count = Arc::new(AtomicUsize::new(0));
+    let child = {
+        let resolve_count = resolve_count.clone();
+        Binding::new(move || {
+            resolve_count.fetch_add(1, Ordering::SeqCst);
+            Text::new("hover").cursor(CursorStyle::Pointer)
+        })
+    };
+    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child(child));
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+
+    let viewport = handler.viewport_rect();
+    assert_eq!(handler.hover_path(viewport).len(), 1);
+    assert_eq!(resolve_count.load(Ordering::SeqCst), 1);
+
+    assert_eq!(handler.hover_path(viewport).len(), 1);
+    assert_eq!(resolve_count.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn clearing_pointer_position_invalidates_hovered_scene() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Text::new("hover").cursor(CursorStyle::Pointer));
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+
+    let viewport = handler.viewport_rect();
+    assert!(handler.handle_hover(viewport));
+    let hover_epoch = handler.hover_epoch;
+    let _ = handler.computed_scene();
+    assert!(handler.cached_scene.is_some());
+
+    handler.clear_pointer_position();
+
+    assert!(handler.hovered_widgets.is_empty());
+    assert_eq!(handler.hover_epoch, hover_epoch.wrapping_add(1));
+    assert!(handler.cached_scene.is_none());
+}
+
+#[test]
+fn scene_cache_invalidates_when_units_change() {
+    let invalidation = InvalidationSignal::new();
+    let handler = test_handler(None, invalidation);
+    let viewport = handler.viewport_rect();
+    let cached = CachedScene::<TestVm> {
+        viewport,
+        units: UnitContext::new(1.0, 1.0),
+        focused_widget: None,
+        focus_visible: false,
+        pressed_widget: None,
+        selected_text: None,
+        caret_visible: false,
+        animation_epoch: 0,
+        scroll_epoch: 0,
+        hover_epoch: 0,
+        hovered_scrollbar: None,
+        active_scrollbar: None,
+        layout: None,
+        computed: Default::default(),
+    };
+
+    assert!(!handler.scene_cache_matches(
+        &cached,
+        viewport,
+        UnitContext::new(1.0, 1.25),
+        false,
+        None,
+    ));
+}
+
+#[test]
+fn scene_cache_invalidates_when_pressed_widget_changes() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    let viewport = handler.viewport_rect();
+    let cached = CachedScene::<TestVm> {
+        viewport,
+        units: UnitContext::new(1.0, 1.0),
+        focused_widget: None,
+        focus_visible: false,
+        pressed_widget: None,
+        selected_text: None,
+        caret_visible: false,
+        animation_epoch: 0,
+        scroll_epoch: 0,
+        hover_epoch: 0,
+        hovered_scrollbar: None,
+        active_scrollbar: None,
+        layout: None,
+        computed: Default::default(),
+    };
+
+    handler.pressed_widget = Some(WidgetId::next());
+
+    assert!(!handler.scene_cache_matches(
+        &cached,
+        viewport,
+        UnitContext::new(1.0, 1.0),
+        false,
+        None,
+    ));
+}
+
+#[test]
+fn scene_cache_invalidates_when_focused_widget_changes() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    let viewport = handler.viewport_rect();
+    let cached = CachedScene::<TestVm> {
+        viewport,
+        units: UnitContext::new(1.0, 1.0),
+        focused_widget: None,
+        focus_visible: false,
+        pressed_widget: None,
+        selected_text: None,
+        caret_visible: false,
+        animation_epoch: 0,
+        scroll_epoch: 0,
+        hover_epoch: 0,
+        hovered_scrollbar: None,
+        active_scrollbar: None,
+        layout: None,
+        computed: Default::default(),
+    };
+
+    handler.focused_widget = Some(super::FocusedWidget {
+        widget_id: WidgetId::next(),
+        on_blur: None,
+    });
+
+    assert!(!handler.scene_cache_matches(
+        &cached,
+        viewport,
+        UnitContext::new(1.0, 1.0),
+        false,
+        None,
+    ));
+}
+
+#[test]
+fn user_select_text_defaults_to_text_cursor() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Text::new("hover").user_select(true));
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+
+    let viewport = handler.viewport_rect();
+    let hovered = handler.hover_path(viewport);
+    assert_eq!(
+        hovered.last().and_then(|hovered| hovered.cursor_style),
+        Some(CursorStyle::Text)
+    );
+}
+
+#[test]
+fn disabled_control_defaults_to_not_allowed_cursor() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Checkbox::new(false).disable(true).size(dp(120.0), dp(30.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+
+    let hovered = handler.hover_path(handler.viewport_rect());
+    assert_eq!(
+        hovered.last().and_then(|hovered| hovered.cursor_style),
+        Some(CursorStyle::NotAllowed)
+    );
+}
+
+#[test]
+fn clicking_open_select_trigger_closes_dropdown() {
+    let invalidation = InvalidationSignal::new();
+    let select: Element<TestVm> = Select::new(
+        vec![SelectOption::new("email".to_string(), "Email".to_string())],
+        None::<String>,
+    )
+    .size(dp(160.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+    let tree = WidgetTree::new(select);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert_eq!(handler.focused_widget_id(), Some(select_id));
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(true));
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert_eq!(handler.focused_widget_id(), Some(select_id));
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(false));
+}
+
+#[test]
+fn clicking_outside_closes_open_select_dropdown() {
+    let invalidation = InvalidationSignal::new();
+    let select: Element<TestVm> = Select::new(
+        vec![SelectOption::new("email".to_string(), "Email".to_string())],
+        None::<String>,
+    )
+    .size(dp(160.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+    let filler: Element<TestVm> = Button::new("Other")
+        .size(dp(160.0), dp(32.0))
+        .top(dp(40.0))
+        .position_absolute()
+        .into();
+    let tree = WidgetTree::new(Stack::new().child([select, filler]));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(true));
+
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(60.0)));
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(false));
+}
+
+#[test]
+fn tab_focuses_first_widget_when_none_is_focused() {
+    let invalidation = InvalidationSignal::new();
+    let first: Element<TestVm> = Button::new("First").size(dp(80.0), dp(30.0)).into();
+    let first_id = first.id;
+    let second: Element<TestVm> = Button::new("Second").size(dp(80.0), dp(30.0)).into();
+    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child([first, second]));
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let changed = handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(
+        KeyCode::Tab,
+    )));
+
+    assert!(changed);
+    assert_eq!(handler.focused_widget_id(), Some(first_id));
+}
+
+#[test]
+fn tab_advances_to_next_focusable_widget() {
+    let invalidation = InvalidationSignal::new();
+    let first: Element<TestVm> = Button::new("First").size(dp(80.0), dp(30.0)).into();
+    let first_id = first.id;
+    let second: Element<TestVm> = Button::new("Second").size(dp(80.0), dp(30.0)).into();
+    let second_id = second.id;
+    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child([first, second]));
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.focused_widget = Some(super::FocusedWidget {
+        widget_id: first_id,
+        on_blur: None,
+    });
+
+    let changed = handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(
+        KeyCode::Tab,
+    )));
+
+    assert!(changed);
+    assert_eq!(handler.focused_widget_id(), Some(second_id));
+}
+
+#[test]
+fn shift_tab_moves_focus_backward() {
+    let invalidation = InvalidationSignal::new();
+    let first: Element<TestVm> = Button::new("First").size(dp(80.0), dp(30.0)).into();
+    let first_id = first.id;
+    let second: Element<TestVm> = Button::new("Second").size(dp(80.0), dp(30.0)).into();
+    let second_id = second.id;
+    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child([first, second]));
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.focused_widget = Some(super::FocusedWidget {
+        widget_id: second_id,
+        on_blur: None,
+    });
+    handler.modifiers = ModifiersState::SHIFT;
+
+    let changed = handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(
+        KeyCode::Tab,
+    )));
+
+    assert!(changed);
+    assert_eq!(handler.focused_widget_id(), Some(first_id));
+}
+
+#[test]
+fn mouse_focus_does_not_mark_widget_as_focused_for_styling() {
+    let invalidation = InvalidationSignal::new();
+    let button: Element<TestVm> = Button::new("First").size(dp(80.0), dp(30.0)).into();
+    let button_id = button.id;
+    let tree = WidgetTree::new(button);
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+    handler.handle_mouse_press(handler.viewport_rect(), Instant::now(), CanvasMouseButton::Left);
+
+    assert_eq!(handler.focused_widget_id(), Some(button_id));
+    assert!(!handler.widget_state_map(None).get(button_id).focused);
+}
+
+#[test]
+fn tab_focus_marks_widget_as_focused_for_styling() {
+    let invalidation = InvalidationSignal::new();
+    let button: Element<TestVm> = Button::new("First").size(dp(80.0), dp(30.0)).into();
+    let button_id = button.id;
+    let tree = WidgetTree::new(button);
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+
+    assert_eq!(handler.focused_widget_id(), Some(button_id));
+    assert!(handler.widget_state_map(None).get(button_id).focused);
+}
+
+#[test]
+fn dragging_selectable_text_updates_selection_range() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Text::new("hello").user_select(true));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+
+    let (text_id, frame, padding, text_style, text) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::SelectableText {
+                    id,
+                    frame,
+                    padding,
+                    text_style,
+                    text,
+                    ..
+                } => Some((*id, *frame, *padding, text_style.clone(), text.clone())),
+                _ => None,
+            })
+            .expect("selectable text hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + 1.0,
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - 1.0,
+        y: frame.y + (frame.height * 0.5),
+    });
+    assert!(handler.handle_text_selection_drag());
+    assert_eq!(handler.selected_text, Some(text_id));
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("text selection state should be recorded");
+    assert_eq!(state.selection_range(), Some((0, text.len())));
+    assert_eq!(state.anchor, 0);
+    assert_eq!(
+        state.cursor,
+        text_cursor_index_at_point(
+            &handler.font_manager,
+            &handler.theme,
+            handler.unit_context(),
+            frame,
+            padding,
+            &text_style,
+            &text,
+            Point {
+                x: frame.x + frame.width - 1.0,
+                y: frame.y + (frame.height * 0.5),
+            },
+        )
+    );
+}
+
+#[test]
+fn selectable_text_can_provide_selected_content_for_copy() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Text::new("hello world").user_select(true));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let text_id = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::SelectableText { id, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("selectable text hit region should exist")
+    };
+
+    handler.selected_text = Some(text_id);
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: 11,
+            anchor: 6,
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    assert_eq!(handler.selected_text_for_copy().as_deref(), Some("world"));
+}
+
+#[derive(Default)]
+struct SwitchVm {
+    checked: bool,
+}
+
+impl crate::foundation::view_model::ViewModel for SwitchVm {
+    fn new(_context: &ViewModelContext) -> Self {
+        todo!()
+    }
+
+    fn view(&self) -> Element<Self>
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
+}
+
+#[test]
+fn clicking_switch_dispatches_toggled_value() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        crate::ui::widget::Switch::new(false)
+            .on_change(ValueCommand::new(|vm: &mut SwitchVm, value| {
+                vm.checked = value
+            }))
+            .size(dp(52.0), dp(30.0)),
+    );
+    let mut handler = test_handler_with_vm(SwitchVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::Switch { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("switch hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + (frame.width * 0.5),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let checked = handler.with_view_model(|vm| vm.checked);
+    assert!(checked);
+}
+
+#[test]
+fn clicking_checkbox_dispatches_toggled_value() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Checkbox::new(false)
+            .label("Accept")
+            .on_change(ValueCommand::new(|vm: &mut SwitchVm, value| {
+                vm.checked = value
+            }))
+            .size(dp(120.0), dp(30.0)),
+    );
+    let mut handler = test_handler_with_vm(SwitchVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::Checkbox { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("checkbox hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + (frame.width * 0.5),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let checked = handler.with_view_model(|vm| vm.checked);
+    assert!(checked);
+}
+
+#[test]
+fn clicking_disabled_checkbox_does_not_dispatch_toggled_value() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Checkbox::new(false)
+            .disable(true)
+            .on_change(ValueCommand::new(|vm: &mut SwitchVm, value| {
+                vm.checked = value
+            }))
+            .size(dp(120.0), dp(30.0)),
+    );
+    let mut handler = test_handler_with_vm(SwitchVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::Disabled { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("disabled hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + (frame.width * 0.5),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let checked = handler.with_view_model(|vm| vm.checked);
+    assert!(!checked);
+}
+
+#[cfg(feature = "video")]
+struct MockVideoBackend;
+
+#[cfg(feature = "video")]
+impl VideoBackend for MockVideoBackend {
+    fn load(&self, _source: VideoSource) -> Result<(), crate::TguiError> {
+        Ok(())
+    }
+
+    fn play(&self) {}
+
+    fn pause(&self) {}
+
+    fn seek(&self, _position: Duration) {}
+
+    fn set_volume(&self, _volume: f32) {}
+
+    fn set_muted(&self, _muted: bool) {}
+
+    fn set_buffer_memory_limit_bytes(&self, _bytes: u64) {}
+
+    fn current_frame(&self) -> Option<Arc<TextureFrame>> {
+        None
+    }
+
+    fn shutdown(&self) {}
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn hover_path_keeps_video_surface_hit_testing_when_scene_is_cached() {
+    let invalidation = InvalidationSignal::new();
+    let animations = AnimationCoordinator::default();
+    let ctx = ViewModelContext::new(invalidation.clone(), animations.clone());
+    let shared = BackendSharedState {
+        playback_state: ctx.observable(PlaybackState::Ready),
+        metrics: ctx.observable(VideoMetrics::default()),
+        volume: ctx.observable(1.0),
+        muted: ctx.observable(false),
+        buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+        video_size: ctx.observable(VideoSize {
+            width: 160,
+            height: 90,
+        }),
+        error: ctx.observable(None),
+        surface: ctx.observable(VideoSurfaceSnapshot::default()),
+    };
+    let controller = VideoController::from_parts(shared, Arc::new(MockVideoBackend));
+    let tree = WidgetTree::new(
+        VideoSurface::new(controller)
+            .size(dp(160.0), dp(90.0))
+            .cursor(CursorStyle::Pointer),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+
+    let viewport = handler.viewport_rect();
+    assert_eq!(handler.hover_path(viewport).len(), 1);
+    assert_eq!(handler.hover_path(viewport).len(), 1);
+}
+
+#[derive(Default)]
+struct CanvasEventVm {
+    hover_events: Vec<CanvasPointerEvent>,
+    clicks: usize,
+    widget_clicks: usize,
+    mouse_downs: usize,
+    mouse_ups: usize,
+    wheel_events: usize,
+    drag_events: usize,
+    drag_end_events: usize,
+}
+
+impl crate::foundation::view_model::ViewModel for CanvasEventVm {
+    fn new(_context: &ViewModelContext) -> Self {
+        Self {
+            hover_events: vec![],
+            clicks: 0,
+            widget_clicks: 0,
+            mouse_downs: 0,
+            mouse_ups: 0,
+            wheel_events: 0,
+            drag_events: 0,
+            drag_end_events: 0,
+        }
+    }
+
+    fn view(&self) -> Element<Self>
+    where
+        Self: Sized,
+    {
+        Stack::new().into()
+    }
+}
+
+#[test]
+fn canvas_item_hover_dispatches_canvas_pointer_payload() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Canvas::new(vec![CanvasItem::Path(
+            CanvasPath::new(
+                7_u64,
+                PathBuilder::new()
+                    .move_to(10.0, 10.0)
+                    .line_to(60.0, 10.0)
+                    .line_to(60.0, 40.0)
+                    .line_to(10.0, 40.0)
+                    .close(),
+            )
+            .fill(Color::WHITE),
+        )])
+        .size(dp(100.0), dp(80.0))
+        .on_item_mouse_move(ValueCommand::new(
+            |vm: &mut CanvasEventVm, event| {
+                vm.hover_events.push(event);
+            },
+        )),
+    );
+    let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+    handler.cursor_position = Some(Point::new(dp(25.0), dp(20.0)));
+
+    handler.handle_hover(handler.viewport_rect());
+
+    let view_model = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(view_model.hover_events.len(), 1);
+    assert_eq!(view_model.hover_events[0].item_id, 7_u64.into());
+    assert_eq!(
+        view_model.hover_events[0].canvas_position,
+        Point::new(25.0, 20.0)
+    );
+    assert_eq!(
+        view_model.hover_events[0].local_position,
+        Point::new(15.0, 10.0)
+    );
+}
+
+#[test]
+fn canvas_item_click_takes_priority_over_widget_click() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Canvas::new(vec![CanvasItem::Path(
+            CanvasPath::new(
+                11_u64,
+                PathBuilder::new()
+                    .move_to(10.0, 10.0)
+                    .line_to(60.0, 10.0)
+                    .line_to(60.0, 40.0)
+                    .line_to(10.0, 40.0)
+                    .close(),
+            )
+            .fill(Color::WHITE),
+        )])
+        .size(dp(100.0), dp(80.0))
+        .on_click(Command::new(|vm: &mut CanvasEventVm| {
+            vm.widget_clicks += 1;
+        }))
+        .on_item_click(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+            vm.clicks += 1;
+        })),
+    );
+    let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+    handler.cursor_position = Some(Point::new(dp(20.0), dp(20.0)));
+
+    handler.handle_mouse_press(
+        handler.viewport_rect(),
+        Instant::now(),
+        CanvasMouseButton::Left,
+    );
+
+    let view_model = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(view_model.clicks, 1);
+    assert_eq!(view_model.widget_clicks, 0);
+}
+
+#[test]
+fn canvas_item_mouse_down_up_wheel_and_drag_dispatch() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Canvas::new(vec![CanvasItem::Path(
+            CanvasPath::new(
+                12_u64,
+                PathBuilder::new()
+                    .move_to(10.0, 10.0)
+                    .line_to(60.0, 10.0)
+                    .line_to(60.0, 40.0)
+                    .line_to(10.0, 40.0)
+                    .close(),
+            )
+            .fill(Color::WHITE),
+        )])
+        .size(dp(100.0), dp(80.0))
+        .on_item_mouse_down(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+            vm.mouse_downs += 1;
+        }))
+        .on_item_mouse_up(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+            vm.mouse_ups += 1;
+        }))
+        .on_item_wheel(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+            vm.wheel_events += 1;
+        }))
+        .on_item_drag(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+            vm.drag_events += 1;
+        }))
+        .on_item_drag_end(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
+            vm.drag_end_events += 1;
+        })),
+    );
+    let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    handler.cursor_position = Some(Point::new(dp(20.0), dp(20.0)));
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.cursor_position = Some(Point::new(dp(36.0), dp(28.0)));
+    assert!(handler.handle_canvas_drag());
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -1.0)));
+    handler.handle_canvas_mouse_release(CanvasMouseButton::Left);
+
+    let view_model = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(view_model.mouse_downs, 1);
+    assert_eq!(view_model.mouse_ups, 1);
+    assert_eq!(view_model.wheel_events, 1);
+    assert_eq!(view_model.drag_events, 1);
+    assert_eq!(view_model.drag_end_events, 1);
+}
+
+#[test]
+fn dashed_canvas_item_hit_testing_skips_gaps() {
+    let make_tree = || {
+        WidgetTree::new(
+            Canvas::new(vec![CanvasItem::Path(
+                CanvasPath::new(
+                    21_u64,
+                    PathBuilder::new().move_to(10.0, 20.0).line_to(90.0, 20.0),
+                )
+                .stroke(CanvasStroke::new(dp(6.0), Color::WHITE).dash([dp(10.0), dp(10.0)])),
+            )])
+            .size(dp(100.0), dp(60.0))
+            .on_item_mouse_move(ValueCommand::new(
+                |vm: &mut CanvasEventVm, event| {
+                    vm.hover_events.push(event);
+                },
+            )),
+        )
+    };
+
+    let mut hit_handler = test_handler_with_vm(
+        CanvasEventVm::default(),
+        Some(make_tree()),
+        InvalidationSignal::new(),
+    );
+    hit_handler.cursor_position = Some(Point::new(dp(15.0), dp(20.0)));
+    hit_handler.handle_hover(hit_handler.viewport_rect());
+    let hit_vm = hit_handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(hit_vm.hover_events.len(), 1);
+    drop(hit_vm);
+
+    let mut gap_handler = test_handler_with_vm(
+        CanvasEventVm::default(),
+        Some(make_tree()),
+        InvalidationSignal::new(),
+    );
+    gap_handler.cursor_position = Some(Point::new(dp(25.0), dp(20.0)));
+    gap_handler.handle_hover(gap_handler.viewport_rect());
+    let gap_vm = gap_handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert!(gap_vm.hover_events.is_empty());
+}
+
+#[test]
+fn canvas_shadow_does_not_extend_item_hit_region() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Canvas::new(vec![CanvasItem::Path(
+            CanvasPath::new(
+                31_u64,
+                PathBuilder::new()
+                    .move_to(10.0, 10.0)
+                    .line_to(40.0, 10.0)
+                    .line_to(40.0, 40.0)
+                    .line_to(10.0, 40.0)
+                    .close(),
+            )
+            .fill(Color::WHITE)
+            .shadow(CanvasShadow::new(
+                Color::BLACK,
+                Point::new(18.0, 0.0),
+                dp(8.0),
+            )),
+        )])
+        .size(dp(100.0), dp(80.0))
+        .on_item_mouse_move(ValueCommand::new(
+            |vm: &mut CanvasEventVm, event| {
+                vm.hover_events.push(event);
+            },
+        )),
+    );
+    let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+    handler.cursor_position = Some(Point::new(dp(55.0), dp(25.0)));
+
+    handler.handle_hover(handler.viewport_rect());
+
+    let view_model = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert!(view_model.hover_events.is_empty());
+}
