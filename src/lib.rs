@@ -203,8 +203,8 @@ pub mod prelude {
     };
     pub use crate::theme::{
         BorderScale, ColorScheme, ElevationScale, FocusRingStyle, FontWeight, MotionScale,
-        RadiusScale, ResolvedThemeMode, Shadow, SpaceScale, Stateful, TextStyle, Theme,
-        ThemeMode, ThemeSet, ThemeStore, TypeScale, WidgetState,
+        RadiusScale, ResolvedThemeMode, Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode,
+        ThemeSet, ThemeStore, TypeScale, WidgetState,
     };
     #[cfg(feature = "video")]
     pub use crate::video::{
@@ -224,8 +224,8 @@ pub mod prelude {
 pub mod theme {
     pub use crate::ui::theme::{
         BorderScale, ColorScheme, ElevationScale, FocusRingStyle, FontWeight, MotionScale,
-        RadiusScale, ResolvedThemeMode, Shadow, SpaceScale, Stateful, TextStyle, Theme,
-        ThemeMode, ThemeSet, ThemeStore, TypeScale, WidgetState,
+        RadiusScale, ResolvedThemeMode, Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode,
+        ThemeSet, ThemeStore, TypeScale, WidgetState,
     };
 }
 

@@ -17,9 +17,9 @@ use crate::ui::layout::Axis;
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::{dp, Dp, UnitContext};
 use crate::ui::widget::{
-    Button, Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent,
-    CanvasShadow, CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, PathBuilder,
-    Point, Select, SelectOption, Text, TextEditState, WidgetTree,
+    Button, Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent, CanvasShadow,
+    CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, PathBuilder, Point, Select,
+    SelectOption, Text, TextEditState, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -487,9 +487,8 @@ fn tab_focuses_first_widget_when_none_is_focused() {
     let tree = WidgetTree::new(Flex::new(Axis::Vertical).child([first, second]));
     let mut handler = test_handler(Some(tree), invalidation);
 
-    let changed = handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(
-        KeyCode::Tab,
-    )));
+    let changed =
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
 
     assert!(changed);
     assert_eq!(handler.focused_widget_id(), Some(first_id));
@@ -509,9 +508,8 @@ fn tab_advances_to_next_focusable_widget() {
         on_blur: None,
     });
 
-    let changed = handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(
-        KeyCode::Tab,
-    )));
+    let changed =
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
 
     assert!(changed);
     assert_eq!(handler.focused_widget_id(), Some(second_id));
@@ -532,9 +530,8 @@ fn shift_tab_moves_focus_backward() {
     });
     handler.modifiers = ModifiersState::SHIFT;
 
-    let changed = handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(
-        KeyCode::Tab,
-    )));
+    let changed =
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
 
     assert!(changed);
     assert_eq!(handler.focused_widget_id(), Some(first_id));
@@ -549,7 +546,11 @@ fn mouse_focus_does_not_mark_widget_as_focused_for_styling() {
     let mut handler = test_handler(Some(tree), invalidation);
 
     handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
-    handler.handle_mouse_press(handler.viewport_rect(), Instant::now(), CanvasMouseButton::Left);
+    handler.handle_mouse_press(
+        handler.viewport_rect(),
+        Instant::now(),
+        CanvasMouseButton::Left,
+    );
 
     assert_eq!(handler.focused_widget_id(), Some(button_id));
     assert!(!handler.widget_state_map(None).get(button_id).focused);
@@ -902,11 +903,9 @@ fn canvas_item_hover_dispatches_canvas_pointer_payload() {
             .fill(Color::WHITE),
         )])
         .size(dp(100.0), dp(80.0))
-        .on_item_mouse_move(ValueCommand::new(
-            |vm: &mut CanvasEventVm, event| {
-                vm.hover_events.push(event);
-            },
-        )),
+        .on_item_mouse_move(ValueCommand::new(|vm: &mut CanvasEventVm, event| {
+            vm.hover_events.push(event);
+        })),
     );
     let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
     handler.cursor_position = Some(Point::new(dp(25.0), dp(20.0)));
@@ -1094,11 +1093,9 @@ fn canvas_shadow_does_not_extend_item_hit_region() {
             )),
         )])
         .size(dp(100.0), dp(80.0))
-        .on_item_mouse_move(ValueCommand::new(
-            |vm: &mut CanvasEventVm, event| {
-                vm.hover_events.push(event);
-            },
-        )),
+        .on_item_mouse_move(ValueCommand::new(|vm: &mut CanvasEventVm, event| {
+            vm.hover_events.push(event);
+        })),
     );
     let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
     handler.cursor_position = Some(Point::new(dp(55.0), dp(25.0)));

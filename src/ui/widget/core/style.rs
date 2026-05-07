@@ -3,13 +3,13 @@ use crate::ui::layout::Value;
 use crate::ui::theme::{Theme, WidgetState};
 use crate::ui::unit::Dp;
 
+#[cfg(feature = "video")]
+use super::super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::super::style::{
     infer_theme_mode, ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
     FocusRingOverride, RadioStyle as WidgetRadioStyle, SelectStyle as WidgetSelectStyle,
     TextWidgetStyle,
 };
-#[cfg(feature = "video")]
-use super::super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::{Text, VisualStyle};
 
 #[derive(Clone)]
