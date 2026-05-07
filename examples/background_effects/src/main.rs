@@ -2,6 +2,35 @@ use tgui::prelude::*;
 
 struct BackgroundEffectsVm;
 
+fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for(mode);
+    style.typography.size = size;
+    style.color = color.into();
+    style
+}
+
+fn surface_style(
+    mode: ResolvedThemeMode,
+    radius: Dp,
+    background: Option<Color>,
+    brush: Option<BackgroundBrush>,
+    blur: Dp,
+    border: Option<(Dp, Color)>,
+    background_image: Option<BackgroundImage>,
+) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for(mode);
+    style.surface.background = background.map(Into::into);
+    style.surface.background_brush = brush.map(Into::into);
+    style.surface.background_blur = blur.into();
+    style.surface.background_image = background_image.map(Into::into);
+    style.surface.border_radius = Some(radius.into());
+    if let Some((width, color)) = border {
+        style.surface.border_width = Some(width.into());
+        style.surface.border_color = Some(color.into());
+    }
+    style
+}
+
 impl ViewModel for BackgroundEffectsVm {
 
     fn new(_: &ViewModelContext) -> Self {
@@ -11,7 +40,20 @@ impl ViewModel for BackgroundEffectsVm {
     fn view(&self) -> Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
-            .background_image(BackgroundImage::from_bytes(include_bytes!("../assets/juequling_shushu.jpg")).fit(ContentFit::Cover))
+            .style(|mode| {
+                surface_style(
+                    mode,
+                    dp(0.0),
+                    None,
+                    None,
+                    Dp::ZERO,
+                    None,
+                    Some(
+                        BackgroundImage::from_bytes(include_bytes!("../assets/juequling_shushu.jpg"))
+                            .fit(ContentFit::Cover),
+                    ),
+                )
+            })
             .child(background_pattern())
             .child(
                 Flex::new(Axis::Vertical)
@@ -52,15 +94,27 @@ fn background_pattern() -> Element<BackgroundEffectsVm> {
 fn color_band(start: u32, end: u32) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .grow(1.0)
-        .border_radius(dp(28.0))
-        .background_brush(BackgroundLinearGradient::new(
-            Point::new(dp(0.0), dp(0.0)),
-            Point::new(dp(260.0), dp(200.0)),
-            vec![
-                BackgroundGradientStop::new(0.0, Color::hexa(start)),
-                BackgroundGradientStop::new(1.0, Color::hexa(end)),
-            ],
-        ))
+        .style(move |mode| {
+            surface_style(
+                mode,
+                dp(28.0),
+                None,
+                Some(
+                    BackgroundLinearGradient::new(
+                        Point::new(dp(0.0), dp(0.0)),
+                        Point::new(dp(260.0), dp(200.0)),
+                        vec![
+                            BackgroundGradientStop::new(0.0, Color::hexa(start)),
+                            BackgroundGradientStop::new(1.0, Color::hexa(end)),
+                        ],
+                    )
+                    .into(),
+                ),
+                Dp::ZERO,
+                None,
+                None,
+            )
+        })
         .into()
 }
 
@@ -68,28 +122,36 @@ fn hero_card() -> Element<BackgroundEffectsVm> {
     Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(24.0)))
         .gap(dp(12.0))
-        .border_radius(dp(26.0))
-        .background_blur(dp(22.0))
-        .background_brush(BackgroundLinearGradient::new(
-            Point::new(dp(0.0), dp(0.0)),
-            Point::new(dp(720.0), dp(0.0)),
-            vec![
-                BackgroundGradientStop::new(0.0, Color::hexa(0xFFFFFF1A)),
-                BackgroundGradientStop::new(1.0, Color::hexa(0xFFFFFF08)),
-            ],
-        ))
-        .border(dp(1.0), Color::hexa(0xFFFFFF44))
+        .style(|mode| {
+            surface_style(
+                mode,
+                dp(26.0),
+                None,
+                Some(
+                    BackgroundLinearGradient::new(
+                        Point::new(dp(0.0), dp(0.0)),
+                        Point::new(dp(720.0), dp(0.0)),
+                        vec![
+                            BackgroundGradientStop::new(0.0, Color::hexa(0xFFFFFF1A)),
+                            BackgroundGradientStop::new(1.0, Color::hexa(0xFFFFFF08)),
+                        ],
+                    )
+                    .into(),
+                ),
+                dp(22.0),
+                Some((dp(1.0), Color::hexa(0xFFFFFF44))),
+                None,
+            )
+        })
         .child(
             Text::new("Background Effects Gallery")
-                .font_size(sp(30.0))
-                .color(Color::WHITE),
+                .style(|mode| text_style(mode, sp(30.0), Color::WHITE)),
         )
         .child(
             Text::new(
                 "Linear gradients, radial gradients, layered glass cards, and backdrop blur on a shared background.",
             )
-            .font_size(sp(15.0))
-            .color(Color::hexa(0xE2E8F0FF)),
+            .style(|mode| text_style(mode, sp(15.0), Color::hexa(0xE2E8F0FF))),
         )
         .into()
 }
@@ -108,28 +170,34 @@ fn gallery_column(
     show_background_blur: bool,
     content: Element<BackgroundEffectsVm>,
 ) -> Element<BackgroundEffectsVm> {
-    let mut flex = Flex::new(Axis::Vertical)
+    Flex::new(Axis::Vertical)
         .grow(1.0)
         .padding(Insets::all(dp(18.0)))
         .gap(dp(16.0))
-        .border_radius(dp(24.0))
-        .background_brush(BackgroundLinearGradient::new(
-            Point::new(dp(0.0), dp(0.0)),
-            Point::new(dp(0.0), dp(480.0)),
-            vec![
-                BackgroundGradientStop::new(0.0, Color::hexa(0x0F172A88)),
-                BackgroundGradientStop::new(1.0, Color::hexa(0x11182766)),
-            ],
-        ))
-        .border(dp(1.0), Color::hexa(0xFFFFFF2E))
-        .child(Text::new(title).font_size(sp(20.0)).color(Color::WHITE))
-        .child(content);
-
-    if show_background_blur {
-        flex = flex.background_blur(dp(12.0));
-    }
-
-    flex.into()
+        .style(move |mode| {
+            surface_style(
+                mode,
+                dp(24.0),
+                None,
+                Some(
+                    BackgroundLinearGradient::new(
+                        Point::new(dp(0.0), dp(0.0)),
+                        Point::new(dp(0.0), dp(480.0)),
+                        vec![
+                            BackgroundGradientStop::new(0.0, Color::hexa(0x0F172A88)),
+                            BackgroundGradientStop::new(1.0, Color::hexa(0x11182766)),
+                        ],
+                    )
+                    .into(),
+                ),
+                if show_background_blur { dp(12.0) } else { Dp::ZERO },
+                Some((dp(1.0), Color::hexa(0xFFFFFF2E))),
+                None,
+            )
+        })
+        .child(Text::new(title).style(|mode| text_style(mode, sp(20.0), Color::WHITE)))
+        .child(content)
+        .into()
 }
 
 fn linear_gallery() -> Element<BackgroundEffectsVm> {
@@ -205,12 +273,20 @@ fn gradient_tile(
 ) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .height(dp(110.0))
-        .border_radius(dp(18.0))
-        .background_brush(gradient)
+        .style(move |mode| {
+            surface_style(
+                mode,
+                dp(18.0),
+                None,
+                Some(gradient.clone().into()),
+                Dp::ZERO,
+                None,
+                None,
+            )
+        })
         .child(
             Text::new(label)
-                .font_size(sp(16.0))
-                .color(Color::WHITE)
+                .style(|mode| text_style(mode, sp(16.0), Color::WHITE))
                 .padding(Insets::all(dp(14.0))),
         )
         .into()
@@ -222,13 +298,20 @@ fn radial_tile(
 ) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .height(dp(110.0))
-        .border_radius(dp(18.0))
-        .background_brush(gradient)
-        .background(Color::hexa(0x0F172AFF))
+        .style(move |mode| {
+            surface_style(
+                mode,
+                dp(18.0),
+                Some(Color::hexa(0x0F172AFF)),
+                Some(gradient.clone().into()),
+                Dp::ZERO,
+                None,
+                None,
+            )
+        })
         .child(
             Text::new(label)
-                .font_size(sp(16.0))
-                .color(Color::WHITE)
+                .style(|mode| text_style(mode, sp(16.0), Color::WHITE))
                 .padding(Insets::all(dp(14.0))),
         )
         .into()
@@ -237,14 +320,20 @@ fn radial_tile(
 fn glass_tile(label: &str, blur: Dp, fill: Color) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .height(dp(96.0))
-        .border_radius(dp(18.0))
-        .background_blur(blur)
-        .background(fill)
-        .border(dp(1.0), Color::hexa(0xFFFFFF40))
+        .style(move |mode| {
+            surface_style(
+                mode,
+                dp(18.0),
+                Some(fill),
+                None,
+                blur,
+                Some((dp(1.0), Color::hexa(0xFFFFFF40))),
+                None,
+            )
+        })
         .child(
             Text::new(label)
-                .font_size(sp(16.0))
-                .color(Color::WHITE)
+                .style(|mode| text_style(mode, sp(16.0), Color::WHITE))
                 .padding(Insets::all(dp(14.0))),
         )
         .into()
@@ -253,11 +342,13 @@ fn glass_tile(label: &str, blur: Dp, fill: Color) -> Element<BackgroundEffectsVm
 fn main() -> Result<(), TguiError> {
     let mut theme = Theme::dark();
     theme.colors.background = Color::hexa(0x050816FF);
+    let theme_set = ThemeSet::new(theme.clone(), theme);
 
     Application::new()
         .title("tgui background effects")
         .window_size(dp(1280.0), dp(860.0))
-        .theme(theme)
+        .theme_set(theme_set)
+        .theme_mode(ThemeMode::Dark)
         .with_view_model(BackgroundEffectsVm::new)
         .root_view(BackgroundEffectsVm::view)
         .run()

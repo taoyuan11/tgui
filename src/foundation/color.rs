@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Color {
     pub r: u8,
@@ -84,6 +86,16 @@ impl Color {
 impl Default for Color {
     fn default() -> Self {
         Self::TRANSPARENT
+    }
+}
+
+impl Display for Color {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "#{:02X}{:02X}{:02X}{:02X}",
+            self.r, self.g, self.b, self.a
+        )
     }
 }
 

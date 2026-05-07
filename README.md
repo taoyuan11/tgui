@@ -127,7 +127,7 @@ impl CounterVm {
                 self.count.binding().map(|count| format!("Count: {count}")),
             ))
             .child(
-                Button::new(Text::new("Increment"))
+                Button::new("Increment")
                     .on_click(Command::new(Self::increment)),
             )
             .into()
@@ -195,7 +195,7 @@ Notifications
 Stack / Grid / Flex
 Text / Button / Image / Canvas
 
-Theme / ThemeMode / ThemeSet / Color
+Theme / ThemeMode / ThemeSet / Color / FocusRingStyle
 dp / sp / Dp / Sp
 
 Transition
@@ -252,7 +252,7 @@ Application::new()
 ```
 
 ```rust
-Button::new(Text::new("发送通知")).on_click(Command::new_with_context(|_, ctx| {
+Button::new("发送通知").on_click(Command::new_with_context(|_, ctx| {
     let _ = ctx.notifications().send(
         NotificationOptions::new("TGUI Demo")
             .body("任务已经完成")
@@ -352,7 +352,7 @@ controller.load(source)?;
 `Application::decorations(false)` 或 `WindowSpec::decorations(false)` 可以关闭系统标题栏，用普通 tgui 组件自绘窗口 chrome。命令处理里可以通过 `ctx.window()` 操作当前窗口：
 
 ```rust
-Button::new(Text::new("Close"))
+Button::new("Close")
     .on_click(Command::new_with_context(|_, ctx| {
         ctx.window().close();
     }));

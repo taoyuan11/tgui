@@ -2,6 +2,22 @@ use std::time::Duration;
 
 use tgui::prelude::*;
 
+fn stateful<T: Clone>(value: T) -> Stateful<T> {
+    Stateful {
+        normal: value.clone(),
+        hovered: value.clone(),
+        pressed: value.clone(),
+        disabled: value,
+    }
+}
+
+fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for(mode);
+    style.typography.size = size;
+    style.color = color.into();
+    style
+}
+
 struct TimelineVm {
     status: Observable<String>,
     card_color: AnimatedValue<Color>,
@@ -142,8 +158,7 @@ impl ViewModel for TimelineVm {
             .gap(dp(16.0))
             .child(
                 Text::new("Timeline controller")
-                    .font_size(sp(28.0))
-                    .color(Color::hexa(0xF8FAFCFF)),
+                    .style(|mode| text_style(mode, sp(28.0), Color::hexa(0xF8FAFCFF))),
             )
             .child(
                 Text::new(
@@ -151,30 +166,46 @@ impl ViewModel for TimelineVm {
                         .binding()
                         .map(|status| format!("Status: {status}")),
                 )
-                    .font_size(sp(16.0))
-                    .color(Color::hexa(0xCBD5E1FF)),
+                    .style(|mode| text_style(mode, sp(16.0), Color::hexa(0xCBD5E1FF))),
             )
             .child(
                 Flex::new(Axis::Horizontal)
                     .gap(dp(10.0))
-                    .child(Button::new(Text::new("Play")).on_click(Command::new(Self::play)))
-                    .child(Button::new(Text::new("Pause")).on_click(Command::new(Self::pause)))
-                    .child(Button::new(Text::new("Resume")).on_click(Command::new(Self::resume)))
-                    .child(Button::new(Text::new("Restart")).on_click(Command::new(Self::restart)))
-                    .child(Button::new(Text::new("Reverse")).on_click(Command::new(Self::reverse)))
+                    .child(Button::new("Play").on_click(Command::new(Self::play)))
+                    .child(Button::new("Pause").on_click(Command::new(Self::pause)))
+                    .child(Button::new("Resume").on_click(Command::new(Self::resume)))
+                    .child(Button::new("Restart").on_click(Command::new(Self::restart)))
+                    .child(Button::new("Reverse").on_click(Command::new(Self::reverse)))
                     .child(
-                        Button::new(Text::new("Seek 50%"))
+                        Button::new("Seek 50%")
                             .on_click(Command::new(Self::seek_middle)),
                     ),
             )
             .child(
-                Button::new(Text::new("Timeline-driven card"))
+                Button::new("Timeline-driven card")
                     .width(self.card_width.binding())
                     .padding(self.card_padding.binding())
-                    .background(self.card_color.binding())
-                    .border_radius(dp(18.0))
-                    .opacity(self.card_opacity.binding())
-                    .offset(self.card_offset.binding()),
+                    .style({
+                        let color = self.card_color.binding();
+                        let opacity = self.card_opacity.binding();
+                        let offset = self.card_offset.binding();
+                        move |mode| ButtonStyle {
+                            surface: WidgetSurfaceStyle {
+                                opacity: opacity.clone().into(),
+                                offset: offset.clone().into(),
+                                ..WidgetSurfaceStyle::default()
+                            },
+                            background: stateful(color.clone().into()),
+                            foreground: stateful(Color::WHITE.into()),
+                            border: stateful(Color::TRANSPARENT.into()),
+                            border_width: dp(0.0).into(),
+                            radius: dp(18.0).into(),
+                            padding_x: dp(18.0),
+                            padding_y: dp(14.0),
+                            min_height: dp(44.0),
+                            text_style: TextWidgetStyle::default_for(mode).typography,
+                        }
+                    }),
             )
             .into()
     }

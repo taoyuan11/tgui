@@ -1,28 +1,30 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
+use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
-use crate::ui::unit::Dp;
 
-use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, SelectOptionState, VisualStyle,
     WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
-use super::text::Text;
+use super::style::{SelectStyle, StyleResolver};
 
 pub struct Select<VM, K, V> {
     options: Vec<SelectOption<K, V>>,
     selected_key: Value<Option<K>>,
-    placeholder: Text,
+    placeholder: Value<String>,
+    open: Option<Value<bool>>,
     disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, (K, V)>>,
+    on_open_change: Option<ValueCommand<VM, bool>>,
     layout: LayoutStyle,
     visual: VisualStyle,
     interactions: InteractionHandlers<VM>,
     media_events: MediaEventHandlers<VM>,
     background: Option<Value<Color>>,
+    style: Option<StyleResolver<SelectStyle>>,
 }
 
 macro_rules! impl_select_layout_api {
@@ -168,26 +170,24 @@ impl<VM, K, V> Select<VM, K, V> {
         Self {
             options: options.into_iter().map(Into::into).collect(),
             selected_key: selected_key.into(),
-            placeholder: Text::new(String::new()),
+            placeholder: Value::Static(String::new()),
+            open: None,
             disabled: Value::Static(false),
             on_change: None,
+            on_open_change: None,
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
             interactions,
             media_events: MediaEventHandlers::default(),
             background: None,
+            style: None,
         }
     }
 
     impl_select_layout_api!();
 
-    pub fn placeholder_with_text(mut self, placeholder: Text) -> Self {
-        self.placeholder = placeholder;
-        self
-    }
-
-    pub fn placeholder_with_str(mut self, placeholder: &str) -> Self {
-        self.placeholder = Text::new(placeholder.to_string());
+    pub fn placeholder(mut self, placeholder: impl Into<Value<String>>) -> Self {
+        self.placeholder = placeholder.into();
         self
     }
 
@@ -196,59 +196,26 @@ impl<VM, K, V> Select<VM, K, V> {
         self
     }
 
+    pub fn open(mut self, open: impl Into<Value<bool>>) -> Self {
+        self.open = Some(open.into());
+        self
+    }
+
     pub fn on_change(mut self, command: ValueCommand<VM, (K, V)>) -> Self {
         self.on_change = Some(command);
         self
     }
 
-    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.background = Some(color.into());
+    pub fn on_open_change(mut self, command: ValueCommand<VM, bool>) -> Self {
+        self.on_open_change = Some(command);
         self
     }
 
-    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
-        self.visual.background_brush = Some(brush.into());
-        self
-    }
-
-    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
-        self.visual.background_image = Some(image.into());
-        self
-    }
-
-    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
-        self.visual.background_blur = blur.into();
-        self
-    }
-
-    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_width = Some(width.into());
-        self.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_radius = Some(radius.into());
-        self
-    }
-
-    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_width = Some(width.into());
-        self
-    }
-
-    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
-        self.visual.opacity = opacity.into();
-        self
-    }
-
-    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
-        self.visual.offset = offset.into();
+    pub fn style(
+        mut self,
+        resolver: impl Fn(ResolvedThemeMode) -> SelectStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::new(resolver));
         self
     }
 
@@ -307,7 +274,7 @@ where
                 let label = option
                     .label
                     .clone()
-                    .unwrap_or_else(|| Text::new(option.value.clone()));
+                    .unwrap_or_else(|| option.value.clone().into());
                 (option.key.clone(), label)
             })
             .collect::<Vec<_>>();
@@ -349,7 +316,10 @@ where
                 selected_label,
                 placeholder: select.placeholder,
                 options,
+                open: select.open,
+                on_open_change: select.on_open_change,
                 disabled: select.disabled,
+                style: select.style,
             },
         }
     }
@@ -359,7 +329,7 @@ where
 pub struct SelectOption<K, V> {
     key: K,
     value: V,
-    label: Option<Text>,
+    label: Option<Value<String>>,
     disabled: Value<bool>,
 }
 
@@ -373,8 +343,8 @@ impl<K, V> SelectOption<K, V> {
         }
     }
 
-    pub fn label(mut self, label: Text) -> Self {
-        self.label = Some(label);
+    pub fn label(mut self, label: impl Into<Value<String>>) -> Self {
+        self.label = Some(label.into());
         self
     }
 
@@ -404,7 +374,7 @@ where
 
 fn select_selected_label<K>(
     selected_key: &Value<Option<K>>,
-    options: Vec<(K, Text)>,
+    options: Vec<(K, Value<String>)>,
 ) -> Value<Option<String>>
 where
     K: Clone + PartialEq + Send + Sync + 'static,
@@ -425,12 +395,12 @@ where
     }
 }
 
-fn selected_label_for_key<K>(key: &K, options: &[(K, Text)]) -> Option<String>
+fn selected_label_for_key<K>(key: &K, options: &[(K, Value<String>)]) -> Option<String>
 where
     K: PartialEq,
 {
     options
         .iter()
         .find(|(option_key, _)| option_key == key)
-        .map(|(_, label)| label.content.resolve())
+        .map(|(_, label)| label.resolve())
 }

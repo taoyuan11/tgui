@@ -1,5 +1,52 @@
 use tgui::prelude::*;
 
+fn stateful<T: Clone>(value: T) -> Stateful<T> {
+    Stateful {
+        normal: value.clone(),
+        hovered: value.clone(),
+        pressed: value.clone(),
+        disabled: value,
+    }
+}
+
+fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for(mode);
+    style.typography.size = size;
+    style.color = color.into();
+    style
+}
+
+fn surface_style(
+    mode: ResolvedThemeMode,
+    background: Option<Color>,
+    radius: Dp,
+    border: Option<(Dp, Color)>,
+) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for(mode);
+    style.surface.background = background.map(Into::into);
+    style.surface.border_radius = Some(radius.into());
+    if let Some((width, color)) = border {
+        style.surface.border_width = Some(width.into());
+        style.surface.border_color = Some(color.into());
+    }
+    style
+}
+
+fn window_button_style(mode: ResolvedThemeMode, background: Color) -> ButtonStyle {
+    ButtonStyle {
+        surface: WidgetSurfaceStyle::default(),
+        background: stateful(background.into()),
+        foreground: stateful(Color::hexa(0xF8FAFCFF).into()),
+        border: stateful(Color::TRANSPARENT.into()),
+        border_width: dp(0.0).into(),
+        radius: dp(6.0).into(),
+        padding_x: dp(0.0),
+        padding_y: dp(0.0),
+        min_height: dp(30.0),
+        text_style: TextWidgetStyle::default_for(mode).typography,
+    }
+}
+
 struct AppVm {
     confirm_exit_open: Observable<bool>,
     app_open: Observable<bool>,
@@ -54,7 +101,7 @@ impl AppVm {
         let corner = dp(14.0);
         let grip = Stack::new()
             .position_absolute()
-            .background(Color::hexa(0x00000000))
+            .style(|mode| surface_style(mode, Some(Color::hexa(0x00000000)), Dp::ZERO, None))
             .cursor(cursor)
             .on_click(Command::new_with_context(move |_: &mut Self, context| {
                 context.window().drag_resize_window(direction);
@@ -109,15 +156,15 @@ impl AppVm {
     }
 
     fn window_button(label: &'static str, background: Color, command: Command<Self>) -> Button<Self> {
-        Button::new(
-            Text::new(label)
-                .font_size(sp(15.0))
-                .color(Color::hexa(0xF8FAFCFF)),
-        )
+        Button::new(label)
         .size(dp(38.0), dp(30.0))
         .padding(Insets::all(dp(0.0)))
-        .background(background)
-        .border_radius(dp(6.0))
+        .style(move |mode| {
+            let mut style = window_button_style(mode, background);
+            style.foreground = stateful(Color::hexa(0xF8FAFCFF).into());
+            style.text_style = text_style(mode, sp(15.0), Color::hexa(0xF8FAFCFF)).typography;
+            style
+        })
         .on_click(command)
     }
 
@@ -133,8 +180,7 @@ impl AppVm {
             }))
             .child(
                 Text::new("tgui frameless")
-                    .font_size(sp(15.0))
-                    .color(Color::hexa(0xF8FAFCFF))
+                    .style(|mode| text_style(mode, sp(15.0), Color::hexa(0xF8FAFCFF)))
                     .grow(1.0),
             )
             .child(Self::window_button(
@@ -166,14 +212,13 @@ impl AppVm {
             .align(Align::Center)
             .padding(Insets::symmetric(dp(16.0), dp(0.0)))
             .gap(dp(8.0))
-            .background(Color::hexa(0x1A2440FF))
+            .style(|mode| surface_style(mode, Some(Color::hexa(0x1A2440FF)), Dp::ZERO, None))
             .on_click(Command::new_with_context(|_: &mut Self, context| {
                 context.window().drag_window();
             }))
             .child(
                 Text::new("Confirm exit")
-                    .font_size(sp(14.0))
-                    .color(Color::hexa(0xE2E8F0FF))
+                    .style(|mode| text_style(mode, sp(14.0), Color::hexa(0xE2E8F0FF)))
                     .grow(1.0),
             )
             .child(Self::window_button(
@@ -190,8 +235,9 @@ impl AppVm {
             .child(
                 Flex::new(Axis::Vertical)
                     .size(pct(100.0), pct(100.0))
-                    .background(Color::hexa(0x0B1020FF))
-                    .border_radius(dp(18.0))
+                    .style(|mode| {
+                        surface_style(mode, Some(Color::hexa(0x0B1020FF)), dp(18.0), None)
+                    })
                     .child(self.main_title_bar())
                     .child(
                         Stack::new()
@@ -203,40 +249,64 @@ impl AppVm {
                                     .width(dp(580.0))
                                     .padding(Insets::all(dp(26.0)))
                                     .gap(dp(14.0))
-                                    .background(Color::hexa(0x162033EE))
-                                    .border(dp(1.0), Color::hexa(0x334155FF))
-                                    .border_radius(dp(16.0))
+                                    .style(|mode| {
+                                        surface_style(
+                                            mode,
+                                            Some(Color::hexa(0x162033EE)),
+                                            dp(16.0),
+                                            Some((dp(1.0), Color::hexa(0x334155FF))),
+                                        )
+                                    })
                                     .child(
                                         Text::new("Custom chrome")
-                                            .font_size(sp(28.0))
-                                            .color(Color::hexa(0xF8FAFCFF)),
+                                            .style(|mode| {
+                                                text_style(mode, sp(28.0), Color::hexa(0xF8FAFCFF))
+                                            }),
                                     )
                                     .child(
                                         Text::new(
                                             "This example runs with native decorations disabled and opens a custom modal confirmation window before exit.",
                                         )
-                                        .font_size(sp(16.0))
-                                        .color(Color::hexa(0xCBD5E1FF)),
+                                        .style(|mode| {
+                                            text_style(mode, sp(16.0), Color::hexa(0xCBD5E1FF))
+                                        }),
                                     )
                                     .child(
                                         Text::new(
                                             "On supported platforms the confirmation window is also wired up as a native owned/modal child, while tgui still gates main-window input everywhere else.",
                                         )
-                                        .font_size(sp(15.0))
-                                        .color(Color::hexa(0x93C5FDFF)),
+                                        .style(|mode| {
+                                            text_style(mode, sp(15.0), Color::hexa(0x93C5FDFF))
+                                        }),
                                     )
                                     .child(
                                         Text::new(
                                             "The custom edges and corners still start native resize drags, and the top bar remains regular tgui UI.",
                                         )
-                                        .font_size(sp(15.0))
-                                        .color(Color::hexa(0x93C5FDFF)),
+                                        .style(|mode| {
+                                            text_style(mode, sp(15.0), Color::hexa(0x93C5FDFF))
+                                        }),
                                     )
                                     .child(
-                                        Button::new(Text::new("Open modal confirmation"))
+                                        Button::new("Open modal confirmation")
                                             .height(dp(42.0))
-                                            .background(Color::hexa(0x0F766EFF))
-                                            .border_radius(dp(12.0))
+                                            .style(|mode| {
+                                                ButtonStyle {
+                                                    surface: WidgetSurfaceStyle::default(),
+                                                    background: stateful(
+                                                        Color::hexa(0x0F766EFF).into(),
+                                                    ),
+                                                    foreground: stateful(Color::WHITE.into()),
+                                                    border: stateful(Color::TRANSPARENT.into()),
+                                                    border_width: dp(0.0).into(),
+                                                    radius: dp(12.0).into(),
+                                                    padding_x: dp(16.0),
+                                                    padding_y: dp(10.0),
+                                                    min_height: dp(42.0),
+                                                    text_style: TextWidgetStyle::default_for(mode)
+                                                        .typography,
+                                                }
+                                            })
                                             .on_click(Command::new(Self::request_exit)),
                                     ),
                             ),
@@ -253,8 +323,9 @@ impl AppVm {
             .child(
                 Flex::new(Axis::Vertical)
                     .size(pct(100.0), pct(100.0))
-                    .background(Color::hexa(0x101827FF))
-                    .border_radius(dp(18.0))
+                    .style(|mode| {
+                        surface_style(mode, Some(Color::hexa(0x101827FF)), dp(18.0), None)
+                    })
                     .child(self.modal_title_bar())
                     .child(
                         Flex::new(Axis::Vertical)
@@ -263,41 +334,74 @@ impl AppVm {
                             .gap(dp(12.0))
                             .child(
                                 Text::new("Exit the frameless demo?")
-                                    .font_size(sp(24.0))
-                                    .color(Color::hexa(0xF8FAFCFF)),
+                                    .style(|mode| {
+                                        text_style(mode, sp(24.0), Color::hexa(0xF8FAFCFF))
+                                    }),
                             )
                             .child(
                                 Text::new(
                                     "This confirmation window is also undecorated. Try clicking the main window behind it while this dialog is open.",
                                 )
-                                .font_size(sp(15.0))
-                                .color(Color::hexa(0xCBD5E1FF)),
+                                .style(|mode| {
+                                    text_style(mode, sp(15.0), Color::hexa(0xCBD5E1FF))
+                                }),
                             )
                             .child(
                                 Text::new(
                                     "Cancel keeps the app alive. Confirm removes the main window from the runtime and exits the application.",
                                 )
-                                .font_size(sp(14.0))
-                                .color(Color::hexa(0x93C5FDFF)),
+                                .style(|mode| {
+                                    text_style(mode, sp(14.0), Color::hexa(0x93C5FDFF))
+                                }),
                             )
                             .child(
                                 Flex::new(Axis::Horizontal)
                                     .gap(dp(10.0))
                                     .padding(Insets::top(dp(8.0)))
                                     .child(
-                                        Button::new(Text::new("Cancel"))
+                                        Button::new("Cancel")
                                             .grow(1.0)
                                             .height(dp(40.0))
-                                            .background(Color::hexa(0x1F2937FF))
-                                            .border_radius(dp(10.0))
+                                            .style(|mode| {
+                                                ButtonStyle {
+                                                    surface: WidgetSurfaceStyle::default(),
+                                                    background: stateful(
+                                                        Color::hexa(0x1F2937FF).into(),
+                                                    ),
+                                                    foreground: stateful(Color::WHITE.into()),
+                                                    border: stateful(Color::TRANSPARENT.into()),
+                                                    border_width: dp(0.0).into(),
+                                                    radius: dp(10.0).into(),
+                                                    padding_x: dp(16.0),
+                                                    padding_y: dp(10.0),
+                                                    min_height: dp(40.0),
+                                                    text_style: TextWidgetStyle::default_for(mode)
+                                                        .typography,
+                                                }
+                                            })
                                             .on_click(Command::new(Self::cancel_exit)),
                                     )
                                     .child(
-                                        Button::new(Text::new("Exit app"))
+                                        Button::new("Exit app")
                                             .grow(1.0)
                                             .height(dp(40.0))
-                                            .background(Color::hexa(0x991B1BFF))
-                                            .border_radius(dp(10.0))
+                                            .style(|mode| {
+                                                ButtonStyle {
+                                                    surface: WidgetSurfaceStyle::default(),
+                                                    background: stateful(
+                                                        Color::hexa(0x991B1BFF).into(),
+                                                    ),
+                                                    foreground: stateful(Color::WHITE.into()),
+                                                    border: stateful(Color::TRANSPARENT.into()),
+                                                    border_width: dp(0.0).into(),
+                                                    radius: dp(10.0).into(),
+                                                    padding_x: dp(16.0),
+                                                    padding_y: dp(10.0),
+                                                    min_height: dp(40.0),
+                                                    text_style: TextWidgetStyle::default_for(mode)
+                                                        .typography,
+                                                }
+                                            })
                                             .on_click(Command::new(Self::confirm_exit)),
                                     ),
                             ),

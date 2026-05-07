@@ -1,16 +1,17 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::ContentFit;
+use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::Dp;
 use crate::video::VideoController;
 
-use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
+use super::style::{StyleResolver, VideoSurfaceStyle};
 
 #[derive(Clone)]
 pub struct VideoSurface {
@@ -20,6 +21,7 @@ pub struct VideoSurface {
     pub(crate) background: Option<Value<Color>>,
     pub(crate) fit: ContentFit,
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
+    pub(crate) style: Option<StyleResolver<VideoSurfaceStyle>>,
 }
 
 macro_rules! impl_video_layout_api {
@@ -163,64 +165,17 @@ impl VideoSurface {
             background: None,
             fit: ContentFit::Contain,
             cursor_style: None,
+            style: None,
         }
     }
 
     impl_video_layout_api!();
 
-    pub fn fit(mut self, fit: ContentFit) -> Self {
-        self.fit = fit;
-        self
-    }
-
-    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.background = Some(color.into());
-        self
-    }
-
-    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
-        self.visual.background_brush = Some(brush.into());
-        self
-    }
-
-    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
-        self.visual.background_image = Some(image.into());
-        self
-    }
-
-    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
-        self.visual.background_blur = blur.into();
-        self
-    }
-
-    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_width = Some(width.into());
-        self.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_radius = Some(radius.into());
-        self
-    }
-
-    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_width = Some(width.into());
-        self
-    }
-
-    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
-        self.visual.opacity = opacity.into();
-        self
-    }
-
-    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
-        self.visual.offset = offset.into();
+    pub fn style(
+        mut self,
+        resolver: impl Fn(ResolvedThemeMode) -> VideoSurfaceStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(super::style::StyleResolver::new(resolver));
         self
     }
 
@@ -297,7 +252,10 @@ impl VideoSurface {
             interactions,
             media_events: MediaEventHandlers::default(),
             background: self.background.clone(),
-            kind: WidgetKind::VideoSurface { video: self },
+            kind: WidgetKind::VideoSurface {
+                style: self.style.clone(),
+                video: self,
+            },
         }
     }
 
@@ -315,7 +273,10 @@ impl VideoSurface {
             },
             media_events,
             background: self.background.clone(),
-            kind: WidgetKind::VideoSurface { video: self },
+            kind: WidgetKind::VideoSurface {
+                style: self.style.clone(),
+                video: self,
+            },
         }
     }
 }
@@ -332,7 +293,10 @@ impl<VM> From<VideoSurface> for Element<VM> {
             },
             media_events: MediaEventHandlers::default(),
             background: value.background.clone(),
-            kind: WidgetKind::VideoSurface { video: value },
+            kind: WidgetKind::VideoSurface {
+                style: value.style.clone(),
+                video: value,
+            },
         }
     }
 }

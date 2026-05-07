@@ -1,5 +1,45 @@
 use tgui::prelude::*;
 
+fn stateful<T: Clone>(value: T) -> Stateful<T> {
+    Stateful {
+        normal: value.clone(),
+        hovered: value.clone(),
+        pressed: value.clone(),
+        disabled: value,
+    }
+}
+
+fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for(mode);
+    style.typography.size = size;
+    style.color = color.into();
+    style
+}
+
+fn panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for(mode);
+    style.surface.background = Some(Color::hexa(0x162033F0).into());
+    style.surface.border_color = Some(Color::hexa(0x2E4262FF).into());
+    style.surface.border_width = Some(dp(1.0).into());
+    style.surface.border_radius = Some(dp(18.0).into());
+    style
+}
+
+fn filled_button_style(mode: ResolvedThemeMode, color: Color) -> ButtonStyle {
+    ButtonStyle {
+        surface: WidgetSurfaceStyle::default(),
+        background: stateful(color.into()),
+        foreground: stateful(Color::WHITE.into()),
+        border: stateful(Color::TRANSPARENT.into()),
+        border_width: dp(0.0).into(),
+        radius: dp(12.0).into(),
+        padding_x: dp(16.0),
+        padding_y: dp(10.0),
+        min_height: dp(40.0),
+        text_style: TextWidgetStyle::default_for(mode).typography,
+    }
+}
+
 struct MultiWindowVm {
     next_document_id: Observable<u32>,
     inspector_open: Observable<bool>,
@@ -73,48 +113,40 @@ impl MultiWindowVm {
                     .width(dp(620.0))
                     .padding(Insets::all(dp(24.0)))
                     .gap(dp(14.0))
-                    .background(Color::hexa(0x162033F0))
-                    .border(dp(1.0), Color::hexa(0x2E4262FF))
-                    .border_radius(dp(18.0))
+                    .style(panel_style)
                     .child(
                         Text::new("Multi-window runtime")
-                            .font_size(sp(28.0))
-                            .color(Color::hexa(0xF8FAFCFF)),
+                            .style(|mode| text_style(mode, sp(28.0), Color::hexa(0xF8FAFCFF))),
                     )
                     .child(
                         Text::new(
                             "This example keeps one shared view model while dynamically reconciling a main window, an optional inspector, and multiple document windows.",
                         )
-                        .font_size(sp(15.0))
-                        .color(Color::hexa(0xCBD5E1FF)),
+                        .style(|mode| text_style(mode, sp(15.0), Color::hexa(0xCBD5E1FF))),
                     )
                     .child(
                         Text::new(self.document_summary())
-                            .font_size(sp(15.0))
-                            .color(Color::hexa(0x7DD3FCFF)),
+                            .style(|mode| text_style(mode, sp(15.0), Color::hexa(0x7DD3FCFF))),
                     )
                     .child(
                         Flex::new(Axis::Horizontal)
                             .gap(dp(10.0))
                             .child(
-                                Button::new(Text::new("Toggle inspector"))
+                                Button::new("Toggle inspector")
                                     .grow(1.0)
-                                    .background(Color::hexa(0x0F766EFF))
-                                    .border_radius(dp(12.0))
+                                    .style(|mode| filled_button_style(mode, Color::hexa(0x0F766EFF)))
                                     .on_click(Command::new(Self::toggle_inspector)),
                             )
                             .child(
-                                Button::new(Text::new("Spawn document"))
+                                Button::new("Spawn document")
                                     .grow(1.0)
-                                    .background(Color::hexa(0x1D4ED8FF))
-                                    .border_radius(dp(12.0))
+                                    .style(|mode| filled_button_style(mode, Color::hexa(0x1D4ED8FF)))
                                     .on_click(Command::new(Self::open_document)),
                             )
                             .child(
-                                Button::new(Text::new("Remove last"))
+                                Button::new("Remove last")
                                     .grow(1.0)
-                                    .background(Color::hexa(0x7C2D12FF))
-                                    .border_radius(dp(12.0))
+                                    .style(|mode| filled_button_style(mode, Color::hexa(0x7C2D12FF)))
                                     .on_click(Command::new(Self::close_last_document)),
                             ),
                     ),
@@ -131,20 +163,17 @@ impl MultiWindowVm {
                     .gap(dp(10.0))
                     .child(
                         Text::new("Inspector")
-                            .font_size(sp(24.0))
-                            .color(Color::hexa(0xE2E8F0FF)),
+                            .style(|mode| text_style(mode, sp(24.0), Color::hexa(0xE2E8F0FF))),
                     )
                     .child(
                         Text::new(self.document_summary())
-                            .font_size(sp(15.0))
-                            .color(Color::hexa(0x93C5FDFF)),
+                            .style(|mode| text_style(mode, sp(15.0), Color::hexa(0x93C5FDFF))),
                     )
                     .child(
                         Text::new(
                             "Close this window from the button in the main window, or use the native close button to hide just this instance.",
                         )
-                        .font_size(sp(14.0))
-                        .color(Color::hexa(0xCBD5E1FF)),
+                        .style(|mode| text_style(mode, sp(14.0), Color::hexa(0xCBD5E1FF))),
                     ),
             )
             .into()
@@ -159,23 +188,20 @@ impl MultiWindowVm {
                     .gap(dp(12.0))
                     .child(el![
                         Text::new(self.document_title(id))
-                            .font_size(sp(26.0))
-                            .color(Color::hexa(0xF8FAFCFF)),
+                            .style(|mode| text_style(mode, sp(26.0), Color::hexa(0xF8FAFCFF))),
                         Text::new(
                             self.documents
                                 .binding()
                                 .map(move |documents| format!("Shared registry size: {}", documents.len())),
                         )
-                        .font_size(sp(15.0))
-                        .color(Color::hexa(0x93C5FDFF)),
+                        .style(|mode| text_style(mode, sp(15.0), Color::hexa(0x93C5FDFF))),
                         Text::new(
                             "Each document window owns its own renderer, focus state, scroll state, and animation state, but still reads from the same shared view model.",
                         )
-                        .font_size(sp(14.0))
-                        .color(Color::hexa(0xCBD5E1FF)),
-                        Button::new(Text::new("Close"))
+                        .style(|mode| text_style(mode, sp(14.0), Color::hexa(0xCBD5E1FF))),
+                        Button::new("Close")
                             .danger()
-                            .border_radius(dp(12.0))
+                            .style(|mode| filled_button_style(mode, Color::hexa(0x991B1BFF)))
                             .on_click(Command::new_with_context(|_, context| {
                                 context.window().close()
                             })),

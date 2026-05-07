@@ -2,15 +2,15 @@ use crate::foundation::binding::Binding;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{ContentFit, MediaBytes, MediaSource};
+use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
-use crate::ui::unit::Dp;
 
-use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
+use super::style::{ImageStyle, StyleResolver};
 
 #[derive(Clone)]
 pub struct Image {
@@ -20,6 +20,7 @@ pub struct Image {
     pub(crate) background: Option<Value<Color>>,
     pub(crate) fit: ContentFit,
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
+    pub(crate) style: Option<StyleResolver<ImageStyle>>,
 }
 
 macro_rules! impl_image_layout_api {
@@ -252,6 +253,7 @@ impl Image {
             background: None,
             fit: ContentFit::Contain,
             cursor_style: None,
+            style: None,
         }
     }
 
@@ -269,59 +271,11 @@ impl Image {
 
     impl_image_layout_api!();
 
-    pub fn fit(mut self, fit: ContentFit) -> Self {
-        self.fit = fit;
-        self
-    }
-
-    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.background = Some(color.into());
-        self
-    }
-
-    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
-        self.visual.background_brush = Some(brush.into());
-        self
-    }
-
-    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
-        self.visual.background_image = Some(image.into());
-        self
-    }
-
-    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
-        self.visual.background_blur = blur.into();
-        self
-    }
-
-    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_width = Some(width.into());
-        self.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_radius = Some(radius.into());
-        self
-    }
-
-    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_width = Some(width.into());
-        self
-    }
-
-    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
-        self.visual.opacity = opacity.into();
-        self
-    }
-
-    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
-        self.visual.offset = offset.into();
+    pub fn style(
+        mut self,
+        resolver: impl Fn(ResolvedThemeMode) -> ImageStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(super::style::StyleResolver::new(resolver));
         self
     }
 

@@ -1,14 +1,13 @@
-use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
+use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
-use crate::ui::unit::Dp;
 
-use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
+use super::style::SwitchStyle;
 
 pub struct Switch<VM> {
     element: Element<VM>,
@@ -167,6 +166,7 @@ impl<VM> Switch<VM> {
                     active_thumb_color: None,
                     inactive_thumb_color: None,
                     disabled: Value::Static(false),
+                    style: None,
                 },
             },
         }
@@ -174,110 +174,13 @@ impl<VM> Switch<VM> {
 
     impl_widget_layout_api!();
 
-    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.background = Some(color.into());
-        self
-    }
-
-    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
-        self.element.visual.background_brush = Some(brush.into());
-        self
-    }
-
-    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
-        self.element.visual.background_image = Some(image.into());
-        self
-    }
-
-    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.background_blur = blur.into();
-        self
-    }
-
-    pub fn active_background(mut self, color: impl Into<Value<Color>>) -> Self {
-        if let WidgetKind::Switch {
-            active_background, ..
-        } = &mut self.element.kind
-        {
-            *active_background = Some(color.into());
+    pub fn style(
+        mut self,
+        resolver: impl Fn(ResolvedThemeMode) -> SwitchStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Switch { style, .. } = &mut self.element.kind {
+            *style = Some(super::style::StyleResolver::new(resolver));
         }
-        self
-    }
-
-    pub fn inactive_background(mut self, color: impl Into<Value<Color>>) -> Self {
-        if let WidgetKind::Switch {
-            inactive_background,
-            ..
-        } = &mut self.element.kind
-        {
-            *inactive_background = Some(color.into());
-        }
-        self
-    }
-
-    pub fn thumb_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        let color = color.into();
-        if let WidgetKind::Switch {
-            active_thumb_color,
-            inactive_thumb_color,
-            ..
-        } = &mut self.element.kind
-        {
-            *active_thumb_color = Some(color.clone());
-            *inactive_thumb_color = Some(color);
-        }
-        self
-    }
-
-    pub fn active_thumb_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        if let WidgetKind::Switch {
-            active_thumb_color, ..
-        } = &mut self.element.kind
-        {
-            *active_thumb_color = Some(color.into());
-        }
-        self
-    }
-
-    pub fn inactive_thumb_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        if let WidgetKind::Switch {
-            inactive_thumb_color,
-            ..
-        } = &mut self.element.kind
-        {
-            *inactive_thumb_color = Some(color.into());
-        }
-        self
-    }
-
-    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_width = Some(width.into());
-        self.element.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_radius = Some(radius.into());
-        self
-    }
-
-    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_width = Some(width.into());
-        self
-    }
-
-    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
-        self.element.visual.opacity = opacity.into();
-        self
-    }
-
-    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
-        self.element.visual.offset = offset.into();
         self
     }
 

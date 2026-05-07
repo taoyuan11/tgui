@@ -23,6 +23,13 @@ use super::canvas::{
     CanvasDragEvent, CanvasItem, CanvasItemId, CanvasMouseEvent, CanvasWheelEvent,
 };
 use super::image::Image;
+#[cfg(feature = "video")]
+use super::style::VideoSurfaceStyle;
+use super::style::{
+    ButtonStyle as WidgetButtonStyle, CanvasStyle, CheckboxStyle as WidgetCheckboxStyle,
+    ContainerStyle, SelectStyle as WidgetSelectStyle, StyleResolver,
+    SwitchStyle as WidgetSwitchStyle,
+};
 use super::text::Text;
 
 static NEXT_WIDGET_ID: AtomicU64 = AtomicU64::new(1);
@@ -971,6 +978,7 @@ pub(crate) enum WidgetKind<VM> {
     Container {
         layout: ContainerLayout,
         children: Vec<ChildSource<VM>>,
+        style: Option<StyleResolver<ContainerStyle>>,
     },
     Text {
         text: Text,
@@ -981,27 +989,32 @@ pub(crate) enum WidgetKind<VM> {
     Canvas {
         items: Value<Vec<CanvasItem>>,
         item_interactions: CanvasItemInteractionHandlers<VM>,
+        style: Option<StyleResolver<CanvasStyle>>,
     },
     #[cfg(feature = "video")]
     VideoSurface {
         video: VideoSurface,
+        style: Option<StyleResolver<VideoSurfaceStyle>>,
     },
     Button {
-        label: Text,
+        label: Value<String>,
         disabled: Value<bool>,
         variant: ButtonVariantKind,
+        style: Option<StyleResolver<WidgetButtonStyle>>,
     },
     Checkbox {
         checked: Value<bool>,
-        label: Option<Text>,
+        label: Option<Value<String>>,
         on_change: Option<ValueCommand<VM, bool>>,
         disabled: Value<bool>,
+        style: Option<StyleResolver<WidgetCheckboxStyle>>,
     },
     Radio {
         checked: Value<bool>,
-        label: Option<Text>,
+        label: Option<Value<String>>,
         on_change: Option<ValueCommand<VM, bool>>,
         disabled: Value<bool>,
+        style: Option<StyleResolver<crate::ui::widget::RadioStyle>>,
     },
     Switch {
         checked: Value<bool>,
@@ -1011,17 +1024,21 @@ pub(crate) enum WidgetKind<VM> {
         active_thumb_color: Option<Value<Color>>,
         inactive_thumb_color: Option<Value<Color>>,
         disabled: Value<bool>,
+        style: Option<StyleResolver<WidgetSwitchStyle>>,
     },
     Select {
         selected_label: Value<Option<String>>,
-        placeholder: Text,
+        placeholder: Value<String>,
         options: Vec<SelectOptionState<VM>>,
+        open: Option<Value<bool>>,
+        on_open_change: Option<ValueCommand<VM, bool>>,
         disabled: Value<bool>,
+        style: Option<StyleResolver<WidgetSelectStyle>>,
     },
 }
 
 pub(crate) struct SelectOptionState<VM> {
-    pub label: Text,
+    pub label: Value<String>,
     pub selected: Value<bool>,
     pub disabled: Value<bool>,
     pub on_select: Option<Command<VM>>,
@@ -1049,9 +1066,14 @@ pub enum ButtonVariantKind {
 impl<VM> Clone for WidgetKind<VM> {
     fn clone(&self) -> Self {
         match self {
-            Self::Container { layout, children } => Self::Container {
+            Self::Container {
+                layout,
+                children,
+                style,
+            } => Self::Container {
                 layout: layout.clone(),
                 children: children.clone(),
+                style: style.clone(),
             },
             Self::Text { text } => Self::Text { text: text.clone() },
             Self::Image { image } => Self::Image {
@@ -1060,44 +1082,53 @@ impl<VM> Clone for WidgetKind<VM> {
             Self::Canvas {
                 items,
                 item_interactions,
+                style,
             } => Self::Canvas {
                 items: items.clone(),
                 item_interactions: item_interactions.clone(),
+                style: style.clone(),
             },
             #[cfg(feature = "video")]
-            Self::VideoSurface { video } => Self::VideoSurface {
+            Self::VideoSurface { video, style } => Self::VideoSurface {
                 video: video.clone(),
+                style: style.clone(),
             },
             Self::Button {
                 label,
                 disabled,
                 variant,
+                style,
             } => Self::Button {
                 label: label.clone(),
                 disabled: disabled.clone(),
                 variant: *variant,
+                style: style.clone(),
             },
             Self::Checkbox {
                 checked,
                 label,
                 on_change,
                 disabled,
+                style,
             } => Self::Checkbox {
                 checked: checked.clone(),
                 label: label.clone(),
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
+                style: style.clone(),
             },
             Self::Radio {
                 checked,
                 label,
                 on_change,
                 disabled,
+                style,
             } => Self::Radio {
                 checked: checked.clone(),
                 label: label.clone(),
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
+                style: style.clone(),
             },
             Self::Switch {
                 checked,
@@ -1107,6 +1138,7 @@ impl<VM> Clone for WidgetKind<VM> {
                 active_thumb_color,
                 inactive_thumb_color,
                 disabled,
+                style,
             } => Self::Switch {
                 checked: checked.clone(),
                 on_change: on_change.clone(),
@@ -1115,17 +1147,24 @@ impl<VM> Clone for WidgetKind<VM> {
                 active_thumb_color: active_thumb_color.clone(),
                 inactive_thumb_color: inactive_thumb_color.clone(),
                 disabled: disabled.clone(),
+                style: style.clone(),
             },
             Self::Select {
                 selected_label,
                 placeholder,
                 options,
+                open,
+                on_open_change,
                 disabled,
+                style,
             } => Self::Select {
                 selected_label: selected_label.clone(),
                 placeholder: placeholder.clone(),
                 options: options.clone(),
+                open: open.clone(),
+                on_open_change: on_open_change.clone(),
                 disabled: disabled.clone(),
+                style: style.clone(),
             },
         }
     }
@@ -1140,23 +1179,24 @@ pub(crate) enum MeasureContext {
     #[cfg(feature = "video")]
     VideoSurface(VideoSurface),
     Button {
-        label: Text,
-        variant: ButtonVariantKind,
+        label: Value<String>,
+        style: crate::ui::widget::ButtonStyle,
     },
     Checkbox {
-        checked: bool,
-        label: Option<Text>,
+        label: Option<Value<String>>,
+        style: crate::ui::widget::CheckboxStyle,
     },
     Radio {
-        checked: bool,
-        label: Option<Text>,
+        label: Option<Value<String>>,
+        style: crate::ui::widget::RadioStyle,
     },
     Switch {
-        checked: bool,
+        style: crate::ui::widget::SwitchStyle,
     },
     Select {
         selected_label: Option<String>,
-        placeholder: Text,
+        placeholder: Value<String>,
+        style: crate::ui::widget::SelectStyle,
     },
 }
 
@@ -1204,12 +1244,15 @@ pub(crate) enum HitInteraction<VM> {
     SelectTrigger {
         id: WidgetId,
         interactions: InteractionHandlers<VM>,
+        on_open_change: Option<ValueCommand<VM, bool>>,
+        is_open: bool,
     },
     SelectOption {
         id: WidgetId,
         option_index: usize,
         interactions: InteractionHandlers<VM>,
         on_select: Option<Command<VM>>,
+        on_open_change: Option<ValueCommand<VM, bool>>,
     },
     CanvasItem {
         id: WidgetId,
@@ -1282,20 +1325,29 @@ impl<VM> Clone for HitInteraction<VM> {
                 on_change: on_change.clone(),
                 current: *current,
             },
-            Self::SelectTrigger { id, interactions } => Self::SelectTrigger {
+            Self::SelectTrigger {
+                id,
+                interactions,
+                on_open_change,
+                is_open,
+            } => Self::SelectTrigger {
                 id: *id,
                 interactions: interactions.clone(),
+                on_open_change: on_open_change.clone(),
+                is_open: *is_open,
             },
             Self::SelectOption {
                 id,
                 option_index,
                 interactions,
                 on_select,
+                on_open_change,
             } => Self::SelectOption {
                 id: *id,
                 option_index: *option_index,
                 interactions: interactions.clone(),
                 on_select: on_select.clone(),
+                on_open_change: on_open_change.clone(),
             },
             Self::CanvasItem {
                 id,
@@ -1381,7 +1433,6 @@ pub(crate) struct HitRegion<VM> {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ScrollRegion {
     pub id: WidgetId,
-    pub source: ScrollRegionSource,
     pub content_viewport: Rect,
     pub visible_frame: Rect,
     pub content_bounds: Rect,
@@ -1392,11 +1443,6 @@ pub(crate) struct ScrollRegion {
     pub horizontal_thumb: Option<Rect>,
     pub vertical_track: Option<Rect>,
     pub vertical_thumb: Option<Rect>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ScrollRegionSource {
-    Container,
 }
 
 impl ScrollRegion {
@@ -1530,7 +1576,7 @@ fn point_in_triangle(point: Point, a: Point, b: Point, c: Point) -> bool {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct InputEditState {
+pub(crate) struct TextEditState {
     pub cursor: usize,
     pub anchor: usize,
     pub composition: Option<CompositionState>,
@@ -1539,7 +1585,7 @@ pub(crate) struct InputEditState {
     pub preferred_column_x: Option<f32>,
 }
 
-impl InputEditState {
+impl TextEditState {
     pub(crate) fn caret_at(text: &str) -> Self {
         let end = text.len();
         Self {
@@ -1605,14 +1651,14 @@ pub(crate) struct CompositionState {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompositionState, InputEditState};
+    use super::{CompositionState, TextEditState};
     use crate::ui::unit::Dp;
 
     #[test]
     fn input_edit_state_clamps_to_utf8_char_boundaries() {
         let text = "输入框示例输入框示例输入框示例";
 
-        let state = InputEditState {
+        let state = TextEditState {
             cursor: 25,
             anchor: 29,
             composition: Some(CompositionState {

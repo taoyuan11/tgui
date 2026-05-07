@@ -1,6 +1,30 @@
 use tgui::prelude::*;
 
 struct AppVm;
+
+fn card_style(mode: ResolvedThemeMode) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for(mode);
+    style.surface.background = Some(Color::hexa(0x16233AFF).into());
+    style.surface.border_color = Some(Color::hexa(0x33507DFF).into());
+    style.surface.border_width = Some(dp(1.0).into());
+    style.surface.border_radius = Some(dp(20.0).into());
+    style
+}
+
+fn title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for(mode);
+    style.typography.size = sp(28.0);
+    style.color = Color::hexa(0xF7FAFFFF).into();
+    style
+}
+
+fn body_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for(mode);
+    style.typography.size = size;
+    style.color = color.into();
+    style
+}
+
 impl ViewModel for AppVm {
     fn new(_: &ViewModelContext) -> Self {
         Self
@@ -16,23 +40,17 @@ impl ViewModel for AppVm {
                     .width(pct(100.0))
                     .padding(Insets::all(dp(28.0)))
                     .gap(dp(14.0))
-                    .background(Color::hexa(0x16233AFF))
-                    .border(dp(1.0), Color::hexa(0x33507DFF))
-                    .border_radius(dp(20.0))
+                    .style(card_style)
                     .child(el![
-                        Text::new("Hello, tgui")
-                            .font_size(sp(28.0))
-                            .color(Color::hexa(0xF7FAFFFF)),
+                        Text::new("Hello, tgui").style(title_style),
                         Text::new(
                             "This example keeps things intentionally simple: one window, one card, and a small static widget tree.",
                         )
-                        .font_size(sp(16.0))
-                        .color(Color::hexa(0xC2D3F1FF)),
+                        .style(|mode| body_style(mode, sp(16.0), Color::hexa(0xC2D3F1FF))),
                         Text::new(
                             "Use it as the smallest complete MVVM starting point before moving on to input, theming, and animation examples.",
                         )
-                        .font_size(sp(15.0))
-                        .color(Color::hexa(0x9AB3D9FF)),
+                        .style(|mode| body_style(mode, sp(15.0), Color::hexa(0x9AB3D9FF))),
                     ]),
             )
             .into()
@@ -45,13 +63,15 @@ fn main() -> Result<(), TguiError> {
     theme.colors.surface = Color::hexa(0x111B2EFF);
     theme.colors.surface_low = Color::hexa(0x1B2942FF);
     theme.colors.primary = Color::hexa(0x4F9CF9FF);
+    let theme_set = ThemeSet::new(theme.clone(), theme);
 
     tgui_log(LogLevel::Info, "starting...");
 
     let result = Application::new()
         .title("tgui basic window")
         .window_size(dp(960.0), dp(640.0))
-        .theme(theme)
+        .theme_set(theme_set)
+        .theme_mode(ThemeMode::Dark)
         .with_view_model(AppVm::new)
         .root_view(AppVm::view)
         .run();

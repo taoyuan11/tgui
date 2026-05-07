@@ -95,28 +95,28 @@ impl ViewModel for App {
     }
 
     fn view(&self) -> Element<Self> {
-        let open_sync = Button::new(Text::new("同步文件选择")).on_click(Command::new_with_context(
+        let open_sync = Button::new("同步文件选择").on_click(Command::new_with_context(
             |app: &mut App, ctx| app.open_file_sync(ctx),
         ));
 
-        let open_async = Button::new(Text::new("异步文件选择")).on_click(
+        let open_async = Button::new("异步文件选择").on_click(
             Command::new_with_context(|_: &mut App, ctx| Self::open_file_async(ctx)),
         );
 
-        let message_sync = Button::new(Text::new("同步确认框")).on_click(
+        let message_sync = Button::new("同步确认框").on_click(
             Command::new_with_context(|app: &mut App, ctx| app.show_message_sync(ctx)),
         );
 
-        let message_async = Button::new(Text::new("异步消息框")).on_click(
+        let message_async = Button::new("异步消息框").on_click(
             Command::new_with_context(|_: &mut App, ctx| Self::show_message_async(ctx)),
         );
 
-        let counter = Button::new(Text::new(
+        let counter = Button::new(
             self.clicks
                 .binding()
                 .map(|clicks| format!("普通按钮，点击了 {clicks} 次")),
-        ))
-            .on_click(Command::new(Self::increment));
+        )
+        .on_click(Command::new(Self::increment));
 
         Flex::new(Axis::Vertical)
             .size(pct(100.0), pct(100.0))

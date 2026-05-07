@@ -8,6 +8,7 @@ mod core;
 mod image;
 mod radio;
 mod select;
+mod style;
 mod switch;
 mod text;
 #[cfg(feature = "video")]
@@ -31,9 +32,9 @@ pub use canvas::{
 pub use checkbox::Checkbox;
 pub(crate) use common::{
     BackdropBlurPrimitive, BrushPrimitiveData, CanvasItemInteractionHandlers, ClipMask,
-    ComputedScene, HitInteraction, InputEditState, InteractionHandlers, MediaEventPhase,
-    MediaEventState, MeshVertex, RenderCommand, ScrollRegion, ScrollRegionSource, ScrollbarAxis,
-    ScrollbarHandle, WidgetStateMap,
+    ComputedScene, HitInteraction, InteractionHandlers, MediaEventPhase, MediaEventState,
+    MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextEditState,
+    WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,
@@ -44,6 +45,10 @@ pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use image::Image;
 pub use radio::{Radio, RadioGroup, RadioOption};
 pub use select::{Select, SelectOption};
+pub use style::{
+    ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, FocusRingOverride, ImageStyle,
+    RadioStyle, SelectStyle, SwitchStyle, TextWidgetStyle, VideoSurfaceStyle, WidgetSurfaceStyle,
+};
 pub use switch::Switch;
 pub use text::Text;
 #[cfg(feature = "video")]

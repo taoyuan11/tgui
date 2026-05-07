@@ -1,16 +1,14 @@
-use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
+use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
-use crate::ui::unit::Dp;
 
-use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     ButtonVariantKind, CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle,
     WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
-use super::text::Text;
+use super::style::ButtonStyle;
 
 pub struct Button<VM> {
     element: Element<VM>,
@@ -149,7 +147,7 @@ macro_rules! impl_widget_layout_api {
 }
 
 impl<VM> Button<VM> {
-    pub fn new(label: Text) -> Self {
+    pub fn new(label: impl Into<Value<String>>) -> Self {
         let mut interactions = InteractionHandlers::default();
         interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
         Self {
@@ -161,9 +159,10 @@ impl<VM> Button<VM> {
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::Button {
-                    label,
+                    label: label.into(),
                     disabled: Value::Static(false),
                     variant: ButtonVariantKind::Primary,
+                    style: None,
                 },
             },
         }
@@ -199,54 +198,13 @@ impl<VM> Button<VM> {
 
     impl_widget_layout_api!();
 
-    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.background = Some(color.into());
-        self
-    }
-
-    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
-        self.element.visual.background_brush = Some(brush.into());
-        self
-    }
-
-    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
-        self.element.visual.background_image = Some(image.into());
-        self
-    }
-
-    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.background_blur = blur.into();
-        self
-    }
-
-    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_width = Some(width.into());
-        self.element.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_radius = Some(radius.into());
-        self
-    }
-
-    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_width = Some(width.into());
-        self
-    }
-
-    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
-        self.element.visual.opacity = opacity.into();
-        self
-    }
-
-    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
-        self.element.visual.offset = offset.into();
+    pub fn style(
+        mut self,
+        resolver: impl Fn(ResolvedThemeMode) -> ButtonStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Button { style, .. } = &mut self.element.kind {
+            *style = Some(super::style::StyleResolver::new(resolver));
+        }
         self
     }
 

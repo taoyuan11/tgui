@@ -1,5 +1,33 @@
 use tgui::prelude::*;
 
+fn text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for(mode);
+    style.typography.size = size;
+    style
+}
+
+fn frame_style(mode: ResolvedThemeMode) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for(mode);
+    style.surface.background = Some(Color::hexa(0x0F172ACC).into());
+    style.surface.border_radius = Some(dp(20.0).into());
+    style
+}
+
+fn canvas_frame_style(mode: ResolvedThemeMode) -> CanvasStyle {
+    let mut style = CanvasStyle::default_for(mode);
+    style.surface.border_color = Some(Color::hexa(0x334155FF).into());
+    style.surface.border_width = Some(dp(2.0).into());
+    style.surface.border_radius = Some(dp(20.0).into());
+    style
+}
+
+fn info_chip_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for(mode);
+    style.surface.background = Some(Color::hexa(0x0F172ACC).into());
+    style.surface.border_radius = Some(dp(12.0).into());
+    style
+}
+
 struct CanvasVm {
     hovered: Observable<String>,
     activity: Observable<String>,
@@ -214,25 +242,24 @@ impl ViewModel for CanvasVm {
             .gap(dp(16.0))
             .child(
                 Text::new("Canvas scene upgrade example")
-                    .font_size(sp(28.0))
+                    .style(|mode| text_style(mode, sp(28.0)))
             )
             .child(
                 Text::new(
                     "The surface below mixes PathBuilder helpers, text/image items, grouping, clipping, transforms, and richer item events.",
                 )
-                .font_size(sp(15.0))
+                .style(|mode| text_style(mode, sp(15.0)))
             )
             .child(
                 Stack::new()
                     .padding(Insets::all(dp(16.0)))
-                    .border_radius(dp(20.0))
+                    .style(frame_style)
                     .overflow_x(Overflow::Scroll)
                     .overflow_y(Overflow::Scroll)
                     .child(
                         Canvas::new(self.items())
                             .size(dp(840.0), dp(560.0))
-                            .border(dp(2.0), Color::hexa(0x334155FF))
-                            .border_radius(dp(20.0))
+                            .style(canvas_frame_style)
                             .on_item_mouse_move(ValueCommand::new(Self::on_hover))
                             .on_item_click(ValueCommand::new(Self::on_click))
                             .on_item_wheel(ValueCommand::new(Self::on_wheel))
@@ -245,12 +272,12 @@ impl ViewModel for CanvasVm {
                     .child(
                         Text::new(self.hovered.binding())
                             .padding(Insets::all(dp(12.0)))
-                            .border_radius(dp(12.0))
+                            .style(info_chip_style)
                     )
                     .child(
                         Text::new(self.activity.binding())
                             .padding(Insets::all(dp(12.0)))
-                            .border_radius(dp(12.0))
+                            .style(info_chip_style)
                     ),
             )
             .into()
@@ -259,7 +286,7 @@ impl ViewModel for CanvasVm {
 
 fn main() -> Result<(), TguiError> {
     Application::new()
-        .theme(Theme::light())
+        .theme_mode(ThemeMode::Light)
         .title("tgui Canvas Scene")
         .window_size(dp(1180.0), dp(940.0))
         .with_view_model(CanvasVm::new)

@@ -1,17 +1,17 @@
 use crate::foundation::binding::Binding;
-use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
+use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{
-    Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, ScrollbarStyle, Track, Value, Wrap,
+    Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, Track, Value, Wrap,
 };
 use crate::ui::unit::Dp;
 
-use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     ChildSource, ContainerKind, ContainerLayout, CursorStyle, InteractionHandlers,
     MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::core::Element;
+use super::style::ContainerStyle;
 
 trait IntoChildGroup<VM> {
     fn into_elements(self) -> Vec<Element<VM>>;
@@ -208,59 +208,19 @@ impl<VM> Container<VM> {
                 kind: WidgetKind::Container {
                     layout,
                     children: Vec::new(),
+                    style: None,
                 },
             },
         }
     }
 
-    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.background = Some(color.into());
-        self
-    }
-
-    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
-        self.element.visual.background_brush = Some(brush.into());
-        self
-    }
-
-    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
-        self.element.visual.background_image = Some(image.into());
-        self
-    }
-
-    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.background_blur = blur.into();
-        self
-    }
-
-    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_width = Some(width.into());
-        self.element.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_radius = Some(radius.into());
-        self
-    }
-
-    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_width = Some(width.into());
-        self
-    }
-
-    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
-        self.element.visual.opacity = opacity.into();
-        self
-    }
-
-    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
-        self.element.visual.offset = offset.into();
+    pub fn style(
+        mut self,
+        resolver: impl Fn(ResolvedThemeMode) -> ContainerStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Container { style, .. } = &mut self.element.kind {
+            *style = Some(super::style::StyleResolver::new(resolver));
+        }
         self
     }
 
@@ -351,69 +311,6 @@ impl<VM> Container<VM> {
     pub fn overflow_y(mut self, overflow: Overflow) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
             layout.overflow_y = overflow;
-        }
-        self
-    }
-
-    pub fn scrollbar_style(mut self, style: ScrollbarStyle) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style = style;
-        }
-        self
-    }
-
-    pub fn scrollbar_thumb_color(mut self, color: Color) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.thumb_color = Some(color);
-        }
-        self
-    }
-
-    pub fn scrollbar_track_color(mut self, color: Color) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.track_color = Some(color);
-        }
-        self
-    }
-
-    pub fn scrollbar_hover_thumb_color(mut self, color: Color) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.hover_thumb_color = Some(color);
-        }
-        self
-    }
-
-    pub fn scrollbar_active_thumb_color(mut self, color: Color) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.active_thumb_color = Some(color);
-        }
-        self
-    }
-
-    pub fn scrollbar_thickness(mut self, thickness: Dp) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.thickness = Some(thickness);
-        }
-        self
-    }
-
-    pub fn scrollbar_radius(mut self, radius: Dp) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.radius = Some(radius);
-        }
-        self
-    }
-
-    pub fn scrollbar_insets(mut self, insets: Insets) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.insets = Some(insets);
-        }
-        self
-    }
-
-    pub fn scrollbar_min_thumb_length(mut self, min_thumb_length: Dp) -> Self {
-        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style.min_thumb_length = Some(min_thumb_length);
         }
         self
     }
@@ -675,48 +572,11 @@ macro_rules! impl_layout_api {
                 )
             }
 
-            pub fn background(self, color: impl Into<Value<Color>>) -> Self {
-                Self(self.0.background(color))
-            }
-
-            pub fn background_brush(self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
-                Self(self.0.background_brush(brush))
-            }
-
-            pub fn background_image(self, image: impl Into<Value<BackgroundImage>>) -> Self {
-                Self(self.0.background_image(image))
-            }
-
-            pub fn background_blur(self, blur: impl Into<Value<Dp>>) -> Self {
-                Self(self.0.background_blur(blur))
-            }
-
-            pub fn border(
+            pub fn style(
                 self,
-                width: impl Into<Value<Dp>>,
-                color: impl Into<Value<Color>>,
+                resolver: impl Fn(ResolvedThemeMode) -> ContainerStyle + Send + Sync + 'static,
             ) -> Self {
-                Self(self.0.border(width, color))
-            }
-
-            pub fn border_color(self, color: impl Into<Value<Color>>) -> Self {
-                Self(self.0.border_color(color))
-            }
-
-            pub fn border_radius(self, radius: impl Into<Value<Dp>>) -> Self {
-                Self(self.0.border_radius(radius))
-            }
-
-            pub fn border_width(self, width: impl Into<Value<Dp>>) -> Self {
-                Self(self.0.border_width(width))
-            }
-
-            pub fn opacity(self, opacity: impl Into<Value<f32>>) -> Self {
-                Self(self.0.opacity(opacity))
-            }
-
-            pub fn offset(self, offset: impl Into<Value<Point>>) -> Self {
-                Self(self.0.offset(offset))
+                Self(self.0.style(resolver))
             }
 
             pub fn on_click(self, command: Command<VM>) -> Self {
@@ -777,42 +637,6 @@ macro_rules! impl_layout_api {
 
             pub fn overflow_y(self, overflow: Overflow) -> Self {
                 Self(self.0.overflow_y(overflow))
-            }
-
-            pub fn scrollbar_style(self, style: ScrollbarStyle) -> Self {
-                Self(self.0.scrollbar_style(style))
-            }
-
-            pub fn scrollbar_thumb_color(self, color: Color) -> Self {
-                Self(self.0.scrollbar_thumb_color(color))
-            }
-
-            pub fn scrollbar_track_color(self, color: Color) -> Self {
-                Self(self.0.scrollbar_track_color(color))
-            }
-
-            pub fn scrollbar_hover_thumb_color(self, color: Color) -> Self {
-                Self(self.0.scrollbar_hover_thumb_color(color))
-            }
-
-            pub fn scrollbar_active_thumb_color(self, color: Color) -> Self {
-                Self(self.0.scrollbar_active_thumb_color(color))
-            }
-
-            pub fn scrollbar_thickness(self, thickness: Dp) -> Self {
-                Self(self.0.scrollbar_thickness(thickness))
-            }
-
-            pub fn scrollbar_radius(self, radius: Dp) -> Self {
-                Self(self.0.scrollbar_radius(radius))
-            }
-
-            pub fn scrollbar_insets(self, insets: Insets) -> Self {
-                Self(self.0.scrollbar_insets(insets))
-            }
-
-            pub fn scrollbar_min_thumb_length(self, min_thumb_length: Dp) -> Self {
-                Self(self.0.scrollbar_min_thumb_length(min_thumb_length))
             }
         }
 

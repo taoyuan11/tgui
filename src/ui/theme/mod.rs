@@ -1,7 +1,7 @@
 mod color;
-mod component;
 mod mode;
 mod motion;
+mod resolved_mode;
 mod shape;
 mod spacing;
 mod state;
@@ -10,19 +10,14 @@ mod theme;
 mod typography;
 
 pub use color::ColorScheme;
-#[allow(unused_imports)]
-pub use component::{
-    ButtonStyle, ButtonTheme, ButtonVariant, CheckboxStyle, CheckboxTheme, ComponentTheme,
-    RadioStyle, RadioTheme, ScrollbarTheme, SelectStyle, SelectTheme, SwitchStyle, SwitchTheme,
-    TextTheme,
-};
 pub use mode::ThemeMode;
 pub use motion::MotionScale;
+pub use resolved_mode::ResolvedThemeMode;
 pub use shape::{BorderScale, ElevationScale, RadiusScale, Shadow};
 pub use spacing::SpaceScale;
 pub use state::{Stateful, WidgetState};
 pub use store::{ThemeSet, ThemeStore};
-pub use theme::Theme;
+pub use theme::{FocusRingStyle, Theme};
 pub use typography::{FontWeight, TextStyle, TypeScale};
 
 use crate::platform::window::Theme as WindowTheme;
@@ -38,7 +33,7 @@ impl Theme {
 
 #[cfg(test)]
 mod tests {
-    use super::{Theme, ThemeMode, ThemeSet, ThemeStore, WidgetState};
+    use super::{Theme, ThemeMode, ThemeSet, ThemeStore};
     use crate::platform::window::Theme as WindowTheme;
 
     #[test]
@@ -59,53 +54,5 @@ mod tests {
             "light"
         );
         assert_eq!(themes.resolve(ThemeMode::System, None).name, "dark");
-    }
-
-    #[test]
-    fn stateful_resolution_prefers_disabled_then_focused_then_pressed_then_hovered() {
-        let resolved = Theme::dark()
-            .components
-            .button
-            .primary
-            .container
-            .resolve(WidgetState {
-                disabled: true,
-                hovered: true,
-                pressed: true,
-                focused: true,
-                selected: false,
-            });
-        assert_eq!(resolved, Theme::dark().colors.disabled);
-    }
-
-    #[test]
-    fn stateful_resolution_prefers_focused_over_pressed_and_hovered() {
-        let theme = Theme::dark();
-        let resolved = theme.components.button.primary.border.resolve(WidgetState {
-            hovered: true,
-            pressed: true,
-            focused: true,
-            disabled: false,
-            selected: false,
-        });
-
-        assert_eq!(resolved, theme.colors.focus_ring);
-    }
-
-    #[test]
-    fn refresh_components_rebuilds_button_tokens_after_color_mutation() {
-        let mut theme = Theme::dark();
-        theme.colors.primary = crate::foundation::color::Color::WHITE;
-        assert_ne!(
-            theme.components.button.primary.container.normal,
-            theme.colors.primary
-        );
-
-        theme.refresh_components();
-
-        assert_eq!(
-            theme.components.button.primary.container.normal,
-            theme.colors.primary
-        );
     }
 }

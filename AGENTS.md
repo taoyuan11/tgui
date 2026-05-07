@@ -27,7 +27,6 @@ crate 信息：
 - `src/ui/layout.rs`：布局基础类型，封装 `Length`、`Track`、`Insets`、`Align`、`Justify`、`Axis`、`Overflow` 等。
 - `src/ui/widget/`：组件和场景构建。`core.rs` 很大，负责元素树解析、Taffy 布局、渲染 primitive 收集、命中区域、输入/选择文本等大量逻辑；其他文件提供具体 widget builder。
 - `src/ui/theme/`：主题 token、组件主题、状态解析、light/dark/system 模式。
-- `src/ui/theme/component/textarea.rs`：`TextAreaTheme` / `TextAreaStyle`，定义多行文本域的背景、边框、滚动条和文本 token。
 - `src/rendering/renderer.rs`：`wgpu` 渲染器，包含矩形、渐变/brush、mesh、文字、纹理、透明窗口 surface、backdrop blur 等 pipeline。
 - `src/rendering/shader/`：WGSL shader。
 - `src/media/mod.rs`：图片、SVG、网络/本地/内存媒体加载，纹理缓存，SVG 栅格化，canvas shadow 缓存。
@@ -35,7 +34,6 @@ crate 信息：
 - `src/platform.rs`：平台抽象和不同 winit 后端的选择。
 - `src/video/`：启用 `video` feature 后的 `VideoController`、`VideoSurface`、FFmpeg 后端。
 - `examples/`：独立 Cargo 示例工程。
-- `examples/text_area/`：`TextArea` 多行输入、自动增高、内部滚动与提交语义示例。
 - `docs/images/tgui_logo.png`：README 使用的 logo。
 
 ## Features 和平台
@@ -198,7 +196,6 @@ Application::new()
 - `background_effects`
 - `frameless_window`
 - `demo`
-- `text_area`
 - `multiple_vm_examples`
 - `android_basic_window`
 - `ohos_basic_window`
@@ -210,7 +207,6 @@ cargo run --manifest-path examples/basic_window/Cargo.toml
 cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 cargo run --manifest-path examples/canvas/Cargo.toml
 cargo run --manifest-path examples/frameless_window/Cargo.toml
-cargo run --manifest-path examples/text_area/Cargo.toml
 ```
 
 README 中提到的一些示例名称未必都在当前工作区存在；维护文档时以实际 `examples/` 目录为准。
@@ -257,7 +253,7 @@ cargo run --manifest-path examples/<example_name>/Cargo.toml
 - `src/video/backend/ffmpeg/*`：视频后端内部逻辑，需 feature/环境支持。
 - `src/ui/widget/canvas.rs`、`src/ui/widget/common.rs`、`src/ui/theme/mod.rs`、`src/text/font.rs` 等也有局部测试。
 
-修改共享行为时，不要只跑示例；至少跑相关模块测试。修改 `runtime.rs`、`ui/widget/core.rs` 或渲染 primitive 时，优先补充小型单元测试。`TextArea` 行为变更优先覆盖提交语义、换行、选择与滚动；通知变更优先覆盖 options 校验、平台约束和 completion 回调。
+修改共享行为时，不要只跑示例；至少跑相关模块测试。修改 `runtime.rs`、`ui/widget/core.rs` 或渲染 primitive 时，优先补充小型单元测试。文本选择、光标、IME 或滚动相关变更要优先覆盖 UTF-8 边界、选区、滚动和失效路径；通知变更优先覆盖 options 校验、平台约束和 completion 回调。
 
 ## 维护注意事项
 
@@ -270,7 +266,7 @@ cargo run --manifest-path examples/<example_name>/Cargo.toml
 - 新增视觉属性时通常需要同时考虑：widget builder、`VisualStyle` 或相关状态、scene primitive、动画 key、renderer/shader。
 - 新增绑定属性时优先接受 `impl Into<Value<T>>`，这样静态值和 `Binding<T>` 都可用。
 - 新增交互事件时要检查 hover/focus/pressed 状态、命中区域、命令 scope、运行时事件派发以及缓存失效。
-- 新增或修改 `TextArea` 能力时，要同时检查 widget builder、`WidgetKind`、布局测量、scroll region、caret/selection、键盘事件和主题 token，而不是只改渲染或只改输入。
+- 新增或修改文本编辑基础设施时，要同时检查 widget builder、`WidgetKind`、scroll region、caret/selection、键盘事件和主题/渲染输出，而不是只改渲染或只改输入。
 - 文本相关修改要注意 UTF-8 边界、IME composition、选择区间、caret 可见性和横向滚动。
 - 通知相关改动要同步检查 `Application::app_id`、`CommandContext::notifications()`、平台后端限制、action 数量约束以及异步回调回到 ViewModel 的路径。
 - 媒体和异步加载修改要确保完成后调用 invalidation，避免 UI 不刷新。
@@ -287,7 +283,7 @@ cargo run --manifest-path examples/<example_name>/Cargo.toml
 4. `src/application/mod.rs`
 5. `src/foundation/binding.rs`
 6. `src/foundation/view_model.rs`
-7. 涉及文本输入时读 `src/ui/widget/input.rs`、`src/ui/widget/textarea.rs` 和 `examples/text_area/src/main.rs`
+7. 涉及文本选择、光标、IME 或编辑状态时读 `src/ui/widget/common.rs`、`src/ui/widget/core.rs` 和 `src/runtime.rs`
 8. 涉及通知时读 `src/notification.rs`、`src/foundation/view_model.rs` 中的 `CommandContext`，以及 `examples/demo/src/main.rs`
 9. 涉及窗口控制时读 `src/foundation/window_control.rs` 和 `examples/frameless_window/src/main.rs`
 10. `src/ui/widget/core.rs` 中的 `Element`、`WidgetTree`、布局和渲染输出相关部分

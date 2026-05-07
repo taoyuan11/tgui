@@ -42,7 +42,7 @@ Desktop targets use windowing, clipboard, dialog, raw-window-handle, logging, an
 - `application`: `Application`, `WindowSpec`, `WindowRole`, `WindowClosePolicy`.
 - `mvvm`: `ViewModel`, `ViewModelContext`, `Observable`, `Binding`, `Command`, `ValueCommand`, `CommandContext`, `WindowControl`, `WindowResizeDirection`.
 - `layout`: `Flex`, `Grid`, `Stack`, `Length`, `Track`, `Insets`, alignment, overflow, units.
-- `widgets`: `Button`, `Text`, `Input`, `Image`, `Checkbox`, `Radio`, `Select`, `Switch`, `Element`, `WidgetTree`, common styling.
+- `widgets`: `Button`, `Text`, `Image`, `Checkbox`, `Radio`, `Select`, `Switch`, `Element`, `WidgetTree`, common styling.
 - `canvas`: `Canvas`, `PathBuilder`, canvas paths, gradients, shadows, boolean ops, pointer events.
 - `theme`: `Theme`, `ThemeMode`, `ThemeSet`, design tokens, component styles.
 - `media`: `MediaSource`, `MediaBytes`, `ContentFit`.

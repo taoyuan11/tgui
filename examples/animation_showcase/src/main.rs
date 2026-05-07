@@ -2,6 +2,22 @@ use std::time::Duration;
 
 use tgui::prelude::*;
 
+fn stateful<T: Clone>(value: T) -> Stateful<T> {
+    Stateful {
+        normal: value.clone(),
+        hovered: value.clone(),
+        pressed: value.clone(),
+        disabled: value,
+    }
+}
+
+fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for(mode);
+    style.typography.size = size;
+    style.color = color.into();
+    style
+}
+
 struct AnimationVm {
     expanded: Observable<bool>,
 }
@@ -125,26 +141,51 @@ impl ViewModel for AnimationVm {
                     .width(self.card_width())
                     .padding(self.card_padding())
                     .gap(dp(16.0))
-                    .background(self.card_background())
-                    .border(dp(1.0), Color::hexa(0xE2E8F055))
-                    .border_radius(self.card_radius())
-                    .offset(self.card_offset())
+                    .style({
+                        let background = self.card_background();
+                        let radius = self.card_radius();
+                        let offset = self.card_offset();
+                        move |mode| {
+                            let mut style = ContainerStyle::default_for(mode);
+                            style.surface.background = Some(background.clone().into());
+                            style.surface.border_color = Some(Color::hexa(0xE2E8F055).into());
+                            style.surface.border_width = Some(dp(1.0).into());
+                            style.surface.border_radius = Some(radius.clone().into());
+                            style.surface.offset = offset.clone().into();
+                            style
+                        }
+                    })
                     .child(
                         Text::new("Declarative transitions")
-                            .font_size(sp(26.0))
-                            .color(Color::hexa(0xF8FAFCFF)),
+                            .style(|mode| text_style(mode, sp(26.0), Color::hexa(0xF8FAFCFF))),
                     )
                     .child(
                         Text::new("This single boolean drives animated width, padding, radius, color, offset, opacity, and window clear color.")
-                            .font_size(sp(15.0))
-                            .opacity(self.body_opacity())
-                            .color(Color::hexa(0xECFEFFFF)),
+                            .style({
+                                let opacity = self.body_opacity();
+                                move |mode| {
+                                    let mut style =
+                                        text_style(mode, sp(15.0), Color::hexa(0xECFEFFFF));
+                                    style.surface.opacity = opacity.clone().into();
+                                    style
+                                }
+                            }),
                     )
                     .child(
-                        Button::new(Text::new(self.action_label()))
+                        Button::new(self.action_label())
                             .width(pct(100.0))
-                            .background(Color::hexa(0x0F172AFF))
-                            .border_radius(dp(12.0))
+                            .style(|mode| ButtonStyle {
+                                surface: WidgetSurfaceStyle::default(),
+                                background: stateful(Color::hexa(0x0F172AFF).into()),
+                                foreground: stateful(Color::WHITE.into()),
+                                border: stateful(Color::TRANSPARENT.into()),
+                                border_width: dp(0.0).into(),
+                                radius: dp(12.0).into(),
+                                padding_x: dp(16.0),
+                                padding_y: dp(10.0),
+                                min_height: dp(40.0),
+                                text_style: TextWidgetStyle::default_for(mode).typography,
+                            })
                             .on_click(Command::new(Self::toggle)),
                     ),
             )

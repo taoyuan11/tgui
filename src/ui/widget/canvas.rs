@@ -23,10 +23,10 @@ use crate::media::{
     resolve_media_rect, ContentFit, MediaManager, MediaSource, RasterRequest, TextureFrame,
 };
 use crate::text::font::FontWeight;
+use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{Dp, Sp, UnitContext};
 
-use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     CanvasItemInteractionHandlers, ClipMask, CursorStyle, InteractionHandlers, MediaEventHandlers,
     MeshPrimitive, MeshVertex, Point, Rect, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId,
@@ -34,6 +34,7 @@ use super::common::{
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
+use super::style::CanvasStyle;
 
 const MAX_CANVAS_GRADIENT_STOPS: usize = 8;
 const CANVAS_FLATTEN_TOLERANCE: f32 = 0.1;
@@ -2035,6 +2036,7 @@ impl<VM> Canvas<VM> {
                 kind: WidgetKind::Canvas {
                     items: items.into(),
                     item_interactions: CanvasItemInteractionHandlers::default(),
+                    style: None,
                 },
             },
         }
@@ -2042,54 +2044,13 @@ impl<VM> Canvas<VM> {
 
     impl_canvas_layout_api!();
 
-    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.background = Some(color.into());
-        self
-    }
-
-    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
-        self.element.visual.background_brush = Some(brush.into());
-        self
-    }
-
-    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
-        self.element.visual.background_image = Some(image.into());
-        self
-    }
-
-    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.background_blur = blur.into();
-        self
-    }
-
-    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_width = Some(width.into());
-        self.element.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.element.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_radius = Some(radius.into());
-        self
-    }
-
-    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.element.visual.border_width = Some(width.into());
-        self
-    }
-
-    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
-        self.element.visual.opacity = opacity.into();
-        self
-    }
-
-    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
-        self.element.visual.offset = offset.into();
+    pub fn style(
+        mut self,
+        resolver: impl Fn(ResolvedThemeMode) -> CanvasStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Canvas { style, .. } = &mut self.element.kind {
+            *style = Some(super::style::StyleResolver::new(resolver));
+        }
         self
     }
 

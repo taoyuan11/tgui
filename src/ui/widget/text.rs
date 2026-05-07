@@ -1,15 +1,16 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
+use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
-use crate::ui::unit::{Dp, Sp};
+use crate::ui::unit::Sp;
 
-use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
+use super::style::{StyleResolver, TextWidgetStyle};
 
 #[derive(Clone)]
 pub struct Text {
@@ -20,10 +21,12 @@ pub struct Text {
     pub(crate) background: Option<Value<Color>>,
     pub(crate) color: Option<Value<Color>>,
     pub(crate) font_size: Option<Sp>,
+    pub(crate) line_height: Option<Sp>,
     pub(crate) font_weight: Option<FontWeight>,
     pub(crate) letter_spacing: Option<Sp>,
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
     pub(crate) user_select: bool,
+    pub(crate) style: Option<StyleResolver<TextWidgetStyle>>,
 }
 
 macro_rules! impl_text_layout_api {
@@ -168,88 +171,22 @@ impl Text {
             background: None,
             color: None,
             font_size: None,
+            line_height: None,
             font_weight: None,
             letter_spacing: None,
             cursor_style: None,
             user_select: false,
+            style: None,
         }
     }
 
     impl_text_layout_api!();
 
-    pub fn font(mut self, font_family: impl Into<String>) -> Self {
-        self.font_family = Some(font_family.into());
-        self
-    }
-
-    pub fn background(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.background = Some(color.into());
-        self
-    }
-
-    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
-        self.visual.background_brush = Some(brush.into());
-        self
-    }
-
-    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
-        self.visual.background_image = Some(image.into());
-        self
-    }
-
-    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
-        self.visual.background_blur = blur.into();
-        self
-    }
-
-    pub fn border(mut self, width: impl Into<Value<Dp>>, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_width = Some(width.into());
-        self.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.visual.border_color = Some(color.into());
-        self
-    }
-
-    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_radius = Some(radius.into());
-        self
-    }
-
-    pub fn border_width(mut self, width: impl Into<Value<Dp>>) -> Self {
-        self.visual.border_width = Some(width.into());
-        self
-    }
-
-    pub fn color(mut self, color: impl Into<Value<Color>>) -> Self {
-        self.color = Some(color.into());
-        self
-    }
-
-    pub fn font_size(mut self, size: Sp) -> Self {
-        self.font_size = Some(size.max(Sp::new(1.0)));
-        self
-    }
-
-    pub fn font_weight(mut self, weight: FontWeight) -> Self {
-        self.font_weight = Some(weight);
-        self
-    }
-
-    pub fn character_spacing(mut self, spacing: Sp) -> Self {
-        self.letter_spacing = Some(spacing);
-        self
-    }
-
-    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
-        self.visual.opacity = opacity.into();
-        self
-    }
-
-    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
-        self.visual.offset = offset.into();
+    pub fn style(
+        mut self,
+        resolver: impl Fn(ResolvedThemeMode) -> TextWidgetStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::new(resolver));
         self
     }
 

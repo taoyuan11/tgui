@@ -12,7 +12,6 @@ pub struct Stateful<T> {
     pub normal: T,
     pub hovered: T,
     pub pressed: T,
-    pub focused: T,
     pub disabled: T,
 }
 
@@ -20,9 +19,6 @@ impl<T: Clone> Stateful<T> {
     pub fn resolve(&self, state: WidgetState) -> T {
         if state.disabled {
             return self.disabled.clone();
-        }
-        if state.focused {
-            return self.focused.clone();
         }
         if state.pressed {
             return self.pressed.clone();

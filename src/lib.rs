@@ -38,7 +38,7 @@
 //!             .child(Text::new(
 //!                 self.count.binding().map(|count| format!("Count: {count}")),
 //!             ))
-//!             .child(Button::new(Text::new("Increment")).on_click(Command::new(Self::increment)))
+//!             .child(Button::new("Increment").on_click(Command::new(Self::increment)))
 //!             .into()
 //!     }
 //! }
@@ -202,10 +202,9 @@ pub mod prelude {
         NotificationPermission, Notifications,
     };
     pub use crate::theme::{
-        BorderScale, CheckboxStyle, CheckboxTheme, ColorScheme, ComponentTheme, ElevationScale,
-        FontWeight, MotionScale, RadioStyle, RadioTheme, RadiusScale, SelectStyle, SelectTheme,
-        Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet, ThemeStore, TypeScale,
-        WidgetState,
+        BorderScale, ColorScheme, ElevationScale, FocusRingStyle, FontWeight, MotionScale,
+        RadiusScale, ResolvedThemeMode, Shadow, SpaceScale, Stateful, TextStyle, Theme,
+        ThemeMode, ThemeSet, ThemeStore, TypeScale, WidgetState,
     };
     #[cfg(feature = "video")]
     pub use crate::video::{
@@ -213,19 +212,20 @@ pub mod prelude {
     };
     pub use crate::widgets::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
-        BackgroundRadialGradient, Button, Checkbox, CursorStyle, Element, Image, Radio, RadioGroup,
-        RadioOption, Select, SelectOption, Switch, Text, WidgetCommand, WidgetEventResult,
-        WidgetTree,
+        BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
+        ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Radio,
+        RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle, Switch,
+        SwitchStyle, Text, TextWidgetStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
+        WidgetSurfaceStyle, WidgetTree,
     };
 }
 
 /// Theme tokens, state resolution, and theme storage.
 pub mod theme {
     pub use crate::ui::theme::{
-        BorderScale, CheckboxStyle, CheckboxTheme, ColorScheme, ComponentTheme, ElevationScale,
-        FontWeight, MotionScale, RadioStyle, RadioTheme, RadiusScale, SelectStyle, SelectTheme,
-        Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode, ThemeSet, ThemeStore, TypeScale,
-        WidgetState,
+        BorderScale, ColorScheme, ElevationScale, FocusRingStyle, FontWeight, MotionScale,
+        RadiusScale, ResolvedThemeMode, Shadow, SpaceScale, Stateful, TextStyle, Theme,
+        ThemeMode, ThemeSet, ThemeStore, TypeScale, WidgetState,
     };
 }
 
@@ -234,9 +234,11 @@ pub mod widgets {
     pub use crate::layout::{Flex, Grid, IntoLengthValue, Stack};
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
-        BackgroundRadialGradient, Button, Checkbox, CursorStyle, Element, Image, Radio, RadioGroup,
-        RadioOption, Select, SelectOption, Switch, Text, WidgetCommand, WidgetEventResult,
-        WidgetTree,
+        BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
+        ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Radio,
+        RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle, Switch,
+        SwitchStyle, Text, TextWidgetStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
+        WidgetSurfaceStyle, WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

@@ -945,8 +945,9 @@ impl Renderer {
                 }
                 RenderCommand::Text(text) => {
                     if let Some(bind_group) = self.text_bind_group_for(text)? {
+                        let snapped_frame = self.snap_text_rect(text.frame);
                         let vertices = TextVertex::quad(
-                            text.frame,
+                            snapped_frame,
                             logical_width,
                             logical_height,
                             0.0,
@@ -1430,13 +1431,14 @@ impl Renderer {
     }
 
     fn text_cache_key(&self, text: &TextPrimitive) -> Option<TextCacheKey> {
+        let frame = self.snap_text_rect(text.frame);
         let width = self
-            .logical_to_physical(text.frame.width.get())
-            .ceil()
+            .logical_to_physical(frame.width.get())
+            .round()
             .max(1.0) as u32;
         let height = self
-            .logical_to_physical(text.frame.height.get())
-            .ceil()
+            .logical_to_physical(frame.height.get())
+            .round()
             .max(1.0) as u32;
         if width == 0 || height == 0 || text.content.is_empty() {
             return None;
@@ -1491,13 +1493,14 @@ impl Renderer {
         &mut self,
         text: &TextPrimitive,
     ) -> Result<Option<(wgpu::Texture, wgpu::BindGroup)>, TguiError> {
+        let frame = self.snap_text_rect(text.frame);
         let width = self
-            .logical_to_physical(text.frame.width.get())
-            .ceil()
+            .logical_to_physical(frame.width.get())
+            .round()
             .max(1.0) as u32;
         let height = self
-            .logical_to_physical(text.frame.height.get())
-            .ceil()
+            .logical_to_physical(frame.height.get())
+            .round()
             .max(1.0) as u32;
         if width == 0 || height == 0 || text.content.is_empty() {
             return Ok(None);
@@ -1604,6 +1607,19 @@ impl Renderer {
         });
 
         Ok(Some((texture, bind_group)))
+    }
+
+    fn snap_text_rect(&self, rect: Rect) -> Rect {
+        let x = self.logical_to_physical(rect.x.get()).round();
+        let y = self.logical_to_physical(rect.y.get()).round();
+        let width = self.logical_to_physical(rect.width.get()).ceil().max(1.0);
+        let height = self.logical_to_physical(rect.height.get()).ceil().max(1.0);
+        Rect::new(
+            x / self.scale_factor,
+            y / self.scale_factor,
+            width / self.scale_factor,
+            height / self.scale_factor,
+        )
     }
 
     fn texture_bind_group_for(

@@ -2,16 +2,31 @@
 use tgui::platform::android::activity::AndroidApp;
 use tgui::prelude::*;
 
+fn title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for(mode);
+    style.typography.size = sp(30.0);
+    style
+}
+
+fn card_style(mode: ResolvedThemeMode) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for(mode);
+    style.surface.background = Some(Color::hex(0x0099FF).into());
+    style.surface.border_radius = Some(dp(28.0).into());
+    style
+}
+
 fn themed_app() -> Application {
     let mut theme = Theme::dark();
     theme.colors.background = Color::hexa(0x09111EFF);
     theme.colors.surface = Color::hexa(0x132238FF);
     theme.colors.surface_low = Color::hexa(0x1C3150FF);
     theme.colors.primary = Color::hexa(0x54A6FFFF);
+    let theme_set = ThemeSet::new(theme.clone(), theme);
 
     Application::new()
         .title("tgui android")
-        .theme(theme)
+        .theme_set(theme_set)
+        .theme_mode(ThemeMode::Dark)
 }
 
 struct AndroidApplication {
@@ -51,11 +66,11 @@ impl ViewModel for AndroidApplication {
     }
 
     fn view(&self) -> Element<Self> {
-        let title = Text::new("当前主题/CurrentTheme").font_size(sp(30.0));
+        let title = Text::new("当前主题/CurrentTheme").style(title_style);
 
         let text = Text::new(self.current_theme.binding());
 
-        let button = Button::new(Text::new("change theme")).on_click(Command::new(Self::set_theme));
+        let button = Button::new("change theme").on_click(Command::new(Self::set_theme));
 
         Stack::new()
             .size(pct(100.0), pct(100.0))
@@ -66,8 +81,7 @@ impl ViewModel for AndroidApplication {
                     .width(pct(100.0))
                     .padding(Insets::all(dp(24.0)))
                     .gap(dp(12.0))
-                    .background(Color::hex(0x0099FF))
-                    .border_radius(dp(28.0))
+                    .style(card_style)
                     .child(el![
                         title,
                         text,

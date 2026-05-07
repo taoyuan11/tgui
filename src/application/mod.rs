@@ -37,7 +37,6 @@ fn min_logical_size(lhs: LogicalSize<f64>, rhs: LogicalSize<f64>) -> LogicalSize
 pub(crate) enum ThemeSelection {
     System,
     Mode(ThemeMode),
-    Fixed(Theme),
 }
 
 impl ThemeSelection {
@@ -248,15 +247,14 @@ impl Application {
         self
     }
 
-    /// Applies a fixed theme for the whole application.
+    /// Sets a fixed theme mode for the whole application.
     ///
-    /// If no clear color override has been set, the theme's window background is
-    /// also used as the renderer clear color.
-    pub fn theme(mut self, theme: Theme) -> Self {
+    /// This selects either the light or dark theme from the current [`ThemeSet`].
+    pub fn theme_mode(mut self, mode: ThemeMode) -> Self {
         if !self.clear_color_overridden {
-            self.clear_color = theme.colors.background;
+            self.clear_color = self.theme_set.resolve(mode, None).colors.background;
         }
-        self.theme = ThemeSelection::Fixed(theme);
+        self.theme = ThemeSelection::from_mode(mode);
         self
     }
 
@@ -266,7 +264,11 @@ impl Application {
     /// [`ThemeMode::Dark`], and [`ThemeMode::System`] resolve through this set.
     pub fn theme_set(mut self, theme_set: ThemeSet) -> Self {
         if !self.clear_color_overridden {
-            self.clear_color = theme_set.dark.colors.background;
+            let mode = match self.theme {
+                ThemeSelection::Mode(mode) => mode,
+                ThemeSelection::System => ThemeMode::Dark,
+            };
+            self.clear_color = theme_set.resolve(mode, None).colors.background;
         }
         self.theme_set = theme_set;
         self

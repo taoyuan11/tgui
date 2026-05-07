@@ -185,7 +185,6 @@ impl TextLayoutInfo {
             .or_else(|| self.lines.first())
             .expect("text layout should always contain at least one line")
     }
-
 }
 
 impl TextLineLayoutInfo {
@@ -261,14 +260,15 @@ impl FontManager {
         }
     }
 
-    pub(crate) fn resolve_text(&self, _text: &str, request: TextFontRequest<'_>) -> ResolvedText {
-        let _weight = request.weight;
+    pub(crate) fn resolve_text(&self, text: &str, request: TextFontRequest<'_>) -> ResolvedText {
         let preferred = request
             .preferred_font
             .and_then(|name| self.resolve_family_name(name, request.weight));
+        let script_aware_default = self.script_aware_default_family(text, request.weight);
 
         ResolvedText {
             primary_font: preferred
+                .or(script_aware_default)
                 .or_else(|| {
                     self.default_font
                         .as_deref()
@@ -385,6 +385,7 @@ impl FontManager {
             .collect::<Vec<_>>();
         let mut lines = Vec::new();
         let mut line_start = 0usize;
+        let mut current_top = 0.0f32;
 
         while line_start < text.len() {
             let mut current_end = line_start;
@@ -412,7 +413,7 @@ impl FontManager {
                     );
                     if candidate.width > limit && current_end > line_start {
                         let break_at = last_break.unwrap_or(current_end);
-                        lines.push(build_wrapped_line(
+                        let line = build_wrapped_line(
                             self,
                             text,
                             request.clone(),
@@ -421,8 +422,10 @@ impl FontManager {
                             letter_spacing,
                             line_start,
                             break_at,
-                            lines.len() as f32 * line_height,
-                        ));
+                            current_top,
+                        );
+                        current_top += line.height;
+                        lines.push(line);
                         line_start = break_at;
                         wrapped = true;
                         break;
@@ -440,7 +443,7 @@ impl FontManager {
             }
 
             if let Some((newline_start, newline_end)) = explicit_newline_end {
-                lines.push(build_wrapped_line(
+                let line = build_wrapped_line(
                     self,
                     text,
                     request.clone(),
@@ -449,13 +452,15 @@ impl FontManager {
                     letter_spacing,
                     line_start,
                     newline_start,
-                    lines.len() as f32 * line_height,
-                ));
+                    current_top,
+                );
+                current_top += line.height;
+                lines.push(line);
                 line_start = newline_end;
                 continue;
             }
 
-            lines.push(build_wrapped_line(
+            let line = build_wrapped_line(
                 self,
                 text,
                 request.clone(),
@@ -464,13 +469,15 @@ impl FontManager {
                 letter_spacing,
                 line_start,
                 current_end,
-                lines.len() as f32 * line_height,
-            ));
+                current_top,
+            );
+            current_top += line.height;
+            lines.push(line);
             line_start = current_end;
         }
 
         if text.ends_with('\n') {
-            lines.push(build_wrapped_line(
+            let line = build_wrapped_line(
                 self,
                 text,
                 request,
@@ -479,8 +486,9 @@ impl FontManager {
                 letter_spacing,
                 text.len(),
                 text.len(),
-                lines.len() as f32 * line_height,
-            ));
+                current_top,
+            );
+            lines.push(line);
         }
 
         let width = lines.iter().map(|line| line.width).fold(0.0, f32::max);
@@ -599,6 +607,12 @@ impl FontManager {
             .letter_spacing(letter_spacing / font_size.max(1.0));
         buffer.set_text(text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut font_system, false);
+        let effective_line_height =
+            measured_glyph_line_height(&mut buffer, &mut font_system, line_height).max(line_height);
+        if effective_line_height > line_height + 0.01 {
+            buffer.set_metrics(Metrics::new(font_size, effective_line_height));
+            buffer.shape_until_scroll(&mut font_system, false);
+        }
         compute(&buffer)
     }
 
@@ -645,6 +659,19 @@ impl FontManager {
             .query(&query)
             .and_then(|id| face_family_name(self.font_system.borrow().db(), id))
     }
+
+    fn script_aware_default_family(&self, text: &str, weight: FontWeight) -> Option<String> {
+        if !contains_cjk(text) {
+            return None;
+        }
+
+        let database = self.font_system.borrow();
+        let database = database.db();
+
+        desktop_cjk_sans_candidates()
+            .and_then(|candidates| first_matching_family(database, candidates))
+            .or_else(|| self.system_default_family(weight))
+    }
 }
 
 fn push_boundary(boundaries: &mut Vec<TextBoundary>, index: usize, x: f32) {
@@ -657,6 +684,24 @@ fn push_boundary(boundaries: &mut Vec<TextBoundary>, index: usize, x: f32) {
     }
 
     boundaries.push(TextBoundary { index, x });
+}
+
+fn measured_glyph_line_height(
+    buffer: &mut Buffer,
+    font_system: &mut FontSystem,
+    fallback_line_height: f32,
+) -> f32 {
+    let mut max_height = fallback_line_height;
+    let mut line_index = 0usize;
+    while let Some(layout_lines) = buffer.line_layout(font_system, line_index) {
+        for layout_line in layout_lines {
+            let glyph_height = layout_line.max_ascent + layout_line.max_descent;
+            let requested_height = layout_line.line_height_opt.unwrap_or(fallback_line_height);
+            max_height = max_height.max(glyph_height.max(requested_height));
+        }
+        line_index += 1;
+    }
+    max_height
 }
 
 fn build_wrapped_line(
@@ -737,6 +782,20 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn chinese_text_resolves_to_single_primary_font() {
+        let manager = FontManager::new(&FontCatalog::default());
+        let resolved = manager.resolve_text(
+            "中文测试ABC",
+            TextFontRequest {
+                preferred_font: None,
+                weight: FontWeight::NORMAL,
+            },
+        );
+
+        assert!(!resolved.primary_font.trim().is_empty());
+    }
 }
 
 #[cfg(any(target_os = "android", target_env = "ohos"))]
@@ -768,6 +827,29 @@ fn load_mobile_system_fonts(database: &mut cosmic_text::fontdb::Database) {
     if let Some(family) = monospace_family {
         database.set_monospace_family(family);
     }
+}
+
+fn contains_cjk(text: &str) -> bool {
+    text.chars().any(is_cjk_character)
+}
+
+fn is_cjk_character(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x2E80..=0x2EFF
+            | 0x2F00..=0x2FDF
+            | 0x3000..=0x303F
+            | 0x31C0..=0x31EF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0x20000..=0x2A6DF
+            | 0x2A700..=0x2B73F
+            | 0x2B740..=0x2B81F
+            | 0x2B820..=0x2CEAF
+            | 0x2CEB0..=0x2EBEF
+            | 0x2F800..=0x2FA1F
+    )
 }
 
 #[cfg(target_os = "android")]
@@ -857,7 +939,6 @@ fn mobile_monospace_candidates() -> &'static [&'static str] {
     ]
 }
 
-#[cfg(any(target_os = "android", target_env = "ohos"))]
 fn first_matching_family(
     database: &cosmic_text::fontdb::Database,
     candidates: &[&str],
@@ -877,6 +958,49 @@ fn first_loaded_family(database: &cosmic_text::fontdb::Database) -> Option<Strin
     database
         .faces()
         .find_map(|face| face.families.first().map(|(family, _)| family.clone()))
+}
+
+#[cfg(target_os = "windows")]
+fn desktop_cjk_sans_candidates() -> Option<&'static [&'static str]> {
+    Some(&[
+        "Noto Sans SC",
+        "DengXian",
+        "Microsoft YaHei",
+        "Microsoft YaHei UI",
+        "Microsoft JhengHei UI",
+        "Microsoft JhengHei",
+        "SimHei",
+        "Yu Gothic UI",
+        "Yu Gothic",
+        "Malgun Gothic",
+        "SimSun",
+    ])
+}
+
+#[cfg(target_os = "macos")]
+fn desktop_cjk_sans_candidates() -> Option<&'static [&'static str]> {
+    Some(&[
+        "PingFang SC",
+        "Hiragino Sans GB",
+        "Heiti SC",
+        "Apple SD Gothic Neo",
+    ])
+}
+
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
+fn desktop_cjk_sans_candidates() -> Option<&'static [&'static str]> {
+    Some(&[
+        "Noto Sans CJK SC",
+        "Noto Sans SC",
+        "Source Han Sans SC",
+        "WenQuanYi Micro Hei",
+        "Droid Sans Fallback",
+    ])
+}
+
+#[cfg(any(target_os = "android", target_env = "ohos"))]
+fn desktop_cjk_sans_candidates() -> Option<&'static [&'static str]> {
+    None
 }
 
 fn face_family_name(database: &cosmic_text::fontdb::Database, id: ID) -> Option<String> {

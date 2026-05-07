@@ -1097,9 +1097,6 @@ pub(crate) enum WindowProperty {
     ThemePrimaryContainer,
     ThemeFocusRing,
     ThemeSelection,
-    ThemeButtonPrimary,
-    ThemeButtonSecondary,
-    ThemeScrollbarThumb,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

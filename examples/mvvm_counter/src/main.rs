@@ -2,6 +2,47 @@ use tgui::core::Color;
 use tgui::platform::keyboard::KeyCode;
 use tgui::prelude::*;
 
+fn stateful<T: Clone>(value: T) -> Stateful<T> {
+    Stateful {
+        normal: value.clone(),
+        hovered: value.clone(),
+        pressed: value.clone(),
+        disabled: value,
+    }
+}
+
+fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for(mode);
+    style.typography.size = size;
+    style.color = color.into();
+    style
+}
+
+fn card_style(mode: ResolvedThemeMode) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for(mode);
+    style.surface.background = Some(Color::hexa(0x162033EE).into());
+    style.surface.border_color = Some(Color::hexa(0x31415FFF).into());
+    style.surface.border_width = Some(dp(1.0).into());
+    style.surface.border_radius = Some(dp(18.0).into());
+    style
+}
+
+fn solid_button_style(mode: ResolvedThemeMode, background: Color) -> ButtonStyle {
+    let typography = TextWidgetStyle::default_for(mode).typography;
+    ButtonStyle {
+        surface: WidgetSurfaceStyle::default(),
+        background: stateful(background.into()),
+        foreground: stateful(Color::WHITE.into()),
+        border: stateful(Color::TRANSPARENT.into()),
+        border_width: dp(0.0).into(),
+        radius: dp(12.0).into(),
+        padding_x: dp(16.0),
+        padding_y: dp(10.0),
+        min_height: dp(40.0),
+        text_style: typography,
+    }
+}
+
 struct CounterVm {
     count: Observable<i32>,
 }
@@ -76,46 +117,38 @@ impl ViewModel for CounterVm {
                     .width(dp(520.0))
                     .padding(Insets::all(dp(26.0)))
                     .gap(dp(16.0))
-                    .background(Color::hexa(0x162033EE))
-                    .border(dp(1.0), Color::hexa(0x31415FFF))
-                    .border_radius(dp(18.0))
+                    .style(card_style)
                     .child(
                         Text::new("MVVM counter")
-                            .font_size(sp(26.0))
-                            .color(Color::hexa(0xF8FAFCFF)),
+                            .style(|mode| text_style(mode, sp(26.0), Color::hexa(0xF8FAFCFF))),
                     )
                     .child(
                         Text::new(self.headline())
-                            .font_size(sp(20.0))
-                            .color(Color::hexa(0x7DD3FCFF)),
+                            .style(|mode| text_style(mode, sp(20.0), Color::hexa(0x7DD3FCFF))),
                     )
                     .child(
                         Text::new(self.hint())
-                            .font_size(sp(15.0))
-                            .color(Color::hexa(0xCBD5E1FF)),
+                            .style(|mode| text_style(mode, sp(15.0), Color::hexa(0xCBD5E1FF))),
                     )
                     .child(
                         Flex::new(Axis::Horizontal)
                             .gap(dp(10.0))
                             .child(
-                                Button::new(Text::new("-1"))
+                                Button::new("-1")
                                     .grow(1.0)
-                                    .background(Color::hexa(0x243247FF))
-                                    .border_radius(dp(12.0))
+                                    .style(|mode| solid_button_style(mode, Color::hexa(0x243247FF)))
                                     .on_click(Command::new(Self::decrement)),
                             )
                             .child(
-                                Button::new(Text::new("+1"))
+                                Button::new("+1")
                                     .grow(1.0)
-                                    .background(Color::hexa(0x0F766EFF))
-                                    .border_radius(dp(12.0))
+                                    .style(|mode| solid_button_style(mode, Color::hexa(0x0F766EFF)))
                                     .on_click(Command::new(Self::increment)),
                             )
                             .child(
-                                Button::new(Text::new("Reset"))
+                                Button::new("Reset")
                                     .grow(1.0)
-                                    .background(Color::hexa(0x7C2D12FF))
-                                    .border_radius(dp(12.0))
+                                    .style(|mode| solid_button_style(mode, Color::hexa(0x7C2D12FF)))
                                     .on_click(Command::new(Self::reset)),
                             ),
                     ),
