@@ -198,6 +198,7 @@ impl ViewModel for TimelineVm {
                             background: stateful(color.clone().into()),
                             foreground: stateful(Color::WHITE.into()),
                             border: stateful(Color::TRANSPARENT.into()),
+                            focus_ring: None,
                             border_width: dp(0.0).into(),
                             radius: dp(18.0).into(),
                             padding_x: dp(18.0),

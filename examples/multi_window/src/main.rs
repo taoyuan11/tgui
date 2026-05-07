@@ -31,6 +31,7 @@ fn filled_button_style(mode: ResolvedThemeMode, color: Color) -> ButtonStyle {
         background: stateful(color.into()),
         foreground: stateful(Color::WHITE.into()),
         border: stateful(Color::TRANSPARENT.into()),
+        focus_ring: None,
         border_width: dp(0.0).into(),
         radius: dp(12.0).into(),
         padding_x: dp(16.0),
