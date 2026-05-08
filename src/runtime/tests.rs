@@ -1803,6 +1803,78 @@ fn textarea_click_tracks_visual_wrap_for_overflowing_initial_content() {
 }
 
 #[test]
+fn textarea_click_reuses_live_session_layout_snapshot() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Textarea::<TestVm>::new("abcde").height(dp(120.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let (frame, padding, text_style) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    frame,
+                    padding,
+                    text_style,
+                    multiline: true,
+                    ..
+                } => Some((*frame, *padding, text_style.clone())),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    let _ = handler.sync_text_input_buffer(text_id);
+    let inner = frame.inset(padding);
+    let alternate_text = "a\nb\nc";
+    let (alternate_layout, _font_size, _line_height) = super::input_text_layout(
+        &handler.font_manager,
+        &handler.theme,
+        handler.unit_context(),
+        &text_style,
+        alternate_text,
+        true,
+        false,
+        inner.width.get(),
+    );
+    let sample_line = 2usize;
+    let sample_x = 0.0;
+    let sample_y =
+        alternate_layout.line_top(sample_line) + (alternate_layout.line_height(sample_line) * 0.5);
+    let expected_cursor = alternate_layout.index_for_point(sample_x, sample_y);
+
+    let session = handler
+        .text_input_buffers
+        .get_mut(&text_id)
+        .expect("textarea text input session should exist");
+    session.display_text = session.current_text.clone();
+    session.layout_snapshot = Some(alternate_layout);
+
+    handler.cursor_position = Some(Point {
+        x: inner.x + Dp::new(sample_x),
+        y: inner.y + Dp::new(sample_y),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("textarea edit state should exist");
+    assert_eq!(state.cursor, expected_cursor);
+}
+
+#[test]
 fn repeated_tab_does_not_advance_focus() {
     let invalidation = InvalidationSignal::new();
     let first: Element<TestVm> = Input::<TestVm>::new("first").into();

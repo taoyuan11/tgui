@@ -414,6 +414,56 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .and_then(|session| session.layout_snapshot.as_ref())
     }
 
+    fn text_input_cursor_index_at_point(
+        &self,
+        widget_id: WidgetId,
+        frame: Rect,
+        padding: crate::ui::layout::Insets,
+        text_style: &Text,
+        current_text: &str,
+        multiline: bool,
+        auto_wrap: bool,
+        scroll: Point,
+        point: Point,
+    ) -> usize {
+        if current_text.is_empty() {
+            return 0;
+        }
+
+        let (_, _, line_height, _) =
+            super::resolved_input_text_metrics(&self.theme, self.unit_context(), text_style);
+        if let Some(layout) = self.text_input_buffers.get(&widget_id).and_then(|session| {
+            (session.display_text == current_text)
+                .then_some(session.layout_snapshot.as_ref())
+                .flatten()
+        }) {
+            return super::text_cursor_index_from_layout_at_point(
+                layout,
+                line_height,
+                frame,
+                padding,
+                multiline,
+                auto_wrap,
+                scroll,
+                point,
+            );
+        }
+
+        text_cursor_index_at_point(
+            &self.font_manager,
+            &self.theme,
+            self.unit_context(),
+            frame,
+            padding,
+            text_style,
+            current_text,
+            multiline,
+            auto_wrap,
+            scroll,
+            point,
+        )
+    }
+
     pub(super) fn sync_text_input_buffer(
         &mut self,
         widget_id: WidgetId,
@@ -1308,10 +1358,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
 
-        let cursor = text_cursor_index_at_point(
-            &self.font_manager,
-            &self.theme,
-            self.unit_context(),
+        let cursor = self.text_input_cursor_index_at_point(
+            drag.widget_id,
             drag.frame,
             drag.padding,
             &drag.text_style,
@@ -2726,10 +2774,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 pointer_position.map(|point| {
                     let value = self.text_input_current_value(id, &controller);
                     let scroll = self.scroll_states.get(&id).copied().unwrap_or(Point::ZERO);
-                    let cursor = text_cursor_index_at_point(
-                        &self.font_manager,
-                        &self.theme,
-                        self.unit_context(),
+                    let cursor = self.text_input_cursor_index_at_point(
+                        id,
                         frame,
                         padding,
                         &text_style,

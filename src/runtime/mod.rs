@@ -2921,6 +2921,29 @@ fn text_cursor_index_at_point(
         auto_wrap,
         inner.width.get(),
     );
+    text_cursor_index_from_layout_at_point(
+        &layout,
+        line_height,
+        frame,
+        padding,
+        multiline,
+        auto_wrap,
+        scroll,
+        point,
+    )
+}
+
+fn text_cursor_index_from_layout_at_point(
+    layout: &TextLayoutInfo,
+    line_height: f32,
+    frame: Rect,
+    padding: crate::ui::layout::Insets,
+    multiline: bool,
+    auto_wrap: bool,
+    scroll: Point,
+    point: Point,
+) -> usize {
+    let inner = frame.inset(padding);
     let content_height = if multiline {
         Dp::new(layout.height.max(line_height))
     } else {
