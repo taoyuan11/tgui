@@ -16,7 +16,7 @@ use crate::text::rope_buffer::RopeBuffer;
 use crate::ui::unit::{Dp, UnitContext};
 use crate::ui::widget::{
     CanvasItemInteractionHandlers, CanvasMouseButton, HitInteraction, InteractionHandlers, Point,
-    Rect, ScrollRegion, ScrollbarAxis, ScrollbarHandle, Text, TextEditState, WidgetId, WidgetTree,
+    Rect, ScrollbarAxis, ScrollbarHandle, Text, TextEditState, WidgetId, WidgetTree,
 };
 use cosmic_text::{Edit, Editor, Metrics, Wrap};
 
@@ -923,13 +923,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             state.scroll_y.clamp(0.0, max_y),
         );
 
-        if multiline && auto_wrap {
+        if multiline {
             if caret_y < next_scroll.y.get() {
                 next_scroll.y = Dp::new(caret_y);
             } else if caret_y + caret_h > next_scroll.y.get() + inner.height.get() {
                 next_scroll.y = Dp::new((caret_y + caret_h - inner.height.get()).max(0.0));
             }
-        } else {
+        }
+
+        if !multiline || !auto_wrap {
             let caret_right = caret_x + INPUT_CARET_WIDTH;
             if caret_x < next_scroll.x.get() {
                 next_scroll.x = Dp::new(caret_x);
@@ -1844,6 +1846,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn handle_hover(&mut self, viewport: Rect) -> bool {
+        let started_at = text_profile_enabled().then_some(Instant::now());
         let revision_before = self.invalidation.revision();
         let cursor_position = self.cursor_position;
         let next_hovered = self.hover_path(viewport);
@@ -1888,10 +1891,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         let scrollbar_changed = self.sync_scrollbar_hover();
         let cursor_changed = self.update_cursor_icon();
-        hover_path_changed
+        let changed = hover_path_changed
             || scrollbar_changed
             || cursor_changed
-            || self.invalidation.revision() != revision_before
+            || self.invalidation.revision() != revision_before;
+        if let Some(started_at) = started_at.filter(|_| changed) {
+            log_text_profile(
+                "handle_hover",
+                started_at.elapsed(),
+                format!(
+                    "path_changed={} prev={} next={} prefix={} scrollbar_changed={} cursor_changed={} invalidation={} -> {}",
+                    hover_path_changed,
+                    previous_hovered.len(),
+                    self.hovered_widgets.len(),
+                    prefix_len,
+                    scrollbar_changed,
+                    cursor_changed,
+                    revision_before,
+                    self.invalidation.revision(),
+                ),
+            );
+        }
+        changed
     }
 
     pub(super) fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) -> bool {
@@ -1964,7 +1985,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
 
             let max_offset = region.max_offset();
-            let mut next_offset = region.scroll_offset;
+            let mut next_offset = self.effective_scroll_offset(region.id, region.scroll_offset);
             if region.can_scroll_x() {
                 next_offset.x = (next_offset.x - scroll_delta.x).clamp(0.0, max_offset.x);
             }
@@ -1975,12 +1996,20 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if (next_offset.x - region.scroll_offset.x).abs() > 0.01
                 || (next_offset.y - region.scroll_offset.y).abs() > 0.01
             {
-                self.set_smooth_scroll_target(region, next_offset);
+                self.set_smooth_scroll_target(region.id, next_offset);
                 return true;
             }
         }
 
         false
+    }
+
+    fn effective_scroll_offset(&self, widget_id: WidgetId, fallback: Point) -> Point {
+        self.smooth_scroll_states
+            .get(&widget_id)
+            .map(|state| state.target)
+            .or_else(|| self.scroll_states.get(&widget_id).copied())
+            .unwrap_or(fallback)
     }
 
     fn scroll_multiline_text_input(
@@ -2047,7 +2076,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         if self.hovered_scrollbar != next_hovered {
             self.hovered_scrollbar = next_hovered;
-            self.invalidate_scene();
             return true;
         }
 
@@ -2312,13 +2340,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.scroll_epoch = self.scroll_epoch.wrapping_add(1);
     }
 
-    pub(super) fn set_smooth_scroll_target(&mut self, region: ScrollRegion, target: Point) {
+    fn set_smooth_scroll_target(&mut self, widget_id: WidgetId, target: Point) {
         self.smooth_scroll_states
-            .insert(region.id, SmoothScrollState { target });
-        self.invalidation.mark_dirty();
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
-        }
+            .insert(widget_id, SmoothScrollState { target });
+        let _ = self.advance_smooth_scroll();
     }
 
     pub(super) fn advance_smooth_scroll(&mut self) -> bool {

@@ -13,7 +13,7 @@ use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use crate::platform::event::{ElementState, Ime, KeyEvent, MouseScrollDelta};
 use crate::platform::keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey};
 use crate::text::font::FontCatalog;
-use crate::ui::layout::Axis;
+use crate::ui::layout::{Axis, Overflow};
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::{dp, Dp, UnitContext};
 use crate::ui::widget::{
@@ -309,7 +309,7 @@ fn hover_path_reuses_cached_computed_scene() {
 }
 
 #[test]
-fn clearing_pointer_position_invalidates_hovered_scene() {
+fn clearing_pointer_position_preserves_cached_layout_for_hover_recompute() {
     let invalidation = InvalidationSignal::new();
     let tree = WidgetTree::new(Text::new("hover").cursor(CursorStyle::Pointer));
     let mut handler = test_handler(Some(tree), invalidation);
@@ -325,7 +325,37 @@ fn clearing_pointer_position_invalidates_hovered_scene() {
 
     assert!(handler.hovered_widgets.is_empty());
     assert_eq!(handler.hover_epoch, hover_epoch.wrapping_add(1));
-    assert!(handler.cached_scene.is_none());
+    assert!(handler.cached_scene.is_some());
+}
+
+#[test]
+fn scrollbar_hover_preserves_cached_layout_for_hover_recompute() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Textarea::<TestVm>::new("line 0\nline 1\nline 2\nline 3\nline 4\nline 5").height(dp(52.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let region = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.vertical_thumb.is_some())
+        .copied()
+        .expect("textarea scroll region with a vertical thumb should exist");
+    let thumb = region
+        .vertical_thumb
+        .expect("vertical scrollbar thumb should exist");
+
+    assert!(handler.cached_scene.is_some());
+
+    handler.cursor_position = Some(Point {
+        x: thumb.x + Dp::new(thumb.width.get() * 0.5),
+        y: thumb.y + Dp::new(thumb.height.get() * 0.5),
+    });
+
+    assert!(handler.sync_scrollbar_hover());
+    assert_eq!(handler.hovered_scrollbar.map(|handle| handle.id), Some(region.id));
+    assert!(handler.cached_scene.is_some());
 }
 
 #[test]
@@ -388,6 +418,35 @@ fn scene_layout_cache_survives_visual_only_animation_epoch_change() {
     handler.animation_epoch = 1;
 
     assert!(handler.scene_layout_cache_matches(&cached, viewport, UnitContext::new(1.0, 1.0),));
+}
+
+#[test]
+fn animation_scene_invalidation_preserves_cached_layout() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Textarea::<TestVm>::new("line 0\nline 1\nline 2\nline 3\nline 4\nline 5").height(dp(52.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let units = handler.unit_context();
+
+    let _ = handler.computed_scene();
+    assert!(handler.cached_scene.is_some());
+    assert!(!handler.text_input_regions.is_empty());
+
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    handler.invalidate_computed_scene();
+
+    assert!(handler.cached_scene.is_some());
+    assert!(handler.text_input_regions.is_empty());
+    assert!(handler.scene_layout_cache_matches(
+        handler
+            .cached_scene
+            .as_ref()
+            .expect("cached scene should remain available"),
+        viewport,
+        units,
+    ));
 }
 
 #[test]
@@ -1988,6 +2047,70 @@ fn textarea_arrow_down_scrolls_caret_into_vertical_view() {
 }
 
 #[test]
+fn textarea_without_auto_wrap_keeps_keyboard_moved_caret_in_view() {
+    let invalidation = InvalidationSignal::new();
+    let value = (0..6)
+        .map(|index| format!("line {index} 0123456789abcdef0123456789abcdef0123456789abcdef"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tree = WidgetTree::new(
+        Textarea::<TestVm>::new(value)
+            .size(dp(140.0), dp(52.0))
+            .auto_wrap(false),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let (frame, padding) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    frame,
+                    padding,
+                    multiline: true,
+                    auto_wrap: false,
+                    ..
+                } => Some((*frame, *padding)),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::End))));
+    for _ in 0..5 {
+        assert!(handler
+            .handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown,))));
+    }
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("textarea edit state should exist");
+    assert!(state.scroll_x > Dp::ZERO);
+    assert!(state.scroll_y > Dp::ZERO);
+
+    let inner = frame.inset(padding);
+    let caret = handler
+        .computed_scene()
+        .ime_cursor_area
+        .expect("focused textarea should expose a caret rect");
+    assert!(caret.x >= inner.x);
+    assert!(caret.right() <= inner.right() + dp(1.0));
+    assert!(caret.y >= inner.y);
+    assert!(caret.bottom() <= inner.bottom() + dp(1.0));
+}
+
+#[test]
 fn textarea_mouse_wheel_scrolls_vertical_overflow() {
     let invalidation = InvalidationSignal::new();
     let value = "line 0\nline 1\nline 2\nline 3\nline 4\nline 5";
@@ -2024,6 +2147,49 @@ fn textarea_mouse_wheel_scrolls_vertical_overflow() {
             > Dp::ZERO
             || handler.smooth_scroll_states.contains_key(&text_id)
     );
+}
+
+#[test]
+fn mouse_wheel_starts_immediately_and_keeps_smooth_target() {
+    let invalidation = InvalidationSignal::new();
+    let scroller: Element<TestVm> = Stack::new()
+        .size(dp(100.0), dp(100.0))
+        .overflow_y(Overflow::Scroll)
+        .child(Stack::new().size(dp(100.0), dp(320.0)))
+        .into();
+    let scroller_id = scroller.id;
+    let tree = WidgetTree::new(scroller);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let region = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == scroller_id)
+        .copied()
+        .expect("scroll region should exist");
+
+    handler.cursor_position = Some(Point {
+        x: region.visible_frame.x + dp(8.0),
+        y: region.visible_frame.y + dp(8.0),
+    });
+
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -2.0)));
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -2.0)));
+
+    let offset = handler
+        .scroll_states
+        .get(&scroller_id)
+        .map(|state| state.y)
+        .expect("scroll offset should exist");
+    assert!(offset > Dp::ZERO);
+    assert!(offset < dp(160.0));
+
+    let target = handler
+        .smooth_scroll_states
+        .get(&scroller_id)
+        .map(|state| state.target.y)
+        .expect("smooth scroll target should exist");
+    assert_eq!(target, dp(160.0));
 }
 
 #[test]
@@ -2178,6 +2344,81 @@ fn textarea_backspace_keeps_scrolled_viewport_and_scroll_range() {
         !line_zero_visible_after_backspace,
         "focused textarea should not jump back to the first line after backspace"
     );
+}
+
+#[test]
+fn textarea_without_auto_wrap_keeps_edited_caret_in_view() {
+    let invalidation = InvalidationSignal::new();
+    let value = (0..6)
+        .map(|index| format!("line {index} 0123456789abcdef0123456789abcdef0123456789abcdef"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tree = WidgetTree::new(
+        Textarea::<TestVm>::new(value)
+            .size(dp(140.0), dp(52.0))
+            .auto_wrap(false),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let (text_id, frame, padding) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    id,
+                    frame,
+                    padding,
+                    multiline: true,
+                    auto_wrap: false,
+                    ..
+                } => Some((*id, *frame, *padding)),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::End))));
+    for _ in 0..5 {
+        assert!(handler
+            .handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown,))));
+    }
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Backspace,)))
+    );
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("textarea edit state should exist after backspace");
+    assert!(state.scroll_x > Dp::ZERO);
+    assert!(state.scroll_y > Dp::ZERO);
+
+    let inner = frame.inset(padding);
+    let caret = handler
+        .computed_scene()
+        .ime_cursor_area
+        .expect("focused textarea should expose a caret rect after edit");
+    assert!(caret.x >= inner.x);
+    assert!(caret.right() <= inner.right() + dp(1.0));
+    assert!(caret.y >= inner.y);
+    assert!(caret.bottom() <= inner.bottom() + dp(1.0));
+
+    let scroll_region = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == text_id)
+        .copied()
+        .expect("textarea scroll region should exist");
+    assert!(scroll_region.max_offset().x > Dp::ZERO);
+    assert!(scroll_region.max_offset().y > Dp::ZERO);
 }
 
 #[test]

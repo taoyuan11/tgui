@@ -7,6 +7,13 @@ use std::time::Duration;
 const DEFAULT_TAG: &str = "tgui";
 const TEXT_PROFILE_ENV: &str = "TGUI_TEXT_PROFILE";
 const TEXT_PROFILE_MIN_MS_ENV: &str = "TGUI_TEXT_PROFILE_MIN_MS";
+const TEXT_PROFILE_LABELS: &[&str] = &[
+    "computed_scene",
+    "edit_focused_text_input",
+    "handle_hover",
+    "handle_keyboard_input",
+    "refresh_session_buffer",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LogLevel {
@@ -126,8 +133,15 @@ fn text_profile_min_duration() -> Duration {
     })
 }
 
+fn text_profile_label_enabled(label: &str) -> bool {
+    TEXT_PROFILE_LABELS.contains(&label)
+}
+
 pub(crate) fn log_text_profile(label: &str, duration: Duration, message: impl Display) {
-    if !text_profile_enabled() || duration < text_profile_min_duration() {
+    if !text_profile_enabled()
+        || !text_profile_label_enabled(label)
+        || duration < text_profile_min_duration()
+    {
         return;
     }
 

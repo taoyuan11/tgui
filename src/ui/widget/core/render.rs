@@ -328,6 +328,13 @@ pub(super) fn push_text_primitives(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(super) struct TextInputRenderOutput {
+    pub(super) ime_cursor_area: Option<Rect>,
+    pub(super) content_width: Dp,
+    pub(super) content_height: Dp,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn push_text_input_primitives(
     text: &Text,
     frame: Rect,
@@ -351,7 +358,7 @@ pub(super) fn push_text_input_primitives(
     precomputed_layout: Option<&TextLayoutInfo>,
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
-) -> Option<Rect> {
+) -> TextInputRenderOutput {
     let started_at = crate::log::text_profile_enabled().then_some(std::time::Instant::now());
     let resolved_content = text.content.resolve();
     let default_style = &theme.typography.body;
@@ -417,8 +424,11 @@ pub(super) fn push_text_input_primitives(
         };
 
     let layout_started_at = std::time::Instant::now();
-    let layout = precomputed_layout.cloned().unwrap_or_else(|| {
-        if multiline && auto_wrap {
+    let measured_layout;
+    let layout = if let Some(layout) = precomputed_layout {
+        layout
+    } else {
+        measured_layout = if multiline && auto_wrap {
             font_manager.measure_text_layout_wrapped(
                 &display_content,
                 text_request.clone(),
@@ -435,8 +445,9 @@ pub(super) fn push_text_input_primitives(
                 line_height,
                 letter_spacing,
             )
-        }
-    });
+        };
+        &measured_layout
+    };
     let layout_duration = layout_started_at.elapsed();
 
     let content_width = if multiline && auto_wrap {
@@ -543,15 +554,14 @@ pub(super) fn push_text_input_primitives(
     if multiline {
         let viewport_top = inner.y.get();
         let viewport_bottom = inner.bottom().get();
+        let visible_lines = layout.line_range_for_vertical_span(
+            viewport_top - content_frame.y.get(),
+            viewport_bottom - content_frame.y.get(),
+        );
 
-        for line_index in 0..layout.line_count() {
+        for line_index in visible_lines {
             let line_top = content_frame.y.get() + layout.line_top(line_index);
             let line_height_value = layout.line_height(line_index).max(line_height);
-            let line_bottom = line_top + line_height_value;
-            if line_bottom <= viewport_top || line_top >= viewport_bottom {
-                continue;
-            }
-
             let start = layout.line_start(line_index).min(display_content.len());
             let end = layout.line_end(line_index).min(display_content.len());
             if start >= end {
@@ -627,7 +637,11 @@ pub(super) fn push_text_input_primitives(
         );
     }
 
-    ime_cursor_area
+    TextInputRenderOutput {
+        ime_cursor_area,
+        content_width,
+        content_height,
+    }
 }
 
 pub(super) fn measure_select_content(
