@@ -11,7 +11,7 @@ use crate::platform::event::{
 };
 use crate::platform::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 use crate::platform::window::ImeRequestData;
-use crate::text::font::{build_layout_info_from_buffer, FontManager};
+use crate::text::font::{build_layout_info_from_buffer, FontManager, TextFontRequest};
 use crate::text::rope_buffer::RopeBuffer;
 use crate::ui::unit::{Dp, UnitContext};
 use crate::ui::widget::{
@@ -112,14 +112,43 @@ fn apply_text_state_to_editor(editor: &mut Editor<'static>, state: &TextEditStat
 }
 
 fn update_session_layout_snapshot(
+    font_manager: &FontManager,
     session: &mut super::TextInputBufferState,
     display_text: &str,
     line_height: f32,
 ) {
-    session.layout_snapshot =
-        Some(session.editor.with_buffer(|buffer| {
-            build_layout_info_from_buffer(buffer, display_text, line_height)
-        }));
+    session.layout_snapshot = Some(if let Some(config) = session.config.as_ref() {
+        let request = TextFontRequest {
+            preferred_font: config.font_family.as_deref(),
+            weight: config.font_weight,
+        };
+        let font_size = f32::from_bits(config.font_size_bits);
+        let line_height = f32::from_bits(config.line_height_bits);
+        let letter_spacing = f32::from_bits(config.letter_spacing_bits);
+        let wrap_width = f32::from_bits(config.width_bits).max(0.0);
+        if config.multiline && config.auto_wrap {
+            font_manager.measure_text_layout_wrapped(
+                display_text,
+                request,
+                font_size,
+                line_height,
+                letter_spacing,
+                wrap_width,
+            )
+        } else {
+            font_manager.measure_text_layout(
+                display_text,
+                request,
+                font_size,
+                line_height,
+                letter_spacing,
+            )
+        }
+    } else {
+        session
+            .editor
+            .with_buffer(|buffer| build_layout_info_from_buffer(buffer, display_text, line_height))
+    });
     session.display_text = display_text.to_string();
 }
 
@@ -182,9 +211,6 @@ fn apply_incremental_session_buffer_edit(
         text_replacement_bounds(old_display_text, next_display_text)
     else {
         apply_text_state_to_editor(&mut session.editor, text_state, next_display_text);
-        if session.layout_snapshot.is_none() {
-            update_session_layout_snapshot(session, next_display_text, line_height);
-        }
         return;
     };
 
@@ -205,7 +231,6 @@ fn apply_incremental_session_buffer_edit(
         font_manager.finish_buffer_layout(font_system, buffer, font_size, line_height);
     });
     apply_text_state_to_editor(&mut session.editor, text_state, next_display_text);
-    update_session_layout_snapshot(session, next_display_text, line_height);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -232,7 +257,7 @@ fn refresh_session_buffer(
     if !config_changed && !text_changed {
         apply_text_state_to_editor(&mut session.editor, text_state, display_text);
         if session.layout_snapshot.is_none() {
-            update_session_layout_snapshot(session, display_text, line_height);
+            update_session_layout_snapshot(font_manager, session, display_text, line_height);
         }
         if let Some(started_at) = started_at {
             log_text_profile(
@@ -302,10 +327,8 @@ fn refresh_session_buffer(
         session.text_attrs = Some(next_attrs);
     });
     session.config = Some(config);
-    if !incremental {
-        apply_text_state_to_editor(&mut session.editor, text_state, display_text);
-        update_session_layout_snapshot(session, display_text, line_height);
-    }
+    apply_text_state_to_editor(&mut session.editor, text_state, display_text);
+    update_session_layout_snapshot(font_manager, session, display_text, line_height);
     if let Some(started_at) = started_at {
         log_text_profile(
             "refresh_session_buffer",
@@ -412,7 +435,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             ))
         });
         let display_text = session.display_text.clone();
-        update_session_layout_snapshot(&mut session, &display_text, line_height);
+        update_session_layout_snapshot(
+            &self.font_manager,
+            &mut session,
+            &display_text,
+            line_height,
+        );
         if let Some(started_at) = started_at {
             log_text_profile(
                 "create_text_input_session",
@@ -928,14 +956,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or_else(|| {
                 let (layout, _, _) = super::input_text_layout(
                     &self.font_manager,
-                &self.theme,
-                self.unit_context(),
-                text_style,
-                &display_text,
-                multiline,
-                auto_wrap,
-                inner.width.get(),
-            );
+                    &self.theme,
+                    self.unit_context(),
+                    text_style,
+                    &display_text,
+                    multiline,
+                    auto_wrap,
+                    inner.width.get(),
+                );
                 layout
             });
         let caret = caret_index.min(display_text.len());
@@ -1022,14 +1050,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or_else(|| {
                 let (layout, _, _) = super::input_text_layout(
                     &self.font_manager,
-                &self.theme,
-                self.unit_context(),
-                &text_style,
-                &current_value,
-                true,
-                region.auto_wrap,
-                inner.width.get(),
-            );
+                    &self.theme,
+                    self.unit_context(),
+                    &text_style,
+                    &current_value,
+                    true,
+                    region.auto_wrap,
+                    inner.width.get(),
+                );
                 layout
             });
         let current_line = layout.line_index_for_index(state.cursor);
@@ -2714,7 +2742,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     None,
                     interactions.on_click.clone().map(ClickHandler::Command),
                     None,
-                    cursor.map(|cursor| (id, frame, padding, text_style, text, false, false, cursor)),
+                    cursor
+                        .map(|cursor| (id, frame, padding, text_style, text, false, false, cursor)),
                 )
             }
             HitInteraction::Switch {
@@ -2818,7 +2847,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         scroll,
                         point,
                     );
-                    (id, frame, padding, text_style, value, multiline, auto_wrap, cursor)
+                    (
+                        id, frame, padding, text_style, value, multiline, auto_wrap, cursor,
+                    )
                 }),
             ),
             HitInteraction::SelectOption {
