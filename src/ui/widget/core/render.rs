@@ -339,6 +339,7 @@ pub(super) fn push_text_input_primitives(
     scene: &mut ScenePrimitives,
     show_caret: bool,
     multiline: bool,
+    auto_wrap: bool,
     padding: Insets,
     scroll_offset: Point,
     edit_state: Option<&TextEditState>,
@@ -417,7 +418,7 @@ pub(super) fn push_text_input_primitives(
 
     let layout_started_at = std::time::Instant::now();
     let layout = precomputed_layout.cloned().unwrap_or_else(|| {
-        if multiline {
+        if multiline && auto_wrap {
             font_manager.measure_text_layout_wrapped(
                 &display_content,
                 text_request.clone(),
@@ -438,7 +439,7 @@ pub(super) fn push_text_input_primitives(
     });
     let layout_duration = layout_started_at.elapsed();
 
-    let content_width = if multiline {
+    let content_width = if multiline && auto_wrap {
         inner.width.max(0.0)
     } else {
         Dp::new(layout.width.max(inner.width.get() + CARET_WIDTH))
@@ -451,7 +452,7 @@ pub(super) fn push_text_input_primitives(
             .min(layout.height.max(line_height))
             .max(Dp::new(line_height))
     };
-    let scroll_x = if multiline {
+    let scroll_x = if multiline && auto_wrap {
         Dp::ZERO
     } else {
         display_state.scroll_x.clamp(

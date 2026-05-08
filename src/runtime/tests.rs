@@ -692,6 +692,7 @@ fn dragging_selectable_text_updates_selection_range() {
             &text_style,
             &text,
             false,
+            false,
             Point::ZERO,
             Point {
                 x: frame.x + frame.width - 1.0,
@@ -1823,6 +1824,7 @@ fn textarea_click_tracks_visual_wrap_for_overflowing_initial_content() {
         &text_style,
         value,
         true,
+        true,
         inner.width.get(),
     );
     assert!(
@@ -1998,6 +2000,82 @@ fn textarea_mouse_wheel_scrolls_vertical_overflow() {
             .map(|offset| offset.y)
             .unwrap_or(Dp::ZERO)
             > Dp::ZERO
+            || handler.smooth_scroll_states.contains_key(&text_id)
+    );
+}
+
+#[test]
+fn textarea_click_after_prefocus_scroll_keeps_scrolled_viewport() {
+    let invalidation = InvalidationSignal::new();
+    let value = (0..8)
+        .map(|index| format!("line {index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tree = WidgetTree::new(Textarea::<TestVm>::new(value).height(dp(52.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let (text_id, frame) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    id,
+                    multiline: true,
+                    ..
+                } => Some((*id, region.rect)),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -2.0)));
+    while handler.advance_smooth_scroll() {}
+
+    let scrolled_y = handler
+        .scroll_states
+        .get(&text_id)
+        .map(|offset| offset.y)
+        .unwrap_or(Dp::ZERO);
+    assert!(scrolled_y > Dp::ZERO);
+
+    let line_zero_visible_before_focus = handler
+        .computed_scene()
+        .scene
+        .texts
+        .iter()
+        .any(|primitive| primitive.content.contains("line 0"));
+    assert!(
+        !line_zero_visible_before_focus,
+        "prefocus wheel scrolling should move the first line out of view"
+    );
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("textarea edit state should exist after click");
+    assert!(
+        (state.scroll_y - scrolled_y).abs() <= 0.01,
+        "clicking after prefocus scroll should preserve the existing vertical offset"
+    );
+
+    let line_zero_visible_after_focus = handler
+        .computed_scene()
+        .scene
+        .texts
+        .iter()
+        .any(|primitive| primitive.content.contains("line 0"));
+    assert!(
+        !line_zero_visible_after_focus,
+        "focusing the textarea should not jump the viewport back to the top"
     );
 }
 

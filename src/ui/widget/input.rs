@@ -169,6 +169,8 @@ impl<VM> Input<VM> {
                     input_style: None,
                     textarea_style: None,
                     multiline: false,
+                    show_scrollbar: Value::Static(false),
+                    auto_wrap: Value::Static(false),
                 },
             },
         }

@@ -521,6 +521,7 @@ struct TextInputSessionConfig {
     width_bits: u32,
     height_bits: u32,
     multiline: bool,
+    auto_wrap: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -742,6 +743,7 @@ struct TextSelectionDrag {
     text_style: Text,
     text: String,
     multiline: bool,
+    auto_wrap: bool,
 }
 
 enum PendingMediaEvent<VM> {
@@ -871,7 +873,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let state = self
             .text_edit_state(id)
             .cloned()
-            .unwrap_or_else(|| TextEditState::caret_at(&text));
+            .unwrap_or_else(|| self.default_text_edit_state(id, &text));
         let surrounding = ImeSurroundingText::new(text, state.cursor, state.anchor).ok();
         let mut data = crate::platform::window::ImeRequestData::default();
         if let Some(rect) = region.0 {
@@ -1260,6 +1262,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     padding,
                     text_style,
                     multiline,
+                    auto_wrap,
+                    show_scrollbar,
                     on_change,
                     on_change_set,
                     ..
@@ -1271,6 +1275,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         padding: *padding,
                         text_style: text_style.clone(),
                         multiline: *multiline,
+                        auto_wrap: *auto_wrap,
+                        show_scrollbar: *show_scrollbar,
                         on_change: on_change.clone(),
                         on_change_set: on_change_set.clone(),
                     },
@@ -2131,17 +2137,31 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.text_edit_states.get(&id)
     }
 
+    fn default_text_edit_state(&self, widget_id: WidgetId, text: &str) -> TextEditState {
+        let scroll_offset = self
+            .scroll_states
+            .get(&widget_id)
+            .copied()
+            .unwrap_or(Point::ZERO);
+        TextEditState {
+            scroll_x: scroll_offset.x,
+            scroll_y: scroll_offset.y,
+            ..TextEditState::caret_at(text)
+        }
+    }
+
     fn update_text_edit_state(
         &mut self,
         widget_id: WidgetId,
         text: &str,
         update: impl FnOnce(&mut TextEditState),
     ) -> bool {
+        let default_state = self.default_text_edit_state(widget_id, text);
         let state = self
             .text_edit_states
             .entry(widget_id)
             .and_modify(|state| *state = state.clone().clamped_to(text))
-            .or_insert_with(|| TextEditState::caret_at(text));
+            .or_insert(default_state);
         let before = state.clone();
         update(state);
         *state = state.clone().clamped_to(text);
@@ -2811,11 +2831,12 @@ fn input_text_layout(
     text_style: &Text,
     current_text: &str,
     multiline: bool,
+    auto_wrap: bool,
     wrap_width: f32,
 ) -> (crate::text::font::TextLayoutInfo, f32, f32) {
     let (text_request, font_size, line_height, letter_spacing) =
         resolved_input_text_metrics(theme, units, text_style);
-    let layout = if multiline {
+    let layout = if multiline && auto_wrap {
         font_manager.measure_text_layout_wrapped(
             current_text,
             text_request,
@@ -2883,6 +2904,7 @@ fn text_cursor_index_at_point(
     text_style: &Text,
     current_text: &str,
     multiline: bool,
+    auto_wrap: bool,
     scroll: Point,
     point: Point,
 ) -> usize {
@@ -2898,6 +2920,7 @@ fn text_cursor_index_at_point(
         text_style,
         current_text,
         multiline,
+        auto_wrap,
         inner.width.get(),
     );
     let content_height = if multiline {
@@ -2908,13 +2931,13 @@ fn text_cursor_index_at_point(
             .min(layout.height.max(line_height))
             .max(Dp::new(line_height))
     };
-    let content_width = if multiline {
+    let content_width = if multiline && auto_wrap {
         inner.width.max(0.0)
     } else {
         inner.width.min(layout.width).max(0.0)
     };
     let content_frame = Rect::new(
-        inner.x - if multiline { Dp::ZERO } else { scroll.x },
+        inner.x - if multiline && auto_wrap { Dp::ZERO } else { scroll.x },
         if multiline {
             inner.y - scroll.y
         } else {

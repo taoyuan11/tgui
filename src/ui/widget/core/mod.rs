@@ -175,6 +175,8 @@ enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         style: WidgetInputStyle,
         multiline: bool,
+        show_scrollbar: bool,
+        auto_wrap: bool,
     },
 }
 

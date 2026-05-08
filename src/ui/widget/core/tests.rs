@@ -4508,6 +4508,107 @@ fn textarea_only_emits_visible_text_primitives_for_large_content() {
 }
 
 #[test]
+fn textarea_shows_scrollbar_by_default() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Textarea::new("line 0\nline 1\nline 2\nline 3\nline 4\nline 5").height(dp(52.0)),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 52.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(!rendered.scroll_regions.is_empty());
+    assert!(rendered
+        .scroll_regions
+        .iter()
+        .any(|region| region.vertical_thumb.is_some()));
+    assert!(!rendered.primitives.overlay_shapes.is_empty());
+}
+
+#[test]
+fn textarea_can_hide_scrollbar() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Textarea::new("line 0\nline 1\nline 2\nline 3\nline 4\nline 5")
+            .height(dp(52.0))
+            .show_scrollbar(false),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 52.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered
+        .scroll_regions
+        .iter()
+        .any(|region| region.vertical_thumb.is_some() || region.horizontal_thumb.is_some()));
+    assert!(rendered.primitives.overlay_shapes.is_empty());
+}
+
+#[test]
+fn textarea_auto_wrap_false_enables_horizontal_scroll_region() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let long_line = "0123456789abcdef0123456789abcdef0123456789abcdef";
+    let tree: WidgetTree<()> =
+        WidgetTree::new(Textarea::new(long_line).size(dp(120.0), dp(60.0)).auto_wrap(false));
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 120.0, 60.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered
+        .scroll_regions
+        .iter()
+        .any(|region| region.overflow_x == Overflow::Scroll));
+}
+
+#[test]
 fn input_renders_composition_preview_text() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
