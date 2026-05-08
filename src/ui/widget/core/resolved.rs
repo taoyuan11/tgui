@@ -41,12 +41,14 @@ impl<VM> ResolvedElement<VM> {
                 placeholder,
                 style,
                 multiline,
+                auto_wrap,
                 ..
             } => MeasureContext::TextEditor {
                 controller: controller.clone(),
                 placeholder: placeholder.resolve(),
                 style: style.clone(),
                 multiline: *multiline,
+                auto_wrap: *auto_wrap,
             },
         }
     }
@@ -1524,12 +1526,15 @@ impl<VM> ResolvedElement<VM> {
                 on_change,
                 on_change_set,
                 multiline,
+                show_scrollbar,
+                auto_wrap,
                 ..
             } => {
                 let input_style = input_style
                     .as_ref()
                     .expect("input style should be resolved for input widgets");
                 let padding = Insets::symmetric(input_style.padding_x, input_style.padding_y);
+                let inner = frame.inset(padding);
                 let resolved_value = controller.text();
                 let visible_value = context
                     .focused_text_value
@@ -1545,6 +1550,11 @@ impl<VM> ResolvedElement<VM> {
                 let precomputed_layout = context
                     .focused_text_layout
                     .filter(|_| context.focused_input == Some(self.id));
+                let scroll_offset = context
+                    .scroll_offsets
+                    .get(&self.id)
+                    .copied()
+                    .unwrap_or(Point::ZERO);
                 let ime_cursor_area = push_text_input_primitives(
                     &text,
                     frame,
@@ -1556,12 +1566,9 @@ impl<VM> ResolvedElement<VM> {
                     &mut computed.scene,
                     context.caret_visible && context.focused_input == Some(self.id),
                     *multiline,
+                    *auto_wrap,
                     padding,
-                    context
-                        .scroll_offsets
-                        .get(&self.id)
-                        .copied()
-                        .unwrap_or(Point::ZERO),
+                    scroll_offset,
                     context
                         .focused_text_state
                         .filter(|_| context.focused_input == Some(self.id)),
@@ -1574,6 +1581,107 @@ impl<VM> ResolvedElement<VM> {
                     primitive_clip,
                     primitive_clip_mask,
                 );
+                if *multiline {
+                    let wrap_width = inner.width.get().max(0.0);
+                    let layout = precomputed_layout.cloned().unwrap_or_else(|| {
+                        let default_style = &context.theme.typography.body;
+                        let text_request = crate::text::font::TextFontRequest {
+                            preferred_font: text
+                                .font_family
+                                .as_deref()
+                                .or(default_style.font_family.as_deref()),
+                            weight: text.font_weight.unwrap_or(default_style.weight),
+                        };
+                        let (font_size, line_height, letter_spacing) =
+                            resolved_text_metrics(&text, context.theme, context.units);
+                        if *auto_wrap {
+                            context.font_manager.measure_text_layout_wrapped(
+                                &display_value,
+                                text_request,
+                                font_size,
+                                line_height,
+                                letter_spacing,
+                                wrap_width,
+                            )
+                        } else {
+                            context.font_manager.measure_text_layout(
+                                &display_value,
+                                text_request,
+                                font_size,
+                                line_height,
+                                letter_spacing,
+                            )
+                        }
+                    });
+                    let content_bounds = Rect::new(
+                        inner.x,
+                        inner.y,
+                        if *auto_wrap {
+                            inner.width.max(0.0)
+                        } else {
+                            Dp::new(layout.width.max(inner.width.get()))
+                        },
+                        Dp::new(layout.height.max(inner.height.get())),
+                    );
+                    let overflow_x = if *auto_wrap {
+                        Overflow::Hidden
+                    } else {
+                        Overflow::Scroll
+                    };
+                    let overflow_y = Overflow::Scroll;
+                    let mut scrollbar_layout = ContainerLayout::flow();
+                    scrollbar_layout.overflow_x = overflow_x;
+                    scrollbar_layout.overflow_y = overflow_y;
+                    let max_scroll = Point {
+                        x: (content_bounds.right() - inner.right()).max(0.0),
+                        y: (content_bounds.bottom() - inner.bottom()).max(0.0),
+                    };
+                    let clamped_scroll = Point {
+                        x: if overflow_x == Overflow::Scroll {
+                            scroll_offset.x.clamp(0.0, max_scroll.x)
+                        } else {
+                            Dp::ZERO
+                        },
+                        y: scroll_offset.y.clamp(0.0, max_scroll.y),
+                    };
+                    let scrollbar_geometry = compute_scrollbar_geometry(
+                        inner,
+                        content_bounds,
+                        clamped_scroll,
+                        &scrollbar_layout,
+                        context.theme,
+                        context.units,
+                    );
+                    let visible_frame = frame
+                        .intersect(visual_context.clip_rect)
+                        .unwrap_or(Rect::new(frame.x, frame.y, 0.0, 0.0));
+                    computed.scroll_regions.push(ScrollRegion {
+                        id: self.id,
+                        content_viewport: inner,
+                        visible_frame,
+                        content_bounds,
+                        scroll_offset: clamped_scroll,
+                        overflow_x,
+                        overflow_y,
+                        horizontal_track: scrollbar_geometry.horizontal_track,
+                        horizontal_thumb: scrollbar_geometry.horizontal_thumb,
+                        vertical_track: scrollbar_geometry.vertical_track,
+                        vertical_thumb: scrollbar_geometry.vertical_thumb,
+                    });
+                    if *show_scrollbar {
+                        push_scrollbar_primitives(
+                            &mut computed.scene,
+                            context.theme,
+                            inner,
+                            opacity,
+                            &scrollbar_layout,
+                            scrollbar_geometry,
+                            self.id,
+                            context.hovered_scrollbar,
+                            context.active_scrollbar,
+                        );
+                    }
+                }
                 if context.focused_input == Some(self.id) {
                     computed.ime_cursor_area = ime_cursor_area;
                 }
@@ -1589,6 +1697,8 @@ impl<VM> ResolvedElement<VM> {
                             on_change: on_change.clone(),
                             on_change_set: on_change_set.clone(),
                             multiline: *multiline,
+                            auto_wrap: *auto_wrap,
+                            show_scrollbar: *show_scrollbar,
                             frame,
                             padding,
                             text_style: text,

@@ -1046,6 +1046,8 @@ pub(crate) enum WidgetKind<VM> {
         input_style: Option<StyleResolver<WidgetInputStyle>>,
         textarea_style: Option<StyleResolver<WidgetTextareaStyle>>,
         multiline: bool,
+        show_scrollbar: Value<bool>,
+        auto_wrap: Value<bool>,
     },
 }
 
@@ -1187,6 +1189,8 @@ impl<VM> Clone for WidgetKind<VM> {
                 input_style,
                 textarea_style,
                 multiline,
+                show_scrollbar,
+                auto_wrap,
             } => Self::TextEditor {
                 controller: controller.clone(),
                 placeholder: placeholder.clone(),
@@ -1196,6 +1200,8 @@ impl<VM> Clone for WidgetKind<VM> {
                 input_style: input_style.clone(),
                 textarea_style: textarea_style.clone(),
                 multiline: *multiline,
+                show_scrollbar: show_scrollbar.clone(),
+                auto_wrap: auto_wrap.clone(),
             },
         }
     }
@@ -1234,6 +1240,7 @@ pub(crate) enum MeasureContext {
         placeholder: String,
         style: crate::ui::widget::InputStyle,
         multiline: bool,
+        auto_wrap: bool,
     },
 }
 
@@ -1291,6 +1298,8 @@ pub(crate) enum HitInteraction<VM> {
         on_change: Option<ValueCommand<VM, String>>,
         on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
         multiline: bool,
+        auto_wrap: bool,
+        show_scrollbar: bool,
         frame: Rect,
         padding: Insets,
         text_style: Text,
@@ -1391,6 +1400,8 @@ impl<VM> Clone for HitInteraction<VM> {
                 on_change,
                 on_change_set,
                 multiline,
+                auto_wrap,
+                show_scrollbar,
                 frame,
                 padding,
                 text_style,
@@ -1401,6 +1412,8 @@ impl<VM> Clone for HitInteraction<VM> {
                 on_change: on_change.clone(),
                 on_change_set: on_change_set.clone(),
                 multiline: *multiline,
+                auto_wrap: *auto_wrap,
+                show_scrollbar: *show_scrollbar,
                 frame: *frame,
                 padding: *padding,
                 text_style: text_style.clone(),

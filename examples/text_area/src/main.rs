@@ -37,6 +37,7 @@ impl ViewModel for App {
 
     fn view(&self) -> Element<Self> {
         Flex::vertical()
+            .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(20.0)))
             .gap(dp(12.0))
             .child(el![
@@ -48,12 +49,14 @@ impl ViewModel for App {
                     .padding(Insets::all(dp(14.0)))
                     .gap(dp(10.0))
                     .width(pct(100.0))
+                    .min_height(dp(0.0))
                     .grow(1.0)
                     .style(card_style)
                     .child(el![
                         Text::new("源码编辑区"),
                         Textarea::new(self.content.clone())
                             .width(pct(100.0))
+                            .min_height(dp(0.0))
                             .grow(1.0),
                     ]),
             ])
@@ -68,6 +71,7 @@ fn source_path() -> PathBuf {
 fn main() -> Result<(), TguiError> {
     Application::new()
         .title("tgui textarea example")
+        .window_size(dp(960.0), dp(640.0))
         .with_view_model(App::new)
         .root_view(App::view)
         .run()

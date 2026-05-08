@@ -141,6 +141,8 @@ impl<VM> Element<VM> {
                 input_style,
                 textarea_style,
                 multiline,
+                show_scrollbar,
+                auto_wrap,
             } => WidgetKind::TextEditor {
                 controller,
                 placeholder,
@@ -150,6 +152,8 @@ impl<VM> Element<VM> {
                 input_style,
                 textarea_style,
                 multiline,
+                show_scrollbar,
+                auto_wrap,
             },
         };
 
@@ -347,6 +351,8 @@ impl<VM> Element<VM> {
                 input_style,
                 textarea_style,
                 multiline,
+                show_scrollbar,
+                auto_wrap,
             } => ResolvedWidgetKind::TextEditor {
                 controller: controller.clone(),
                 placeholder: placeholder.clone(),
@@ -374,6 +380,8 @@ impl<VM> Element<VM> {
                     resolved_input_style(input_style.as_ref(), theme)
                 },
                 multiline: *multiline,
+                show_scrollbar: show_scrollbar.resolve(),
+                auto_wrap: auto_wrap.resolve(),
             },
         };
 

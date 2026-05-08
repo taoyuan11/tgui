@@ -169,6 +169,8 @@ impl<VM> Textarea<VM> {
                     input_style: None,
                     textarea_style: None,
                     multiline: true,
+                    show_scrollbar: Value::Static(true),
+                    auto_wrap: Value::Static(false),
                 },
             },
         }
@@ -208,6 +210,20 @@ impl<VM> Textarea<VM> {
     pub fn disable(mut self, disable: impl Into<Value<bool>>) -> Self {
         if let WidgetKind::TextEditor { disabled, .. } = &mut self.element.kind {
             *disabled = disable.into();
+        }
+        self
+    }
+
+    pub fn show_scrollbar(mut self, show: impl Into<Value<bool>>) -> Self {
+        if let WidgetKind::TextEditor { show_scrollbar, .. } = &mut self.element.kind {
+            *show_scrollbar = show.into();
+        }
+        self
+    }
+
+    pub fn auto_wrap(mut self, auto_wrap: impl Into<Value<bool>>) -> Self {
+        if let WidgetKind::TextEditor { auto_wrap: target, .. } = &mut self.element.kind {
+            *target = auto_wrap.into();
         }
         self
     }

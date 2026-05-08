@@ -645,6 +645,8 @@ pub(super) fn measure_node(
             placeholder,
             style,
             multiline,
+            auto_wrap,
+            ..
         }) => {
             let value = controller.text();
             let content = if value.is_empty() {
@@ -654,11 +656,16 @@ pub(super) fn measure_node(
             };
             let text = text_with_typography(Value::Static(content.clone()), &style.text_style);
             let text_size = if *multiline {
-                let (_, line_height, _) = resolved_text_metrics(&text, theme, units);
-                (
-                    SELECT_DEFAULT_WIDTH,
-                    line_height.max(units.resolve_dp(style.min_height)),
-                )
+                if *auto_wrap {
+                    let (_, line_height, _) = resolved_text_metrics(&text, theme, units);
+                    (
+                        SELECT_DEFAULT_WIDTH,
+                        line_height.max(units.resolve_dp(style.min_height)),
+                    )
+                } else {
+                    let (width, height) = measure_text_content(&text, font_manager, theme, units);
+                    (width.max(SELECT_DEFAULT_WIDTH), height)
+                }
             } else {
                 measure_text_content(&text, font_manager, theme, units)
             };

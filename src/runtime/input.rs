@@ -36,6 +36,8 @@ pub(super) struct TextInputRegionData<VM> {
     pub(super) padding: crate::ui::layout::Insets,
     pub(super) text_style: Text,
     pub(super) multiline: bool,
+    pub(super) auto_wrap: bool,
+    pub(super) show_scrollbar: bool,
     pub(super) on_change: Option<ValueCommand<VM, String>>,
     pub(super) on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
 }
@@ -48,6 +50,8 @@ impl<VM> Clone for TextInputRegionData<VM> {
             padding: self.padding,
             text_style: self.text_style.clone(),
             multiline: self.multiline,
+            auto_wrap: self.auto_wrap,
+            show_scrollbar: self.show_scrollbar,
             on_change: self.on_change.clone(),
             on_change_set: self.on_change_set.clone(),
         }
@@ -217,6 +221,7 @@ fn refresh_session_buffer(
     width: f32,
     height: f32,
     multiline: bool,
+    auto_wrap: bool,
     text_state: &TextEditState,
     display_text: &str,
 ) {
@@ -283,7 +288,7 @@ fn refresh_session_buffer(
                     line_height,
                     Some(width),
                     Some(height.max(line_height)),
-                    if multiline {
+                    if multiline && auto_wrap {
                         Wrap::WordOrGlyph
                     } else {
                         Wrap::None
@@ -347,6 +352,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 width_bits: inner.width.get().max(0.0).to_bits(),
                 height_bits: inner.height.get().max(0.0).to_bits(),
                 multiline: region.multiline,
+                auto_wrap: region.auto_wrap,
             },
             preferred_font,
             request.weight,
@@ -382,7 +388,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 letter_spacing,
                 Some(width),
                 Some(height.max(line_height)),
-                if region.multiline {
+                if region.multiline && region.auto_wrap {
                     Wrap::WordOrGlyph
                 } else {
                     Wrap::None
@@ -448,6 +454,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     padding,
                     text_style,
                     multiline,
+                    auto_wrap,
+                    show_scrollbar,
                     on_change,
                     on_change_set,
                     ..
@@ -457,6 +465,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     padding: *padding,
                     text_style: text_style.clone(),
                     multiline: *multiline,
+                    auto_wrap: *auto_wrap,
+                    show_scrollbar: *show_scrollbar,
                     on_change: on_change.clone(),
                     on_change_set: on_change_set.clone(),
                 }),
@@ -498,7 +508,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let mut state = self
             .text_edit_state(widget_id)
             .cloned()
-            .unwrap_or_else(|| TextEditState::caret_at(&snapshot.text));
+            .unwrap_or_else(|| self.default_text_edit_state(widget_id, &snapshot.text));
         let (config, preferred_font, weight, font_size, line_height, letter_spacing, width, height) =
             self.text_input_session_config(&region);
         {
@@ -532,6 +542,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 width,
                 height,
                 region.multiline,
+                region.auto_wrap,
                 &state,
                 &display_text,
             );
@@ -642,7 +653,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let state = self
             .text_edit_state(widget_id)
             .cloned()
-            .unwrap_or_else(|| TextEditState::caret_at(&snapshot.text));
+            .unwrap_or_else(|| self.default_text_edit_state(widget_id, &snapshot.text));
         let (next_value, next_state, text_change) = {
             let session = self
                 .text_input_buffers
@@ -695,6 +706,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 width,
                 height,
                 region.multiline,
+                region.auto_wrap,
                 &next_state,
                 &display_text,
             );
@@ -715,6 +727,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 region.padding,
                 &region.text_style,
                 region.multiline,
+                region.auto_wrap,
                 &canonical_value,
                 &state,
             );
@@ -822,7 +835,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let state = self
             .text_edit_state(widget_id)
             .cloned()
-            .unwrap_or_else(|| TextEditState::caret_at(&current_value));
+            .unwrap_or_else(|| self.default_text_edit_state(widget_id, &current_value));
         let clamped_state = {
             let session = self
                 .text_input_buffers
@@ -861,6 +874,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 region.padding,
                 &region.text_style,
                 region.multiline,
+                region.auto_wrap,
                 &current_value,
                 &state,
             );
@@ -877,6 +891,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         padding: crate::ui::layout::Insets,
         text_style: &Text,
         multiline: bool,
+        auto_wrap: bool,
         text: &str,
         state: &TextEditState,
     ) {
@@ -913,20 +928,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or_else(|| {
                 let (layout, _, _) = super::input_text_layout(
                     &self.font_manager,
-                    &self.theme,
-                    self.unit_context(),
-                    text_style,
-                    &display_text,
-                    multiline,
-                    inner.width.get(),
-                );
+                &self.theme,
+                self.unit_context(),
+                text_style,
+                &display_text,
+                multiline,
+                auto_wrap,
+                inner.width.get(),
+            );
                 layout
             });
         let caret = caret_index.min(display_text.len());
         let caret_x = layout.x_for_index(caret);
         let caret_y = layout.top_for_index(caret);
         let caret_h = layout.line_height_for_index(caret).max(line_height);
-        let max_x = if multiline {
+        let max_x = if multiline && auto_wrap {
             (layout.width - inner.width.get()).max(0.0)
         } else {
             (layout.width + INPUT_CARET_WIDTH - inner.width.get()).max(0.0)
@@ -937,7 +953,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             state.scroll_y.clamp(0.0, max_y),
         );
 
-        if multiline {
+        if multiline && auto_wrap {
             if caret_y < next_scroll.y.get() {
                 next_scroll.y = Dp::new(caret_y);
             } else if caret_y + caret_h > next_scroll.y.get() + inner.height.get() {
@@ -998,7 +1014,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let state = self
             .text_edit_state(widget_id)
             .cloned()
-            .unwrap_or_else(|| TextEditState::caret_at(&current_value));
+            .unwrap_or_else(|| self.default_text_edit_state(widget_id, &current_value));
         let state = state.clamped_to(&current_value);
         let layout = self
             .text_input_layout_snapshot(widget_id)
@@ -1006,13 +1022,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or_else(|| {
                 let (layout, _, _) = super::input_text_layout(
                     &self.font_manager,
-                    &self.theme,
-                    self.unit_context(),
-                    &text_style,
-                    &current_value,
-                    true,
-                    inner.width.get(),
-                );
+                &self.theme,
+                self.unit_context(),
+                &text_style,
+                &current_value,
+                true,
+                region.auto_wrap,
+                inner.width.get(),
+            );
                 layout
             });
         let current_line = layout.line_index_for_index(state.cursor);
@@ -1048,6 +1065,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             padding,
             &text_style,
             true,
+            region.auto_wrap,
             &current_value,
             &next_state,
         );
@@ -1087,6 +1105,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 region.padding,
                 &region.text_style,
                 region.multiline,
+                region.auto_wrap,
                 &self.text_input_current_value(widget_id, &region.controller),
                 &state,
             );
@@ -1146,6 +1165,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     region.padding,
                     &region.text_style,
                     region.multiline,
+                    region.auto_wrap,
                     &current_value,
                     &state,
                 );
@@ -1175,6 +1195,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     region.padding,
                     &region.text_style,
                     region.multiline,
+                    region.auto_wrap,
                     &current_value,
                     &state,
                 );
@@ -1282,7 +1303,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let (start, end) = self
                 .text_edit_state(widget_id)
                 .cloned()
-                .unwrap_or_else(|| crate::ui::widget::TextEditState::caret_at(&current_value))
+                .unwrap_or_else(|| self.default_text_edit_state(widget_id, &current_value))
                 .clamped_to(&current_value)
                 .selection_range()?;
             return self.text_input_buffers.get(&widget_id).map(|state| {
@@ -1294,7 +1315,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let (start, end) = self
             .text_edit_state(widget_id)
             .cloned()
-            .unwrap_or_else(|| crate::ui::widget::TextEditState::caret_at(&text))
+            .unwrap_or_else(|| self.default_text_edit_state(widget_id, &text))
             .clamped_to(&text)
             .selection_range()?;
         Some(text[start..end].to_string())
@@ -1326,6 +1347,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         text_style: Text,
         text: String,
         multiline: bool,
+        auto_wrap: bool,
         cursor: usize,
     ) {
         self.selected_text = Some(widget_id);
@@ -1336,6 +1358,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             text_style: text_style.clone(),
             text: text.clone(),
             multiline,
+            auto_wrap,
         });
         self.update_text_edit_state(widget_id, &text, |state| {
             state.cursor = cursor;
@@ -1349,6 +1372,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 padding,
                 &text_style,
                 multiline,
+                auto_wrap,
                 &text,
                 &state,
             );
@@ -1373,6 +1397,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             &drag.text_style,
             &drag.text,
             drag.multiline,
+            drag.auto_wrap,
             self.scroll_states
                 .get(&drag.widget_id)
                 .copied()
@@ -1392,6 +1417,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     drag.padding,
                     &drag.text_style,
                     drag.multiline,
+                    drag.auto_wrap,
                     &drag.text,
                     &state,
                 );
@@ -1945,6 +1971,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 padding,
                 text_style,
                 multiline: true,
+                auto_wrap: true,
                 ..
             } = interaction
             {
@@ -2014,6 +2041,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     self.unit_context(),
                     text_style,
                     value,
+                    true,
                     true,
                     inner.width.get(),
                 );
@@ -2674,6 +2702,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         &text_style,
                         &text,
                         false,
+                        false,
                         Point::ZERO,
                         point,
                     )
@@ -2685,7 +2714,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     None,
                     interactions.on_click.clone().map(ClickHandler::Command),
                     None,
-                    cursor.map(|cursor| (id, frame, padding, text_style, text, false, cursor)),
+                    cursor.map(|cursor| (id, frame, padding, text_style, text, false, false, cursor)),
                 )
             }
             HitInteraction::Switch {
@@ -2761,6 +2790,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 interactions,
                 controller,
                 multiline,
+                auto_wrap,
                 frame,
                 padding,
                 text_style,
@@ -2784,10 +2814,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         &text_style,
                         &value,
                         multiline,
+                        auto_wrap,
                         scroll,
                         point,
                     );
-                    (id, frame, padding, text_style, value, multiline, cursor)
+                    (id, frame, padding, text_style, value, multiline, auto_wrap, cursor)
                 }),
             ),
             HitInteraction::SelectOption {
@@ -2840,11 +2871,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.pressed_widget = Some(widget_id);
 
-        if let Some((widget_id, frame, padding, text_style, text, multiline, cursor)) =
+        if let Some((widget_id, frame, padding, text_style, text, multiline, auto_wrap, cursor)) =
             selectable_text
         {
             self.begin_text_selection(
-                widget_id, frame, padding, text_style, text, multiline, cursor,
+                widget_id, frame, padding, text_style, text, multiline, auto_wrap, cursor,
             );
         }
 
