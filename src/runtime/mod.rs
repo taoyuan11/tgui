@@ -15,13 +15,13 @@ use crate::application::{
     ApplicationConfig, ThemeSelection, WindowClosePolicy, WindowRole, WindowSetFactory,
 };
 use crate::dialog::{async_dialog_channel, AsyncDialogDispatcher, AsyncDialogReceiver};
-use crate::foundation::binding::{Binding, InvalidationSignal};
+use crate::foundation::binding::{Binding, InvalidationSignal, TextChange, TextChangeSet};
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, ValueCommand, ViewModel};
 use crate::foundation::window_control::WindowRequestQueue;
-use crate::log::Log;
+use crate::log::{log_text_profile, text_profile_enabled, Log};
 use crate::media::MediaManager;
 #[cfg(target_os = "windows")]
 use crate::notification::prepare_platform_notifications;
@@ -45,7 +45,7 @@ use crate::platform::window::{
     Theme as WindowTheme, WindowAttributes, WindowId,
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
-use crate::text::font::{FontManager, FontWeight, TextFontRequest};
+use crate::text::font::{FontManager, FontWeight, TextFontRequest, TextLayoutInfo};
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet, ThemeStore};
 use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 use crate::ui::widget::{
@@ -54,11 +54,11 @@ use crate::ui::widget::{
     ResolvedSceneLayout, ScrollRegion, ScrollbarHandle, Text, TextEditState, WidgetId,
     WidgetStateMap, WidgetTree,
 };
-use cosmic_text::Editor;
+use cosmic_text::{AttrsOwned, Editor};
 use image::GenericImageView;
-use ropey::Rope;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use ropey::Rope;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -449,6 +449,7 @@ pub struct BoundRuntimeHandler<VM> {
     animations: AnimationCoordinator,
     animation_engine: AnimationEngine,
     animation_epoch: u64,
+    layout_animation_epoch: u64,
     hover_epoch: u64,
     cursor_position: Option<Point>,
     modifiers: ModifiersState,
@@ -463,6 +464,7 @@ pub struct BoundRuntimeHandler<VM> {
     selected_text: Option<WidgetId>,
     text_edit_states: HashMap<WidgetId, TextEditState>,
     text_input_buffers: HashMap<WidgetId, TextInputBufferState>,
+    text_input_regions: HashMap<WidgetId, input::TextInputRegionData<VM>>,
     active_text_selection: Option<TextSelectionDrag>,
     caret_blink_origin: Instant,
     clipboard: ClipboardService,
@@ -472,6 +474,7 @@ pub struct BoundRuntimeHandler<VM> {
     smooth_scroll_states: HashMap<WidgetId, SmoothScrollState>,
     select_open_states: HashMap<WidgetId, bool>,
     scroll_epoch: u64,
+    text_input_epoch: u64,
     media_event_states: HashMap<WidgetId, DispatchedMediaState>,
     media_manager: MediaManager,
     window_requests: WindowRequestQueue,
@@ -498,8 +501,10 @@ struct CachedScene<VM> {
     selected_text: Option<WidgetId>,
     caret_visible: bool,
     animation_epoch: u64,
+    layout_animation_epoch: u64,
     scroll_epoch: u64,
     hover_epoch: u64,
+    text_input_epoch: u64,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar: Option<ScrollbarHandle>,
     layout: Option<ResolvedSceneLayout<VM>>,
@@ -521,20 +526,32 @@ struct TextInputSessionConfig {
 #[derive(Clone, Debug)]
 struct TextInputBufferState {
     external_value: String,
+    external_revision: u64,
     current_text: String,
+    display_text: String,
     rope: Rope,
     editor: Editor<'static>,
     config: Option<TextInputSessionConfig>,
+    text_attrs: Option<AttrsOwned>,
+    layout_snapshot: Option<TextLayoutInfo>,
+    pending_changes: Vec<TextChange>,
+    pending_start_revision: Option<u64>,
 }
 
 impl TextInputBufferState {
-    fn new(editor: Editor<'static>, resolved_value: String) -> Self {
+    fn new(editor: Editor<'static>, resolved_value: String, revision: u64) -> Self {
         Self {
             external_value: resolved_value.clone(),
+            external_revision: revision,
             current_text: resolved_value.clone(),
+            display_text: resolved_value.clone(),
             rope: Rope::from_str(&resolved_value),
             editor,
             config: None,
+            text_attrs: None,
+            layout_snapshot: None,
+            pending_changes: Vec::new(),
+            pending_start_revision: None,
         }
     }
 
@@ -544,6 +561,23 @@ impl TextInputBufferState {
 
     fn has_unresolved_local_edits(&self) -> bool {
         self.current_text != self.external_value
+    }
+
+    fn push_pending_change(&mut self, change: TextChange) {
+        if self.pending_start_revision.is_none() {
+            self.pending_start_revision = Some(self.external_revision);
+        }
+        self.pending_changes.push(change);
+    }
+
+    fn take_pending_change_set(&mut self) -> Option<TextChangeSet> {
+        let start_revision = self.pending_start_revision.take()?;
+        Some(TextChangeSet {
+            start_revision,
+            end_revision: self.external_revision,
+            changes: std::mem::take(&mut self.pending_changes),
+            text: self.current_text.clone(),
+        })
     }
 }
 
@@ -822,16 +856,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .chain(computed.overlay_hit_regions.iter())
                 .find_map(|region| match &region.interaction {
                     crate::ui::widget::HitInteraction::TextInput {
-                        id: hit_id, value, ..
-                    } if *hit_id == id => Some((ime_cursor_area, value.clone())),
+                        id: hit_id,
+                        controller,
+                        ..
+                    } if *hit_id == id => Some((ime_cursor_area, controller.clone())),
                     _ => None,
                 })?
         };
+        let text = self
+            .text_input_buffers
+            .get(&id)
+            .map(|session| session.current_text.clone())
+            .unwrap_or_else(|| region.1.text());
         let state = self
             .text_edit_state(id)
             .cloned()
-            .unwrap_or_else(|| TextEditState::caret_at(&region.1));
-        let surrounding = ImeSurroundingText::new(region.1, state.cursor, state.anchor).ok();
+            .unwrap_or_else(|| TextEditState::caret_at(&text));
+        let surrounding = ImeSurroundingText::new(text, state.cursor, state.anchor).ok();
         let mut data = crate::platform::window::ImeRequestData::default();
         if let Some(rect) = region.0 {
             data = Self::ime_cursor_request_data(rect, self.unit_context());
@@ -903,6 +944,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             animations,
             animation_engine: AnimationEngine::default(),
             animation_epoch: 0,
+            layout_animation_epoch: 0,
             hover_epoch: 0,
             cursor_position: None,
             modifiers: ModifiersState::default(),
@@ -917,6 +959,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             selected_text: None,
             text_edit_states: HashMap::new(),
             text_input_buffers: HashMap::new(),
+            text_input_regions: HashMap::new(),
             active_text_selection: None,
             caret_blink_origin: Instant::now(),
             clipboard: ClipboardService::default(),
@@ -926,6 +969,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             smooth_scroll_states: HashMap::new(),
             select_open_states: HashMap::new(),
             scroll_epoch: 0,
+            text_input_epoch: 0,
             media_event_states: HashMap::new(),
             media_manager: MediaManager::new(invalidation.clone()),
             window_requests: WindowRequestQueue::default(),
@@ -970,6 +1014,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.commands = commands;
         self.close_policy = close_policy;
         self.media_event_states.clear();
+        self.text_input_regions.clear();
         self.invalidate_scene();
     }
 
@@ -1087,6 +1132,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn sync_bindings(&mut self, now: Instant) {
+        let started_at = text_profile_enabled().then_some(Instant::now());
         self.sync_theme_binding();
         #[cfg(all(target_os = "android", feature = "android"))]
         {
@@ -1113,11 +1159,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 renderer.set_clear_color(theme.colors.background);
             }
         }
+
+        if let Some(started_at) = started_at {
+            log_text_profile(
+                "sync_bindings",
+                started_at.elapsed(),
+                format!(
+                    "title_binding={} clear_color_binding={} animation_epoch={}",
+                    self.window_bindings.title.is_some(),
+                    self.window_bindings.clear_color.is_some(),
+                    self.animation_epoch,
+                ),
+            );
+        }
     }
 
     fn request_redraw_if_dirty(&mut self, now: Instant) {
         let revision = self.invalidation.revision();
         if revision != self.last_invalidation_revision {
+            let started_at = text_profile_enabled().then_some(Instant::now());
+            let previous_revision = self.last_invalidation_revision;
             self.last_invalidation_revision = revision;
             self.invalidate_scene();
             self.sync_bindings(now);
@@ -1125,12 +1186,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
+
+            if let Some(started_at) = started_at {
+                log_text_profile(
+                    "request_redraw_if_dirty",
+                    started_at.elapsed(),
+                    format!(
+                        "revision {} -> {} forced_full_scene_invalidation=true",
+                        previous_revision, revision
+                    ),
+                );
+            }
         }
     }
 
     fn reset_caret_blink(&mut self) {
         self.caret_blink_origin = Instant::now();
-        self.invalidate_scene();
+        self.invalidate_text_input_scene();
     }
 
     fn focused_text_input_id_cached(&self, computed: &ComputedScene<VM>) -> Option<WidgetId> {
@@ -1157,6 +1229,57 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         })
     }
 
+    fn focused_text_layout_override(
+        &self,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
+    ) -> Option<TextLayoutInfo> {
+        if focused_text_state
+            .and_then(|state| state.composition.as_ref())
+            .is_some()
+        {
+            return None;
+        }
+        focused_input.and_then(|widget_id| {
+            self.text_input_buffers
+                .get(&widget_id)
+                .and_then(|state| state.layout_snapshot.clone())
+        })
+    }
+
+    fn sync_text_input_regions_from_computed(&mut self, computed: &ComputedScene<VM>) {
+        self.text_input_regions = computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .filter_map(|region| match &region.interaction {
+                crate::ui::widget::HitInteraction::TextInput {
+                    id,
+                    controller,
+                    frame,
+                    padding,
+                    text_style,
+                    multiline,
+                    on_change,
+                    on_change_set,
+                    ..
+                } => Some((
+                    *id,
+                    input::TextInputRegionData {
+                        controller: controller.clone(),
+                        frame: *frame,
+                        padding: *padding,
+                        text_style: text_style.clone(),
+                        multiline: *multiline,
+                        on_change: on_change.clone(),
+                        on_change_set: on_change_set.clone(),
+                    },
+                )),
+                _ => None,
+            })
+            .collect();
+    }
+
     fn prune_text_input_buffers(&mut self, computed: &ComputedScene<VM>) {
         let active_ids: HashSet<_> = computed
             .hit_regions
@@ -1168,6 +1291,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             })
             .collect();
         self.text_input_buffers
+            .retain(|widget_id, _| active_ids.contains(widget_id));
+        self.text_input_regions
             .retain(|widget_id, _| active_ids.contains(widget_id));
     }
 
@@ -1206,6 +1331,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && cached.animation_epoch == self.animation_epoch
             && cached.scroll_epoch == self.scroll_epoch
             && cached.hover_epoch == self.hover_epoch
+            && cached.text_input_epoch == self.text_input_epoch
             && cached.hovered_scrollbar == self.hovered_scrollbar
             && cached.active_scrollbar == active_scrollbar
     }
@@ -1218,10 +1344,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) -> bool {
         cached.viewport == viewport
             && cached.units == units
-            && cached.animation_epoch == self.animation_epoch
+            && cached.layout_animation_epoch == self.layout_animation_epoch
     }
 
     fn computed_scene(&mut self) -> &ComputedScene<VM> {
+        let started_at = text_profile_enabled().then_some(Instant::now());
         let viewport = self.viewport_rect();
         let units = self.unit_context();
         let now = Instant::now();
@@ -1257,6 +1384,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let widget_states = self.widget_state_map(active_scrollbar);
         if !cache_valid {
+            let mut layout_duration = Duration::ZERO;
+            let mut collect_duration = Duration::ZERO;
+            let mut recollect_duration = Duration::ZERO;
+            let mut collect_passes = 0usize;
             let previous_cached = self.cached_scene.take();
             let theme = self.animated_theme(Instant::now());
             let (layout, computed) = match self.widget_tree.as_ref() {
@@ -1272,36 +1403,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 .expect("layout should exist when layout cache is valid")
                         };
                         let focused_text_value = self.focused_text_value_override(focused_input);
-                        let mut computed = tree.collect_scene_from_layout_with_focus_value(
-                            &self.font_manager,
-                            layout,
-                            &theme,
-                            &self.media_manager,
-                            &mut self.animation_engine,
-                            self.hovered_scrollbar,
-                            active_scrollbar,
-                            &widget_states,
-                            &self.select_open_states,
-                            &self.scroll_states,
-                            viewport,
+                        let focused_text_layout = self.focused_text_layout_override(
                             focused_input,
                             focused_text_state.as_ref(),
-                            focused_text_value.as_deref(),
-                            self.selected_text,
-                            selected_text_state.as_ref(),
-                            caret_visible,
                         );
-                        let actual_focused_input = self.focused_text_input_id_cached(&computed);
-                        let actual_focused_text_state = actual_focused_input
-                            .and_then(|id| self.text_edit_state(id))
-                            .cloned();
-                        let actual_caret_visible = self.caret_visible_at(now, actual_focused_input);
-                        if actual_focused_input != focused_input
-                            || actual_caret_visible != caret_visible
-                        {
-                            let actual_focused_text_value =
-                                self.focused_text_value_override(actual_focused_input);
-                            computed = tree.collect_scene_from_layout_with_focus_value(
+                        let mut computed = {
+                            let collect_started_at = Instant::now();
+                            let computed = tree.collect_scene_from_layout_with_focus_value(
                                 &self.font_manager,
                                 layout,
                                 &theme,
@@ -1313,45 +1421,106 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 &self.select_open_states,
                                 &self.scroll_states,
                                 viewport,
-                                actual_focused_input,
-                                actual_focused_text_state.as_ref(),
-                                actual_focused_text_value.as_deref(),
+                                focused_input,
+                                focused_text_state.as_ref(),
+                                focused_text_value.as_deref(),
+                                focused_text_layout.as_ref(),
                                 self.selected_text,
                                 selected_text_state.as_ref(),
-                                actual_caret_visible,
+                                caret_visible,
                             );
+                            collect_duration += collect_started_at.elapsed();
+                            collect_passes += 1;
+                            computed
+                        };
+                        let actual_focused_input = self.focused_text_input_id_cached(&computed);
+                        let actual_focused_text_state = actual_focused_input
+                            .and_then(|id| self.text_edit_state(id))
+                            .cloned();
+                        let actual_caret_visible = self.caret_visible_at(now, actual_focused_input);
+                        if actual_focused_input != focused_input
+                            || actual_caret_visible != caret_visible
+                        {
+                            let actual_focused_text_value =
+                                self.focused_text_value_override(actual_focused_input);
+                            let actual_focused_text_layout = self.focused_text_layout_override(
+                                actual_focused_input,
+                                actual_focused_text_state.as_ref(),
+                            );
+                            computed = {
+                                let collect_started_at = Instant::now();
+                                let computed = tree.collect_scene_from_layout_with_focus_value(
+                                    &self.font_manager,
+                                    layout,
+                                    &theme,
+                                    &self.media_manager,
+                                    &mut self.animation_engine,
+                                    self.hovered_scrollbar,
+                                    active_scrollbar,
+                                    &widget_states,
+                                    &self.select_open_states,
+                                    &self.scroll_states,
+                                    viewport,
+                                    actual_focused_input,
+                                    actual_focused_text_state.as_ref(),
+                                    actual_focused_text_value.as_deref(),
+                                    actual_focused_text_layout.as_ref(),
+                                    self.selected_text,
+                                    selected_text_state.as_ref(),
+                                    actual_caret_visible,
+                                );
+                                recollect_duration += collect_started_at.elapsed();
+                                collect_passes += 1;
+                                computed
+                            };
                         }
                         let layout = previous_cached.and_then(|cached| cached.layout);
                         (layout, computed)
                     } else {
-                        let layout = tree.build_scene_layout(
-                            &self.font_manager,
-                            &theme,
-                            &self.media_manager,
-                            &mut self.animation_engine,
-                            units,
-                            viewport,
-                        );
+                        let layout = {
+                            let layout_started_at = Instant::now();
+                            let layout = tree.build_scene_layout(
+                                &self.font_manager,
+                                &theme,
+                                &self.media_manager,
+                                &mut self.animation_engine,
+                                units,
+                                viewport,
+                            );
+                            layout_duration += layout_started_at.elapsed();
+                            layout
+                        };
                         let focused_text_value = self.focused_text_value_override(focused_input);
-                        let computed = tree.collect_scene_from_layout_with_focus_value(
-                            &self.font_manager,
-                            &layout,
-                            &theme,
-                            &self.media_manager,
-                            &mut self.animation_engine,
-                            self.hovered_scrollbar,
-                            active_scrollbar,
-                            &widget_states,
-                            &self.select_open_states,
-                            &self.scroll_states,
-                            viewport,
+                        let focused_text_layout = self.focused_text_layout_override(
                             focused_input,
                             focused_text_state.as_ref(),
-                            focused_text_value.as_deref(),
-                            self.selected_text,
-                            selected_text_state.as_ref(),
-                            caret_visible,
                         );
+                        let computed = {
+                            let collect_started_at = Instant::now();
+                            let computed = tree.collect_scene_from_layout_with_focus_value(
+                                &self.font_manager,
+                                &layout,
+                                &theme,
+                                &self.media_manager,
+                                &mut self.animation_engine,
+                                self.hovered_scrollbar,
+                                active_scrollbar,
+                                &widget_states,
+                                &self.select_open_states,
+                                &self.scroll_states,
+                                viewport,
+                                focused_input,
+                                focused_text_state.as_ref(),
+                                focused_text_value.as_deref(),
+                                focused_text_layout.as_ref(),
+                                self.selected_text,
+                                selected_text_state.as_ref(),
+                                caret_visible,
+                            );
+                            collect_duration += collect_started_at.elapsed();
+                            collect_passes += 1;
+                            computed
+                        };
                         let actual_focused_input = self.focused_text_input_id_cached(&computed);
                         let actual_focused_text_state = actual_focused_input
                             .and_then(|id| self.text_edit_state(id))
@@ -1362,7 +1531,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         {
                             let actual_focused_text_value =
                                 self.focused_text_value_override(actual_focused_input);
-                            tree.collect_scene_from_layout_with_focus_value(
+                            let actual_focused_text_layout = self.focused_text_layout_override(
+                                actual_focused_input,
+                                actual_focused_text_state.as_ref(),
+                            );
+                            let collect_started_at = Instant::now();
+                            let computed = tree.collect_scene_from_layout_with_focus_value(
                                 &self.font_manager,
                                 &layout,
                                 &theme,
@@ -1377,10 +1551,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 actual_focused_input,
                                 actual_focused_text_state.as_ref(),
                                 actual_focused_text_value.as_deref(),
+                                actual_focused_text_layout.as_ref(),
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 actual_caret_visible,
-                            )
+                            );
+                            recollect_duration += collect_started_at.elapsed();
+                            collect_passes += 1;
+                            computed
                         } else {
                             computed
                         };
@@ -1392,6 +1570,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let focused_input = self.focused_text_input_id_cached(&computed);
             let caret_visible = self.caret_visible_at(now, focused_input);
             self.prune_text_input_buffers(&computed);
+            self.sync_text_input_regions_from_computed(&computed);
             self.cached_scene = Some(CachedScene {
                 viewport,
                 units,
@@ -1401,13 +1580,38 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 selected_text: self.selected_text,
                 caret_visible,
                 animation_epoch: self.animation_epoch,
+                layout_animation_epoch: self.layout_animation_epoch,
                 scroll_epoch: self.scroll_epoch,
                 hover_epoch: self.hover_epoch,
+                text_input_epoch: self.text_input_epoch,
                 hovered_scrollbar: self.hovered_scrollbar,
                 active_scrollbar,
                 layout,
                 computed,
             });
+
+            if let Some(started_at) = started_at {
+                let computed = &self
+                    .cached_scene
+                    .as_ref()
+                    .expect("computed scene cache should exist")
+                    .computed;
+                log_text_profile(
+                    "computed_scene",
+                    started_at.elapsed(),
+                    format!(
+                        "cache_valid=false layout_cache_valid={} layout_ms={:.3} collect_ms={:.3} recollect_ms={:.3} collect_passes={} focused_input={:?} hit_regions={} scroll_regions={}",
+                        layout_cache_valid,
+                        layout_duration.as_secs_f64() * 1000.0,
+                        collect_duration.as_secs_f64() * 1000.0,
+                        recollect_duration.as_secs_f64() * 1000.0,
+                        collect_passes,
+                        focused_input,
+                        computed.hit_regions.len(),
+                        computed.scroll_regions.len(),
+                    ),
+                );
+            }
         }
 
         &self
@@ -1535,6 +1739,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn invalidate_scene(&mut self) {
         self.cached_scene = None;
+        self.text_input_regions.clear();
+    }
+
+    fn invalidate_text_input_scene(&mut self) {
+        self.text_input_epoch = self.text_input_epoch.wrapping_add(1);
     }
 
     fn should_dispatch_widget_event(event: &WindowEvent) -> bool {
@@ -1557,8 +1766,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return Ok(RenderStatus::SkipFrame);
         }
 
+        let frame_started_at = text_profile_enabled().then_some(Instant::now());
+        let sync_started_at = Instant::now();
         self.sync_bindings(Instant::now());
+        let sync_duration = sync_started_at.elapsed();
+        let media_started_at = Instant::now();
         self.dispatch_media_events();
+        let media_duration = media_started_at.elapsed();
         let caret_rect = self.ime_cursor_area();
         if let (Some(window), Some(caret_rect)) = (self.window.as_ref(), caret_rect) {
             let _ = window.request_ime_update(ImeRequest::Update(Self::ime_cursor_request_data(
@@ -1570,9 +1784,34 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .renderer
             .take()
             .expect("renderer should exist before drawing");
+        let computed_started_at = Instant::now();
         let status = {
             let computed = self.computed_scene();
-            renderer.render(&computed.scene)
+            let computed_duration = computed_started_at.elapsed();
+            let render_started_at = Instant::now();
+            let status = renderer.render(&computed.scene);
+            let render_duration = render_started_at.elapsed();
+            if let Some(frame_started_at) = frame_started_at {
+                let status_name = match &status {
+                    Ok(RenderStatus::Rendered) => "Rendered",
+                    Ok(RenderStatus::SkipFrame) => "SkipFrame",
+                    Ok(RenderStatus::ReconfigureSurface) => "ReconfigureSurface",
+                    Err(_) => "Error",
+                };
+                log_text_profile(
+                    "render_current_frame",
+                    frame_started_at.elapsed(),
+                    format!(
+                        "sync_ms={:.3} media_ms={:.3} computed_scene_ms={:.3} render_ms={:.3} status={}",
+                        sync_duration.as_secs_f64() * 1000.0,
+                        media_duration.as_secs_f64() * 1000.0,
+                        computed_duration.as_secs_f64() * 1000.0,
+                        render_duration.as_secs_f64() * 1000.0,
+                        status_name,
+                    ),
+                );
+            }
+            status
         };
         self.renderer = Some(renderer);
         status
@@ -1674,15 +1913,20 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if self.animations.refresh(now) {
             frame_advanced = true;
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
+            self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
             self.invalidate_scene();
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
         }
 
-        if self.animation_engine.refresh(now) {
+        let animation_refresh = self.animation_engine.refresh(now);
+        if animation_refresh.changed {
             frame_advanced = true;
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
+            if animation_refresh.layout_changed {
+                self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
+            }
             self.invalidate_scene();
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
@@ -1904,7 +2148,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if *state == before {
             return false;
         }
-        self.invalidate_scene();
+        self.invalidate_text_input_scene();
         true
     }
 

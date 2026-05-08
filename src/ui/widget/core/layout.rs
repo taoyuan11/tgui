@@ -640,13 +640,18 @@ pub(super) fn measure_node(
             theme,
             units,
         ),
-        Some(MeasureContext::Input {
-            value,
+        Some(MeasureContext::TextEditor {
+            controller,
             placeholder,
             style,
             multiline,
         }) => {
-            let content = if value.is_empty() { placeholder } else { value };
+            let value = controller.text();
+            let content = if value.is_empty() {
+                placeholder.clone()
+            } else {
+                value
+            };
             let text = text_with_typography(Value::Static(content.clone()), &style.text_style);
             let text_size = if *multiline {
                 let (_, line_height, _) = resolved_text_metrics(&text, theme, units);
@@ -797,10 +802,7 @@ pub(super) fn default_layout_padding<VM>(element: &ResolvedElement<VM>, _theme: 
         ResolvedWidgetKind::Select { style, .. } => {
             Insets::symmetric(style.padding_x, style.padding_y)
         }
-        ResolvedWidgetKind::Input { style, .. } => {
-            Insets::symmetric(style.padding_x, style.padding_y)
-        }
-        ResolvedWidgetKind::Textarea { style, .. } => {
+        ResolvedWidgetKind::TextEditor { style, .. } => {
             Insets::symmetric(style.padding_x, style.padding_y)
         }
         ResolvedWidgetKind::Switch { style, .. } => style.padding,

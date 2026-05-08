@@ -35,6 +35,7 @@
 - `ViewModelContext`：创建响应式状态与动画句柄
 - `Observable<T>`：可变状态，更新后自动触发重绘
 - `Binding<T>`：从状态派生 UI 值，支持 `map` 和 `animated`
+- `TextController`：`Input` / `Textarea` 的保留式文本状态，支持程序化读写与批量变更通知
 - `Command<T>` / `ValueCommand<T, V>`：把按钮、输入、画布事件接回 ViewModel
 - `CommandContext::window()`：在命令中请求窗口拖拽、拉伸、最小化、最大化/还原、关闭
 - `CommandContext::notifications()`：在命令中发送通知、请求权限、处理通知 action 回调
@@ -42,7 +43,7 @@
 ### 布局与组件
 
 - 布局：`Stack`、`Grid`、`Flex`
-- 基础组件：`Text`、`Button`、`Radio`、`Checkbox`、`Select`、`Image`
+- 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Image`
 - 画布：`Canvas`、`CanvasPath`、`PathBuilder`、渐变/阴影/布尔运算
 - 视频：`VideoSurface`、`VideoController`、`VideoSource`（需启用 `video` feature）
 
@@ -95,7 +96,7 @@ tgui = { version = "0.1.7", features = ["video"] }
 `tgui` 的公开类型按职责分类导出：
 
 - `application`：应用、窗口和运行入口
-- `mvvm`：`ViewModel`、`Observable`、`Binding`、`Command`、`CommandContext`、`WindowControl`
+- `mvvm`：`ViewModel`、`Observable`、`Binding`、`TextController`、`Command`、`CommandContext`、`WindowControl`
 - `layout`：布局容器、尺寸、间距和滚动相关类型
 - `widgets` / `canvas`：基础控件、控件树和 Canvas 绘制 API
 - `theme`：主题、色板、排版、状态和设计 token
@@ -183,6 +184,7 @@ ViewModel
 ViewModelContext
 Observable<T>
 Binding<T>
+TextController
 Command<T>
 ValueCommand<T, V>
 CommandContext<T>

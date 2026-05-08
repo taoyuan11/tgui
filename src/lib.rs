@@ -158,7 +158,10 @@ pub mod logging {
 
 /// MVVM state, bindings, commands, and view model contracts.
 pub mod mvvm {
-    pub use crate::foundation::binding::{Binding, Observable, ViewModelContext};
+    pub use crate::foundation::binding::{
+        Binding, Observable, TextChange, TextChangeSet, TextController, TextSnapshot,
+        ViewModelContext,
+    };
     pub use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
     pub use crate::foundation::window_control::{WindowControl, WindowResizeDirection};
 }
@@ -194,8 +197,9 @@ pub mod prelude {
     pub use crate::logging::{tgui_log, Log, LogLevel};
     pub use crate::media::{ContentFit, MediaBytes, MediaSource};
     pub use crate::mvvm::{
-        Binding, Command, CommandContext, Observable, ValueCommand, ViewModel, ViewModelContext,
-        WindowControl, WindowResizeDirection,
+        Binding, Command, CommandContext, Observable, TextChange, TextChangeSet, TextController,
+        TextSnapshot, ValueCommand, ViewModel, ViewModelContext, WindowControl,
+        WindowResizeDirection,
     };
     pub use crate::notification::{
         NotificationAction, NotificationActionEvent, NotificationError, NotificationOptions,
@@ -232,6 +236,7 @@ pub mod theme {
 /// Built-in widgets and widget-tree infrastructure.
 pub mod widgets {
     pub use crate::layout::{Flex, Grid, IntoLengthValue, Stack};
+    pub use crate::mvvm::{TextChange, TextChangeSet, TextController, TextSnapshot};
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,

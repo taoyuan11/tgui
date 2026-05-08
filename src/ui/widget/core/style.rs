@@ -378,25 +378,6 @@ pub(super) fn resolve_input_style(
     }
 }
 
-pub(super) fn resolve_textarea_style(
-    style: &WidgetTextareaStyle,
-    state: WidgetState,
-) -> ResolvedInputStyle {
-    ResolvedInputStyle {
-        background: resolve_stateful_widget_color(&style.background, state),
-        text: resolve_stateful_widget_color(&style.text, state),
-        placeholder: resolve_stateful_widget_color(&style.placeholder, state),
-        border: resolve_stateful_widget_color(&style.border, state),
-        selection: style.selection.as_ref().map(Value::resolve),
-        caret: style.caret.as_ref().map(Value::resolve),
-        border_width: style.border_width.resolve(),
-        radius: style.radius.resolve(),
-        padding_x: style.padding_x,
-        padding_y: style.padding_y,
-        text_style: style.text_style.clone(),
-    }
-}
-
 pub(super) fn default_select_menu_option_color(theme: &Theme, state: WidgetState) -> Color {
     let style = WidgetSelectStyle::default_for(infer_theme_mode(theme));
     resolve_stateful_widget_color(&style.option_background, base_interaction_state(state))

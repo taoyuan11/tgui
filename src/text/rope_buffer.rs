@@ -71,7 +71,8 @@ impl RopeBuffer {
         if !replacement.is_empty() {
             self.rope.insert(start_char, replacement);
         }
-        self.snapshot.replace_range(start_byte..end_byte, replacement);
+        self.snapshot
+            .replace_range(start_byte..end_byte, replacement);
     }
 
     pub(crate) fn slice_byte_range_to_string(&self, start_byte: usize, end_byte: usize) -> String {

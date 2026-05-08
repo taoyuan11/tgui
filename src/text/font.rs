@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cosmic_text::fontdb::{Family, Query, Stretch, Style, Weight, ID};
-use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping, Wrap};
+use cosmic_text::{Attrs, AttrsOwned, Buffer, FontSystem, Metrics, Shaping, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) const ICON_FONT_FAMILY: &str = "tgui-icons";
@@ -366,11 +366,9 @@ impl FontManager {
             primary_font: preferred
                 .or(script_aware_default)
                 .or_else(|| {
-                    self.default_font
-                        .as_deref()
-                        .and_then(|name| {
-                            self.resolve_family_name_in_database(database, name, request.weight)
-                        })
+                    self.default_font.as_deref().and_then(|name| {
+                        self.resolve_family_name_in_database(database, name, request.weight)
+                    })
                 })
                 .or_else(|| self.system_default_family_in_database(database, request.weight))
                 .unwrap_or_else(|| "sans-serif".to_string()),
@@ -380,6 +378,39 @@ impl FontManager {
     pub(crate) fn with_font_system<T>(&self, f: impl FnOnce(&mut FontSystem) -> T) -> T {
         let mut font_system = self.font_system.borrow_mut();
         f(&mut font_system)
+    }
+
+    pub(crate) fn buffer_attrs_owned(
+        &self,
+        font_system: &FontSystem,
+        text: &str,
+        request: TextFontRequest<'_>,
+        font_size: f32,
+        letter_spacing: f32,
+    ) -> AttrsOwned {
+        let resolved = self.resolve_text_with_database(font_system.db(), text, request.clone());
+        let attrs = Attrs::new()
+            .family(Family::Name(&resolved.primary_font))
+            .weight(Weight(request.weight.to_raw()))
+            .letter_spacing(letter_spacing / font_size.max(1.0));
+        AttrsOwned::new(&attrs)
+    }
+
+    pub(crate) fn finish_buffer_layout(
+        &self,
+        font_system: &mut FontSystem,
+        buffer: &mut Buffer,
+        font_size: f32,
+        line_height: f32,
+    ) {
+        buffer.shape_until_scroll(font_system, false);
+        let effective_line_height =
+            measured_glyph_line_height(buffer, font_system, line_height).max(line_height);
+        let desired_metrics = Metrics::new(font_size, effective_line_height);
+        if buffer.metrics() != desired_metrics {
+            buffer.set_metrics(desired_metrics);
+            buffer.shape_until_scroll(font_system, false);
+        }
     }
 
     pub(crate) fn configure_buffer(
@@ -395,21 +426,36 @@ impl FontManager {
         height_opt: Option<f32>,
         wrap: Wrap,
     ) {
-        let resolved = self.resolve_text_with_database(font_system.db(), text, request.clone());
+        let attrs = self.buffer_attrs_owned(font_system, text, request, font_size, letter_spacing);
+        self.configure_buffer_with_attrs(
+            font_system,
+            buffer,
+            text,
+            &attrs,
+            font_size,
+            line_height,
+            width_opt,
+            height_opt,
+            wrap,
+        );
+    }
+
+    pub(crate) fn configure_buffer_with_attrs(
+        &self,
+        font_system: &mut FontSystem,
+        buffer: &mut Buffer,
+        text: &str,
+        attrs: &AttrsOwned,
+        font_size: f32,
+        line_height: f32,
+        width_opt: Option<f32>,
+        height_opt: Option<f32>,
+        wrap: Wrap,
+    ) {
         buffer.set_metrics_and_size(Metrics::new(font_size, line_height), width_opt, height_opt);
         buffer.set_wrap(wrap);
-        let attrs = Attrs::new()
-            .family(Family::Name(&resolved.primary_font))
-            .weight(Weight(request.weight.to_raw()))
-            .letter_spacing(letter_spacing / font_size.max(1.0));
-        buffer.set_text(text, &attrs, Shaping::Advanced, None);
-        buffer.shape_until_scroll(font_system, false);
-        let effective_line_height =
-            measured_glyph_line_height(buffer, font_system, line_height).max(line_height);
-        if effective_line_height > line_height + 0.01 {
-            buffer.set_metrics(Metrics::new(font_size, effective_line_height));
-            buffer.shape_until_scroll(font_system, false);
-        }
+        buffer.set_text(text, &attrs.as_attrs(), Shaping::Advanced, None);
+        self.finish_buffer_layout(font_system, buffer, font_size, line_height);
     }
 
     pub(crate) fn measure_text(
@@ -672,7 +718,9 @@ impl FontManager {
             style: Style::Normal,
         };
 
-        database.query(&query).and_then(|id| face_family_name(database, id))
+        database
+            .query(&query)
+            .and_then(|id| face_family_name(database, id))
     }
 
     fn script_aware_default_family_in_database(
@@ -723,7 +771,11 @@ fn measured_glyph_line_height(
     max_height
 }
 
-fn build_layout_info_from_buffer(buffer: &Buffer, text: &str, line_height: f32) -> TextLayoutInfo {
+pub(crate) fn build_layout_info_from_buffer(
+    buffer: &Buffer,
+    text: &str,
+    line_height: f32,
+) -> TextLayoutInfo {
     let line_offsets = logical_line_offsets(text);
     let mut width = 0.0f32;
     let mut height = 0.0f32;
@@ -813,7 +865,9 @@ fn logical_line_offsets(text: &str) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{push_boundary, FontCatalog, FontManager, FontWeight, TextBoundary, TextFontRequest};
+    use super::{
+        push_boundary, FontCatalog, FontManager, FontWeight, TextBoundary, TextFontRequest,
+    };
     use cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping, Weight, Wrap};
     use unicode_segmentation::UnicodeSegmentation;
 
@@ -924,10 +978,17 @@ mod tests {
         let line_offsets = super::logical_line_offsets(text);
         for run in buffer.layout_runs() {
             let sample_y = run.line_top + (run.line_height * 0.5);
-            for sample_x in [0.0, run.line_w * 0.25, run.line_w * 0.75, (run.line_w - 0.5).max(0.0)] {
+            for sample_x in [
+                0.0,
+                run.line_w * 0.25,
+                run.line_w * 0.75,
+                (run.line_w - 0.5).max(0.0),
+            ] {
                 let expected = buffer
                     .hit(sample_x, sample_y)
-                    .map(|cursor| line_offsets.get(cursor.line).copied().unwrap_or(0) + cursor.index)
+                    .map(|cursor| {
+                        line_offsets.get(cursor.line).copied().unwrap_or(0) + cursor.index
+                    })
                     .unwrap_or(0);
                 let actual = layout.index_for_point(sample_x, sample_y);
                 assert_eq!(actual, expected, "x={sample_x}, y={sample_y}");

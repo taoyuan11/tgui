@@ -1,3 +1,4 @@
+use crate::foundation::binding::{TextChangeSet, TextController};
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
@@ -146,9 +147,10 @@ macro_rules! impl_textarea_layout_api {
 }
 
 impl<VM> Textarea<VM> {
-    pub fn new(value: impl Into<Value<String>>) -> Self {
+    pub fn new(controller: impl Into<TextController>) -> Self {
         let mut interactions = InteractionHandlers::default();
         interactions.cursor_style = Some(Value::Static(CursorStyle::Text));
+        let controller = controller.into();
 
         Self {
             element: Element {
@@ -158,21 +160,28 @@ impl<VM> Textarea<VM> {
                 interactions,
                 media_events: MediaEventHandlers::default(),
                 background: None,
-                kind: WidgetKind::Textarea {
-                    value: value.into(),
+                kind: WidgetKind::TextEditor {
+                    controller,
                     placeholder: Value::Static(String::new()),
                     on_change: None,
+                    on_change_set: None,
                     disabled: Value::Static(false),
-                    style: None,
+                    input_style: None,
+                    textarea_style: None,
+                    multiline: true,
                 },
             },
         }
     }
 
+    pub fn from_value(value: impl Into<Value<String>>) -> Self {
+        Self::new(TextController::new_legacy(value.into()))
+    }
+
     impl_textarea_layout_api!();
 
     pub fn placeholder(mut self, placeholder: impl Into<Value<String>>) -> Self {
-        if let WidgetKind::Textarea {
+        if let WidgetKind::TextEditor {
             placeholder: target,
             ..
         } = &mut self.element.kind
@@ -183,14 +192,21 @@ impl<VM> Textarea<VM> {
     }
 
     pub fn on_change(mut self, command: ValueCommand<VM, String>) -> Self {
-        if let WidgetKind::Textarea { on_change, .. } = &mut self.element.kind {
+        if let WidgetKind::TextEditor { on_change, .. } = &mut self.element.kind {
             *on_change = Some(command);
         }
         self
     }
 
+    pub fn on_change_set(mut self, command: ValueCommand<VM, TextChangeSet>) -> Self {
+        if let WidgetKind::TextEditor { on_change_set, .. } = &mut self.element.kind {
+            *on_change_set = Some(command);
+        }
+        self
+    }
+
     pub fn disable(mut self, disable: impl Into<Value<bool>>) -> Self {
-        if let WidgetKind::Textarea { disabled, .. } = &mut self.element.kind {
+        if let WidgetKind::TextEditor { disabled, .. } = &mut self.element.kind {
             *disabled = disable.into();
         }
         self
@@ -200,8 +216,8 @@ impl<VM> Textarea<VM> {
         mut self,
         resolver: impl Fn(ResolvedThemeMode) -> TextareaStyle + Send + Sync + 'static,
     ) -> Self {
-        if let WidgetKind::Textarea { style, .. } = &mut self.element.kind {
-            *style = Some(StyleResolver::new(resolver));
+        if let WidgetKind::TextEditor { textarea_style, .. } = &mut self.element.kind {
+            *textarea_style = Some(StyleResolver::new(resolver));
         }
         self
     }
