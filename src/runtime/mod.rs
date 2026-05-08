@@ -45,8 +45,7 @@ use crate::platform::window::{
     Theme as WindowTheme, WindowAttributes, WindowId,
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
-use crate::text::font::{FontManager, TextFontRequest};
-use crate::text::rope_buffer::RopeBuffer;
+use crate::text::font::{FontManager, FontWeight, TextFontRequest};
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet, ThemeStore};
 use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 use crate::ui::widget::{
@@ -55,7 +54,9 @@ use crate::ui::widget::{
     ResolvedSceneLayout, ScrollRegion, ScrollbarHandle, Text, TextEditState, WidgetId,
     WidgetStateMap, WidgetTree,
 };
+use cosmic_text::Editor;
 use image::GenericImageView;
+use ropey::Rope;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::collections::{HashMap, HashSet};
@@ -505,29 +506,44 @@ struct CachedScene<VM> {
     computed: ComputedScene<VM>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TextInputSessionConfig {
+    font_family: Option<String>,
+    font_weight: FontWeight,
+    font_size_bits: u32,
+    line_height_bits: u32,
+    letter_spacing_bits: u32,
+    width_bits: u32,
+    height_bits: u32,
+    multiline: bool,
+}
+
 #[derive(Clone, Debug)]
 struct TextInputBufferState {
-    source_value: String,
-    buffer: RopeBuffer,
+    external_value: String,
+    current_text: String,
+    rope: Rope,
+    editor: Editor<'static>,
+    config: Option<TextInputSessionConfig>,
 }
 
 impl TextInputBufferState {
-    fn new(source_value: String) -> Self {
+    fn new(editor: Editor<'static>, resolved_value: String) -> Self {
         Self {
-            buffer: RopeBuffer::from_str(&source_value),
-            source_value,
+            external_value: resolved_value.clone(),
+            current_text: resolved_value.clone(),
+            rope: Rope::from_str(&resolved_value),
+            editor,
+            config: None,
         }
     }
 
-    fn sync_source(&mut self, source_value: &str) -> bool {
-        if self.source_value == source_value {
-            return false;
-        }
+    fn current_text(&self) -> &str {
+        &self.current_text
+    }
 
-        self.source_value.clear();
-        self.source_value.push_str(source_value);
-        self.buffer = RopeBuffer::from_str(source_value);
-        true
+    fn has_unresolved_local_edits(&self) -> bool {
+        self.current_text != self.external_value
     }
 }
 
@@ -1131,6 +1147,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             })
     }
 
+    fn focused_text_value_override(&self, focused_input: Option<WidgetId>) -> Option<String> {
+        focused_input.and_then(|widget_id| {
+            self.text_input_buffers.get(&widget_id).and_then(|state| {
+                state
+                    .has_unresolved_local_edits()
+                    .then(|| state.current_text.clone())
+            })
+        })
+    }
+
     fn prune_text_input_buffers(&mut self, computed: &ComputedScene<VM>) {
         let active_ids: HashSet<_> = computed
             .hit_regions
@@ -1189,17 +1215,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         cached: &CachedScene<VM>,
         viewport: Rect,
         units: UnitContext,
-        caret_visible: bool,
     ) -> bool {
         cached.viewport == viewport
             && cached.units == units
-            && cached.focused_widget == self.focused_widget_id()
-            && cached.focus_visible == self.focus_visible
-            && cached.pressed_widget == self.pressed_widget
-            && cached.selected_text == self.selected_text
-            && cached.caret_visible == caret_visible
             && cached.animation_epoch == self.animation_epoch
-            && cached.hover_epoch == self.hover_epoch
     }
 
     fn computed_scene(&mut self) -> &ComputedScene<VM> {
@@ -1223,7 +1242,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         caret_visible,
                         active_scrollbar,
                     ),
-                    self.scene_layout_cache_matches(cached, viewport, units, caret_visible),
+                    self.scene_layout_cache_matches(cached, viewport, units),
                     focused_input,
                     focused_text_state,
                     caret_visible,
@@ -1252,7 +1271,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 .as_ref()
                                 .expect("layout should exist when layout cache is valid")
                         };
-                        let mut computed = tree.collect_scene_from_layout(
+                        let focused_text_value = self.focused_text_value_override(focused_input);
+                        let mut computed = tree.collect_scene_from_layout_with_focus_value(
                             &self.font_manager,
                             layout,
                             &theme,
@@ -1266,6 +1286,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             viewport,
                             focused_input,
                             focused_text_state.as_ref(),
+                            focused_text_value.as_deref(),
                             self.selected_text,
                             selected_text_state.as_ref(),
                             caret_visible,
@@ -1278,7 +1299,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         if actual_focused_input != focused_input
                             || actual_caret_visible != caret_visible
                         {
-                            computed = tree.collect_scene_from_layout(
+                            let actual_focused_text_value =
+                                self.focused_text_value_override(actual_focused_input);
+                            computed = tree.collect_scene_from_layout_with_focus_value(
                                 &self.font_manager,
                                 layout,
                                 &theme,
@@ -1292,6 +1315,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 viewport,
                                 actual_focused_input,
                                 actual_focused_text_state.as_ref(),
+                                actual_focused_text_value.as_deref(),
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 actual_caret_visible,
@@ -1308,7 +1332,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             units,
                             viewport,
                         );
-                        let computed = tree.collect_scene_from_layout(
+                        let focused_text_value = self.focused_text_value_override(focused_input);
+                        let computed = tree.collect_scene_from_layout_with_focus_value(
                             &self.font_manager,
                             &layout,
                             &theme,
@@ -1322,6 +1347,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             viewport,
                             focused_input,
                             focused_text_state.as_ref(),
+                            focused_text_value.as_deref(),
                             self.selected_text,
                             selected_text_state.as_ref(),
                             caret_visible,
@@ -1334,7 +1360,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         let computed = if actual_focused_input != focused_input
                             || actual_caret_visible != caret_visible
                         {
-                            tree.collect_scene_from_layout(
+                            let actual_focused_text_value =
+                                self.focused_text_value_override(actual_focused_input);
+                            tree.collect_scene_from_layout_with_focus_value(
                                 &self.font_manager,
                                 &layout,
                                 &theme,
@@ -1348,6 +1376,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 viewport,
                                 actual_focused_input,
                                 actual_focused_text_state.as_ref(),
+                                actual_focused_text_value.as_deref(),
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 actual_caret_visible,
@@ -2540,25 +2569,8 @@ fn input_text_layout(
     multiline: bool,
     wrap_width: f32,
 ) -> (crate::text::font::TextLayoutInfo, f32, f32) {
-    let default_style = &theme.typography.body;
-    let font_size = units.resolve_sp(
-        text_style
-            .font_size
-            .unwrap_or(default_style.size.max(sp(1.0))),
-    );
-    let line_height = (font_size * 1.25).max(font_size + 4.0);
-    let letter_spacing = units.resolve_sp(
-        text_style
-            .letter_spacing
-            .unwrap_or(default_style.letter_spacing.unwrap_or(Sp::ZERO)),
-    );
-    let text_request = TextFontRequest {
-        preferred_font: text_style
-            .font_family
-            .as_deref()
-            .or(default_style.font_family.as_deref()),
-        weight: text_style.font_weight.unwrap_or(default_style.weight),
-    };
+    let (text_request, font_size, line_height, letter_spacing) =
+        resolved_input_text_metrics(theme, units, text_style);
     let layout = if multiline {
         font_manager.measure_text_layout_wrapped(
             current_text,
@@ -2578,6 +2590,44 @@ fn input_text_layout(
         )
     };
     (layout, font_size, line_height)
+}
+
+fn resolved_input_text_metrics<'a>(
+    theme: &'a Theme,
+    units: UnitContext,
+    text_style: &'a Text,
+) -> (TextFontRequest<'a>, f32, f32, f32) {
+    let default_style = &theme.typography.body;
+    let default_size = default_style.size.max(sp(1.0));
+    let resolved_font_size = text_style.font_size.unwrap_or(default_size);
+    let font_size = units.resolve_sp(resolved_font_size);
+    let default_line_height_sp = text_style
+        .line_height
+        .or(default_style.line_height)
+        .unwrap_or(resolved_font_size * 1.25);
+    let default_line_height = units.resolve_sp(default_line_height_sp);
+    let default_font_size = units.resolve_sp(default_size);
+    let scaled_line_height = if default_font_size > 0.0 {
+        default_line_height * (font_size / default_font_size)
+    } else {
+        default_line_height
+    };
+    let line_height = default_line_height
+        .max(scaled_line_height)
+        .max(font_size + 4.0);
+    let letter_spacing = units.resolve_sp(
+        text_style
+            .letter_spacing
+            .unwrap_or(default_style.letter_spacing.unwrap_or(Sp::ZERO)),
+    );
+    let text_request = TextFontRequest {
+        preferred_font: text_style
+            .font_family
+            .as_deref()
+            .or(default_style.font_family.as_deref()),
+        weight: text_style.font_weight.unwrap_or(default_style.weight),
+    };
+    (text_request, font_size, line_height, letter_spacing)
 }
 
 fn text_cursor_index_at_point(

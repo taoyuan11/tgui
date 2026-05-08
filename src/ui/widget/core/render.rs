@@ -340,6 +340,7 @@ pub(super) fn push_text_input_primitives(
     show_caret: bool,
     multiline: bool,
     padding: Insets,
+    scroll_offset: Point,
     edit_state: Option<&TextEditState>,
     fallback_color: Color,
     selection_color: Option<Color>,
@@ -373,7 +374,11 @@ pub(super) fn push_text_input_primitives(
     let wrap_width = inner.width.get().max(0.0);
     let base_state = edit_state
         .cloned()
-        .unwrap_or_else(|| TextEditState::caret_at(&resolved_content))
+        .unwrap_or_else(|| TextEditState {
+            scroll_x: scroll_offset.x,
+            scroll_y: scroll_offset.y,
+            ..TextEditState::caret_at(&resolved_content)
+        })
         .clamped_to(&resolved_content);
 
     let (display_content, display_state, composition_range) =
@@ -449,9 +454,10 @@ pub(super) fn push_text_input_primitives(
         )
     };
     let scroll_y = if multiline {
-        display_state
-            .scroll_y
-            .clamp(0.0, (layout.height - inner.height.get()).max(0.0))
+        display_state.scroll_y.clamp(
+            0.0,
+            (layout.height.max(line_height) - inner.height.get()).max(0.0),
+        )
     } else {
         Dp::ZERO
     };
@@ -523,20 +529,62 @@ pub(super) fn push_text_input_primitives(
             clip_mask,
         });
     }
+    let text_color = text_color.with_alpha_factor(opacity);
+    let font_family = Some(resolved_font.primary_font);
+    let font_weight = text.font_weight.unwrap_or(default_style.weight);
 
-    scene.push_text(TextPrimitive {
-        content: display_content.clone(),
-        frame: content_frame,
-        color: text_color.with_alpha_factor(opacity),
-        force_color: false,
-        font_family: Some(resolved_font.primary_font),
-        font_size,
-        font_weight: text.font_weight.unwrap_or(default_style.weight),
-        line_height,
-        letter_spacing,
-        clip_rect: content_clip_rect,
-        clip_mask,
-    });
+    if multiline {
+        let viewport_top = inner.y.get();
+        let viewport_bottom = inner.bottom().get();
+
+        for line_index in 0..layout.line_count() {
+            let line_top = content_frame.y.get() + layout.line_top(line_index);
+            let line_height_value = layout.line_height(line_index).max(line_height);
+            let line_bottom = line_top + line_height_value;
+            if line_bottom <= viewport_top || line_top >= viewport_bottom {
+                continue;
+            }
+
+            let start = layout.line_start(line_index).min(display_content.len());
+            let end = layout.line_end(line_index).min(display_content.len());
+            if start >= end {
+                continue;
+            }
+
+            scene.push_text(TextPrimitive {
+                content: display_content[start..end].to_string(),
+                frame: Rect::new(
+                    content_frame.x,
+                    line_top,
+                    layout.line_width(line_index).max(1.0),
+                    line_height_value,
+                ),
+                color: text_color,
+                force_color: false,
+                font_family: font_family.clone(),
+                font_size,
+                font_weight,
+                line_height,
+                letter_spacing,
+                clip_rect: content_clip_rect,
+                clip_mask,
+            });
+        }
+    } else {
+        scene.push_text(TextPrimitive {
+            content: display_content.clone(),
+            frame: content_frame,
+            color: text_color,
+            force_color: false,
+            font_family,
+            font_size,
+            font_weight,
+            line_height,
+            letter_spacing,
+            clip_rect: content_clip_rect,
+            clip_mask,
+        });
+    }
 
     let mut ime_cursor_area = None;
     if show_caret {

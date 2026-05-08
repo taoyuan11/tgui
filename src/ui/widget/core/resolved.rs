@@ -1560,10 +1560,14 @@ impl<VM> ResolvedElement<VM> {
                     .expect("input style should be resolved for input widgets");
                 let padding = Insets::symmetric(input_style.padding_x, input_style.padding_y);
                 let resolved_value = value.resolve();
-                let display_value = if resolved_value.is_empty() {
+                let visible_value = context
+                    .focused_text_value
+                    .filter(|_| context.focused_input == Some(self.id))
+                    .unwrap_or_else(|| resolved_value.as_str());
+                let display_value = if visible_value.is_empty() {
                     placeholder.resolve()
                 } else {
-                    resolved_value.clone()
+                    visible_value.to_string()
                 };
                 let mut text = text_with_typography(display_value.clone(), &input_style.text_style);
                 text.color = Some(Value::Static(input_style.text));
@@ -1579,6 +1583,11 @@ impl<VM> ResolvedElement<VM> {
                     context.caret_visible && context.focused_input == Some(self.id),
                     false,
                     padding,
+                    context
+                        .scroll_offsets
+                        .get(&self.id)
+                        .copied()
+                        .unwrap_or(Point::ZERO),
                     context
                         .focused_text_state
                         .filter(|_| context.focused_input == Some(self.id)),
@@ -1623,10 +1632,14 @@ impl<VM> ResolvedElement<VM> {
                     .expect("input style should be resolved for input widgets");
                 let padding = Insets::symmetric(input_style.padding_x, input_style.padding_y);
                 let resolved_value = value.resolve();
-                let display_value = if resolved_value.is_empty() {
+                let visible_value = context
+                    .focused_text_value
+                    .filter(|_| context.focused_input == Some(self.id))
+                    .unwrap_or_else(|| resolved_value.as_str());
+                let display_value = if visible_value.is_empty() {
                     placeholder.resolve()
                 } else {
-                    resolved_value.clone()
+                    visible_value.to_string()
                 };
                 let mut text = text_with_typography(display_value.clone(), &input_style.text_style);
                 text.color = Some(Value::Static(input_style.text));
@@ -1642,6 +1655,11 @@ impl<VM> ResolvedElement<VM> {
                     context.caret_visible && context.focused_input == Some(self.id),
                     true,
                     padding,
+                    context
+                        .scroll_offsets
+                        .get(&self.id)
+                        .copied()
+                        .unwrap_or(Point::ZERO),
                     context
                         .focused_text_state
                         .filter(|_| context.focused_input == Some(self.id)),

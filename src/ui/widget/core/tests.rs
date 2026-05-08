@@ -4409,6 +4409,105 @@ fn textarea_renders_multiline_caret_on_second_line() {
 }
 
 #[test]
+fn textarea_uses_scroll_offset_when_unfocused() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let text: Element<()> = Textarea::new("line 0\nline 1\nline 2\nline 3")
+        .height(dp(52.0))
+        .into();
+    let text_id = text.id;
+    let tree = WidgetTree::new(text);
+    let viewport = Rect::new(0.0, 0.0, 220.0, 52.0);
+
+    let baseline = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let mut scroll_offsets = HashMap::new();
+    scroll_offsets.insert(text_id, Point::new(Dp::ZERO, dp(18.0)));
+    let scrolled = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &scroll_offsets,
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let baseline_text = baseline
+        .primitives
+        .texts
+        .iter()
+        .find(|primitive| primitive.content.contains("line 0"))
+        .expect("baseline textarea text should render");
+    let scrolled_text = scrolled
+        .primitives
+        .texts
+        .iter()
+        .find(|primitive| primitive.content.contains("line 0"))
+        .expect("scrolled textarea text should render");
+
+    assert!(scrolled_text.frame.y < baseline_text.frame.y);
+}
+
+#[test]
+fn textarea_only_emits_visible_text_primitives_for_large_content() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let content = (0..100)
+        .map(|index| format!("line {index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tree: WidgetTree<()> = WidgetTree::new(Textarea::new(content).height(dp(52.0)));
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 52.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered.primitives.texts.len() <= 3);
+    assert!(rendered
+        .primitives
+        .texts
+        .iter()
+        .all(|primitive| !primitive.content.contains("line 50")));
+}
+
+#[test]
 fn input_renders_composition_preview_text() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

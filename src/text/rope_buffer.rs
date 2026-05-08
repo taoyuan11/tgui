@@ -3,14 +3,14 @@ use ropey::Rope;
 #[derive(Clone, Debug)]
 pub(crate) struct RopeBuffer {
     rope: Rope,
-    snapshot: Option<String>,
+    snapshot: String,
 }
 
 impl RopeBuffer {
     pub(crate) fn from_str(text: &str) -> Self {
         Self {
             rope: Rope::from_str(text),
-            snapshot: Some(text.to_string()),
+            snapshot: text.to_string(),
         }
     }
 
@@ -71,7 +71,7 @@ impl RopeBuffer {
         if !replacement.is_empty() {
             self.rope.insert(start_char, replacement);
         }
-        self.snapshot = None;
+        self.snapshot.replace_range(start_byte..end_byte, replacement);
     }
 
     pub(crate) fn slice_byte_range_to_string(&self, start_byte: usize, end_byte: usize) -> String {
@@ -82,14 +82,8 @@ impl RopeBuffer {
         self.rope.slice(start_char..end_char).to_string()
     }
 
-    pub(crate) fn materialize_string(&mut self) -> String {
-        if let Some(snapshot) = &self.snapshot {
-            return snapshot.clone();
-        }
-
-        let snapshot = self.rope.to_string();
-        self.snapshot = Some(snapshot.clone());
-        snapshot
+    pub(crate) fn materialize_string(&self) -> String {
+        self.snapshot.clone()
     }
 }
 

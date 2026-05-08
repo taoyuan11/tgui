@@ -989,6 +989,96 @@ fn input_backspace_repeats_while_key_is_held() {
 }
 
 #[test]
+fn repeated_backspace_keeps_deleting_when_widget_value_is_static() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Input::new("abcd").on_change(ValueCommand::new(
+        |vm: &mut TextInputVm, value| {
+            vm.value = value;
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    assert!(handler.handle_keyboard_input(&repeated_pressed_key_event(PhysicalKey::Code(
+        KeyCode::Backspace,
+    ))));
+    assert!(handler.handle_keyboard_input(&repeated_pressed_key_event(PhysicalKey::Code(
+        KeyCode::Backspace,
+    ))));
+
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value, "ab");
+    assert_eq!(
+        handler
+            .text_input_buffers
+            .get(
+                &handler
+                    .focused_widget_id()
+                    .expect("input should remain focused after repeated backspace"),
+            )
+            .expect("text input buffer should exist")
+            .current_text,
+        "ab"
+    );
+}
+
+#[test]
+fn focused_input_renders_local_buffer_until_bound_value_catches_up() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Input::new("abcd").on_change(ValueCommand::new(
+        |vm: &mut TextInputVm, value| {
+            vm.value = value;
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&repeated_pressed_key_event(PhysicalKey::Code(
+        KeyCode::Backspace,
+    )));
+
+    let computed = handler.computed_scene();
+    assert!(computed
+        .scene
+        .texts
+        .iter()
+        .any(|primitive| primitive.content == "abc"));
+}
+
+#[test]
 fn textarea_replaces_multibyte_selection_via_rope_buffer() {
     let invalidation = InvalidationSignal::new();
     let tree = WidgetTree::new(Textarea::new("ab中🙂cd").on_change(ValueCommand::new(
@@ -1145,7 +1235,7 @@ fn external_bound_value_rebuilds_text_input_buffer_and_clamps_state() {
             .text_input_buffers
             .get(&text_id)
             .expect("text input buffer should exist")
-            .source_value,
+            .external_value,
         "hello🙂world"
     );
 
@@ -1159,8 +1249,8 @@ fn external_bound_value_rebuilds_text_input_buffer_and_clamps_state() {
         .text_input_buffers
         .get_mut(&text_id)
         .expect("text input buffer should be rebuilt");
-    assert_eq!(buffer_state.source_value, "中");
-    assert_eq!(buffer_state.buffer.materialize_string(), "中");
+    assert_eq!(buffer_state.external_value, "中");
+    assert_eq!(buffer_state.current_text, "中");
 
     let state = handler
         .text_edit_states
@@ -1535,6 +1625,64 @@ fn textarea_arrow_down_moves_caret_to_next_visual_line() {
 }
 
 #[test]
+fn textarea_click_tracks_visual_wrap_for_overflowing_initial_content() {
+    let invalidation = InvalidationSignal::new();
+    let value = "supercalifragilisticexpialidocious wrapped text with another long visual line";
+    let tree =
+        WidgetTree::new(Textarea::<TestVm>::new(value).width(dp(140.0)).height(dp(52.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let (frame, padding, text_style) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    frame,
+                    padding,
+                    text_style,
+                    multiline: true,
+                    ..
+                } => Some((*frame, *padding, text_style.clone())),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    let inner = frame.inset(padding);
+    let (layout, _font_size, _line_height) = super::input_text_layout(
+        &handler.font_manager,
+        &handler.theme,
+        handler.unit_context(),
+        &text_style,
+        value,
+        true,
+        inner.width.get(),
+    );
+    assert!(layout.line_count() > 1, "test value should wrap to multiple visual lines");
+    let second_line = 1;
+    let sample_x = (layout.x_for_index(layout.line_end(second_line)) - 0.5).max(0.0);
+    let sample_y = layout.line_top(second_line) + (layout.line_height(second_line) * 0.5);
+    let expected_cursor = layout.index_for_point(sample_x, sample_y);
+
+    handler.cursor_position = Some(Point {
+        x: inner.x + Dp::new(sample_x),
+        y: inner.y + Dp::new(sample_y),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("textarea edit state should exist");
+    assert_eq!(state.cursor, expected_cursor);
+}
+
+#[test]
 fn repeated_tab_does_not_advance_focus() {
     let invalidation = InvalidationSignal::new();
     let first: Element<TestVm> = Input::<TestVm>::new("first").into();
@@ -1645,6 +1793,91 @@ fn textarea_arrow_down_scrolls_caret_into_vertical_view() {
 
     assert!(state.cursor >= "line 0\nline 1\nline 2\n".len());
     assert!(scroll_y > Dp::ZERO);
+}
+
+#[test]
+fn textarea_mouse_wheel_scrolls_vertical_overflow() {
+    let invalidation = InvalidationSignal::new();
+    let value = "line 0\nline 1\nline 2\nline 3\nline 4\nline 5";
+    let tree = WidgetTree::new(Textarea::<TestVm>::new(value).height(dp(52.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let (text_id, frame) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    id,
+                    multiline: true,
+                    ..
+                } => Some((*id, region.rect)),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -2.0)));
+    assert!(
+        handler
+            .scroll_states
+            .get(&text_id)
+            .map(|offset| offset.y)
+            .unwrap_or(Dp::ZERO)
+            > Dp::ZERO
+    );
+}
+
+#[test]
+fn textarea_mouse_wheel_reaches_last_line_with_tall_line_height() {
+    let invalidation = InvalidationSignal::new();
+    let value = "line 0\nline 1\nline 2\nline 3\nline 4\nline 5";
+    let tree = WidgetTree::new(
+        Textarea::<TestVm>::new(value)
+            .height(dp(120.0))
+            .style(|mode| {
+                let mut style = crate::ui::widget::TextareaStyle::default_for(mode);
+                style.text_style.line_height = Some(crate::ui::unit::sp(40.0));
+                style
+            }),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+
+    while handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -3.0)) {}
+
+    let computed = handler.computed_scene();
+    let text_primitive = computed
+        .scene
+        .texts
+        .iter()
+        .find(|primitive| primitive.content.contains("line 5"))
+        .expect("textarea text primitive should render");
+    let inner_bottom = frame.bottom() - dp(8.0);
+
+    assert!(text_primitive.frame.bottom() <= inner_bottom + dp(1.0));
 }
 
 #[test]

@@ -226,6 +226,47 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
     ) -> ComputedScene<VM> {
+        self.collect_scene_from_layout_with_focus_value(
+            font_manager,
+            layout,
+            theme,
+            media,
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            select_open_states,
+            scroll_offsets,
+            viewport,
+            focused_input,
+            focused_text_state,
+            None,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+        )
+    }
+
+    pub(crate) fn collect_scene_from_layout_with_focus_value(
+        &self,
+        font_manager: &FontManager,
+        layout: &ResolvedSceneLayout<VM>,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        select_open_states: &HashMap<WidgetId, bool>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
+        focused_text_value: Option<&str>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&TextEditState>,
+        caret_visible: bool,
+    ) -> ComputedScene<VM> {
         let mut computed = ComputedScene::default();
         let mut context = CollectContext {
             taffy: &layout.taffy,
@@ -234,6 +275,7 @@ impl<VM> WidgetTree<VM> {
             media,
             focused_input,
             focused_text_state,
+            focused_text_value,
             caret_visible,
             selected_text,
             selected_text_state,

@@ -190,6 +190,7 @@ struct CollectContext<'a, 'b> {
     media: &'a MediaManager,
     focused_input: Option<WidgetId>,
     focused_text_state: Option<&'a TextEditState>,
+    focused_text_value: Option<&'a str>,
     caret_visible: bool,
     selected_text: Option<WidgetId>,
     selected_text_state: Option<&'a TextEditState>,
