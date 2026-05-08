@@ -1219,32 +1219,30 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             })
     }
 
-    fn focused_text_value_override(&self, focused_input: Option<WidgetId>) -> Option<String> {
-        focused_input.and_then(|widget_id| {
-            self.text_input_buffers.get(&widget_id).and_then(|state| {
-                state
-                    .has_unresolved_local_edits()
-                    .then(|| state.current_text.clone())
-            })
-        })
-    }
-
-    fn focused_text_layout_override(
-        &self,
+    fn focused_text_overrides<'a>(
+        text_input_buffers: &'a HashMap<WidgetId, TextInputBufferState>,
         focused_input: Option<WidgetId>,
         focused_text_state: Option<&TextEditState>,
-    ) -> Option<TextLayoutInfo> {
-        if focused_text_state
+    ) -> (Option<&'a str>, Option<&'a TextLayoutInfo>) {
+        let Some(widget_id) = focused_input else {
+            return (None, None);
+        };
+        let Some(state) = text_input_buffers.get(&widget_id) else {
+            return (None, None);
+        };
+
+        let text = state
+            .has_unresolved_local_edits()
+            .then_some(state.current_text.as_str());
+        let layout = if focused_text_state
             .and_then(|state| state.composition.as_ref())
-            .is_some()
+            .is_none()
         {
-            return None;
-        }
-        focused_input.and_then(|widget_id| {
-            self.text_input_buffers
-                .get(&widget_id)
-                .and_then(|state| state.layout_snapshot.clone())
-        })
+            state.layout_snapshot.as_ref()
+        } else {
+            None
+        };
+        (text, layout)
     }
 
     fn sync_text_input_regions_from_computed(&mut self, computed: &ComputedScene<VM>) {
@@ -1406,11 +1404,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 .as_ref()
                                 .expect("layout should exist when layout cache is valid")
                         };
-                        let focused_text_value = self.focused_text_value_override(focused_input);
-                        let focused_text_layout = self.focused_text_layout_override(
-                            focused_input,
-                            focused_text_state.as_ref(),
-                        );
+                        let (focused_text_value, focused_text_layout) =
+                            Self::focused_text_overrides(
+                                &self.text_input_buffers,
+                                focused_input,
+                                focused_text_state.as_ref(),
+                            );
                         let mut computed = {
                             let collect_started_at = Instant::now();
                             let computed = tree.collect_scene_from_layout_with_focus_value(
@@ -1427,8 +1426,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 viewport,
                                 focused_input,
                                 focused_text_state.as_ref(),
-                                focused_text_value.as_deref(),
-                                focused_text_layout.as_ref(),
+                                focused_text_value,
+                                focused_text_layout,
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 caret_visible,
@@ -1445,12 +1444,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         if actual_focused_input != focused_input
                             || actual_caret_visible != caret_visible
                         {
-                            let actual_focused_text_value =
-                                self.focused_text_value_override(actual_focused_input);
-                            let actual_focused_text_layout = self.focused_text_layout_override(
-                                actual_focused_input,
-                                actual_focused_text_state.as_ref(),
-                            );
+                            let (actual_focused_text_value, actual_focused_text_layout) =
+                                Self::focused_text_overrides(
+                                    &self.text_input_buffers,
+                                    actual_focused_input,
+                                    actual_focused_text_state.as_ref(),
+                                );
                             computed = {
                                 let collect_started_at = Instant::now();
                                 let computed = tree.collect_scene_from_layout_with_focus_value(
@@ -1467,8 +1466,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     viewport,
                                     actual_focused_input,
                                     actual_focused_text_state.as_ref(),
-                                    actual_focused_text_value.as_deref(),
-                                    actual_focused_text_layout.as_ref(),
+                                    actual_focused_text_value,
+                                    actual_focused_text_layout,
                                     self.selected_text,
                                     selected_text_state.as_ref(),
                                     actual_caret_visible,
@@ -1494,11 +1493,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             layout_duration += layout_started_at.elapsed();
                             layout
                         };
-                        let focused_text_value = self.focused_text_value_override(focused_input);
-                        let focused_text_layout = self.focused_text_layout_override(
-                            focused_input,
-                            focused_text_state.as_ref(),
-                        );
+                        let (focused_text_value, focused_text_layout) =
+                            Self::focused_text_overrides(
+                                &self.text_input_buffers,
+                                focused_input,
+                                focused_text_state.as_ref(),
+                            );
                         let computed = {
                             let collect_started_at = Instant::now();
                             let computed = tree.collect_scene_from_layout_with_focus_value(
@@ -1515,8 +1515,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 viewport,
                                 focused_input,
                                 focused_text_state.as_ref(),
-                                focused_text_value.as_deref(),
-                                focused_text_layout.as_ref(),
+                                focused_text_value,
+                                focused_text_layout,
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 caret_visible,
@@ -1533,12 +1533,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         let computed = if actual_focused_input != focused_input
                             || actual_caret_visible != caret_visible
                         {
-                            let actual_focused_text_value =
-                                self.focused_text_value_override(actual_focused_input);
-                            let actual_focused_text_layout = self.focused_text_layout_override(
-                                actual_focused_input,
-                                actual_focused_text_state.as_ref(),
-                            );
+                            let (actual_focused_text_value, actual_focused_text_layout) =
+                                Self::focused_text_overrides(
+                                    &self.text_input_buffers,
+                                    actual_focused_input,
+                                    actual_focused_text_state.as_ref(),
+                                );
                             let collect_started_at = Instant::now();
                             let computed = tree.collect_scene_from_layout_with_focus_value(
                                 &self.font_manager,
@@ -1554,8 +1554,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 viewport,
                                 actual_focused_input,
                                 actual_focused_text_state.as_ref(),
-                                actual_focused_text_value.as_deref(),
-                                actual_focused_text_layout.as_ref(),
+                                actual_focused_text_value,
+                                actual_focused_text_layout,
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 actual_caret_visible,
@@ -1746,6 +1746,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.text_input_regions.clear();
     }
 
+    fn invalidate_computed_scene(&mut self) {
+        self.text_input_regions.clear();
+    }
+
     fn invalidate_text_input_scene(&mut self) {
         self.text_input_epoch = self.text_input_epoch.wrapping_add(1);
     }
@@ -1899,7 +1903,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.hovered_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
         if had_hovered_widgets || self.hovered_scrollbar != previous_scrollbar {
             self.hover_epoch = self.hover_epoch.wrapping_add(1);
-            self.invalidate_scene();
         }
         self.update_cursor_icon();
     }
@@ -1918,7 +1921,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             frame_advanced = true;
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
             self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
-            self.invalidate_scene();
+            self.invalidate_computed_scene();
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
@@ -1931,7 +1934,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if animation_refresh.layout_changed {
                 self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
             }
-            self.invalidate_scene();
+            self.invalidate_computed_scene();
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
@@ -2921,6 +2924,29 @@ fn text_cursor_index_at_point(
         auto_wrap,
         inner.width.get(),
     );
+    text_cursor_index_from_layout_at_point(
+        &layout,
+        line_height,
+        frame,
+        padding,
+        multiline,
+        auto_wrap,
+        scroll,
+        point,
+    )
+}
+
+fn text_cursor_index_from_layout_at_point(
+    layout: &TextLayoutInfo,
+    line_height: f32,
+    frame: Rect,
+    padding: crate::ui::layout::Insets,
+    multiline: bool,
+    auto_wrap: bool,
+    scroll: Point,
+    point: Point,
+) -> usize {
+    let inner = frame.inset(padding);
     let content_height = if multiline {
         Dp::new(layout.height.max(line_height))
     } else {

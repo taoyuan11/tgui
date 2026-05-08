@@ -218,6 +218,34 @@ impl TextLayoutInfo {
             .unwrap_or(0.0)
     }
 
+    pub(crate) fn line_range_for_vertical_span(
+        &self,
+        top: f32,
+        bottom: f32,
+    ) -> std::ops::Range<usize> {
+        if self.lines.is_empty() || bottom <= top {
+            return 0..0;
+        }
+
+        let start = self.first_line_with_bottom_after(top);
+        if start >= self.lines.len() {
+            return self.lines.len()..self.lines.len();
+        }
+
+        let mut left = start;
+        let mut right = self.lines.len();
+        while left < right {
+            let mid = (left + right) / 2;
+            if self.lines[mid].top < bottom {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+
+        start..left
+    }
+
     fn find_line_index_for_index(&self, index: usize) -> usize {
         if self.lines.is_empty() {
             return 0;
@@ -256,6 +284,20 @@ impl TextLayoutInfo {
             .find(|line| local_y < line.top + line.height)
             .or_else(|| self.lines.last())
             .expect("text layout should always contain at least one line")
+    }
+
+    fn first_line_with_bottom_after(&self, y: f32) -> usize {
+        let mut left = 0usize;
+        let mut right = self.lines.len();
+        while left < right {
+            let mid = (left + right) / 2;
+            if self.lines[mid].top + self.lines[mid].height <= y {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        left
     }
 }
 
@@ -1163,6 +1205,27 @@ mod tests {
             assert_eq!(incremental.line_end(line_index), fresh.line_end(line_index));
             assert_eq!(incremental.line_top(line_index), fresh.line_top(line_index));
         }
+    }
+
+    #[test]
+    fn line_range_for_vertical_span_tracks_visible_lines() {
+        let manager = FontManager::new(&FontCatalog::default());
+        let layout = manager.measure_text_layout(
+            "line 0\nline 1\nline 2",
+            TextFontRequest {
+                preferred_font: None,
+                weight: FontWeight::NORMAL,
+            },
+            16.0,
+            24.0,
+            0.0,
+        );
+
+        assert_eq!(layout.line_range_for_vertical_span(0.0, 1.0), 0..1);
+        assert_eq!(layout.line_range_for_vertical_span(10.0, 30.0), 0..2);
+        assert_eq!(layout.line_range_for_vertical_span(24.0, 48.0), 1..2);
+        assert_eq!(layout.line_range_for_vertical_span(48.0, 72.0), 2..3);
+        assert_eq!(layout.line_range_for_vertical_span(72.0, 96.0), 3..3);
     }
 
     #[test]

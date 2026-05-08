@@ -1555,7 +1555,7 @@ impl<VM> ResolvedElement<VM> {
                     .get(&self.id)
                     .copied()
                     .unwrap_or(Point::ZERO);
-                let ime_cursor_area = push_text_input_primitives(
+                let text_render = push_text_input_primitives(
                     &text,
                     frame,
                     context.font_manager,
@@ -1582,46 +1582,11 @@ impl<VM> ResolvedElement<VM> {
                     primitive_clip_mask,
                 );
                 if *multiline {
-                    let wrap_width = inner.width.get().max(0.0);
-                    let layout = precomputed_layout.cloned().unwrap_or_else(|| {
-                        let default_style = &context.theme.typography.body;
-                        let text_request = crate::text::font::TextFontRequest {
-                            preferred_font: text
-                                .font_family
-                                .as_deref()
-                                .or(default_style.font_family.as_deref()),
-                            weight: text.font_weight.unwrap_or(default_style.weight),
-                        };
-                        let (font_size, line_height, letter_spacing) =
-                            resolved_text_metrics(&text, context.theme, context.units);
-                        if *auto_wrap {
-                            context.font_manager.measure_text_layout_wrapped(
-                                &display_value,
-                                text_request,
-                                font_size,
-                                line_height,
-                                letter_spacing,
-                                wrap_width,
-                            )
-                        } else {
-                            context.font_manager.measure_text_layout(
-                                &display_value,
-                                text_request,
-                                font_size,
-                                line_height,
-                                letter_spacing,
-                            )
-                        }
-                    });
                     let content_bounds = Rect::new(
                         inner.x,
                         inner.y,
-                        if *auto_wrap {
-                            inner.width.max(0.0)
-                        } else {
-                            Dp::new(layout.width.max(inner.width.get()))
-                        },
-                        Dp::new(layout.height.max(inner.height.get())),
+                        text_render.content_width,
+                        text_render.content_height.max(inner.height),
                     );
                     let overflow_x = if *auto_wrap {
                         Overflow::Hidden
@@ -1683,7 +1648,7 @@ impl<VM> ResolvedElement<VM> {
                     }
                 }
                 if context.focused_input == Some(self.id) {
-                    computed.ime_cursor_area = ime_cursor_area;
+                    computed.ime_cursor_area = text_render.ime_cursor_area;
                 }
                 if !disabled {
                     computed.hit_regions.push(HitRegion {
