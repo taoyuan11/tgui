@@ -65,7 +65,7 @@ impl ViewModel for App {
 }
 
 fn source_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/main.rs")
+    PathBuf::from("D:\\Project\\Rust\\libs\\tgui\\src\\runtime\\mod.rs")
 }
 
 fn main() -> Result<(), TguiError> {

@@ -2080,6 +2080,85 @@ fn textarea_click_after_prefocus_scroll_keeps_scrolled_viewport() {
 }
 
 #[test]
+fn textarea_backspace_keeps_scrolled_viewport_and_scroll_range() {
+    let invalidation = InvalidationSignal::new();
+    let value = (0..24)
+        .map(|index| format!("line {index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tree = WidgetTree::new(Textarea::<TestVm>::new(value).height(dp(52.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let (text_id, frame) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    id,
+                    multiline: true,
+                    ..
+                } => Some((*id, region.rect)),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(24.0),
+        y: frame.y + dp(8.0),
+    });
+
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -8.0)));
+    while handler.advance_smooth_scroll() {}
+
+    let scrolled_before_focus = handler
+        .scroll_states
+        .get(&text_id)
+        .map(|offset| offset.y)
+        .unwrap_or(Dp::ZERO);
+    assert!(scrolled_before_focus > Dp::ZERO);
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(
+        KeyCode::Backspace,
+    ))));
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("textarea edit state should exist after backspace");
+    assert!(
+        state.scroll_y > Dp::ZERO,
+        "editing while focused should keep the vertical scroll offset"
+    );
+
+    let scroll_region = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == text_id)
+        .copied()
+        .expect("textarea scroll region should exist");
+    assert!(
+        scroll_region.max_offset().y > Dp::ZERO,
+        "focused textarea should keep a vertical scroll range after backspace"
+    );
+
+    let line_zero_visible_after_backspace = handler
+        .computed_scene()
+        .scene
+        .texts
+        .iter()
+        .any(|primitive| primitive.content.contains("line 0"));
+    assert!(
+        !line_zero_visible_after_backspace,
+        "focused textarea should not jump back to the first line after backspace"
+    );
+}
+
+#[test]
 fn textarea_mouse_wheel_reaches_last_line_with_tall_line_height() {
     let invalidation = InvalidationSignal::new();
     let value = "line 0\nline 1\nline 2\nline 3\nline 4\nline 5";
