@@ -1105,6 +1105,24 @@ pub(crate) enum AnimationKey {
     Window(WindowProperty),
 }
 
+impl WidgetProperty {
+    pub(crate) const fn affects_layout(self) -> bool {
+        matches!(
+            self,
+            Self::Width | Self::Height | Self::Margin | Self::Padding | Self::Gap | Self::Grow
+        )
+    }
+}
+
+impl AnimationKey {
+    pub(crate) const fn affects_layout(self) -> bool {
+        match self {
+            Self::Widget { property, .. } => property.affects_layout(),
+            Self::Window(_) => false,
+        }
+    }
+}
+
 pub trait Animatable: Clone + PartialEq + Send + Sync + 'static {
     fn interpolate(from: &Self, to: &Self, progress: f32) -> Self;
 }
@@ -1332,20 +1350,29 @@ impl<T: Animatable> AnimationStore<T> {
         state.sample(now)
     }
 
-    fn refresh(&mut self, now: Instant) -> bool {
-        let mut changed = false;
-        for state in self.slots.values_mut() {
+    fn refresh(&mut self, now: Instant) -> AnimationRefresh {
+        let mut refresh = AnimationRefresh::default();
+        for (key, state) in self.slots.iter_mut() {
             let before = state.displayed.clone();
             if state.sample(now) != before {
-                changed = true;
+                refresh.changed = true;
+                if key.affects_layout() {
+                    refresh.layout_changed = true;
+                }
             }
         }
-        changed
+        refresh
     }
 
     fn has_active(&self) -> bool {
         self.slots.values().any(|state| state.animation.is_some())
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AnimationRefresh {
+    pub(crate) changed: bool,
+    pub(crate) layout_changed: bool,
 }
 
 #[derive(Default)]
@@ -1408,12 +1435,21 @@ impl AnimationEngine {
         self.insets.resolve(key, target, transition, now)
     }
 
-    pub(crate) fn refresh(&mut self, now: Instant) -> bool {
-        self.colors.refresh(now)
-            || self.floats.refresh(now)
-            || self.dps.refresh(now)
-            || self.points.refresh(now)
-            || self.insets.refresh(now)
+    pub(crate) fn refresh(&mut self, now: Instant) -> AnimationRefresh {
+        let stores = [
+            self.colors.refresh(now),
+            self.floats.refresh(now),
+            self.dps.refresh(now),
+            self.points.refresh(now),
+            self.insets.refresh(now),
+        ];
+        stores
+            .into_iter()
+            .fold(AnimationRefresh::default(), |mut acc, next| {
+                acc.changed |= next.changed;
+                acc.layout_changed |= next.layout_changed;
+                acc
+            })
     }
 
     pub(crate) fn has_active_animations(&self) -> bool {
@@ -1572,7 +1608,9 @@ mod tests {
             start + Duration::from_millis(1),
         );
 
-        assert!(engine.refresh(start + Duration::from_millis(50)));
+        let refresh = engine.refresh(start + Duration::from_millis(50));
+        assert!(refresh.changed);
+        assert!(!refresh.layout_changed);
     }
 
     #[test]

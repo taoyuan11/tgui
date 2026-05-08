@@ -1,12 +1,13 @@
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
 use crate::foundation::window_control::{WindowControl, WindowRequest};
-use crate::log::Log;
+use crate::log::{log_text_profile, text_profile_enabled, Log};
 use crate::notification::Notifications;
 use crate::platform::backend::event_loop::ActiveEventLoop;
 use crate::ui::widget::{
     CanvasDragEvent, CanvasMouseButton, CanvasMouseEvent, CanvasWheelEvent, Point,
 };
 use crate::{application::WindowClosePolicy, dialog::Dialogs};
+use std::time::Instant;
 
 use super::{
     BoundRuntimeHandler, CanvasPointerContext, ClickHandler, HoverMoveHandler,
@@ -47,19 +48,35 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn execute_command(&mut self, command: &Command<VM>) {
+        let started_at = text_profile_enabled().then_some(Instant::now());
         let context = self.command_context();
         self.with_view_model(|view_model| command.execute_with_context(view_model, &context));
         self.invalidate_scene();
         self.invalidation.mark_dirty();
+        if let Some(started_at) = started_at {
+            log_text_profile(
+                "execute_command",
+                started_at.elapsed(),
+                "invalidated_scene=true".to_string(),
+            );
+        }
     }
 
     pub(super) fn execute_value_command<V>(&mut self, command: &ValueCommand<VM, V>, value: V) {
+        let started_at = text_profile_enabled().then_some(Instant::now());
         let context = self.command_context();
         self.with_view_model(|view_model| {
             command.execute_with_context(view_model, value, &context)
         });
         self.invalidate_scene();
         self.invalidation.mark_dirty();
+        if let Some(started_at) = started_at {
+            log_text_profile(
+                "execute_value_command",
+                started_at.elapsed(),
+                "invalidated_scene=true".to_string(),
+            );
+        }
     }
 
     pub(super) fn drain_window_requests(&mut self) -> bool {

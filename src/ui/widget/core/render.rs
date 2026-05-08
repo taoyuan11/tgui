@@ -347,9 +347,11 @@ pub(super) fn push_text_input_primitives(
     caret_color: Option<Color>,
     opacity: f32,
     widget_id: WidgetId,
+    precomputed_layout: Option<&TextLayoutInfo>,
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
 ) -> Option<Rect> {
+    let started_at = crate::log::text_profile_enabled().then_some(std::time::Instant::now());
     let resolved_content = text.content.resolve();
     let default_style = &theme.typography.body;
     let text_request = TextFontRequest {
@@ -413,24 +415,28 @@ pub(super) fn push_text_input_primitives(
             (resolved_content.clone(), base_state.clone(), None)
         };
 
-    let layout = if multiline {
-        font_manager.measure_text_layout_wrapped(
-            &display_content,
-            text_request.clone(),
-            font_size,
-            line_height,
-            letter_spacing,
-            wrap_width,
-        )
-    } else {
-        font_manager.measure_text_layout(
-            &display_content,
-            text_request.clone(),
-            font_size,
-            line_height,
-            letter_spacing,
-        )
-    };
+    let layout_started_at = std::time::Instant::now();
+    let layout = precomputed_layout.cloned().unwrap_or_else(|| {
+        if multiline {
+            font_manager.measure_text_layout_wrapped(
+                &display_content,
+                text_request.clone(),
+                font_size,
+                line_height,
+                letter_spacing,
+                wrap_width,
+            )
+        } else {
+            font_manager.measure_text_layout(
+                &display_content,
+                text_request.clone(),
+                font_size,
+                line_height,
+                letter_spacing,
+            )
+        }
+    });
+    let layout_duration = layout_started_at.elapsed();
 
     let content_width = if multiline {
         inner.width.max(0.0)
@@ -602,6 +608,22 @@ pub(super) fn push_text_input_primitives(
             clip_rect: content_clip_rect,
             clip_mask,
         });
+    }
+
+    if let Some(started_at) = started_at {
+        crate::log::log_text_profile(
+            "push_text_input_primitives",
+            started_at.elapsed(),
+            format!(
+                "widget={:?} multiline={} text_len={} layout_ms={:.3} width={:.1} height={:.1}",
+                widget_id,
+                multiline,
+                display_content.len(),
+                layout_duration.as_secs_f64() * 1000.0,
+                frame.width.get(),
+                frame.height.get(),
+            ),
+        );
     }
 
     ime_cursor_area

@@ -132,31 +132,24 @@ impl<VM> Element<VM> {
                 disabled,
                 style,
             },
-            WidgetKind::Input {
-                value,
+            WidgetKind::TextEditor {
+                controller,
                 placeholder,
                 on_change,
+                on_change_set,
                 disabled,
-                style,
-            } => WidgetKind::Input {
-                value,
+                input_style,
+                textarea_style,
+                multiline,
+            } => WidgetKind::TextEditor {
+                controller,
                 placeholder,
                 on_change: on_change.map(|command| command.scope(selector.clone())),
+                on_change_set: on_change_set.map(|command| command.scope(selector.clone())),
                 disabled,
-                style,
-            },
-            WidgetKind::Textarea {
-                value,
-                placeholder,
-                on_change,
-                disabled,
-                style,
-            } => WidgetKind::Textarea {
-                value,
-                placeholder,
-                on_change: on_change.map(|command| command.scope(selector.clone())),
-                disabled,
-                style,
+                input_style,
+                textarea_style,
+                multiline,
             },
         };
 
@@ -345,31 +338,42 @@ impl<VM> Element<VM> {
                 disabled: disabled.clone(),
                 style: resolved_select_style(style.as_ref(), theme),
             },
-            WidgetKind::Input {
-                value,
+            WidgetKind::TextEditor {
+                controller,
                 placeholder,
                 on_change,
+                on_change_set,
                 disabled,
-                style,
-            } => ResolvedWidgetKind::Input {
-                value: value.clone(),
+                input_style,
+                textarea_style,
+                multiline,
+            } => ResolvedWidgetKind::TextEditor {
+                controller: controller.clone(),
                 placeholder: placeholder.clone(),
                 on_change: on_change.clone(),
+                on_change_set: on_change_set.clone(),
                 disabled: disabled.clone(),
-                style: resolved_input_style(style.as_ref(), theme),
-            },
-            WidgetKind::Textarea {
-                value,
-                placeholder,
-                on_change,
-                disabled,
-                style,
-            } => ResolvedWidgetKind::Textarea {
-                value: value.clone(),
-                placeholder: placeholder.clone(),
-                on_change: on_change.clone(),
-                disabled: disabled.clone(),
-                style: resolved_textarea_style(style.as_ref(), theme),
+                style: if *multiline {
+                    let style = resolved_textarea_style(textarea_style.as_ref(), theme);
+                    crate::ui::widget::InputStyle {
+                        surface: style.surface,
+                        background: style.background,
+                        text: style.text,
+                        placeholder: style.placeholder,
+                        border: style.border,
+                        selection: style.selection,
+                        caret: style.caret,
+                        border_width: style.border_width,
+                        radius: style.radius,
+                        padding_x: style.padding_x,
+                        padding_y: style.padding_y,
+                        min_height: style.min_height,
+                        text_style: style.text_style,
+                    }
+                } else {
+                    resolved_input_style(input_style.as_ref(), theme)
+                },
+                multiline: *multiline,
             },
         };
 

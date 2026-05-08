@@ -11,13 +11,14 @@ use taffy::prelude::{
 use taffy::Size as TaffySize;
 
 use crate::animation::{AnimationEngine, Transition, WidgetProperty};
+use crate::foundation::binding::{TextChangeSet, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{
     media_placeholder_color, media_placeholder_label, resolve_media_rect, ContentFit,
     IntrinsicSize, MediaManager, RasterRequest,
 };
-use crate::text::font::{FontManager, TextFontRequest, ICON_FONT_FAMILY};
+use crate::text::font::{FontManager, TextFontRequest, TextLayoutInfo, ICON_FONT_FAMILY};
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, Track, Value, Wrap,
 };
@@ -43,7 +44,6 @@ use super::style::{
     ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
     InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
     SelectStyle as WidgetSelectStyle, SwitchStyle as WidgetSwitchStyle,
-    TextareaStyle as WidgetTextareaStyle,
 };
 use super::text::Text;
 
@@ -167,19 +167,14 @@ enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         style: WidgetSelectStyle,
     },
-    Input {
-        value: Value<String>,
+    TextEditor {
+        controller: TextController,
         placeholder: Value<String>,
         on_change: Option<ValueCommand<VM, String>>,
+        on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
         disabled: Value<bool>,
         style: WidgetInputStyle,
-    },
-    Textarea {
-        value: Value<String>,
-        placeholder: Value<String>,
-        on_change: Option<ValueCommand<VM, String>>,
-        disabled: Value<bool>,
-        style: WidgetTextareaStyle,
+        multiline: bool,
     },
 }
 
@@ -191,6 +186,7 @@ struct CollectContext<'a, 'b> {
     focused_input: Option<WidgetId>,
     focused_text_state: Option<&'a TextEditState>,
     focused_text_value: Option<&'a str>,
+    focused_text_layout: Option<&'a TextLayoutInfo>,
     caret_visible: bool,
     selected_text: Option<WidgetId>,
     selected_text_state: Option<&'a TextEditState>,

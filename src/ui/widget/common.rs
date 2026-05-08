@@ -7,6 +7,7 @@ use crate::animation::{AnimationEngine, AnimationKey, WidgetProperty};
 use crate::media::TextureFrame;
 use taffy::NodeId as TaffyNodeId;
 
+use crate::foundation::binding::{TextChangeSet, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
@@ -1036,19 +1037,15 @@ pub(crate) enum WidgetKind<VM> {
         disabled: Value<bool>,
         style: Option<StyleResolver<WidgetSelectStyle>>,
     },
-    Input {
-        value: Value<String>,
+    TextEditor {
+        controller: TextController,
         placeholder: Value<String>,
         on_change: Option<ValueCommand<VM, String>>,
+        on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
         disabled: Value<bool>,
-        style: Option<StyleResolver<WidgetInputStyle>>,
-    },
-    Textarea {
-        value: Value<String>,
-        placeholder: Value<String>,
-        on_change: Option<ValueCommand<VM, String>>,
-        disabled: Value<bool>,
-        style: Option<StyleResolver<WidgetTextareaStyle>>,
+        input_style: Option<StyleResolver<WidgetInputStyle>>,
+        textarea_style: Option<StyleResolver<WidgetTextareaStyle>>,
+        multiline: bool,
     },
 }
 
@@ -1181,31 +1178,24 @@ impl<VM> Clone for WidgetKind<VM> {
                 disabled: disabled.clone(),
                 style: style.clone(),
             },
-            Self::Input {
-                value,
+            Self::TextEditor {
+                controller,
                 placeholder,
                 on_change,
+                on_change_set,
                 disabled,
-                style,
-            } => Self::Input {
-                value: value.clone(),
+                input_style,
+                textarea_style,
+                multiline,
+            } => Self::TextEditor {
+                controller: controller.clone(),
                 placeholder: placeholder.clone(),
                 on_change: on_change.clone(),
+                on_change_set: on_change_set.clone(),
                 disabled: disabled.clone(),
-                style: style.clone(),
-            },
-            Self::Textarea {
-                value,
-                placeholder,
-                on_change,
-                disabled,
-                style,
-            } => Self::Textarea {
-                value: value.clone(),
-                placeholder: placeholder.clone(),
-                on_change: on_change.clone(),
-                disabled: disabled.clone(),
-                style: style.clone(),
+                input_style: input_style.clone(),
+                textarea_style: textarea_style.clone(),
+                multiline: *multiline,
             },
         }
     }
@@ -1239,8 +1229,8 @@ pub(crate) enum MeasureContext {
         placeholder: Value<String>,
         style: crate::ui::widget::SelectStyle,
     },
-    Input {
-        value: String,
+    TextEditor {
+        controller: TextController,
         placeholder: String,
         style: crate::ui::widget::InputStyle,
         multiline: bool,
@@ -1297,9 +1287,9 @@ pub(crate) enum HitInteraction<VM> {
     TextInput {
         id: WidgetId,
         interactions: InteractionHandlers<VM>,
-        value: String,
-        placeholder: String,
+        controller: TextController,
         on_change: Option<ValueCommand<VM, String>>,
+        on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
         multiline: bool,
         frame: Rect,
         padding: Insets,
@@ -1397,9 +1387,9 @@ impl<VM> Clone for HitInteraction<VM> {
             Self::TextInput {
                 id,
                 interactions,
-                value,
-                placeholder,
+                controller,
                 on_change,
+                on_change_set,
                 multiline,
                 frame,
                 padding,
@@ -1407,9 +1397,9 @@ impl<VM> Clone for HitInteraction<VM> {
             } => Self::TextInput {
                 id: *id,
                 interactions: interactions.clone(),
-                value: value.clone(),
-                placeholder: placeholder.clone(),
+                controller: controller.clone(),
                 on_change: on_change.clone(),
+                on_change_set: on_change_set.clone(),
                 multiline: *multiline,
                 frame: *frame,
                 padding: *padding,

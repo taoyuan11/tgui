@@ -18,7 +18,7 @@ fn title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
 }
 
 struct App {
-    content: Observable<String>,
+    content: TextController,
     path_label: Observable<String>,
 }
 
@@ -30,7 +30,7 @@ impl ViewModel for App {
         });
 
         Self {
-            content: context.observable(content),
+            content: context.text_controller(content),
             path_label: context.observable(path.display().to_string()),
         }
     }
@@ -52,12 +52,9 @@ impl ViewModel for App {
                     .style(card_style)
                     .child(el![
                         Text::new("源码编辑区"),
-                        Textarea::new(self.content.binding())
+                        Textarea::new(self.content.clone())
                             .width(pct(100.0))
-                            .grow(1.0)
-                            .on_change(ValueCommand::new(|app: &mut App, value| {
-                                app.content.set(value)
-                            })),
+                            .grow(1.0),
                     ]),
             ])
             .into()

@@ -49,8 +49,8 @@ struct App {
     contact_method: Observable<String>,
     select_action: Observable<Option<String>>,
     notification_status: Observable<String>,
-    input_text: Observable<String>,
-    textarea_text: Observable<String>,
+    input_text: TextController,
+    textarea_text: TextController,
 }
 
 impl ViewModel for App {
@@ -63,10 +63,10 @@ impl ViewModel for App {
             contact_method: context.observable(String::from("system")),
             select_action: context.observable(None),
             notification_status: context.observable(String::from("尚未发送通知")),
-            input_text: context.observable(String::from("可编辑的单行输入框")),
-            textarea_text: context.observable(String::from(
+            input_text: context.text_controller("可编辑的单行输入框"),
+            textarea_text: context.text_controller(
                 "这是一个受控 Textarea。\n你可以在这里输入多行内容，示例不会保存修改。",
-            )),
+            ),
         }
     }
 
@@ -159,21 +159,15 @@ impl ViewModel for App {
                 ),
                 component_card(
                     "Input",
-                    Input::new(self.input_text.binding())
+                    Input::new(self.input_text.clone())
                         .width(dp(260.0))
-                        .placeholder("请输入内容")
-                        .on_change(ValueCommand::new(|app: &mut App, value| {
-                            app.input_text.set(value)
-                        })),
+                        .placeholder("请输入内容"),
                 ),
                 component_card(
                     "Textarea",
-                    Textarea::new(self.textarea_text.binding())
+                    Textarea::new(self.textarea_text.clone())
                         .size(dp(320.0), dp(140.0))
-                        .placeholder("请输入多行内容")
-                        .on_change(ValueCommand::new(|app: &mut App, value| {
-                            app.textarea_text.set(value)
-                        })),
+                        .placeholder("请输入多行内容"),
                 ),
                 component_card(
                     "Notification",

@@ -74,6 +74,141 @@ impl ViewModelContext {
     pub fn timeline(&self) -> AnimationControllerBuilder {
         AnimationControllerBuilder::new(self.animations.clone(), self.invalidation.clone())
     }
+
+    /// Creates a retained text controller for `Input` and `Textarea`.
+    pub fn text_controller(&self, initial_text: impl Into<String>) -> TextController {
+        TextController::new(initial_text, self.invalidation.clone())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextSnapshot {
+    pub text: String,
+    pub revision: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextChange {
+    pub range_bytes: (usize, usize),
+    pub inserted_text: String,
+}
+
+impl TextChange {
+    pub fn new(range_bytes: (usize, usize), inserted_text: impl Into<String>) -> Self {
+        Self {
+            range_bytes,
+            inserted_text: inserted_text.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextChangeSet {
+    pub start_revision: u64,
+    pub end_revision: u64,
+    pub changes: Vec<TextChange>,
+    pub text: String,
+}
+
+#[derive(Clone)]
+pub struct TextController {
+    state: Arc<Mutex<TextControllerState>>,
+    invalidation: InvalidationSignal,
+}
+
+#[derive(Debug)]
+struct TextControllerState {
+    text: String,
+    revision: u64,
+}
+
+impl TextController {
+    fn new(initial_text: impl Into<String>, invalidation: InvalidationSignal) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(TextControllerState {
+                text: initial_text.into(),
+                revision: 1,
+            })),
+            invalidation,
+        }
+    }
+
+    pub(crate) fn new_legacy(initial_text: impl Into<crate::ui::layout::Value<String>>) -> Self {
+        Self::new(initial_text.into().resolve(), InvalidationSignal::new())
+    }
+
+    pub fn text(&self) -> String {
+        self.state
+            .lock()
+            .expect("text controller lock poisoned")
+            .text
+            .clone()
+    }
+
+    pub fn snapshot(&self) -> TextSnapshot {
+        let state = self.state.lock().expect("text controller lock poisoned");
+        TextSnapshot {
+            text: state.text.clone(),
+            revision: state.revision,
+        }
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.state
+            .lock()
+            .expect("text controller lock poisoned")
+            .revision
+    }
+
+    pub fn set_text(&self, text: impl Into<String>) {
+        if self.set_text_silent(text) {
+            self.invalidation.mark_dirty();
+        }
+    }
+
+    pub fn replace_all(&self, text: impl Into<String>) {
+        self.set_text(text);
+    }
+
+    pub(crate) fn replace_text_silent(&self, text: impl Into<String>) -> u64 {
+        let text = text.into();
+        let mut state = self.state.lock().expect("text controller lock poisoned");
+        if state.text != text {
+            state.text = text;
+            state.revision = state.revision.wrapping_add(1).max(1);
+        }
+        state.revision
+    }
+
+    pub(crate) fn set_text_silent(&self, text: impl Into<String>) -> bool {
+        let previous = self.revision();
+        let next = self.replace_text_silent(text);
+        next != previous
+    }
+}
+
+impl From<String> for TextController {
+    fn from(value: String) -> Self {
+        TextController::new_legacy(value)
+    }
+}
+
+impl From<&str> for TextController {
+    fn from(value: &str) -> Self {
+        TextController::new_legacy(value)
+    }
+}
+
+impl From<Binding<String>> for TextController {
+    fn from(value: Binding<String>) -> Self {
+        TextController::new_legacy(crate::ui::layout::Value::Bound(value))
+    }
+}
+
+impl From<crate::ui::layout::Value<String>> for TextController {
+    fn from(value: crate::ui::layout::Value<String>) -> Self {
+        TextController::new_legacy(value)
+    }
 }
 
 #[derive(Clone)]
