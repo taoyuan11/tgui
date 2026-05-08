@@ -2937,7 +2937,12 @@ fn text_cursor_index_at_point(
         inner.width.min(layout.width).max(0.0)
     };
     let content_frame = Rect::new(
-        inner.x - if multiline && auto_wrap { Dp::ZERO } else { scroll.x },
+        inner.x
+            - if multiline && auto_wrap {
+                Dp::ZERO
+            } else {
+                scroll.x
+            },
         if multiline {
             inner.y - scroll.y
         } else {

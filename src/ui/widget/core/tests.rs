@@ -4583,8 +4583,11 @@ fn textarea_auto_wrap_false_enables_horizontal_scroll_region() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let long_line = "0123456789abcdef0123456789abcdef0123456789abcdef";
-    let tree: WidgetTree<()> =
-        WidgetTree::new(Textarea::new(long_line).size(dp(120.0), dp(60.0)).auto_wrap(false));
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Textarea::new(long_line)
+            .size(dp(120.0), dp(60.0))
+            .auto_wrap(false),
+    );
 
     let rendered = tree.render_output(
         &font_manager,

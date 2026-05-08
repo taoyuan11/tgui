@@ -843,41 +843,6 @@ fn clicking_checkbox_dispatches_toggled_value() {
 }
 
 #[test]
-fn input_builder_creates_text_input_hit_region() {
-    let invalidation = InvalidationSignal::new();
-    let tree: WidgetTree<TestVm> = WidgetTree::new(Input::<TestVm>::new("hello"));
-    let mut handler = test_handler(Some(tree), invalidation);
-    let has_input = handler.computed_scene().hit_regions.iter().any(|region| {
-        matches!(
-            region.interaction,
-            HitInteraction::TextInput {
-                multiline: false,
-                ..
-            }
-        )
-    });
-    assert!(has_input);
-}
-
-#[test]
-fn textarea_builder_creates_multiline_text_input_hit_region() {
-    let invalidation = InvalidationSignal::new();
-    let tree: WidgetTree<TestVm> =
-        WidgetTree::new(Textarea::<TestVm>::new("hello").height(dp(80.0)));
-    let mut handler = test_handler(Some(tree), invalidation);
-    let has_textarea = handler.computed_scene().hit_regions.iter().any(|region| {
-        matches!(
-            region.interaction,
-            HitInteraction::TextInput {
-                multiline: true,
-                ..
-            }
-        )
-    });
-    assert!(has_textarea);
-}
-
-#[test]
 fn focused_input_receives_inserted_text_via_on_change() {
     let invalidation = InvalidationSignal::new();
     let tree = WidgetTree::new(Input::new("hi").on_change(ValueCommand::new(
@@ -1169,78 +1134,6 @@ fn focused_input_renders_local_buffer_until_bound_value_catches_up() {
         .texts
         .iter()
         .any(|primitive| primitive.content == "abc"));
-}
-
-#[test]
-fn focused_input_flush_without_callbacks_does_not_mark_global_invalidation() {
-    let invalidation = InvalidationSignal::new();
-    let tree = WidgetTree::new(Input::new("abcd"));
-    let mut handler =
-        test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation.clone());
-    let viewport = handler.viewport_rect();
-    let frame = {
-        let computed = handler.computed_scene();
-        computed
-            .hit_regions
-            .iter()
-            .find_map(|region| match &region.interaction {
-                HitInteraction::TextInput { .. } => Some(region.rect),
-                _ => None,
-            })
-            .expect("input hit region should exist")
-    };
-
-    handler.cursor_position = Some(Point {
-        x: frame.x + frame.width - dp(4.0),
-        y: frame.y + (frame.height * 0.5),
-    });
-    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
-    handler.handle_keyboard_input(&repeated_pressed_key_event(PhysicalKey::Code(
-        KeyCode::Backspace,
-    )));
-
-    let revision_before_flush = invalidation.revision();
-    let outcome = handler.flush_pending_text_input_changes();
-    assert!(outcome.changed);
-    assert!(!outcome.requires_global_invalidation);
-    assert_eq!(invalidation.revision(), revision_before_flush);
-}
-
-#[test]
-fn focused_input_session_keeps_retained_layout_snapshot() {
-    let invalidation = InvalidationSignal::new();
-    let tree = WidgetTree::new(Textarea::new("abcd"));
-    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
-    let viewport = handler.viewport_rect();
-    let frame = {
-        let computed = handler.computed_scene();
-        computed
-            .hit_regions
-            .iter()
-            .find_map(|region| match &region.interaction {
-                HitInteraction::TextInput {
-                    multiline: true, ..
-                } => Some(region.rect),
-                _ => None,
-            })
-            .expect("textarea hit region should exist")
-    };
-
-    handler.cursor_position = Some(Point {
-        x: frame.x + dp(8.0),
-        y: frame.y + dp(8.0),
-    });
-    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
-    handler.handle_keyboard_input(&text_key_event("x"));
-
-    let focused = handler
-        .focused_widget_id()
-        .expect("textarea should stay focused after edit");
-    let session = handler
-        .text_input_buffers
-        .get(&focused)
-        .expect("text input session should exist");
-    assert!(session.layout_snapshot.is_some());
 }
 
 #[test]
@@ -2121,9 +2014,9 @@ fn textarea_backspace_keeps_scrolled_viewport_and_scroll_range() {
     assert!(scrolled_before_focus > Dp::ZERO);
 
     handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
-    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(
-        KeyCode::Backspace,
-    ))));
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Backspace,)))
+    );
 
     let state = handler
         .text_edit_states

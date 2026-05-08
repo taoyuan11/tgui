@@ -145,9 +145,9 @@ fn update_session_layout_snapshot(
             )
         }
     } else {
-        session.editor.with_buffer(|buffer| {
-            build_layout_info_from_buffer(buffer, display_text, line_height)
-        })
+        session
+            .editor
+            .with_buffer(|buffer| build_layout_info_from_buffer(buffer, display_text, line_height))
     });
     session.display_text = display_text.to_string();
 }
@@ -435,7 +435,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             ))
         });
         let display_text = session.display_text.clone();
-        update_session_layout_snapshot(&self.font_manager, &mut session, &display_text, line_height);
+        update_session_layout_snapshot(
+            &self.font_manager,
+            &mut session,
+            &display_text,
+            line_height,
+        );
         if let Some(started_at) = started_at {
             log_text_profile(
                 "create_text_input_session",
@@ -951,14 +956,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or_else(|| {
                 let (layout, _, _) = super::input_text_layout(
                     &self.font_manager,
-                &self.theme,
-                self.unit_context(),
-                text_style,
-                &display_text,
-                multiline,
-                auto_wrap,
-                inner.width.get(),
-            );
+                    &self.theme,
+                    self.unit_context(),
+                    text_style,
+                    &display_text,
+                    multiline,
+                    auto_wrap,
+                    inner.width.get(),
+                );
                 layout
             });
         let caret = caret_index.min(display_text.len());
@@ -1045,14 +1050,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or_else(|| {
                 let (layout, _, _) = super::input_text_layout(
                     &self.font_manager,
-                &self.theme,
-                self.unit_context(),
-                &text_style,
-                &current_value,
-                true,
-                region.auto_wrap,
-                inner.width.get(),
-            );
+                    &self.theme,
+                    self.unit_context(),
+                    &text_style,
+                    &current_value,
+                    true,
+                    region.auto_wrap,
+                    inner.width.get(),
+                );
                 layout
             });
         let current_line = layout.line_index_for_index(state.cursor);
@@ -2737,7 +2742,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     None,
                     interactions.on_click.clone().map(ClickHandler::Command),
                     None,
-                    cursor.map(|cursor| (id, frame, padding, text_style, text, false, false, cursor)),
+                    cursor
+                        .map(|cursor| (id, frame, padding, text_style, text, false, false, cursor)),
                 )
             }
             HitInteraction::Switch {
@@ -2841,7 +2847,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         scroll,
                         point,
                     );
-                    (id, frame, padding, text_style, value, multiline, auto_wrap, cursor)
+                    (
+                        id, frame, padding, text_style, value, multiline, auto_wrap, cursor,
+                    )
                 }),
             ),
             HitInteraction::SelectOption {

@@ -222,7 +222,10 @@ impl<VM> Textarea<VM> {
     }
 
     pub fn auto_wrap(mut self, auto_wrap: impl Into<Value<bool>>) -> Self {
-        if let WidgetKind::TextEditor { auto_wrap: target, .. } = &mut self.element.kind {
+        if let WidgetKind::TextEditor {
+            auto_wrap: target, ..
+        } = &mut self.element.kind
+        {
             *target = auto_wrap.into();
         }
         self
