@@ -1681,6 +1681,63 @@ fn textarea_arrow_down_moves_caret_to_next_visual_line() {
 }
 
 #[test]
+fn textarea_edit_does_not_create_phantom_blank_line_in_layout_snapshot() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Textarea::<TestVm>::new("hello\nworld").height(dp(120.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: 0,
+            anchor: 0,
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    assert!(handler.handle_keyboard_input(&text_key_event("x")));
+
+    let session = handler
+        .text_input_buffers
+        .get(&text_id)
+        .expect("textarea text input session should exist");
+    let layout = session
+        .layout_snapshot
+        .as_ref()
+        .expect("textarea layout snapshot should exist after edit");
+
+    assert_eq!(session.current_text, "xhello\nworld");
+    assert_eq!(layout.line_count(), 2);
+    assert_eq!(layout.line_start(1), "xhello\n".len());
+}
+
+#[test]
 fn textarea_click_tracks_visual_wrap_for_overflowing_initial_content() {
     let invalidation = InvalidationSignal::new();
     let value = "supercalifragilisticexpialidocious wrapped text with another long visual line";

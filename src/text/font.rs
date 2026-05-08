@@ -265,9 +265,10 @@ impl TextLineLayoutInfo {
             return 0.0;
         }
 
+        let local_index = index.saturating_sub(self.start_index);
         let mut x = 0.0;
         for boundary in &self.boundaries {
-            if boundary.index > index {
+            if boundary.index > local_index {
                 break;
             }
             x = boundary.x;
@@ -285,13 +286,13 @@ impl TextLineLayoutInfo {
             let start = pair[0];
             let end = pair[1];
             if local_x <= (start.x + end.x) * 0.5 {
-                return start.index;
+                return self.start_index + start.index;
             }
         }
 
         self.boundaries
             .last()
-            .map(|boundary| boundary.index)
+            .map(|boundary| self.start_index + boundary.index)
             .unwrap_or(self.end_index)
     }
 }
@@ -568,6 +569,89 @@ impl FontManager {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn update_layout_after_edit(
+        &self,
+        previous: &mut TextLayoutInfo,
+        old_text: &str,
+        new_text: &str,
+        request: TextFontRequest<'_>,
+        font_size: f32,
+        line_height: f32,
+        letter_spacing: f32,
+        wrap_width: Option<f32>,
+        replacement: (usize, usize, usize, usize),
+    ) -> bool {
+        let (old_start, old_end, new_start, new_end) = replacement;
+        let old_segment_start = logical_line_start(old_text, old_start);
+        let old_segment_end = logical_line_end_exclusive(old_text, old_end);
+        let new_segment_start = logical_line_start(new_text, new_start);
+        let new_segment_end = logical_line_end_exclusive(new_text, new_end);
+        let new_segment_measure_end =
+            logical_line_measure_end_exclusive(new_text, new_segment_start, new_segment_end);
+
+        if old_segment_start != new_segment_start {
+            return false;
+        }
+
+        let start_line = previous.line_index_for_index(old_segment_start);
+        let end_line_exclusive = if old_segment_end >= old_text.len() {
+            previous.line_count()
+        } else {
+            previous.line_index_for_index(old_segment_end)
+        };
+
+        if start_line > end_line_exclusive || end_line_exclusive > previous.lines.len() {
+            return false;
+        }
+
+        let base_top = previous.line_top(start_line);
+        let removed_height = if end_line_exclusive < previous.line_count() {
+            previous.line_top(end_line_exclusive) - base_top
+        } else {
+            previous.height - base_top
+        };
+        let next_layout = if let Some(wrap_width) = wrap_width {
+            self.measure_text_layout_wrapped(
+                &new_text[new_segment_start..new_segment_measure_end],
+                request,
+                font_size,
+                line_height,
+                letter_spacing,
+                wrap_width,
+            )
+        } else {
+            self.measure_text_layout(
+                &new_text[new_segment_start..new_segment_measure_end],
+                request,
+                font_size,
+                line_height,
+                letter_spacing,
+            )
+        };
+        let height_delta = next_layout.height - removed_height;
+        let byte_delta = new_text.len() as isize - old_text.len() as isize;
+        let inserted_lines: Vec<_> = next_layout
+            .lines
+            .into_iter()
+            .map(|line| shift_line_layout(line, new_segment_start, base_top))
+            .collect();
+        let inserted_len = inserted_lines.len();
+        previous
+            .lines
+            .splice(start_line..end_line_exclusive, inserted_lines);
+        for line in previous.lines.iter_mut().skip(start_line + inserted_len) {
+            shift_line_layout_tail_in_place(line, byte_delta, height_delta);
+        }
+        previous.width = previous
+            .lines
+            .iter()
+            .map(|line| line.width)
+            .fold(0.0, f32::max);
+        previous.height = (previous.height + height_delta).max(line_height);
+        true
+    }
+
     fn measure_text_layout_cached(
         &self,
         text: &str,
@@ -797,13 +881,15 @@ pub(crate) fn build_layout_info_from_buffer(
                 .map(|glyph| glyph.end)
                 .max()
                 .unwrap_or(run.text.len());
-        let mut boundaries = vec![TextBoundary {
-            index: start_index,
-            x: 0.0,
-        }];
+        let start_relative = start_index.saturating_sub(line_offset);
+        let mut boundaries = vec![TextBoundary { index: 0, x: 0.0 }];
 
         for glyph in run.glyphs {
-            push_boundary(&mut boundaries, line_offset + glyph.start, glyph.x.max(0.0));
+            push_boundary(
+                &mut boundaries,
+                glyph.start.saturating_sub(start_relative),
+                glyph.x.max(0.0),
+            );
 
             let cluster = &run.text[glyph.start..glyph.end];
             let grapheme_count = cluster.graphemes(true).count().max(1);
@@ -814,13 +900,17 @@ pub(crate) fn build_layout_info_from_buffer(
                 grapheme_x += grapheme_width;
                 push_boundary(
                     &mut boundaries,
-                    line_offset + glyph.start + offset + grapheme.len(),
+                    glyph.start + offset + grapheme.len() - start_relative,
                     grapheme_x.max(0.0),
                 );
             }
         }
 
-        push_boundary(&mut boundaries, end_index, run.line_w.max(0.0));
+        push_boundary(
+            &mut boundaries,
+            end_index.saturating_sub(start_index),
+            run.line_w.max(0.0),
+        );
 
         width = width.max(run.line_w.max(0.0));
         height = height.max(run.line_top + run.line_height);
@@ -861,6 +951,48 @@ fn logical_line_offsets(text: &str) -> Vec<usize> {
         }
     }
     offsets
+}
+
+fn logical_line_start(text: &str, index: usize) -> usize {
+    let target = index.min(text.len());
+    text[..target].rfind('\n').map(|pos| pos + 1).unwrap_or(0)
+}
+
+fn logical_line_end_exclusive(text: &str, index: usize) -> usize {
+    let target = index.min(text.len());
+    text[target..]
+        .find('\n')
+        .map(|relative| target + relative + 1)
+        .unwrap_or(text.len())
+}
+
+fn logical_line_measure_end_exclusive(text: &str, start: usize, end: usize) -> usize {
+    if start < end && end < text.len() && text.as_bytes()[end - 1] == b'\n' {
+        end - 1
+    } else {
+        end
+    }
+}
+
+fn shift_line_layout(
+    mut line: TextLineLayoutInfo,
+    byte_offset: usize,
+    top_offset: f32,
+) -> TextLineLayoutInfo {
+    line.start_index += byte_offset;
+    line.end_index += byte_offset;
+    line.top += top_offset;
+    line
+}
+
+fn shift_line_layout_tail_in_place(
+    line: &mut TextLineLayoutInfo,
+    byte_delta: isize,
+    top_delta: f32,
+) {
+    line.start_index = line.start_index.saturating_add_signed(byte_delta);
+    line.end_index = line.end_index.saturating_add_signed(byte_delta);
+    line.top += top_delta;
 }
 
 #[cfg(test)]
@@ -993,6 +1125,43 @@ mod tests {
                 let actual = layout.index_for_point(sample_x, sample_y);
                 assert_eq!(actual, expected, "x={sample_x}, y={sample_y}");
             }
+        }
+    }
+
+    #[test]
+    fn incremental_layout_edit_on_nonterminal_line_matches_full_layout() {
+        let manager = FontManager::new(&FontCatalog::default());
+        let old_text = "hello\nworld";
+        let new_text = "xhello\nworld";
+        let request = TextFontRequest {
+            preferred_font: None,
+            weight: FontWeight::NORMAL,
+        };
+        let mut incremental =
+            manager.measure_text_layout(old_text, request.clone(), 16.0, 24.0, 0.0);
+
+        assert!(manager.update_layout_after_edit(
+            &mut incremental,
+            old_text,
+            new_text,
+            request.clone(),
+            16.0,
+            24.0,
+            0.0,
+            None,
+            (0, 0, 0, 1),
+        ));
+
+        let fresh = manager.measure_text_layout(new_text, request, 16.0, 24.0, 0.0);
+        assert_eq!(incremental.line_count(), fresh.line_count());
+        assert_eq!(incremental.height, fresh.height);
+        for line_index in 0..fresh.line_count() {
+            assert_eq!(
+                incremental.line_start(line_index),
+                fresh.line_start(line_index)
+            );
+            assert_eq!(incremental.line_end(line_index), fresh.line_end(line_index));
+            assert_eq!(incremental.line_top(line_index), fresh.line_top(line_index));
         }
     }
 

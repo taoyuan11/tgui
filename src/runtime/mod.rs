@@ -54,7 +54,7 @@ use crate::ui::widget::{
     ResolvedSceneLayout, ScrollRegion, ScrollbarHandle, Text, TextEditState, WidgetId,
     WidgetStateMap, WidgetTree,
 };
-use cosmic_text::{AttrsOwned, Editor};
+use cosmic_text::Editor;
 use image::GenericImageView;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -533,7 +533,6 @@ struct TextInputBufferState {
     rope: Rope,
     editor: Editor<'static>,
     config: Option<TextInputSessionConfig>,
-    text_attrs: Option<AttrsOwned>,
     layout_snapshot: Option<TextLayoutInfo>,
     pending_changes: Vec<TextChange>,
     pending_start_revision: Option<u64>,
@@ -549,7 +548,6 @@ impl TextInputBufferState {
             rope: Rope::from_str(&resolved_value),
             editor,
             config: None,
-            text_attrs: None,
             layout_snapshot: None,
             pending_changes: Vec::new(),
             pending_start_revision: None,

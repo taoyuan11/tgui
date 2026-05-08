@@ -648,25 +648,35 @@ pub(super) fn measure_node(
             auto_wrap,
             ..
         }) => {
-            let value = controller.text();
-            let content = if value.is_empty() {
-                placeholder.clone()
-            } else {
-                value
-            };
-            let text = text_with_typography(Value::Static(content.clone()), &style.text_style);
             let text_size = if *multiline {
                 if *auto_wrap {
+                    let text =
+                        text_with_typography(Value::Static(String::new()), &style.text_style);
                     let (_, line_height, _) = resolved_text_metrics(&text, theme, units);
                     (
                         SELECT_DEFAULT_WIDTH,
                         line_height.max(units.resolve_dp(style.min_height)),
                     )
                 } else {
+                    let value = controller.text();
+                    let content = if value.is_empty() {
+                        placeholder.clone()
+                    } else {
+                        value
+                    };
+                    let text =
+                        text_with_typography(Value::Static(content.clone()), &style.text_style);
                     let (width, height) = measure_text_content(&text, font_manager, theme, units);
                     (width.max(SELECT_DEFAULT_WIDTH), height)
                 }
             } else {
+                let value = controller.text();
+                let content = if value.is_empty() {
+                    placeholder.clone()
+                } else {
+                    value
+                };
+                let text = text_with_typography(Value::Static(content.clone()), &style.text_style);
                 measure_text_content(&text, font_manager, theme, units)
             };
             let horizontal = units.resolve_dp(style.padding_x) * 2.0;

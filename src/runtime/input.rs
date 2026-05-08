@@ -18,7 +18,7 @@ use crate::ui::widget::{
     CanvasItemInteractionHandlers, CanvasMouseButton, HitInteraction, InteractionHandlers, Point,
     Rect, ScrollRegion, ScrollbarAxis, ScrollbarHandle, Text, TextEditState, WidgetId, WidgetTree,
 };
-use cosmic_text::{AttrsList, Cursor as TextCursor, Edit, Editor, Metrics, Selection, Wrap};
+use cosmic_text::{Edit, Editor, Metrics, Wrap};
 
 use super::{
     canvas_mouse_button, cursor_icon, is_primary_shortcut_modifier, mouse_scroll_delta,
@@ -76,38 +76,6 @@ fn text_edit_display_text(text: &str, state: &TextEditState) -> String {
         display
     } else {
         text.to_string()
-    }
-}
-
-fn text_cursor_from_byte_index(text: &str, byte_index: usize) -> TextCursor {
-    let mut line = 0usize;
-    let mut line_start = 0usize;
-    let target = byte_index.min(text.len());
-
-    while let Some(relative) = text[line_start..].find('\n') {
-        let line_end = line_start + relative;
-        if target <= line_end {
-            return TextCursor::new(line, target - line_start);
-        }
-        line += 1;
-        line_start = line_end + 1;
-    }
-
-    TextCursor::new(line, target.saturating_sub(line_start))
-}
-
-fn apply_text_state_to_editor(editor: &mut Editor<'static>, state: &TextEditState, text: &str) {
-    editor.set_cursor(text_cursor_from_byte_index(
-        text,
-        state.cursor.min(text.len()),
-    ));
-    if let Some((start, _)) = state.selection_range() {
-        editor.set_selection(Selection::Normal(text_cursor_from_byte_index(
-            text,
-            start.min(text.len()),
-        )));
-    } else {
-        editor.set_selection(Selection::None);
     }
 }
 
@@ -196,44 +164,6 @@ fn text_replacement_bounds(old_text: &str, new_text: &str) -> Option<(usize, usi
 }
 
 #[allow(clippy::too_many_arguments)]
-fn apply_incremental_session_buffer_edit(
-    font_manager: &FontManager,
-    font_system: &mut cosmic_text::FontSystem,
-    session: &mut super::TextInputBufferState,
-    old_display_text: &str,
-    next_display_text: &str,
-    text_state: &TextEditState,
-    attrs: &cosmic_text::AttrsOwned,
-    font_size: f32,
-    line_height: f32,
-) {
-    let Some((old_start, old_end, new_start, new_end)) =
-        text_replacement_bounds(old_display_text, next_display_text)
-    else {
-        apply_text_state_to_editor(&mut session.editor, text_state, next_display_text);
-        return;
-    };
-
-    let inserted_text = &next_display_text[new_start..new_end];
-    let replace_start = text_cursor_from_byte_index(old_display_text, old_start);
-    let replace_end = text_cursor_from_byte_index(old_display_text, old_end);
-    let previous_scroll = session.editor.with_buffer(|buffer| buffer.scroll());
-    session.editor.delete_range(replace_start, replace_end);
-    if !inserted_text.is_empty() {
-        session.editor.insert_at(
-            replace_start,
-            inserted_text,
-            Some(AttrsList::new(&attrs.as_attrs())),
-        );
-    }
-    session.editor.with_buffer_mut(|buffer| {
-        buffer.set_scroll(previous_scroll);
-        font_manager.finish_buffer_layout(font_system, buffer, font_size, line_height);
-    });
-    apply_text_state_to_editor(&mut session.editor, text_state, next_display_text);
-}
-
-#[allow(clippy::too_many_arguments)]
 fn refresh_session_buffer(
     font_manager: &FontManager,
     session: &mut super::TextInputBufferState,
@@ -244,18 +174,20 @@ fn refresh_session_buffer(
     line_height: f32,
     letter_spacing: f32,
     width: f32,
-    height: f32,
+    _height: f32,
     multiline: bool,
     auto_wrap: bool,
-    text_state: &TextEditState,
+    _text_state: &TextEditState,
     display_text: &str,
 ) {
     let started_at = text_profile_enabled().then_some(Instant::now());
     let config_changed = session.config.as_ref() != Some(&config);
     let text_changed = session.display_text != display_text;
+    let incremental = !config_changed
+        && text_changed
+        && text_replacement_bounds(&session.display_text, display_text).is_some();
 
     if !config_changed && !text_changed {
-        apply_text_state_to_editor(&mut session.editor, text_state, display_text);
         if session.layout_snapshot.is_none() {
             update_session_layout_snapshot(font_manager, session, display_text, line_height);
         }
@@ -273,69 +205,46 @@ fn refresh_session_buffer(
         return;
     }
 
-    let mut reconfigured = config_changed;
-    let mut incremental = false;
-    let previous_scroll = session.editor.with_buffer(|buffer| buffer.scroll());
-    let previous_display_text = session.display_text.clone();
-    font_manager.with_font_system(|font_system| {
-        let next_attrs = font_manager.buffer_attrs_owned(
-            font_system,
-            display_text,
-            crate::text::font::TextFontRequest {
-                preferred_font,
-                weight,
-            },
-            font_size,
-            letter_spacing,
-        );
-        let attrs_changed = session.text_attrs.as_ref() != Some(&next_attrs);
-        if !config_changed && !attrs_changed && text_changed {
-            apply_incremental_session_buffer_edit(
-                font_manager,
-                font_system,
-                session,
-                &previous_display_text,
-                display_text,
-                text_state,
-                &next_attrs,
-                font_size,
-                line_height,
-            );
-            incremental = true;
-        } else {
-            session.editor.with_buffer_mut(|buffer| {
-                font_manager.configure_buffer_with_attrs(
-                    font_system,
-                    buffer,
-                    display_text,
-                    &next_attrs,
-                    font_size,
-                    line_height,
-                    Some(width),
-                    Some(height.max(line_height)),
-                    if multiline && auto_wrap {
-                        Wrap::WordOrGlyph
-                    } else {
-                        Wrap::None
-                    },
-                );
-                buffer.set_scroll(previous_scroll);
-                buffer.shape_until_scroll(font_system, false);
-            });
-            reconfigured = true;
-        }
-        session.text_attrs = Some(next_attrs);
-    });
     session.config = Some(config);
-    apply_text_state_to_editor(&mut session.editor, text_state, display_text);
-    update_session_layout_snapshot(font_manager, session, display_text, line_height);
+    let layout_updated_incrementally = if multiline {
+        text_replacement_bounds(&session.display_text, display_text)
+            .map(|replacement| {
+                session.layout_snapshot.as_mut().is_some_and(|previous| {
+                    font_manager.update_layout_after_edit(
+                        previous,
+                        &session.display_text,
+                        display_text,
+                        TextFontRequest {
+                            preferred_font,
+                            weight,
+                        },
+                        font_size,
+                        line_height,
+                        letter_spacing,
+                        auto_wrap.then_some(width.max(0.0)),
+                        replacement,
+                    )
+                })
+            })
+            .is_some_and(|updated| {
+                if updated {
+                    session.display_text = display_text.to_string();
+                }
+                updated
+            })
+    } else {
+        false
+    };
+    if !layout_updated_incrementally {
+        update_session_layout_snapshot(font_manager, session, display_text, line_height);
+    }
     if let Some(started_at) = started_at {
         log_text_profile(
             "refresh_session_buffer",
             started_at.elapsed(),
             format!(
                 "reconfigured={} incremental={} text_len={} multiline={}",
-                reconfigured,
+                config_changed,
                 incremental,
                 display_text.len(),
                 multiline,
@@ -393,47 +302,30 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) -> super::TextInputBufferState {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let snapshot = region.controller.snapshot();
-        let (config, preferred_font, weight, font_size, line_height, letter_spacing, width, height) =
-            self.text_input_session_config(region);
+        let (
+            config,
+            _preferred_font,
+            _weight,
+            font_size,
+            line_height,
+            _letter_spacing,
+            width,
+            height,
+        ) = self.text_input_session_config(region);
         let buffer = self.font_manager.with_font_system(|font_system| {
             let mut buffer =
                 cosmic_text::Buffer::new(font_system, Metrics::new(font_size, line_height));
-            self.font_manager.configure_buffer(
-                font_system,
-                &mut buffer,
-                &snapshot.text,
-                crate::text::font::TextFontRequest {
-                    preferred_font: preferred_font.as_deref(),
-                    weight,
-                },
-                font_size,
-                line_height,
-                letter_spacing,
-                Some(width),
-                Some(height.max(line_height)),
-                if region.multiline && region.auto_wrap {
-                    Wrap::WordOrGlyph
-                } else {
-                    Wrap::None
-                },
-            );
+            buffer.set_size(Some(width), Some(height.max(line_height)));
+            buffer.set_wrap(if region.multiline && region.auto_wrap {
+                Wrap::WordOrGlyph
+            } else {
+                Wrap::None
+            });
             buffer
         });
         let mut session =
             super::TextInputBufferState::new(Editor::new(buffer), snapshot.text, snapshot.revision);
         session.config = Some(config);
-        session.text_attrs = self.font_manager.with_font_system(|font_system| {
-            Some(self.font_manager.buffer_attrs_owned(
-                font_system,
-                session.current_text(),
-                crate::text::font::TextFontRequest {
-                    preferred_font: preferred_font.as_deref(),
-                    weight,
-                },
-                font_size,
-                letter_spacing,
-            ))
-        });
         let display_text = session.display_text.clone();
         update_session_layout_snapshot(
             &self.font_manager,
