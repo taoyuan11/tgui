@@ -57,7 +57,10 @@ impl ViewModel for App {
                         Textarea::new(self.content.clone())
                             .width(pct(100.0))
                             .min_height(dp(0.0))
-                            .grow(1.0),
+                            .grow(1.0)
+                            .on_change(Command::new(|_app: &mut App| {
+                                tgui_log(LogLevel::Info, "11")
+                            }))
                     ]),
             ])
             .into()

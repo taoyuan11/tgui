@@ -10,12 +10,12 @@ use taffy::NodeId as TaffyNodeId;
 use crate::foundation::binding::{TextChangeSet, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::text::font::FontWeight;
+use crate::text::font::{FontWeight, TextLayoutInfo};
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, Length, Overflow, ScrollbarStyle, Track, Value, Wrap,
 };
-use crate::ui::theme::WidgetState;
-use crate::ui::unit::{Dp, UnitContext};
+use crate::ui::theme::{Theme, WidgetState};
+use crate::ui::unit::{dp, Dp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface;
 
@@ -27,9 +27,9 @@ use super::image::Image;
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle;
 use super::style::{
-    ButtonStyle as WidgetButtonStyle, CanvasStyle, CheckboxStyle as WidgetCheckboxStyle,
-    ContainerStyle, SelectStyle as WidgetSelectStyle, StyleResolver,
-    SwitchStyle as WidgetSwitchStyle,
+    infer_theme_mode, ButtonStyle as WidgetButtonStyle, CanvasStyle,
+    CheckboxStyle as WidgetCheckboxStyle, ContainerStyle, SelectStyle as WidgetSelectStyle,
+    StyleResolver, SwitchStyle as WidgetSwitchStyle,
 };
 use super::style::{InputStyle as WidgetInputStyle, TextareaStyle as WidgetTextareaStyle};
 use super::text::Text;
@@ -140,6 +140,119 @@ impl Rect {
         let right = self.right().max(other.right());
         let bottom = self.bottom().max(other.bottom());
         Self::new(x, y, right - x, bottom - y)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TextInputContentGeometry {
+    pub content_frame: Rect,
+    pub content_width: Dp,
+    pub content_height: Dp,
+    pub scroll_offset: Point,
+}
+
+pub(crate) fn text_input_content_viewport(
+    frame: Rect,
+    padding: Insets,
+    multiline: bool,
+    show_scrollbar: bool,
+    theme: &Theme,
+    units: UnitContext,
+) -> Rect {
+    let inner = frame.inset(padding);
+    if !multiline || !show_scrollbar {
+        return inner;
+    }
+
+    let defaults = ContainerStyle::default_for(infer_theme_mode(theme)).scrollbar;
+    let thickness = Dp::new(units.resolve_dp(defaults.thickness.unwrap_or(dp(5.0)).max(dp(2.0))));
+
+    Rect::new(
+        inner.x,
+        inner.y,
+        (inner.width - thickness.min(inner.width)).max(0.0),
+        inner.height,
+    )
+}
+
+pub(crate) fn text_input_content_geometry(
+    layout: &TextLayoutInfo,
+    line_height: f32,
+    content_viewport: Rect,
+    multiline: bool,
+    auto_wrap: bool,
+    scroll: Point,
+    trailing_padding: f32,
+) -> TextInputContentGeometry {
+    let content_width = if multiline && auto_wrap {
+        content_viewport.width.max(0.0)
+    } else {
+        Dp::new(
+            layout
+                .width
+                .max(content_viewport.width.get() + trailing_padding),
+        )
+    };
+    let content_height = if multiline {
+        Dp::new(layout.height.max(line_height))
+    } else {
+        content_viewport
+            .height
+            .min(layout.height.max(line_height))
+            .max(Dp::new(line_height))
+    };
+    let scroll_offset = Point::new(
+        if multiline && auto_wrap {
+            Dp::ZERO
+        } else {
+            scroll.x.clamp(
+                0.0,
+                (layout.width + trailing_padding - content_viewport.width.get()).max(0.0),
+            )
+        },
+        if multiline {
+            scroll.y.clamp(
+                0.0,
+                (layout.height.max(line_height) - content_viewport.height.get()).max(0.0),
+            )
+        } else {
+            Dp::ZERO
+        },
+    );
+    let content_frame = Rect::new(
+        content_viewport.x
+            - if multiline && auto_wrap {
+                Dp::ZERO
+            } else {
+                scroll_offset.x
+            },
+        if multiline {
+            content_viewport.y - scroll_offset.y
+        } else {
+            content_viewport.y + ((content_viewport.height - content_height).max(0.0) * 0.5)
+        },
+        content_width,
+        content_height,
+    );
+
+    TextInputContentGeometry {
+        content_frame,
+        content_width,
+        content_height,
+        scroll_offset,
+    }
+}
+
+pub(crate) fn text_input_layout_width(
+    content_viewport: Rect,
+    multiline: bool,
+    auto_wrap: bool,
+    trailing_padding: f32,
+) -> f32 {
+    if multiline && auto_wrap {
+        (content_viewport.width.get() - trailing_padding).max(0.0)
+    } else {
+        content_viewport.width.get().max(0.0)
     }
 }
 
@@ -1040,7 +1153,7 @@ pub(crate) enum WidgetKind<VM> {
     TextEditor {
         controller: TextController,
         placeholder: Value<String>,
-        on_change: Option<ValueCommand<VM, String>>,
+        on_change: Option<Command<VM>>,
         on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
         disabled: Value<bool>,
         input_style: Option<StyleResolver<WidgetInputStyle>>,
@@ -1295,7 +1408,7 @@ pub(crate) enum HitInteraction<VM> {
         id: WidgetId,
         interactions: InteractionHandlers<VM>,
         controller: TextController,
-        on_change: Option<ValueCommand<VM, String>>,
+        on_change: Option<Command<VM>>,
         on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
         multiline: bool,
         auto_wrap: bool,

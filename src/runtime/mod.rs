@@ -49,10 +49,11 @@ use crate::text::font::{FontManager, FontWeight, TextFontRequest, TextLayoutInfo
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet, ThemeStore};
 use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 use crate::ui::widget::{
+    text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     CanvasDragEvent, CanvasItemId, CanvasMouseButton, CanvasMouseEvent, CanvasPointerEvent,
     CanvasWheelEvent, ComputedScene, MediaEventPhase, MediaEventState, Point, Rect,
-    ResolvedSceneLayout, ScrollRegion, ScrollbarHandle, Text, TextEditState, WidgetId,
-    WidgetStateMap, WidgetTree,
+    ResolvedSceneLayout, ScrollRegion, ScrollbarHandle, Text, TextEditState,
+    TextInputContentGeometry, WidgetId, WidgetStateMap, WidgetTree,
 };
 use cosmic_text::Editor;
 use image::GenericImageView;
@@ -575,7 +576,6 @@ impl TextInputBufferState {
             start_revision,
             end_revision: self.external_revision,
             changes: std::mem::take(&mut self.pending_changes),
-            text: self.current_text.clone(),
         })
     }
 }
@@ -742,6 +742,7 @@ struct TextSelectionDrag {
     text: String,
     multiline: bool,
     auto_wrap: bool,
+    show_scrollbar: bool,
 }
 
 enum PendingMediaEvent<VM> {
@@ -2906,6 +2907,7 @@ fn text_cursor_index_at_point(
     current_text: &str,
     multiline: bool,
     auto_wrap: bool,
+    show_scrollbar: bool,
     scroll: Point,
     point: Point,
 ) -> usize {
@@ -2913,7 +2915,8 @@ fn text_cursor_index_at_point(
         return 0;
     }
 
-    let inner = frame.inset(padding);
+    let content_viewport =
+        text_input_content_viewport(frame, padding, multiline, show_scrollbar, theme, units);
     let (layout, _font_size, line_height) = input_text_layout(
         font_manager,
         theme,
@@ -2922,13 +2925,17 @@ fn text_cursor_index_at_point(
         current_text,
         multiline,
         auto_wrap,
-        inner.width.get(),
+        text_input_layout_width(
+            content_viewport,
+            multiline,
+            auto_wrap,
+            input::INPUT_CARET_WIDTH,
+        ),
     );
     text_cursor_index_from_layout_at_point(
         &layout,
         line_height,
-        frame,
-        padding,
+        content_viewport,
         multiline,
         auto_wrap,
         scroll,
@@ -2939,41 +2946,20 @@ fn text_cursor_index_at_point(
 fn text_cursor_index_from_layout_at_point(
     layout: &TextLayoutInfo,
     line_height: f32,
-    frame: Rect,
-    padding: crate::ui::layout::Insets,
+    content_viewport: Rect,
     multiline: bool,
     auto_wrap: bool,
     scroll: Point,
     point: Point,
 ) -> usize {
-    let inner = frame.inset(padding);
-    let content_height = if multiline {
-        Dp::new(layout.height.max(line_height))
-    } else {
-        inner
-            .height
-            .min(layout.height.max(line_height))
-            .max(Dp::new(line_height))
-    };
-    let content_width = if multiline && auto_wrap {
-        inner.width.max(0.0)
-    } else {
-        inner.width.min(layout.width).max(0.0)
-    };
-    let content_frame = Rect::new(
-        inner.x
-            - if multiline && auto_wrap {
-                Dp::ZERO
-            } else {
-                scroll.x
-            },
-        if multiline {
-            inner.y - scroll.y
-        } else {
-            inner.y + ((inner.height - content_height).max(0.0) * 0.5)
-        },
-        content_width,
-        content_height,
+    let TextInputContentGeometry { content_frame, .. } = text_input_content_geometry(
+        layout,
+        line_height,
+        content_viewport,
+        multiline,
+        auto_wrap,
+        scroll,
+        input::INPUT_CARET_WIDTH,
     );
     let local_x = (point.x - content_frame.x).max(0.0);
     if multiline {

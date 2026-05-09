@@ -193,7 +193,7 @@ impl<VM> Input<VM> {
         self
     }
 
-    pub fn on_change(mut self, command: ValueCommand<VM, String>) -> Self {
+    pub fn on_change(mut self, command: Command<VM>) -> Self {
         if let WidgetKind::TextEditor { on_change, .. } = &mut self.element.kind {
             *on_change = Some(command);
         }

@@ -6,7 +6,7 @@ use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 use crate::media::{MediaManager, MediaSource};
-use crate::text::font::{FontCatalog, FontManager};
+use crate::text::font::{FontCatalog, FontManager, TextFontRequest};
 use crate::ui::layout::{Axis, Insets, Overflow};
 use crate::ui::theme::{Stateful, Theme};
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
@@ -19,7 +19,7 @@ use crate::ui::widget::{
     ButtonStyle, Canvas, CanvasItem, CanvasPath, CanvasStroke, CanvasStyle, Checkbox, ClipMask,
     ContainerStyle, Element, Image, Input, InputStyle, PathBuilder, Point, Radio, RadioGroup,
     RadioOption, ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack, Switch, SwitchStyle,
-    Text, TextEditState, TextWidgetStyle, Textarea, WidgetStateMap, WidgetTree,
+    Text, TextEditState, TextWidgetStyle, Textarea, TextareaStyle, WidgetStateMap, WidgetTree,
 };
 #[cfg(feature = "video")]
 use crate::video::backend::{
@@ -4539,6 +4539,123 @@ fn textarea_shows_scrollbar_by_default() {
         .iter()
         .any(|region| region.vertical_thumb.is_some()));
     assert!(!rendered.primitives.overlay_shapes.is_empty());
+}
+
+#[test]
+fn textarea_keeps_wrapped_text_and_caret_clear_of_vertical_scrollbar() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let content = "W".repeat(240);
+    let text: Element<()> = Textarea::new(content.clone())
+        .size(dp(220.0), dp(52.0))
+        .auto_wrap(true)
+        .into();
+    let text_id = text.id;
+    let tree = WidgetTree::new(text);
+    let viewport = Rect::new(0.0, 0.0, 220.0, 52.0);
+
+    let baseline = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let baseline_region = baseline
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == text_id)
+        .expect("textarea should register a scroll region");
+    let style = TextareaStyle::default_for(infer_theme_mode(&theme));
+    let text = super::text_with_typography(content.clone(), &style.text_style);
+    let (font_size, line_height, letter_spacing) =
+        resolved_text_metrics(&text, &theme, UnitContext::default());
+    let request = TextFontRequest {
+        preferred_font: text.font_family.as_deref().or(theme
+            .typography
+            .body
+            .font_family
+            .as_deref()),
+        weight: text.font_weight.unwrap_or(theme.typography.body.weight),
+    };
+    let layout = font_manager.measure_text_layout_wrapped(
+        &content,
+        request,
+        font_size,
+        line_height,
+        letter_spacing,
+        crate::ui::widget::text_input_layout_width(
+            baseline_region.content_viewport,
+            true,
+            true,
+            super::CARET_WIDTH,
+        ),
+    );
+    let cursor = layout.line_end(0);
+
+    let focused = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        Some(text_id),
+        Some(&TextEditState {
+            cursor,
+            anchor: cursor,
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        }),
+        Some(text_id),
+        Some(&TextEditState::caret_at(&content)),
+        true,
+    );
+
+    let scroll_region = focused
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == text_id)
+        .expect("textarea should register a scroll region");
+    let vertical_track = scroll_region
+        .vertical_track
+        .expect("textarea should show a vertical scrollbar");
+    let max_right = vertical_track.x + dp(0.1);
+
+    assert!(focused
+        .primitives
+        .texts
+        .iter()
+        .all(|primitive| primitive.frame.right() <= max_right));
+
+    let caret = focused
+        .primitives
+        .overlay_shapes
+        .iter()
+        .find(|primitive| (primitive.rect.width.get() - super::CARET_WIDTH).abs() <= 0.01)
+        .expect("caret should be rendered");
+    assert!(
+        caret.rect.right() <= max_right,
+        "caret_right={} track_x={} viewport_right={}",
+        caret.rect.right().get(),
+        vertical_track.x.get(),
+        scroll_region.content_viewport.right().get(),
+    );
 }
 
 #[test]

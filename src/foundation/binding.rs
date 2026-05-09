@@ -107,7 +107,6 @@ pub struct TextChangeSet {
     pub start_revision: u64,
     pub end_revision: u64,
     pub changes: Vec<TextChange>,
-    pub text: String,
 }
 
 #[derive(Clone)]

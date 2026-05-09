@@ -31,12 +31,13 @@ use super::canvas::{canvas_bounds, CanvasClipContext, CanvasItem};
 #[cfg(test)]
 use super::common::RenderedWidgetScene;
 use super::common::{
+    text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     BackdropBlurPrimitive, BrushPrimitive, ClipMask, ComputedScene, ContainerKind, ContainerLayout,
     CursorStyle, HitGeometry, HitInteraction, HitRegion, InteractionHandlers, LayoutNode,
     MeasureContext, MediaEventHandlers, MediaEventPhase, MediaEventState, Point, Rect,
     RenderPrimitive, ScenePrimitives, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    SelectOptionState, TextEditState, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId,
-    WidgetKind, WidgetStateMap,
+    SelectOptionState, TextEditState, TextInputContentGeometry, TextPrimitive, TexturePrimitive,
+    VisualStyle, WidgetId, WidgetKind, WidgetStateMap,
 };
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
@@ -170,7 +171,7 @@ enum ResolvedWidgetKind<VM> {
     TextEditor {
         controller: TextController,
         placeholder: Value<String>,
-        on_change: Option<ValueCommand<VM, String>>,
+        on_change: Option<Command<VM>>,
         on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
         disabled: Value<bool>,
         style: WidgetInputStyle,

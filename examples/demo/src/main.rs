@@ -167,7 +167,10 @@ impl ViewModel for App {
                     "Textarea",
                     Textarea::new(self.textarea_text.clone())
                         .size(dp(320.0), dp(140.0))
-                        .placeholder("请输入多行内容"),
+                        .placeholder("请输入多行内容")
+                        .on_change(Command::new(|app: &mut App| {
+                            tgui_log(LogLevel::Info, app.textarea_text.text())
+                        })),
                 ),
                 component_card(
                     "Notification",

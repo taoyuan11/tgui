@@ -26,7 +26,7 @@ use super::{
     FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
     PendingClick, ScrollbarDrag, SmoothScrollState, TextSelectionDrag,
 };
-const INPUT_CARET_WIDTH: f32 = 2.0;
+pub(super) const INPUT_CARET_WIDTH: f32 = 2.0;
 use crate::platform::backend::event_loop::ActiveEventLoop;
 use crate::rendering::renderer::RenderStatus;
 
@@ -38,7 +38,7 @@ pub(super) struct TextInputRegionData<VM> {
     pub(super) multiline: bool,
     pub(super) auto_wrap: bool,
     pub(super) show_scrollbar: bool,
-    pub(super) on_change: Option<ValueCommand<VM, String>>,
+    pub(super) on_change: Option<Command<VM>>,
     pub(super) on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
 }
 
@@ -267,11 +267,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         f32,
         f32,
     ) {
-        let inner = region.frame.inset(region.padding);
+        let content_viewport = crate::ui::widget::text_input_content_viewport(
+            region.frame,
+            region.padding,
+            region.multiline,
+            region.show_scrollbar,
+            &self.theme,
+            self.unit_context(),
+        );
         let (request, font_size, line_height, letter_spacing) = super::resolved_input_text_metrics(
             &self.theme,
             self.unit_context(),
             &region.text_style,
+        );
+        let layout_width = crate::ui::widget::text_input_layout_width(
+            content_viewport,
+            region.multiline,
+            region.auto_wrap,
+            INPUT_CARET_WIDTH,
         );
         let preferred_font = request.preferred_font.map(ToString::to_string);
         (
@@ -281,8 +294,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 font_size_bits: font_size.to_bits(),
                 line_height_bits: line_height.to_bits(),
                 letter_spacing_bits: letter_spacing.to_bits(),
-                width_bits: inner.width.get().max(0.0).to_bits(),
-                height_bits: inner.height.get().max(0.0).to_bits(),
+                width_bits: layout_width.to_bits(),
+                height_bits: content_viewport.height.get().max(0.0).to_bits(),
                 multiline: region.multiline,
                 auto_wrap: region.auto_wrap,
             },
@@ -291,8 +304,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             font_size,
             line_height,
             letter_spacing,
-            inner.width.get().max(0.0),
-            inner.height.get().max(0.0),
+            layout_width,
+            content_viewport.height.get().max(0.0),
         )
     }
 
@@ -423,6 +436,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         current_text: &str,
         multiline: bool,
         auto_wrap: bool,
+        show_scrollbar: bool,
         scroll: Point,
         point: Point,
     ) -> usize {
@@ -432,6 +446,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let (_, _, line_height, _) =
             super::resolved_input_text_metrics(&self.theme, self.unit_context(), text_style);
+        let content_viewport = crate::ui::widget::text_input_content_viewport(
+            frame,
+            padding,
+            multiline,
+            show_scrollbar,
+            &self.theme,
+            self.unit_context(),
+        );
         if let Some(layout) = self.text_input_buffers.get(&widget_id).and_then(|session| {
             (session.display_text == current_text)
                 .then_some(session.layout_snapshot.as_ref())
@@ -440,8 +462,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return super::text_cursor_index_from_layout_at_point(
                 layout,
                 line_height,
-                frame,
-                padding,
+                content_viewport,
                 multiline,
                 auto_wrap,
                 scroll,
@@ -459,6 +480,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             current_text,
             multiline,
             auto_wrap,
+            show_scrollbar,
             scroll,
             point,
         )
@@ -535,26 +557,25 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(mut change_set) = session.take_pending_change_set() else {
             return TextInputFlushOutcome::default();
         };
+        let next_text = session.current_text.clone();
 
         let controller_started_at = Instant::now();
-        let end_revision = region
-            .controller
-            .replace_text_silent(change_set.text.clone());
+        let end_revision = region.controller.replace_text_silent(next_text.clone());
         let controller_duration = controller_started_at.elapsed();
         change_set.end_revision = end_revision;
-        session.external_value = change_set.text.clone();
+        session.external_value = next_text.clone();
         session.external_revision = end_revision;
         session.pending_changes.clear();
         session.pending_start_revision = None;
 
         let change_count = change_set.changes.len();
-        let text_len = change_set.text.len();
+        let text_len = next_text.len();
         let callbacks_started_at = Instant::now();
         if let Some(command) = region.on_change_set.as_ref() {
             self.execute_value_command(command, change_set.clone());
         }
         if let Some(command) = region.on_change.as_ref() {
-            self.execute_value_command(command, change_set.text.clone());
+            self.execute_command(command);
         }
         let callbacks_duration = callbacks_started_at.elapsed();
         let outcome = TextInputFlushOutcome {
@@ -698,6 +719,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 &region.text_style,
                 region.multiline,
                 region.auto_wrap,
+                region.show_scrollbar,
                 &canonical_value,
                 &state,
             );
@@ -845,6 +867,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 &region.text_style,
                 region.multiline,
                 region.auto_wrap,
+                region.show_scrollbar,
                 &current_value,
                 &state,
             );
@@ -862,10 +885,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         text_style: &Text,
         multiline: bool,
         auto_wrap: bool,
+        show_scrollbar: bool,
         text: &str,
         state: &TextEditState,
     ) {
-        let inner = frame.inset(padding);
+        let content_viewport = crate::ui::widget::text_input_content_viewport(
+            frame,
+            padding,
+            multiline,
+            show_scrollbar,
+            &self.theme,
+            self.unit_context(),
+        );
         self.invalidate_text_input_scene();
         let (display_text, caret_index) = if let Some(composition) = state.composition.as_ref() {
             let start = composition.replace_range.0.min(text.len());
@@ -904,7 +935,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     &display_text,
                     multiline,
                     auto_wrap,
-                    inner.width.get(),
+                    crate::ui::widget::text_input_layout_width(
+                        content_viewport,
+                        multiline,
+                        auto_wrap,
+                        INPUT_CARET_WIDTH,
+                    ),
                 );
                 layout
             });
@@ -913,11 +949,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let caret_y = layout.top_for_index(caret);
         let caret_h = layout.line_height_for_index(caret).max(line_height);
         let max_x = if multiline && auto_wrap {
-            (layout.width - inner.width.get()).max(0.0)
+            (layout.width - content_viewport.width.get()).max(0.0)
         } else {
-            (layout.width + INPUT_CARET_WIDTH - inner.width.get()).max(0.0)
+            (layout.width + INPUT_CARET_WIDTH - content_viewport.width.get()).max(0.0)
         };
-        let max_y = (layout.height.max(line_height) - inner.height.get()).max(0.0);
+        let max_y = (layout.height.max(line_height) - content_viewport.height.get()).max(0.0);
         let mut next_scroll = Point::new(
             state.scroll_x.clamp(0.0, max_x),
             state.scroll_y.clamp(0.0, max_y),
@@ -926,8 +962,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if multiline {
             if caret_y < next_scroll.y.get() {
                 next_scroll.y = Dp::new(caret_y);
-            } else if caret_y + caret_h > next_scroll.y.get() + inner.height.get() {
-                next_scroll.y = Dp::new((caret_y + caret_h - inner.height.get()).max(0.0));
+            } else if caret_y + caret_h > next_scroll.y.get() + content_viewport.height.get() {
+                next_scroll.y =
+                    Dp::new((caret_y + caret_h - content_viewport.height.get()).max(0.0));
             }
         }
 
@@ -935,8 +972,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let caret_right = caret_x + INPUT_CARET_WIDTH;
             if caret_x < next_scroll.x.get() {
                 next_scroll.x = Dp::new(caret_x);
-            } else if caret_right > next_scroll.x.get() + inner.width.get() {
-                next_scroll.x = Dp::new((caret_right - inner.width.get()).max(0.0));
+            } else if caret_right > next_scroll.x.get() + content_viewport.width.get() {
+                next_scroll.x = Dp::new((caret_right - content_viewport.width.get()).max(0.0));
             }
         }
 
@@ -1038,6 +1075,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             &text_style,
             true,
             region.auto_wrap,
+            region.show_scrollbar,
             &current_value,
             &next_state,
         );
@@ -1078,6 +1116,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 &region.text_style,
                 region.multiline,
                 region.auto_wrap,
+                region.show_scrollbar,
                 &self.text_input_current_value(widget_id, &region.controller),
                 &state,
             );
@@ -1138,6 +1177,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     &region.text_style,
                     region.multiline,
                     region.auto_wrap,
+                    region.show_scrollbar,
                     &current_value,
                     &state,
                 );
@@ -1168,6 +1208,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     &region.text_style,
                     region.multiline,
                     region.auto_wrap,
+                    region.show_scrollbar,
                     &current_value,
                     &state,
                 );
@@ -1320,8 +1361,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         text: String,
         multiline: bool,
         auto_wrap: bool,
+        show_scrollbar: bool,
         cursor: usize,
     ) {
+        let had_text_state = self.text_edit_states.contains_key(&widget_id);
         self.selected_text = Some(widget_id);
         self.active_text_selection = Some(TextSelectionDrag {
             widget_id,
@@ -1331,13 +1374,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             text: text.clone(),
             multiline,
             auto_wrap,
+            show_scrollbar,
         });
         self.update_text_edit_state(widget_id, &text, |state| {
             state.cursor = cursor;
             state.anchor = cursor;
             state.composition = None;
         });
-        if let Some(state) = self.text_edit_states.get(&widget_id).cloned() {
+        if let Some(state) = had_text_state
+            .then(|| self.text_edit_states.get(&widget_id).cloned())
+            .flatten()
+        {
             self.ensure_text_input_caret_visible(
                 widget_id,
                 frame,
@@ -1345,9 +1392,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 &text_style,
                 multiline,
                 auto_wrap,
+                show_scrollbar,
                 &text,
                 &state,
             );
+        } else {
+            self.invalidate_text_input_scene();
         }
         self.reset_caret_blink();
     }
@@ -1368,6 +1418,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             &drag.text,
             drag.multiline,
             drag.auto_wrap,
+            drag.show_scrollbar,
             self.scroll_states
                 .get(&drag.widget_id)
                 .copied()
@@ -1388,6 +1439,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     &drag.text_style,
                     drag.multiline,
                     drag.auto_wrap,
+                    drag.show_scrollbar,
                     &drag.text,
                     &state,
                 );
@@ -2428,7 +2480,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             })
             .filter(|(_, region)| !region.multiline);
 
-        if current_id == next_id && self.focus_visible == focus_visible {
+        if current_id == next_id {
+            self.focused_widget = next_widget;
+            self.focus_visible = next_id.is_some() && focus_visible;
             return;
         }
 
@@ -2696,6 +2750,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         &text,
                         false,
                         false,
+                        false,
                         Point::ZERO,
                         point,
                     )
@@ -2707,8 +2762,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     None,
                     interactions.on_click.clone().map(ClickHandler::Command),
                     None,
-                    cursor
-                        .map(|cursor| (id, frame, padding, text_style, text, false, false, cursor)),
+                    cursor.map(|cursor| {
+                        (
+                            id, frame, padding, text_style, text, false, false, false, cursor,
+                        )
+                    }),
                 )
             }
             HitInteraction::Switch {
@@ -2785,6 +2843,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 controller,
                 multiline,
                 auto_wrap,
+                show_scrollbar,
                 frame,
                 padding,
                 text_style,
@@ -2807,11 +2866,20 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         &value,
                         multiline,
                         auto_wrap,
+                        show_scrollbar,
                         scroll,
                         point,
                     );
                     (
-                        id, frame, padding, text_style, value, multiline, auto_wrap, cursor,
+                        id,
+                        frame,
+                        padding,
+                        text_style,
+                        value,
+                        multiline,
+                        auto_wrap,
+                        show_scrollbar,
+                        cursor,
                     )
                 }),
             ),
@@ -2865,11 +2933,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.pressed_widget = Some(widget_id);
 
-        if let Some((widget_id, frame, padding, text_style, text, multiline, auto_wrap, cursor)) =
-            selectable_text
+        if let Some((
+            widget_id,
+            frame,
+            padding,
+            text_style,
+            text,
+            multiline,
+            auto_wrap,
+            show_scrollbar,
+            cursor,
+        )) = selectable_text
         {
             self.begin_text_selection(
-                widget_id, frame, padding, text_style, text, multiline, auto_wrap, cursor,
+                widget_id,
+                frame,
+                padding,
+                text_style,
+                text,
+                multiline,
+                auto_wrap,
+                show_scrollbar,
+                cursor,
             );
         }
 

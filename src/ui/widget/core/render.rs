@@ -347,6 +347,7 @@ pub(super) fn push_text_input_primitives(
     show_caret: bool,
     multiline: bool,
     auto_wrap: bool,
+    show_scrollbar: bool,
     padding: Insets,
     scroll_offset: Point,
     edit_state: Option<&TextEditState>,
@@ -377,11 +378,12 @@ pub(super) fn push_text_input_primitives(
         .map(|color| color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now))
         .unwrap_or(fallback_color);
     let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
-    let inner = frame.inset(padding);
+    let content_viewport =
+        text_input_content_viewport(frame, padding, multiline, show_scrollbar, theme, units);
     let content_clip_rect = clip_rect
-        .map(|clip| clip.intersect(inner))
-        .unwrap_or(Some(inner));
-    let wrap_width = inner.width.get().max(0.0);
+        .map(|clip| clip.intersect(content_viewport))
+        .unwrap_or(Some(content_viewport));
+    let wrap_width = text_input_layout_width(content_viewport, multiline, auto_wrap, CARET_WIDTH);
     let base_state = edit_state
         .cloned()
         .unwrap_or_else(|| TextEditState {
@@ -450,44 +452,19 @@ pub(super) fn push_text_input_primitives(
     };
     let layout_duration = layout_started_at.elapsed();
 
-    let content_width = if multiline && auto_wrap {
-        inner.width.max(0.0)
-    } else {
-        Dp::new(layout.width.max(inner.width.get() + CARET_WIDTH))
-    };
-    let content_height = if multiline {
-        Dp::new(layout.height.max(line_height))
-    } else {
-        inner
-            .height
-            .min(layout.height.max(line_height))
-            .max(Dp::new(line_height))
-    };
-    let scroll_x = if multiline && auto_wrap {
-        Dp::ZERO
-    } else {
-        display_state.scroll_x.clamp(
-            0.0,
-            (layout.width + CARET_WIDTH - inner.width.get()).max(0.0),
-        )
-    };
-    let scroll_y = if multiline {
-        display_state.scroll_y.clamp(
-            0.0,
-            (layout.height.max(line_height) - inner.height.get()).max(0.0),
-        )
-    } else {
-        Dp::ZERO
-    };
-    let content_frame = Rect::new(
-        inner.x - scroll_x,
-        if multiline {
-            inner.y - scroll_y
-        } else {
-            inner.y + ((inner.height - content_height).max(0.0) * 0.5)
-        },
+    let TextInputContentGeometry {
+        content_frame,
         content_width,
         content_height,
+        ..
+    } = text_input_content_geometry(
+        layout,
+        line_height,
+        content_viewport,
+        multiline,
+        auto_wrap,
+        Point::new(display_state.scroll_x, display_state.scroll_y),
+        CARET_WIDTH,
     );
 
     let selection_fill = selection_color.unwrap_or(theme.colors.selection);
@@ -552,8 +529,8 @@ pub(super) fn push_text_input_primitives(
     let font_weight = text.font_weight.unwrap_or(default_style.weight);
 
     if multiline {
-        let viewport_top = inner.y.get();
-        let viewport_bottom = inner.bottom().get();
+        let viewport_top = content_viewport.y.get();
+        let viewport_bottom = content_viewport.bottom().get();
         let visible_lines = layout.line_range_for_vertical_span(
             viewport_top - content_frame.y.get(),
             viewport_bottom - content_frame.y.get(),
@@ -606,7 +583,12 @@ pub(super) fn push_text_input_primitives(
     let mut ime_cursor_area = None;
     if show_caret {
         let caret_index = display_state.cursor.min(display_content.len());
-        let caret_x = content_frame.x + layout.x_for_index(caret_index);
+        let caret_x = if multiline && auto_wrap {
+            (content_frame.x + layout.x_for_index(caret_index))
+                .min((content_viewport.right() - CARET_WIDTH).max(content_viewport.x))
+        } else {
+            content_frame.x + layout.x_for_index(caret_index)
+        };
         let caret_y = content_frame.y + Dp::new(layout.top_for_index(caret_index));
         let caret_height = Dp::new(layout.line_height_for_index(caret_index).max(line_height));
         let caret_rect = Rect::new(caret_x, caret_y, CARET_WIDTH, caret_height);

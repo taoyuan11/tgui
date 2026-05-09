@@ -1535,6 +1535,14 @@ impl<VM> ResolvedElement<VM> {
                     .expect("input style should be resolved for input widgets");
                 let padding = Insets::symmetric(input_style.padding_x, input_style.padding_y);
                 let inner = frame.inset(padding);
+                let content_viewport = text_input_content_viewport(
+                    frame,
+                    padding,
+                    *multiline,
+                    *show_scrollbar,
+                    context.theme,
+                    context.units,
+                );
                 let resolved_value = controller.text();
                 let visible_value = context
                     .focused_text_value
@@ -1567,6 +1575,7 @@ impl<VM> ResolvedElement<VM> {
                     context.caret_visible && context.focused_input == Some(self.id),
                     *multiline,
                     *auto_wrap,
+                    *show_scrollbar,
                     padding,
                     scroll_offset,
                     context
@@ -1583,10 +1592,10 @@ impl<VM> ResolvedElement<VM> {
                 );
                 if *multiline {
                     let content_bounds = Rect::new(
-                        inner.x,
-                        inner.y,
+                        content_viewport.x,
+                        content_viewport.y,
                         text_render.content_width,
-                        text_render.content_height.max(inner.height),
+                        text_render.content_height.max(content_viewport.height),
                     );
                     let overflow_x = if *auto_wrap {
                         Overflow::Hidden
@@ -1598,8 +1607,8 @@ impl<VM> ResolvedElement<VM> {
                     scrollbar_layout.overflow_x = overflow_x;
                     scrollbar_layout.overflow_y = overflow_y;
                     let max_scroll = Point {
-                        x: (content_bounds.right() - inner.right()).max(0.0),
-                        y: (content_bounds.bottom() - inner.bottom()).max(0.0),
+                        x: (content_bounds.right() - content_viewport.right()).max(0.0),
+                        y: (content_bounds.bottom() - content_viewport.bottom()).max(0.0),
                     };
                     let clamped_scroll = Point {
                         x: if overflow_x == Overflow::Scroll {
@@ -1622,7 +1631,7 @@ impl<VM> ResolvedElement<VM> {
                         .unwrap_or(Rect::new(frame.x, frame.y, 0.0, 0.0));
                     computed.scroll_regions.push(ScrollRegion {
                         id: self.id,
-                        content_viewport: inner,
+                        content_viewport,
                         visible_frame,
                         content_bounds,
                         scroll_offset: clamped_scroll,
