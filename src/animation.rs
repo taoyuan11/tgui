@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
-use crate::foundation::binding::{InvalidationSignal, Signal};
+use crate::foundation::binding::{
+    record_dependency_read, DependencyId, InvalidationSignal, Signal,
+};
 use crate::foundation::color::Color;
 use crate::ui::layout::Insets;
 use crate::ui::unit::{Dp, Sp};
@@ -421,6 +423,7 @@ impl<T> From<AnimationSpec<T>> for Transition {
 pub struct AnimatedValue<T> {
     value: Arc<Mutex<T>>,
     invalidation: InvalidationSignal,
+    dependency: DependencyId,
 }
 
 impl<T> AnimatedValue<T> {
@@ -428,12 +431,13 @@ impl<T> AnimatedValue<T> {
         Self {
             value: Arc::new(Mutex::new(value)),
             invalidation,
+            dependency: DependencyId::next(),
         }
     }
 
     pub fn set(&self, value: T) {
         *self.value.lock().expect("animated value lock poisoned") = value;
-        self.invalidation.mark_dirty();
+        self.invalidation.mark_dependency_dirty(self.dependency);
     }
 
     pub fn signal(&self) -> Signal<T>
@@ -441,12 +445,17 @@ impl<T> AnimatedValue<T> {
         T: Clone + Send + Sync + 'static,
     {
         let animated = self.clone();
-        Signal::new(move || animated.get(), self.invalidation.clone())
+        Signal::new_tracked(
+            move || animated.get(),
+            self.invalidation.clone(),
+            Some(self.dependency),
+        )
     }
 }
 
 impl<T: Clone> AnimatedValue<T> {
     pub fn get(&self) -> T {
+        record_dependency_read(Some(self.dependency));
         self.value
             .lock()
             .expect("animated value lock poisoned")
@@ -462,7 +471,7 @@ impl<T: PartialEq> AnimatedValue<T> {
         }
         *current = value;
         drop(current);
-        self.invalidation.mark_dirty();
+        self.invalidation.mark_dependency_dirty(self.dependency);
         true
     }
 }

@@ -226,7 +226,7 @@ impl<VM> Element<VM> {
                     layout,
                     children: children
                         .iter()
-                        .flat_map(|child| child.resolve())
+                        .flat_map(|child| child.resolve(Some(self.id)))
                         .map(|child| child.resolve(theme))
                         .collect(),
                 }
@@ -254,7 +254,7 @@ impl<VM> Element<VM> {
                 let resolved_style = resolved_canvas_style(style.as_ref(), theme);
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 ResolvedWidgetKind::Canvas {
-                    items: items.resolve(),
+                    items: items.clone(),
                     item_interactions: item_interactions.clone(),
                 }
             }
@@ -380,8 +380,8 @@ impl<VM> Element<VM> {
                     resolved_input_style(input_style.as_ref(), theme)
                 },
                 multiline: *multiline,
-                show_scrollbar: show_scrollbar.resolve(),
-                auto_wrap: auto_wrap.resolve(),
+                show_scrollbar: show_scrollbar.clone(),
+                auto_wrap: auto_wrap.clone(),
             },
         };
 

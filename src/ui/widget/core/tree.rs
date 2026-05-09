@@ -4,6 +4,28 @@ pub struct WidgetTree<VM> {
     pub(super) root: Element<VM>,
 }
 
+fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    ))]
+    {
+        const WIDGET_STACK_SIZE: usize = 8 * 1024 * 1024;
+        const WIDGET_STACK_RED_ZONE: usize = WIDGET_STACK_SIZE;
+        return stacker::maybe_grow(WIDGET_STACK_RED_ZONE, WIDGET_STACK_SIZE, f);
+    }
+
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    )))]
+    {
+        f()
+    }
+}
+
 impl<VM> WidgetTree<VM> {
     pub fn new(root: impl Into<Element<VM>>) -> Self {
         Self { root: root.into() }
@@ -171,40 +193,47 @@ impl<VM> WidgetTree<VM> {
         units: UnitContext,
         viewport: Rect,
     ) -> ResolvedSceneLayout<VM> {
-        let mut taffy = TaffyTree::new();
-        let now = std::time::Instant::now();
-        let resolved_root = self.root.resolve(theme);
-        let root_layout = resolved_root
-            .build_layout_tree(
-                &mut taffy, animations, theme, units, None, viewport, true, now,
-            )
-            .expect("widget tree layout should build");
-        taffy
-            .compute_layout_with_measure(
-                root_layout.node,
-                TaffySize {
-                    width: AvailableSpace::Definite(viewport.width.get()),
-                    height: AvailableSpace::Definite(viewport.height.get()),
-                },
-                |known_dimensions, _, _, node_context, _| {
-                    measure_node(
-                        node_context,
-                        known_dimensions,
-                        font_manager,
-                        theme,
-                        media,
-                        units,
+        let (mut layout, dependencies) = with_widget_stack(|| {
+            with_dependency_collection(|| {
+                let mut taffy = TaffyTree::new();
+                let now = std::time::Instant::now();
+                let resolved_root = self.root.resolve(theme);
+                let root_layout = resolved_root
+                    .build_layout_tree(
+                        &mut taffy, animations, theme, units, None, viewport, true, now,
                     )
-                },
-            )
-            .expect("widget tree layout should compute");
+                    .expect("widget tree layout should build");
+                taffy
+                    .compute_layout_with_measure(
+                        root_layout.node,
+                        TaffySize {
+                            width: AvailableSpace::Definite(viewport.width.get()),
+                            height: AvailableSpace::Definite(viewport.height.get()),
+                        },
+                        |known_dimensions, _, _, node_context, _| {
+                            measure_node(
+                                node_context,
+                                known_dimensions,
+                                font_manager,
+                                theme,
+                                media,
+                                units,
+                            )
+                        },
+                    )
+                    .expect("widget tree layout should compute");
 
-        ResolvedSceneLayout {
-            resolved_root,
-            layout_root: root_layout,
-            taffy,
-            units,
-        }
+                ResolvedSceneLayout {
+                    resolved_root,
+                    layout_root: root_layout,
+                    taffy,
+                    units,
+                    dependencies: DependencyGraph::default(),
+                }
+            })
+        });
+        layout.dependencies = dependencies;
+        layout
     }
 
     pub(crate) fn collect_scene_from_layout(
@@ -269,43 +298,49 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
     ) -> ComputedScene<VM> {
-        let mut computed = ComputedScene::default();
-        let mut context = CollectContext {
-            taffy: &layout.taffy,
-            font_manager,
-            theme,
-            media,
-            focused_input,
-            focused_text_state,
-            focused_text_value,
-            focused_text_layout,
-            caret_visible,
-            selected_text,
-            selected_text_state,
-            hovered_scrollbar,
-            active_scrollbar,
-            widget_states,
-            select_open_states,
-            scroll_offsets,
-            viewport,
-            units: layout.units,
-            animations,
-            now: std::time::Instant::now(),
-        };
-        layout.resolved_root.collect_primitives(
-            &layout.layout_root,
-            VisualContext {
-                origin: Point {
-                    x: viewport.x,
-                    y: viewport.y,
-                },
-                opacity: 1.0,
-                clip_rect: viewport,
-                clip_mask: None,
-            },
-            &mut context,
-            &mut computed,
-        );
+        let (mut computed, dependencies) = with_widget_stack(|| {
+            with_dependency_collection(|| {
+                let mut computed = ComputedScene::default();
+                let mut context = CollectContext {
+                    taffy: &layout.taffy,
+                    font_manager,
+                    theme,
+                    media,
+                    focused_input,
+                    focused_text_state,
+                    focused_text_value,
+                    focused_text_layout,
+                    caret_visible,
+                    selected_text,
+                    selected_text_state,
+                    hovered_scrollbar,
+                    active_scrollbar,
+                    widget_states,
+                    select_open_states,
+                    scroll_offsets,
+                    viewport,
+                    units: layout.units,
+                    animations,
+                    now: std::time::Instant::now(),
+                };
+                layout.resolved_root.collect_primitives(
+                    &layout.layout_root,
+                    VisualContext {
+                        origin: Point {
+                            x: viewport.x,
+                            y: viewport.y,
+                        },
+                        opacity: 1.0,
+                        clip_rect: viewport,
+                        clip_mask: None,
+                    },
+                    &mut context,
+                    &mut computed,
+                );
+                computed
+            })
+        });
+        computed.dependencies = dependencies;
         computed
     }
 

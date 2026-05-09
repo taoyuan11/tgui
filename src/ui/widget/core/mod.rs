@@ -11,7 +11,10 @@ use taffy::prelude::{
 use taffy::Size as TaffySize;
 
 use crate::animation::{AnimationEngine, Transition, WidgetProperty};
-use crate::foundation::binding::{TextChangeSet, TextController};
+use crate::foundation::binding::{
+    track_dependency_scope, with_dependency_collection, DependencyGraph, DependencyPhase,
+    TextChangeSet, TextController,
+};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{
@@ -122,7 +125,7 @@ enum ResolvedWidgetKind<VM> {
         image: super::image::Image,
     },
     Canvas {
-        items: Vec<CanvasItem>,
+        items: Value<Vec<CanvasItem>>,
         item_interactions: super::common::CanvasItemInteractionHandlers<VM>,
     },
     #[cfg(feature = "video")]
@@ -176,8 +179,8 @@ enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         style: WidgetInputStyle,
         multiline: bool,
-        show_scrollbar: bool,
-        auto_wrap: bool,
+        show_scrollbar: Value<bool>,
+        auto_wrap: Value<bool>,
     },
 }
 
@@ -218,6 +221,13 @@ pub(crate) struct ResolvedSceneLayout<VM> {
     layout_root: LayoutNode,
     taffy: TaffyTree<MeasureContext>,
     units: UnitContext,
+    dependencies: DependencyGraph,
+}
+
+impl<VM> ResolvedSceneLayout<VM> {
+    pub(crate) fn dependencies(&self) -> &DependencyGraph {
+        &self.dependencies
+    }
 }
 
 fn media_event_phase(loading: bool, error: Option<&str>) -> Option<MediaEventPhase> {

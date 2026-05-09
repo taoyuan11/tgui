@@ -15,7 +15,10 @@ use crate::application::{
     ApplicationConfig, ThemeSelection, WindowClosePolicy, WindowRole, WindowSetFactory,
 };
 use crate::dialog::{async_dialog_channel, AsyncDialogDispatcher, AsyncDialogReceiver};
-use crate::foundation::binding::{InvalidationSignal, Signal, TextChange, TextChangeSet};
+use crate::foundation::binding::{
+    DependencyGraph, DependencyPhase, DirtyDependencySet, InvalidationSignal, Signal, TextChange,
+    TextChangeSet,
+};
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
@@ -509,8 +512,10 @@ struct CachedScene<VM> {
     text_input_epoch: u64,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar: Option<ScrollbarHandle>,
+    computed_valid: bool,
     layout: Option<ResolvedSceneLayout<VM>>,
     computed: ComputedScene<VM>,
+    dependencies: DependencyGraph,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1183,8 +1188,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if revision != self.last_invalidation_revision {
             let started_at = text_profile_enabled().then_some(Instant::now());
             let previous_revision = self.last_invalidation_revision;
+            let (dirty_kind, dirty_dependencies) = self
+                .invalidation
+                .dirty_dependencies_since(previous_revision);
             self.last_invalidation_revision = revision;
-            self.invalidate_scene();
+            let invalidation_action =
+                self.invalidate_cached_scene_for_dependencies(dirty_kind, &dirty_dependencies);
             self.sync_bindings(now);
 
             if let Some(window) = self.window.as_ref() {
@@ -1196,11 +1205,58 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     "request_redraw_if_dirty",
                     started_at.elapsed(),
                     format!(
-                        "revision {} -> {} forced_full_scene_invalidation=true",
-                        previous_revision, revision
+                        "revision {} -> {} invalidation_action={}",
+                        previous_revision, revision, invalidation_action
                     ),
                 );
             }
+        }
+    }
+
+    fn invalidate_cached_scene_for_dependencies(
+        &mut self,
+        dirty_kind: DirtyDependencySet,
+        dirty_dependencies: &HashSet<crate::foundation::binding::DependencyId>,
+    ) -> &'static str {
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return "no_cache";
+        };
+        if matches!(dirty_kind, DirtyDependencySet::Clean) {
+            return "clean";
+        }
+        if matches!(dirty_kind, DirtyDependencySet::Global)
+            || cached.dependencies.has_global_dependency()
+        {
+            self.invalidate_scene();
+            return "global_full_scene";
+        }
+
+        let mut affects_layout = false;
+        let mut affects_scene = false;
+        for dependency in dirty_dependencies {
+            let Some(owners) = cached.dependencies.owners_for(*dependency) else {
+                continue;
+            };
+            for owner in owners {
+                match owner.phase {
+                    DependencyPhase::Structure | DependencyPhase::Layout => {
+                        affects_layout = true;
+                    }
+                    DependencyPhase::Scene => {
+                        affects_scene = true;
+                    }
+                }
+            }
+        }
+
+        if affects_layout {
+            self.invalidate_scene();
+            "layout_full_scene"
+        } else if affects_scene {
+            self.invalidate_computed_scene();
+            "scene_only"
+        } else {
+            "unrelated"
         }
     }
 
@@ -1327,6 +1383,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         caret_visible: bool,
         active_scrollbar: Option<ScrollbarHandle>,
     ) -> bool {
+        if !cached.computed_valid {
+            return false;
+        }
         cached.viewport == viewport
             && cached.units == units
             && cached.focused_widget == self.focused_widget_id()
@@ -1597,6 +1656,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 text_input_epoch: self.text_input_epoch,
                 hovered_scrollbar: self.hovered_scrollbar,
                 active_scrollbar,
+                computed_valid: true,
+                dependencies: {
+                    let mut dependencies = DependencyGraph::default();
+                    if let Some(layout) = layout.as_ref() {
+                        dependencies.merge_from(layout.dependencies());
+                    }
+                    dependencies.merge_from(&computed.dependencies);
+                    dependencies
+                },
                 layout,
                 computed,
             });
@@ -1754,6 +1822,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn invalidate_computed_scene(&mut self) {
+        if let Some(cached) = self.cached_scene.as_mut() {
+            cached.computed_valid = false;
+        }
         self.text_input_regions.clear();
     }
 

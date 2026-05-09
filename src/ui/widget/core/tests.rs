@@ -2,7 +2,9 @@ use super::{centered_text_frame, resolved_text_metrics, SELECT_ARROW_ICON};
 use std::collections::HashMap;
 
 use crate::animation::{AnimationCoordinator, AnimationEngine};
-use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
+use crate::foundation::binding::{
+    DependencyOwner, DependencyPhase, InvalidationSignal, ViewModelContext,
+};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 use crate::media::{MediaManager, MediaSource};
@@ -918,6 +920,240 @@ fn wait_for_rendered_output(
 
 fn test_context() -> ViewModelContext {
     ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
+}
+
+#[test]
+fn text_signal_records_layout_and_scene_dependencies() {
+    let ctx = test_context();
+    let content = ctx.state(String::from("tracked"));
+    let text: Element<()> = Text::new(content.signal()).into();
+    let widget_id = text.id;
+    let tree = WidgetTree::new(text);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert!(layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Layout,
+    }));
+
+    let computed = tree.collect_scene_from_layout(
+        &font_manager,
+        &layout,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(computed.dependencies.contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Scene,
+    }));
+}
+
+#[test]
+fn dynamic_children_signal_records_structure_dependency() {
+    let ctx = test_context();
+    let show = ctx.state(true);
+    let container: Element<()> = Stack::new()
+        .child(show.signal().map(|show| {
+            if show {
+                Text::new("shown")
+            } else {
+                Text::new("hidden")
+            }
+        }))
+        .into();
+    let widget_id = container.id;
+    let tree = WidgetTree::new(container);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert!(layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Structure,
+    }));
+}
+
+#[test]
+fn canvas_items_signal_records_layout_and_scene_dependencies() {
+    let ctx = test_context();
+    let expanded = ctx.state(false);
+    let canvas: Element<()> = Canvas::new(expanded.signal().map(|expanded| {
+        let width = if expanded { 96.0 } else { 48.0 };
+        vec![CanvasItem::Path(
+            CanvasPath::new(
+                1_u64,
+                PathBuilder::new()
+                    .move_to(0.0, 0.0)
+                    .line_to(width, 0.0)
+                    .line_to(width, 24.0)
+                    .line_to(0.0, 24.0)
+                    .close(),
+            )
+            .fill(Color::WHITE),
+        )]
+    }))
+    .into();
+    let widget_id = canvas.id;
+    let tree = WidgetTree::new(canvas);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert!(!layout.dependencies().has_global_dependency());
+    assert!(layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Layout,
+    }));
+
+    let computed = tree.collect_scene_from_layout(
+        &font_manager,
+        &layout,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(!computed.dependencies.has_global_dependency());
+    assert!(computed.dependencies.contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Scene,
+    }));
+}
+
+#[test]
+fn textarea_auto_wrap_signal_records_layout_dependency() {
+    let ctx = test_context();
+    let auto_wrap = ctx.state(true);
+    let textarea: Element<()> = Textarea::new("tracked text")
+        .auto_wrap(auto_wrap.signal())
+        .into();
+    let widget_id = textarea.id;
+    let tree = WidgetTree::new(textarea);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert!(!layout.dependencies().has_global_dependency());
+    assert_eq!(layout.dependencies().dependency_count(), 1);
+    assert!(layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Layout,
+    }));
+}
+
+#[test]
+fn textarea_show_scrollbar_signal_only_records_scene_dependency() {
+    let ctx = test_context();
+    let show_scrollbar = ctx.state(false);
+    let textarea: Element<()> = Textarea::new("line 0\nline 1\nline 2\nline 3")
+        .height(dp(52.0))
+        .show_scrollbar(show_scrollbar.signal())
+        .into();
+    let widget_id = textarea.id;
+    let tree = WidgetTree::new(textarea);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert!(!layout.dependencies().has_global_dependency());
+    assert_eq!(layout.dependencies().dependency_count(), 1);
+
+    let computed = tree.collect_scene_from_layout(
+        &font_manager,
+        &layout,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(!computed.dependencies.has_global_dependency());
+    assert_eq!(computed.dependencies.dependency_count(), 2);
+    assert!(computed.dependencies.contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Scene,
+    }));
 }
 
 #[cfg(feature = "video")]
@@ -2870,7 +3106,7 @@ fn scoped_dynamic_children_resolve_to_root_commands() {
     )));
 
     let resolved = match &tree.root.kind {
-        WidgetKind::Container { children, .. } => children[0].resolve(),
+        WidgetKind::Container { children, .. } => children[0].resolve(None),
         _ => panic!("root should be a container"),
     };
 
@@ -2886,7 +3122,7 @@ fn scoped_dynamic_children_resolve_to_root_commands() {
 
     show.set(false);
     let resolved = match &tree.root.kind {
-        WidgetKind::Container { children, .. } => children[0].resolve(),
+        WidgetKind::Container { children, .. } => children[0].resolve(None),
         _ => panic!("root should be a container"),
     };
     let command = resolved[0]

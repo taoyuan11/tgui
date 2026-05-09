@@ -4,26 +4,40 @@ impl<VM> ResolvedElement<VM> {
     fn measure_context(&self) -> MeasureContext {
         match &self.kind {
             ResolvedWidgetKind::Container { .. } => MeasureContext::None,
-            ResolvedWidgetKind::Text { text } => MeasureContext::Text(text.clone()),
-            ResolvedWidgetKind::Image { image } => MeasureContext::Image(image.clone()),
-            ResolvedWidgetKind::Canvas { items, .. } => MeasureContext::Canvas(items.clone()),
+            ResolvedWidgetKind::Text { text } => MeasureContext::Text {
+                id: self.id,
+                text: text.clone(),
+            },
+            ResolvedWidgetKind::Image { image } => MeasureContext::Image {
+                id: self.id,
+                image: image.clone(),
+            },
+            ResolvedWidgetKind::Canvas { items, .. } => MeasureContext::Canvas {
+                id: self.id,
+                items: items.clone(),
+            },
             #[cfg(feature = "video")]
-            ResolvedWidgetKind::VideoSurface { video, .. } => {
-                MeasureContext::VideoSurface(video.clone())
-            }
+            ResolvedWidgetKind::VideoSurface { video, .. } => MeasureContext::VideoSurface {
+                id: self.id,
+                video: video.clone(),
+            },
             ResolvedWidgetKind::Button { label, style, .. } => MeasureContext::Button {
+                id: self.id,
                 label: label.clone(),
                 style: style.clone(),
             },
             ResolvedWidgetKind::Checkbox { label, style, .. } => MeasureContext::Checkbox {
+                id: self.id,
                 label: label.clone(),
                 style: style.clone(),
             },
             ResolvedWidgetKind::Radio { label, style, .. } => MeasureContext::Radio {
+                id: self.id,
                 label: label.clone(),
                 style: style.clone(),
             },
             ResolvedWidgetKind::Switch { style, .. } => MeasureContext::Switch {
+                id: self.id,
                 style: style.clone(),
             },
             ResolvedWidgetKind::Select {
@@ -32,7 +46,8 @@ impl<VM> ResolvedElement<VM> {
                 style,
                 ..
             } => MeasureContext::Select {
-                selected_label: selected_label.resolve(),
+                id: self.id,
+                selected_label: selected_label.clone(),
                 placeholder: placeholder.clone(),
                 style: style.clone(),
             },
@@ -44,16 +59,43 @@ impl<VM> ResolvedElement<VM> {
                 auto_wrap,
                 ..
             } => MeasureContext::TextEditor {
+                id: self.id,
                 controller: controller.clone(),
-                placeholder: placeholder.resolve(),
+                placeholder: placeholder.clone(),
                 style: style.clone(),
                 multiline: *multiline,
-                auto_wrap: *auto_wrap,
+                auto_wrap: auto_wrap.clone(),
             },
         }
     }
 
     pub(super) fn build_layout_tree(
+        &self,
+        taffy: &mut TaffyTree<MeasureContext>,
+        animations: &mut AnimationEngine,
+        theme: &Theme,
+        units: UnitContext,
+        parent_kind: Option<ContainerKind>,
+        viewport: Rect,
+        is_root: bool,
+        now: std::time::Instant,
+    ) -> Result<LayoutNode, taffy::TaffyError> {
+        let owner = self.id.dependency_owner(DependencyPhase::Layout);
+        track_dependency_scope(owner, || {
+            self.build_layout_tree_tracked(
+                taffy,
+                animations,
+                theme,
+                units,
+                parent_kind,
+                viewport,
+                is_root,
+                now,
+            )
+        })
+    }
+
+    fn build_layout_tree_tracked(
         &self,
         taffy: &mut TaffyTree<MeasureContext>,
         animations: &mut AnimationEngine,
@@ -364,6 +406,19 @@ impl<VM> ResolvedElement<VM> {
     }
 
     pub(super) fn collect_primitives(
+        &self,
+        layout_node: &LayoutNode,
+        visual_context: VisualContext,
+        context: &mut CollectContext<'_, '_>,
+        computed: &mut ComputedScene<VM>,
+    ) {
+        let owner = self.id.dependency_owner(DependencyPhase::Scene);
+        track_dependency_scope(owner, || {
+            self.collect_primitives_tracked(layout_node, visual_context, context, computed);
+        });
+    }
+
+    fn collect_primitives_tracked(
         &self,
         layout_node: &LayoutNode,
         visual_context: VisualContext,
@@ -1176,6 +1231,7 @@ impl<VM> ResolvedElement<VM> {
                 items,
                 item_interactions,
             } => {
+                let items = items.resolve();
                 let padding = self
                     .layout
                     .padding
@@ -1205,7 +1261,7 @@ impl<VM> ResolvedElement<VM> {
                 let canvas_origin = Point::new(canvas_frame.x, canvas_frame.y);
 
                 if canvas_frame.width > Dp::ZERO && canvas_frame.height > Dp::ZERO {
-                    for item in items {
+                    for item in &items {
                         let rendered = item.tessellate(
                             canvas_origin,
                             opacity,
@@ -1533,13 +1589,15 @@ impl<VM> ResolvedElement<VM> {
                 let input_style = input_style
                     .as_ref()
                     .expect("input style should be resolved for input widgets");
+                let show_scrollbar = show_scrollbar.resolve();
+                let auto_wrap = auto_wrap.resolve();
                 let padding = Insets::symmetric(input_style.padding_x, input_style.padding_y);
                 let inner = frame.inset(padding);
                 let content_viewport = text_input_content_viewport(
                     frame,
                     padding,
                     *multiline,
-                    *show_scrollbar,
+                    show_scrollbar,
                     context.theme,
                     context.units,
                 );
@@ -1574,8 +1632,8 @@ impl<VM> ResolvedElement<VM> {
                     &mut computed.scene,
                     context.caret_visible && context.focused_input == Some(self.id),
                     *multiline,
-                    *auto_wrap,
-                    *show_scrollbar,
+                    auto_wrap,
+                    show_scrollbar,
                     padding,
                     scroll_offset,
                     context
@@ -1597,7 +1655,7 @@ impl<VM> ResolvedElement<VM> {
                         text_render.content_width,
                         text_render.content_height.max(content_viewport.height),
                     );
-                    let overflow_x = if *auto_wrap {
+                    let overflow_x = if auto_wrap {
                         Overflow::Hidden
                     } else {
                         Overflow::Scroll
@@ -1642,7 +1700,7 @@ impl<VM> ResolvedElement<VM> {
                         vertical_track: scrollbar_geometry.vertical_track,
                         vertical_thumb: scrollbar_geometry.vertical_thumb,
                     });
-                    if *show_scrollbar {
+                    if show_scrollbar {
                         push_scrollbar_primitives(
                             &mut computed.scene,
                             context.theme,
@@ -1671,8 +1729,8 @@ impl<VM> ResolvedElement<VM> {
                             on_change: on_change.clone(),
                             on_change_set: on_change_set.clone(),
                             multiline: *multiline,
-                            auto_wrap: *auto_wrap,
-                            show_scrollbar: *show_scrollbar,
+                            auto_wrap,
+                            show_scrollbar,
                             frame,
                             padding,
                             text_style: text,

@@ -7,7 +7,10 @@ use crate::animation::{AnimationEngine, AnimationKey, WidgetProperty};
 use crate::media::TextureFrame;
 use taffy::NodeId as TaffyNodeId;
 
-use crate::foundation::binding::{TextChangeSet, TextController};
+use crate::foundation::binding::{
+    track_dependency_scope, DependencyGraph, DependencyOwner, DependencyPhase, TextChangeSet,
+    TextController,
+};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::{FontWeight, TextLayoutInfo};
@@ -62,6 +65,13 @@ impl WidgetId {
 
     pub(crate) fn raw(self) -> u64 {
         self.0
+    }
+
+    pub(crate) fn dependency_owner(self, phase: DependencyPhase) -> DependencyOwner {
+        DependencyOwner {
+            widget_id: self.0,
+            phase,
+        }
     }
 }
 
@@ -1021,10 +1031,19 @@ pub(crate) enum ChildSource<VM> {
 }
 
 impl<VM> ChildSource<VM> {
-    pub(crate) fn resolve(&self) -> Vec<super::core::Element<VM>> {
+    pub(crate) fn resolve(&self, owner: Option<WidgetId>) -> Vec<super::core::Element<VM>> {
         match self {
             Self::Static(children) => children.clone(),
-            Self::Dynamic(resolver) => resolve_dynamic_children(resolver),
+            Self::Dynamic(resolver) => {
+                if let Some(owner) = owner {
+                    track_dependency_scope(
+                        owner.dependency_owner(DependencyPhase::Structure),
+                        || resolve_dynamic_children(resolver),
+                    )
+                } else {
+                    resolve_dynamic_children(resolver)
+                }
+            }
         }
     }
 
@@ -1323,37 +1342,55 @@ impl<VM> Clone for WidgetKind<VM> {
 #[derive(Clone)]
 pub(crate) enum MeasureContext {
     None,
-    Text(Text),
-    Image(Image),
-    Canvas(Vec<CanvasItem>),
+    Text {
+        id: WidgetId,
+        text: Text,
+    },
+    Image {
+        id: WidgetId,
+        image: Image,
+    },
+    Canvas {
+        id: WidgetId,
+        items: Value<Vec<CanvasItem>>,
+    },
     #[cfg(feature = "video")]
-    VideoSurface(VideoSurface),
+    VideoSurface {
+        id: WidgetId,
+        video: VideoSurface,
+    },
     Button {
+        id: WidgetId,
         label: Value<String>,
         style: crate::ui::widget::ButtonStyle,
     },
     Checkbox {
+        id: WidgetId,
         label: Option<Value<String>>,
         style: crate::ui::widget::CheckboxStyle,
     },
     Radio {
+        id: WidgetId,
         label: Option<Value<String>>,
         style: crate::ui::widget::RadioStyle,
     },
     Switch {
+        id: WidgetId,
         style: crate::ui::widget::SwitchStyle,
     },
     Select {
-        selected_label: Option<String>,
+        id: WidgetId,
+        selected_label: Value<Option<String>>,
         placeholder: Value<String>,
         style: crate::ui::widget::SelectStyle,
     },
     TextEditor {
+        id: WidgetId,
         controller: TextController,
-        placeholder: String,
+        placeholder: Value<String>,
         style: crate::ui::widget::InputStyle,
         multiline: bool,
-        auto_wrap: bool,
+        auto_wrap: Value<bool>,
     },
 }
 
@@ -1677,6 +1714,7 @@ pub(crate) struct ComputedScene<VM> {
     pub overlay_hit_regions: Vec<HitRegion<VM>>,
     pub scroll_regions: Vec<ScrollRegion>,
     pub ime_cursor_area: Option<Rect>,
+    pub(crate) dependencies: DependencyGraph,
 }
 
 #[derive(Clone, Default)]
@@ -1724,6 +1762,7 @@ impl<VM> Default for ComputedScene<VM> {
             overlay_hit_regions: Vec::new(),
             scroll_regions: Vec::new(),
             ime_cursor_area: None,
+            dependencies: DependencyGraph::default(),
         }
     }
 }
