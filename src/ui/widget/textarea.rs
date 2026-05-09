@@ -155,6 +155,7 @@ impl<VM> Textarea<VM> {
         Self {
             element: Element {
                 id: WidgetId::next(),
+                key: None,
                 layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
                 interactions,
@@ -181,6 +182,11 @@ impl<VM> Textarea<VM> {
     }
 
     impl_textarea_layout_api!();
+
+    pub fn key(mut self, key: impl Into<super::WidgetKey>) -> Self {
+        self.element.key = Some(key.into());
+        self
+    }
 
     pub fn placeholder(mut self, placeholder: impl Into<Value<String>>) -> Self {
         if let WidgetKind::TextEditor {

@@ -168,8 +168,8 @@ impl ViewModel for App {
                     Textarea::new(self.textarea_text.clone())
                         .size(dp(320.0), dp(140.0))
                         .placeholder("请输入多行内容")
-                        .on_change(Command::new(|app: &mut App| {
-                            tgui_log(LogLevel::Info, app.textarea_text.text())
+                        .on_change(Command::new(|_app: &mut App| {
+                            tgui_log(LogLevel::Info, "111111")
                         })),
                 ),
                 component_card(

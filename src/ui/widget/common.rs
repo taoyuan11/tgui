@@ -67,6 +67,10 @@ impl WidgetId {
         self.0
     }
 
+    pub(crate) fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
     pub(crate) fn dependency_owner(self, phase: DependencyPhase) -> DependencyOwner {
         DependencyOwner {
             widget_id: self.0,
@@ -74,6 +78,41 @@ impl WidgetId {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct WidgetKey(String);
+
+impl From<String> for WidgetKey {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for WidgetKey {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<&String> for WidgetKey {
+    fn from(value: &String) -> Self {
+        Self(value.clone())
+    }
+}
+
+macro_rules! impl_widget_key_from_int {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl From<$ty> for WidgetKey {
+                fn from(value: $ty) -> Self {
+                    Self(value.to_string())
+                }
+            }
+        )*
+    };
+}
+
+impl_widget_key_from_int!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point {
@@ -860,6 +899,25 @@ impl ScenePrimitives {
     pub(crate) fn push_overlay_text(&mut self, primitive: TextPrimitive) {
         self.overlay_texts.push(primitive.clone());
         self.overlay_commands.push(RenderCommand::Text(primitive));
+    }
+
+    pub(crate) fn extend(&mut self, other: &ScenePrimitives) {
+        self.backdrop_blurs
+            .extend(other.backdrop_blurs.iter().copied());
+        self.brushes.extend(other.brushes.iter().cloned());
+        self.shapes.extend(other.shapes.iter().copied());
+        self.meshes.extend(other.meshes.iter().cloned());
+        self.textures.extend(other.textures.iter().cloned());
+        self.texts.extend(other.texts.iter().cloned());
+        self.overlay_shapes
+            .extend(other.overlay_shapes.iter().copied());
+        self.overlay_meshes
+            .extend(other.overlay_meshes.iter().cloned());
+        self.overlay_texts
+            .extend(other.overlay_texts.iter().cloned());
+        self.commands.extend(other.commands.iter().cloned());
+        self.overlay_commands
+            .extend(other.overlay_commands.iter().cloned());
     }
 }
 
@@ -1655,12 +1713,22 @@ impl HitGeometry {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct HitRegion<VM> {
     pub rect: Rect,
     pub clip_rect: Option<Rect>,
     pub geometry: HitGeometry,
     pub interaction: HitInteraction<VM>,
+}
+
+impl<VM> Clone for HitRegion<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            rect: self.rect,
+            clip_rect: self.clip_rect,
+            geometry: self.geometry.clone(),
+            interaction: self.interaction.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1707,7 +1775,6 @@ pub(crate) struct ScrollbarHandle {
     pub axis: ScrollbarAxis,
 }
 
-#[derive(Clone)]
 pub(crate) struct ComputedScene<VM> {
     pub scene: ScenePrimitives,
     pub hit_regions: Vec<HitRegion<VM>>,
@@ -1715,6 +1782,19 @@ pub(crate) struct ComputedScene<VM> {
     pub scroll_regions: Vec<ScrollRegion>,
     pub ime_cursor_area: Option<Rect>,
     pub(crate) dependencies: DependencyGraph,
+}
+
+impl<VM> Clone for ComputedScene<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            scene: self.scene.clone(),
+            hit_regions: self.hit_regions.clone(),
+            overlay_hit_regions: self.overlay_hit_regions.clone(),
+            scroll_regions: self.scroll_regions.clone(),
+            ime_cursor_area: self.ime_cursor_area,
+            dependencies: self.dependencies.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -1768,6 +1848,19 @@ impl<VM> Default for ComputedScene<VM> {
 }
 
 impl<VM> ComputedScene<VM> {
+    pub(crate) fn extend(&mut self, other: &ComputedScene<VM>) {
+        self.scene.extend(&other.scene);
+        self.hit_regions.extend(other.hit_regions.iter().cloned());
+        self.overlay_hit_regions
+            .extend(other.overlay_hit_regions.iter().cloned());
+        self.scroll_regions
+            .extend(other.scroll_regions.iter().copied());
+        if self.ime_cursor_area.is_none() {
+            self.ime_cursor_area = other.ime_cursor_area;
+        }
+        self.dependencies.merge_from(&other.dependencies);
+    }
+
     #[cfg(test)]
     pub(crate) fn rendered(&self) -> RenderedWidgetScene {
         RenderedWidgetScene {

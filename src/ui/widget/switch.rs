@@ -153,6 +153,7 @@ impl<VM> Switch<VM> {
         Self {
             element: Element {
                 id: WidgetId::next(),
+                key: None,
                 layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
                 interactions,
@@ -173,6 +174,11 @@ impl<VM> Switch<VM> {
     }
 
     impl_widget_layout_api!();
+
+    pub fn key(mut self, key: impl Into<super::WidgetKey>) -> Self {
+        self.element.key = Some(key.into());
+        self
+    }
 
     pub fn style(
         mut self,

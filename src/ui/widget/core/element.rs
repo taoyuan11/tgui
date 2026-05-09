@@ -1,6 +1,12 @@
 use super::*;
+use crate::ui::widget::common::ChildSource;
 
 impl<VM> Element<VM> {
+    pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
+
     /// Adapts an element tree built for a child view model so it can be mounted
     /// inside a root view model tree.
     ///
@@ -159,6 +165,7 @@ impl<VM> Element<VM> {
 
         Element {
             id: self.id,
+            key: self.key,
             layout: self.layout,
             visual: self.visual,
             interactions: self.interactions.scope(selector.clone()),
@@ -209,10 +216,23 @@ impl<VM> Element<VM> {
     }
 
     pub(super) fn resolve(&self, theme: &Theme) -> ResolvedElement<VM> {
-        let layout = self.layout.clone();
-        let mut visual = self.visual.clone();
-        let mut background = self.background.clone();
-        let kind = match &self.kind {
+        self.resolve_with_previous(theme, None)
+    }
+
+    pub(super) fn resolve_with_previous(
+        &self,
+        theme: &Theme,
+        previous: Option<&ResolvedElement<VM>>,
+    ) -> ResolvedElement<VM> {
+        let mut source = self.clone();
+        if let Some(previous) = previous {
+            source.id = previous.id;
+        }
+
+        let layout = source.layout.clone();
+        let mut visual = source.visual.clone();
+        let mut background = source.background.clone();
+        let kind = match &source.kind {
             WidgetKind::Container {
                 layout: container_layout,
                 children,
@@ -222,13 +242,22 @@ impl<VM> Element<VM> {
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 let mut layout = container_layout.clone();
                 layout.scrollbar_style = resolved_style.scrollbar;
+                let previous_children = previous
+                    .and_then(|previous| match &previous.kind {
+                        ResolvedWidgetKind::Container { children, .. } => Some(children.as_slice()),
+                        _ => None,
+                    })
+                    .unwrap_or(&[]);
                 ResolvedWidgetKind::Container {
                     layout,
-                    children: children
-                        .iter()
-                        .flat_map(|child| child.resolve(Some(self.id)))
-                        .map(|child| child.resolve(theme))
-                        .collect(),
+                    children: resolved_child_elements_with_previous(
+                        source.id,
+                        children,
+                        previous_children,
+                    )
+                    .into_iter()
+                    .map(|(child, previous_child)| child.resolve_with_previous(theme, previous_child))
+                    .collect(),
                 }
             }
             WidgetKind::Text { text } => {
@@ -386,13 +415,72 @@ impl<VM> Element<VM> {
         };
 
         ResolvedElement {
-            id: self.id,
+            id: source.id,
+            key: source.key.clone(),
             layout,
             visual,
-            interactions: self.interactions.clone(),
-            media_events: self.media_events.clone(),
+            interactions: source.interactions.clone(),
+            media_events: source.media_events.clone(),
             background,
             kind,
         }
     }
+}
+
+fn resolved_child_elements_with_previous<'a, VM>(
+    owner_id: WidgetId,
+    child_sources: &[ChildSource<VM>],
+    previous_children: &'a [ResolvedElement<VM>],
+) -> Vec<(Element<VM>, Option<&'a ResolvedElement<VM>>)> {
+    let previous_by_key: HashMap<_, _> = previous_children
+        .iter()
+        .filter_map(|child| child.key.as_ref().map(|key| (key.clone(), child)))
+        .collect();
+    let previous_by_id: HashMap<_, _> = previous_children.iter().map(|child| (child.id, child)).collect();
+
+    child_sources
+        .iter()
+        .flat_map(|child| child.resolve(Some(owner_id)))
+        .map(|mut child| {
+            let previous_child = child
+                .key
+                .as_ref()
+                .and_then(|key| previous_by_key.get(key).copied())
+                .or_else(|| previous_by_id.get(&child.id).copied());
+            if let Some(previous_child) = previous_child {
+                child.id = previous_child.id;
+            }
+            (child, previous_child)
+        })
+        .collect()
+}
+
+pub(super) fn resolve_subtree_from_source_path<'a, VM>(
+    source: &Element<VM>,
+    previous: Option<&'a ResolvedElement<VM>>,
+    theme: &Theme,
+    path: &[usize],
+) -> Option<ResolvedElement<VM>> {
+    if path.is_empty() {
+        return Some(source.resolve_with_previous(theme, previous));
+    }
+
+    let WidgetKind::Container { children, .. } = &source.kind else {
+        return None;
+    };
+    let previous_children = previous
+        .and_then(|previous| match &previous.kind {
+            ResolvedWidgetKind::Container { children, .. } => Some(children.as_slice()),
+            _ => None,
+        })
+        .unwrap_or(&[]);
+    let owner_id = previous.map(|previous| previous.id).unwrap_or(source.id);
+    let (child, previous_child) = resolved_child_elements_with_previous(
+        owner_id,
+        children,
+        previous_children,
+    )
+    .into_iter()
+    .nth(path[0])?;
+    resolve_subtree_from_source_path(&child, previous_child, theme, &path[1..])
 }

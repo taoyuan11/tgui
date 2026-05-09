@@ -68,6 +68,38 @@ impl DependencyGraph {
                 .extend(owners.iter().copied());
         }
     }
+
+    pub(crate) fn remove_widget_owners(&mut self, widget_ids: &HashSet<u64>) {
+        if widget_ids.is_empty() {
+            return;
+        }
+        self.dependencies.retain(|_, owners| {
+            owners.retain(|owner| !widget_ids.contains(&owner.widget_id));
+            !owners.is_empty()
+        });
+        if self.dependencies.is_empty() {
+            self.has_global_dependency = false;
+        }
+    }
+
+    pub(crate) fn remove_widget_phase_owners(
+        &mut self,
+        widget_ids: &HashSet<u64>,
+        phase: DependencyPhase,
+    ) {
+        if widget_ids.is_empty() {
+            return;
+        }
+        self.dependencies.retain(|_, owners| {
+            owners.retain(|owner| {
+                !(owner.phase == phase && widget_ids.contains(&owner.widget_id))
+            });
+            !owners.is_empty()
+        });
+        if self.dependencies.is_empty() {
+            self.has_global_dependency = false;
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

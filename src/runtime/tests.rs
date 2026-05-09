@@ -18,8 +18,8 @@ use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::{dp, Dp, UnitContext};
 use crate::ui::widget::{
     Button, Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent, CanvasShadow,
-    CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, Input, PathBuilder, Point, Select,
-    SelectOption, Text, TextEditState, Textarea, WidgetTree,
+    CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, Input, PathBuilder, Point, Rect,
+    Select, SelectOption, Text, TextEditState, Textarea, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -198,6 +198,37 @@ fn custom_theme_set() -> (ThemeSet, Theme, Theme) {
     (ThemeSet::new(light.clone(), dark.clone()), light, dark)
 }
 
+fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
+    handler: &BoundRuntimeHandler<VM>,
+    viewport: Rect,
+    units: UnitContext,
+) -> CachedScene<VM> {
+    CachedScene {
+        viewport,
+        units,
+        focused_widget: None,
+        focus_visible: false,
+        pressed_widget: None,
+        selected_text: None,
+        caret_visible: false,
+        theme_epoch: handler.theme_store.version(),
+        animation_epoch: 0,
+        layout_animation_epoch: 0,
+        scroll_epoch: 0,
+        hover_epoch: 0,
+        text_input_epoch: 0,
+        hovered_scrollbar: None,
+        active_scrollbar: None,
+        computed_valid: true,
+        layout: None,
+        computed: Default::default(),
+        scene_chunks: Default::default(),
+        scene_chunk_parts: Default::default(),
+        visual_contexts: Default::default(),
+        dependencies: DependencyGraph::default(),
+    }
+}
+
 #[test]
 fn centered_window_position_uses_monitor_center() {
     let position = centered_window_position_for_monitor(
@@ -370,27 +401,7 @@ fn scene_cache_invalidates_when_units_change() {
     let invalidation = InvalidationSignal::new();
     let handler = test_handler(None, invalidation);
     let viewport = handler.viewport_rect();
-    let cached = CachedScene::<TestVm> {
-        viewport,
-        units: UnitContext::new(1.0, 1.0),
-        focused_widget: None,
-        focus_visible: false,
-        pressed_widget: None,
-        selected_text: None,
-        caret_visible: false,
-        theme_epoch: handler.theme_store.version(),
-        animation_epoch: 0,
-        layout_animation_epoch: 0,
-        scroll_epoch: 0,
-        hover_epoch: 0,
-        text_input_epoch: 0,
-        hovered_scrollbar: None,
-        active_scrollbar: None,
-        computed_valid: true,
-        layout: None,
-        computed: Default::default(),
-        dependencies: DependencyGraph::default(),
-    };
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
 
     assert!(!handler.scene_cache_matches(
         &cached,
@@ -406,27 +417,7 @@ fn scene_layout_cache_survives_visual_only_animation_epoch_change() {
     let invalidation = InvalidationSignal::new();
     let mut handler = test_handler(None, invalidation);
     let viewport = handler.viewport_rect();
-    let cached = CachedScene::<TestVm> {
-        viewport,
-        units: UnitContext::new(1.0, 1.0),
-        focused_widget: None,
-        focus_visible: false,
-        pressed_widget: None,
-        selected_text: None,
-        caret_visible: false,
-        theme_epoch: handler.theme_store.version(),
-        animation_epoch: 0,
-        layout_animation_epoch: 0,
-        scroll_epoch: 0,
-        hover_epoch: 0,
-        text_input_epoch: 0,
-        hovered_scrollbar: None,
-        active_scrollbar: None,
-        computed_valid: true,
-        layout: None,
-        computed: Default::default(),
-        dependencies: DependencyGraph::default(),
-    };
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
 
     handler.animation_epoch = 1;
 
@@ -438,27 +429,7 @@ fn theme_animation_invalidates_cached_layout() {
     let invalidation = InvalidationSignal::new();
     let mut handler = test_handler(None, invalidation);
     let viewport = handler.viewport_rect();
-    let cached = CachedScene::<TestVm> {
-        viewport,
-        units: UnitContext::new(1.0, 1.0),
-        focused_widget: None,
-        focus_visible: false,
-        pressed_widget: None,
-        selected_text: None,
-        caret_visible: false,
-        theme_epoch: handler.theme_store.version(),
-        animation_epoch: 0,
-        layout_animation_epoch: 0,
-        scroll_epoch: 0,
-        hover_epoch: 0,
-        text_input_epoch: 0,
-        hovered_scrollbar: None,
-        active_scrollbar: None,
-        computed_valid: true,
-        layout: None,
-        computed: Default::default(),
-        dependencies: DependencyGraph::default(),
-    };
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
 
     handler.layout_animation_epoch = 1;
 
@@ -480,27 +451,7 @@ fn theme_mode_change_invalidates_cached_layout_when_theme_changes() {
     handler.sync_theme_binding();
 
     let viewport = handler.viewport_rect();
-    let cached = CachedScene::<TestVm> {
-        viewport,
-        units: UnitContext::new(1.0, 1.0),
-        focused_widget: None,
-        focus_visible: false,
-        pressed_widget: None,
-        selected_text: None,
-        caret_visible: false,
-        theme_epoch: handler.theme_store.version(),
-        animation_epoch: 0,
-        layout_animation_epoch: 0,
-        scroll_epoch: 0,
-        hover_epoch: 0,
-        text_input_epoch: 0,
-        hovered_scrollbar: None,
-        active_scrollbar: None,
-        computed_valid: true,
-        layout: None,
-        computed: Default::default(),
-        dependencies: DependencyGraph::default(),
-    };
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
 
     handler.window_bindings.theme_mode = Some(Signal::new(|| ThemeMode::Dark, invalidation));
     handler.sync_theme_binding();
@@ -579,11 +530,12 @@ fn scene_only_dependency_update_preserves_cached_layout() {
         .as_ref()
         .expect("scene-only invalidation should keep the cache shell");
     assert!(cached.layout.is_some());
+    assert!(cached.computed_valid);
     assert!(handler.scene_layout_cache_matches(cached, viewport, units));
 }
 
 #[test]
-fn layout_dependency_update_drops_cached_layout() {
+fn layout_dependency_update_preserves_cached_layout_shell() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let label = context.state(String::from("short"));
@@ -600,11 +552,16 @@ fn layout_dependency_update_drops_cached_layout() {
     label.set(String::from("a much longer label"));
     handler.request_redraw_if_dirty(Instant::now());
 
-    assert!(handler.cached_scene.is_none());
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("layout subtree patch should keep the cache shell");
+    assert!(cached.layout.is_some());
+    assert!(!cached.computed_valid);
 }
 
 #[test]
-fn dynamic_child_dependency_update_drops_cached_layout() {
+fn dynamic_child_dependency_update_preserves_cached_layout_shell() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let visible = context.state(true);
@@ -629,7 +586,12 @@ fn dynamic_child_dependency_update_drops_cached_layout() {
     visible.set(false);
     handler.request_redraw_if_dirty(Instant::now());
 
-    assert!(handler.cached_scene.is_none());
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("dynamic child subtree patch should keep the cache shell");
+    assert!(cached.layout.is_some());
+    assert!(!cached.computed_valid);
 }
 
 #[test]
@@ -661,11 +623,12 @@ fn textarea_show_scrollbar_dependency_update_preserves_cached_layout() {
         .as_ref()
         .expect("scene-only invalidation should keep the cache shell");
     assert!(cached.layout.is_some());
+    assert!(cached.computed_valid);
     assert!(handler.scene_layout_cache_matches(cached, viewport, units));
 }
 
 #[test]
-fn textarea_auto_wrap_dependency_update_drops_cached_layout() {
+fn textarea_auto_wrap_dependency_update_preserves_cached_layout_shell() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let auto_wrap = context.state(false);
@@ -686,11 +649,16 @@ fn textarea_auto_wrap_dependency_update_drops_cached_layout() {
     auto_wrap.set(true);
     handler.request_redraw_if_dirty(Instant::now());
 
-    assert!(handler.cached_scene.is_none());
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("textarea subtree patch should keep the cache shell");
+    assert!(cached.layout.is_some());
+    assert!(!cached.computed_valid);
 }
 
 #[test]
-fn canvas_items_dependency_update_drops_cached_layout() {
+fn canvas_items_dependency_update_preserves_cached_layout_shell() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let expanded = context.state(false);
@@ -721,7 +689,12 @@ fn canvas_items_dependency_update_drops_cached_layout() {
     expanded.set(true);
     handler.request_redraw_if_dirty(Instant::now());
 
-    assert!(handler.cached_scene.is_none());
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("canvas subtree patch should keep the cache shell");
+    assert!(cached.layout.is_some());
+    assert!(!cached.computed_valid);
 }
 
 #[test]
@@ -755,27 +728,7 @@ fn scene_cache_invalidates_when_pressed_widget_changes() {
     let invalidation = InvalidationSignal::new();
     let mut handler = test_handler(None, invalidation);
     let viewport = handler.viewport_rect();
-    let cached = CachedScene::<TestVm> {
-        viewport,
-        units: UnitContext::new(1.0, 1.0),
-        focused_widget: None,
-        focus_visible: false,
-        pressed_widget: None,
-        selected_text: None,
-        caret_visible: false,
-        theme_epoch: handler.theme_store.version(),
-        animation_epoch: 0,
-        layout_animation_epoch: 0,
-        scroll_epoch: 0,
-        hover_epoch: 0,
-        text_input_epoch: 0,
-        hovered_scrollbar: None,
-        active_scrollbar: None,
-        computed_valid: true,
-        layout: None,
-        computed: Default::default(),
-        dependencies: DependencyGraph::default(),
-    };
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
 
     handler.pressed_widget = Some(WidgetId::next());
 
@@ -793,27 +746,7 @@ fn scene_cache_invalidates_when_focused_widget_changes() {
     let invalidation = InvalidationSignal::new();
     let mut handler = test_handler(None, invalidation);
     let viewport = handler.viewport_rect();
-    let cached = CachedScene::<TestVm> {
-        viewport,
-        units: UnitContext::new(1.0, 1.0),
-        focused_widget: None,
-        focus_visible: false,
-        pressed_widget: None,
-        selected_text: None,
-        caret_visible: false,
-        theme_epoch: handler.theme_store.version(),
-        animation_epoch: 0,
-        layout_animation_epoch: 0,
-        scroll_epoch: 0,
-        hover_epoch: 0,
-        text_input_epoch: 0,
-        hovered_scrollbar: None,
-        active_scrollbar: None,
-        computed_valid: true,
-        layout: None,
-        computed: Default::default(),
-        dependencies: DependencyGraph::default(),
-    };
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
 
     handler.focused_widget = Some(super::FocusedWidget {
         widget_id: WidgetId::next(),

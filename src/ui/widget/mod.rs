@@ -41,9 +41,12 @@ pub(crate) use common::{
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId,
+    WidgetKey,
 };
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
-pub(crate) use core::ResolvedSceneLayout;
+pub(crate) use core::{
+    CollectedSceneCache, ResolvedSceneLayout, SceneChunkParts, VisualContextSnapshot,
+};
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use image::Image;
 pub use input::Input;

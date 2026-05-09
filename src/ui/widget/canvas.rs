@@ -2028,6 +2028,7 @@ impl<VM> Canvas<VM> {
         Self {
             element: Element {
                 id: WidgetId::next(),
+                key: None,
                 layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
                 interactions: InteractionHandlers::default(),
@@ -2051,6 +2052,11 @@ impl<VM> Canvas<VM> {
         if let WidgetKind::Canvas { style, .. } = &mut self.element.kind {
             *style = Some(super::style::StyleResolver::new(resolver));
         }
+        self
+    }
+
+    pub fn key(mut self, key: impl Into<super::WidgetKey>) -> Self {
+        self.element.key = Some(key.into());
         self
     }
 

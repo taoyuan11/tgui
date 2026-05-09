@@ -1,7 +1,7 @@
 use super::*;
 
 impl<VM> ResolvedElement<VM> {
-    fn measure_context(&self) -> MeasureContext {
+    pub(super) fn measure_context(&self) -> MeasureContext {
         match &self.kind {
             ResolvedWidgetKind::Container { .. } => MeasureContext::None,
             ResolvedWidgetKind::Text { text } => MeasureContext::Text {
@@ -148,7 +148,7 @@ impl<VM> ResolvedElement<VM> {
         })
     }
 
-    fn taffy_style(
+    pub(super) fn taffy_style(
         &self,
         parent_kind: Option<ContainerKind>,
         viewport: Rect,
@@ -405,26 +405,38 @@ impl<VM> ResolvedElement<VM> {
         style
     }
 
-    pub(super) fn collect_primitives(
+    pub(super) fn collect_subtree_cache(
         &self,
         layout_node: &LayoutNode,
         visual_context: VisualContext,
         context: &mut CollectContext<'_, '_>,
-        computed: &mut ComputedScene<VM>,
-    ) {
+        chunks: &mut HashMap<WidgetId, ComputedScene<VM>>,
+        chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
+        visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
+    ) -> ComputedScene<VM> {
         let owner = self.id.dependency_owner(DependencyPhase::Scene);
         track_dependency_scope(owner, || {
-            self.collect_primitives_tracked(layout_node, visual_context, context, computed);
-        });
+            self.collect_subtree_cache_tracked(
+                layout_node,
+                visual_context,
+                context,
+                chunks,
+                chunk_parts,
+                visual_contexts,
+            )
+        })
     }
 
-    fn collect_primitives_tracked(
+    fn collect_subtree_cache_tracked(
         &self,
         layout_node: &LayoutNode,
         visual_context: VisualContext,
         context: &mut CollectContext<'_, '_>,
-        computed: &mut ComputedScene<VM>,
-    ) {
+        chunks: &mut HashMap<WidgetId, ComputedScene<VM>>,
+        chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
+        visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
+    ) -> ComputedScene<VM> {
+        let mut computed = ComputedScene::default();
         let layout = context
             .taffy
             .layout(layout_node.node)
@@ -979,7 +991,7 @@ impl<VM> ResolvedElement<VM> {
                     primitive_clip,
                     primitive_clip_mask,
                     context,
-                    computed,
+                    &mut computed,
                 );
             }
 
@@ -1117,8 +1129,9 @@ impl<VM> ResolvedElement<VM> {
                     vertical_track: scrollbar_geometry.vertical_track,
                     vertical_thumb: scrollbar_geometry.vertical_thumb,
                 });
+                let before_children = computed.clone();
                 for (child, child_layout) in children.iter().zip(layout_node.children.iter()) {
-                    child.collect_primitives(
+                    let child_chunk = child.collect_subtree_cache(
                         child_layout,
                         VisualContext {
                             origin: Point {
@@ -1130,11 +1143,15 @@ impl<VM> ResolvedElement<VM> {
                             clip_mask: child_clip_mask,
                         },
                         context,
-                        computed,
+                        chunks,
+                        chunk_parts,
+                        visual_contexts,
                     );
+                    computed.extend(&child_chunk);
                 }
+                let mut after_children = ComputedScene::default();
                 push_scrollbar_primitives(
-                    &mut computed.scene,
+                    &mut after_children.scene,
                     context.theme,
                     child_clip_rect,
                     opacity,
@@ -1144,6 +1161,14 @@ impl<VM> ResolvedElement<VM> {
                     context.hovered_scrollbar,
                     context.active_scrollbar,
                 );
+                chunk_parts.insert(
+                    self.id,
+                    SceneChunkParts {
+                        before_children,
+                        after_children: after_children.clone(),
+                    },
+                );
+                computed.extend(&after_children);
             }
             ResolvedWidgetKind::Text { text } => {
                 let padding = text
@@ -1223,7 +1248,7 @@ impl<VM> ResolvedElement<VM> {
                     opacity,
                     loading_background,
                     context,
-                    computed,
+                    &mut computed,
                     "image",
                 );
             }
@@ -1558,7 +1583,7 @@ impl<VM> ResolvedElement<VM> {
                         on_open_change.as_ref(),
                         select_style,
                         context,
-                        computed,
+                        &mut computed,
                         opacity,
                     );
                 }
@@ -1739,6 +1764,15 @@ impl<VM> ResolvedElement<VM> {
                 }
             }
         }
+        chunk_parts
+            .entry(self.id)
+            .or_insert_with(|| SceneChunkParts {
+                before_children: computed.clone(),
+                after_children: ComputedScene::default(),
+            });
+        visual_contexts.insert(self.id, visual_context.into());
+        chunks.insert(self.id, computed.clone());
+        computed
     }
 
     pub(super) fn collect_media_event_states(

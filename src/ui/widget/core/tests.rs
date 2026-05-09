@@ -1,4 +1,6 @@
-use super::{centered_text_frame, resolved_text_metrics, SELECT_ARROW_ICON};
+use super::{
+    centered_text_frame, resolved_text_metrics, ResolvedWidgetKind, SELECT_ARROW_ICON,
+};
 use std::collections::HashMap;
 
 use crate::animation::{AnimationCoordinator, AnimationEngine};
@@ -1004,6 +1006,71 @@ fn dynamic_children_signal_records_structure_dependency() {
         widget_id: widget_id.raw(),
         phase: DependencyPhase::Structure,
     }));
+}
+
+#[test]
+fn keyed_dynamic_children_reuse_widget_ids_across_reorder_patch() {
+    let ctx = test_context();
+    let reversed = ctx.state(false);
+    let container: Element<()> = Stack::<()>::new()
+        .child(reversed.signal().map(|reversed| {
+            if reversed {
+                vec![
+                    Element::from(Text::new("second").key("second")),
+                    Element::from(Text::new("first").key("first")),
+                ]
+            } else {
+                vec![
+                    Element::from(Text::new("first").key("first")),
+                    Element::from(Text::new("second").key("second")),
+                ]
+            }
+        }))
+        .into();
+    let container_id = container.id;
+    let tree = WidgetTree::new(container);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let viewport = Rect::new(0.0, 0.0, 200.0, 120.0);
+    let mut animations = AnimationEngine::default();
+
+    let mut layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        viewport,
+    );
+
+    let initial_ids = match &layout.resolved_root.kind {
+        ResolvedWidgetKind::Container { children, .. } => {
+            children.iter().map(|child| child.id).collect::<Vec<_>>()
+        }
+        _ => panic!("stack root should resolve to a container"),
+    };
+
+    reversed.set(true);
+    let removed = layout
+        .patch_layout_roots(
+            &[container_id],
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            viewport,
+        )
+        .expect("keyed reorder should patch successfully");
+
+    assert!(removed.is_empty());
+    let reordered_ids = match &layout.resolved_root.kind {
+        ResolvedWidgetKind::Container { children, .. } => {
+            children.iter().map(|child| child.id).collect::<Vec<_>>()
+        }
+        _ => panic!("stack root should remain a container"),
+    };
+    assert_eq!(reordered_ids, vec![initial_ids[1], initial_ids[0]]);
 }
 
 #[test]

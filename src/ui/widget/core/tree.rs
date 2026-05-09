@@ -4,7 +4,7 @@ pub struct WidgetTree<VM> {
     pub(super) root: Element<VM>,
 }
 
-fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
+pub(super) fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
     #[cfg(any(
         target_os = "windows",
         target_os = "macos",
@@ -224,15 +224,21 @@ impl<VM> WidgetTree<VM> {
                     .expect("widget tree layout should compute");
 
                 ResolvedSceneLayout {
+                    source_root: self.root.clone(),
+                    root_id: resolved_root.id,
                     resolved_root,
                     layout_root: root_layout,
                     taffy,
                     units,
                     dependencies: DependencyGraph::default(),
+                    paths: HashMap::new(),
+                    parents: HashMap::new(),
+                    depths: HashMap::new(),
                 }
             })
         });
         layout.dependencies = dependencies;
+        layout.rebuild_indexes();
         layout
     }
 
@@ -255,7 +261,7 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
     ) -> ComputedScene<VM> {
-        self.collect_scene_from_layout_with_focus_value(
+        self.collect_scene_cache_from_layout_with_focus_value(
             font_manager,
             layout,
             theme,
@@ -275,9 +281,10 @@ impl<VM> WidgetTree<VM> {
             selected_text_state,
             caret_visible,
         )
+        .computed
     }
 
-    pub(crate) fn collect_scene_from_layout_with_focus_value(
+    pub(crate) fn collect_scene_cache_from_layout_with_focus_value(
         &self,
         font_manager: &FontManager,
         layout: &ResolvedSceneLayout<VM>,
@@ -297,10 +304,13 @@ impl<VM> WidgetTree<VM> {
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
-    ) -> ComputedScene<VM> {
-        let (mut computed, dependencies) = with_widget_stack(|| {
+    ) -> CollectedSceneCache<VM> {
+        let ((mut computed, chunks, chunk_parts, visual_contexts), dependencies) =
+            with_widget_stack(|| {
             with_dependency_collection(|| {
-                let mut computed = ComputedScene::default();
+                let mut chunks = HashMap::new();
+                let mut chunk_parts = HashMap::new();
+                let mut visual_contexts = HashMap::new();
                 let mut context = CollectContext {
                     taffy: &layout.taffy,
                     font_manager,
@@ -323,7 +333,7 @@ impl<VM> WidgetTree<VM> {
                     animations,
                     now: std::time::Instant::now(),
                 };
-                layout.resolved_root.collect_primitives(
+                let computed = layout.resolved_root.collect_subtree_cache(
                     &layout.layout_root,
                     VisualContext {
                         origin: Point {
@@ -335,13 +345,66 @@ impl<VM> WidgetTree<VM> {
                         clip_mask: None,
                     },
                     &mut context,
-                    &mut computed,
+                    &mut chunks,
+                    &mut chunk_parts,
+                    &mut visual_contexts,
                 );
-                computed
+                (computed, chunks, chunk_parts, visual_contexts)
             })
         });
-        computed.dependencies = dependencies;
-        computed
+        computed.dependencies = dependencies.clone();
+        CollectedSceneCache {
+            computed,
+            chunks,
+            chunk_parts,
+            visual_contexts,
+            dependencies,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn collect_scene_from_layout_with_focus_value(
+        &self,
+        font_manager: &FontManager,
+        layout: &ResolvedSceneLayout<VM>,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        select_open_states: &HashMap<WidgetId, bool>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
+        focused_text_value: Option<&str>,
+        focused_text_layout: Option<&TextLayoutInfo>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&TextEditState>,
+        caret_visible: bool,
+    ) -> ComputedScene<VM> {
+        self.collect_scene_cache_from_layout_with_focus_value(
+            font_manager,
+            layout,
+            theme,
+            media,
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            select_open_states,
+            scroll_offsets,
+            viewport,
+            focused_input,
+            focused_text_state,
+            focused_text_value,
+            focused_text_layout,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+        )
+        .computed
     }
 
     #[cfg(test)]

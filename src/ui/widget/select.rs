@@ -5,13 +5,14 @@ use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
     CursorStyle, InteractionHandlers, MediaEventHandlers, Point, SelectOptionState, VisualStyle,
-    WidgetId, WidgetKind,
+    WidgetId, WidgetKey, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
 use super::style::{SelectStyle, StyleResolver};
 
 pub struct Select<VM, K, V> {
+    key: Option<WidgetKey>,
     options: Vec<SelectOption<K, V>>,
     selected_key: Value<Option<K>>,
     placeholder: Value<String>,
@@ -168,6 +169,7 @@ impl<VM, K, V> Select<VM, K, V> {
         interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
 
         Self {
+            key: None,
             options: options.into_iter().map(Into::into).collect(),
             selected_key: selected_key.into(),
             placeholder: Value::Static(String::new()),
@@ -216,6 +218,11 @@ impl<VM, K, V> Select<VM, K, V> {
         resolver: impl Fn(ResolvedThemeMode) -> SelectStyle + Send + Sync + 'static,
     ) -> Self {
         self.style = Some(StyleResolver::new(resolver));
+        self
+    }
+
+    pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
+        self.key = Some(key.into());
         self
     }
 
@@ -307,6 +314,7 @@ where
 
         Element {
             id: WidgetId::next(),
+            key: select.key,
             layout: select.layout,
             visual: select.visual,
             interactions: select.interactions,

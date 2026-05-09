@@ -6,7 +6,8 @@ use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
-    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
+    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKey,
+    WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -14,6 +15,7 @@ use super::style::{ImageStyle, StyleResolver};
 
 #[derive(Clone)]
 pub struct Image {
+    pub(crate) key: Option<WidgetKey>,
     pub(crate) layout: LayoutStyle,
     pub(crate) visual: VisualStyle,
     pub(crate) source: Value<MediaSource>,
@@ -247,6 +249,7 @@ impl IntoImageUrlSource for Value<String> {
 impl Image {
     pub fn new(source: impl Into<Value<MediaSource>>) -> Self {
         Self {
+            key: None,
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
             source: source.into(),
@@ -270,6 +273,11 @@ impl Image {
     }
 
     impl_image_layout_api!();
+
+    pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
 
     pub fn style(
         mut self,
@@ -347,6 +355,7 @@ impl Image {
         interactions.cursor_style = self.cursor_style.clone();
         Element {
             id: WidgetId::next(),
+            key: self.key.clone(),
             layout: self.layout.clone(),
             visual: self.visual.clone(),
             interactions,
@@ -362,6 +371,7 @@ impl Image {
     ) -> Element<VM> {
         Element {
             id: WidgetId::next(),
+            key: self.key.clone(),
             layout: self.layout.clone(),
             visual: self.visual.clone(),
             interactions: InteractionHandlers {
@@ -379,6 +389,7 @@ impl<VM> From<Image> for Element<VM> {
     fn from(value: Image) -> Self {
         Element {
             id: WidgetId::next(),
+            key: value.key.clone(),
             layout: value.layout.clone(),
             visual: value.visual.clone(),
             interactions: InteractionHandlers {

@@ -6,7 +6,8 @@ use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::Sp;
 
 use super::common::{
-    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
+    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKey,
+    WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -14,6 +15,7 @@ use super::style::{StyleResolver, TextWidgetStyle};
 
 #[derive(Clone)]
 pub struct Text {
+    pub(crate) key: Option<WidgetKey>,
     pub(crate) layout: LayoutStyle,
     pub(crate) visual: VisualStyle,
     pub(crate) content: Value<String>,
@@ -164,6 +166,7 @@ macro_rules! impl_text_layout_api {
 impl Text {
     pub fn new(content: impl Into<Value<String>>) -> Self {
         Self {
+            key: None,
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
             content: content.into(),
@@ -187,6 +190,11 @@ impl Text {
         resolver: impl Fn(ResolvedThemeMode) -> TextWidgetStyle + Send + Sync + 'static,
     ) -> Self {
         self.style = Some(StyleResolver::new(resolver));
+        self
+    }
+
+    pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
+        self.key = Some(key.into());
         self
     }
 
@@ -251,6 +259,7 @@ impl Text {
         interactions.cursor_style = self.resolved_cursor_style();
         Element {
             id: WidgetId::next(),
+            key: self.key.clone(),
             layout,
             visual,
             interactions,
@@ -268,6 +277,7 @@ impl<VM> From<Text> for Element<VM> {
         let visual = value.visual.clone();
         Element {
             id: WidgetId::next(),
+            key: value.key.clone(),
             layout,
             visual,
             interactions: InteractionHandlers {
