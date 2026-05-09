@@ -1,4 +1,4 @@
-use crate::foundation::binding::Binding;
+use crate::foundation::binding::Signal;
 use crate::foundation::color::Color;
 use crate::media::{ContentFit, MediaBytes, MediaSource};
 use crate::ui::layout::Value;
@@ -140,9 +140,9 @@ impl From<BackgroundRadialGradient> for Value<BackgroundBrush> {
     }
 }
 
-impl From<Binding<Color>> for Value<BackgroundBrush> {
-    fn from(value: Binding<Color>) -> Self {
-        Value::Bound(value.map(BackgroundBrush::Solid))
+impl From<Signal<Color>> for Value<BackgroundBrush> {
+    fn from(value: Signal<Color>) -> Self {
+        Value::Signal(value.map(BackgroundBrush::Solid))
     }
 }
 
@@ -150,7 +150,7 @@ impl From<Value<Color>> for Value<BackgroundBrush> {
     fn from(value: Value<Color>) -> Self {
         match value {
             Value::Static(color) => Value::Static(BackgroundBrush::Solid(color)),
-            Value::Bound(binding) => Value::Bound(binding.map(BackgroundBrush::Solid)),
+            Value::Signal(signal) => Value::Signal(signal.map(BackgroundBrush::Solid)),
         }
     }
 }

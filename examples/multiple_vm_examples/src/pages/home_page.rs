@@ -23,7 +23,7 @@ enum HomeTab {
 
 #[derive(Clone)]
 pub struct HomePage {
-    tab: Observable<HomeTab>,
+    tab: State<HomeTab>,
     counter: HomeCounterPage,
     details: HomeDetailsPage,
 }
@@ -31,7 +31,7 @@ pub struct HomePage {
 impl HomePage {
     pub fn new(context: &ViewModelContext) -> Self {
         Self {
-            tab: context.observable(HomeTab::Counter),
+            tab: context.state(HomeTab::Counter),
             counter: HomeCounterPage::new(context),
             details: HomeDetailsPage::new(context),
         }
@@ -46,7 +46,7 @@ impl HomePage {
     }
 
     pub fn view(&self) -> Element<Self> {
-        let tab = self.tab.binding();
+        let tab = self.tab.signal();
         let counter = self.counter.clone();
         let details = self.details.clone();
 
@@ -76,13 +76,13 @@ impl HomePage {
 
 #[derive(Clone)]
 struct HomeCounterPage {
-    count: Observable<i32>,
+    count: State<i32>,
 }
 
 impl HomeCounterPage {
     fn new(context: &ViewModelContext) -> Self {
         Self {
-            count: context.observable(0),
+            count: context.state(0),
         }
     }
 
@@ -95,7 +95,7 @@ impl HomeCounterPage {
             .padding(Insets::all(dp(14.0)))
             .style(|mode| panel_style(mode, Color::hex(0x0D47A1)))
             .child(el![
-                Text::new(self.count.binding().map(|i| format!("Home Counter 数量：{i}")))
+                Text::new(self.count.signal().map(|i| format!("Home Counter 数量：{i}")))
                     .style(|mode| text_style(mode, sp(16.0), Color::WHITE)),
                 Button::new("Counter +1").on_click(Command::new(Self::increment)),
             ])
@@ -105,13 +105,13 @@ impl HomeCounterPage {
 
 #[derive(Clone)]
 struct HomeDetailsPage {
-    visits: Observable<i32>,
+    visits: State<i32>,
 }
 
 impl HomeDetailsPage {
     fn new(context: &ViewModelContext) -> Self {
         Self {
-            visits: context.observable(0),
+            visits: context.state(0),
         }
     }
 
@@ -126,7 +126,7 @@ impl HomeDetailsPage {
             .child(el![
                 Text::new("Home Details 子页面")
                     .style(|mode| text_style(mode, sp(16.0), Color::WHITE)),
-                Text::new(self.visits.binding().map(|visits| format!("访问次数：{visits}")))
+                Text::new(self.visits.signal().map(|visits| format!("访问次数：{visits}")))
                     .style(|mode| text_style(mode, sp(16.0), Color::WHITE)),
                 Button::new("记录访问").on_click(Command::new(Self::add_visit)),
             ])

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::foundation::binding::{Binding, ViewModelContext};
+use crate::foundation::binding::{Signal, ViewModelContext};
 use crate::TguiError;
 
 use super::backend::{
@@ -23,14 +23,14 @@ struct VideoControllerInner {
 impl VideoController {
     pub fn new(ctx: &ViewModelContext) -> Self {
         let shared = BackendSharedState {
-            playback_state: ctx.observable(PlaybackState::Idle),
-            metrics: ctx.observable(VideoMetrics::default()),
-            volume: ctx.observable(1.0),
-            muted: ctx.observable(false),
-            buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
-            video_size: ctx.observable(VideoSize::default()),
-            error: ctx.observable(None),
-            surface: ctx.observable(VideoSurfaceSnapshot::default()),
+            playback_state: ctx.state(PlaybackState::Idle),
+            metrics: ctx.state(VideoMetrics::default()),
+            volume: ctx.state(1.0),
+            muted: ctx.state(false),
+            buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+            video_size: ctx.state(VideoSize::default()),
+            error: ctx.state(None),
+            surface: ctx.state(VideoSurfaceSnapshot::default()),
         };
         let backend: Arc<dyn VideoBackend> = Arc::new(FfmpegVideoBackend::new(shared.clone()));
         Self::from_parts(shared, backend)
@@ -84,48 +84,48 @@ impl VideoController {
         self.inner.backend.set_buffer_memory_limit_bytes(bytes);
     }
 
-    pub fn playback_state(&self) -> Binding<PlaybackState> {
-        self.inner.shared.playback_state.binding()
+    pub fn playback_state(&self) -> Signal<PlaybackState> {
+        self.inner.shared.playback_state.signal()
     }
 
-    pub fn position(&self) -> Binding<Duration> {
+    pub fn position(&self) -> Signal<Duration> {
         self.inner
             .shared
             .metrics
-            .binding()
+            .signal()
             .map(|metrics| metrics.position)
     }
 
-    pub fn duration(&self) -> Binding<Option<Duration>> {
+    pub fn duration(&self) -> Signal<Option<Duration>> {
         self.inner
             .shared
             .metrics
-            .binding()
+            .signal()
             .map(|metrics| metrics.duration)
     }
 
-    pub fn buffered_position(&self) -> Binding<Option<Duration>> {
+    pub fn buffered_position(&self) -> Signal<Option<Duration>> {
         self.inner
             .shared
             .metrics
-            .binding()
+            .signal()
             .map(|metrics| metrics.buffered)
     }
 
-    pub fn volume(&self) -> Binding<f32> {
-        self.inner.shared.volume.binding()
+    pub fn volume(&self) -> Signal<f32> {
+        self.inner.shared.volume.signal()
     }
 
-    pub fn muted(&self) -> Binding<bool> {
-        self.inner.shared.muted.binding()
+    pub fn muted(&self) -> Signal<bool> {
+        self.inner.shared.muted.signal()
     }
 
-    pub fn video_size(&self) -> Binding<VideoSize> {
-        self.inner.shared.video_size.binding()
+    pub fn video_size(&self) -> Signal<VideoSize> {
+        self.inner.shared.video_size.signal()
     }
 
-    pub fn error(&self) -> Binding<Option<String>> {
-        self.inner.shared.error.binding()
+    pub fn error(&self) -> Signal<Option<String>> {
+        self.inner.shared.error.signal()
     }
 
     pub(crate) fn surface_snapshot(&self) -> VideoSurfaceSnapshot {
@@ -238,14 +238,14 @@ mod tests {
 
     fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
         BackendSharedState {
-            playback_state: ctx.observable(PlaybackState::Idle),
-            metrics: ctx.observable(VideoMetrics::default()),
-            volume: ctx.observable(1.0),
-            muted: ctx.observable(false),
-            buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
-            video_size: ctx.observable(VideoSize::default()),
-            error: ctx.observable(None),
-            surface: ctx.observable(VideoSurfaceSnapshot::default()),
+            playback_state: ctx.state(PlaybackState::Idle),
+            metrics: ctx.state(VideoMetrics::default()),
+            volume: ctx.state(1.0),
+            muted: ctx.state(false),
+            buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+            video_size: ctx.state(VideoSize::default()),
+            error: ctx.state(None),
+            surface: ctx.state(VideoSurfaceSnapshot::default()),
         }
     }
 

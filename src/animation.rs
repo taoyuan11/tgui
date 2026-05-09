@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
-use crate::foundation::binding::{Binding, InvalidationSignal};
+use crate::foundation::binding::{InvalidationSignal, Signal};
 use crate::foundation::color::Color;
 use crate::ui::layout::Insets;
 use crate::ui::unit::{Dp, Sp};
@@ -436,12 +436,12 @@ impl<T> AnimatedValue<T> {
         self.invalidation.mark_dirty();
     }
 
-    pub fn binding(&self) -> Binding<T>
+    pub fn signal(&self) -> Signal<T>
     where
         T: Clone + Send + Sync + 'static,
     {
         let animated = self.clone();
-        Binding::new(move || animated.get())
+        Signal::new(move || animated.get(), self.invalidation.clone())
     }
 }
 
@@ -1118,7 +1118,8 @@ impl AnimationKey {
     pub(crate) const fn affects_layout(self) -> bool {
         match self {
             Self::Widget { property, .. } => property.affects_layout(),
-            Self::Window(_) => false,
+            Self::Window(WindowProperty::ClearColor) => false,
+            Self::Window(_) => true,
         }
     }
 }

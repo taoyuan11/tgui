@@ -15,7 +15,7 @@ use lyon::tessellation::{
 };
 use resvg::tiny_skia;
 
-use crate::foundation::binding::Binding;
+use crate::foundation::binding::Signal;
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::view_model::ValueCommand;
@@ -214,9 +214,9 @@ impl From<CanvasRadialGradient> for Value<CanvasBrush> {
     }
 }
 
-impl From<Binding<Color>> for Value<CanvasBrush> {
-    fn from(value: Binding<Color>) -> Self {
-        Value::Bound(value.map(CanvasBrush::Solid))
+impl From<Signal<Color>> for Value<CanvasBrush> {
+    fn from(value: Signal<Color>) -> Self {
+        Value::Signal(value.map(CanvasBrush::Solid))
     }
 }
 
@@ -224,7 +224,7 @@ impl From<Value<Color>> for Value<CanvasBrush> {
     fn from(value: Value<Color>) -> Self {
         match value {
             Value::Static(color) => Value::Static(CanvasBrush::Solid(color)),
-            Value::Bound(binding) => Value::Bound(binding.map(CanvasBrush::Solid)),
+            Value::Signal(signal) => Value::Signal(signal.map(CanvasBrush::Solid)),
         }
     }
 }

@@ -15,7 +15,7 @@ use crate::application::{
     ApplicationConfig, ThemeSelection, WindowClosePolicy, WindowRole, WindowSetFactory,
 };
 use crate::dialog::{async_dialog_channel, AsyncDialogDispatcher, AsyncDialogReceiver};
-use crate::foundation::binding::{Binding, InvalidationSignal, TextChange, TextChangeSet};
+use crate::foundation::binding::{InvalidationSignal, Signal, TextChange, TextChangeSet};
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
@@ -411,10 +411,10 @@ fn build_event_loop_with_ohos_app(
 
 #[derive(Clone, Default)]
 pub struct WindowBindings {
-    pub(crate) title: Option<Binding<String>>,
-    pub(crate) clear_color: Option<Binding<Color>>,
-    pub(crate) theme_set: Option<Binding<ThemeSet>>,
-    pub(crate) theme_mode: Option<Binding<ThemeMode>>,
+    pub(crate) title: Option<Signal<String>>,
+    pub(crate) clear_color: Option<Signal<Color>>,
+    pub(crate) theme_set: Option<Signal<ThemeSet>>,
+    pub(crate) theme_mode: Option<Signal<ThemeMode>>,
 }
 
 pub struct WindowCommand<VM> {
@@ -501,6 +501,7 @@ struct CachedScene<VM> {
     pressed_widget: Option<WidgetId>,
     selected_text: Option<WidgetId>,
     caret_visible: bool,
+    theme_epoch: u64,
     animation_epoch: u64,
     layout_animation_epoch: u64,
     scroll_epoch: u64,
@@ -1067,6 +1068,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn apply_theme(&mut self, theme: Theme) {
         self.theme = theme;
+        self.animation_epoch = self.animation_epoch.wrapping_add(1);
+        self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
         self.invalidate_scene();
     }
 
@@ -1089,7 +1092,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.window_bindings
             .theme_mode
             .as_ref()
-            .map(|binding| ThemeSelection::from_mode(binding.get()))
+            .map(|signal| ThemeSelection::from_mode(signal.get()))
             .unwrap_or_else(|| self.config.theme.clone())
     }
 
@@ -1097,7 +1100,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.window_bindings
             .theme_set
             .as_ref()
-            .map(Binding::get)
+            .map(Signal::get)
             .unwrap_or_else(|| self.config.theme_set.clone())
     }
 
@@ -1142,18 +1145,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         if let Some(window) = self.window.as_ref() {
-            if let Some(binding) = self.window_bindings.title.as_ref() {
-                window.set_title(&binding.get());
+            if let Some(signal) = self.window_bindings.title.as_ref() {
+                window.set_title(&signal.get());
             }
         }
 
         let theme = self.animated_theme(now);
         if let Some(renderer) = self.renderer.as_mut() {
-            if let Some(binding) = self.window_bindings.clear_color.as_ref() {
+            if let Some(signal) = self.window_bindings.clear_color.as_ref() {
                 renderer.set_clear_color(self.animation_engine.resolve_color(
                     AnimationKey::Window(WindowProperty::ClearColor),
-                    binding.get(),
-                    binding.transition(),
+                    signal.get(),
+                    signal.transition(),
                     now,
                 ));
             } else if !self.config.clear_color_overridden {
@@ -1331,6 +1334,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && cached.pressed_widget == self.pressed_widget
             && cached.selected_text == self.selected_text
             && cached.caret_visible == caret_visible
+            && cached.theme_epoch == self.theme_store.version()
             && cached.animation_epoch == self.animation_epoch
             && cached.scroll_epoch == self.scroll_epoch
             && cached.hover_epoch == self.hover_epoch
@@ -1347,6 +1351,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) -> bool {
         cached.viewport == viewport
             && cached.units == units
+            && cached.theme_epoch == self.theme_store.version()
             && cached.layout_animation_epoch == self.layout_animation_epoch
     }
 
@@ -1584,6 +1589,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 pressed_widget: self.pressed_widget,
                 selected_text: self.selected_text,
                 caret_visible,
+                theme_epoch: self.theme_store.version(),
                 animation_epoch: self.animation_epoch,
                 layout_animation_epoch: self.layout_animation_epoch,
                 scroll_epoch: self.scroll_epoch,

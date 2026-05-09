@@ -600,14 +600,14 @@ mod tests {
 
     fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
         BackendSharedState {
-            playback_state: ctx.observable(PlaybackState::Idle),
-            metrics: ctx.observable(VideoMetrics::default()),
-            volume: ctx.observable(1.0),
-            muted: ctx.observable(false),
-            buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
-            video_size: ctx.observable(VideoSize::default()),
-            error: ctx.observable(None),
-            surface: ctx.observable(VideoSurfaceSnapshot::default()),
+            playback_state: ctx.state(PlaybackState::Idle),
+            metrics: ctx.state(VideoMetrics::default()),
+            volume: ctx.state(1.0),
+            muted: ctx.state(false),
+            buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+            video_size: ctx.state(VideoSize::default()),
+            error: ctx.state(None),
+            surface: ctx.state(VideoSurfaceSnapshot::default()),
         }
     }
 

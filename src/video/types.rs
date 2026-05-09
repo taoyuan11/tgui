@@ -123,7 +123,7 @@ impl Default for VideoMetrics {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct VideoSurfaceSnapshot {
     pub intrinsic_size: IntrinsicSize,
     pub texture: Option<Arc<TextureFrame>>,

@@ -45,20 +45,20 @@ fn solid_button_style(mode: ResolvedThemeMode, background: Color) -> ButtonStyle
 }
 
 struct CounterVm {
-    count: Observable<i32>,
+    count: State<i32>,
 }
 
 impl CounterVm {
     
 
-    fn title(&self) -> Binding<String> {
+    fn title(&self) -> Signal<String> {
         self.count
-            .binding()
+            .signal()
             .map(|count| format!("tgui mvvm counter - count: {count}"))
     }
 
-    fn clear_color(&self) -> Binding<Color> {
-        self.count.binding().map(|count| match count.rem_euclid(4) {
+    fn clear_color(&self) -> Signal<Color> {
+        self.count.signal().map(|count| match count.rem_euclid(4) {
             0 => Color::hexa(0x0F172AFF),
             1 => Color::hexa(0x10253CFF),
             2 => Color::hexa(0x1F2937FF),
@@ -66,14 +66,14 @@ impl CounterVm {
         })
     }
 
-    fn headline(&self) -> Binding<String> {
+    fn headline(&self) -> Signal<String> {
         self.count
-            .binding()
+            .signal()
             .map(|count| format!("Current value: {count}"))
     }
 
-    fn hint(&self) -> Binding<String> {
-        self.count.binding().map(|count| {
+    fn hint(&self) -> Signal<String> {
+        self.count.signal().map(|count| {
             if count == 0 {
                 "Press Space to increment, Minus to decrement, or R to reset.".to_string()
             } else if count > 0 {
@@ -104,7 +104,7 @@ impl CounterVm {
 impl ViewModel for CounterVm {
     fn new(ctx: &ViewModelContext) -> Self {
         Self {
-            count: ctx.observable(0),
+            count: ctx.state(0),
         }
     }
 

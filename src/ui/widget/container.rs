@@ -1,4 +1,4 @@
-use crate::foundation::binding::Binding;
+use crate::foundation::binding::Signal;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{
@@ -79,9 +79,9 @@ where
     }
 }
 
-impl<VM, T> IntoChildren<VM> for Binding<T>
+impl<VM, T> IntoChildren<VM> for Signal<T>
 where
-    T: IntoChildGroup<VM> + Send + Sync + 'static,
+    T: Clone + IntoChildGroup<VM> + Send + Sync + 'static,
 {
     #[allow(private_interfaces)]
     fn into_child_source(self) -> ChildSource<VM> {
@@ -135,13 +135,13 @@ impl IntoLengthValue for Value<Length> {
     }
 }
 
-impl IntoLengthValue for Binding<Length> {
+impl IntoLengthValue for Signal<Length> {
     fn into_length_value(self) -> Value<Length> {
         self.into()
     }
 }
 
-impl IntoLengthValue for Binding<Dp> {
+impl IntoLengthValue for Signal<Dp> {
     fn into_length_value(self) -> Value<Length> {
         self.map(Length::from).into()
     }
@@ -151,7 +151,7 @@ impl IntoLengthValue for Value<Dp> {
     fn into_length_value(self) -> Value<Length> {
         match self {
             Value::Static(value) => Length::from(value).into(),
-            Value::Bound(binding) => binding.map(Length::from).into(),
+            Value::Signal(signal) => signal.map(Length::from).into(),
         }
     }
 }
@@ -160,7 +160,7 @@ impl IntoLengthValue for Value<f32> {
     fn into_length_value(self) -> Value<Length> {
         match self {
             Value::Static(value) => Length::from(value).into(),
-            Value::Bound(binding) => binding.map(Length::from).into(),
+            Value::Signal(signal) => signal.map(Length::from).into(),
         }
     }
 }

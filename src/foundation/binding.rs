@@ -60,9 +60,17 @@ impl ViewModelContext {
         }
     }
 
-    /// Creates an observable piece of reactive state.
-    pub fn observable<T>(&self, value: T) -> Observable<T> {
-        Observable::new(value, self.invalidation.clone())
+    /// Creates a writable piece of reactive state.
+    pub fn state<T>(&self, value: T) -> State<T> {
+        State::new(value, self.invalidation.clone())
+    }
+
+    /// Creates a cached read-only signal from a reader closure.
+    pub fn signal<T>(&self, reader: impl Fn() -> T + Send + Sync + 'static) -> Signal<T>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        Signal::new(reader, self.invalidation.clone())
     }
 
     /// Creates an animatable value for imperative timeline-driven animation.
@@ -198,9 +206,9 @@ impl From<&str> for TextController {
     }
 }
 
-impl From<Binding<String>> for TextController {
-    fn from(value: Binding<String>) -> Self {
-        TextController::new_legacy(crate::ui::layout::Value::Bound(value))
+impl From<Signal<String>> for TextController {
+    fn from(value: Signal<String>) -> Self {
+        TextController::new_legacy(crate::ui::layout::Value::Signal(value))
     }
 }
 
@@ -211,16 +219,16 @@ impl From<crate::ui::layout::Value<String>> for TextController {
 }
 
 #[derive(Clone)]
-/// Shared mutable state that marks the UI dirty whenever it changes.
+/// Shared mutable state that marks the UI dirty whenever its value changes.
 ///
-/// Create it through [`ViewModelContext::observable`], then derive UI-facing
-/// values using [`Observable::binding`].
-pub struct Observable<T> {
+/// Create it through [`ViewModelContext::state`], then derive UI-facing values
+/// using [`State::signal`].
+pub struct State<T> {
     value: Arc<Mutex<T>>,
     invalidation: InvalidationSignal,
 }
 
-impl<T> Observable<T> {
+impl<T> State<T> {
     fn new(value: T, invalidation: InvalidationSignal) -> Self {
         Self {
             value: Arc::new(Mutex::new(value)),
@@ -228,81 +236,215 @@ impl<T> Observable<T> {
         }
     }
 
-    /// Replaces the current value and requests a UI refresh.
-    pub fn set(&self, value: T) {
-        *self.value.lock().expect("observable lock poisoned") = value;
-        self.invalidation.mark_dirty();
+    /// Reads the current value without cloning it.
+    pub fn read<R>(&self, reader: impl FnOnce(&T) -> R) -> R {
+        let value = self.value.lock().expect("state lock poisoned");
+        reader(&value)
     }
 
-    /// Mutates the current value in place and requests a UI refresh.
-    pub fn update<R>(&self, updater: impl FnOnce(&mut T) -> R) -> R {
-        let mut value = self.value.lock().expect("observable lock poisoned");
-        let result = updater(&mut value);
-        self.invalidation.mark_dirty();
-        result
-    }
-
-    /// Creates a binding that reads the current observable value on demand.
-    pub fn binding(&self) -> Binding<T>
+    /// Creates a cached signal that reads the current state value on demand.
+    pub fn signal(&self) -> Signal<T>
     where
         T: Clone + Send + Sync + 'static,
     {
-        let observable = self.clone();
-        Binding::new(move || observable.get())
+        let state = self.clone();
+        Signal::new(move || state.get(), self.invalidation.clone())
     }
 }
 
-impl<T: Clone> Observable<T> {
+impl<T: PartialEq> State<T> {
+    /// Replaces the current value and requests a UI refresh only when it changed.
+    pub fn set(&self, value: T) {
+        let mut current = self.value.lock().expect("state lock poisoned");
+        if *current == value {
+            return;
+        }
+        *current = value;
+        drop(current);
+        self.invalidation.mark_dirty();
+    }
+}
+
+impl<T: Clone> State<T> {
     /// Returns a cloned snapshot of the current value.
     pub fn get(&self) -> T {
-        self.value.lock().expect("observable lock poisoned").clone()
+        self.value.lock().expect("state lock poisoned").clone()
+    }
+}
+
+impl<T: Clone + PartialEq> State<T> {
+    /// Mutates the current value in place and requests a UI refresh only when it changed.
+    pub fn update<R>(&self, updater: impl FnOnce(&mut T) -> R) -> R {
+        let mut value = self.value.lock().expect("state lock poisoned");
+        let previous = value.clone();
+        let result = updater(&mut value);
+        let changed = *value != previous;
+        drop(value);
+        if changed {
+            self.invalidation.mark_dirty();
+        }
+        result
     }
 }
 
 #[derive(Clone)]
 /// Lazily evaluated value used by widgets and window bindings.
 ///
-/// A binding can be derived from an [`Observable`] or created from any closure.
-/// Use [`Binding::map`] to derive more values and [`Binding::animated`] to attach
-/// a declarative transition.
-pub struct Binding<T> {
+/// A signal can be derived from a [`State`] or created through
+/// [`ViewModelContext::signal`]. Use [`Signal::map`] to derive more values and
+/// [`Signal::animated`] to attach a declarative transition.
+pub struct Signal<T> {
     reader: Arc<dyn Fn() -> T + Send + Sync>,
+    invalidation: InvalidationSignal,
+    cache: Arc<Mutex<SignalCache<T>>>,
     transition: Option<Transition>,
 }
 
-impl<T> Binding<T> {
-    /// Creates a binding from a reader closure.
-    pub fn new(reader: impl Fn() -> T + Send + Sync + 'static) -> Self {
+struct SignalCache<T> {
+    revision: u64,
+    value: Option<T>,
+}
+
+impl<T> Signal<T> {
+    pub(crate) fn new(
+        reader: impl Fn() -> T + Send + Sync + 'static,
+        invalidation: InvalidationSignal,
+    ) -> Self {
         Self {
             reader: Arc::new(reader),
+            invalidation,
+            cache: Arc::new(Mutex::new(SignalCache {
+                revision: 0,
+                value: None,
+            })),
             transition: None,
         }
     }
 
-    /// Reads the current value of the binding.
+    fn with_transition(mut self, transition: Option<Transition>) -> Self {
+        self.transition = transition;
+        self
+    }
+}
+
+impl<T: Clone> Signal<T> {
+    /// Reads the current value of the signal.
     pub fn get(&self) -> T {
-        (self.reader)()
+        let revision = self.invalidation.revision();
+        {
+            let cache = self.cache.lock().expect("signal cache lock poisoned");
+            if cache.revision == revision {
+                if let Some(value) = cache.value.as_ref() {
+                    return value.clone();
+                }
+            }
+        }
+
+        let value = (self.reader)();
+        let mut cache = self.cache.lock().expect("signal cache lock poisoned");
+        cache.revision = revision;
+        cache.value = Some(value.clone());
+        value
     }
 
-    /// Marks the binding as animatable when consumed by a supported UI property.
+    /// Marks the signal as animatable when consumed by a supported UI property.
     pub fn animated(mut self, transition: impl Into<Transition>) -> Self {
         self.transition = Some(transition.into());
         self
     }
 
-    /// Derives a new binding from the current one.
-    pub fn map<U>(&self, mapper: impl Fn(T) -> U + Send + Sync + 'static) -> Binding<U>
+    /// Derives a cached signal from the current one.
+    pub fn map<U>(&self, mapper: impl Fn(T) -> U + Send + Sync + 'static) -> Signal<U>
     where
-        T: 'static,
+        T: Clone + Send + Sync + 'static,
+        U: Clone + Send + Sync + 'static,
     {
-        let reader = self.reader.clone();
-        Binding {
-            reader: Arc::new(move || mapper(reader())),
-            transition: self.transition,
-        }
+        let signal = self.clone();
+        Signal::new(move || mapper(signal.get()), self.invalidation.clone())
+            .with_transition(self.transition)
     }
 
     pub(crate) fn transition(&self) -> Option<Transition> {
         self.transition
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use std::time::Duration;
+
+    use crate::animation::Transition;
+
+    use super::{InvalidationSignal, State, ViewModelContext};
+    use crate::animation::AnimationCoordinator;
+
+    fn context() -> ViewModelContext {
+        ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
+    }
+
+    #[test]
+    fn state_set_same_value_does_not_advance_revision() {
+        let invalidation = InvalidationSignal::new();
+        let state = State::new(1, invalidation.clone());
+        let before = invalidation.revision();
+
+        state.set(1);
+
+        assert_eq!(invalidation.revision(), before);
+    }
+
+    #[test]
+    fn state_update_only_invalidates_when_value_changes() {
+        let invalidation = InvalidationSignal::new();
+        let state = State::new(String::from("hello"), invalidation.clone());
+        let before = invalidation.revision();
+
+        state.update(|value| value.push_str(""));
+        assert_eq!(invalidation.revision(), before);
+
+        state.update(|value| value.push('!'));
+        assert!(invalidation.revision() > before);
+    }
+
+    #[test]
+    fn signal_get_caches_within_revision() {
+        let ctx = context();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_signal = calls.clone();
+        let signal = ctx.signal(move || {
+            calls_for_signal.fetch_add(1, Ordering::SeqCst);
+            42
+        });
+
+        assert_eq!(signal.get(), 42);
+        assert_eq!(signal.get(), 42);
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn signal_recomputes_after_state_changes() {
+        let ctx = context();
+        let state = ctx.state(1);
+        let signal = state.signal().map(|value| value * 2);
+
+        assert_eq!(signal.get(), 2);
+        state.set(4);
+        assert_eq!(signal.get(), 8);
+    }
+
+    #[test]
+    fn mapped_signal_preserves_transition() {
+        let ctx = context();
+        let state = ctx.state(1);
+        let transition = Transition::linear(Duration::from_millis(10));
+        let signal = state.signal().animated(transition).map(|value| value + 1);
+
+        assert_eq!(signal.get(), 2);
+        assert_eq!(signal.transition(), Some(transition));
     }
 }

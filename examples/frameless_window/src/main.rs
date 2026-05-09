@@ -49,20 +49,20 @@ fn window_button_style(mode: ResolvedThemeMode, background: Color) -> ButtonStyl
 }
 
 struct AppVm {
-    confirm_exit_open: Observable<bool>,
-    app_open: Observable<bool>,
+    confirm_exit_open: State<bool>,
+    app_open: State<bool>,
 }
 
 impl AppVm {
     fn new(ctx: &ViewModelContext) -> Self {
         Self {
-            confirm_exit_open: ctx.observable(false),
-            app_open: ctx.observable(true),
+            confirm_exit_open: ctx.state(false),
+            app_open: ctx.state(true),
         }
     }
 
-    fn main_title(&self) -> Binding<String> {
-        self.confirm_exit_open.binding().map(|open| {
+    fn main_title(&self) -> Signal<String> {
+        self.confirm_exit_open.signal().map(|open| {
             if open {
                 "tgui frameless window (modal confirmation open)".to_string()
             } else {

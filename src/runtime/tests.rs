@@ -6,7 +6,7 @@ use crate::animation::AnimationCoordinator;
 use crate::application::{ApplicationConfig, ThemeSelection, WindowRole};
 use crate::dialog::async_dialog_channel;
 use crate::foundation::binding::ViewModelContext;
-use crate::foundation::binding::{Binding, InvalidationSignal, TextController};
+use crate::foundation::binding::{InvalidationSignal, Signal, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -238,11 +238,11 @@ fn window_control_close_request_marks_handler_for_close() {
 fn bound_theme_modes_resolve_through_configured_theme_set() {
     let invalidation = InvalidationSignal::new();
     let (theme_set, light, dark) = custom_theme_set();
-    let mode = Binding::new(|| ThemeMode::Light);
+    let mode = Signal::new(|| ThemeMode::Light, invalidation.clone());
     let mut handler = test_handler_with_config(
         TestVm,
         None,
-        invalidation,
+        invalidation.clone(),
         test_config_with_theme(ThemeSelection::System, theme_set),
     );
     handler.window_bindings.theme_mode = Some(mode);
@@ -250,7 +250,7 @@ fn bound_theme_modes_resolve_through_configured_theme_set() {
     handler.sync_theme_binding();
     assert_eq!(handler.theme, light);
 
-    handler.window_bindings.theme_mode = Some(Binding::new(|| ThemeMode::Dark));
+    handler.window_bindings.theme_mode = Some(Signal::new(|| ThemeMode::Dark, invalidation));
     handler.sync_theme_binding();
     assert_eq!(handler.theme, dark);
 }
@@ -258,19 +258,18 @@ fn bound_theme_modes_resolve_through_configured_theme_set() {
 #[test]
 fn bound_theme_set_updates_current_theme_without_mode_change() {
     let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let (theme_set, light, _dark) = custom_theme_set();
-    let themes = Arc::new(Mutex::new(theme_set));
-    let theme_binding = {
-        let themes = themes.clone();
-        Binding::new(move || themes.lock().expect("theme set lock poisoned").clone())
-    };
+    let themes = context.state(theme_set);
+    let theme_binding = themes.signal();
     let mut handler = test_handler_with_config(
         TestVm,
         None,
-        invalidation,
+        invalidation.clone(),
         test_config_with_theme(ThemeSelection::System, ThemeSet::default()),
     );
-    handler.window_bindings.theme_mode = Some(Binding::new(|| ThemeMode::Light));
+    handler.window_bindings.theme_mode =
+        Some(Signal::new(|| ThemeMode::Light, invalidation.clone()));
     handler.window_bindings.theme_set = Some(theme_binding);
 
     handler.sync_theme_binding();
@@ -279,7 +278,9 @@ fn bound_theme_set_updates_current_theme_without_mode_change() {
     let mut updated_light = Theme::light();
     updated_light.colors.background = Color::hexa(0xFFFFFFFF);
     updated_light.colors.primary = Color::hexa(0xFFAA00FF);
-    themes.lock().expect("theme set lock poisoned").light = Arc::new(updated_light.clone());
+    themes.update(|themes| {
+        themes.light = Arc::new(updated_light.clone());
+    });
 
     handler.sync_theme_binding();
     assert_eq!(handler.theme, updated_light);
@@ -291,10 +292,13 @@ fn hover_path_reuses_cached_computed_scene() {
     let resolve_count = Arc::new(AtomicUsize::new(0));
     let child = {
         let resolve_count = resolve_count.clone();
-        Binding::new(move || {
-            resolve_count.fetch_add(1, Ordering::SeqCst);
-            Text::new("hover").cursor(CursorStyle::Pointer)
-        })
+        Signal::new(
+            move || {
+                resolve_count.fetch_add(1, Ordering::SeqCst);
+                Text::new("hover").cursor(CursorStyle::Pointer)
+            },
+            invalidation.clone(),
+        )
     };
     let tree = WidgetTree::new(Flex::new(Axis::Vertical).child(child));
     let mut handler = test_handler(Some(tree), invalidation);
@@ -374,6 +378,7 @@ fn scene_cache_invalidates_when_units_change() {
         pressed_widget: None,
         selected_text: None,
         caret_visible: false,
+        theme_epoch: handler.theme_store.version(),
         animation_epoch: 0,
         layout_animation_epoch: 0,
         scroll_epoch: 0,
@@ -407,6 +412,7 @@ fn scene_layout_cache_survives_visual_only_animation_epoch_change() {
         pressed_widget: None,
         selected_text: None,
         caret_visible: false,
+        theme_epoch: handler.theme_store.version(),
         animation_epoch: 0,
         layout_animation_epoch: 0,
         scroll_epoch: 0,
@@ -421,6 +427,85 @@ fn scene_layout_cache_survives_visual_only_animation_epoch_change() {
     handler.animation_epoch = 1;
 
     assert!(handler.scene_layout_cache_matches(&cached, viewport, UnitContext::new(1.0, 1.0),));
+}
+
+#[test]
+fn theme_animation_invalidates_cached_layout() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    let viewport = handler.viewport_rect();
+    let cached = CachedScene::<TestVm> {
+        viewport,
+        units: UnitContext::new(1.0, 1.0),
+        focused_widget: None,
+        focus_visible: false,
+        pressed_widget: None,
+        selected_text: None,
+        caret_visible: false,
+        theme_epoch: handler.theme_store.version(),
+        animation_epoch: 0,
+        layout_animation_epoch: 0,
+        scroll_epoch: 0,
+        hover_epoch: 0,
+        text_input_epoch: 0,
+        hovered_scrollbar: None,
+        active_scrollbar: None,
+        layout: None,
+        computed: Default::default(),
+    };
+
+    handler.layout_animation_epoch = 1;
+
+    assert!(!handler.scene_layout_cache_matches(
+        &cached,
+        viewport,
+        UnitContext::new(1.0, 1.0),
+    ));
+}
+
+#[test]
+fn theme_mode_change_invalidates_cached_layout_when_theme_changes() {
+    let invalidation = InvalidationSignal::new();
+    let mode = Signal::new(|| ThemeMode::Light, invalidation.clone());
+    let (theme_set, _light, _dark) = custom_theme_set();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        None,
+        invalidation.clone(),
+        test_config_with_theme(ThemeSelection::System, theme_set),
+    );
+    handler.window_bindings.theme_mode = Some(mode);
+    handler.sync_theme_binding();
+
+    let viewport = handler.viewport_rect();
+    let cached = CachedScene::<TestVm> {
+        viewport,
+        units: UnitContext::new(1.0, 1.0),
+        focused_widget: None,
+        focus_visible: false,
+        pressed_widget: None,
+        selected_text: None,
+        caret_visible: false,
+        theme_epoch: handler.theme_store.version(),
+        animation_epoch: 0,
+        layout_animation_epoch: 0,
+        scroll_epoch: 0,
+        hover_epoch: 0,
+        text_input_epoch: 0,
+        hovered_scrollbar: None,
+        active_scrollbar: None,
+        layout: None,
+        computed: Default::default(),
+    };
+
+    handler.window_bindings.theme_mode = Some(Signal::new(|| ThemeMode::Dark, invalidation));
+    handler.sync_theme_binding();
+
+    assert!(!handler.scene_layout_cache_matches(
+        &cached,
+        viewport,
+        UnitContext::new(1.0, 1.0),
+    ));
 }
 
 #[test]
@@ -465,6 +550,7 @@ fn scene_cache_invalidates_when_pressed_widget_changes() {
         pressed_widget: None,
         selected_text: None,
         caret_visible: false,
+        theme_epoch: handler.theme_store.version(),
         animation_epoch: 0,
         layout_animation_epoch: 0,
         scroll_epoch: 0,
@@ -500,6 +586,7 @@ fn scene_cache_invalidates_when_focused_widget_changes() {
         pressed_widget: None,
         selected_text: None,
         caret_visible: false,
+        theme_epoch: handler.theme_store.version(),
         animation_epoch: 0,
         layout_animation_epoch: 0,
         scroll_epoch: 0,
@@ -2829,17 +2916,17 @@ fn hover_path_keeps_video_surface_hit_testing_when_scene_is_cached() {
     let animations = AnimationCoordinator::default();
     let ctx = ViewModelContext::new(invalidation.clone(), animations.clone());
     let shared = BackendSharedState {
-        playback_state: ctx.observable(PlaybackState::Ready),
-        metrics: ctx.observable(VideoMetrics::default()),
-        volume: ctx.observable(1.0),
-        muted: ctx.observable(false),
-        buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
-        video_size: ctx.observable(VideoSize {
+        playback_state: ctx.state(PlaybackState::Ready),
+        metrics: ctx.state(VideoMetrics::default()),
+        volume: ctx.state(1.0),
+        muted: ctx.state(false),
+        buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+        video_size: ctx.state(VideoSize {
             width: 160,
             height: 90,
         }),
-        error: ctx.observable(None),
-        surface: ctx.observable(VideoSurfaceSnapshot::default()),
+        error: ctx.state(None),
+        surface: ctx.state(VideoSurfaceSnapshot::default()),
     };
     let controller = VideoController::from_parts(shared, Arc::new(MockVideoBackend));
     let tree = WidgetTree::new(

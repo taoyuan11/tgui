@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use tgui::prelude::*;
 
 struct App {
-    clicks: Observable<u32>,
-    file_status: Observable<String>,
-    message_status: Observable<String>,
+    clicks: State<u32>,
+    file_status: State<String>,
+    message_status: State<String>,
 }
 
 impl App {
@@ -88,9 +88,9 @@ impl ViewModel for App {
 
     fn new(context: &ViewModelContext) -> Self {
         Self {
-            clicks: context.observable(0),
-            file_status: context.observable("尚未选择文件".to_string()),
-            message_status: context.observable("尚未显示消息框".to_string()),
+            clicks: context.state(0),
+            file_status: context.state("尚未选择文件".to_string()),
+            message_status: context.state("尚未显示消息框".to_string()),
         }
     }
 
@@ -113,7 +113,7 @@ impl ViewModel for App {
 
         let counter = Button::new(
             self.clicks
-                .binding()
+                .signal()
                 .map(|clicks| format!("普通按钮，点击了 {clicks} 次")),
         )
         .on_click(Command::new(Self::increment));
@@ -126,8 +126,8 @@ impl ViewModel for App {
                 message_sync,
                 message_async,
                 counter,
-                Text::new(self.file_status.binding()),
-                Text::new(self.message_status.binding()),
+                Text::new(self.file_status.signal()),
+                Text::new(self.message_status.signal()),
             ])
             .into()
     }

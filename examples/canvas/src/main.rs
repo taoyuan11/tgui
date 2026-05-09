@@ -29,8 +29,8 @@ fn info_chip_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
 }
 
 struct CanvasVm {
-    hovered: Observable<String>,
-    activity: Observable<String>,
+    hovered: State<String>,
+    activity: State<String>,
 }
 
 impl CanvasVm {
@@ -230,8 +230,8 @@ impl CanvasVm {
 impl ViewModel for CanvasVm {
     fn new(ctx: &ViewModelContext) -> Self {
         Self {
-            hovered: ctx.observable("Move across a canvas item".to_string()),
-            activity: ctx.observable("Click, wheel, or drag inside the canvas".to_string()),
+            hovered: ctx.state("Move across a canvas item".to_string()),
+            activity: ctx.state("Click, wheel, or drag inside the canvas".to_string()),
         }
     }
 
@@ -270,12 +270,12 @@ impl ViewModel for CanvasVm {
                 Flex::new(Axis::Vertical)
                     .gap(dp(8.0))
                     .child(
-                        Text::new(self.hovered.binding())
+                        Text::new(self.hovered.signal())
                             .padding(Insets::all(dp(12.0)))
                             .style(info_chip_style)
                     )
                     .child(
-                        Text::new(self.activity.binding())
+                        Text::new(self.activity.signal())
                             .padding(Insets::all(dp(12.0)))
                             .style(info_chip_style)
                     ),

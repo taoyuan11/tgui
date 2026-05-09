@@ -621,8 +621,8 @@ impl Value<Length> {
     ) -> Length {
         match self {
             Value::Static(value) => *value,
-            Value::Bound(binding) => {
-                let target = binding.get();
+            Value::Signal(signal) => {
+                let target = signal.get();
                 match target {
                     Length::Px(target_dp) => Length::Px(animations.resolve_dp(
                         AnimationKey::Widget {
@@ -630,7 +630,7 @@ impl Value<Length> {
                             property,
                         },
                         target_dp,
-                        binding.transition(),
+                        signal.transition(),
                         now,
                     )),
                     Length::Auto | Length::Percent(_) => target,
@@ -684,7 +684,7 @@ impl Value<BackgroundBrush> {
     pub(crate) fn resolve_widget(&self) -> BackgroundBrush {
         match self {
             Value::Static(value) => value.clone(),
-            Value::Bound(binding) => binding.get(),
+            Value::Signal(signal) => signal.get(),
         }
     }
 }
@@ -693,7 +693,7 @@ impl Value<BackgroundImage> {
     pub(crate) fn resolve_widget(&self) -> BackgroundImage {
         match self {
             Value::Static(value) => value.clone(),
-            Value::Bound(binding) => binding.get(),
+            Value::Signal(signal) => signal.get(),
         }
     }
 }

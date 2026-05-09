@@ -5,7 +5,7 @@ use crate::pages::settings_page::SettingsPage;
 use std::sync::Arc;
 use tgui::prelude::*;
 
-fn root_style(mode: ResolvedThemeMode, background: Binding<Color>) -> ContainerStyle {
+fn root_style(mode: ResolvedThemeMode, background: Signal<Color>) -> ContainerStyle {
     let mut style = ContainerStyle::default_for(mode);
     style.surface.background = Some(background.into());
     style
@@ -18,29 +18,25 @@ enum Page {
 }
 
 struct RootVM {
-    page: Observable<Page>,
+    page: State<Page>,
     home: HomePage,
     settings: SettingsPage,
-    themes: Observable<ThemeSet>,
-    current_theme: Observable<ThemeMode>,
+    themes: State<ThemeSet>,
+    current_theme: State<ThemeMode>,
+    background_color: Signal<Color>,
 }
 
 impl RootVM {
-    fn theme_set(&self) -> Binding<ThemeSet> {
-        self.themes.binding()
+    fn theme_set(&self) -> Signal<ThemeSet> {
+        self.themes.signal()
     }
 
-    fn binding_theme(&self) -> Binding<ThemeMode> {
-        self.current_theme.binding()
+    fn binding_theme(&self) -> Signal<ThemeMode> {
+        self.current_theme.signal()
     }
 
-    fn background_color(&self) -> Binding<Color> {
-        let themes = self.themes.binding();
-        let mode = self.current_theme.binding();
-        Binding::new(move || match mode.get() {
-            ThemeMode::Light => themes.get().light.colors.background,
-            ThemeMode::Dark | ThemeMode::System => themes.get().dark.colors.background,
-        })
+    fn background_color(&self) -> Signal<Color> {
+        self.background_color.clone()
     }
 
     fn toggle_theme_colors(&mut self) {
@@ -61,19 +57,28 @@ impl RootVM {
 
 impl ViewModel for RootVM {
     fn new(context: &ViewModelContext) -> Self {
+        let themes = context.state(multiple_vm_theme_set(false));
+        let current_theme = context.state(ThemeMode::System);
+        let theme_signal = themes.signal();
+        let mode_signal = current_theme.signal();
+        let background_color = context.signal(move || match mode_signal.get() {
+            ThemeMode::Light => theme_signal.get().light.colors.background,
+            ThemeMode::Dark | ThemeMode::System => theme_signal.get().dark.colors.background,
+        });
         Self {
-            page: context.observable(Page::Home),
+            page: context.state(Page::Home),
             home: HomePage::new(context),
             settings: SettingsPage::new(context, Some(Arc::new(|enabled| {
                 tgui_log(LogLevel::Debug, format!("Settings enabled: {}", enabled));
             }))),
-            themes: context.observable(multiple_vm_theme_set(false)),
-            current_theme: context.observable(ThemeMode::System),
+            themes,
+            current_theme,
+            background_color,
         }
     }
 
     fn view(&self) -> Element<Self> {
-        let page = self.page.binding();
+        let page = self.page.signal();
         let home = self.home.clone();
         let settings = self.settings.clone();
         Flex::new(Axis::Vertical)

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::foundation::binding::Observable;
+use crate::foundation::binding::State;
 use crate::media::TextureFrame;
 use crate::TguiError;
 
@@ -12,14 +12,14 @@ pub(crate) const DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES: u64 = 100 * 1024 * 102
 
 #[derive(Clone)]
 pub(crate) struct BackendSharedState {
-    pub playback_state: Observable<PlaybackState>,
-    pub metrics: Observable<VideoMetrics>,
-    pub volume: Observable<f32>,
-    pub muted: Observable<bool>,
-    pub buffer_memory_limit_bytes: Observable<u64>,
-    pub video_size: Observable<VideoSize>,
-    pub error: Observable<Option<String>>,
-    pub surface: Observable<VideoSurfaceSnapshot>,
+    pub playback_state: State<PlaybackState>,
+    pub metrics: State<VideoMetrics>,
+    pub volume: State<f32>,
+    pub muted: State<bool>,
+    pub buffer_memory_limit_bytes: State<u64>,
+    pub video_size: State<VideoSize>,
+    pub error: State<Option<String>>,
+    pub surface: State<VideoSurfaceSnapshot>,
 }
 
 impl BackendSharedState {

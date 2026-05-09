@@ -19,7 +19,7 @@ fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyl
 }
 
 struct TimelineVm {
-    status: Observable<String>,
+    status: State<String>,
     card_color: AnimatedValue<Color>,
     card_offset: AnimatedValue<Point>,
     card_width: AnimatedValue<Dp>,
@@ -64,7 +64,7 @@ impl TimelineVm {
 impl ViewModel for TimelineVm {
 
     fn new(ctx: &ViewModelContext) -> Self {
-        let status = ctx.observable("Idle".to_string());
+        let status = ctx.state("Idle".to_string());
         let card_color = ctx.animated_value(Color::hexa(0x2563EBFF));
         let card_offset = ctx.animated_value(Point::new(dp(0.0), dp(0.0)));
         let card_width = ctx.animated_value(dp(280.0));
@@ -163,7 +163,7 @@ impl ViewModel for TimelineVm {
             .child(
                 Text::new(
                     self.status
-                        .binding()
+                        .signal()
                         .map(|status| format!("Status: {status}")),
                 )
                     .style(|mode| text_style(mode, sp(16.0), Color::hexa(0xCBD5E1FF))),
@@ -183,12 +183,12 @@ impl ViewModel for TimelineVm {
             )
             .child(
                 Button::new("Timeline-driven card")
-                    .width(self.card_width.binding())
-                    .padding(self.card_padding.binding())
+                    .width(self.card_width.signal())
+                    .padding(self.card_padding.signal())
                     .style({
-                        let color = self.card_color.binding();
-                        let opacity = self.card_opacity.binding();
-                        let offset = self.card_offset.binding();
+                        let color = self.card_color.signal();
+                        let opacity = self.card_opacity.signal();
+                        let offset = self.card_offset.signal();
                         move |mode| ButtonStyle {
                             surface: WidgetSurfaceStyle {
                                 opacity: opacity.clone().into(),

@@ -33,15 +33,15 @@ fn themed_app() -> Application {
 }
 
 struct OhosApplication {
-    current_theme: Observable<String>,
-    theme: Observable<ThemeMode>,
+    current_theme: State<String>,
+    theme: State<ThemeMode>,
 }
 
 impl OhosApplication {
     
 
-    fn theme_mode(&self) -> Binding<ThemeMode> {
-        self.theme.binding()
+    fn theme_mode(&self) -> Signal<ThemeMode> {
+        self.theme.signal()
     }
 
     fn toggle_theme(&mut self) {
@@ -66,8 +66,8 @@ impl ViewModel for OhosApplication {
 
     fn new(context: &ViewModelContext) -> Self {
         Self {
-            current_theme: context.observable("System".to_string()),
-            theme: context.observable(ThemeMode::System),
+            current_theme: context.state("System".to_string()),
+            theme: context.state(ThemeMode::System),
         }
     }
     
@@ -84,7 +84,7 @@ impl ViewModel for OhosApplication {
                     .style(card_style)
                     .child(el![
                         Text::new("当前主题 / Current Theme").style(title_style),
-                        Text::new(self.current_theme.binding()),
+                        Text::new(self.current_theme.signal()),
                         Button::new("toggle theme")
                             .on_click(Command::new(Self::toggle_theme)),
                     ])

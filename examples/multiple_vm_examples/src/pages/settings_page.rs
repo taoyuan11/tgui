@@ -18,14 +18,14 @@ fn panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
 
 #[derive(Clone)]
 pub struct SettingsPage {
-    enabled: Observable<bool>,
+    enabled: State<bool>,
     on_change: Option<Arc<dyn Fn(bool) + Send + Sync>>
 }
 
 impl SettingsPage {
     pub fn new(context: &ViewModelContext, on_change: Option<Arc<dyn Fn(bool) + Send + Sync>>) -> Self {
         Self {
-            enabled: context.observable(false),
+            enabled: context.state(false),
             on_change
         }
     }
@@ -49,7 +49,7 @@ impl SettingsPage {
                 Text::new("设置页").style(|mode| text_style(mode, sp(24.0), Color::WHITE)),
                 Text::new(
                     self.enabled
-                        .binding()
+                        .signal()
                         .map(|enabled| format!("当前状态：{}", if enabled { "已启用" } else { "已关闭" }))
                 )
                 .style(|mode| text_style(mode, sp(16.0), Color::WHITE)),

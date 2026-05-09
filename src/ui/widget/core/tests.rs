@@ -943,23 +943,23 @@ fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoC
 
     let ctx = test_context();
     let shared = BackendSharedState {
-        playback_state: ctx.observable(PlaybackState::Ready),
-        metrics: ctx.observable(VideoMetrics {
+        playback_state: ctx.state(PlaybackState::Ready),
+        metrics: ctx.state(VideoMetrics {
             duration: Some(std::time::Duration::from_secs(30)),
             position: std::time::Duration::ZERO,
             buffered: Some(std::time::Duration::from_secs(30)),
             video_width: snapshot.intrinsic_size.width as u32,
             video_height: snapshot.intrinsic_size.height as u32,
         }),
-        volume: ctx.observable(1.0),
-        muted: ctx.observable(false),
-        buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
-        video_size: ctx.observable(VideoSize {
+        volume: ctx.state(1.0),
+        muted: ctx.state(false),
+        buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+        video_size: ctx.state(VideoSize {
             width: snapshot.intrinsic_size.width as u32,
             height: snapshot.intrinsic_size.height as u32,
         }),
-        error: ctx.observable(snapshot.error.clone()),
-        surface: ctx.observable(snapshot),
+        error: ctx.state(snapshot.error.clone()),
+        surface: ctx.state(snapshot),
     };
     VideoController::from_parts(shared, std::sync::Arc::new(StaticVideoBackend))
 }
@@ -1463,8 +1463,8 @@ fn binding_driven_children_relayout_when_child_count_changes() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let context = test_context();
-    let expanded = context.observable(false);
-    let tree = WidgetTree::new(Stack::<()>::new().child(expanded.binding().map(|value| {
+    let expanded = context.state(false);
+    let tree = WidgetTree::new(Stack::<()>::new().child(expanded.signal().map(|value| {
         if value {
             vec![
                 Element::from(Text::new("first")),
@@ -1518,7 +1518,7 @@ fn hit_testing_tracks_currently_resolved_children() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let context = test_context();
-    let visible = context.observable(true);
+    let visible = context.state(true);
     let clickable: Element<()> = Stack::new()
         .size(dp(40.0), dp(40.0))
         .style(|mode| {
@@ -1536,7 +1536,7 @@ fn hit_testing_tracks_currently_resolved_children() {
         .on_click(Command::new(|_: &mut ()| {}))
         .into();
     let tree = WidgetTree::new(Stack::<()>::new().size(dp(100.0), dp(100.0)).child(
-        visible.binding().map(move |value| {
+        visible.signal().map(move |value| {
             if value {
                 vec![clickable.clone()]
             } else {
@@ -2851,7 +2851,7 @@ fn scoped_value_commands_cover_switch_canvas_and_media() {
 #[test]
 fn scoped_dynamic_children_resolve_to_root_commands() {
     let context = test_context();
-    let show = context.observable(true);
+    let show = context.state(true);
     let child_a: Element<ScopeChildVm> = Stack::new()
         .on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 1))
         .into();
@@ -2859,7 +2859,7 @@ fn scoped_dynamic_children_resolve_to_root_commands() {
         .on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 10))
         .into();
 
-    let tree = WidgetTree::new(Stack::<ScopeRootVm>::new().child(show.binding().map(
+    let tree = WidgetTree::new(Stack::<ScopeRootVm>::new().child(show.signal().map(
         move |visible| {
             if visible {
                 vec![child_a.clone().scope(scope_child)]
@@ -3045,8 +3045,8 @@ fn binding_driven_children_can_switch_component_types() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let context = test_context();
-    let show_button = context.observable(false);
-    let tree = WidgetTree::new(Stack::<()>::new().child(show_button.binding().map(|value| {
+    let show_button = context.state(false);
+    let tree = WidgetTree::new(Stack::<()>::new().child(show_button.signal().map(|value| {
         if value {
             vec![super::Element::from(crate::ui::widget::Button::new(
                 "toggle button",
@@ -4245,8 +4245,8 @@ fn switch_thumb_animates_between_positions() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let context = test_context();
-    let checked = context.observable(false);
-    let tree: WidgetTree<()> = WidgetTree::new(Switch::new(checked.binding().animated(
+    let checked = context.state(false);
+    let tree: WidgetTree<()> = WidgetTree::new(Switch::new(checked.signal().animated(
         crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(180)),
     )));
 

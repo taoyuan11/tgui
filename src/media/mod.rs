@@ -205,6 +205,14 @@ pub(crate) struct TextureFrame {
     pixels: Arc<[u8]>,
 }
 
+impl PartialEq for TextureFrame {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.revision == other.revision
+    }
+}
+
+impl Eq for TextureFrame {}
+
 impl TextureFrame {
     pub(crate) fn new(width: u32, height: u32, pixels: Vec<u8>) -> Self {
         Self {

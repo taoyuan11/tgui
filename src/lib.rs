@@ -3,9 +3,9 @@
 //! The crate is organized around a few core building blocks:
 //!
 //! - [`application::Application`] configures the window, theme, fonts, and runtime entry point.
-//! - [`mvvm::ViewModelContext`] creates reactive state such as [`mvvm::Observable`] and
+//! - [`mvvm::ViewModelContext`] creates reactive state such as [`mvvm::State`] and
 //!   [`animation::AnimatedValue`].
-//! - [`mvvm::Binding`] derives UI-facing values from state and can opt into declarative transitions.
+//! - [`mvvm::Signal`] derives UI-facing values from state and can opt into declarative transitions.
 //! - [`mvvm::Command`] and [`mvvm::ValueCommand`] connect widget events back to your view model.
 //! - Layout and widgets such as [`layout::Flex`], [`widgets::Button`], and [`widgets::Text`]
 //!   build the widget tree.
@@ -15,17 +15,17 @@
 //! ```no_run
 //! use tgui::application::Application;
 //! use tgui::layout::Axis;
-//! use tgui::mvvm::{Command, Observable, ViewModel, ViewModelContext};
+//! use tgui::mvvm::{Command, State, ViewModel, ViewModelContext};
 //! use tgui::widgets::{Button, Element, Flex, Text};
 //!
 //! struct CounterVm {
-//!     count: Observable<u32>,
+//!     count: State<u32>,
 //! }
 //!
 //! impl CounterVm {
 //!     fn new(ctx: &ViewModelContext) -> Self {
 //!         Self {
-//!             count: ctx.observable(0),
+//!             count: ctx.state(0),
 //!         }
 //!     }
 //!
@@ -36,7 +36,7 @@
 //!     fn view(&self) -> Element<Self> {
 //!         Flex::new(Axis::Vertical)
 //!             .child(Text::new(
-//!                 self.count.binding().map(|count| format!("Count: {count}")),
+//!                 self.count.signal().map(|count| format!("Count: {count}")),
 //!             ))
 //!             .child(Button::new("Increment").on_click(Command::new(Self::increment)))
 //!             .into()
@@ -159,8 +159,7 @@ pub mod logging {
 /// MVVM state, bindings, commands, and view model contracts.
 pub mod mvvm {
     pub use crate::foundation::binding::{
-        Binding, Observable, TextChange, TextChangeSet, TextController, TextSnapshot,
-        ViewModelContext,
+        Signal, State, TextChange, TextChangeSet, TextController, TextSnapshot, ViewModelContext,
     };
     pub use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
     pub use crate::foundation::window_control::{WindowControl, WindowResizeDirection};
@@ -197,7 +196,7 @@ pub mod prelude {
     pub use crate::logging::{tgui_log, Log, LogLevel};
     pub use crate::media::{ContentFit, MediaBytes, MediaSource};
     pub use crate::mvvm::{
-        Binding, Command, CommandContext, Observable, TextChange, TextChangeSet, TextController,
+        Command, CommandContext, Signal, State, TextChange, TextChangeSet, TextController,
         TextSnapshot, ValueCommand, ViewModel, ViewModelContext, WindowControl,
         WindowResizeDirection,
     };

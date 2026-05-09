@@ -30,14 +30,14 @@ fn themed_app() -> Application {
 }
 
 struct AndroidApplication {
-    current_theme: Observable<String>,
-    theme: Observable<ThemeMode>,
+    current_theme: State<String>,
+    theme: State<ThemeMode>,
 }
 
 impl AndroidApplication {
 
-    fn get_theme(&self) -> Binding<ThemeMode> {
-        self.theme.binding()
+    fn get_theme(&self) -> Signal<ThemeMode> {
+        self.theme.signal()
     }
 
     fn set_theme(&mut self) {
@@ -60,15 +60,15 @@ impl ViewModel for AndroidApplication {
 
     fn new(context: &ViewModelContext) -> Self {
         Self {
-            current_theme: context.observable("System".to_string()),
-            theme: context.observable(ThemeMode::System),
+            current_theme: context.state("System".to_string()),
+            theme: context.state(ThemeMode::System),
         }
     }
 
     fn view(&self) -> Element<Self> {
         let title = Text::new("当前主题/CurrentTheme").style(title_style);
 
-        let text = Text::new(self.current_theme.binding());
+        let text = Text::new(self.current_theme.signal());
 
         let button = Button::new("change theme").on_click(Command::new(Self::set_theme));
 

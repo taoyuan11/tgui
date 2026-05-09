@@ -366,7 +366,7 @@ where
 {
     match selected_key {
         Value::Static(current) => Value::Static(current.as_ref() == Some(&option_key)),
-        Value::Bound(binding) => binding
+        Value::Signal(signal) => signal
             .map(move |current| current.as_ref() == Some(&option_key))
             .into(),
     }
@@ -385,7 +385,7 @@ where
                 .as_ref()
                 .and_then(|key| selected_label_for_key(key, &options)),
         ),
-        Value::Bound(binding) => binding
+        Value::Signal(signal) => signal
             .map(move |current| {
                 current
                     .as_ref()

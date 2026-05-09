@@ -374,6 +374,6 @@ where
 {
     match selected_key {
         Value::Static(current) => Value::Static(*current == option_key),
-        Value::Bound(binding) => binding.map(move |current| current == option_key).into(),
+        Value::Signal(signal) => signal.map(move |current| current == option_key).into(),
     }
 }

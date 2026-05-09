@@ -1,4 +1,4 @@
-use crate::foundation::binding::Binding;
+use crate::foundation::binding::Signal;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{ContentFit, MediaBytes, MediaSource};
@@ -187,13 +187,13 @@ impl IntoImagePathSource for &str {
     }
 }
 
-impl IntoImagePathSource for Binding<std::path::PathBuf> {
+impl IntoImagePathSource for Signal<std::path::PathBuf> {
     fn into_image_path_source(self) -> Value<MediaSource> {
         self.map(MediaSource::Path).into()
     }
 }
 
-impl IntoImagePathSource for Binding<String> {
+impl IntoImagePathSource for Signal<String> {
     fn into_image_path_source(self) -> Value<MediaSource> {
         self.map(|path| MediaSource::Path(path.into())).into()
     }
@@ -203,7 +203,7 @@ impl IntoImagePathSource for Value<std::path::PathBuf> {
     fn into_image_path_source(self) -> Value<MediaSource> {
         match self {
             Value::Static(path) => MediaSource::Path(path).into(),
-            Value::Bound(binding) => binding.map(MediaSource::Path).into(),
+            Value::Signal(signal) => signal.map(MediaSource::Path).into(),
         }
     }
 }
@@ -212,7 +212,7 @@ impl IntoImagePathSource for Value<String> {
     fn into_image_path_source(self) -> Value<MediaSource> {
         match self {
             Value::Static(path) => MediaSource::Path(path.into()).into(),
-            Value::Bound(binding) => binding.map(|path| MediaSource::Path(path.into())).into(),
+            Value::Signal(signal) => signal.map(|path| MediaSource::Path(path.into())).into(),
         }
     }
 }
@@ -229,7 +229,7 @@ impl IntoImageUrlSource for &str {
     }
 }
 
-impl IntoImageUrlSource for Binding<String> {
+impl IntoImageUrlSource for Signal<String> {
     fn into_image_url_source(self) -> Value<MediaSource> {
         self.map(MediaSource::Url).into()
     }
@@ -239,7 +239,7 @@ impl IntoImageUrlSource for Value<String> {
     fn into_image_url_source(self) -> Value<MediaSource> {
         match self {
             Value::Static(url) => MediaSource::Url(url).into(),
-            Value::Bound(binding) => binding.map(MediaSource::Url).into(),
+            Value::Signal(signal) => signal.map(MediaSource::Url).into(),
         }
     }
 }

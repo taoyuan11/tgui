@@ -42,34 +42,34 @@ fn filled_button_style(mode: ResolvedThemeMode, color: Color) -> ButtonStyle {
 }
 
 struct MultiWindowVm {
-    next_document_id: Observable<u32>,
-    inspector_open: Observable<bool>,
-    documents: Observable<Vec<u32>>,
+    next_document_id: State<u32>,
+    inspector_open: State<bool>,
+    documents: State<Vec<u32>>,
 }
 
 impl MultiWindowVm {
     fn new(ctx: &ViewModelContext) -> Self {
         Self {
-            next_document_id: ctx.observable(3),
-            inspector_open: ctx.observable(true),
-            documents: ctx.observable(vec![1, 2]),
+            next_document_id: ctx.state(3),
+            inspector_open: ctx.state(true),
+            documents: ctx.state(vec![1, 2]),
         }
     }
 
-    fn main_title(&self) -> Binding<String> {
+    fn main_title(&self) -> Signal<String> {
         self.documents
-            .binding()
+            .signal()
             .map(|documents| format!("tgui multi-window - {} document windows", documents.len()))
     }
 
-    fn inspector_title(&self) -> Binding<String> {
+    fn inspector_title(&self) -> Signal<String> {
         self.inspector_open
-            .binding()
+            .signal()
             .map(|_| "Inspector".to_string())
     }
 
-    fn document_title(&self, id: u32) -> Binding<String> {
-        self.documents.binding().map(move |documents| {
+    fn document_title(&self, id: u32) -> Signal<String> {
+        self.documents.signal().map(move |documents| {
             if documents.contains(&id) {
                 format!("Document {id}")
             } else {
@@ -78,8 +78,8 @@ impl MultiWindowVm {
         })
     }
 
-    fn document_summary(&self) -> Binding<String> {
-        self.documents.binding().map(|documents| {
+    fn document_summary(&self) -> Signal<String> {
+        self.documents.signal().map(|documents| {
             if documents.is_empty() {
                 "No registered document windows.".to_string()
             } else {
@@ -192,7 +192,7 @@ impl MultiWindowVm {
                             .style(|mode| text_style(mode, sp(26.0), Color::hexa(0xF8FAFCFF))),
                         Text::new(
                             self.documents
-                                .binding()
+                                .signal()
                                 .map(move |documents| format!("Shared registry size: {}", documents.len())),
                         )
                         .style(|mode| text_style(mode, sp(15.0), Color::hexa(0x93C5FDFF))),
