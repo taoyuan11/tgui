@@ -107,19 +107,19 @@ impl<VM> Clone for Element<VM> {
     }
 }
 
-struct ResolvedElement<VM> {
-    id: WidgetId,
-    key: Option<WidgetKey>,
-    layout: LayoutStyle,
-    visual: VisualStyle,
-    interactions: InteractionHandlers<VM>,
-    lifecycle_events: LifecycleEventHandlers<VM>,
-    media_events: MediaEventHandlers<VM>,
-    background: Option<Value<Color>>,
-    kind: ResolvedWidgetKind<VM>,
+pub(crate) struct ResolvedElement<VM> {
+    pub(crate) id: WidgetId,
+    pub(crate) key: Option<WidgetKey>,
+    pub(crate) layout: LayoutStyle,
+    pub(crate) visual: VisualStyle,
+    pub(crate) interactions: InteractionHandlers<VM>,
+    pub(crate) lifecycle_events: LifecycleEventHandlers<VM>,
+    pub(crate) media_events: MediaEventHandlers<VM>,
+    pub(crate) background: Option<Value<Color>>,
+    pub(crate) kind: ResolvedWidgetKind<VM>,
 }
 
-enum ResolvedWidgetKind<VM> {
+pub(crate) enum ResolvedWidgetKind<VM> {
     Container {
         layout: ContainerLayout,
         children: Vec<ResolvedElement<VM>>,

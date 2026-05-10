@@ -305,7 +305,7 @@ pub(crate) fn text_input_layout_width(
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct VisualStyle {
     pub border_color: Option<Value<Color>>,
     pub border_radius: Option<Value<Dp>>,
@@ -472,7 +472,7 @@ pub(crate) struct MediaEventState<VM> {
 #[derive(Clone)]
 pub(crate) struct LifecycleEventState<VM> {
     pub widget_id: WidgetId,
-    pub handlers: LifecycleEventHandlers<VM>,
+    pub resolved: super::core::ResolvedElement<VM>,
 }
 
 impl<VM> Clone for InteractionHandlers<VM> {
@@ -1096,7 +1096,7 @@ fn solid_stop_colors(color: Color) -> [[f32; 4]; 7] {
     colors
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ContainerKind {
     Flow,
     Stack,
@@ -1110,7 +1110,7 @@ pub(crate) enum ContainerKind {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ContainerLayout {
     pub kind: ContainerKind,
     pub padding: Option<Value<Insets>>,

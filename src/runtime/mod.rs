@@ -482,6 +482,7 @@ pub struct BoundRuntimeHandler<VM> {
     select_open_states: HashMap<WidgetId, bool>,
     scroll_epoch: u64,
     text_input_epoch: u64,
+    last_lifecycle_dispatch_text_input_epoch: u64,
     media_event_states: HashMap<WidgetId, DispatchedMediaState>,
     lifecycle_event_states: HashMap<WidgetId, DispatchedLifecycleState<VM>>,
     media_manager: MediaManager,
@@ -771,9 +772,9 @@ struct DispatchedMediaState {
     phase: Option<MediaEventPhase>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct DispatchedLifecycleState<VM> {
-    handlers: crate::ui::widget::LifecycleEventHandlers<VM>,
+    resolved: crate::ui::widget::ResolvedElement<VM>,
 }
 
 fn collect_pending_media_event<VM>(
@@ -809,14 +810,20 @@ fn collect_pending_lifecycle_events<VM>(
     pending: &mut Vec<PendingLifecycleEvent<VM>>,
 ) {
     if previous.is_none() {
-        if let Some(command) = state.handlers.on_mount.clone() {
+        if let Some(command) = state.resolved.lifecycle_events.on_mount.clone() {
             pending.push(PendingLifecycleEvent::Command(command));
         }
         return;
     }
 
-    if let Some(command) = state.handlers.on_update.clone() {
-        pending.push(PendingLifecycleEvent::Command(command));
+    if state.resolved
+        != previous
+            .expect("previous lifecycle state should exist")
+            .resolved
+    {
+        if let Some(command) = state.resolved.lifecycle_events.on_update.clone() {
+            pending.push(PendingLifecycleEvent::Command(command));
+        }
     }
 }
 
@@ -1010,6 +1017,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             select_open_states: HashMap::new(),
             scroll_epoch: 0,
             text_input_epoch: 0,
+            last_lifecycle_dispatch_text_input_epoch: 0,
             media_event_states: HashMap::new(),
             lifecycle_event_states: HashMap::new(),
             media_manager: MediaManager::new(invalidation.clone()),
@@ -2340,7 +2348,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         for removed_id in removed_ids {
             if let Some(previous) = self.lifecycle_event_states.remove(&removed_id) {
-                if let Some(command) = previous.handlers.on_unmount {
+                if let Some(command) = previous.resolved.lifecycle_events.on_unmount {
                     pending.push(PendingLifecycleEvent::Command(command));
                 }
             }
@@ -2350,7 +2358,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.lifecycle_event_states.insert(
                 state.widget_id,
                 DispatchedLifecycleState {
-                    handlers: state.handlers,
+                    resolved: state.resolved,
                 },
             );
         }
@@ -2374,11 +2382,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn dispatch_lifecycle_events_if_needed(&mut self) {
         let revision = self.invalidation.revision();
-        if revision == self.last_lifecycle_dispatch_revision {
+        if revision == self.last_lifecycle_dispatch_revision
+            && self.text_input_epoch == self.last_lifecycle_dispatch_text_input_epoch
+        {
             return;
         }
 
         self.last_lifecycle_dispatch_revision = revision;
+        self.last_lifecycle_dispatch_text_input_epoch = self.text_input_epoch;
         self.dispatch_lifecycle_events();
     }
 

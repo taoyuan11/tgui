@@ -27,6 +27,12 @@ impl<T: Clone> Value<T> {
     }
 }
 
+impl<T: Clone + PartialEq> PartialEq for Value<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.resolve() == other.resolve()
+    }
+}
+
 impl<T> From<T> for Value<T> {
     fn from(value: T) -> Self {
         Self::Static(value)
@@ -315,7 +321,7 @@ impl Default for ScrollbarStyle {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct LayoutStyle {
     pub width: Option<Value<Length>>,
     pub height: Option<Value<Length>>,

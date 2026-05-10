@@ -742,6 +742,72 @@ fn lifecycle_update_dispatches_for_rebuilt_stable_identity() {
 }
 
 #[test]
+fn lifecycle_update_only_dispatches_for_changed_widget() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::from("hi");
+
+    let root_updates = Arc::new(AtomicUsize::new(0));
+    let area_updates = Arc::new(AtomicUsize::new(0));
+    let textarea_updates = Arc::new(AtomicUsize::new(0));
+
+    let root_updates_capture = root_updates.clone();
+    let area_updates_capture = area_updates.clone();
+    let textarea_updates_capture = textarea_updates.clone();
+
+    let tree = WidgetTree::new(
+        Stack::<LifecycleVm>::new()
+            .on_update(Command::new(move |_vm: &mut LifecycleVm| {
+                root_updates_capture.fetch_add(1, Ordering::SeqCst);
+            }))
+            .child(
+                Stack::<LifecycleVm>::new()
+                    .on_update(Command::new(move |_vm: &mut LifecycleVm| {
+                        area_updates_capture.fetch_add(1, Ordering::SeqCst);
+                    }))
+                    .child(Textarea::new(controller).on_update(Command::new(
+                        move |_vm: &mut LifecycleVm| {
+                            textarea_updates_capture.fetch_add(1, Ordering::SeqCst);
+                        },
+                    ))),
+            ),
+    );
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    handler.handle_keyboard_input(&text_key_event("a"));
+    flush_text_input_commits(&mut handler);
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    assert_eq!(root_updates.load(Ordering::SeqCst), 0);
+    assert_eq!(area_updates.load(Ordering::SeqCst), 0);
+    assert_eq!(textarea_updates.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn lifecycle_unmount_dispatches_when_component_is_removed() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());

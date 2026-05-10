@@ -408,7 +408,7 @@ pub enum CanvasPathOpError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CanvasSvgPathError(pub String);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasStroke {
     pub width: Dp,
     pub brush: Value<CanvasBrush>,
@@ -1011,7 +1011,7 @@ impl PathBuilder {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasPath {
     pub style: CanvasItemStyle,
     pub path: PathBuilder,
@@ -1156,7 +1156,7 @@ impl Default for CanvasParagraphStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasText {
     pub style: CanvasItemStyle,
     pub frame: Rect,
@@ -1217,7 +1217,7 @@ impl CanvasText {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasImage {
     pub style: CanvasItemStyle,
     pub frame: Rect,
@@ -1278,7 +1278,7 @@ impl CanvasImage {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasGroup {
     pub style: CanvasItemStyle,
     pub items: Vec<CanvasItem>,
@@ -1318,14 +1318,14 @@ impl CanvasGroup {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CanvasClipShape {
     Rect(Rect),
     RoundedRect { rect: Rect, radius: Dp },
     Path(PathBuilder),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasClip {
     pub style: CanvasItemStyle,
     pub clip: CanvasClipShape,
@@ -1361,7 +1361,7 @@ impl CanvasClip {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasLayer {
     pub style: CanvasItemStyle,
     pub items: Vec<CanvasItem>,
@@ -1396,7 +1396,7 @@ impl CanvasLayer {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasMask {
     pub style: CanvasItemStyle,
     pub mask: Vec<CanvasItem>,
@@ -1437,7 +1437,7 @@ impl CanvasMask {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CanvasItem {
     Path(CanvasPath),
     Text(CanvasText),

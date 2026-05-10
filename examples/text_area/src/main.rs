@@ -100,7 +100,10 @@ impl ViewModel for App {
                     "下面的内容读取自当前示例的 `main.rs`，你可以编辑它，但修改不会保存到磁盘。"
                 )
                 .user_select(true),
-                Text::new(self.path_label.signal()).user_select(true),
+                Text::new(self.path_label.signal()).user_select(true)
+                            .on_update(Command::new(|_| {
+                                tgui_log(LogLevel::Info, "path_label text update")
+                            })),
                 Flex::vertical()
                     .padding(Insets::all(dp(14.0)))
                     .gap(dp(10.0))

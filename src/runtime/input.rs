@@ -587,7 +587,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let next_text = session.current_text.clone();
 
         let controller_started_at = Instant::now();
-        let end_revision = region.controller.replace_text_silent(next_text.clone());
+        region.controller.set_text(next_text.clone());
+        let end_revision = region.controller.revision();
         let controller_duration = controller_started_at.elapsed();
         change_set.end_revision = end_revision;
         session.external_value = next_text.clone();

@@ -1,6 +1,513 @@
 use std::borrow::Cow;
 
 use super::*;
+use crate::ui::widget::style::{
+    ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
+    InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
+    SelectStyle as WidgetSelectStyle, SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle,
+};
+#[cfg(feature = "video")]
+use crate::ui::widget::style::VideoSurfaceStyle;
+use crate::ui::widget::{Image, Text};
+
+fn freeze_value<T: Clone>(value: &mut Value<T>) {
+    let resolved = value.resolve();
+    *value = Value::Static(resolved);
+}
+
+fn freeze_option_value<T: Clone>(value: &mut Option<Value<T>>) {
+    if let Some(inner) = value.as_mut() {
+        freeze_value(inner);
+    }
+}
+
+fn freeze_stateful_value<T: Clone>(value: &mut crate::ui::theme::Stateful<Value<T>>) {
+    freeze_value(&mut value.normal);
+    freeze_value(&mut value.hovered);
+    freeze_value(&mut value.pressed);
+    freeze_value(&mut value.disabled);
+}
+
+fn freeze_widget_surface_style(style: &mut WidgetSurfaceStyle) {
+    freeze_option_value(&mut style.background);
+    freeze_option_value(&mut style.background_brush);
+    freeze_option_value(&mut style.background_image);
+    freeze_value(&mut style.background_blur);
+    freeze_option_value(&mut style.border_color);
+    freeze_option_value(&mut style.border_radius);
+    freeze_option_value(&mut style.border_width);
+    freeze_value(&mut style.opacity);
+    freeze_value(&mut style.offset);
+}
+
+#[cfg(feature = "video")]
+fn freeze_video_surface_style(style: &mut VideoSurfaceStyle) {
+    freeze_widget_surface_style(&mut style.surface);
+}
+
+fn freeze_layout_style(style: &mut LayoutStyle) {
+    freeze_option_value(&mut style.width);
+    freeze_option_value(&mut style.height);
+    freeze_option_value(&mut style.min_width);
+    freeze_option_value(&mut style.min_height);
+    freeze_option_value(&mut style.max_width);
+    freeze_option_value(&mut style.max_height);
+    freeze_option_value(&mut style.aspect_ratio);
+    freeze_option_value(&mut style.padding);
+    freeze_value(&mut style.margin);
+    freeze_value(&mut style.grow);
+    freeze_value(&mut style.shrink);
+    freeze_option_value(&mut style.basis);
+    freeze_option_value(&mut style.left);
+    freeze_option_value(&mut style.top);
+    freeze_option_value(&mut style.right);
+    freeze_option_value(&mut style.bottom);
+}
+
+fn freeze_visual_style(style: &mut VisualStyle) {
+    freeze_option_value(&mut style.border_color);
+    freeze_option_value(&mut style.border_radius);
+    freeze_option_value(&mut style.border_width);
+    freeze_option_value(&mut style.background_brush);
+    freeze_option_value(&mut style.background_image);
+    freeze_value(&mut style.background_blur);
+    freeze_value(&mut style.opacity);
+    freeze_value(&mut style.offset);
+}
+
+fn freeze_container_layout(layout: &mut ContainerLayout) {
+    freeze_option_value(&mut layout.padding);
+    freeze_value(&mut layout.gap);
+}
+
+fn freeze_text(text: &mut Text) {
+    freeze_value(&mut text.content);
+    freeze_option_value(&mut text.background);
+    freeze_option_value(&mut text.color);
+    freeze_option_value(&mut text.cursor_style);
+}
+
+fn freeze_image(image: &mut Image) {
+    freeze_value(&mut image.source);
+    freeze_option_value(&mut image.background);
+    freeze_option_value(&mut image.cursor_style);
+}
+
+fn freeze_button_style(style: &mut WidgetButtonStyle) {
+    freeze_widget_surface_style(&mut style.surface);
+    freeze_stateful_value(&mut style.background);
+    freeze_stateful_value(&mut style.foreground);
+    freeze_stateful_value(&mut style.border);
+    freeze_value(&mut style.border_width);
+    freeze_value(&mut style.radius);
+}
+
+fn freeze_checkbox_style(style: &mut WidgetCheckboxStyle) {
+    freeze_widget_surface_style(&mut style.surface);
+    freeze_stateful_value(&mut style.background);
+    freeze_stateful_value(&mut style.background_checked);
+    freeze_stateful_value(&mut style.border);
+    freeze_stateful_value(&mut style.border_checked);
+    freeze_stateful_value(&mut style.checkmark);
+    freeze_stateful_value(&mut style.label);
+    freeze_value(&mut style.border_width);
+    freeze_value(&mut style.radius);
+}
+
+fn freeze_radio_style(style: &mut WidgetRadioStyle) {
+    freeze_widget_surface_style(&mut style.surface);
+    freeze_stateful_value(&mut style.background);
+    freeze_stateful_value(&mut style.background_checked);
+    freeze_stateful_value(&mut style.border);
+    freeze_stateful_value(&mut style.border_checked);
+    freeze_stateful_value(&mut style.indicator);
+    freeze_stateful_value(&mut style.label);
+    freeze_value(&mut style.border_width);
+    freeze_value(&mut style.radius);
+}
+
+fn freeze_switch_style(style: &mut WidgetSwitchStyle) {
+    freeze_widget_surface_style(&mut style.surface);
+    freeze_stateful_value(&mut style.track);
+    freeze_stateful_value(&mut style.track_checked);
+    freeze_stateful_value(&mut style.thumb);
+    freeze_stateful_value(&mut style.thumb_checked);
+    freeze_stateful_value(&mut style.border);
+    freeze_stateful_value(&mut style.border_checked);
+    freeze_value(&mut style.border_width);
+    freeze_value(&mut style.radius);
+}
+
+fn freeze_select_style(style: &mut WidgetSelectStyle) {
+    freeze_widget_surface_style(&mut style.surface);
+    freeze_stateful_value(&mut style.background);
+    freeze_stateful_value(&mut style.text);
+    freeze_stateful_value(&mut style.placeholder);
+    freeze_stateful_value(&mut style.border);
+    freeze_stateful_value(&mut style.arrow);
+    freeze_value(&mut style.menu_background);
+    freeze_stateful_value(&mut style.option_background);
+    freeze_value(&mut style.selected_option_background);
+    freeze_value(&mut style.border_width);
+    freeze_value(&mut style.radius);
+}
+
+fn freeze_input_style(style: &mut WidgetInputStyle) {
+    freeze_widget_surface_style(&mut style.surface);
+    freeze_stateful_value(&mut style.background);
+    freeze_stateful_value(&mut style.text);
+    freeze_stateful_value(&mut style.placeholder);
+    freeze_stateful_value(&mut style.border);
+    freeze_option_value(&mut style.selection);
+    freeze_option_value(&mut style.caret);
+    freeze_value(&mut style.border_width);
+    freeze_value(&mut style.radius);
+}
+
+fn freeze_resolved_element<VM>(element: &mut ResolvedElement<VM>) {
+    freeze_layout_style(&mut element.layout);
+    freeze_visual_style(&mut element.visual);
+    freeze_option_value(&mut element.background);
+    freeze_resolved_widget_kind(&mut element.kind);
+}
+
+fn freeze_resolved_widget_kind<VM>(kind: &mut ResolvedWidgetKind<VM>) {
+    match kind {
+        ResolvedWidgetKind::Container { layout, children } => {
+            freeze_container_layout(layout);
+            for child in children {
+                freeze_resolved_element(child);
+            }
+        }
+        ResolvedWidgetKind::Text { text } => freeze_text(text),
+        ResolvedWidgetKind::Image { image } => freeze_image(image),
+        ResolvedWidgetKind::Canvas { items, .. } => freeze_value(items),
+        #[cfg(feature = "video")]
+        ResolvedWidgetKind::VideoSurface { video, style } => {
+            freeze_option_value(&mut video.background);
+            freeze_option_value(&mut video.cursor_style);
+            freeze_video_surface_style(style);
+        }
+        ResolvedWidgetKind::Button {
+            label,
+            disabled,
+            style,
+        } => {
+            freeze_value(label);
+            freeze_value(disabled);
+            freeze_button_style(style);
+        }
+        ResolvedWidgetKind::Checkbox {
+            checked,
+            label,
+            disabled,
+            style,
+            ..
+        } => {
+            freeze_value(checked);
+            freeze_option_value(label);
+            freeze_value(disabled);
+            freeze_checkbox_style(style);
+        }
+        ResolvedWidgetKind::Radio {
+            checked,
+            label,
+            disabled,
+            style,
+            ..
+        } => {
+            freeze_value(checked);
+            freeze_option_value(label);
+            freeze_value(disabled);
+            freeze_radio_style(style);
+        }
+        ResolvedWidgetKind::Switch {
+            checked,
+            active_background,
+            inactive_background,
+            active_thumb_color,
+            inactive_thumb_color,
+            disabled,
+            style,
+            ..
+        } => {
+            freeze_value(checked);
+            freeze_option_value(active_background);
+            freeze_option_value(inactive_background);
+            freeze_option_value(active_thumb_color);
+            freeze_option_value(inactive_thumb_color);
+            freeze_value(disabled);
+            freeze_switch_style(style);
+        }
+        ResolvedWidgetKind::Select {
+            selected_label,
+            placeholder,
+            options,
+            open,
+            disabled,
+            style,
+            ..
+        } => {
+            freeze_value(selected_label);
+            freeze_value(placeholder);
+            for option in options {
+                freeze_value(&mut option.label);
+                freeze_value(&mut option.selected);
+                freeze_value(&mut option.disabled);
+            }
+            freeze_option_value(open);
+            freeze_value(disabled);
+            freeze_select_style(style);
+        }
+        ResolvedWidgetKind::TextEditor {
+            controller,
+            placeholder,
+            disabled,
+            style,
+            show_scrollbar,
+            auto_wrap,
+            ..
+        } => {
+            let text = controller.text();
+            *controller = TextController::from(text);
+            freeze_value(placeholder);
+            freeze_value(disabled);
+            freeze_input_style(style);
+            freeze_value(show_scrollbar);
+            freeze_value(auto_wrap);
+        }
+    }
+}
+
+impl<VM> PartialEq for ResolvedElement<VM> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.key == other.key
+            && self.layout == other.layout
+            && self.visual == other.visual
+            && self.background == other.background
+            && self.kind == other.kind
+    }
+}
+
+impl<VM> PartialEq for ResolvedWidgetKind<VM> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Container {
+                    layout: left_layout,
+                    children: left_children,
+                },
+                Self::Container {
+                    layout: right_layout,
+                    children: right_children,
+                },
+            ) => {
+                left_layout == right_layout
+                    && left_children.len() == right_children.len()
+                    && left_children
+                        .iter()
+                        .zip(right_children.iter())
+                        .all(|(left_child, right_child)| left_child.id == right_child.id)
+            }
+            (Self::Text { text: left }, Self::Text { text: right }) => {
+                left.content == right.content
+                    && left.font_family == right.font_family
+                    && left.background == right.background
+                    && left.color == right.color
+                    && left.font_size == right.font_size
+                    && left.line_height == right.line_height
+                    && left.font_weight == right.font_weight
+                    && left.letter_spacing == right.letter_spacing
+                    && left.cursor_style == right.cursor_style
+                    && left.user_select == right.user_select
+            }
+            (Self::Image { image: left }, Self::Image { image: right }) => {
+                left.source == right.source
+                    && left.background == right.background
+                    && left.fit == right.fit
+                    && left.cursor_style == right.cursor_style
+            }
+            (
+                Self::Canvas {
+                    items: left_items, ..
+                },
+                Self::Canvas {
+                    items: right_items, ..
+                },
+            ) => left_items == right_items,
+            #[cfg(feature = "video")]
+            (
+                Self::VideoSurface {
+                    video: left_video,
+                    style: left_style,
+                },
+                Self::VideoSurface {
+                    video: right_video,
+                    style: right_style,
+                },
+            ) => {
+                left_video.background == right_video.background
+                    && left_video.fit == right_video.fit
+                    && left_video.cursor_style == right_video.cursor_style
+                    && left_style == right_style
+            }
+            (
+                Self::Button {
+                    label: left_label,
+                    disabled: left_disabled,
+                    style: left_style,
+                },
+                Self::Button {
+                    label: right_label,
+                    disabled: right_disabled,
+                    style: right_style,
+                },
+            ) => {
+                left_label == right_label
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+            }
+            (
+                Self::Checkbox {
+                    checked: left_checked,
+                    label: left_label,
+                    disabled: left_disabled,
+                    style: left_style,
+                    ..
+                },
+                Self::Checkbox {
+                    checked: right_checked,
+                    label: right_label,
+                    disabled: right_disabled,
+                    style: right_style,
+                    ..
+                },
+            ) => {
+                left_checked == right_checked
+                    && left_label == right_label
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+            }
+            (
+                Self::Radio {
+                    checked: left_checked,
+                    label: left_label,
+                    disabled: left_disabled,
+                    style: left_style,
+                    ..
+                },
+                Self::Radio {
+                    checked: right_checked,
+                    label: right_label,
+                    disabled: right_disabled,
+                    style: right_style,
+                    ..
+                },
+            ) => {
+                left_checked == right_checked
+                    && left_label == right_label
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+            }
+            (
+                Self::Switch {
+                    checked: left_checked,
+                    active_background: left_active_background,
+                    inactive_background: left_inactive_background,
+                    active_thumb_color: left_active_thumb_color,
+                    inactive_thumb_color: left_inactive_thumb_color,
+                    disabled: left_disabled,
+                    style: left_style,
+                    ..
+                },
+                Self::Switch {
+                    checked: right_checked,
+                    active_background: right_active_background,
+                    inactive_background: right_inactive_background,
+                    active_thumb_color: right_active_thumb_color,
+                    inactive_thumb_color: right_inactive_thumb_color,
+                    disabled: right_disabled,
+                    style: right_style,
+                    ..
+                },
+            ) => {
+                left_checked == right_checked
+                    && left_active_background == right_active_background
+                    && left_inactive_background == right_inactive_background
+                    && left_active_thumb_color == right_active_thumb_color
+                    && left_inactive_thumb_color == right_inactive_thumb_color
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+            }
+            (
+                Self::Select {
+                    selected_label: left_selected_label,
+                    placeholder: left_placeholder,
+                    options: left_options,
+                    open: left_open,
+                    disabled: left_disabled,
+                    style: left_style,
+                    ..
+                },
+                Self::Select {
+                    selected_label: right_selected_label,
+                    placeholder: right_placeholder,
+                    options: right_options,
+                    open: right_open,
+                    disabled: right_disabled,
+                    style: right_style,
+                    ..
+                },
+            ) => {
+                left_selected_label == right_selected_label
+                    && left_placeholder == right_placeholder
+                    && left_open == right_open
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+                    && left_options.len() == right_options.len()
+                    && left_options.iter().zip(right_options.iter()).all(
+                        |(left_option, right_option)| {
+                            left_option.label == right_option.label
+                                && left_option.selected == right_option.selected
+                                && left_option.disabled == right_option.disabled
+                        },
+                    )
+            }
+            (
+                Self::TextEditor {
+                    controller: left_controller,
+                    placeholder: left_placeholder,
+                    disabled: left_disabled,
+                    style: left_style,
+                    multiline: left_multiline,
+                    show_scrollbar: left_show_scrollbar,
+                    auto_wrap: left_auto_wrap,
+                    ..
+                },
+                Self::TextEditor {
+                    controller: right_controller,
+                    placeholder: right_placeholder,
+                    disabled: right_disabled,
+                    style: right_style,
+                    multiline: right_multiline,
+                    show_scrollbar: right_show_scrollbar,
+                    auto_wrap: right_auto_wrap,
+                    ..
+                },
+            ) => {
+                left_controller.text() == right_controller.text()
+                    && left_placeholder == right_placeholder
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+                    && left_multiline == right_multiline
+                    && left_show_scrollbar == right_show_scrollbar
+                    && left_auto_wrap == right_auto_wrap
+            }
+            _ => false,
+        }
+    }
+}
 
 impl<VM> ResolvedElement<VM> {
     pub(super) fn measure_context(&self) -> MeasureContext {
@@ -1843,9 +2350,11 @@ impl<VM> ResolvedElement<VM> {
 
     pub(super) fn collect_lifecycle_event_states(&self, states: &mut Vec<LifecycleEventState<VM>>) {
         if self.lifecycle_events.has_any() {
+            let mut resolved = self.clone();
+            freeze_resolved_element(&mut resolved);
             states.push(LifecycleEventState {
                 widget_id: self.id,
-                handlers: self.lifecycle_events.clone(),
+                resolved,
             });
         }
 
