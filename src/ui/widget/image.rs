@@ -6,8 +6,8 @@ use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
-    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKey,
-    WidgetKind,
+    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
+    VisualStyle, WidgetId, WidgetKey, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -322,6 +322,27 @@ impl Image {
         })
     }
 
+    pub fn on_mount<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_mount: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_unmount<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_unmount: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_update<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_update: Some(command),
+            ..Default::default()
+        })
+    }
+
     pub fn on_loading<VM>(self, command: Command<VM>) -> Element<VM> {
         self.into_element_with_media_events(MediaEventHandlers {
             on_loading: Some(command),
@@ -359,6 +380,27 @@ impl Image {
             layout: self.layout.clone(),
             visual: self.visual.clone(),
             interactions,
+            lifecycle_events: LifecycleEventHandlers::default(),
+            media_events: MediaEventHandlers::default(),
+            background: self.background.clone(),
+            kind: WidgetKind::Image { image: self },
+        }
+    }
+
+    fn into_element_with_lifecycle_events<VM>(
+        self,
+        lifecycle_events: LifecycleEventHandlers<VM>,
+    ) -> Element<VM> {
+        Element {
+            id: WidgetId::next(),
+            key: self.key.clone(),
+            layout: self.layout.clone(),
+            visual: self.visual.clone(),
+            interactions: InteractionHandlers {
+                cursor_style: self.cursor_style.clone(),
+                ..Default::default()
+            },
+            lifecycle_events,
             media_events: MediaEventHandlers::default(),
             background: self.background.clone(),
             kind: WidgetKind::Image { image: self },
@@ -378,6 +420,7 @@ impl Image {
                 cursor_style: self.cursor_style.clone(),
                 ..Default::default()
             },
+            lifecycle_events: LifecycleEventHandlers::default(),
             media_events,
             background: self.background.clone(),
             kind: WidgetKind::Image { image: self },
@@ -396,6 +439,7 @@ impl<VM> From<Image> for Element<VM> {
                 cursor_style: value.cursor_style.clone(),
                 ..Default::default()
             },
+            lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background: value.background.clone(),
             kind: WidgetKind::Image { image: value },

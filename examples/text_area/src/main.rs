@@ -22,11 +22,20 @@ struct App {
     contact_method: State<String>,
     content: TextController,
     path_label: State<String>,
+    count: State<i32>,
 }
 
 impl App {
     fn theme_binding(&self) -> Signal<ThemeMode> {
         self.theme.signal()
+    }
+
+    fn dynamic_blocks(&self) -> Signal<Vec<Element<Self>>> {
+        self.count.signal().map(|count| {
+            (1..=count)
+                .map(|num| dynamic_block::<Self>(num).into())
+                .collect()
+        })
     }
 }
 
@@ -42,10 +51,12 @@ impl ViewModel for App {
             contact_method: context.state(String::from("system")),
             content: context.text_controller(content),
             path_label: context.state(path.display().to_string()),
+            count: context.state(0),
         }
     }
 
     fn view(&self) -> Element<Self> {
+
         Flex::vertical()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(20.0)))
@@ -71,6 +82,17 @@ impl ViewModel for App {
                     }
                     app.contact_method.set(key)
                 })),
+                Flex::horizontal()
+                .gap(dp(10.0))
+                .child(el![
+                    Button::new("添加一个块").on_click(Command::new(|app: &mut App| {
+                        app.count.update(|count| *count += 1)
+
+                    })),
+                    Button::new("去掉一个块").on_click(Command::new(|app: &mut App| {
+                        app.count.update(|count| *count -= 1)
+                    })),
+                ]),
                 Text::new(
                     "下面的内容读取自当前示例的 `main.rs`，你可以编辑它，但修改不会保存到磁盘。"
                 )
@@ -93,10 +115,32 @@ impl ViewModel for App {
                                 app.path_label
                                     .set(format!("已编辑: {:03}", app.content.revision() % 1000));
                             }))
+                            .on_mount(Command::new(|_| {
+                                tgui_log(LogLevel::Info, "Textarea mounted")
+                            }))
+                            .on_unmount(Command::new(|_| {
+                                tgui_log(LogLevel::Info, "Textarea unmount")
+                            }))
+                            .on_update(Command::new(|_| {
+                                tgui_log(LogLevel::Info, "Textarea update")
+                            })),
+                        Flex::vertical()
+                            .width(pct(100.0))
+                            .gap(dp(8.0))
+                            .child(self.dynamic_blocks()),
                     ]),
             ])
             .into()
     }
+}
+
+fn dynamic_block<VM>(num: i32) -> Stack<VM> {
+    Stack::new()
+        .width(pct(100.0))
+        .padding(Insets::all(dp(10.0)))
+        .style(card_style)
+        .child(Text::new(format!("块 {num}")))
+        .into()
 }
 
 fn source_path() -> PathBuf {

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::*;
 
 impl<VM> ResolvedElement<VM> {
@@ -56,7 +58,6 @@ impl<VM> ResolvedElement<VM> {
                 placeholder,
                 style,
                 multiline,
-                auto_wrap,
                 ..
             } => MeasureContext::TextEditor {
                 id: self.id,
@@ -64,7 +65,6 @@ impl<VM> ResolvedElement<VM> {
                 placeholder: placeholder.clone(),
                 style: style.clone(),
                 multiline: *multiline,
-                auto_wrap: auto_wrap.clone(),
             },
         }
     }
@@ -1626,21 +1626,42 @@ impl<VM> ResolvedElement<VM> {
                     context.theme,
                     context.units,
                 );
-                let resolved_value = controller.text();
-                let visible_value = context
-                    .focused_text_value
-                    .filter(|_| context.focused_input == Some(self.id))
-                    .unwrap_or_else(|| resolved_value.as_str());
-                let display_value = if visible_value.is_empty() {
+                let focused = context.focused_input == Some(self.id);
+                let controller_revision = (!focused).then(|| controller.revision());
+                let cached_layout = (!focused)
+                    .then(|| {
+                        context
+                            .text_layout_overrides
+                            .and_then(|overrides| overrides.get(&self.id))
+                            .filter(|override_layout| {
+                                Some(override_layout.revision) == controller_revision
+                            })
+                    })
+                    .flatten();
+                let resolved_value = if focused {
+                    context
+                        .focused_text_value
+                        .map(Cow::Borrowed)
+                        .unwrap_or_else(|| Cow::Owned(controller.text()))
+                } else if let Some(override_layout) = cached_layout {
+                    Cow::Borrowed(override_layout.text)
+                } else {
+                    Cow::Owned(controller.text())
+                };
+                let display_value = if resolved_value.is_empty() {
                     placeholder.resolve()
                 } else {
-                    visible_value.to_string()
+                    resolved_value.to_string()
                 };
-                let mut text = text_with_typography(display_value.clone(), &input_style.text_style);
+                let mut text = text_with_typography(display_value, &input_style.text_style);
                 text.color = Some(Value::Static(input_style.text));
-                let precomputed_layout = context
-                    .focused_text_layout
-                    .filter(|_| context.focused_input == Some(self.id));
+                let precomputed_layout = if resolved_value.is_empty() {
+                    None
+                } else if focused {
+                    context.focused_text_layout
+                } else {
+                    cached_layout.map(|override_layout| override_layout.layout)
+                };
                 let scroll_offset = context
                     .scroll_offsets
                     .get(&self.id)
@@ -1817,6 +1838,21 @@ impl<VM> ResolvedElement<VM> {
                 }
             }
             _ => {}
+        }
+    }
+
+    pub(super) fn collect_lifecycle_event_states(&self, states: &mut Vec<LifecycleEventState<VM>>) {
+        if self.lifecycle_events.has_any() {
+            states.push(LifecycleEventState {
+                widget_id: self.id,
+                handlers: self.lifecycle_events.clone(),
+            });
+        }
+
+        if let ResolvedWidgetKind::Container { children, .. } = &self.kind {
+            for child in children {
+                child.collect_lifecycle_event_states(states);
+            }
         }
     }
 }

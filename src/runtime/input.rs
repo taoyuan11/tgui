@@ -117,7 +117,8 @@ fn update_session_layout_snapshot(
             .editor
             .with_buffer(|buffer| build_layout_info_from_buffer(buffer, display_text, line_height))
     });
-    session.display_text = display_text.to_string();
+    session.display_text.clear();
+    session.display_text.push_str(display_text);
 }
 
 fn text_replacement_bounds(old_text: &str, new_text: &str) -> Option<(usize, usize, usize, usize)> {
@@ -179,13 +180,12 @@ fn refresh_session_buffer(
     auto_wrap: bool,
     _text_state: &TextEditState,
     display_text: &str,
+    edit_replacement: Option<(usize, usize, usize, usize)>,
 ) {
     let started_at = text_profile_enabled().then_some(Instant::now());
     let config_changed = session.config.as_ref() != Some(&config);
-    let text_changed = session.display_text != display_text;
-    let incremental = !config_changed
-        && text_changed
-        && text_replacement_bounds(&session.display_text, display_text).is_some();
+    let text_changed = edit_replacement.is_some() || session.display_text != display_text;
+    let incremental = !config_changed && text_changed && edit_replacement.is_some();
 
     if !config_changed && !text_changed {
         if session.layout_snapshot.is_none() {
@@ -207,7 +207,9 @@ fn refresh_session_buffer(
 
     session.config = Some(config);
     let layout_updated_incrementally = if multiline {
-        text_replacement_bounds(&session.display_text, display_text)
+        let replacement = edit_replacement
+            .or_else(|| text_replacement_bounds(&session.display_text, display_text));
+        replacement
             .map(|replacement| {
                 session.layout_snapshot.as_mut().is_some_and(|previous| {
                     font_manager.update_layout_after_edit(
@@ -228,7 +230,8 @@ fn refresh_session_buffer(
             })
             .is_some_and(|updated| {
                 if updated {
-                    session.display_text = display_text.to_string();
+                    session.display_text.clear();
+                    session.display_text.push_str(display_text);
                 }
                 updated
             })
@@ -295,7 +298,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 line_height_bits: line_height.to_bits(),
                 letter_spacing_bits: letter_spacing.to_bits(),
                 width_bits: layout_width.to_bits(),
-                height_bits: content_viewport.height.get().max(0.0).to_bits(),
                 multiline: region.multiline,
                 auto_wrap: region.auto_wrap,
             },
@@ -411,6 +413,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         region
     }
 
+    #[cfg(test)]
+    pub(crate) fn text_input_session_config_signature_for_test(
+        &mut self,
+        widget_id: WidgetId,
+        frame: Rect,
+    ) -> Option<(u64, f32)> {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut region = self.text_input_region_data(widget_id)?;
+        region.frame = frame;
+        let (config, _, _, _, _, _, _, height) = self.text_input_session_config(&region);
+        let mut hasher = DefaultHasher::new();
+        config.hash(&mut hasher);
+        Some((hasher.finish(), height))
+    }
+
     fn text_input_current_value(&self, widget_id: WidgetId, controller: &TextController) -> String {
         self.text_input_buffers
             .get(&widget_id)
@@ -491,16 +510,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         widget_id: WidgetId,
     ) -> Option<TextInputRegionData<VM>> {
         let region = self.text_input_region_data(widget_id)?;
-        let snapshot = region.controller.snapshot();
         if !self.text_input_buffers.contains_key(&widget_id) {
             let session = self.create_text_input_session(&region);
             self.text_input_buffers.insert(widget_id, session);
         }
 
-        let mut state = self
-            .text_edit_state(widget_id)
-            .cloned()
-            .unwrap_or_else(|| self.default_text_edit_state(widget_id, &snapshot.text));
+        let mut state = self.text_edit_state(widget_id).cloned().unwrap_or_else(|| {
+            let current_text = self
+                .text_input_buffers
+                .get(&widget_id)
+                .map(|session| session.current_text.as_str())
+                .unwrap_or("");
+            self.default_text_edit_state(widget_id, current_text)
+        });
         let (config, preferred_font, weight, font_size, line_height, letter_spacing, width, height) =
             self.text_input_session_config(&region);
         {
@@ -508,17 +530,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .text_input_buffers
                 .get_mut(&widget_id)
                 .expect("text input session should exist");
-            if session.current_text == snapshot.text {
-                session.external_value = snapshot.text.clone();
-                session.external_revision = snapshot.revision;
-            } else if session.external_revision != snapshot.revision {
-                session.external_value = snapshot.text.clone();
-                session.external_revision = snapshot.revision;
-                session.current_text = snapshot.text.clone();
-                session.rope = ropey::Rope::from_str(&snapshot.text);
-                session.pending_changes.clear();
-                session.pending_start_revision = None;
-                state = state.clamped_to(&snapshot.text);
+            let controller_revision = region.controller.revision();
+            if session.external_revision != controller_revision {
+                let snapshot = region.controller.snapshot();
+                if session.current_text == snapshot.text {
+                    session.external_value = snapshot.text;
+                    session.external_revision = snapshot.revision;
+                } else {
+                    session.external_value = snapshot.text.clone();
+                    session.external_revision = snapshot.revision;
+                    session.current_text = snapshot.text.clone();
+                    session.rope = ropey::Rope::from_str(&snapshot.text);
+                    session.pending_changes.clear();
+                    session.pending_start_revision = None;
+                    state = state.clamped_to(&snapshot.text);
+                }
             }
             state = state.clamped_to(session.current_text());
             let display_text = text_edit_display_text(session.current_text(), &state);
@@ -537,6 +563,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 region.auto_wrap,
                 &state,
                 &display_text,
+                None,
             );
         }
         self.text_edit_states.insert(widget_id, state);
@@ -639,26 +666,42 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(region) = self.sync_text_input_buffer(widget_id) else {
             return false;
         };
-        let snapshot = region.controller.snapshot();
+        let current_text = self
+            .text_input_buffers
+            .get(&widget_id)
+            .map(|session| session.current_text.as_str())
+            .unwrap_or("");
         let state = self
             .text_edit_state(widget_id)
             .cloned()
-            .unwrap_or_else(|| self.default_text_edit_state(widget_id, &snapshot.text));
-        let (next_value, next_state, text_change) = {
+            .unwrap_or_else(|| self.default_text_edit_state(widget_id, current_text));
+        let (text_len_before, changed, next_rope, next_value, next_state, text_change) = {
             let session = self
                 .text_input_buffers
                 .get_mut(&widget_id)
                 .expect("text input session should be initialized");
-            let current_text = session.current_text.clone();
+            let current_text = std::mem::take(&mut session.current_text);
             let state = state.clamped_to(&current_text);
-            let mut buffer = RopeBuffer::from_str(&current_text);
+            let mut buffer =
+                RopeBuffer::from_parts(std::mem::take(&mut session.rope), current_text);
             let Some((next_state, text_change)) = edit(&mut buffer, &state) else {
+                let (next_rope, next_value) = buffer.into_parts();
+                session.rope = next_rope;
+                session.current_text = next_value;
                 return false;
             };
-            (buffer.materialize_string(), next_state, text_change)
+            let (next_rope, next_value) = buffer.into_parts();
+            let text_len_before = session.external_value.len();
+            let changed = session.external_value != next_value;
+            (
+                text_len_before,
+                changed,
+                next_rope,
+                next_value,
+                next_state,
+                text_change,
+            )
         };
-        let changed = snapshot.text != next_value;
-        let text_len_before = snapshot.text.len();
         let text_len_after = next_value.len();
         let (config, preferred_font, weight, font_size, line_height, letter_spacing, width, height) =
             self.text_input_session_config(&region);
@@ -667,21 +710,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .text_input_buffers
                 .get_mut(&widget_id)
                 .expect("text input session should exist after edit");
+            session.current_text = next_value;
+            session.rope = next_rope;
+            let edit_replacement = Some((
+                text_change.range_bytes.0,
+                text_change.range_bytes.1,
+                text_change.range_bytes.0,
+                text_change.range_bytes.0 + text_change.inserted_text.len(),
+            ));
             if changed {
-                session.current_text = next_value.clone();
-                session.rope = ropey::Rope::from_str(&next_value);
                 session.push_pending_change(text_change);
-            } else {
-                session.current_text = snapshot.text.clone();
-                session.rope = ropey::Rope::from_str(&snapshot.text);
-                session.external_value = snapshot.text.clone();
-                session.external_revision = snapshot.revision;
             }
-            let canonical_value = if changed {
-                session.current_text.as_str()
-            } else {
-                session.external_value.as_str()
-            };
+            let canonical_value = session.current_text.as_str();
             let next_state = next_state.clamped_to(canonical_value);
             let display_text = text_edit_display_text(canonical_value, &next_state);
             refresh_session_buffer(
@@ -699,6 +739,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 region.auto_wrap,
                 &next_state,
                 &display_text,
+                edit_replacement,
             );
             self.text_edit_states.insert(widget_id, next_state);
         }
@@ -710,7 +751,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .text_input_buffers
                 .get(&widget_id)
                 .map(|session| session.current_text.clone())
-                .unwrap_or_else(|| snapshot.text.clone());
+                .unwrap_or_default();
             self.ensure_text_input_caret_visible(
                 widget_id,
                 region.frame,
@@ -910,39 +951,42 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .cursor
                 .map(|(_, end)| end.min(composition.text.len()))
                 .unwrap_or(composition.text.len());
-            (display, start + caret_offset)
+            (std::borrow::Cow::Owned(display), start + caret_offset)
         } else {
-            (text.to_string(), state.cursor.min(text.len()))
+            (
+                std::borrow::Cow::Borrowed(text),
+                state.cursor.min(text.len()),
+            )
         };
         let (_, _, line_height, _) =
             super::resolved_input_text_metrics(&self.theme, self.unit_context(), text_style);
-        let layout = self
-            .text_input_buffers
-            .get(&widget_id)
-            .and_then(|session| {
-                (session.display_text == display_text)
-                    .then(|| session.layout_snapshot.as_ref())
-                    .flatten()
-            })
-            .cloned()
-            .unwrap_or_else(|| {
-                let (layout, _, _) = super::input_text_layout(
-                    &self.font_manager,
-                    &self.theme,
-                    self.unit_context(),
-                    text_style,
-                    &display_text,
+        let layout_ref = self.text_input_buffers.get(&widget_id).and_then(|session| {
+            (session.display_text == display_text.as_ref())
+                .then_some(session.layout_snapshot.as_ref())
+                .flatten()
+        });
+        let layout_owned;
+        let layout = if let Some(layout) = layout_ref {
+            layout
+        } else {
+            let (layout, _, _) = super::input_text_layout(
+                &self.font_manager,
+                &self.theme,
+                self.unit_context(),
+                text_style,
+                display_text.as_ref(),
+                multiline,
+                auto_wrap,
+                crate::ui::widget::text_input_layout_width(
+                    content_viewport,
                     multiline,
                     auto_wrap,
-                    crate::ui::widget::text_input_layout_width(
-                        content_viewport,
-                        multiline,
-                        auto_wrap,
-                        INPUT_CARET_WIDTH,
-                    ),
-                );
-                layout
-            });
+                    INPUT_CARET_WIDTH,
+                ),
+            );
+            layout_owned = layout;
+            &layout_owned
+        };
         let caret = caret_index.min(display_text.len());
         let caret_x = layout.x_for_index(caret);
         let caret_y = layout.top_for_index(caret);
@@ -3224,6 +3268,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if flush_outcome.requires_global_invalidation {
             self.invalidation.mark_dirty();
         }
+        let lifecycle_started_at = Instant::now();
+        self.dispatch_lifecycle_events_if_needed();
+        let lifecycle_duration = lifecycle_started_at.elapsed();
         let theme_started_at = Instant::now();
         let theme_changed = self.refresh_platform_theme();
         let theme_duration = theme_started_at.elapsed();
@@ -3258,9 +3305,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 "handle_bound_about_to_wait",
                 started_at.elapsed(),
                 format!(
-                    "flushed_text_changes={} flush_ms={:.3} theme_changed={} theme_ms={:.3} redraw_ms={:.3} animation_ms={:.3} close_requested={}",
+                    "flushed_text_changes={} flush_ms={:.3} lifecycle_ms={:.3} theme_changed={} theme_ms={:.3} redraw_ms={:.3} animation_ms={:.3} close_requested={}",
                     flush_outcome.changed,
                     flush_duration.as_secs_f64() * 1000.0,
+                    lifecycle_duration.as_secs_f64() * 1000.0,
                     theme_changed,
                     theme_duration.as_secs_f64() * 1000.0,
                     redraw_duration.as_secs_f64() * 1000.0,

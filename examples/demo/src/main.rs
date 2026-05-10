@@ -51,6 +51,8 @@ struct App {
     notification_status: State<String>,
     input_text: TextController,
     textarea_text: TextController,
+
+    test_text: State<String>
 }
 
 impl ViewModel for App {
@@ -67,6 +69,7 @@ impl ViewModel for App {
             textarea_text: context.text_controller(
                 "这是一个受控 Textarea。\n你可以在这里输入多行内容，示例不会保存修改。",
             ),
+            test_text: context.state(String::from("这是一段测试文字"))
         }
     }
 
@@ -163,7 +166,12 @@ impl ViewModel for App {
                     "Input",
                     Input::new(self.input_text.clone())
                         .width(dp(260.0))
-                        .placeholder("请输入内容"),
+                        .placeholder("请输入内容")
+                        .on_change(Command::new(|app: &mut App| {
+                            app.test_text.update(|text| {
+                                *text = format!("{text}1")
+                            })
+                        })),
                 ),
                 component_card(
                     "Textarea",

@@ -8,7 +8,7 @@ use crate::ui::unit::Dp;
 
 use super::common::{
     ChildSource, ContainerKind, ContainerLayout, CursorStyle, InteractionHandlers,
-    MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
+    LifecycleEventHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::core::Element;
 use super::style::ContainerStyle;
@@ -204,6 +204,7 @@ impl<VM> Container<VM> {
                 layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
                 interactions: InteractionHandlers::default(),
+                lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::Container {
@@ -252,6 +253,21 @@ impl<VM> Container<VM> {
 
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.element.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    pub fn on_mount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_mount = Some(command);
+        self
+    }
+
+    pub fn on_unmount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_unmount = Some(command);
+        self
+    }
+
+    pub fn on_update(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_update = Some(command);
         self
     }
 
@@ -603,6 +619,18 @@ macro_rules! impl_layout_api {
 
             pub fn on_mouse_move(self, command: ValueCommand<VM, Point>) -> Self {
                 Self(self.0.on_mouse_move(command))
+            }
+
+            pub fn on_mount(self, command: Command<VM>) -> Self {
+                Self(self.0.on_mount(command))
+            }
+
+            pub fn on_unmount(self, command: Command<VM>) -> Self {
+                Self(self.0.on_unmount(command))
+            }
+
+            pub fn on_update(self, command: Command<VM>) -> Self {
+                Self(self.0.on_update(command))
             }
 
             pub fn cursor(self, cursor: impl Into<Value<CursorStyle>>) -> Self {

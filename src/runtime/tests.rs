@@ -188,6 +188,12 @@ fn flush_text_input_commits<VM: crate::foundation::view_model::ViewModel>(
     let _ = handler.flush_pending_text_input_changes();
 }
 
+fn dispatch_lifecycle_if_dirty<VM: crate::foundation::view_model::ViewModel>(
+    handler: &mut BoundRuntimeHandler<VM>,
+) {
+    handler.dispatch_lifecycle_events_if_needed();
+}
+
 fn custom_theme_set() -> (ThemeSet, Theme, Theme) {
     let mut light = Theme::light();
     light.colors.background = Color::hexa(0xEAF4FFFF);
@@ -595,6 +601,139 @@ fn dynamic_child_dependency_update_preserves_cached_layout_shell() {
 }
 
 #[test]
+fn lifecycle_mount_dispatches_once_without_update() {
+    let invalidation = InvalidationSignal::new();
+    invalidation.mark_dirty();
+    let tree = WidgetTree::new(
+        Text::new("hello")
+            .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+            .on_update(Command::new(|vm: &mut LifecycleVm| vm.updates += 1)),
+    );
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(vm.mounts, 1);
+    assert_eq!(vm.updates, 0);
+    assert_eq!(vm.unmounts, 0);
+}
+
+#[test]
+fn lifecycle_mount_command_invalidation_does_not_remount_same_component() {
+    let invalidation = InvalidationSignal::new();
+    invalidation.mark_dirty();
+    let tree = WidgetTree::new(
+        Text::new("hello")
+            .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+            .on_update(Command::new(|vm: &mut LifecycleVm| vm.updates += 1)),
+    );
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    dispatch_lifecycle_if_dirty(&mut handler);
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(vm.mounts, 1);
+    assert_eq!(vm.updates, 0);
+    assert_eq!(vm.unmounts, 0);
+}
+
+#[test]
+fn lifecycle_update_command_without_state_change_does_not_loop() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let label = context.state(String::from("first"));
+    let tree = WidgetTree::new(
+        Text::new(label.signal())
+            .key("stable")
+            .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+            .on_update(Command::new(|vm: &mut LifecycleVm| vm.updates += 1)),
+    );
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    label.set(String::from("second"));
+    dispatch_lifecycle_if_dirty(&mut handler);
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(vm.mounts, 1);
+    assert_eq!(vm.updates, 1);
+    assert_eq!(vm.unmounts, 0);
+}
+
+#[test]
+fn lifecycle_update_dispatches_for_rebuilt_stable_identity() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let label = context.state(String::from("first"));
+    let tree = WidgetTree::new(
+        Text::new(label.signal())
+            .key("stable")
+            .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+            .on_update(Command::new(|vm: &mut LifecycleVm| vm.updates += 1)),
+    );
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    label.set(String::from("second"));
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(vm.mounts, 1);
+    assert_eq!(vm.updates, 1);
+    assert_eq!(vm.unmounts, 0);
+}
+
+#[test]
+fn lifecycle_unmount_dispatches_when_component_is_removed() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let visible = context.state(true);
+    let tree = WidgetTree::new(Stack::<LifecycleVm>::new().child(visible.signal().map(|visible| {
+        let element: Element<LifecycleVm> = if visible {
+            Text::new("shown")
+                .key("tracked")
+                .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+                .on_unmount(Command::new(|vm: &mut LifecycleVm| vm.unmounts += 1))
+                .into()
+        } else {
+            Stack::<LifecycleVm>::new().into()
+        };
+        element
+    })));
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    visible.set(false);
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(vm.mounts, 1);
+    assert_eq!(vm.unmounts, 1);
+    assert_eq!(vm.updates, 0);
+}
+
+#[test]
 fn textarea_show_scrollbar_dependency_update_preserves_cached_layout() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
@@ -628,7 +767,7 @@ fn textarea_show_scrollbar_dependency_update_preserves_cached_layout() {
 }
 
 #[test]
-fn textarea_auto_wrap_dependency_update_preserves_cached_layout_shell() {
+fn textarea_auto_wrap_dependency_update_preserves_cached_layout() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let auto_wrap = context.state(false);
@@ -652,9 +791,14 @@ fn textarea_auto_wrap_dependency_update_preserves_cached_layout_shell() {
     let cached = handler
         .cached_scene
         .as_ref()
-        .expect("textarea subtree patch should keep the cache shell");
+        .expect("scene-only invalidation should keep the cache shell");
     assert!(cached.layout.is_some());
-    assert!(!cached.computed_valid);
+    assert!(cached.computed_valid);
+    assert!(handler.scene_layout_cache_matches(
+        cached,
+        handler.viewport_rect(),
+        handler.unit_context()
+    ));
 }
 
 #[test]
@@ -1212,6 +1356,44 @@ fn focused_input_accepts_repeated_text_input() {
 
     let value = handler.with_view_model(|vm| vm.value.clone());
     assert_eq!(value, "hia");
+}
+
+#[test]
+fn focused_text_overrides_use_session_text_without_local_edits() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::from("hello world");
+    let tree = WidgetTree::new(Input::new(controller));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let focused_id = handler
+        .focused_text_input_id()
+        .expect("input should be focused after click");
+    let (text, layout) = BoundRuntimeHandler::<TextInputVm>::focused_text_overrides(
+        &handler.text_input_buffers,
+        Some(focused_id),
+        handler.text_edit_state(focused_id),
+    );
+
+    assert_eq!(text, Some("hello world"));
+    assert!(layout.is_some());
 }
 
 #[test]
@@ -2487,6 +2669,38 @@ fn textarea_click_reuses_live_session_layout_snapshot() {
 }
 
 #[test]
+fn textarea_height_change_does_not_change_layout_session_config() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Textarea::<TestVm>::new("hello\nworld").height(dp(120.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let (text_id, frame) = {
+        let computed = handler.computed_scene();
+        let frame = computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { id, .. } => Some((id, region.rect)),
+                _ => None,
+            })
+            .expect("textarea hit region should exist");
+        (*frame.0, frame.1)
+    };
+
+    let (config_signature, height) = handler
+        .text_input_session_config_signature_for_test(text_id, frame)
+        .expect("textarea config should exist");
+    let (taller_signature, taller_height) = handler
+        .text_input_session_config_signature_for_test(
+            text_id,
+            Rect::new(frame.x, frame.y, frame.width, frame.height + dp(48.0)),
+        )
+        .expect("textarea config should exist");
+
+    assert_eq!(config_signature, taller_signature);
+    assert_ne!(height, taller_height);
+}
+
+#[test]
 fn repeated_tab_does_not_advance_focus() {
     let invalidation = InvalidationSignal::new();
     let first: Element<TestVm> = Input::<TestVm>::new("first").into();
@@ -3187,6 +3401,26 @@ struct CanvasEventVm {
     wheel_events: usize,
     drag_events: usize,
     drag_end_events: usize,
+}
+
+#[derive(Default)]
+struct LifecycleVm {
+    mounts: usize,
+    updates: usize,
+    unmounts: usize,
+}
+
+impl crate::foundation::view_model::ViewModel for LifecycleVm {
+    fn new(_context: &ViewModelContext) -> Self {
+        Self::default()
+    }
+
+    fn view(&self) -> Element<Self>
+    where
+        Self: Sized,
+    {
+        Stack::new().into()
+    }
 }
 
 impl crate::foundation::view_model::ViewModel for CanvasEventVm {

@@ -37,6 +37,7 @@
 - `Signal<T>`：从状态派生 UI 值，支持 `map` 和 `animated`
 - `TextController`：`Input` / `Textarea` 的保留式文本状态，支持程序化读写与批量变更通知
 - `Command<T>` / `ValueCommand<T, V>`：把按钮、输入、画布事件接回 ViewModel
+- 生命周期事件：`on_mount`、`on_unmount`、`on_update`
 - `CommandContext::window()`：在命令中请求窗口拖拽、拉伸、最小化、最大化/还原、关闭
 - `CommandContext::notifications()`：在命令中发送通知、请求权限、处理通知 action 回调
 
@@ -205,6 +206,26 @@ AnimatedValue<T>
 AnimationSpec<T>
 Keyframes<T>
 ```
+
+## 组件生命周期事件
+
+所有公开组件都支持：
+
+- `on_mount(Command<VM>)`
+- `on_unmount(Command<VM>)`
+- `on_update(Command<VM>)`
+
+语义说明：
+
+- `on_mount`：组件首次进入当前窗口的组件树时触发一次
+- `on_unmount`：组件在应用仍运行时从当前组件树移除时触发一次
+- `on_update`：同一组件身份在一次 view 重建后仍然存在时触发一次
+
+注意事项：
+
+- 动态列表建议始终显式设置 `.key(...)`，这样生命周期身份才会稳定
+- `on_update` 表示“同身份组件参与了一次重建”，不是“属性 diff 后确实有变化”
+- 关闭窗口或应用退出时，不额外保证补发 `on_unmount`
 
 ## 仓库示例
 

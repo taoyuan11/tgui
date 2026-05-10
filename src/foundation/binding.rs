@@ -173,6 +173,16 @@ impl DirtyDependencyLog {
 }
 
 #[derive(Default)]
+struct InvalidationWakeState {
+    depth: usize,
+    pending_wake: bool,
+}
+
+thread_local! {
+    static INVALIDATION_WAKE_STATE: RefCell<InvalidationWakeState> = RefCell::new(InvalidationWakeState::default());
+}
+
+#[derive(Default)]
 struct DependencyTracker {
     scopes: Vec<DependencyOwner>,
     records: Vec<(DependencyId, DependencyOwner)>,
@@ -269,6 +279,12 @@ impl InvalidationSignal {
             .lock()
             .expect("dirty dependency log lock poisoned")
             .push(revision, dependency);
+        if self.should_wake_now() {
+            self.wake_proxy();
+        }
+    }
+
+    fn wake_proxy(&self) {
         if let Some(proxy) = self
             .proxy
             .lock()
@@ -280,12 +296,33 @@ impl InvalidationSignal {
         }
     }
 
+    fn should_wake_now(&self) -> bool {
+        INVALIDATION_WAKE_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            if state.depth == 0 {
+                true
+            } else {
+                state.pending_wake = true;
+                false
+            }
+        })
+    }
+
     pub(crate) fn revision(&self) -> u64 {
         self.revision.load(Ordering::SeqCst)
     }
 
     pub(crate) fn set_proxy(&self, proxy: EventLoopProxy) {
         *self.proxy.lock().expect("invalidation proxy lock poisoned") = Some(proxy);
+    }
+
+    pub(crate) fn suppress_wakeups(&self) -> InvalidationWakeGuard {
+        INVALIDATION_WAKE_STATE.with(|state| {
+            state.borrow_mut().depth += 1;
+        });
+        InvalidationWakeGuard {
+            signal: self.clone(),
+        }
     }
 
     pub(crate) fn dirty_dependencies_since(
@@ -297,6 +334,29 @@ impl InvalidationSignal {
             .lock()
             .expect("dirty dependency log lock poisoned")
             .dirty_since(revision, current_revision)
+    }
+}
+
+pub(crate) struct InvalidationWakeGuard {
+    signal: InvalidationSignal,
+}
+
+impl Drop for InvalidationWakeGuard {
+    fn drop(&mut self) {
+        let should_wake = INVALIDATION_WAKE_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.depth = state.depth.saturating_sub(1);
+            if state.depth == 0 && state.pending_wake {
+                state.pending_wake = false;
+                true
+            } else {
+                false
+            }
+        });
+
+        if should_wake {
+            self.signal.wake_proxy();
+        }
     }
 }
 

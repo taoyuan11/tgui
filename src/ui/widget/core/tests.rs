@@ -1139,13 +1139,12 @@ fn canvas_items_signal_records_layout_and_scene_dependencies() {
 }
 
 #[test]
-fn textarea_auto_wrap_signal_records_layout_dependency() {
+fn multiline_textarea_layout_is_content_independent() {
     let ctx = test_context();
     let auto_wrap = ctx.state(true);
     let textarea: Element<()> = Textarea::new("tracked text")
         .auto_wrap(auto_wrap.signal())
         .into();
-    let widget_id = textarea.id;
     let tree = WidgetTree::new(textarea);
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -1161,11 +1160,118 @@ fn textarea_auto_wrap_signal_records_layout_dependency() {
     );
 
     assert!(!layout.dependencies().has_global_dependency());
-    assert_eq!(layout.dependencies().dependency_count(), 1);
-    assert!(layout.dependencies().contains_owner(DependencyOwner {
-        widget_id: widget_id.raw(),
-        phase: DependencyPhase::Layout,
-    }));
+    assert_eq!(layout.dependencies().dependency_count(), 0);
+}
+
+#[test]
+fn textarea_non_focused_render_reuses_stable_layout_snapshot() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let content = "line 0\nline 1\nline 2";
+    let textarea: Element<()> = Textarea::new(content).height(dp(52.0)).into();
+    let widget_id = textarea.id;
+    let tree = WidgetTree::new(textarea);
+    let viewport = Rect::new(0.0, 0.0, 220.0, 52.0);
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        viewport,
+    );
+
+    let baseline = tree.collect_scene_from_layout_with_focus_value(
+        &font_manager,
+        &layout,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let baseline_region = baseline
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == widget_id)
+        .expect("textarea scroll region should exist");
+
+    let style = TextareaStyle::default_for(infer_theme_mode(&theme));
+    let text = super::text_with_typography(content, &style.text_style);
+    let (font_size, line_height, letter_spacing) =
+        resolved_text_metrics(&text, &theme, UnitContext::default());
+    let request = TextFontRequest {
+        preferred_font: text.font_family.as_deref().or(theme
+            .typography
+            .body
+            .font_family
+            .as_deref()),
+        weight: text.font_weight.unwrap_or(theme.typography.body.weight),
+    };
+    let alternate_layout = font_manager.measure_text_layout(
+        content,
+        request,
+        font_size,
+        line_height * 2.0,
+        letter_spacing,
+    );
+    let overrides = HashMap::from([(
+        widget_id,
+        super::TextInputLayoutOverride {
+            revision: 1,
+            text: content,
+            layout: &alternate_layout,
+        },
+    )]);
+
+    let overridden = tree.collect_scene_from_layout_with_focus_value(
+        &font_manager,
+        &layout,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        Some(&overrides),
+        None,
+        None,
+        false,
+    );
+    let overridden_region = overridden
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == widget_id)
+        .expect("textarea scroll region should exist");
+
+    assert!(overridden_region.content_bounds.height > baseline_region.content_bounds.height);
+    assert_eq!(
+        overridden_region.content_bounds.height.get(),
+        alternate_layout
+            .height
+            .max(overridden_region.content_viewport.height.get())
+    );
 }
 
 #[test]
@@ -1930,6 +2036,24 @@ fn scoped_context_command_receives_child_context() {
     command.execute(&mut vm);
 
     assert_eq!(vm.child.context_hits, 1);
+}
+
+#[test]
+fn scoped_lifecycle_command_targets_child_view_model() {
+    let child: Element<ScopeChildVm> = Stack::new()
+        .on_mount(Command::new(|vm: &mut ScopeChildVm| vm.count += 1))
+        .into();
+    let root = child.scope(scope_child);
+
+    let command = root
+        .lifecycle_events
+        .on_mount
+        .expect("scoped lifecycle command");
+    let mut vm = ScopeRootVm::default();
+    command.execute(&mut vm);
+
+    assert_eq!(vm.child.count, 1);
+    assert_eq!(vm.root_count, 0);
 }
 
 #[test]

@@ -18,7 +18,7 @@ use resvg::tiny_skia;
 use crate::foundation::binding::Signal;
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
-use crate::foundation::view_model::ValueCommand;
+use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{
     resolve_media_rect, ContentFit, MediaManager, MediaSource, RasterRequest, TextureFrame,
 };
@@ -28,9 +28,9 @@ use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{Dp, Sp, UnitContext};
 
 use super::common::{
-    CanvasItemInteractionHandlers, ClipMask, CursorStyle, InteractionHandlers, MediaEventHandlers,
-    MeshPrimitive, MeshVertex, Point, Rect, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId,
-    WidgetKind,
+    CanvasItemInteractionHandlers, ClipMask, CursorStyle, InteractionHandlers,
+    LifecycleEventHandlers, MediaEventHandlers, MeshPrimitive, MeshVertex, Point, Rect,
+    TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -2032,6 +2032,7 @@ impl<VM> Canvas<VM> {
                 layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
                 interactions: InteractionHandlers::default(),
+                lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::Canvas {
@@ -2082,6 +2083,21 @@ impl<VM> Canvas<VM> {
 
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.element.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    pub fn on_mount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_mount = Some(command);
+        self
+    }
+
+    pub fn on_unmount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_unmount = Some(command);
+        self
+    }
+
+    pub fn on_update(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_update = Some(command);
         self
     }
 

@@ -51,12 +51,14 @@ use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::{FontManager, FontWeight, TextFontRequest, TextLayoutInfo};
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet, ThemeStore};
 use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
+use crate::ui::widget::TextInputLayoutOverride;
 use crate::ui::widget::{
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     CanvasDragEvent, CanvasItemId, CanvasMouseButton, CanvasMouseEvent, CanvasPointerEvent,
-    CanvasWheelEvent, CollectedSceneCache, ComputedScene, MediaEventPhase, MediaEventState, Point,
-    Rect, ResolvedSceneLayout, SceneChunkParts, ScrollRegion, ScrollbarHandle, Text, TextEditState,
-    TextInputContentGeometry, VisualContextSnapshot, WidgetId, WidgetStateMap, WidgetTree,
+    CanvasWheelEvent, CollectedSceneCache, ComputedScene, LifecycleEventState, MediaEventPhase,
+    MediaEventState, Point, Rect, ResolvedSceneLayout, SceneChunkParts, ScrollRegion,
+    ScrollbarHandle, Text, TextEditState, TextInputContentGeometry, VisualContextSnapshot,
+    WidgetId, WidgetStateMap, WidgetTree,
 };
 use cosmic_text::Editor;
 use image::GenericImageView;
@@ -450,6 +452,7 @@ pub struct BoundRuntimeHandler<VM> {
     close_policy: WindowClosePolicy,
     invalidation: InvalidationSignal,
     last_invalidation_revision: u64,
+    last_lifecycle_dispatch_revision: u64,
     animations: AnimationCoordinator,
     animation_engine: AnimationEngine,
     animation_epoch: u64,
@@ -480,6 +483,7 @@ pub struct BoundRuntimeHandler<VM> {
     scroll_epoch: u64,
     text_input_epoch: u64,
     media_event_states: HashMap<WidgetId, DispatchedMediaState>,
+    lifecycle_event_states: HashMap<WidgetId, DispatchedLifecycleState<VM>>,
     media_manager: MediaManager,
     window_requests: WindowRequestQueue,
     window: Option<Arc<dyn Window>>,
@@ -521,7 +525,7 @@ struct CachedScene<VM> {
     dependencies: DependencyGraph,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TextInputSessionConfig {
     font_family: Option<String>,
     font_weight: FontWeight,
@@ -529,7 +533,6 @@ struct TextInputSessionConfig {
     line_height_bits: u32,
     letter_spacing_bits: u32,
     width_bits: u32,
-    height_bits: u32,
     multiline: bool,
     auto_wrap: bool,
 }
@@ -759,9 +762,18 @@ enum PendingMediaEvent<VM> {
     Error(ValueCommand<VM, String>, String),
 }
 
+enum PendingLifecycleEvent<VM> {
+    Command(Command<VM>),
+}
+
 #[derive(Clone, Default)]
 struct DispatchedMediaState {
     phase: Option<MediaEventPhase>,
+}
+
+#[derive(Clone, Default)]
+struct DispatchedLifecycleState<VM> {
+    handlers: crate::ui::widget::LifecycleEventHandlers<VM>,
 }
 
 fn collect_pending_media_event<VM>(
@@ -788,6 +800,23 @@ fn collect_pending_media_event<VM>(
             }
             _ => {}
         }
+    }
+}
+
+fn collect_pending_lifecycle_events<VM>(
+    state: &LifecycleEventState<VM>,
+    previous: Option<&DispatchedLifecycleState<VM>>,
+    pending: &mut Vec<PendingLifecycleEvent<VM>>,
+) {
+    if previous.is_none() {
+        if let Some(command) = state.handlers.on_mount.clone() {
+            pending.push(PendingLifecycleEvent::Command(command));
+        }
+        return;
+    }
+
+    if let Some(command) = state.handlers.on_update.clone() {
+        pending.push(PendingLifecycleEvent::Command(command));
     }
 }
 
@@ -951,6 +980,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             close_policy: WindowClosePolicy::Close,
             invalidation: invalidation.clone(),
             last_invalidation_revision: 0,
+            last_lifecycle_dispatch_revision: 0,
             animations,
             animation_engine: AnimationEngine::default(),
             animation_epoch: 0,
@@ -981,6 +1011,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             scroll_epoch: 0,
             text_input_epoch: 0,
             media_event_states: HashMap::new(),
+            lifecycle_event_states: HashMap::new(),
             media_manager: MediaManager::new(invalidation.clone()),
             window_requests: WindowRequestQueue::default(),
             window: None,
@@ -1386,6 +1417,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             focused_input,
             focused_text_state.as_ref(),
         );
+        let text_layout_overrides = Self::stable_text_layout_overrides(&self.text_input_buffers);
         let focused_widget = self.focused_widget_id();
 
         struct ScenePatch<VM> {
@@ -1416,6 +1448,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 focused_text_state.as_ref(),
                 focused_text_value,
                 focused_text_layout,
+                Some(&text_layout_overrides),
                 self.selected_text,
                 selected_text_state.as_ref(),
                 caret_visible,
@@ -1511,6 +1544,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         self.prune_text_input_buffers(&updated_computed);
         self.sync_text_input_regions_from_computed(&updated_computed);
+        self.sync_visible_text_input_buffers(&updated_computed);
         true
     }
 
@@ -1661,9 +1695,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return (None, None);
         };
 
-        let text = state
-            .has_unresolved_local_edits()
-            .then_some(state.current_text.as_str());
+        let text = Some(state.current_text.as_str());
         let layout = if focused_text_state
             .and_then(|state| state.composition.as_ref())
             .is_none()
@@ -1673,6 +1705,29 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             None
         };
         (text, layout)
+    }
+
+    fn stable_text_layout_overrides<'a>(
+        text_input_buffers: &'a HashMap<WidgetId, TextInputBufferState>,
+    ) -> HashMap<WidgetId, TextInputLayoutOverride<'a>> {
+        text_input_buffers
+            .iter()
+            .filter_map(|(widget_id, state)| {
+                let layout = state.layout_snapshot.as_ref()?;
+                if state.has_unresolved_local_edits() || state.display_text != state.current_text()
+                {
+                    return None;
+                }
+                Some((
+                    *widget_id,
+                    TextInputLayoutOverride {
+                        revision: state.external_revision,
+                        text: state.current_text(),
+                        layout,
+                    },
+                ))
+            })
+            .collect()
     }
 
     fn sync_text_input_regions_from_computed(&mut self, computed: &ComputedScene<VM>) {
@@ -1710,6 +1765,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 _ => None,
             })
             .collect();
+    }
+
+    fn sync_visible_text_input_buffers(&mut self, computed: &ComputedScene<VM>) {
+        let widget_ids: Vec<_> = computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .filter_map(|region| match &region.interaction {
+                crate::ui::widget::HitInteraction::TextInput { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        for widget_id in widget_ids {
+            let _ = self.sync_text_input_buffer(widget_id);
+        }
     }
 
     fn prune_text_input_buffers(&mut self, computed: &ComputedScene<VM>) {
@@ -1845,6 +1915,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 focused_input,
                                 focused_text_state.as_ref(),
                             );
+                        let text_layout_overrides =
+                            Self::stable_text_layout_overrides(&self.text_input_buffers);
                         let mut collected = {
                             let collect_started_at = Instant::now();
                             let collected = tree.collect_scene_cache_from_layout_with_focus_value(
@@ -1863,6 +1935,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 focused_text_state.as_ref(),
                                 focused_text_value,
                                 focused_text_layout,
+                                Some(&text_layout_overrides),
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 caret_visible,
@@ -1886,6 +1959,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     actual_focused_input,
                                     actual_focused_text_state.as_ref(),
                                 );
+                            let text_layout_overrides =
+                                Self::stable_text_layout_overrides(&self.text_input_buffers);
                             collected = {
                                 let collect_started_at = Instant::now();
                                 let collected = tree
@@ -1905,6 +1980,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                         actual_focused_text_state.as_ref(),
                                         actual_focused_text_value,
                                         actual_focused_text_layout,
+                                        Some(&text_layout_overrides),
                                         self.selected_text,
                                         selected_text_state.as_ref(),
                                         actual_caret_visible,
@@ -1936,6 +2012,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 focused_input,
                                 focused_text_state.as_ref(),
                             );
+                        let text_layout_overrides =
+                            Self::stable_text_layout_overrides(&self.text_input_buffers);
                         let collected = {
                             let collect_started_at = Instant::now();
                             let collected = tree.collect_scene_cache_from_layout_with_focus_value(
@@ -1954,6 +2032,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 focused_text_state.as_ref(),
                                 focused_text_value,
                                 focused_text_layout,
+                                Some(&text_layout_overrides),
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 caret_visible,
@@ -1977,6 +2056,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     actual_focused_input,
                                     actual_focused_text_state.as_ref(),
                                 );
+                            let text_layout_overrides =
+                                Self::stable_text_layout_overrides(&self.text_input_buffers);
                             let collect_started_at = Instant::now();
                             let collected = tree.collect_scene_cache_from_layout_with_focus_value(
                                 &self.font_manager,
@@ -1994,6 +2075,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 actual_focused_text_state.as_ref(),
                                 actual_focused_text_value,
                                 actual_focused_text_layout,
+                                Some(&text_layout_overrides),
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 actual_caret_visible,
@@ -2023,6 +2105,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let caret_visible = self.caret_visible_at(now, focused_input);
             self.prune_text_input_buffers(&computed);
             self.sync_text_input_regions_from_computed(&computed);
+            self.sync_visible_text_input_buffers(&computed);
             self.cached_scene = Some(CachedScene {
                 viewport,
                 units,
@@ -2184,6 +2267,72 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
+    }
+
+    fn dispatch_lifecycle_events(&mut self) {
+        let Some(tree) = self.widget_tree.as_ref() else {
+            self.lifecycle_event_states.clear();
+            return;
+        };
+
+        let states = tree.lifecycle_event_states(&self.theme);
+        let current_ids: HashSet<_> = states.iter().map(|state| state.widget_id).collect();
+
+        let removed_ids: Vec<_> = self
+            .lifecycle_event_states
+            .keys()
+            .copied()
+            .filter(|widget_id| !current_ids.contains(widget_id))
+            .collect();
+
+        let mut pending = Vec::new();
+        for state in &states {
+            let previous = self.lifecycle_event_states.get(&state.widget_id);
+            collect_pending_lifecycle_events(state, previous, &mut pending);
+        }
+
+        for removed_id in removed_ids {
+            if let Some(previous) = self.lifecycle_event_states.remove(&removed_id) {
+                if let Some(command) = previous.handlers.on_unmount {
+                    pending.push(PendingLifecycleEvent::Command(command));
+                }
+            }
+        }
+
+        for state in states {
+            self.lifecycle_event_states.insert(
+                state.widget_id,
+                DispatchedLifecycleState {
+                    handlers: state.handlers,
+                },
+            );
+        }
+
+        if pending.is_empty() {
+            return;
+        }
+
+        for event in pending {
+            match event {
+                PendingLifecycleEvent::Command(command) => {
+                    self.execute_command_without_invalidation(&command)
+                }
+            }
+        }
+
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    fn dispatch_lifecycle_events_if_needed(&mut self) {
+        let revision = self.invalidation.revision();
+        if revision == self.last_lifecycle_dispatch_revision {
+            return;
+        }
+
+        self.last_lifecycle_dispatch_revision = revision;
+        self.dispatch_lifecycle_events();
     }
 
     fn viewport_rect(&self) -> Rect {
@@ -2496,6 +2645,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.renderer = None;
         self.cached_scene = None;
         self.media_event_states.clear();
+        self.lifecycle_event_states.clear();
         #[cfg(all(target_os = "android", feature = "android"))]
         {
             self.system_bar_style = None;

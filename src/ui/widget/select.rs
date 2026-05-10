@@ -4,8 +4,8 @@ use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
-    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, SelectOptionState, VisualStyle,
-    WidgetId, WidgetKey, WidgetKind,
+    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
+    SelectOptionState, VisualStyle, WidgetId, WidgetKey, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -23,6 +23,7 @@ pub struct Select<VM, K, V> {
     layout: LayoutStyle,
     visual: VisualStyle,
     interactions: InteractionHandlers<VM>,
+    lifecycle_events: LifecycleEventHandlers<VM>,
     media_events: MediaEventHandlers<VM>,
     background: Option<Value<Color>>,
     style: Option<StyleResolver<SelectStyle>>,
@@ -180,6 +181,7 @@ impl<VM, K, V> Select<VM, K, V> {
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
             interactions,
+            lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background: None,
             style: None,
@@ -261,6 +263,21 @@ impl<VM, K, V> Select<VM, K, V> {
         self
     }
 
+    pub fn on_mount(mut self, command: Command<VM>) -> Self {
+        self.lifecycle_events.on_mount = Some(command);
+        self
+    }
+
+    pub fn on_unmount(mut self, command: Command<VM>) -> Self {
+        self.lifecycle_events.on_unmount = Some(command);
+        self
+    }
+
+    pub fn on_update(mut self, command: Command<VM>) -> Self {
+        self.lifecycle_events.on_update = Some(command);
+        self
+    }
+
     pub fn cursor(mut self, cursor: impl Into<Value<CursorStyle>>) -> Self {
         self.interactions.cursor_style = Some(cursor.into());
         self
@@ -318,6 +335,7 @@ where
             layout: select.layout,
             visual: select.visual,
             interactions: select.interactions,
+            lifecycle_events: select.lifecycle_events,
             media_events: select.media_events,
             background: select.background,
             kind: WidgetKind::Select {

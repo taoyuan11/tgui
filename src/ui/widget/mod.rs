@@ -35,9 +35,10 @@ pub use checkbox::Checkbox;
 pub(crate) use common::{
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     BackdropBlurPrimitive, BrushPrimitiveData, CanvasItemInteractionHandlers, ClipMask,
-    CompositionState, ComputedScene, HitInteraction, InteractionHandlers, MediaEventPhase,
-    MediaEventState, MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    TextEditState, TextInputContentGeometry, WidgetStateMap,
+    CompositionState, ComputedScene, HitInteraction, InteractionHandlers,
+    LifecycleEventHandlers, LifecycleEventState, MediaEventPhase, MediaEventState, MeshVertex,
+    RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextEditState,
+    TextInputContentGeometry, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId, WidgetKey,
@@ -45,7 +46,8 @@ pub use common::{
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub(crate) use core::{
-    CollectedSceneCache, ResolvedSceneLayout, SceneChunkParts, VisualContextSnapshot,
+    CollectedSceneCache, ResolvedSceneLayout, SceneChunkParts, TextInputLayoutOverride,
+    VisualContextSnapshot,
 };
 pub use image::Image;
 pub use input::Input;

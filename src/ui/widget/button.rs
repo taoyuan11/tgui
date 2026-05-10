@@ -3,8 +3,8 @@ use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
-    ButtonVariantKind, CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle,
-    WidgetId, WidgetKind,
+    ButtonVariantKind, CursorStyle, InteractionHandlers, LifecycleEventHandlers,
+    MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -157,6 +157,7 @@ impl<VM> Button<VM> {
                 layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
                 interactions,
+                lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::Button {
@@ -246,6 +247,21 @@ impl<VM> Button<VM> {
 
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.element.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    pub fn on_mount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_mount = Some(command);
+        self
+    }
+
+    pub fn on_unmount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_unmount = Some(command);
+        self
+    }
+
+    pub fn on_update(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_update = Some(command);
         self
     }
 

@@ -6,8 +6,8 @@ use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::Sp;
 
 use super::common::{
-    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKey,
-    WidgetKind,
+    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
+    VisualStyle, WidgetId, WidgetKey, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -233,6 +233,27 @@ impl Text {
         })
     }
 
+    pub fn on_mount<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_mount: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_unmount<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_unmount: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_update<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_update: Some(command),
+            ..Default::default()
+        })
+    }
+
     pub fn cursor(mut self, cursor: impl Into<Value<CursorStyle>>) -> Self {
         self.cursor_style = Some(cursor.into());
         self
@@ -263,6 +284,30 @@ impl Text {
             layout,
             visual,
             interactions,
+            lifecycle_events: LifecycleEventHandlers::default(),
+            media_events: MediaEventHandlers::default(),
+            background,
+            kind: WidgetKind::Text { text: self },
+        }
+    }
+
+    fn into_element_with_lifecycle_events<VM>(
+        self,
+        lifecycle_events: LifecycleEventHandlers<VM>,
+    ) -> Element<VM> {
+        let background = self.background.clone();
+        let layout = self.layout.clone();
+        let visual = self.visual.clone();
+        Element {
+            id: WidgetId::next(),
+            key: self.key.clone(),
+            layout,
+            visual,
+            interactions: InteractionHandlers {
+                cursor_style: self.resolved_cursor_style(),
+                ..InteractionHandlers::default()
+            },
+            lifecycle_events,
             media_events: MediaEventHandlers::default(),
             background,
             kind: WidgetKind::Text { text: self },
@@ -284,6 +329,7 @@ impl<VM> From<Text> for Element<VM> {
                 cursor_style: value.resolved_cursor_style(),
                 ..InteractionHandlers::default()
             },
+            lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background,
             kind: WidgetKind::Text { text: value },

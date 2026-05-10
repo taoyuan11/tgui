@@ -50,6 +50,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn execute_command_internal(&mut self, command: &Command<VM>, invalidate_scene: bool) {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let context = self.command_context();
+        let _wake_guard = if invalidate_scene {
+            None
+        } else {
+            Some(self.invalidation.suppress_wakeups())
+        };
         self.with_view_model(|view_model| command.execute_with_context(view_model, &context));
         if invalidate_scene {
             self.invalidate_scene();
@@ -72,6 +77,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let context = self.command_context();
+        let _wake_guard = if invalidate_scene {
+            None
+        } else {
+            Some(self.invalidation.suppress_wakeups())
+        };
         self.with_view_model(|view_model| {
             command.execute_with_context(view_model, value, &context)
         });

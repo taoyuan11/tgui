@@ -37,10 +37,11 @@ use super::common::{
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     BackdropBlurPrimitive, BrushPrimitive, ClipMask, ComputedScene, ContainerKind, ContainerLayout,
     CursorStyle, HitGeometry, HitInteraction, HitRegion, InteractionHandlers, LayoutNode,
-    MeasureContext, MediaEventHandlers, MediaEventPhase, MediaEventState, Point, Rect,
-    RenderPrimitive, ScenePrimitives, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    SelectOptionState, TextEditState, TextInputContentGeometry, TextPrimitive, TexturePrimitive,
-    VisualStyle, WidgetId, WidgetKey, WidgetKind, WidgetStateMap,
+    LifecycleEventHandlers, LifecycleEventState, MeasureContext, MediaEventHandlers,
+    MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive, ScenePrimitives,
+    ScrollRegion, ScrollbarAxis, ScrollbarHandle, SelectOptionState, TextEditState,
+    TextInputContentGeometry, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKey,
+    WidgetKind, WidgetStateMap,
 };
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
@@ -85,6 +86,7 @@ pub struct Element<VM> {
     pub(crate) layout: LayoutStyle,
     pub(crate) visual: VisualStyle,
     pub(crate) interactions: InteractionHandlers<VM>,
+    pub(crate) lifecycle_events: LifecycleEventHandlers<VM>,
     pub(crate) media_events: MediaEventHandlers<VM>,
     pub(crate) background: Option<Value<Color>>,
     pub(crate) kind: WidgetKind<VM>,
@@ -98,6 +100,7 @@ impl<VM> Clone for Element<VM> {
             layout: self.layout.clone(),
             visual: self.visual.clone(),
             interactions: self.interactions.clone(),
+            lifecycle_events: self.lifecycle_events.clone(),
             media_events: self.media_events.clone(),
             background: self.background.clone(),
             kind: self.kind.clone(),
@@ -111,6 +114,7 @@ struct ResolvedElement<VM> {
     layout: LayoutStyle,
     visual: VisualStyle,
     interactions: InteractionHandlers<VM>,
+    lifecycle_events: LifecycleEventHandlers<VM>,
     media_events: MediaEventHandlers<VM>,
     background: Option<Value<Color>>,
     kind: ResolvedWidgetKind<VM>,
@@ -195,6 +199,7 @@ impl<VM> Clone for ResolvedElement<VM> {
             layout: self.layout.clone(),
             visual: self.visual.clone(),
             interactions: self.interactions.clone(),
+            lifecycle_events: self.lifecycle_events.clone(),
             media_events: self.media_events.clone(),
             background: self.background.clone(),
             kind: self.kind.clone(),
@@ -330,6 +335,7 @@ struct CollectContext<'a, 'b> {
     focused_text_state: Option<&'a TextEditState>,
     focused_text_value: Option<&'a str>,
     focused_text_layout: Option<&'a TextLayoutInfo>,
+    text_layout_overrides: Option<&'a HashMap<WidgetId, TextInputLayoutOverride<'a>>>,
     caret_visible: bool,
     selected_text: Option<WidgetId>,
     selected_text_state: Option<&'a TextEditState>,
@@ -342,6 +348,12 @@ struct CollectContext<'a, 'b> {
     units: UnitContext,
     animations: &'b mut AnimationEngine,
     now: std::time::Instant,
+}
+
+pub(crate) struct TextInputLayoutOverride<'a> {
+    pub(crate) revision: u64,
+    pub(crate) text: &'a str,
+    pub(crate) layout: &'a TextLayoutInfo,
 }
 
 #[derive(Clone, Copy)]
@@ -519,6 +531,7 @@ impl<VM> ResolvedSceneLayout<VM> {
         focused_text_state: Option<&TextEditState>,
         focused_text_value: Option<&str>,
         focused_text_layout: Option<&TextLayoutInfo>,
+        text_layout_overrides: Option<&HashMap<WidgetId, TextInputLayoutOverride<'_>>>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
@@ -546,6 +559,7 @@ impl<VM> ResolvedSceneLayout<VM> {
                     focused_text_state,
                     focused_text_value,
                     focused_text_layout,
+                    text_layout_overrides,
                     caret_visible,
                     selected_text,
                     selected_text_state,

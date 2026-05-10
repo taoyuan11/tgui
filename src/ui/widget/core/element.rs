@@ -169,6 +169,7 @@ impl<VM> Element<VM> {
             layout: self.layout,
             visual: self.visual,
             interactions: self.interactions.scope(selector.clone()),
+            lifecycle_events: self.lifecycle_events.scope(selector.clone()),
             media_events: self.media_events.scope(selector),
             background: self.background,
             kind,
@@ -197,6 +198,21 @@ impl<VM> Element<VM> {
 
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    pub fn on_mount(mut self, command: Command<VM>) -> Self {
+        self.lifecycle_events.on_mount = Some(command);
+        self
+    }
+
+    pub fn on_unmount(mut self, command: Command<VM>) -> Self {
+        self.lifecycle_events.on_unmount = Some(command);
+        self
+    }
+
+    pub fn on_update(mut self, command: Command<VM>) -> Self {
+        self.lifecycle_events.on_update = Some(command);
         self
     }
 
@@ -422,6 +438,7 @@ impl<VM> Element<VM> {
             layout,
             visual,
             interactions: source.interactions.clone(),
+            lifecycle_events: source.lifecycle_events.clone(),
             media_events: source.media_events.clone(),
             background,
             kind,

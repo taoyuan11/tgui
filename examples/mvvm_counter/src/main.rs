@@ -49,7 +49,9 @@ struct CounterVm {
 }
 
 impl CounterVm {
-    
+    fn did_mount(&mut self) {
+        self.count.update(|count| *count += 1);
+    }
 
     fn title(&self) -> Signal<String> {
         self.count
@@ -154,9 +156,9 @@ impl ViewModel for CounterVm {
                             ),
                     ),
             )
+            .on_mount(Command::new(Self::did_mount))
             .into()
     }
-    
 }
 
 fn main() -> Result<(), TguiError> {

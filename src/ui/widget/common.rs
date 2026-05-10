@@ -370,6 +370,12 @@ pub(crate) struct MediaEventHandlers<VM> {
     pub on_error: Option<ValueCommand<VM, String>>,
 }
 
+pub(crate) struct LifecycleEventHandlers<VM> {
+    pub on_mount: Option<Command<VM>>,
+    pub on_unmount: Option<Command<VM>>,
+    pub on_update: Option<Command<VM>>,
+}
+
 impl<VM> Clone for MediaEventHandlers<VM> {
     fn clone(&self) -> Self {
         Self {
@@ -414,11 +420,61 @@ impl<VM> MediaEventHandlers<VM> {
     }
 }
 
+impl<VM> Clone for LifecycleEventHandlers<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            on_mount: self.on_mount.clone(),
+            on_unmount: self.on_unmount.clone(),
+            on_update: self.on_update.clone(),
+        }
+    }
+}
+
+impl<VM> Default for LifecycleEventHandlers<VM> {
+    fn default() -> Self {
+        Self {
+            on_mount: None,
+            on_unmount: None,
+            on_update: None,
+        }
+    }
+}
+
+impl<VM> LifecycleEventHandlers<VM> {
+    pub(crate) fn has_any(&self) -> bool {
+        self.on_mount.is_some() || self.on_unmount.is_some() || self.on_update.is_some()
+    }
+
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> LifecycleEventHandlers<RootVm>
+    where
+        VM: 'static,
+    {
+        LifecycleEventHandlers {
+            on_mount: self
+                .on_mount
+                .map(|command| command.scope(selector.clone())),
+            on_unmount: self
+                .on_unmount
+                .map(|command| command.scope(selector.clone())),
+            on_update: self.on_update.map(|command| command.scope(selector)),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct MediaEventState<VM> {
     pub widget_id: WidgetId,
     pub media_phase: Option<MediaEventPhase>,
     pub handlers: MediaEventHandlers<VM>,
+}
+
+#[derive(Clone)]
+pub(crate) struct LifecycleEventState<VM> {
+    pub widget_id: WidgetId,
+    pub handlers: LifecycleEventHandlers<VM>,
 }
 
 impl<VM> Clone for InteractionHandlers<VM> {
@@ -1448,7 +1504,6 @@ pub(crate) enum MeasureContext {
         placeholder: Value<String>,
         style: crate::ui::widget::InputStyle,
         multiline: bool,
-        auto_wrap: Value<bool>,
     },
 }
 
