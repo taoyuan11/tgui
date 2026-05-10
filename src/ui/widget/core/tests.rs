@@ -1298,7 +1298,7 @@ fn textarea_show_scrollbar_signal_only_records_scene_dependency() {
     );
 
     assert!(!layout.dependencies().has_global_dependency());
-    assert_eq!(layout.dependencies().dependency_count(), 1);
+    assert_eq!(layout.dependencies().dependency_count(), 0);
 
     let computed = tree.collect_scene_from_layout(
         &font_manager,

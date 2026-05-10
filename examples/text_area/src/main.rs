@@ -61,6 +61,9 @@ impl ViewModel for App {
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(20.0)))
             .gap(dp(12.0))
+            .on_update(Command::new(|_| {
+                tgui_log(LogLevel::Info, "root view update")
+            }))
             .child(el![
                 Text::new("Textarea 示例").style(title_style),
                 RadioGroup::new(
@@ -97,7 +100,7 @@ impl ViewModel for App {
                     "下面的内容读取自当前示例的 `main.rs`，你可以编辑它，但修改不会保存到磁盘。"
                 )
                 .user_select(true),
-                // Text::new(self.path_label.signal()).user_select(true),
+                Text::new(self.path_label.signal()).user_select(true),
                 Flex::vertical()
                     .padding(Insets::all(dp(14.0)))
                     .gap(dp(10.0))
@@ -105,6 +108,9 @@ impl ViewModel for App {
                     .min_height(dp(0.0))
                     .grow(1.0)
                     .style(card_style)
+                    .on_update(Command::new(|_| {
+                        tgui_log(LogLevel::Info, "source code editing area update")
+                    }))
                     .child(el![
                         Text::new("源码编辑区"),
                         Textarea::new(self.content.clone())
@@ -115,19 +121,16 @@ impl ViewModel for App {
                                 app.path_label
                                     .set(format!("已编辑: {:03}", app.content.revision() % 1000));
                             }))
-                            .on_mount(Command::new(|_| {
-                                tgui_log(LogLevel::Info, "Textarea mounted")
-                            }))
-                            .on_unmount(Command::new(|_| {
-                                tgui_log(LogLevel::Info, "Textarea unmount")
-                            }))
                             .on_update(Command::new(|_| {
-                                tgui_log(LogLevel::Info, "Textarea update")
+                                tgui_log(LogLevel::Info, "textarea update")
                             })),
                         Flex::vertical()
                             .width(pct(100.0))
                             .gap(dp(8.0))
-                            .child(self.dynamic_blocks()),
+                            .child(self.dynamic_blocks())
+                            .on_update(Command::new(|_| {
+                                tgui_log(LogLevel::Info, "dynamic_blocks update")
+                            })),
                     ]),
             ])
             .into()

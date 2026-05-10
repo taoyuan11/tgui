@@ -35,7 +35,7 @@ pub(crate) struct DependencyOwner {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct DependencyGraph {
     dependencies: HashMap<DependencyId, HashSet<DependencyOwner>>,
-    has_global_dependency: bool,
+    global_owners: HashSet<DependencyOwner>,
 }
 
 impl DependencyGraph {
@@ -44,7 +44,7 @@ impl DependencyGraph {
     }
 
     pub(crate) fn has_global_dependency(&self) -> bool {
-        self.has_global_dependency
+        !self.global_owners.is_empty()
     }
 
     #[cfg(test)]
@@ -60,7 +60,8 @@ impl DependencyGraph {
     }
 
     pub(crate) fn merge_from(&mut self, other: &DependencyGraph) {
-        self.has_global_dependency |= other.has_global_dependency;
+        self.global_owners
+            .extend(other.global_owners.iter().copied());
         for (dependency, owners) in &other.dependencies {
             self.dependencies
                 .entry(*dependency)
@@ -73,13 +74,12 @@ impl DependencyGraph {
         if widget_ids.is_empty() {
             return;
         }
+        self.global_owners
+            .retain(|owner| !widget_ids.contains(&owner.widget_id));
         self.dependencies.retain(|_, owners| {
             owners.retain(|owner| !widget_ids.contains(&owner.widget_id));
             !owners.is_empty()
         });
-        if self.dependencies.is_empty() {
-            self.has_global_dependency = false;
-        }
     }
 
     pub(crate) fn remove_widget_phase_owners(
@@ -90,13 +90,12 @@ impl DependencyGraph {
         if widget_ids.is_empty() {
             return;
         }
+        self.global_owners
+            .retain(|owner| !(owner.phase == phase && widget_ids.contains(&owner.widget_id)));
         self.dependencies.retain(|_, owners| {
             owners.retain(|owner| !(owner.phase == phase && widget_ids.contains(&owner.widget_id)));
             !owners.is_empty()
         });
-        if self.dependencies.is_empty() {
-            self.has_global_dependency = false;
-        }
     }
 }
 
@@ -186,7 +185,7 @@ thread_local! {
 struct DependencyTracker {
     scopes: Vec<DependencyOwner>,
     records: Vec<(DependencyId, DependencyOwner)>,
-    global_dependency: bool,
+    global_owners: HashSet<DependencyOwner>,
 }
 
 thread_local! {
@@ -215,14 +214,14 @@ pub(crate) fn with_dependency_collection<R>(f: impl FnOnce() -> R) -> (R, Depend
     DEPENDENCY_TRACKER.with(|tracker| {
         let mut tracker = tracker.borrow_mut();
         tracker.records.clear();
-        tracker.global_dependency = false;
+        tracker.global_owners.clear();
     });
 
     let result = f();
     let graph = DEPENDENCY_TRACKER.with(|tracker| {
         let mut tracker = tracker.borrow_mut();
         let mut graph = DependencyGraph::default();
-        graph.has_global_dependency = tracker.global_dependency;
+        graph.global_owners = std::mem::take(&mut tracker.global_owners);
         for (dependency, owner) in tracker.records.drain(..) {
             graph
                 .dependencies
@@ -244,7 +243,7 @@ pub(crate) fn record_dependency_read(dependency: Option<DependencyId>) {
         if let Some(dependency) = dependency {
             tracker.records.push((dependency, owner));
         } else {
-            tracker.global_dependency = true;
+            tracker.global_owners.insert(owner);
         }
     });
 }

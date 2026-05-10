@@ -18,8 +18,8 @@ use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::{dp, Dp, UnitContext};
 use crate::ui::widget::{
     Button, Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent, CanvasShadow,
-    CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, Input, PathBuilder, Point, Rect,
-    Select, SelectOption, Text, TextEditState, Textarea, WidgetTree,
+    CanvasStroke, Checkbox, ContainerStyle, CursorStyle, Flex, HitInteraction, Input, PathBuilder,
+    Point, Rect, Select, SelectOption, Text, TextEditState, Textarea, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -563,7 +563,7 @@ fn layout_dependency_update_preserves_cached_layout_shell() {
         .as_ref()
         .expect("layout subtree patch should keep the cache shell");
     assert!(cached.layout.is_some());
-    assert!(!cached.computed_valid);
+    assert!(cached.computed_valid);
 }
 
 #[test]
@@ -597,7 +597,48 @@ fn dynamic_child_dependency_update_preserves_cached_layout_shell() {
         .as_ref()
         .expect("dynamic child subtree patch should keep the cache shell");
     assert!(cached.layout.is_some());
-    assert!(!cached.computed_valid);
+    assert!(cached.computed_valid);
+}
+
+#[test]
+fn leaf_dependency_update_does_not_rebuild_unaffected_sibling_chunk() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let changed = context.state(String::from("short"));
+    let sibling_state = context.state(0);
+    let sibling_reads = Arc::new(AtomicUsize::new(0));
+    let sibling_background = {
+        let sibling_reads = sibling_reads.clone();
+        sibling_state.signal().map(move |_| {
+            sibling_reads.fetch_add(1, Ordering::SeqCst);
+            Color::WHITE
+        })
+    };
+    let changed_button: Element<TestVm> = Button::new(changed.signal()).key("changed").into();
+    let sibling_surface: Element<TestVm> = Stack::new()
+        .size(dp(24.0), dp(24.0))
+        .style(move |mode| {
+            let mut style = ContainerStyle::default_for(mode);
+            style.surface.background = Some(sibling_background.clone().into());
+            style
+        })
+        .into();
+    let stack: Element<TestVm> = Stack::new().child([changed_button, sibling_surface]).into();
+    let tree = WidgetTree::new(stack);
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+
+    let _ = handler.computed_scene();
+    assert_eq!(sibling_reads.load(Ordering::SeqCst), 1);
+
+    changed.set(String::from("a much longer label"));
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("cached scene should remain available");
+    assert!(cached.computed_valid);
+    assert_eq!(sibling_reads.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -705,18 +746,20 @@ fn lifecycle_unmount_dispatches_when_component_is_removed() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let visible = context.state(true);
-    let tree = WidgetTree::new(Stack::<LifecycleVm>::new().child(visible.signal().map(|visible| {
-        let element: Element<LifecycleVm> = if visible {
-            Text::new("shown")
-                .key("tracked")
-                .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
-                .on_unmount(Command::new(|vm: &mut LifecycleVm| vm.unmounts += 1))
-                .into()
-        } else {
-            Stack::<LifecycleVm>::new().into()
-        };
-        element
-    })));
+    let tree = WidgetTree::new(Stack::<LifecycleVm>::new().child(visible.signal().map(
+        |visible| {
+            let element: Element<LifecycleVm> = if visible {
+                Text::new("shown")
+                    .key("tracked")
+                    .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+                    .on_unmount(Command::new(|vm: &mut LifecycleVm| vm.unmounts += 1))
+                    .into()
+            } else {
+                Stack::<LifecycleVm>::new().into()
+            };
+            element
+        },
+    )));
     let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
 
     handler.invalidation.mark_dirty();
@@ -838,7 +881,73 @@ fn canvas_items_dependency_update_preserves_cached_layout_shell() {
         .as_ref()
         .expect("canvas subtree patch should keep the cache shell");
     assert!(cached.layout.is_some());
-    assert!(!cached.computed_valid);
+    assert!(cached.computed_valid);
+}
+
+#[test]
+fn removing_opaque_dependency_subtree_clears_global_fallback() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let visible = context.state(false);
+    let checked = context.state(false);
+    let backing = Arc::new(Mutex::new(String::from("first")));
+    let opaque = {
+        let backing = backing.clone();
+        context.signal(move || backing.lock().expect("test signal lock poisoned").clone())
+    };
+    let tree = WidgetTree::new(
+        Stack::<TestVm>::new()
+            .child(visible.signal().map({
+                let opaque = opaque.clone();
+                move |visible| {
+                    let element: Element<TestVm> = if visible {
+                        Text::new(opaque.clone()).key("opaque").into()
+                    } else {
+                        Text::new("static").key("static").into()
+                    };
+                    element
+                }
+            }))
+            .child(Checkbox::new(checked.signal())),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    let root_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cache| cache.layout.as_ref())
+        .expect("cached layout should exist")
+        .root_id();
+
+    visible.set(true);
+    assert!(handler.patch_cached_layout_for_roots(&[root_id], Instant::now()));
+    assert!(handler.patch_cached_scene_for_roots(&[root_id], Instant::now()));
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .expect("patched cache should remain available")
+        .dependencies
+        .has_global_dependency());
+
+    visible.set(false);
+    assert!(handler.patch_cached_layout_for_roots(&[root_id], Instant::now()));
+    assert!(handler.patch_cached_scene_for_roots(&[root_id], Instant::now()));
+    assert!(!handler
+        .cached_scene
+        .as_ref()
+        .expect("patched cache should remain available")
+        .dependencies
+        .has_global_dependency());
+
+    checked.set(true);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("scene-only invalidation should stay local after opaque removal");
+    assert!(cached.computed_valid);
 }
 
 #[test]

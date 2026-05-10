@@ -453,9 +453,7 @@ impl<VM> LifecycleEventHandlers<VM> {
         VM: 'static,
     {
         LifecycleEventHandlers {
-            on_mount: self
-                .on_mount
-                .map(|command| command.scope(selector.clone())),
+            on_mount: self.on_mount.map(|command| command.scope(selector.clone())),
             on_unmount: self
                 .on_unmount
                 .map(|command| command.scope(selector.clone())),

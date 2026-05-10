@@ -1266,8 +1266,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return "global_full_rebuild";
         }
 
-        let mut affects_layout = false;
-        let mut affects_scene = false;
+        let Some(layout) = cached.layout.as_ref() else {
+            self.invalidate_scene();
+            return "layout_missing";
+        };
+
+        let mut layout_affected_ids = HashSet::new();
+        let mut scene_affected_ids = HashSet::new();
         for dependency in dirty_dependencies {
             let Some(owners) = cached.dependencies.owners_for(*dependency) else {
                 continue;
@@ -1275,24 +1280,43 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             for owner in owners {
                 match owner.phase {
                     DependencyPhase::Structure | DependencyPhase::Layout => {
-                        affects_layout = true;
+                        layout_affected_ids.insert(WidgetId::from_raw(owner.widget_id));
                     }
                     DependencyPhase::Scene => {
-                        affects_scene = true;
+                        scene_affected_ids.insert(WidgetId::from_raw(owner.widget_id));
                     }
                 }
             }
         }
 
-        if affects_layout {
-            if self.patch_cached_layout_for_dependencies(dirty_dependencies, now) {
-                "layout_subtree_patch"
+        if !layout_affected_ids.is_empty() {
+            let roots = self.highest_layout_roots(layout, &layout_affected_ids);
+            if roots.is_empty() {
+                return "unrelated";
+            }
+
+            let mut scene_ids = layout_affected_ids.clone();
+            scene_ids.extend(scene_affected_ids.iter().copied());
+            let scene_roots = self.highest_layout_roots(layout, &scene_ids);
+
+            if self.patch_cached_layout_for_roots(&roots, now) {
+                if self.patch_cached_scene_for_roots(&scene_roots, now) {
+                    "layout_scene_subtree_patch"
+                } else {
+                    self.invalidate_computed_scene();
+                    "layout_subtree_patch_scene_recollect"
+                }
             } else {
                 self.invalidate_scene();
                 "global_full_rebuild"
             }
-        } else if affects_scene {
-            if self.patch_cached_scene_for_dependencies(dirty_dependencies, now) {
+        } else if !scene_affected_ids.is_empty() {
+            let roots = self.highest_layout_roots(layout, &scene_affected_ids);
+            if roots.is_empty() {
+                return "unrelated";
+            }
+
+            if self.patch_cached_scene_for_roots(&roots, now) {
                 "scene_subtree_patch"
             } else {
                 self.invalidate_computed_scene();
@@ -1303,6 +1327,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
+    #[allow(dead_code)]
     fn patch_cached_layout_for_dependencies(
         &mut self,
         dirty_dependencies: &HashSet<crate::foundation::binding::DependencyId>,
@@ -1337,6 +1362,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if roots.is_empty() {
             return false;
         }
+        self.patch_cached_layout_for_roots(&roots, now)
+    }
+
+    fn patch_cached_layout_for_roots(&mut self, roots: &[WidgetId], now: Instant) -> bool {
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
+        };
+        let Some(_layout) = cached.layout.as_ref() else {
+            return false;
+        };
+
         let theme = self.animated_theme(now);
         let viewport = self.viewport_rect();
 
@@ -1347,7 +1383,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
         let removed_ids = match layout.patch_layout_roots(
-            &roots,
+            roots,
             &self.font_manager,
             &theme,
             &self.media_manager,
@@ -1367,12 +1403,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
+    #[allow(dead_code)]
     fn patch_cached_scene_for_dependencies(
         &mut self,
         dirty_dependencies: &HashSet<crate::foundation::binding::DependencyId>,
         now: Instant,
     ) -> bool {
-        let theme = self.animated_theme(now);
         let Some(cached) = self.cached_scene.as_ref() else {
             return false;
         };
@@ -1399,6 +1435,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if roots.is_empty() {
             return false;
         }
+        self.patch_cached_scene_for_roots(&roots, now)
+    }
+
+    fn patch_cached_scene_for_roots(&mut self, roots: &[WidgetId], now: Instant) -> bool {
+        let theme = self.animated_theme(now);
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
+        };
+        let Some(layout) = cached.layout.as_ref() else {
+            return false;
+        };
 
         let viewport = self.viewport_rect();
         let active_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
@@ -1426,7 +1473,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let mut patches = Vec::new();
-        for root in &roots {
+        for root in roots {
             let old_ids = layout.subtree_widget_ids(*root);
             let Some(visual_context) = cached.visual_contexts.get(root).copied() else {
                 return false;
@@ -1460,7 +1507,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let mut scene_owner_ids = HashSet::new();
         let mut ancestor_ids = HashSet::new();
-        for root in &roots {
+        for root in roots {
             let mut parent = layout.parent_of(*root);
             while let Some(current) = parent {
                 ancestor_ids.insert(current);
