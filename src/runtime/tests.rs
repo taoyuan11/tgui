@@ -1259,6 +1259,91 @@ fn focused_input_batches_change_set_until_flush() {
 }
 
 #[test]
+fn textarea_on_change_does_not_force_global_invalidation() {
+    let invalidation = InvalidationSignal::new();
+    let callback_count = Arc::new(AtomicUsize::new(0));
+    let callback_count_capture = callback_count.clone();
+    let controller = TextController::from("hi");
+    let tree = WidgetTree::new(Textarea::new(controller).on_change(Command::new(
+        move |_vm: &mut TextInputVm| {
+            callback_count_capture.fetch_add(1, Ordering::SeqCst);
+        },
+    )));
+    let mut handler =
+        test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation.clone());
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    let revision_before = invalidation.revision();
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&text_key_event("a"));
+    flush_text_input_commits(&mut handler);
+
+    assert_eq!(callback_count.load(Ordering::SeqCst), 1);
+    assert_eq!(invalidation.revision(), revision_before);
+}
+
+#[test]
+fn textarea_on_change_set_does_not_force_global_invalidation() {
+    let invalidation = InvalidationSignal::new();
+    let callback_count = Arc::new(AtomicUsize::new(0));
+    let callback_count_capture = callback_count.clone();
+    let controller = TextController::from("hi");
+    let tree = WidgetTree::new(Textarea::new(controller).on_change_set(ValueCommand::new(
+        move |_vm: &mut TextInputVm, change_set: crate::mvvm::TextChangeSet| {
+            assert!(!change_set.changes.is_empty());
+            callback_count_capture.fetch_add(1, Ordering::SeqCst);
+        },
+    )));
+    let mut handler =
+        test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation.clone());
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    let revision_before = invalidation.revision();
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&text_key_event("a"));
+    flush_text_input_commits(&mut handler);
+
+    assert_eq!(callback_count.load(Ordering::SeqCst), 1);
+    assert_eq!(invalidation.revision(), revision_before);
+}
+
+#[test]
 fn input_backspace_preserves_multibyte_boundaries_with_rope_buffer() {
     let invalidation = InvalidationSignal::new();
     let controller = TextController::from("a中🙂b");

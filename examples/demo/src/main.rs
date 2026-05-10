@@ -129,16 +129,18 @@ impl ViewModel for App {
                         self.contact_method.signal(),
                     )
                     .horizontal()
-                    .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
-                        if key == "system" {
-                            app.theme.set(ThemeMode::System)
-                        } else if key == "light" {
-                            app.theme.set(ThemeMode::Light)
-                        } else {
-                            app.theme.set(ThemeMode::Dark);
+                    .on_change(ValueCommand::new(
+                        |app: &mut App, (key, _label)| {
+                            if key == "system" {
+                                app.theme.set(ThemeMode::System)
+                            } else if key == "light" {
+                                app.theme.set(ThemeMode::Light)
+                            } else {
+                                app.theme.set(ThemeMode::Dark);
+                            }
+                            app.contact_method.set(key)
                         }
-                        app.contact_method.set(key)
-                    })),
+                    )),
                 ),
                 component_card(
                     "Select",
@@ -153,9 +155,9 @@ impl ViewModel for App {
                     )
                     .placeholder("请选择操作")
                     .width(dp(220.0))
-                    .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
-                        app.select_action.set(Some(key))
-                    })),
+                    .on_change(ValueCommand::new(
+                        |app: &mut App, (key, _label)| { app.select_action.set(Some(key)) }
+                    )),
                 ),
                 component_card(
                     "Input",
@@ -168,32 +170,23 @@ impl ViewModel for App {
                     Textarea::new(self.textarea_text.clone())
                         .size(dp(320.0), dp(140.0))
                         .placeholder("请输入多行内容")
-                        .on_change(Command::new(|_app: &mut App| {
-                            tgui_log(LogLevel::Info, "111111")
-                        })),
+                        .on_change(Command::new(|_app: &mut App| {})),
                 ),
                 component_card(
                     "Notification",
                     Flex::vertical().gap(dp(10.0)).child(el![
                         Flex::horizontal().gap(dp(10.0)).wrap(Wrap::Wrap).child(el![
-                            Button::new("请求通知权限").on_click(
-                                Command::new_with_context(|_: &mut App, ctx| {
-                                    App::request_notification_permission(ctx)
-                                }),
-                            ),
-                            Button::new("发送普通通知").on_click(
-                                Command::new_with_context(|app: &mut App, ctx| {
-                                    app.send_plain_notification(ctx)
-                                }),
-                            ),
-                            Button::new("发送动作通知").on_click(
-                                Command::new_with_context(|app: &mut App, ctx| {
-                                    app.send_action_notification(ctx)
-                                }),
-                            ),
+                            Button::new("请求通知权限").on_click(Command::new_with_context(
+                                |_: &mut App, ctx| { App::request_notification_permission(ctx) }
+                            ),),
+                            Button::new("发送普通通知").on_click(Command::new_with_context(
+                                |app: &mut App, ctx| { app.send_plain_notification(ctx) }
+                            ),),
+                            Button::new("发送动作通知").on_click(Command::new_with_context(
+                                |app: &mut App, ctx| { app.send_action_notification(ctx) }
+                            ),),
                         ]),
-                        Text::new(self.notification_status.signal())
-                            .style(status_style),
+                        Text::new(self.notification_status.signal()).style(status_style),
                     ]),
                 ),
                 component_card(
@@ -221,7 +214,8 @@ fn component_card(title: &str, content: impl Into<Element<App>>) -> Element<App>
 }
 
 fn demo_image_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../background_effects/assets/juequling_shushu.jpg")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../background_effects/assets/juequling_shushu.jpg")
 }
 
 fn demo_canvas() -> Element<App> {
@@ -269,14 +263,14 @@ fn demo_canvas() -> Element<App> {
 
 impl App {
     fn request_notification_permission(ctx: &CommandContext<Self>) {
-        let _ = ctx.notifications().request_permission(ValueCommand::new(
-            |app: &mut App, result| {
-                app.notification_status.set(match result {
-                    Ok(permission) => format!("通知权限: {permission:?}"),
-                    Err(error) => format!("通知权限请求失败: {error}"),
-                });
-            },
-        ));
+        let _ =
+            ctx.notifications()
+                .request_permission(ValueCommand::new(|app: &mut App, result| {
+                    app.notification_status.set(match result {
+                        Ok(permission) => format!("通知权限: {permission:?}"),
+                        Err(error) => format!("通知权限请求失败: {error}"),
+                    });
+                }));
     }
 
     fn send_plain_notification(&mut self, ctx: &CommandContext<Self>) {
@@ -299,16 +293,16 @@ impl App {
                 .action(NotificationAction::new("accept", "接受"))
                 .action(NotificationAction::new("dismiss", "忽略")),
             ValueCommand::new(
-                |app: &mut App,
-                 result: Result<NotificationActionEvent, NotificationError>| {
-                app.notification_status.set(match result {
-                    Ok(event) => format!(
-                        "通知动作: notification_id={}, action_id={}",
-                        event.notification_id, event.action_id
-                    ),
-                    Err(error) => format!("通知动作失败: {error}"),
-                });
-            }),
+                |app: &mut App, result: Result<NotificationActionEvent, NotificationError>| {
+                    app.notification_status.set(match result {
+                        Ok(event) => format!(
+                            "通知动作: notification_id={}, action_id={}",
+                            event.notification_id, event.action_id
+                        ),
+                        Err(error) => format!("通知动作失败: {error}"),
+                    });
+                },
+            ),
         );
         self.notification_status.set(match result {
             Ok(id) => format!("已发送动作通知: {id}"),
@@ -322,7 +316,9 @@ impl App {
 
     fn run() -> Result<(), TguiError> {
         Application::new()
-            .window_icon(include_bytes!("../../background_effects/assets/juequling_shushu.jpg"))
+            .window_icon(include_bytes!(
+                "../../background_effects/assets/juequling_shushu.jpg"
+            ))
             .app_id("com.tgui.demo")
             .with_view_model(App::new)
             .root_view(App::view)

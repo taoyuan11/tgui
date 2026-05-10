@@ -256,7 +256,9 @@ impl<VM> Element<VM> {
                         previous_children,
                     )
                     .into_iter()
-                    .map(|(child, previous_child)| child.resolve_with_previous(theme, previous_child))
+                    .map(|(child, previous_child)| {
+                        child.resolve_with_previous(theme, previous_child)
+                    })
                     .collect(),
                 }
             }
@@ -436,7 +438,10 @@ fn resolved_child_elements_with_previous<'a, VM>(
         .iter()
         .filter_map(|child| child.key.as_ref().map(|key| (key.clone(), child)))
         .collect();
-    let previous_by_id: HashMap<_, _> = previous_children.iter().map(|child| (child.id, child)).collect();
+    let previous_by_id: HashMap<_, _> = previous_children
+        .iter()
+        .map(|child| (child.id, child))
+        .collect();
 
     child_sources
         .iter()
@@ -475,12 +480,9 @@ pub(super) fn resolve_subtree_from_source_path<'a, VM>(
         })
         .unwrap_or(&[]);
     let owner_id = previous.map(|previous| previous.id).unwrap_or(source.id);
-    let (child, previous_child) = resolved_child_elements_with_previous(
-        owner_id,
-        children,
-        previous_children,
-    )
-    .into_iter()
-    .nth(path[0])?;
+    let (child, previous_child) =
+        resolved_child_elements_with_previous(owner_id, children, previous_children)
+            .into_iter()
+            .nth(path[0])?;
     resolve_subtree_from_source_path(&child, previous_child, theme, &path[1..])
 }

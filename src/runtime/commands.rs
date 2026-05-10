@@ -47,36 +47,65 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.invalidation.set_proxy(event_loop.create_proxy());
     }
 
-    pub(super) fn execute_command(&mut self, command: &Command<VM>) {
+    fn execute_command_internal(&mut self, command: &Command<VM>, invalidate_scene: bool) {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let context = self.command_context();
         self.with_view_model(|view_model| command.execute_with_context(view_model, &context));
-        self.invalidate_scene();
-        self.invalidation.mark_dirty();
+        if invalidate_scene {
+            self.invalidate_scene();
+            self.invalidation.mark_dirty();
+        }
         if let Some(started_at) = started_at {
             log_text_profile(
                 "execute_command",
                 started_at.elapsed(),
-                "invalidated_scene=true".to_string(),
+                format!("invalidated_scene={invalidate_scene}"),
             );
         }
     }
 
-    pub(super) fn execute_value_command<V>(&mut self, command: &ValueCommand<VM, V>, value: V) {
+    fn execute_value_command_internal<V>(
+        &mut self,
+        command: &ValueCommand<VM, V>,
+        value: V,
+        invalidate_scene: bool,
+    ) {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let context = self.command_context();
         self.with_view_model(|view_model| {
             command.execute_with_context(view_model, value, &context)
         });
-        self.invalidate_scene();
-        self.invalidation.mark_dirty();
+        if invalidate_scene {
+            self.invalidate_scene();
+            self.invalidation.mark_dirty();
+        }
         if let Some(started_at) = started_at {
             log_text_profile(
                 "execute_value_command",
                 started_at.elapsed(),
-                "invalidated_scene=true".to_string(),
+                format!("invalidated_scene={invalidate_scene}"),
             );
         }
+    }
+
+    pub(super) fn execute_command(&mut self, command: &Command<VM>) {
+        self.execute_command_internal(command, true);
+    }
+
+    pub(super) fn execute_command_without_invalidation(&mut self, command: &Command<VM>) {
+        self.execute_command_internal(command, false);
+    }
+
+    pub(super) fn execute_value_command<V>(&mut self, command: &ValueCommand<VM, V>, value: V) {
+        self.execute_value_command_internal(command, value, true);
+    }
+
+    pub(super) fn execute_value_command_without_invalidation<V>(
+        &mut self,
+        command: &ValueCommand<VM, V>,
+        value: V,
+    ) {
+        self.execute_value_command_internal(command, value, false);
     }
 
     pub(super) fn drain_window_requests(&mut self) -> bool {

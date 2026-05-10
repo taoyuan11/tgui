@@ -25,11 +25,9 @@ struct App {
 }
 
 impl App {
-
     fn theme_binding(&self) -> Signal<ThemeMode> {
         self.theme.signal()
     }
-
 }
 
 impl ViewModel for App {
@@ -55,27 +53,29 @@ impl ViewModel for App {
             .child(el![
                 Text::new("Textarea 示例").style(title_style),
                 RadioGroup::new(
-                        vec![
-                            RadioOption::new("system".to_string(), "跟随系统".to_string()),
-                            RadioOption::new("light".to_string(), "明亮".to_string()),
-                            RadioOption::new("dark".to_string(), "暗淡".to_string()),
-                        ],
-                        self.contact_method.signal(),
-                    )
-                    .horizontal()
-                    .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
-                        if key == "system" {
-                            app.theme.set(ThemeMode::System)
-                        } else if key == "light" {
-                            app.theme.set(ThemeMode::Light)
-                        } else {
-                            app.theme.set(ThemeMode::Dark);
-                        }
-                        app.contact_method.set(key)
-                    })),
-                Text::new("下面的内容读取自当前示例的 `main.rs`，你可以编辑它，但修改不会保存到磁盘。")
-                    .user_select(true),
-                Text::new(self.path_label.signal()).user_select(true),
+                    vec![
+                        RadioOption::new("system".to_string(), "跟随系统".to_string()),
+                        RadioOption::new("light".to_string(), "明亮".to_string()),
+                        RadioOption::new("dark".to_string(), "暗淡".to_string()),
+                    ],
+                    self.contact_method.signal(),
+                )
+                .horizontal()
+                .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
+                    if key == "system" {
+                        app.theme.set(ThemeMode::System)
+                    } else if key == "light" {
+                        app.theme.set(ThemeMode::Light)
+                    } else {
+                        app.theme.set(ThemeMode::Dark);
+                    }
+                    app.contact_method.set(key)
+                })),
+                Text::new(
+                    "下面的内容读取自当前示例的 `main.rs`，你可以编辑它，但修改不会保存到磁盘。"
+                )
+                .user_select(true),
+                // Text::new(self.path_label.signal()).user_select(true),
                 Flex::vertical()
                     .padding(Insets::all(dp(14.0)))
                     .gap(dp(10.0))
@@ -90,10 +90,8 @@ impl ViewModel for App {
                             .min_height(dp(0.0))
                             .grow(1.0)
                             .on_change(Command::new(|app: &mut App| {
-                                tgui_log(LogLevel::Info, "11");
-                                // app.path_label.update(|path_label| {
-                                //     *path_label = format!("{path_label}1")
-                                // })
+                                app.path_label
+                                    .set(format!("已编辑: {:03}", app.content.revision() % 1000));
                             }))
                     ]),
             ])

@@ -572,16 +572,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let text_len = next_text.len();
         let callbacks_started_at = Instant::now();
         if let Some(command) = region.on_change_set.as_ref() {
-            self.execute_value_command(command, change_set.clone());
+            self.execute_value_command_without_invalidation(command, change_set.clone());
         }
         if let Some(command) = region.on_change.as_ref() {
-            self.execute_command(command);
+            self.execute_command_without_invalidation(command);
         }
         let callbacks_duration = callbacks_started_at.elapsed();
         let outcome = TextInputFlushOutcome {
             changed: true,
-            requires_global_invalidation: region.on_change_set.is_some()
-                || region.on_change.is_some(),
+            requires_global_invalidation: false,
         };
         if let Some(started_at) = started_at {
             log_text_profile(

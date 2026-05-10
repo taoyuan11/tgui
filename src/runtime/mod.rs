@@ -55,9 +55,8 @@ use crate::ui::widget::{
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     CanvasDragEvent, CanvasItemId, CanvasMouseButton, CanvasMouseEvent, CanvasPointerEvent,
     CanvasWheelEvent, CollectedSceneCache, ComputedScene, MediaEventPhase, MediaEventState, Point,
-    Rect, ResolvedSceneLayout, SceneChunkParts, ScrollRegion, ScrollbarHandle, Text,
-    TextEditState, TextInputContentGeometry, VisualContextSnapshot, WidgetId, WidgetStateMap,
-    WidgetTree,
+    Rect, ResolvedSceneLayout, SceneChunkParts, ScrollRegion, ScrollbarHandle, Text, TextEditState,
+    TextInputContentGeometry, VisualContextSnapshot, WidgetId, WidgetStateMap, WidgetTree,
 };
 use cosmic_text::Editor;
 use image::GenericImageView;
@@ -1291,7 +1290,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 continue;
             };
             for owner in owners {
-                if matches!(owner.phase, DependencyPhase::Structure | DependencyPhase::Layout) {
+                if matches!(
+                    owner.phase,
+                    DependencyPhase::Structure | DependencyPhase::Layout
+                ) {
                     affected_ids.insert(WidgetId::from_raw(owner.widget_id));
                 }
             }
@@ -1371,7 +1373,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let active_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
         let widget_states = self.widget_state_map(active_scrollbar);
         let focused_input = self.focused_text_input_id_cached(&cached.computed);
-        let focused_text_state = focused_input.and_then(|id| self.text_edit_state(id)).cloned();
+        let focused_text_state = focused_input
+            .and_then(|id| self.text_edit_state(id))
+            .cloned();
         let selected_text_state = self
             .selected_text
             .and_then(|id| self.text_edit_state(id))
@@ -1546,11 +1550,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        self.hovered_widgets.retain(|hovered| match hovered.target_id {
-            HoverTargetId::Widget(id) => !removed_ids.contains(&id),
-            HoverTargetId::SelectOption { widget_id, .. } => !removed_ids.contains(&widget_id),
-            HoverTargetId::CanvasItem { widget_id, .. } => !removed_ids.contains(&widget_id),
-        });
+        self.hovered_widgets
+            .retain(|hovered| match hovered.target_id {
+                HoverTargetId::Widget(id) => !removed_ids.contains(&id),
+                HoverTargetId::SelectOption { widget_id, .. } => !removed_ids.contains(&widget_id),
+                HoverTargetId::CanvasItem { widget_id, .. } => !removed_ids.contains(&widget_id),
+            });
         if self
             .hovered_scrollbar
             .map(|handle| removed_ids.contains(&handle.id))
@@ -1842,8 +1847,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             );
                         let mut collected = {
                             let collect_started_at = Instant::now();
-                            let collected =
-                                tree.collect_scene_cache_from_layout_with_focus_value(
+                            let collected = tree.collect_scene_cache_from_layout_with_focus_value(
                                 &self.font_manager,
                                 layout,
                                 &theme,
@@ -1884,26 +1888,27 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 );
                             collected = {
                                 let collect_started_at = Instant::now();
-                                let collected = tree.collect_scene_cache_from_layout_with_focus_value(
-                                    &self.font_manager,
-                                    layout,
-                                    &theme,
-                                    &self.media_manager,
-                                    &mut self.animation_engine,
-                                    self.hovered_scrollbar,
-                                    active_scrollbar,
-                                    &widget_states,
-                                    &self.select_open_states,
-                                    &self.scroll_states,
-                                    viewport,
-                                    actual_focused_input,
-                                    actual_focused_text_state.as_ref(),
-                                    actual_focused_text_value,
-                                    actual_focused_text_layout,
-                                    self.selected_text,
-                                    selected_text_state.as_ref(),
-                                    actual_caret_visible,
-                                );
+                                let collected = tree
+                                    .collect_scene_cache_from_layout_with_focus_value(
+                                        &self.font_manager,
+                                        layout,
+                                        &theme,
+                                        &self.media_manager,
+                                        &mut self.animation_engine,
+                                        self.hovered_scrollbar,
+                                        active_scrollbar,
+                                        &widget_states,
+                                        &self.select_open_states,
+                                        &self.scroll_states,
+                                        viewport,
+                                        actual_focused_input,
+                                        actual_focused_text_state.as_ref(),
+                                        actual_focused_text_value,
+                                        actual_focused_text_layout,
+                                        self.selected_text,
+                                        selected_text_state.as_ref(),
+                                        actual_caret_visible,
+                                    );
                                 recollect_duration += collect_started_at.elapsed();
                                 collect_passes += 1;
                                 collected

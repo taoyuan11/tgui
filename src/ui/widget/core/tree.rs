@@ -307,51 +307,51 @@ impl<VM> WidgetTree<VM> {
     ) -> CollectedSceneCache<VM> {
         let ((mut computed, chunks, chunk_parts, visual_contexts), dependencies) =
             with_widget_stack(|| {
-            with_dependency_collection(|| {
-                let mut chunks = HashMap::new();
-                let mut chunk_parts = HashMap::new();
-                let mut visual_contexts = HashMap::new();
-                let mut context = CollectContext {
-                    taffy: &layout.taffy,
-                    font_manager,
-                    theme,
-                    media,
-                    focused_input,
-                    focused_text_state,
-                    focused_text_value,
-                    focused_text_layout,
-                    caret_visible,
-                    selected_text,
-                    selected_text_state,
-                    hovered_scrollbar,
-                    active_scrollbar,
-                    widget_states,
-                    select_open_states,
-                    scroll_offsets,
-                    viewport,
-                    units: layout.units,
-                    animations,
-                    now: std::time::Instant::now(),
-                };
-                let computed = layout.resolved_root.collect_subtree_cache(
-                    &layout.layout_root,
-                    VisualContext {
-                        origin: Point {
-                            x: viewport.x,
-                            y: viewport.y,
+                with_dependency_collection(|| {
+                    let mut chunks = HashMap::new();
+                    let mut chunk_parts = HashMap::new();
+                    let mut visual_contexts = HashMap::new();
+                    let mut context = CollectContext {
+                        taffy: &layout.taffy,
+                        font_manager,
+                        theme,
+                        media,
+                        focused_input,
+                        focused_text_state,
+                        focused_text_value,
+                        focused_text_layout,
+                        caret_visible,
+                        selected_text,
+                        selected_text_state,
+                        hovered_scrollbar,
+                        active_scrollbar,
+                        widget_states,
+                        select_open_states,
+                        scroll_offsets,
+                        viewport,
+                        units: layout.units,
+                        animations,
+                        now: std::time::Instant::now(),
+                    };
+                    let computed = layout.resolved_root.collect_subtree_cache(
+                        &layout.layout_root,
+                        VisualContext {
+                            origin: Point {
+                                x: viewport.x,
+                                y: viewport.y,
+                            },
+                            opacity: 1.0,
+                            clip_rect: viewport,
+                            clip_mask: None,
                         },
-                        opacity: 1.0,
-                        clip_rect: viewport,
-                        clip_mask: None,
-                    },
-                    &mut context,
-                    &mut chunks,
-                    &mut chunk_parts,
-                    &mut visual_contexts,
-                );
-                (computed, chunks, chunk_parts, visual_contexts)
-            })
-        });
+                        &mut context,
+                        &mut chunks,
+                        &mut chunk_parts,
+                        &mut visual_contexts,
+                    );
+                    (computed, chunks, chunk_parts, visual_contexts)
+                })
+            });
         computed.dependencies = dependencies.clone();
         CollectedSceneCache {
             computed,

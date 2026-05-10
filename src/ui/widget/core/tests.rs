@@ -1,6 +1,4 @@
-use super::{
-    centered_text_frame, resolved_text_metrics, ResolvedWidgetKind, SELECT_ARROW_ICON,
-};
+use super::{centered_text_frame, resolved_text_metrics, ResolvedWidgetKind, SELECT_ARROW_ICON};
 use std::collections::HashMap;
 
 use crate::animation::{AnimationCoordinator, AnimationEngine};

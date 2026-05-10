@@ -91,9 +91,7 @@ impl DependencyGraph {
             return;
         }
         self.dependencies.retain(|_, owners| {
-            owners.retain(|owner| {
-                !(owner.phase == phase && widget_ids.contains(&owner.widget_id))
-            });
+            owners.retain(|owner| !(owner.phase == phase && widget_ids.contains(&owner.widget_id)));
             !owners.is_empty()
         });
         if self.dependencies.is_empty() {

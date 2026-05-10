@@ -60,12 +60,12 @@ mod style;
 mod tests;
 mod tree;
 
+use self::element::resolve_subtree_from_source_path;
 use self::layout::*;
 use self::render::*;
 use self::style::*;
-use self::element::resolve_subtree_from_source_path;
-pub use self::tree::{rect, WidgetCommand, WidgetEventResult, WidgetTree};
 use self::tree::with_widget_stack;
+pub use self::tree::{rect, WidgetCommand, WidgetEventResult, WidgetTree};
 
 /// Caret width in logical pixels.
 pub(super) const CARET_WIDTH: f32 = 2.0;
@@ -532,45 +532,44 @@ impl<VM> ResolvedSceneLayout<VM> {
                 HashMap<WidgetId, VisualContextSnapshot>,
             ),
             DependencyGraph,
-        ) =
-            with_widget_stack(|| {
-                with_dependency_collection(|| {
-                    let mut chunks = HashMap::new();
-                    let mut chunk_parts = HashMap::new();
-                    let mut visual_contexts = HashMap::new();
-                    let mut context = CollectContext {
-                        taffy: &self.taffy,
-                        font_manager,
-                        theme,
-                        media,
-                        focused_input,
-                        focused_text_state,
-                        focused_text_value,
-                        focused_text_layout,
-                        caret_visible,
-                        selected_text,
-                        selected_text_state,
-                        hovered_scrollbar,
-                        active_scrollbar,
-                        widget_states,
-                        select_open_states,
-                        scroll_offsets,
-                        viewport,
-                        units: self.units,
-                        animations,
-                        now: std::time::Instant::now(),
-                    };
-                    let computed = self.resolved_at_path(path).collect_subtree_cache(
-                        self.layout_at_path(path),
-                        visual_context.into(),
-                        &mut context,
-                        &mut chunks,
-                        &mut chunk_parts,
-                        &mut visual_contexts,
-                    );
-                    (computed, chunks, chunk_parts, visual_contexts)
-                })
-            });
+        ) = with_widget_stack(|| {
+            with_dependency_collection(|| {
+                let mut chunks = HashMap::new();
+                let mut chunk_parts = HashMap::new();
+                let mut visual_contexts = HashMap::new();
+                let mut context = CollectContext {
+                    taffy: &self.taffy,
+                    font_manager,
+                    theme,
+                    media,
+                    focused_input,
+                    focused_text_state,
+                    focused_text_value,
+                    focused_text_layout,
+                    caret_visible,
+                    selected_text,
+                    selected_text_state,
+                    hovered_scrollbar,
+                    active_scrollbar,
+                    widget_states,
+                    select_open_states,
+                    scroll_offsets,
+                    viewport,
+                    units: self.units,
+                    animations,
+                    now: std::time::Instant::now(),
+                };
+                let computed = self.resolved_at_path(path).collect_subtree_cache(
+                    self.layout_at_path(path),
+                    visual_context.into(),
+                    &mut context,
+                    &mut chunks,
+                    &mut chunk_parts,
+                    &mut visual_contexts,
+                );
+                (computed, chunks, chunk_parts, visual_contexts)
+            })
+        });
         computed.dependencies = dependencies.clone();
         Some(CollectedSceneCache {
             computed,
@@ -612,77 +611,76 @@ impl<VM> ResolvedSceneLayout<VM> {
         viewport: Rect,
     ) -> Result<HashSet<WidgetId>, taffy::TaffyError> {
         let units = self.units;
-        let (result, dependencies) = with_dependency_collection(|| -> Result<
-            (HashSet<WidgetId>, HashSet<u64>),
-            taffy::TaffyError,
-        > {
-            let mut removed_ids = HashSet::new();
-            let mut touched_owner_ids = HashSet::new();
+        let (result, dependencies) = with_dependency_collection(
+            || -> Result<(HashSet<WidgetId>, HashSet<u64>), taffy::TaffyError> {
+                let mut removed_ids = HashSet::new();
+                let mut touched_owner_ids = HashSet::new();
 
-            for root_id in roots {
-                let Some(path) = self.path_for(*root_id).map(|path| path.to_vec()) else {
-                    continue;
-                };
+                for root_id in roots {
+                    let Some(path) = self.path_for(*root_id).map(|path| path.to_vec()) else {
+                        continue;
+                    };
 
-                let previous_ids = self.subtree_widget_ids(*root_id);
-                touched_owner_ids.extend(previous_ids.iter().map(|id| id.raw()));
+                    let previous_ids = self.subtree_widget_ids(*root_id);
+                    touched_owner_ids.extend(previous_ids.iter().map(|id| id.raw()));
 
-                let Some(next) = resolve_subtree_from_source_path(
-                    &self.source_root,
-                    Some(&self.resolved_root),
-                    theme,
-                    &path,
-                ) else {
-                    continue;
-                };
-                let next_ids = {
-                    let mut ids = Vec::new();
-                    collect_resolved_widget_ids(&next, &mut ids);
-                    ids
-                };
-                let next_id_set: HashSet<_> = next_ids.into_iter().collect();
-                removed_ids.extend(
-                    previous_ids
-                        .into_iter()
-                        .filter(|id| !next_id_set.contains(id)),
-                );
-
-                patch_layout_at_path(
-                    &mut self.resolved_root,
-                    &mut self.layout_root,
-                    &path,
-                    next,
-                    &mut self.taffy,
-                    animations,
-                    theme,
-                    units,
-                    viewport,
-                    None,
-                    true,
-                )?;
-                self.rebuild_indexes();
-            }
-
-            self.taffy.compute_layout_with_measure(
-                self.layout_root.node,
-                TaffySize {
-                    width: AvailableSpace::Definite(viewport.width.get()),
-                    height: AvailableSpace::Definite(viewport.height.get()),
-                },
-                |known_dimensions, _, _, node_context, _| {
-                    measure_node(
-                        node_context,
-                        known_dimensions,
-                        font_manager,
+                    let Some(next) = resolve_subtree_from_source_path(
+                        &self.source_root,
+                        Some(&self.resolved_root),
                         theme,
-                        media,
-                        units,
-                    )
-                },
-            )?;
+                        &path,
+                    ) else {
+                        continue;
+                    };
+                    let next_ids = {
+                        let mut ids = Vec::new();
+                        collect_resolved_widget_ids(&next, &mut ids);
+                        ids
+                    };
+                    let next_id_set: HashSet<_> = next_ids.into_iter().collect();
+                    removed_ids.extend(
+                        previous_ids
+                            .into_iter()
+                            .filter(|id| !next_id_set.contains(id)),
+                    );
 
-            Ok((removed_ids, touched_owner_ids))
-        });
+                    patch_layout_at_path(
+                        &mut self.resolved_root,
+                        &mut self.layout_root,
+                        &path,
+                        next,
+                        &mut self.taffy,
+                        animations,
+                        theme,
+                        units,
+                        viewport,
+                        None,
+                        true,
+                    )?;
+                    self.rebuild_indexes();
+                }
+
+                self.taffy.compute_layout_with_measure(
+                    self.layout_root.node,
+                    TaffySize {
+                        width: AvailableSpace::Definite(viewport.width.get()),
+                        height: AvailableSpace::Definite(viewport.height.get()),
+                    },
+                    |known_dimensions, _, _, node_context, _| {
+                        measure_node(
+                            node_context,
+                            known_dimensions,
+                            font_manager,
+                            theme,
+                            media,
+                            units,
+                        )
+                    },
+                )?;
+
+                Ok((removed_ids, touched_owner_ids))
+            },
+        );
         let (removed_ids, touched_owner_ids) = result?;
         self.dependencies.remove_widget_owners(&touched_owner_ids);
         self.dependencies.merge_from(&dependencies);
@@ -877,7 +875,10 @@ fn remove_layout_subtree(
     Ok(())
 }
 
-fn resolved_at_path<'a, VM>(node: &'a ResolvedElement<VM>, path: &[usize]) -> &'a ResolvedElement<VM> {
+fn resolved_at_path<'a, VM>(
+    node: &'a ResolvedElement<VM>,
+    path: &[usize],
+) -> &'a ResolvedElement<VM> {
     if path.is_empty() {
         return node;
     }
