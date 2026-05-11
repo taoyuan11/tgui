@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -6,10 +8,251 @@ use crate::animation::{
 };
 use crate::platform::backend::event_loop::EventLoopProxy;
 
+static NEXT_DEPENDENCY_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct DependencyId(u64);
+
+impl DependencyId {
+    pub(crate) fn next() -> Self {
+        Self(NEXT_DEPENDENCY_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum DependencyPhase {
+    Structure,
+    Layout,
+    Scene,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct DependencyOwner {
+    pub(crate) widget_id: u64,
+    pub(crate) phase: DependencyPhase,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DependencyGraph {
+    dependencies: HashMap<DependencyId, HashSet<DependencyOwner>>,
+    global_owners: HashSet<DependencyOwner>,
+}
+
+impl DependencyGraph {
+    pub(crate) fn owners_for(&self, dependency: DependencyId) -> Option<&HashSet<DependencyOwner>> {
+        self.dependencies.get(&dependency)
+    }
+
+    pub(crate) fn has_global_dependency(&self) -> bool {
+        !self.global_owners.is_empty()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn dependency_count(&self) -> usize {
+        self.dependencies.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn contains_owner(&self, owner: DependencyOwner) -> bool {
+        self.dependencies
+            .values()
+            .any(|owners| owners.contains(&owner))
+    }
+
+    pub(crate) fn merge_from(&mut self, other: &DependencyGraph) {
+        self.global_owners
+            .extend(other.global_owners.iter().copied());
+        for (dependency, owners) in &other.dependencies {
+            self.dependencies
+                .entry(*dependency)
+                .or_default()
+                .extend(owners.iter().copied());
+        }
+    }
+
+    pub(crate) fn remove_widget_owners(&mut self, widget_ids: &HashSet<u64>) {
+        if widget_ids.is_empty() {
+            return;
+        }
+        self.global_owners
+            .retain(|owner| !widget_ids.contains(&owner.widget_id));
+        self.dependencies.retain(|_, owners| {
+            owners.retain(|owner| !widget_ids.contains(&owner.widget_id));
+            !owners.is_empty()
+        });
+    }
+
+    pub(crate) fn remove_widget_phase_owners(
+        &mut self,
+        widget_ids: &HashSet<u64>,
+        phase: DependencyPhase,
+    ) {
+        if widget_ids.is_empty() {
+            return;
+        }
+        self.global_owners
+            .retain(|owner| !(owner.phase == phase && widget_ids.contains(&owner.widget_id)));
+        self.dependencies.retain(|_, owners| {
+            owners.retain(|owner| !(owner.phase == phase && widget_ids.contains(&owner.widget_id)));
+            !owners.is_empty()
+        });
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DirtyDependencySet {
+    Clean,
+    Global,
+    Dependencies {
+        from_revision: u64,
+        to_revision: u64,
+    },
+}
+
+#[derive(Debug)]
+struct DirtyDependencyEntry {
+    revision: u64,
+    dependency: Option<DependencyId>,
+}
+
+#[derive(Debug, Default)]
+struct DirtyDependencyLog {
+    entries: Vec<DirtyDependencyEntry>,
+}
+
+const MAX_DIRTY_DEPENDENCY_ENTRIES: usize = 1024;
+
+impl DirtyDependencyLog {
+    fn push(&mut self, revision: u64, dependency: Option<DependencyId>) {
+        self.entries.push(DirtyDependencyEntry {
+            revision,
+            dependency,
+        });
+        if self.entries.len() > MAX_DIRTY_DEPENDENCY_ENTRIES {
+            let overflow = self.entries.len() - MAX_DIRTY_DEPENDENCY_ENTRIES;
+            self.entries.drain(0..overflow);
+        }
+    }
+
+    fn dirty_since(
+        &self,
+        revision: u64,
+        current_revision: u64,
+    ) -> (DirtyDependencySet, HashSet<DependencyId>) {
+        if revision == current_revision {
+            return (DirtyDependencySet::Clean, HashSet::new());
+        }
+        let Some(first) = self.entries.first() else {
+            return (DirtyDependencySet::Global, HashSet::new());
+        };
+        if revision != 0 && first.revision > revision.saturating_add(1) {
+            return (DirtyDependencySet::Global, HashSet::new());
+        }
+
+        let mut dependencies = HashSet::new();
+        for entry in self
+            .entries
+            .iter()
+            .filter(|entry| entry.revision > revision)
+        {
+            let Some(dependency) = entry.dependency else {
+                return (DirtyDependencySet::Global, HashSet::new());
+            };
+            dependencies.insert(dependency);
+        }
+
+        (
+            DirtyDependencySet::Dependencies {
+                from_revision: revision,
+                to_revision: current_revision,
+            },
+            dependencies,
+        )
+    }
+}
+
+#[derive(Default)]
+struct InvalidationWakeState {
+    depth: usize,
+    pending_wake: bool,
+}
+
+thread_local! {
+    static INVALIDATION_WAKE_STATE: RefCell<InvalidationWakeState> = RefCell::new(InvalidationWakeState::default());
+}
+
+#[derive(Default)]
+struct DependencyTracker {
+    scopes: Vec<DependencyOwner>,
+    records: Vec<(DependencyId, DependencyOwner)>,
+    global_owners: HashSet<DependencyOwner>,
+}
+
+thread_local! {
+    static DEPENDENCY_TRACKER: RefCell<DependencyTracker> = RefCell::new(DependencyTracker::default());
+}
+
+pub(crate) fn track_dependency_scope<R>(owner: DependencyOwner, f: impl FnOnce() -> R) -> R {
+    struct ScopeGuard;
+
+    impl Drop for ScopeGuard {
+        fn drop(&mut self) {
+            DEPENDENCY_TRACKER.with(|tracker| {
+                tracker.borrow_mut().scopes.pop();
+            });
+        }
+    }
+
+    DEPENDENCY_TRACKER.with(|tracker| {
+        tracker.borrow_mut().scopes.push(owner);
+    });
+    let _guard = ScopeGuard;
+    f()
+}
+
+pub(crate) fn with_dependency_collection<R>(f: impl FnOnce() -> R) -> (R, DependencyGraph) {
+    DEPENDENCY_TRACKER.with(|tracker| {
+        let mut tracker = tracker.borrow_mut();
+        tracker.records.clear();
+        tracker.global_owners.clear();
+    });
+
+    let result = f();
+    let graph = DEPENDENCY_TRACKER.with(|tracker| {
+        let mut tracker = tracker.borrow_mut();
+        let mut graph = DependencyGraph::default();
+        graph.global_owners = std::mem::take(&mut tracker.global_owners);
+        for (dependency, owner) in tracker.records.drain(..) {
+            graph
+                .dependencies
+                .entry(dependency)
+                .or_default()
+                .insert(owner);
+        }
+        graph
+    });
+    (result, graph)
+}
+
+pub(crate) fn record_dependency_read(dependency: Option<DependencyId>) {
+    DEPENDENCY_TRACKER.with(|tracker| {
+        let mut tracker = tracker.borrow_mut();
+        let Some(owner) = tracker.scopes.last().copied() else {
+            return;
+        };
+        if let Some(dependency) = dependency {
+            tracker.records.push((dependency, owner));
+        } else {
+            tracker.global_owners.insert(owner);
+        }
+    });
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct InvalidationSignal {
     revision: Arc<AtomicU64>,
     proxy: Arc<Mutex<Option<EventLoopProxy>>>,
+    dirty_dependencies: Arc<Mutex<DirtyDependencyLog>>,
 }
 
 impl InvalidationSignal {
@@ -17,11 +260,30 @@ impl InvalidationSignal {
         Self {
             revision: Arc::new(AtomicU64::new(1)),
             proxy: Arc::new(Mutex::new(None)),
+            dirty_dependencies: Arc::new(Mutex::new(DirtyDependencyLog::default())),
         }
     }
 
     pub(crate) fn mark_dirty(&self) {
-        self.revision.fetch_add(1, Ordering::SeqCst);
+        self.mark_dirty_dependency(None);
+    }
+
+    pub(crate) fn mark_dependency_dirty(&self, dependency: DependencyId) {
+        self.mark_dirty_dependency(Some(dependency));
+    }
+
+    fn mark_dirty_dependency(&self, dependency: Option<DependencyId>) {
+        let revision = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
+        self.dirty_dependencies
+            .lock()
+            .expect("dirty dependency log lock poisoned")
+            .push(revision, dependency);
+        if self.should_wake_now() {
+            self.wake_proxy();
+        }
+    }
+
+    fn wake_proxy(&self) {
         if let Some(proxy) = self
             .proxy
             .lock()
@@ -33,12 +295,67 @@ impl InvalidationSignal {
         }
     }
 
+    fn should_wake_now(&self) -> bool {
+        INVALIDATION_WAKE_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            if state.depth == 0 {
+                true
+            } else {
+                state.pending_wake = true;
+                false
+            }
+        })
+    }
+
     pub(crate) fn revision(&self) -> u64 {
         self.revision.load(Ordering::SeqCst)
     }
 
     pub(crate) fn set_proxy(&self, proxy: EventLoopProxy) {
         *self.proxy.lock().expect("invalidation proxy lock poisoned") = Some(proxy);
+    }
+
+    pub(crate) fn suppress_wakeups(&self) -> InvalidationWakeGuard {
+        INVALIDATION_WAKE_STATE.with(|state| {
+            state.borrow_mut().depth += 1;
+        });
+        InvalidationWakeGuard {
+            signal: self.clone(),
+        }
+    }
+
+    pub(crate) fn dirty_dependencies_since(
+        &self,
+        revision: u64,
+    ) -> (DirtyDependencySet, HashSet<DependencyId>) {
+        let current_revision = self.revision();
+        self.dirty_dependencies
+            .lock()
+            .expect("dirty dependency log lock poisoned")
+            .dirty_since(revision, current_revision)
+    }
+}
+
+pub(crate) struct InvalidationWakeGuard {
+    signal: InvalidationSignal,
+}
+
+impl Drop for InvalidationWakeGuard {
+    fn drop(&mut self) {
+        let should_wake = INVALIDATION_WAKE_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.depth = state.depth.saturating_sub(1);
+            if state.depth == 0 && state.pending_wake {
+                state.pending_wake = false;
+                true
+            } else {
+                false
+            }
+        });
+
+        if should_wake {
+            self.signal.wake_proxy();
+        }
     }
 }
 
@@ -60,9 +377,17 @@ impl ViewModelContext {
         }
     }
 
-    /// Creates an observable piece of reactive state.
-    pub fn observable<T>(&self, value: T) -> Observable<T> {
-        Observable::new(value, self.invalidation.clone())
+    /// Creates a writable piece of reactive state.
+    pub fn state<T>(&self, value: T) -> State<T> {
+        State::new(value, self.invalidation.clone())
+    }
+
+    /// Creates a cached read-only signal from a reader closure.
+    pub fn signal<T>(&self, reader: impl Fn() -> T + Send + Sync + 'static) -> Signal<T>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        Signal::new(reader, self.invalidation.clone())
     }
 
     /// Creates an animatable value for imperative timeline-driven animation.
@@ -107,13 +432,13 @@ pub struct TextChangeSet {
     pub start_revision: u64,
     pub end_revision: u64,
     pub changes: Vec<TextChange>,
-    pub text: String,
 }
 
 #[derive(Clone)]
 pub struct TextController {
     state: Arc<Mutex<TextControllerState>>,
     invalidation: InvalidationSignal,
+    dependency: DependencyId,
 }
 
 #[derive(Debug)]
@@ -130,6 +455,7 @@ impl TextController {
                 revision: 1,
             })),
             invalidation,
+            dependency: DependencyId::next(),
         }
     }
 
@@ -138,6 +464,7 @@ impl TextController {
     }
 
     pub fn text(&self) -> String {
+        record_dependency_read(Some(self.dependency));
         self.state
             .lock()
             .expect("text controller lock poisoned")
@@ -146,6 +473,7 @@ impl TextController {
     }
 
     pub fn snapshot(&self) -> TextSnapshot {
+        record_dependency_read(Some(self.dependency));
         let state = self.state.lock().expect("text controller lock poisoned");
         TextSnapshot {
             text: state.text.clone(),
@@ -154,6 +482,7 @@ impl TextController {
     }
 
     pub fn revision(&self) -> u64 {
+        record_dependency_read(Some(self.dependency));
         self.state
             .lock()
             .expect("text controller lock poisoned")
@@ -162,8 +491,24 @@ impl TextController {
 
     pub fn set_text(&self, text: impl Into<String>) {
         if self.set_text_silent(text) {
-            self.invalidation.mark_dirty();
+            self.invalidation.mark_dependency_dirty(self.dependency);
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_text_assuming_changed(&self, text: impl Into<String>) -> u64 {
+        let mut state = self.state.lock().expect("text controller lock poisoned");
+        state.text = text.into();
+        state.revision = state.revision.wrapping_add(1).max(1);
+        self.invalidation.mark_dependency_dirty(self.dependency);
+        state.revision
+    }
+
+    pub(crate) fn set_text_local_assuming_changed(&self, text: impl Into<String>) -> u64 {
+        let mut state = self.state.lock().expect("text controller lock poisoned");
+        state.text = text.into();
+        state.revision = state.revision.wrapping_add(1).max(1);
+        state.revision
     }
 
     pub fn replace_all(&self, text: impl Into<String>) {
@@ -199,9 +544,9 @@ impl From<&str> for TextController {
     }
 }
 
-impl From<Binding<String>> for TextController {
-    fn from(value: Binding<String>) -> Self {
-        TextController::new_legacy(crate::ui::layout::Value::Bound(value))
+impl From<Signal<String>> for TextController {
+    fn from(value: Signal<String>) -> Self {
+        TextController::new_legacy(crate::ui::layout::Value::Signal(value))
     }
 }
 
@@ -212,98 +557,372 @@ impl From<crate::ui::layout::Value<String>> for TextController {
 }
 
 #[derive(Clone)]
-/// Shared mutable state that marks the UI dirty whenever it changes.
+/// Shared mutable state that marks the UI dirty whenever its value changes.
 ///
-/// Create it through [`ViewModelContext::observable`], then derive UI-facing
-/// values using [`Observable::binding`].
-pub struct Observable<T> {
+/// Create it through [`ViewModelContext::state`], then derive UI-facing values
+/// using [`State::signal`].
+pub struct State<T> {
     value: Arc<Mutex<T>>,
     invalidation: InvalidationSignal,
+    dependency: DependencyId,
 }
 
-impl<T> Observable<T> {
+impl<T> State<T> {
     fn new(value: T, invalidation: InvalidationSignal) -> Self {
         Self {
             value: Arc::new(Mutex::new(value)),
             invalidation,
+            dependency: DependencyId::next(),
         }
     }
 
-    /// Replaces the current value and requests a UI refresh.
-    pub fn set(&self, value: T) {
-        *self.value.lock().expect("observable lock poisoned") = value;
-        self.invalidation.mark_dirty();
+    /// Reads the current value without cloning it.
+    pub fn read<R>(&self, reader: impl FnOnce(&T) -> R) -> R {
+        record_dependency_read(Some(self.dependency));
+        let value = self.value.lock().expect("state lock poisoned");
+        reader(&value)
     }
 
-    /// Mutates the current value in place and requests a UI refresh.
-    pub fn update<R>(&self, updater: impl FnOnce(&mut T) -> R) -> R {
-        let mut value = self.value.lock().expect("observable lock poisoned");
-        let result = updater(&mut value);
-        self.invalidation.mark_dirty();
-        result
-    }
-
-    /// Creates a binding that reads the current observable value on demand.
-    pub fn binding(&self) -> Binding<T>
+    /// Creates a cached signal that reads the current state value on demand.
+    pub fn signal(&self) -> Signal<T>
     where
         T: Clone + Send + Sync + 'static,
     {
-        let observable = self.clone();
-        Binding::new(move || observable.get())
+        let state = self.clone();
+        Signal::new_tracked(
+            move || state.get(),
+            self.invalidation.clone(),
+            Some(self.dependency),
+        )
     }
 }
 
-impl<T: Clone> Observable<T> {
+impl<T: PartialEq> State<T> {
+    /// Replaces the current value and requests a UI refresh only when it changed.
+    pub fn set(&self, value: T) {
+        let mut current = self.value.lock().expect("state lock poisoned");
+        if *current == value {
+            return;
+        }
+        *current = value;
+        drop(current);
+        self.invalidation.mark_dependency_dirty(self.dependency);
+    }
+}
+
+impl<T: Clone> State<T> {
     /// Returns a cloned snapshot of the current value.
     pub fn get(&self) -> T {
-        self.value.lock().expect("observable lock poisoned").clone()
+        record_dependency_read(Some(self.dependency));
+        self.value.lock().expect("state lock poisoned").clone()
+    }
+}
+
+impl<T: Clone + PartialEq> State<T> {
+    /// Mutates the current value in place and requests a UI refresh only when it changed.
+    pub fn update<R>(&self, updater: impl FnOnce(&mut T) -> R) -> R {
+        let mut value = self.value.lock().expect("state lock poisoned");
+        let previous = value.clone();
+        let result = updater(&mut value);
+        let changed = *value != previous;
+        drop(value);
+        if changed {
+            self.invalidation.mark_dependency_dirty(self.dependency);
+        }
+        result
+    }
+}
+
+impl<T> State<T> {
+    /// Mutates the current value in place and always requests a UI refresh afterwards.
+    ///
+    /// This avoids the full-value clone that [`State::update`] performs to detect
+    /// whether the value changed, which makes it a better fit for hot paths such as
+    /// text input callbacks that frequently touch large `String` or `Vec` states.
+    pub fn mutate<R>(&self, updater: impl FnOnce(&mut T) -> R) -> R {
+        let mut value = self.value.lock().expect("state lock poisoned");
+        let result = updater(&mut value);
+        drop(value);
+        self.invalidation.mark_dependency_dirty(self.dependency);
+        result
     }
 }
 
 #[derive(Clone)]
 /// Lazily evaluated value used by widgets and window bindings.
 ///
-/// A binding can be derived from an [`Observable`] or created from any closure.
-/// Use [`Binding::map`] to derive more values and [`Binding::animated`] to attach
-/// a declarative transition.
-pub struct Binding<T> {
+/// A signal can be derived from a [`State`] or created through
+/// [`ViewModelContext::signal`]. Use [`Signal::map`] to derive more values and
+/// [`Signal::animated`] to attach a declarative transition.
+pub struct Signal<T> {
     reader: Arc<dyn Fn() -> T + Send + Sync>,
+    invalidation: InvalidationSignal,
+    cache: Arc<Mutex<SignalCache<T>>>,
     transition: Option<Transition>,
+    dependency: Option<DependencyId>,
 }
 
-impl<T> Binding<T> {
-    /// Creates a binding from a reader closure.
-    pub fn new(reader: impl Fn() -> T + Send + Sync + 'static) -> Self {
+struct SignalCache<T> {
+    revision: u64,
+    value: Option<T>,
+}
+
+impl<T> Signal<T> {
+    pub(crate) fn new(
+        reader: impl Fn() -> T + Send + Sync + 'static,
+        invalidation: InvalidationSignal,
+    ) -> Self {
+        Self::new_tracked(reader, invalidation, None)
+    }
+
+    pub(crate) fn new_tracked(
+        reader: impl Fn() -> T + Send + Sync + 'static,
+        invalidation: InvalidationSignal,
+        dependency: Option<DependencyId>,
+    ) -> Self {
         Self {
             reader: Arc::new(reader),
+            invalidation,
+            cache: Arc::new(Mutex::new(SignalCache {
+                revision: 0,
+                value: None,
+            })),
             transition: None,
+            dependency,
         }
     }
 
-    /// Reads the current value of the binding.
+    fn with_transition(mut self, transition: Option<Transition>) -> Self {
+        self.transition = transition;
+        self
+    }
+}
+
+impl<T: Clone> Signal<T> {
+    /// Reads the current value of the signal.
     pub fn get(&self) -> T {
-        (self.reader)()
+        record_dependency_read(self.dependency);
+        let revision = self.invalidation.revision();
+        {
+            let cache = self.cache.lock().expect("signal cache lock poisoned");
+            if cache.revision == revision {
+                if let Some(value) = cache.value.as_ref() {
+                    return value.clone();
+                }
+            }
+        }
+
+        let value = (self.reader)();
+        let mut cache = self.cache.lock().expect("signal cache lock poisoned");
+        cache.revision = revision;
+        cache.value = Some(value.clone());
+        value
     }
 
-    /// Marks the binding as animatable when consumed by a supported UI property.
+    /// Marks the signal as animatable when consumed by a supported UI property.
     pub fn animated(mut self, transition: impl Into<Transition>) -> Self {
         self.transition = Some(transition.into());
         self
     }
 
-    /// Derives a new binding from the current one.
-    pub fn map<U>(&self, mapper: impl Fn(T) -> U + Send + Sync + 'static) -> Binding<U>
+    /// Derives a cached signal from the current one.
+    pub fn map<U>(&self, mapper: impl Fn(T) -> U + Send + Sync + 'static) -> Signal<U>
     where
-        T: 'static,
+        T: Clone + Send + Sync + 'static,
+        U: Clone + Send + Sync + 'static,
     {
-        let reader = self.reader.clone();
-        Binding {
-            reader: Arc::new(move || mapper(reader())),
-            transition: self.transition,
-        }
+        let signal = self.clone();
+        Signal::new_tracked(
+            move || mapper(signal.get()),
+            self.invalidation.clone(),
+            self.dependency,
+        )
+        .with_transition(self.transition)
     }
 
     pub(crate) fn transition(&self) -> Option<Transition> {
         self.transition
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use std::time::Duration;
+
+    use crate::animation::Transition;
+
+    use super::{
+        track_dependency_scope, with_dependency_collection, DependencyOwner, DependencyPhase,
+        DirtyDependencySet, InvalidationSignal, Signal, State, ViewModelContext,
+    };
+    use crate::animation::AnimationCoordinator;
+
+    fn context() -> ViewModelContext {
+        ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
+    }
+
+    #[test]
+    fn state_set_same_value_does_not_advance_revision() {
+        let invalidation = InvalidationSignal::new();
+        let state = State::new(1, invalidation.clone());
+        let before = invalidation.revision();
+
+        state.set(1);
+
+        assert_eq!(invalidation.revision(), before);
+    }
+
+    #[test]
+    fn state_update_only_invalidates_when_value_changes() {
+        let invalidation = InvalidationSignal::new();
+        let state = State::new(String::from("hello"), invalidation.clone());
+        let before = invalidation.revision();
+
+        state.update(|value| value.push_str(""));
+        assert_eq!(invalidation.revision(), before);
+
+        state.update(|value| value.push('!'));
+        assert!(invalidation.revision() > before);
+    }
+
+    #[test]
+    fn state_mutate_invalidates_without_cloning_value() {
+        struct CloneTracked {
+            value: usize,
+            clone_count: Arc<AtomicUsize>,
+        }
+
+        impl PartialEq for CloneTracked {
+            fn eq(&self, other: &Self) -> bool {
+                self.value == other.value
+            }
+        }
+
+        impl Clone for CloneTracked {
+            fn clone(&self) -> Self {
+                self.clone_count.fetch_add(1, Ordering::SeqCst);
+                Self {
+                    value: self.value,
+                    clone_count: self.clone_count.clone(),
+                }
+            }
+        }
+
+        let invalidation = InvalidationSignal::new();
+        let clone_count = Arc::new(AtomicUsize::new(0));
+        let state = State::new(
+            CloneTracked {
+                value: 1,
+                clone_count: clone_count.clone(),
+            },
+            invalidation.clone(),
+        );
+        let before = invalidation.revision();
+
+        state.mutate(|value| value.value += 1);
+
+        assert_eq!(clone_count.load(Ordering::SeqCst), 0);
+        assert!(invalidation.revision() > before);
+        assert_eq!(state.read(|value| value.value), 2);
+    }
+
+    #[test]
+    fn signal_get_caches_within_revision() {
+        let ctx = context();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_signal = calls.clone();
+        let signal = ctx.signal(move || {
+            calls_for_signal.fetch_add(1, Ordering::SeqCst);
+            42
+        });
+
+        assert_eq!(signal.get(), 42);
+        assert_eq!(signal.get(), 42);
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn signal_recomputes_after_state_changes() {
+        let ctx = context();
+        let state = ctx.state(1);
+        let signal = state.signal().map(|value| value * 2);
+
+        assert_eq!(signal.get(), 2);
+        state.set(4);
+        assert_eq!(signal.get(), 8);
+    }
+
+    #[test]
+    fn mapped_signal_preserves_transition() {
+        let ctx = context();
+        let state = ctx.state(1);
+        let transition = Transition::linear(Duration::from_millis(10));
+        let signal = state.signal().animated(transition).map(|value| value + 1);
+
+        assert_eq!(signal.get(), 2);
+        assert_eq!(signal.transition(), Some(transition));
+    }
+
+    #[test]
+    fn state_change_records_specific_dirty_dependency() {
+        let invalidation = InvalidationSignal::new();
+        let state = State::new(1, invalidation.clone());
+        let baseline = invalidation.revision();
+
+        state.set(2);
+
+        let (dirty, deps) = invalidation.dirty_dependencies_since(baseline);
+        assert!(matches!(dirty, DirtyDependencySet::Dependencies { .. }));
+        assert_eq!(deps.len(), 1);
+    }
+
+    #[test]
+    fn unchanged_state_keeps_dirty_dependencies_clean() {
+        let invalidation = InvalidationSignal::new();
+        let state = State::new(5, invalidation.clone());
+        let baseline = invalidation.revision();
+
+        state.set(5);
+
+        let (dirty, deps) = invalidation.dirty_dependencies_since(baseline);
+        assert!(matches!(dirty, DirtyDependencySet::Clean));
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn mapped_signal_reads_are_tracked_without_global_fallback() {
+        let ctx = context();
+        let state = ctx.state(7);
+        let mapped = state.signal().map(|value| value + 1);
+        let owner = DependencyOwner {
+            widget_id: 1,
+            phase: DependencyPhase::Scene,
+        };
+
+        let (_, graph) =
+            with_dependency_collection(|| track_dependency_scope(owner, || mapped.get()));
+
+        assert!(!graph.has_global_dependency());
+        assert_eq!(graph.dependency_count(), 1);
+    }
+
+    #[test]
+    fn opaque_signal_reads_fall_back_to_global_dependency() {
+        let invalidation = InvalidationSignal::new();
+        let signal = Signal::new(|| 9, invalidation);
+        let owner = DependencyOwner {
+            widget_id: 2,
+            phase: DependencyPhase::Layout,
+        };
+
+        let (_, graph) =
+            with_dependency_collection(|| track_dependency_scope(owner, || signal.get()));
+
+        assert!(graph.has_global_dependency());
     }
 }

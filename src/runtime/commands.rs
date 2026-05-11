@@ -47,36 +47,75 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.invalidation.set_proxy(event_loop.create_proxy());
     }
 
-    pub(super) fn execute_command(&mut self, command: &Command<VM>) {
+    fn execute_command_internal(&mut self, command: &Command<VM>, invalidate_scene: bool) {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let context = self.command_context();
+        let _wake_guard = if invalidate_scene {
+            None
+        } else {
+            Some(self.invalidation.suppress_wakeups())
+        };
         self.with_view_model(|view_model| command.execute_with_context(view_model, &context));
-        self.invalidate_scene();
-        self.invalidation.mark_dirty();
+        if invalidate_scene {
+            self.invalidate_scene_with_reason("execute_command");
+            self.invalidation.mark_dirty();
+        }
         if let Some(started_at) = started_at {
             log_text_profile(
                 "execute_command",
                 started_at.elapsed(),
-                "invalidated_scene=true".to_string(),
+                format!("invalidated_scene={invalidate_scene}"),
             );
         }
     }
 
-    pub(super) fn execute_value_command<V>(&mut self, command: &ValueCommand<VM, V>, value: V) {
+    fn execute_value_command_internal<V>(
+        &mut self,
+        command: &ValueCommand<VM, V>,
+        value: V,
+        invalidate_scene: bool,
+    ) {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let context = self.command_context();
+        let _wake_guard = if invalidate_scene {
+            None
+        } else {
+            Some(self.invalidation.suppress_wakeups())
+        };
         self.with_view_model(|view_model| {
             command.execute_with_context(view_model, value, &context)
         });
-        self.invalidate_scene();
-        self.invalidation.mark_dirty();
+        if invalidate_scene {
+            self.invalidate_scene_with_reason("execute_value_command");
+            self.invalidation.mark_dirty();
+        }
         if let Some(started_at) = started_at {
             log_text_profile(
                 "execute_value_command",
                 started_at.elapsed(),
-                "invalidated_scene=true".to_string(),
+                format!("invalidated_scene={invalidate_scene}"),
             );
         }
+    }
+
+    pub(super) fn execute_command(&mut self, command: &Command<VM>) {
+        self.execute_command_internal(command, true);
+    }
+
+    pub(super) fn execute_command_without_invalidation(&mut self, command: &Command<VM>) {
+        self.execute_command_internal(command, false);
+    }
+
+    pub(super) fn execute_value_command<V>(&mut self, command: &ValueCommand<VM, V>, value: V) {
+        self.execute_value_command_internal(command, value, true);
+    }
+
+    pub(super) fn execute_value_command_without_invalidation<V>(
+        &mut self,
+        command: &ValueCommand<VM, V>,
+        value: V,
+    ) {
+        self.execute_value_command_internal(command, value, false);
     }
 
     pub(super) fn drain_window_requests(&mut self) -> bool {
@@ -92,7 +131,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     if let Some(window) = self.window.as_ref() {
                         if let Err(error) = window.drag_window() {
                             Log::with_tag("tgui-runtime")
-                                .warn(format!("window drag request failed: {error}"));
+                                .warn(format_args!("window drag request failed: {error}"));
                         }
                     }
                 }
@@ -100,7 +139,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     if let Some(window) = self.window.as_ref() {
                         if let Err(error) = window.drag_resize_window(direction.into()) {
                             Log::with_tag("tgui-runtime")
-                                .warn(format!("window resize request failed: {error}"));
+                                .warn(format_args!("window resize request failed: {error}"));
                         }
                     }
                 }
@@ -238,7 +277,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             let context = self.command_context();
             self.with_view_model(|view_model| (completion.callback)(view_model, &context));
-            self.invalidate_scene();
+            self.invalidate_scene_with_reason("dialog_completion");
             self.invalidation.mark_dirty();
         }
 
@@ -266,7 +305,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             let context = self.command_context();
             self.with_view_model(|view_model| (completion.callback)(view_model, &context));
-            self.invalidate_scene();
+            self.invalidate_scene_with_reason("notification_completion");
             self.invalidation.mark_dirty();
         }
 
@@ -298,7 +337,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
 
             let context = window.command_context();
             window.with_view_model(|view_model| (completion.callback)(view_model, &context));
-            window.invalidate_scene();
+            window.invalidate_scene_with_reason("multi_dialog_completion");
             self.invalidation.mark_dirty();
             if let Some(native_window) = window.window.as_ref() {
                 native_window.request_redraw();
@@ -318,7 +357,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
 
             let context = window.command_context();
             window.with_view_model(|view_model| (completion.callback)(view_model, &context));
-            window.invalidate_scene();
+            window.invalidate_scene_with_reason("multi_notification_completion");
             self.invalidation.mark_dirty();
             if let Some(native_window) = window.window.as_ref() {
                 native_window.request_redraw();

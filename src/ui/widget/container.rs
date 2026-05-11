@@ -1,4 +1,4 @@
-use crate::foundation::binding::Binding;
+use crate::foundation::binding::Signal;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{
@@ -8,7 +8,7 @@ use crate::ui::unit::Dp;
 
 use super::common::{
     ChildSource, ContainerKind, ContainerLayout, CursorStyle, InteractionHandlers,
-    MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
+    LifecycleEventHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::core::Element;
 use super::style::ContainerStyle;
@@ -79,9 +79,9 @@ where
     }
 }
 
-impl<VM, T> IntoChildren<VM> for Binding<T>
+impl<VM, T> IntoChildren<VM> for Signal<T>
 where
-    T: IntoChildGroup<VM> + Send + Sync + 'static,
+    T: Clone + IntoChildGroup<VM> + Send + Sync + 'static,
 {
     #[allow(private_interfaces)]
     fn into_child_source(self) -> ChildSource<VM> {
@@ -135,13 +135,13 @@ impl IntoLengthValue for Value<Length> {
     }
 }
 
-impl IntoLengthValue for Binding<Length> {
+impl IntoLengthValue for Signal<Length> {
     fn into_length_value(self) -> Value<Length> {
         self.into()
     }
 }
 
-impl IntoLengthValue for Binding<Dp> {
+impl IntoLengthValue for Signal<Dp> {
     fn into_length_value(self) -> Value<Length> {
         self.map(Length::from).into()
     }
@@ -151,7 +151,7 @@ impl IntoLengthValue for Value<Dp> {
     fn into_length_value(self) -> Value<Length> {
         match self {
             Value::Static(value) => Length::from(value).into(),
-            Value::Bound(binding) => binding.map(Length::from).into(),
+            Value::Signal(signal) => signal.map(Length::from).into(),
         }
     }
 }
@@ -160,7 +160,7 @@ impl IntoLengthValue for Value<f32> {
     fn into_length_value(self) -> Value<Length> {
         match self {
             Value::Static(value) => Length::from(value).into(),
-            Value::Bound(binding) => binding.map(Length::from).into(),
+            Value::Signal(signal) => signal.map(Length::from).into(),
         }
     }
 }
@@ -200,9 +200,11 @@ impl<VM> Container<VM> {
         Self {
             element: Element {
                 id: WidgetId::next(),
+                key: None,
                 layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
                 interactions: InteractionHandlers::default(),
+                lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::Container {
@@ -221,6 +223,11 @@ impl<VM> Container<VM> {
         if let WidgetKind::Container { style, .. } = &mut self.element.kind {
             *style = Some(super::style::StyleResolver::new(resolver));
         }
+        self
+    }
+
+    pub fn key(mut self, key: impl Into<super::WidgetKey>) -> Self {
+        self.element.key = Some(key.into());
         self
     }
 
@@ -246,6 +253,21 @@ impl<VM> Container<VM> {
 
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.element.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    pub fn on_mount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_mount = Some(command);
+        self
+    }
+
+    pub fn on_unmount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_unmount = Some(command);
+        self
+    }
+
+    pub fn on_update(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_update = Some(command);
         self
     }
 
@@ -597,6 +619,18 @@ macro_rules! impl_layout_api {
 
             pub fn on_mouse_move(self, command: ValueCommand<VM, Point>) -> Self {
                 Self(self.0.on_mouse_move(command))
+            }
+
+            pub fn on_mount(self, command: Command<VM>) -> Self {
+                Self(self.0.on_mount(command))
+            }
+
+            pub fn on_unmount(self, command: Command<VM>) -> Self {
+                Self(self.0.on_unmount(command))
+            }
+
+            pub fn on_update(self, command: Command<VM>) -> Self {
+                Self(self.0.on_update(command))
             }
 
             pub fn cursor(self, cursor: impl Into<Value<CursorStyle>>) -> Self {

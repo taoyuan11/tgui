@@ -45,14 +45,13 @@ impl Renderer {
             return Ok(None);
         };
 
-        if let Some(entry) = self.text_cache.iter().find(|entry| entry.key == key) {
+        if let Some(entry) = self.text_cache.get(&key) {
             return Ok(Some(entry.bind_group.clone()));
         }
 
         let bind_group = match self.rasterize_text(text)? {
             Some((texture, bind_group)) => {
-                self.text_cache.push(TextCacheEntry {
-                    key,
+                self.text_cache.insert(key, TextCacheEntry {
                     bind_group: bind_group.clone(),
                     _texture: texture,
                 });

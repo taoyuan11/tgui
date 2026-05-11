@@ -42,31 +42,34 @@ fn canvas_style(mode: ResolvedThemeMode) -> CanvasStyle {
 }
 
 struct App {
-    theme: Observable<ThemeMode>,
-    switch: Observable<bool>,
-    checkbox: Observable<bool>,
-    radio: Observable<bool>,
-    contact_method: Observable<String>,
-    select_action: Observable<Option<String>>,
-    notification_status: Observable<String>,
+    theme: State<ThemeMode>,
+    switch: State<bool>,
+    checkbox: State<bool>,
+    radio: State<bool>,
+    contact_method: State<String>,
+    select_action: State<Option<String>>,
+    notification_status: State<String>,
     input_text: TextController,
     textarea_text: TextController,
+
+    test_text: State<String>
 }
 
 impl ViewModel for App {
     fn new(context: &ViewModelContext) -> Self {
         Self {
-            theme: context.observable(ThemeMode::System),
-            switch: context.observable(false),
-            checkbox: context.observable(false),
-            radio: context.observable(false),
-            contact_method: context.observable(String::from("system")),
-            select_action: context.observable(None),
-            notification_status: context.observable(String::from("尚未发送通知")),
+            theme: context.state(ThemeMode::System),
+            switch: context.state(false),
+            checkbox: context.state(false),
+            radio: context.state(false),
+            contact_method: context.state(String::from("system")),
+            select_action: context.state(None),
+            notification_status: context.state(String::from("尚未发送通知")),
             input_text: context.text_controller("可编辑的单行输入框"),
             textarea_text: context.text_controller(
                 "这是一个受控 Textarea。\n你可以在这里输入多行内容，示例不会保存修改。",
             ),
+            test_text: context.state(String::from("这是一段测试文字"))
         }
     }
 
@@ -98,13 +101,13 @@ impl ViewModel for App {
                 ),
                 component_card(
                     "Switch",
-                    Switch::new(self.switch.binding()).on_change(ValueCommand::new(
+                    Switch::new(self.switch.signal()).on_change(ValueCommand::new(
                         |app: &mut App, enable| app.switch.set(enable)
                     )),
                 ),
                 component_card(
                     "Checkbox",
-                    Checkbox::new(self.checkbox.binding())
+                    Checkbox::new(self.checkbox.signal())
                         .label("接收通知")
                         .on_change(ValueCommand::new(|app: &mut App, checked| {
                             app.checkbox.set(checked)
@@ -112,7 +115,7 @@ impl ViewModel for App {
                 ),
                 component_card(
                     "Radio",
-                    Radio::new(self.radio.binding())
+                    Radio::new(self.radio.signal())
                         .label("单个单选框")
                         .on_change(ValueCommand::new(|app: &mut App, checked| {
                             app.radio.set(checked)
@@ -126,19 +129,21 @@ impl ViewModel for App {
                             RadioOption::new("light".to_string(), "明亮".to_string()),
                             RadioOption::new("dark".to_string(), "暗淡".to_string()),
                         ],
-                        self.contact_method.binding(),
+                        self.contact_method.signal(),
                     )
                     .horizontal()
-                    .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
-                        if key == "system" {
-                            app.theme.set(ThemeMode::System)
-                        } else if key == "light" {
-                            app.theme.set(ThemeMode::Light)
-                        } else {
-                            app.theme.set(ThemeMode::Dark);
+                    .on_change(ValueCommand::new(
+                        |app: &mut App, (key, _label)| {
+                            if key == "system" {
+                                app.theme.set(ThemeMode::System)
+                            } else if key == "light" {
+                                app.theme.set(ThemeMode::Light)
+                            } else {
+                                app.theme.set(ThemeMode::Dark);
+                            }
+                            app.contact_method.set(key)
                         }
-                        app.contact_method.set(key)
-                    })),
+                    )),
                 ),
                 component_card(
                     "Select",
@@ -149,48 +154,47 @@ impl ViewModel for App {
                                 .disable(true),
                             SelectOption::new("share".to_string(), "分享".to_string()),
                         ],
-                        self.select_action.binding(),
+                        self.select_action.signal(),
                     )
                     .placeholder("请选择操作")
                     .width(dp(220.0))
-                    .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
-                        app.select_action.set(Some(key))
-                    })),
+                    .on_change(ValueCommand::new(
+                        |app: &mut App, (key, _label)| { app.select_action.set(Some(key)) }
+                    )),
                 ),
                 component_card(
                     "Input",
                     Input::new(self.input_text.clone())
                         .width(dp(260.0))
-                        .placeholder("请输入内容"),
+                        .placeholder("请输入内容")
+                        .on_change(Command::new(|app: &mut App| {
+                            app.test_text.update(|text| {
+                                *text = format!("{text}1")
+                            })
+                        })),
                 ),
                 component_card(
                     "Textarea",
                     Textarea::new(self.textarea_text.clone())
                         .size(dp(320.0), dp(140.0))
-                        .placeholder("请输入多行内容"),
+                        .placeholder("请输入多行内容")
+                        .on_change(Command::new(|_app: &mut App| {})),
                 ),
                 component_card(
                     "Notification",
                     Flex::vertical().gap(dp(10.0)).child(el![
                         Flex::horizontal().gap(dp(10.0)).wrap(Wrap::Wrap).child(el![
-                            Button::new("请求通知权限").on_click(
-                                Command::new_with_context(|_: &mut App, ctx| {
-                                    App::request_notification_permission(ctx)
-                                }),
-                            ),
-                            Button::new("发送普通通知").on_click(
-                                Command::new_with_context(|app: &mut App, ctx| {
-                                    app.send_plain_notification(ctx)
-                                }),
-                            ),
-                            Button::new("发送动作通知").on_click(
-                                Command::new_with_context(|app: &mut App, ctx| {
-                                    app.send_action_notification(ctx)
-                                }),
-                            ),
+                            Button::new("请求通知权限").on_click(Command::new_with_context(
+                                |_: &mut App, ctx| { App::request_notification_permission(ctx) }
+                            ),),
+                            Button::new("发送普通通知").on_click(Command::new_with_context(
+                                |app: &mut App, ctx| { app.send_plain_notification(ctx) }
+                            ),),
+                            Button::new("发送动作通知").on_click(Command::new_with_context(
+                                |app: &mut App, ctx| { app.send_action_notification(ctx) }
+                            ),),
                         ]),
-                        Text::new(self.notification_status.binding())
-                            .style(status_style),
+                        Text::new(self.notification_status.signal()).style(status_style),
                     ]),
                 ),
                 component_card(
@@ -218,7 +222,8 @@ fn component_card(title: &str, content: impl Into<Element<App>>) -> Element<App>
 }
 
 fn demo_image_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../background_effects/assets/juequling_shushu.jpg")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../background_effects/assets/juequling_shushu.jpg")
 }
 
 fn demo_canvas() -> Element<App> {
@@ -266,14 +271,14 @@ fn demo_canvas() -> Element<App> {
 
 impl App {
     fn request_notification_permission(ctx: &CommandContext<Self>) {
-        let _ = ctx.notifications().request_permission(ValueCommand::new(
-            |app: &mut App, result| {
-                app.notification_status.set(match result {
-                    Ok(permission) => format!("通知权限: {permission:?}"),
-                    Err(error) => format!("通知权限请求失败: {error}"),
-                });
-            },
-        ));
+        let _ =
+            ctx.notifications()
+                .request_permission(ValueCommand::new(|app: &mut App, result| {
+                    app.notification_status.set(match result {
+                        Ok(permission) => format!("通知权限: {permission:?}"),
+                        Err(error) => format!("通知权限请求失败: {error}"),
+                    });
+                }));
     }
 
     fn send_plain_notification(&mut self, ctx: &CommandContext<Self>) {
@@ -296,16 +301,16 @@ impl App {
                 .action(NotificationAction::new("accept", "接受"))
                 .action(NotificationAction::new("dismiss", "忽略")),
             ValueCommand::new(
-                |app: &mut App,
-                 result: Result<NotificationActionEvent, NotificationError>| {
-                app.notification_status.set(match result {
-                    Ok(event) => format!(
-                        "通知动作: notification_id={}, action_id={}",
-                        event.notification_id, event.action_id
-                    ),
-                    Err(error) => format!("通知动作失败: {error}"),
-                });
-            }),
+                |app: &mut App, result: Result<NotificationActionEvent, NotificationError>| {
+                    app.notification_status.set(match result {
+                        Ok(event) => format!(
+                            "通知动作: notification_id={}, action_id={}",
+                            event.notification_id, event.action_id
+                        ),
+                        Err(error) => format!("通知动作失败: {error}"),
+                    });
+                },
+            ),
         );
         self.notification_status.set(match result {
             Ok(id) => format!("已发送动作通知: {id}"),
@@ -313,13 +318,15 @@ impl App {
         });
     }
 
-    fn theme_binding(&self) -> Binding<ThemeMode> {
-        self.theme.binding()
+    fn theme_binding(&self) -> Signal<ThemeMode> {
+        self.theme.signal()
     }
 
     fn run() -> Result<(), TguiError> {
         Application::new()
-            .window_icon(include_bytes!("../../background_effects/assets/juequling_shushu.jpg"))
+            .window_icon(include_bytes!(
+                "../../background_effects/assets/juequling_shushu.jpg"
+            ))
             .app_id("com.tgui.demo")
             .with_view_model(App::new)
             .root_view(App::view)

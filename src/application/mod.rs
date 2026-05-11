@@ -7,7 +7,7 @@ use crate::platform::dpi::LogicalSize;
 use crate::platform::ohos::OhosApp;
 
 use crate::animation::AnimationCoordinator;
-use crate::foundation::binding::{Binding, InvalidationSignal, ViewModelContext};
+use crate::foundation::binding::{InvalidationSignal, Signal, ViewModelContext};
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
@@ -346,10 +346,10 @@ impl ApplicationConfig {
     }
 }
 
-type TitleBinding<VM> = Arc<dyn Fn(&VM) -> Binding<String> + Send + Sync>;
-type ClearColorBinding<VM> = Arc<dyn Fn(&VM) -> Binding<Color> + Send + Sync>;
-type ThemeSetBinding<VM> = Arc<dyn Fn(&VM) -> Binding<ThemeSet> + Send + Sync>;
-type ThemeModeBinding<VM> = Arc<dyn Fn(&VM) -> Binding<ThemeMode> + Send + Sync>;
+type TitleBinding<VM> = Arc<dyn Fn(&VM) -> Signal<String> + Send + Sync>;
+type ClearColorBinding<VM> = Arc<dyn Fn(&VM) -> Signal<Color> + Send + Sync>;
+type ThemeSetBinding<VM> = Arc<dyn Fn(&VM) -> Signal<ThemeSet> + Send + Sync>;
+type ThemeModeBinding<VM> = Arc<dyn Fn(&VM) -> Signal<ThemeMode> + Send + Sync>;
 type RootViewFactory<VM> = Arc<dyn Fn(&VM) -> Element<VM> + Send + Sync>;
 type WindowsFactory<VM> = Box<dyn Fn(&VM) -> Vec<WindowSpec<VM>> + Send + Sync>;
 
@@ -493,36 +493,36 @@ impl<VM> WindowSpec<VM> {
     /// Binds the window title to shared view-model state.
     pub fn bind_title(
         mut self,
-        binding: impl Fn(&VM) -> Binding<String> + Send + Sync + 'static,
+        signal: impl Fn(&VM) -> Signal<String> + Send + Sync + 'static,
     ) -> Self {
-        self.title_binding = Some(Arc::new(binding));
+        self.title_binding = Some(Arc::new(signal));
         self
     }
 
     /// Binds the renderer clear color to shared view-model state.
     pub fn bind_clear_color(
         mut self,
-        binding: impl Fn(&VM) -> Binding<Color> + Send + Sync + 'static,
+        signal: impl Fn(&VM) -> Signal<Color> + Send + Sync + 'static,
     ) -> Self {
-        self.clear_color_binding = Some(Arc::new(binding));
+        self.clear_color_binding = Some(Arc::new(signal));
         self
     }
 
     /// Binds the light and dark themes used by theme mode resolution.
     pub fn bind_theme_set(
         mut self,
-        binding: impl Fn(&VM) -> Binding<ThemeSet> + Send + Sync + 'static,
+        signal: impl Fn(&VM) -> Signal<ThemeSet> + Send + Sync + 'static,
     ) -> Self {
-        self.theme_set_binding = Some(Arc::new(binding));
+        self.theme_set_binding = Some(Arc::new(signal));
         self
     }
 
     /// Binds the active theme mode to shared view-model state.
     pub fn bind_theme_mode(
         mut self,
-        binding: impl Fn(&VM) -> Binding<ThemeMode> + Send + Sync + 'static,
+        signal: impl Fn(&VM) -> Signal<ThemeMode> + Send + Sync + 'static,
     ) -> Self {
-        self.theme_mode_binding = Some(Arc::new(binding));
+        self.theme_mode_binding = Some(Arc::new(signal));
         self
     }
 
@@ -535,7 +535,7 @@ impl<VM> WindowSpec<VM> {
         self
     }
 
-    /// Registers a window-scoped input binding.
+    /// Registers a window-scoped input command.
     pub fn on_input(mut self, trigger: InputTrigger, command: Command<VM>) -> Self {
         self.commands.push(WindowCommand { trigger, command });
         self
@@ -581,22 +581,19 @@ impl<VM> WindowSpec<VM> {
 
     pub(crate) fn build_window_bindings(&self, view_model: &VM) -> WindowBindings {
         WindowBindings {
-            title: self
-                .title_binding
-                .as_ref()
-                .map(|binding| binding(view_model)),
+            title: self.title_binding.as_ref().map(|signal| signal(view_model)),
             clear_color: self
                 .clear_color_binding
                 .as_ref()
-                .map(|binding| binding(view_model)),
+                .map(|signal| signal(view_model)),
             theme_set: self
                 .theme_set_binding
                 .as_ref()
-                .map(|binding| binding(view_model)),
+                .map(|signal| signal(view_model)),
             theme_mode: self
                 .theme_mode_binding
                 .as_ref()
-                .map(|binding| binding(view_model)),
+                .map(|signal| signal(view_model)),
         }
     }
 
@@ -651,18 +648,18 @@ where
     /// Binds the window title to view-model state.
     pub fn bind_title(
         mut self,
-        binding: impl Fn(&VM) -> Binding<String> + Send + Sync + 'static,
+        signal: impl Fn(&VM) -> Signal<String> + Send + Sync + 'static,
     ) -> Self {
-        self.title_binding = Some(Arc::new(binding));
+        self.title_binding = Some(Arc::new(signal));
         self
     }
 
     /// Binds the window clear color to view-model state.
     pub fn bind_clear_color(
         mut self,
-        binding: impl Fn(&VM) -> Binding<Color> + Send + Sync + 'static,
+        signal: impl Fn(&VM) -> Signal<Color> + Send + Sync + 'static,
     ) -> Self {
-        self.clear_color_binding = Some(Arc::new(binding));
+        self.clear_color_binding = Some(Arc::new(signal));
         self
     }
 
@@ -671,9 +668,9 @@ where
     /// Runtime theme changes are animated automatically.
     pub fn bind_theme_set(
         mut self,
-        binding: impl Fn(&VM) -> Binding<ThemeSet> + Send + Sync + 'static,
+        signal: impl Fn(&VM) -> Signal<ThemeSet> + Send + Sync + 'static,
     ) -> Self {
-        self.theme_set_binding = Some(Arc::new(binding));
+        self.theme_set_binding = Some(Arc::new(signal));
         self
     }
 
@@ -682,13 +679,13 @@ where
     /// Runtime theme changes are animated automatically.
     pub fn bind_theme_mode(
         mut self,
-        binding: impl Fn(&VM) -> Binding<ThemeMode> + Send + Sync + 'static,
+        signal: impl Fn(&VM) -> Signal<ThemeMode> + Send + Sync + 'static,
     ) -> Self {
-        self.theme_mode_binding = Some(Arc::new(binding));
+        self.theme_mode_binding = Some(Arc::new(signal));
         self
     }
 
-    /// Registers a global input binding on the application window.
+    /// Registers a global input command on the application window.
     pub fn on_input(mut self, trigger: InputTrigger, command: Command<VM>) -> Self {
         self.commands.push(WindowCommand { trigger, command });
         self

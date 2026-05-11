@@ -1,25 +1,26 @@
 use super::{
     centered_window_position_for_monitor, text_cursor_index_at_point, BoundRuntimeHandler,
-    CachedScene, WindowBindings,
+    CachedScene, FocusedWidget, WindowBindings,
 };
 use crate::animation::AnimationCoordinator;
 use crate::application::{ApplicationConfig, ThemeSelection, WindowRole};
 use crate::dialog::async_dialog_channel;
-use crate::foundation::binding::ViewModelContext;
-use crate::foundation::binding::{Binding, InvalidationSignal, TextController};
+use crate::foundation::binding::{DependencyGraph, ViewModelContext};
+use crate::foundation::binding::{InvalidationSignal, Signal, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use crate::platform::event::{ElementState, Ime, KeyEvent, MouseScrollDelta};
 use crate::platform::keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey};
+use crate::platform::window::{ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose};
 use crate::text::font::FontCatalog;
 use crate::ui::layout::{Axis, Overflow};
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::{dp, Dp, UnitContext};
 use crate::ui::widget::{
     Button, Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent, CanvasShadow,
-    CanvasStroke, Checkbox, CursorStyle, Flex, HitInteraction, Input, PathBuilder, Point, Select,
-    SelectOption, Text, TextEditState, Textarea, WidgetTree,
+    CanvasStroke, Checkbox, ContainerStyle, CursorStyle, Flex, HitInteraction, Input, PathBuilder,
+    Point, Rect, Select, SelectOption, Text, TextEditState, Textarea, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -188,6 +189,12 @@ fn flush_text_input_commits<VM: crate::foundation::view_model::ViewModel>(
     let _ = handler.flush_pending_text_input_changes();
 }
 
+fn dispatch_lifecycle_if_dirty<VM: crate::foundation::view_model::ViewModel>(
+    handler: &mut BoundRuntimeHandler<VM>,
+) {
+    handler.dispatch_lifecycle_events_if_needed();
+}
+
 fn custom_theme_set() -> (ThemeSet, Theme, Theme) {
     let mut light = Theme::light();
     light.colors.background = Color::hexa(0xEAF4FFFF);
@@ -196,6 +203,38 @@ fn custom_theme_set() -> (ThemeSet, Theme, Theme) {
     dark.colors.background = Color::hexa(0x06101DFF);
     dark.colors.primary = Color::hexa(0x66D9E8FF);
     (ThemeSet::new(light.clone(), dark.clone()), light, dark)
+}
+
+fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
+    handler: &BoundRuntimeHandler<VM>,
+    viewport: Rect,
+    units: UnitContext,
+) -> CachedScene<VM> {
+    CachedScene {
+        viewport,
+        units,
+        focused_widget: None,
+        focus_visible: false,
+        pressed_widget: None,
+        selected_text: None,
+        caret_visible: false,
+        theme_epoch: handler.theme_store.version(),
+        animation_epoch: 0,
+        layout_animation_epoch: 0,
+        scroll_epoch: 0,
+        hover_epoch: 0,
+        text_input_epoch: 0,
+        hovered_scrollbar: None,
+        active_scrollbar: None,
+        computed_valid: true,
+        layout: None,
+        computed: Default::default(),
+        lifecycle_states: Default::default(),
+        scene_chunks: Default::default(),
+        scene_chunk_parts: Default::default(),
+        visual_contexts: Default::default(),
+        dependencies: DependencyGraph::default(),
+    }
 }
 
 #[test]
@@ -238,11 +277,11 @@ fn window_control_close_request_marks_handler_for_close() {
 fn bound_theme_modes_resolve_through_configured_theme_set() {
     let invalidation = InvalidationSignal::new();
     let (theme_set, light, dark) = custom_theme_set();
-    let mode = Binding::new(|| ThemeMode::Light);
+    let mode = Signal::new(|| ThemeMode::Light, invalidation.clone());
     let mut handler = test_handler_with_config(
         TestVm,
         None,
-        invalidation,
+        invalidation.clone(),
         test_config_with_theme(ThemeSelection::System, theme_set),
     );
     handler.window_bindings.theme_mode = Some(mode);
@@ -250,7 +289,7 @@ fn bound_theme_modes_resolve_through_configured_theme_set() {
     handler.sync_theme_binding();
     assert_eq!(handler.theme, light);
 
-    handler.window_bindings.theme_mode = Some(Binding::new(|| ThemeMode::Dark));
+    handler.window_bindings.theme_mode = Some(Signal::new(|| ThemeMode::Dark, invalidation));
     handler.sync_theme_binding();
     assert_eq!(handler.theme, dark);
 }
@@ -258,19 +297,18 @@ fn bound_theme_modes_resolve_through_configured_theme_set() {
 #[test]
 fn bound_theme_set_updates_current_theme_without_mode_change() {
     let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let (theme_set, light, _dark) = custom_theme_set();
-    let themes = Arc::new(Mutex::new(theme_set));
-    let theme_binding = {
-        let themes = themes.clone();
-        Binding::new(move || themes.lock().expect("theme set lock poisoned").clone())
-    };
+    let themes = context.state(theme_set);
+    let theme_binding = themes.signal();
     let mut handler = test_handler_with_config(
         TestVm,
         None,
-        invalidation,
+        invalidation.clone(),
         test_config_with_theme(ThemeSelection::System, ThemeSet::default()),
     );
-    handler.window_bindings.theme_mode = Some(Binding::new(|| ThemeMode::Light));
+    handler.window_bindings.theme_mode =
+        Some(Signal::new(|| ThemeMode::Light, invalidation.clone()));
     handler.window_bindings.theme_set = Some(theme_binding);
 
     handler.sync_theme_binding();
@@ -279,7 +317,9 @@ fn bound_theme_set_updates_current_theme_without_mode_change() {
     let mut updated_light = Theme::light();
     updated_light.colors.background = Color::hexa(0xFFFFFFFF);
     updated_light.colors.primary = Color::hexa(0xFFAA00FF);
-    themes.lock().expect("theme set lock poisoned").light = Arc::new(updated_light.clone());
+    themes.update(|themes| {
+        themes.light = Arc::new(updated_light.clone());
+    });
 
     handler.sync_theme_binding();
     assert_eq!(handler.theme, updated_light);
@@ -291,10 +331,13 @@ fn hover_path_reuses_cached_computed_scene() {
     let resolve_count = Arc::new(AtomicUsize::new(0));
     let child = {
         let resolve_count = resolve_count.clone();
-        Binding::new(move || {
-            resolve_count.fetch_add(1, Ordering::SeqCst);
-            Text::new("hover").cursor(CursorStyle::Pointer)
-        })
+        Signal::new(
+            move || {
+                resolve_count.fetch_add(1, Ordering::SeqCst);
+                Text::new("hover").cursor(CursorStyle::Pointer)
+            },
+            invalidation.clone(),
+        )
     };
     let tree = WidgetTree::new(Flex::new(Axis::Vertical).child(child));
     let mut handler = test_handler(Some(tree), invalidation);
@@ -354,7 +397,10 @@ fn scrollbar_hover_preserves_cached_layout_for_hover_recompute() {
     });
 
     assert!(handler.sync_scrollbar_hover());
-    assert_eq!(handler.hovered_scrollbar.map(|handle| handle.id), Some(region.id));
+    assert_eq!(
+        handler.hovered_scrollbar.map(|handle| handle.id),
+        Some(region.id)
+    );
     assert!(handler.cached_scene.is_some());
 }
 
@@ -363,24 +409,7 @@ fn scene_cache_invalidates_when_units_change() {
     let invalidation = InvalidationSignal::new();
     let handler = test_handler(None, invalidation);
     let viewport = handler.viewport_rect();
-    let cached = CachedScene::<TestVm> {
-        viewport,
-        units: UnitContext::new(1.0, 1.0),
-        focused_widget: None,
-        focus_visible: false,
-        pressed_widget: None,
-        selected_text: None,
-        caret_visible: false,
-        animation_epoch: 0,
-        layout_animation_epoch: 0,
-        scroll_epoch: 0,
-        hover_epoch: 0,
-        text_input_epoch: 0,
-        hovered_scrollbar: None,
-        active_scrollbar: None,
-        layout: None,
-        computed: Default::default(),
-    };
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
 
     assert!(!handler.scene_cache_matches(
         &cached,
@@ -396,28 +425,46 @@ fn scene_layout_cache_survives_visual_only_animation_epoch_change() {
     let invalidation = InvalidationSignal::new();
     let mut handler = test_handler(None, invalidation);
     let viewport = handler.viewport_rect();
-    let cached = CachedScene::<TestVm> {
-        viewport,
-        units: UnitContext::new(1.0, 1.0),
-        focused_widget: None,
-        focus_visible: false,
-        pressed_widget: None,
-        selected_text: None,
-        caret_visible: false,
-        animation_epoch: 0,
-        layout_animation_epoch: 0,
-        scroll_epoch: 0,
-        hover_epoch: 0,
-        text_input_epoch: 0,
-        hovered_scrollbar: None,
-        active_scrollbar: None,
-        layout: None,
-        computed: Default::default(),
-    };
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
 
     handler.animation_epoch = 1;
 
     assert!(handler.scene_layout_cache_matches(&cached, viewport, UnitContext::new(1.0, 1.0),));
+}
+
+#[test]
+fn theme_animation_invalidates_cached_layout() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    let viewport = handler.viewport_rect();
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
+
+    handler.layout_animation_epoch = 1;
+
+    assert!(!handler.scene_layout_cache_matches(&cached, viewport, UnitContext::new(1.0, 1.0),));
+}
+
+#[test]
+fn theme_mode_change_invalidates_cached_layout_when_theme_changes() {
+    let invalidation = InvalidationSignal::new();
+    let mode = Signal::new(|| ThemeMode::Light, invalidation.clone());
+    let (theme_set, _light, _dark) = custom_theme_set();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        None,
+        invalidation.clone(),
+        test_config_with_theme(ThemeSelection::System, theme_set),
+    );
+    handler.window_bindings.theme_mode = Some(mode);
+    handler.sync_theme_binding();
+
+    let viewport = handler.viewport_rect();
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
+
+    handler.window_bindings.theme_mode = Some(Signal::new(|| ThemeMode::Dark, invalidation));
+    handler.sync_theme_binding();
+
+    assert!(!handler.scene_layout_cache_matches(&cached, viewport, UnitContext::new(1.0, 1.0),));
 }
 
 #[test]
@@ -450,28 +497,674 @@ fn animation_scene_invalidation_preserves_cached_layout() {
 }
 
 #[test]
+fn unrelated_state_update_preserves_cached_scene() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let unrelated = context.state(0);
+    let tree = WidgetTree::new(Text::new("stable"));
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    assert!(handler.cached_scene.is_some());
+
+    unrelated.set(1);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    assert!(handler.cached_scene.is_some());
+}
+
+#[test]
+fn unrelated_state_update_does_not_rescan_lifecycle_handlers() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let unrelated = context.state(0);
+    let probe = context.state(true);
+    let probe_reads = Arc::new(AtomicUsize::new(0));
+    let probe_signal = probe.signal().map({
+        let probe_reads = probe_reads.clone();
+        move |visible| {
+            probe_reads.fetch_add(1, Ordering::SeqCst);
+            visible
+        }
+    });
+    let tree = WidgetTree::new(Stack::<TestVm>::new().child(probe_signal.map(
+        |visible| -> Element<TestVm> {
+            if visible {
+                Text::new("stable").into()
+            } else {
+                Text::new("hidden").into()
+            }
+        },
+    )));
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    let baseline = probe_reads.load(Ordering::SeqCst);
+
+    unrelated.set(1);
+    handler.dispatch_lifecycle_events_if_needed();
+
+    assert_eq!(probe_reads.load(Ordering::SeqCst), baseline);
+}
+
+#[test]
+fn text_input_update_without_lifecycle_handlers_does_not_rescan_tree() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let controller = context.text_controller("hello");
+    let probe = context.state(true);
+    let probe_reads = Arc::new(AtomicUsize::new(0));
+    let probe_signal = probe.signal().map({
+        let probe_reads = probe_reads.clone();
+        move |visible| {
+            probe_reads.fetch_add(1, Ordering::SeqCst);
+            visible
+        }
+    });
+    let tree = WidgetTree::new(
+        Stack::<TestVm>::new()
+            .child(probe_signal.map(|visible| -> Element<TestVm> {
+                if visible {
+                    Text::new("stable").into()
+                } else {
+                    Text::new("hidden").into()
+                }
+            }))
+            .child(Textarea::new(controller)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+    let baseline = probe_reads.load(Ordering::SeqCst);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    handler.handle_keyboard_input(&text_key_event("a"));
+    flush_text_input_commits(&mut handler);
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    assert_eq!(probe_reads.load(Ordering::SeqCst), baseline);
+}
+
+#[test]
+fn set_definition_for_existing_window_preserves_cached_scene() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Textarea::<TestVm>::new("line 0\nline 1\nline 2\nline 3\nline 4\nline 5").height(dp(52.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    assert!(handler.cached_scene.is_some());
+    assert!(!handler.text_input_regions.is_empty());
+
+    handler.set_definition(
+        WindowRole::Main,
+        test_config(),
+        WindowBindings::default(),
+        Vec::new(),
+        crate::application::WindowClosePolicy::Close,
+    );
+
+    assert!(handler.cached_scene.is_some());
+    assert!(!handler.text_input_regions.is_empty());
+}
+
+#[test]
+fn scene_only_dependency_update_preserves_cached_layout() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let checked = context.state(false);
+    let tree = WidgetTree::new(Checkbox::new(checked.signal()));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let units = handler.unit_context();
+
+    let _ = handler.computed_scene();
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cache| cache.layout.as_ref())
+        .is_some());
+
+    checked.set(true);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("scene-only invalidation should keep the cache shell");
+    assert!(cached.layout.is_some());
+    assert!(cached.computed_valid);
+    assert!(handler.scene_layout_cache_matches(cached, viewport, units));
+}
+
+#[test]
+fn layout_dependency_update_preserves_cached_layout_shell() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let label = context.state(String::from("short"));
+    let tree = WidgetTree::new(Text::new(label.signal()));
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cache| cache.layout.as_ref())
+        .is_some());
+
+    label.set(String::from("a much longer label"));
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("layout subtree patch should keep the cache shell");
+    assert!(cached.layout.is_some());
+    assert!(cached.computed_valid);
+}
+
+#[test]
+fn dynamic_child_dependency_update_preserves_cached_layout_shell() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let visible = context.state(true);
+    let tree = WidgetTree::new(
+        Stack::<TestVm>::new().child(visible.signal().map(|visible| {
+            if visible {
+                Text::new("shown")
+            } else {
+                Text::new("hidden")
+            }
+        })),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cache| cache.layout.as_ref())
+        .is_some());
+
+    visible.set(false);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("dynamic child subtree patch should keep the cache shell");
+    assert!(cached.layout.is_some());
+    assert!(cached.computed_valid);
+}
+
+#[test]
+fn leaf_dependency_update_does_not_rebuild_unaffected_sibling_chunk() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let changed = context.state(String::from("short"));
+    let sibling_state = context.state(0);
+    let sibling_reads = Arc::new(AtomicUsize::new(0));
+    let sibling_background = {
+        let sibling_reads = sibling_reads.clone();
+        sibling_state.signal().map(move |_| {
+            sibling_reads.fetch_add(1, Ordering::SeqCst);
+            Color::WHITE
+        })
+    };
+    let changed_button: Element<TestVm> = Button::new(changed.signal()).key("changed").into();
+    let sibling_surface: Element<TestVm> = Stack::new()
+        .size(dp(24.0), dp(24.0))
+        .style(move |mode| {
+            let mut style = ContainerStyle::default_for(mode);
+            style.surface.background = Some(sibling_background.clone().into());
+            style
+        })
+        .into();
+    let stack: Element<TestVm> = Stack::new().child([changed_button, sibling_surface]).into();
+    let tree = WidgetTree::new(stack);
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+
+    let _ = handler.computed_scene();
+    assert_eq!(sibling_reads.load(Ordering::SeqCst), 1);
+
+    changed.set(String::from("a much longer label"));
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("cached scene should remain available");
+    assert!(cached.computed_valid);
+    assert_eq!(sibling_reads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn lifecycle_mount_dispatches_once_without_update() {
+    let invalidation = InvalidationSignal::new();
+    invalidation.mark_dirty();
+    let tree = WidgetTree::new(
+        Text::new("hello")
+            .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+            .on_update(Command::new(|vm: &mut LifecycleVm| vm.updates += 1)),
+    );
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(vm.mounts, 1);
+    assert_eq!(vm.updates, 0);
+    assert_eq!(vm.unmounts, 0);
+}
+
+#[test]
+fn lifecycle_mount_command_invalidation_does_not_remount_same_component() {
+    let invalidation = InvalidationSignal::new();
+    invalidation.mark_dirty();
+    let tree = WidgetTree::new(
+        Text::new("hello")
+            .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+            .on_update(Command::new(|vm: &mut LifecycleVm| vm.updates += 1)),
+    );
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    dispatch_lifecycle_if_dirty(&mut handler);
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(vm.mounts, 1);
+    assert_eq!(vm.updates, 0);
+    assert_eq!(vm.unmounts, 0);
+}
+
+#[test]
+fn lifecycle_update_command_without_state_change_does_not_loop() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let label = context.state(String::from("first"));
+    let tree = WidgetTree::new(
+        Text::new(label.signal())
+            .key("stable")
+            .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+            .on_update(Command::new(|vm: &mut LifecycleVm| vm.updates += 1)),
+    );
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    label.set(String::from("second"));
+    dispatch_lifecycle_if_dirty(&mut handler);
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(vm.mounts, 1);
+    assert_eq!(vm.updates, 1);
+    assert_eq!(vm.unmounts, 0);
+}
+
+#[test]
+fn lifecycle_update_dispatches_for_rebuilt_stable_identity() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let label = context.state(String::from("first"));
+    let tree = WidgetTree::new(
+        Text::new(label.signal())
+            .key("stable")
+            .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+            .on_update(Command::new(|vm: &mut LifecycleVm| vm.updates += 1)),
+    );
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    label.set(String::from("second"));
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(vm.mounts, 1);
+    assert_eq!(vm.updates, 1);
+    assert_eq!(vm.unmounts, 0);
+}
+
+#[test]
+fn lifecycle_update_only_dispatches_for_changed_widget() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::from("hi");
+
+    let root_updates = Arc::new(AtomicUsize::new(0));
+    let area_updates = Arc::new(AtomicUsize::new(0));
+    let textarea_updates = Arc::new(AtomicUsize::new(0));
+
+    let root_updates_capture = root_updates.clone();
+    let area_updates_capture = area_updates.clone();
+    let textarea_updates_capture = textarea_updates.clone();
+
+    let tree = WidgetTree::new(
+        Stack::<LifecycleVm>::new()
+            .on_update(Command::new(move |_vm: &mut LifecycleVm| {
+                root_updates_capture.fetch_add(1, Ordering::SeqCst);
+            }))
+            .child(
+                Stack::<LifecycleVm>::new()
+                    .on_update(Command::new(move |_vm: &mut LifecycleVm| {
+                        area_updates_capture.fetch_add(1, Ordering::SeqCst);
+                    }))
+                    .child(Textarea::new(controller).on_update(Command::new(
+                        move |_vm: &mut LifecycleVm| {
+                            textarea_updates_capture.fetch_add(1, Ordering::SeqCst);
+                        },
+                    ))),
+            ),
+    );
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    handler.handle_keyboard_input(&text_key_event("a"));
+    flush_text_input_commits(&mut handler);
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    assert_eq!(root_updates.load(Ordering::SeqCst), 0);
+    assert_eq!(area_updates.load(Ordering::SeqCst), 0);
+    assert_eq!(textarea_updates.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn lifecycle_unmount_dispatches_when_component_is_removed() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let visible = context.state(true);
+    let tree = WidgetTree::new(Stack::<LifecycleVm>::new().child(visible.signal().map(
+        |visible| {
+            let element: Element<LifecycleVm> = if visible {
+                Text::new("shown")
+                    .key("tracked")
+                    .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+                    .on_unmount(Command::new(|vm: &mut LifecycleVm| vm.unmounts += 1))
+                    .into()
+            } else {
+                Stack::<LifecycleVm>::new().into()
+            };
+            element
+        },
+    )));
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    visible.set(false);
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(vm.mounts, 1);
+    assert_eq!(vm.unmounts, 1);
+    assert_eq!(vm.updates, 0);
+}
+
+#[test]
+fn textarea_show_scrollbar_dependency_update_preserves_cached_layout() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let show_scrollbar = context.state(false);
+    let tree = WidgetTree::new(
+        Textarea::new("line 0\nline 1\nline 2\nline 3")
+            .height(dp(52.0))
+            .show_scrollbar(show_scrollbar.signal()),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let units = handler.unit_context();
+
+    let _ = handler.computed_scene();
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cache| cache.layout.as_ref())
+        .is_some());
+
+    show_scrollbar.set(true);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("scene-only invalidation should keep the cache shell");
+    assert!(cached.layout.is_some());
+    assert!(cached.computed_valid);
+    assert!(handler.scene_layout_cache_matches(cached, viewport, units));
+}
+
+#[test]
+fn textarea_auto_wrap_dependency_update_preserves_cached_layout() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let auto_wrap = context.state(false);
+    let tree = WidgetTree::new(
+        Textarea::new("a very long line of text that should change the measured content")
+            .height(dp(52.0))
+            .auto_wrap(auto_wrap.signal()),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cache| cache.layout.as_ref())
+        .is_some());
+
+    auto_wrap.set(true);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("scene-only invalidation should keep the cache shell");
+    assert!(cached.layout.is_some());
+    assert!(cached.computed_valid);
+    assert!(handler.scene_layout_cache_matches(
+        cached,
+        handler.viewport_rect(),
+        handler.unit_context()
+    ));
+}
+
+#[test]
+fn canvas_items_dependency_update_preserves_cached_layout_shell() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let expanded = context.state(false);
+    let tree = WidgetTree::new(Canvas::new(expanded.signal().map(|expanded| {
+        let width = if expanded { 96.0 } else { 48.0 };
+        vec![CanvasItem::Path(
+            CanvasPath::new(
+                1_u64,
+                PathBuilder::new()
+                    .move_to(0.0, 0.0)
+                    .line_to(width, 0.0)
+                    .line_to(width, 24.0)
+                    .line_to(0.0, 24.0)
+                    .close(),
+            )
+            .fill(Color::WHITE),
+        )]
+    })));
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cache| cache.layout.as_ref())
+        .is_some());
+
+    expanded.set(true);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("canvas subtree patch should keep the cache shell");
+    assert!(cached.layout.is_some());
+    assert!(cached.computed_valid);
+}
+
+#[test]
+fn removing_opaque_dependency_subtree_clears_global_fallback() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let visible = context.state(false);
+    let checked = context.state(false);
+    let backing = Arc::new(Mutex::new(String::from("first")));
+    let opaque = {
+        let backing = backing.clone();
+        context.signal(move || backing.lock().expect("test signal lock poisoned").clone())
+    };
+    let tree = WidgetTree::new(
+        Stack::<TestVm>::new()
+            .child(visible.signal().map({
+                let opaque = opaque.clone();
+                move |visible| {
+                    let element: Element<TestVm> = if visible {
+                        Text::new(opaque.clone()).key("opaque").into()
+                    } else {
+                        Text::new("static").key("static").into()
+                    };
+                    element
+                }
+            }))
+            .child(Checkbox::new(checked.signal())),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    let root_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cache| cache.layout.as_ref())
+        .expect("cached layout should exist")
+        .root_id();
+
+    visible.set(true);
+    assert!(handler.patch_cached_layout_for_roots(&[root_id], Instant::now()));
+    assert!(handler.patch_cached_scene_for_roots(&[root_id], Instant::now(), true));
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .expect("patched cache should remain available")
+        .dependencies
+        .has_global_dependency());
+
+    visible.set(false);
+    assert!(handler.patch_cached_layout_for_roots(&[root_id], Instant::now()));
+    assert!(handler.patch_cached_scene_for_roots(&[root_id], Instant::now(), true));
+    assert!(!handler
+        .cached_scene
+        .as_ref()
+        .expect("patched cache should remain available")
+        .dependencies
+        .has_global_dependency());
+
+    checked.set(true);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("scene-only invalidation should stay local after opaque removal");
+    assert!(cached.computed_valid);
+}
+
+#[test]
+fn opaque_signal_dirty_update_falls_back_to_full_scene_invalidation() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let backing = Arc::new(Mutex::new(String::from("first")));
+    let signal = {
+        let backing = backing.clone();
+        context.signal(move || backing.lock().expect("test signal lock poisoned").clone())
+    };
+    let tree = WidgetTree::new(Text::new(signal));
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+
+    let _ = handler.computed_scene();
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cache| cache.layout.as_ref())
+        .is_some());
+
+    *backing.lock().expect("test signal lock poisoned") = String::from("second");
+    invalidation.mark_dirty();
+    handler.request_redraw_if_dirty(Instant::now());
+
+    assert!(handler.cached_scene.is_none());
+}
+
+#[test]
 fn scene_cache_invalidates_when_pressed_widget_changes() {
     let invalidation = InvalidationSignal::new();
     let mut handler = test_handler(None, invalidation);
     let viewport = handler.viewport_rect();
-    let cached = CachedScene::<TestVm> {
-        viewport,
-        units: UnitContext::new(1.0, 1.0),
-        focused_widget: None,
-        focus_visible: false,
-        pressed_widget: None,
-        selected_text: None,
-        caret_visible: false,
-        animation_epoch: 0,
-        layout_animation_epoch: 0,
-        scroll_epoch: 0,
-        hover_epoch: 0,
-        text_input_epoch: 0,
-        hovered_scrollbar: None,
-        active_scrollbar: None,
-        layout: None,
-        computed: Default::default(),
-    };
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
 
     handler.pressed_widget = Some(WidgetId::next());
 
@@ -489,24 +1182,7 @@ fn scene_cache_invalidates_when_focused_widget_changes() {
     let invalidation = InvalidationSignal::new();
     let mut handler = test_handler(None, invalidation);
     let viewport = handler.viewport_rect();
-    let cached = CachedScene::<TestVm> {
-        viewport,
-        units: UnitContext::new(1.0, 1.0),
-        focused_widget: None,
-        focus_visible: false,
-        pressed_widget: None,
-        selected_text: None,
-        caret_visible: false,
-        animation_epoch: 0,
-        layout_animation_epoch: 0,
-        scroll_epoch: 0,
-        hover_epoch: 0,
-        text_input_epoch: 0,
-        hovered_scrollbar: None,
-        active_scrollbar: None,
-        layout: None,
-        computed: Default::default(),
-    };
+    let cached = cached_scene_shell(&handler, viewport, UnitContext::new(1.0, 1.0));
 
     handler.focused_widget = Some(super::FocusedWidget {
         widget_id: WidgetId::next(),
@@ -752,6 +1428,7 @@ fn dragging_selectable_text_updates_selection_range() {
             &text,
             false,
             false,
+            false,
             Point::ZERO,
             Point {
                 x: frame.x + frame.width - 1.0,
@@ -904,9 +1581,11 @@ fn clicking_checkbox_dispatches_toggled_value() {
 #[test]
 fn focused_input_receives_inserted_text_via_on_change() {
     let invalidation = InvalidationSignal::new();
-    let tree = WidgetTree::new(Input::new("hi").on_change(ValueCommand::new(
-        |vm: &mut TextInputVm, value| {
-            vm.value = value;
+    let controller = TextController::from("hi");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Input::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
         },
     )));
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
@@ -938,9 +1617,11 @@ fn focused_input_receives_inserted_text_via_on_change() {
 #[test]
 fn focused_input_accepts_repeated_text_input() {
     let invalidation = InvalidationSignal::new();
-    let tree = WidgetTree::new(Input::new("hi").on_change(ValueCommand::new(
-        |vm: &mut TextInputVm, value| {
-            vm.value = value;
+    let controller = TextController::from("hi");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Input::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
         },
     )));
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
@@ -970,14 +1651,54 @@ fn focused_input_accepts_repeated_text_input() {
 }
 
 #[test]
+fn focused_text_overrides_use_session_text_without_local_edits() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::from("hello world");
+    let tree = WidgetTree::new(Input::new(controller));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let focused_id = handler
+        .focused_text_input_id()
+        .expect("input should be focused after click");
+    let (text, layout) = BoundRuntimeHandler::<TextInputVm>::focused_text_overrides(
+        &handler.text_input_buffers,
+        Some(focused_id),
+        handler.text_edit_state(focused_id),
+    );
+
+    assert_eq!(text, Some("hello world"));
+    assert!(layout.is_some());
+}
+
+#[test]
 fn focused_input_batches_change_set_until_flush() {
     let invalidation = InvalidationSignal::new();
     let callback_count = Arc::new(AtomicUsize::new(0));
     let callback_count_capture = callback_count.clone();
-    let tree = WidgetTree::new(Input::new("hi").on_change_set(ValueCommand::new(
-        move |vm: &mut TextInputVm, change_set: crate::mvvm::TextChangeSet| {
+    let controller = TextController::from("hi");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Input::new(controller).on_change_set(ValueCommand::new(
+        move |vm: &mut TextInputVm, _change_set: crate::mvvm::TextChangeSet| {
             callback_count_capture.fetch_add(1, Ordering::SeqCst);
-            vm.value = change_set.text;
+            vm.value = callback_controller.text();
         },
     )));
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
@@ -1012,11 +1733,403 @@ fn focused_input_batches_change_set_until_flush() {
 }
 
 #[test]
+fn textarea_on_change_does_not_force_global_invalidation() {
+    let invalidation = InvalidationSignal::new();
+    let callback_count = Arc::new(AtomicUsize::new(0));
+    let callback_count_capture = callback_count.clone();
+    let controller = TextController::from("hi");
+    let tree = WidgetTree::new(Textarea::new(controller).on_change(Command::new(
+        move |_vm: &mut TextInputVm| {
+            callback_count_capture.fetch_add(1, Ordering::SeqCst);
+        },
+    )));
+    let mut handler =
+        test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation.clone());
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    let revision_before = invalidation.revision();
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&text_key_event("a"));
+    flush_text_input_commits(&mut handler);
+
+    assert_eq!(callback_count.load(Ordering::SeqCst), 1);
+    assert_eq!(invalidation.revision(), revision_before);
+}
+
+#[test]
+fn textarea_edit_keeps_cached_scene_shell_for_text_input_patch() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::from("hi");
+    let tree = WidgetTree::new(Textarea::new(controller));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+    handler.last_invalidation_revision = handler.invalidation.revision();
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert!(handler.focused_text_input_id().is_some());
+    handler.handle_keyboard_input(&text_key_event("a"));
+    flush_text_input_commits(&mut handler);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("text edit should preserve the cached scene shell");
+    assert!(cached.computed_valid);
+    assert!(cached.layout.is_some());
+    assert_eq!(cached.text_input_epoch, handler.text_input_epoch);
+
+    let _ = handler.computed_scene();
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("computed scene should remain cached after text patch");
+    assert!(cached.computed_valid);
+    assert_eq!(cached.text_input_epoch, handler.text_input_epoch);
+}
+
+#[test]
+fn textarea_on_change_set_does_not_force_global_invalidation() {
+    let invalidation = InvalidationSignal::new();
+    let callback_count = Arc::new(AtomicUsize::new(0));
+    let callback_count_capture = callback_count.clone();
+    let controller = TextController::from("hi");
+    let tree = WidgetTree::new(Textarea::new(controller).on_change_set(ValueCommand::new(
+        move |_vm: &mut TextInputVm, change_set: crate::mvvm::TextChangeSet| {
+            assert!(!change_set.changes.is_empty());
+            callback_count_capture.fetch_add(1, Ordering::SeqCst);
+        },
+    )));
+    let mut handler =
+        test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation.clone());
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    let revision_before = invalidation.revision();
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&text_key_event("a"));
+    flush_text_input_commits(&mut handler);
+
+    assert_eq!(callback_count.load(Ordering::SeqCst), 1);
+    assert_eq!(invalidation.revision(), revision_before);
+}
+
+#[test]
+fn textarea_on_change_state_update_does_not_rescan_unrelated_signal() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let unrelated = context.state(0usize);
+    let probe = context.state(true);
+    let probe_reads = Arc::new(AtomicUsize::new(0));
+    let probe_signal = probe.signal().map({
+        let probe_reads = probe_reads.clone();
+        move |visible| {
+            probe_reads.fetch_add(1, Ordering::SeqCst);
+            visible
+        }
+    });
+    let controller = TextController::from("hi");
+    let unrelated_for_command = unrelated.clone();
+    let tree = WidgetTree::new(
+        Flex::<TextInputVm>::vertical()
+            .child(
+                Textarea::new(controller)
+                    .height(dp(80.0))
+                    .on_change(Command::new(move |_vm: &mut TextInputVm| {
+                        unrelated_for_command.set(unrelated_for_command.get() + 1);
+                    })),
+            )
+            .child(probe_signal.map(|visible| -> Element<TextInputVm> {
+                if visible {
+                    Text::new("stable").into()
+                } else {
+                    Text::new("hidden").into()
+                }
+            })),
+    );
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+    let baseline = probe_reads.load(Ordering::SeqCst);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&text_key_event("a"));
+    flush_text_input_commits(&mut handler);
+    handler.request_redraw_if_dirty(Instant::now());
+    let _ = handler.computed_scene();
+
+    assert_eq!(probe_reads.load(Ordering::SeqCst), baseline);
+}
+
+#[test]
+fn textarea_on_change_state_update_keeps_text_input_scene_in_sync() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let change_count = context.state(0usize);
+    let controller = TextController::from("hi");
+    let change_count_for_command = change_count.clone();
+    let tree = WidgetTree::new(
+        Flex::<TextInputVm>::vertical()
+            .width(dp(180.0))
+            .height(dp(120.0))
+            .child(
+                Text::new(
+                    change_count
+                        .signal()
+                        .map(|count| format!("count={count}")),
+                ),
+            )
+            .child(
+                Textarea::new(controller)
+                    .width(dp(180.0))
+                    .height(dp(80.0))
+                    .on_change(Command::new(move |_vm: &mut TextInputVm| {
+                        change_count_for_command.set(change_count_for_command.get() + 1);
+                    })),
+            ),
+    );
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true,
+                    on_change,
+                    ..
+                } => {
+                    assert!(on_change.is_some());
+                    Some(region.rect)
+                }
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+    handler.last_invalidation_revision = handler.invalidation.revision();
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert!(handler.focused_text_input_id().is_some());
+    assert!(handler.handle_keyboard_input(&text_key_event("a")));
+    let focused_id = handler
+        .focused_text_input_id()
+        .expect("textarea should stay focused");
+    assert!(handler
+        .text_input_buffers
+        .get(&focused_id)
+        .map(|session| !session.pending_changes.is_empty())
+        .unwrap_or(false));
+    let flush_outcome = handler.flush_pending_text_input_changes();
+    assert!(flush_outcome.changed);
+    assert_eq!(change_count.get(), 1);
+    let (dirty_kind, dirty_dependencies) = handler
+        .invalidation
+        .dirty_dependencies_since(handler.last_invalidation_revision);
+    assert!(
+        matches!(
+            dirty_kind,
+            crate::foundation::binding::DirtyDependencySet::Dependencies { .. }
+        ),
+        "{dirty_kind:?}"
+    );
+    assert!(!dirty_dependencies.is_empty());
+    let action = handler.invalidate_cached_scene_for_dependencies(
+        dirty_kind,
+        &dirty_dependencies,
+        Instant::now(),
+    );
+    assert_ne!(action, "unrelated");
+    handler.last_invalidation_revision = handler.invalidation.revision();
+    handler.sync_bindings(Instant::now());
+
+    let computed = handler.computed_scene();
+    let texts = computed
+        .scene
+        .texts
+        .iter()
+        .map(|primitive| primitive.content.clone())
+        .collect::<Vec<_>>();
+    assert!(texts.iter().any(|content| content.contains('a') && content.contains("hi")), "{texts:?}");
+    assert!(texts.iter().any(|content| content == "count=1"), "{texts:?}");
+}
+
+#[test]
+fn textarea_on_change_state_update_does_not_resolve_unrelated_dynamic_sibling() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let change_count = context.state(0usize);
+    let probe = context.state(true);
+    let probe_reads = Arc::new(AtomicUsize::new(0));
+    let probe_signal = probe.signal().map({
+        let probe_reads = probe_reads.clone();
+        move |visible| -> Element<TextInputVm> {
+            probe_reads.fetch_add(1, Ordering::SeqCst);
+            if visible {
+                Text::new("stable").into()
+            } else {
+                Text::new("hidden").into()
+            }
+        }
+    });
+    let controller = TextController::from("hi");
+    let change_count_for_command = change_count.clone();
+    let tree = WidgetTree::new(
+        Flex::<TextInputVm>::vertical()
+            .width(dp(180.0))
+            .height(dp(140.0))
+            .child(probe_signal)
+            .child(Text::new(
+                change_count.signal().map(|count| format!("count={count}")),
+            ))
+            .child(
+                Textarea::new(controller)
+                    .width(dp(180.0))
+                    .height(dp(80.0))
+                    .on_change(Command::new(move |_vm: &mut TextInputVm| {
+                        change_count_for_command.set(change_count_for_command.get() + 1);
+                    })),
+            ),
+    );
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+    let baseline = probe_reads.load(Ordering::SeqCst);
+    handler.last_invalidation_revision = handler.invalidation.revision();
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert!(handler.handle_keyboard_input(&text_key_event("a")));
+    flush_text_input_commits(&mut handler);
+    let (dirty_kind, dirty_dependencies) = handler
+        .invalidation
+        .dirty_dependencies_since(handler.last_invalidation_revision);
+    assert!(
+        matches!(
+            dirty_kind,
+            crate::foundation::binding::DirtyDependencySet::Dependencies { .. }
+        ),
+        "{dirty_kind:?}"
+    );
+    let action = handler.invalidate_cached_scene_for_dependencies(
+        dirty_kind,
+        &dirty_dependencies,
+        Instant::now(),
+    );
+    assert_eq!(action, "scene_subtree_patch", "{action}");
+    handler.last_invalidation_revision = handler.invalidation.revision();
+    handler.sync_bindings(Instant::now());
+
+    let computed = handler.computed_scene();
+    let texts = computed
+        .scene
+        .texts
+        .iter()
+        .map(|primitive| primitive.content.clone())
+        .collect::<Vec<_>>();
+
+    assert_eq!(probe_reads.load(Ordering::SeqCst), baseline);
+    assert!(texts.iter().any(|content| content.contains('a') && content.contains("hi")), "{texts:?}");
+    assert!(texts.iter().any(|content| content == "count=1"), "{texts:?}");
+}
+
+#[test]
 fn input_backspace_preserves_multibyte_boundaries_with_rope_buffer() {
     let invalidation = InvalidationSignal::new();
-    let tree = WidgetTree::new(Input::new("a中🙂b").on_change(ValueCommand::new(
-        |vm: &mut TextInputVm, value| {
-            vm.value = value;
+    let controller = TextController::from("a中🙂b");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Input::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
         },
     )));
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
@@ -1066,9 +2179,11 @@ fn input_backspace_preserves_multibyte_boundaries_with_rope_buffer() {
 #[test]
 fn input_backspace_repeats_while_key_is_held() {
     let invalidation = InvalidationSignal::new();
-    let tree = WidgetTree::new(Input::new("abcd").on_change(ValueCommand::new(
-        |vm: &mut TextInputVm, value| {
-            vm.value = value;
+    let controller = TextController::from("abcd");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Input::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
         },
     )));
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
@@ -1103,9 +2218,11 @@ fn input_backspace_repeats_while_key_is_held() {
 #[test]
 fn repeated_backspace_keeps_deleting_when_widget_value_is_static() {
     let invalidation = InvalidationSignal::new();
-    let tree = WidgetTree::new(Input::new("abcd").on_change(ValueCommand::new(
-        |vm: &mut TextInputVm, value| {
-            vm.value = value;
+    let controller = TextController::from("abcd");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Input::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
         },
     )));
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
@@ -1159,9 +2276,11 @@ fn repeated_backspace_keeps_deleting_when_widget_value_is_static() {
 #[test]
 fn focused_input_renders_local_buffer_until_bound_value_catches_up() {
     let invalidation = InvalidationSignal::new();
-    let tree = WidgetTree::new(Input::new("abcd").on_change(ValueCommand::new(
-        |vm: &mut TextInputVm, value| {
-            vm.value = value;
+    let controller = TextController::from("abcd");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Input::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
         },
     )));
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
@@ -1198,9 +2317,11 @@ fn focused_input_renders_local_buffer_until_bound_value_catches_up() {
 #[test]
 fn textarea_replaces_multibyte_selection_via_rope_buffer() {
     let invalidation = InvalidationSignal::new();
-    let tree = WidgetTree::new(Textarea::new("ab中🙂cd").on_change(ValueCommand::new(
-        |vm: &mut TextInputVm, value| {
-            vm.value = value;
+    let controller = TextController::from("ab中🙂cd");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Textarea::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
         },
     )));
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
@@ -1250,9 +2371,11 @@ fn textarea_replaces_multibyte_selection_via_rope_buffer() {
 #[test]
 fn ime_commit_replaces_multibyte_selection_with_rope_buffer() {
     let invalidation = InvalidationSignal::new();
-    let tree = WidgetTree::new(Input::new("你a好").on_change(ValueCommand::new(
-        |vm: &mut TextInputVm, value| {
-            vm.value = value;
+    let controller = TextController::from("你a好");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Input::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
         },
     )));
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
@@ -1302,6 +2425,191 @@ fn ime_commit_replaces_multibyte_selection_with_rope_buffer() {
     flush_text_input_commits(&mut handler);
     let value = handler.with_view_model(|vm| vm.value.clone());
     assert_eq!(value, "你🙂好");
+}
+
+#[test]
+fn textarea_ime_composition_ignores_keyboard_text_until_commit() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::from("");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Textarea::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    assert!(handler.handle_ime_event(&Ime::Preedit(
+        "ni".to_string(),
+        Some((0, "ni".len())),
+    )));
+    assert!(!handler.handle_keyboard_input(&text_key_event("n")));
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should stay focused during composition");
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("composition state should exist");
+    assert_eq!(state.composition.as_ref().map(|composition| composition.text.as_str()), Some("ni"));
+
+    assert!(handler.handle_ime_event(&Ime::Commit("你".to_string())));
+    flush_text_input_commits(&mut handler);
+
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value, "你");
+}
+
+#[test]
+fn textarea_ime_preedit_updates_session_display_layout_snapshot() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Textarea::<TestVm>::new("hello world").height(dp(120.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should stay focused during composition");
+    let _ = handler.sync_text_input_buffer(text_id);
+
+    assert!(handler.handle_ime_event(&Ime::Preedit(
+        "ni".to_string(),
+        Some((0, "ni".len())),
+    )));
+
+    let session = handler
+        .text_input_buffers
+        .get(&text_id)
+        .expect("textarea text input session should exist");
+    assert_eq!(session.current_text, "hello world");
+    assert_eq!(session.display_text, "nihello world");
+    let layout = session
+        .layout_snapshot
+        .as_ref()
+        .expect("textarea layout snapshot should exist during composition");
+    assert_eq!(layout.line_start(0), 0);
+    assert_eq!(layout.line_end(0), session.display_text.len());
+}
+
+#[test]
+fn textarea_ime_request_uses_normal_text_purpose() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Textarea::<TestVm>::new("你好").key("textarea"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let request_data = handler
+        .ime_request_data_for_text_input()
+        .expect("focused textarea should request ime data");
+    assert_eq!(
+        request_data.hint_and_purpose,
+        Some((ImeHint::NONE, ImePurpose::Normal))
+    );
+}
+
+#[test]
+fn long_textarea_ime_request_still_enables_without_surrounding_text() {
+    let invalidation = InvalidationSignal::new();
+    let long_text = "0123456789abcdef\n".repeat(300);
+    let tree = WidgetTree::new(Textarea::<TestVm>::new(long_text));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let request_data = handler
+        .ime_request_data_for_text_input()
+        .expect("focused textarea should request ime data");
+    assert_eq!(
+        request_data.hint_and_purpose,
+        Some((ImeHint::NONE, ImePurpose::Normal))
+    );
+    assert!(request_data.cursor_area.is_some());
+    assert!(request_data.surrounding_text.is_none());
+
+    let capabilities = ImeCapabilities::new()
+        .with_hint_and_purpose()
+        .with_cursor_area();
+    assert!(
+        ImeEnableRequest::new(capabilities, request_data).is_some(),
+        "ime should still enable for long textareas"
+    );
 }
 
 #[test]
@@ -1378,9 +2686,11 @@ fn external_bound_value_rebuilds_text_input_buffer_and_clamps_state() {
 fn textarea_large_text_edit_smoke_uses_rope_buffer() {
     let invalidation = InvalidationSignal::new();
     let initial = "0123456789abcdef\n".repeat(2048);
-    let tree = WidgetTree::new(Textarea::new(initial.clone()).on_change(ValueCommand::new(
-        |vm: &mut TextInputVm, value| {
-            vm.value = value;
+    let controller = TextController::from(initial.clone());
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Textarea::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
         },
     )));
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
@@ -1496,6 +2806,25 @@ fn clicking_text_input_renders_caret_on_first_focused_frame() {
 }
 
 #[test]
+fn non_text_focus_does_not_schedule_caret_blink_deadline() {
+    let invalidation = InvalidationSignal::new();
+    let tree: WidgetTree<TestVm> = WidgetTree::new(Button::new("click"));
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    handler.update_focus(
+        Some(FocusedWidget {
+            widget_id: WidgetId::from_raw(999),
+            on_blur: None,
+        }),
+        None,
+        false,
+    );
+
+    let deadline = handler.next_deadline(Instant::now());
+    assert!(deadline.is_none());
+}
+
+#[test]
 fn single_line_input_scrolls_horizontally_to_keep_caret_visible() {
     let invalidation = InvalidationSignal::new();
     let value = "0123456789abcdef0123456789";
@@ -1537,6 +2866,200 @@ fn single_line_input_scrolls_horizontally_to_keep_caret_visible() {
         .expect("focused input should expose a caret rect");
     assert!(caret.x >= inner.x);
     assert!(caret.right() <= inner.right() + dp(1.0));
+}
+
+#[test]
+fn clicking_scrolled_single_line_input_repositions_caret_within_visible_text() {
+    let invalidation = InvalidationSignal::new();
+    let value = "0123456789abcdef0123456789";
+    let tree = WidgetTree::new(Input::<TestVm>::new(value).size(dp(96.0), dp(40.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let (frame, padding, text_style) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    frame,
+                    padding,
+                    text_style,
+                    ..
+                } => Some((*frame, *padding, text_style.clone())),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::End)));
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    let scrolled_x = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should exist")
+        .scroll_x;
+    assert!(scrolled_x > Dp::ZERO);
+
+    let inner = frame.inset(padding);
+    let click_point = Point {
+        x: inner.x + dp(12.0),
+        y: inner.y + (inner.height * 0.5),
+    };
+    let expected_cursor = text_cursor_index_at_point(
+        &handler.font_manager,
+        &handler.theme,
+        handler.unit_context(),
+        frame,
+        padding,
+        &text_style,
+        value,
+        false,
+        false,
+        false,
+        Point::new(scrolled_x, Dp::ZERO),
+        click_point,
+    );
+
+    handler.cursor_position = Some(click_point);
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should exist after click");
+    assert_eq!(state.cursor, expected_cursor);
+    assert_eq!(state.anchor, expected_cursor);
+    assert!(state.cursor < value.len());
+    assert!(
+        (state.scroll_x - scrolled_x).abs() <= 0.01,
+        "clicking within the visible span should preserve horizontal scroll"
+    );
+
+    let caret = handler
+        .computed_scene()
+        .ime_cursor_area
+        .expect("focused input should expose a caret rect");
+    assert!(caret.right() < inner.right() - dp(8.0));
+}
+
+#[test]
+fn dragging_in_scrolled_single_line_input_tracks_pointer_in_visible_text() {
+    let invalidation = InvalidationSignal::new();
+    let value = "0123456789abcdef0123456789";
+    let tree = WidgetTree::new(Input::<TestVm>::new(value).size(dp(96.0), dp(40.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let (frame, padding, text_style) = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    frame,
+                    padding,
+                    text_style,
+                    ..
+                } => Some((*frame, *padding, text_style.clone())),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::End)));
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    let scrolled_x = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should exist")
+        .scroll_x;
+    assert!(scrolled_x > Dp::ZERO);
+
+    let inner = frame.inset(padding);
+    let press_point = Point {
+        x: inner.x + dp(10.0),
+        y: inner.y + (inner.height * 0.5),
+    };
+    let press_cursor = text_cursor_index_at_point(
+        &handler.font_manager,
+        &handler.theme,
+        handler.unit_context(),
+        frame,
+        padding,
+        &text_style,
+        value,
+        false,
+        false,
+        false,
+        Point::new(scrolled_x, Dp::ZERO),
+        press_point,
+    );
+
+    handler.cursor_position = Some(press_point);
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let pressed_state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should exist after press");
+    assert_eq!(pressed_state.cursor, press_cursor);
+    assert_eq!(pressed_state.anchor, press_cursor);
+    assert!(pressed_state.cursor < value.len());
+    let pressed_scroll_x = pressed_state.scroll_x;
+    assert!(
+        (pressed_scroll_x - scrolled_x).abs() <= 0.01,
+        "pressing within the visible span should not reset horizontal scroll"
+    );
+
+    let drag_point = Point {
+        x: inner.x + (inner.width * 0.5),
+        y: inner.y + (inner.height * 0.5),
+    };
+    let drag_cursor = text_cursor_index_at_point(
+        &handler.font_manager,
+        &handler.theme,
+        handler.unit_context(),
+        frame,
+        padding,
+        &text_style,
+        value,
+        false,
+        false,
+        false,
+        Point::new(pressed_scroll_x, Dp::ZERO),
+        drag_point,
+    );
+
+    handler.cursor_position = Some(drag_point);
+    assert!(handler.handle_text_selection_drag());
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should exist after drag");
+    assert_eq!(
+        state.selection_range(),
+        Some((press_cursor.min(drag_cursor), press_cursor.max(drag_cursor)))
+    );
+    assert!(state.cursor < value.len());
+    assert!(state.anchor < value.len());
 }
 
 #[test]
@@ -1803,7 +3326,8 @@ fn textarea_click_tracks_visual_wrap_for_overflowing_initial_content() {
     let tree = WidgetTree::new(
         Textarea::<TestVm>::new(value)
             .width(dp(140.0))
-            .height(dp(52.0)),
+            .height(dp(52.0))
+            .auto_wrap(true),
     );
     let mut handler = test_handler(Some(tree), invalidation);
     let viewport = handler.viewport_rect();
@@ -1825,7 +3349,14 @@ fn textarea_click_tracks_visual_wrap_for_overflowing_initial_content() {
             .expect("textarea hit region should exist")
     };
 
-    let inner = frame.inset(padding);
+    let content_viewport = crate::ui::widget::text_input_content_viewport(
+        frame,
+        padding,
+        true,
+        true,
+        &handler.theme,
+        handler.unit_context(),
+    );
     let (layout, _font_size, _line_height) = super::input_text_layout(
         &handler.font_manager,
         &handler.theme,
@@ -1834,7 +3365,12 @@ fn textarea_click_tracks_visual_wrap_for_overflowing_initial_content() {
         value,
         true,
         true,
-        inner.width.get(),
+        crate::ui::widget::text_input_layout_width(
+            content_viewport,
+            true,
+            true,
+            super::input::INPUT_CARET_WIDTH,
+        ),
     );
     assert!(
         layout.line_count() > 1,
@@ -1846,8 +3382,8 @@ fn textarea_click_tracks_visual_wrap_for_overflowing_initial_content() {
     let expected_cursor = layout.index_for_point(sample_x, sample_y);
 
     handler.cursor_position = Some(Point {
-        x: inner.x + Dp::new(sample_x),
-        y: inner.y + Dp::new(sample_y),
+        x: content_viewport.x + Dp::new(sample_x),
+        y: content_viewport.y + Dp::new(sample_y),
     });
     handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
 
@@ -1931,6 +3467,38 @@ fn textarea_click_reuses_live_session_layout_snapshot() {
         .get(&text_id)
         .expect("textarea edit state should exist");
     assert_eq!(state.cursor, expected_cursor);
+}
+
+#[test]
+fn textarea_height_change_does_not_change_layout_session_config() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Textarea::<TestVm>::new("hello\nworld").height(dp(120.0)));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let (text_id, frame) = {
+        let computed = handler.computed_scene();
+        let frame = computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { id, .. } => Some((id, region.rect)),
+                _ => None,
+            })
+            .expect("textarea hit region should exist");
+        (*frame.0, frame.1)
+    };
+
+    let (config_signature, height) = handler
+        .text_input_session_config_signature_for_test(text_id, frame)
+        .expect("textarea config should exist");
+    let (taller_signature, taller_height) = handler
+        .text_input_session_config_signature_for_test(
+            text_id,
+            Rect::new(frame.x, frame.y, frame.width, frame.height + dp(48.0)),
+        )
+        .expect("textarea config should exist");
+
+    assert_eq!(config_signature, taller_signature);
+    assert_ne!(height, taller_height);
 }
 
 #[test]
@@ -2598,17 +4166,17 @@ fn hover_path_keeps_video_surface_hit_testing_when_scene_is_cached() {
     let animations = AnimationCoordinator::default();
     let ctx = ViewModelContext::new(invalidation.clone(), animations.clone());
     let shared = BackendSharedState {
-        playback_state: ctx.observable(PlaybackState::Ready),
-        metrics: ctx.observable(VideoMetrics::default()),
-        volume: ctx.observable(1.0),
-        muted: ctx.observable(false),
-        buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
-        video_size: ctx.observable(VideoSize {
+        playback_state: ctx.state(PlaybackState::Ready),
+        metrics: ctx.state(VideoMetrics::default()),
+        volume: ctx.state(1.0),
+        muted: ctx.state(false),
+        buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+        video_size: ctx.state(VideoSize {
             width: 160,
             height: 90,
         }),
-        error: ctx.observable(None),
-        surface: ctx.observable(VideoSurfaceSnapshot::default()),
+        error: ctx.state(None),
+        surface: ctx.state(VideoSurfaceSnapshot::default()),
     };
     let controller = VideoController::from_parts(shared, Arc::new(MockVideoBackend));
     let tree = WidgetTree::new(
@@ -2634,6 +4202,26 @@ struct CanvasEventVm {
     wheel_events: usize,
     drag_events: usize,
     drag_end_events: usize,
+}
+
+#[derive(Default)]
+struct LifecycleVm {
+    mounts: usize,
+    updates: usize,
+    unmounts: usize,
+}
+
+impl crate::foundation::view_model::ViewModel for LifecycleVm {
+    fn new(_context: &ViewModelContext) -> Self {
+        Self::default()
+    }
+
+    fn view(&self) -> Element<Self>
+    where
+        Self: Sized,
+    {
+        Stack::new().into()
+    }
 }
 
 impl crate::foundation::view_model::ViewModel for CanvasEventVm {

@@ -19,13 +19,13 @@ fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyl
 }
 
 struct AnimationVm {
-    expanded: Observable<bool>,
+    expanded: State<bool>,
 }
 
 impl AnimationVm {
 
-    fn title(&self) -> Binding<String> {
-        self.expanded.binding().map(|expanded| {
+    fn title(&self) -> Signal<String> {
+        self.expanded.signal().map(|expanded| {
             if expanded {
                 "tgui animation showcase - expanded".to_string()
             } else {
@@ -34,9 +34,9 @@ impl AnimationVm {
         })
     }
 
-    fn clear_color(&self) -> Binding<Color> {
+    fn clear_color(&self) -> Signal<Color> {
         self.expanded
-            .binding()
+            .signal()
             .map(|expanded| {
                 if expanded {
                     Color::hexa(0x08111FFF)
@@ -47,16 +47,16 @@ impl AnimationVm {
             .animated(Transition::ease_in_out(Duration::from_millis(340)))
     }
 
-    fn card_width(&self) -> Binding<Dp> {
+    fn card_width(&self) -> Signal<Dp> {
         self.expanded
-            .binding()
+            .signal()
             .map(|expanded| if expanded { dp(520.0) } else { dp(320.0) })
             .animated(Transition::ease_in_out(Duration::from_millis(320)))
     }
 
-    fn card_padding(&self) -> Binding<Insets> {
+    fn card_padding(&self) -> Signal<Insets> {
         self.expanded
-            .binding()
+            .signal()
             .map(|expanded| {
                 if expanded {
                     Insets::symmetric(dp(28.0), dp(22.0))
@@ -67,16 +67,16 @@ impl AnimationVm {
             .animated(Transition::ease_in_out(Duration::from_millis(300)))
     }
 
-    fn card_radius(&self) -> Binding<Dp> {
+    fn card_radius(&self) -> Signal<Dp> {
         self.expanded
-            .binding()
+            .signal()
             .map(|expanded| if expanded { dp(24.0) } else { dp(14.0) })
             .animated(Transition::ease_out(Duration::from_millis(260)))
     }
 
-    fn card_background(&self) -> Binding<Color> {
+    fn card_background(&self) -> Signal<Color> {
         self.expanded
-            .binding()
+            .signal()
             .map(|expanded| {
                 if expanded {
                     Color::hexa(0x0F766EFF)
@@ -87,9 +87,9 @@ impl AnimationVm {
             .animated(Transition::ease_in_out(Duration::from_millis(280)))
     }
 
-    fn card_offset(&self) -> Binding<Point> {
+    fn card_offset(&self) -> Signal<Point> {
         self.expanded
-            .binding()
+            .signal()
             .map(|expanded| {
                 if expanded {
                     Point::new(dp(0.0), dp(0.0))
@@ -100,15 +100,15 @@ impl AnimationVm {
             .animated(Transition::ease_in_out(Duration::from_millis(280)))
     }
 
-    fn body_opacity(&self) -> Binding<f32> {
+    fn body_opacity(&self) -> Signal<f32> {
         self.expanded
-            .binding()
+            .signal()
             .map(|expanded| if expanded { 1.0 } else { 0.72 })
             .animated(Transition::ease_out(Duration::from_millis(220)))
     }
 
-    fn action_label(&self) -> Binding<String> {
-        self.expanded.binding().map(|expanded| {
+    fn action_label(&self) -> Signal<String> {
+        self.expanded.signal().map(|expanded| {
             if expanded {
                 "Collapse".to_string()
             } else {
@@ -127,7 +127,7 @@ impl ViewModel for AnimationVm {
 
     fn new(ctx: &ViewModelContext) -> Self {
         Self {
-            expanded: ctx.observable(false),
+            expanded: ctx.state(false),
         }
     }
 

@@ -6,7 +6,7 @@ mod text;
 mod texture;
 mod vertex;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use self::surface::{
@@ -61,8 +61,8 @@ pub struct Renderer {
     blur_scratch_target: Option<OffscreenTarget>,
     clear_color: TguiColor,
     text_system: TextSystem,
-    text_cache: Vec<TextCacheEntry>,
-    texture_cache: Vec<TextureCacheEntry>,
+    text_cache: HashMap<TextCacheKey, TextCacheEntry>,
+    texture_cache: HashMap<(u64, u64), TextureCacheEntry>,
 }
 
 struct TextSystem {
@@ -81,19 +81,16 @@ struct OffscreenTarget {
 }
 
 struct TextCacheEntry {
-    key: TextCacheKey,
     bind_group: wgpu::BindGroup,
     _texture: wgpu::Texture,
 }
 
 struct TextureCacheEntry {
-    id: u64,
-    revision: u64,
     bind_group: wgpu::BindGroup,
     _texture: wgpu::Texture,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 struct TextCacheKey {
     content: String,
     font_family: Option<String>,
@@ -638,8 +635,8 @@ impl Renderer {
                 font_system,
                 swash_cache: SwashCache::new(),
             },
-            text_cache: Vec::new(),
-            texture_cache: Vec::new(),
+            text_cache: HashMap::new(),
+            texture_cache: HashMap::new(),
         })
     }
 
@@ -671,7 +668,7 @@ impl Renderer {
             .map(|texture| (texture.texture.id(), texture.texture.revision()))
             .collect();
         self.texture_cache
-            .retain(|entry| active_texture_keys.contains(&(entry.id, entry.revision)));
+            .retain(|key, _| active_texture_keys.contains(key));
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)

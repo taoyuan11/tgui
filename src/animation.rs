@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
-use crate::foundation::binding::{Binding, InvalidationSignal};
+use crate::foundation::binding::{
+    record_dependency_read, DependencyId, InvalidationSignal, Signal,
+};
 use crate::foundation::color::Color;
 use crate::ui::layout::Insets;
 use crate::ui::unit::{Dp, Sp};
@@ -421,6 +423,7 @@ impl<T> From<AnimationSpec<T>> for Transition {
 pub struct AnimatedValue<T> {
     value: Arc<Mutex<T>>,
     invalidation: InvalidationSignal,
+    dependency: DependencyId,
 }
 
 impl<T> AnimatedValue<T> {
@@ -428,25 +431,31 @@ impl<T> AnimatedValue<T> {
         Self {
             value: Arc::new(Mutex::new(value)),
             invalidation,
+            dependency: DependencyId::next(),
         }
     }
 
     pub fn set(&self, value: T) {
         *self.value.lock().expect("animated value lock poisoned") = value;
-        self.invalidation.mark_dirty();
+        self.invalidation.mark_dependency_dirty(self.dependency);
     }
 
-    pub fn binding(&self) -> Binding<T>
+    pub fn signal(&self) -> Signal<T>
     where
         T: Clone + Send + Sync + 'static,
     {
         let animated = self.clone();
-        Binding::new(move || animated.get())
+        Signal::new_tracked(
+            move || animated.get(),
+            self.invalidation.clone(),
+            Some(self.dependency),
+        )
     }
 }
 
 impl<T: Clone> AnimatedValue<T> {
     pub fn get(&self) -> T {
+        record_dependency_read(Some(self.dependency));
         self.value
             .lock()
             .expect("animated value lock poisoned")
@@ -462,7 +471,7 @@ impl<T: PartialEq> AnimatedValue<T> {
         }
         *current = value;
         drop(current);
-        self.invalidation.mark_dirty();
+        self.invalidation.mark_dependency_dirty(self.dependency);
         true
     }
 }
@@ -1118,7 +1127,8 @@ impl AnimationKey {
     pub(crate) const fn affects_layout(self) -> bool {
         match self {
             Self::Widget { property, .. } => property.affects_layout(),
-            Self::Window(_) => false,
+            Self::Window(WindowProperty::ClearColor) => false,
+            Self::Window(_) => true,
         }
     }
 }
@@ -1458,6 +1468,34 @@ impl AnimationEngine {
             || self.dps.has_active()
             || self.points.has_active()
             || self.insets.has_active()
+    }
+
+    pub(crate) fn active_keys_summary(&self) -> String {
+        fn push_active_keys<T>(
+            summary: &mut Vec<String>,
+            kind: &str,
+            store: &AnimationStore<T>,
+        ) {
+            for key in store
+                .slots
+                .iter()
+                .filter_map(|(key, state)| state.animation.as_ref().map(|_| *key))
+            {
+                summary.push(format!("{kind}:{key:?}"));
+            }
+        }
+
+        let mut summary = Vec::new();
+        push_active_keys(&mut summary, "color", &self.colors);
+        push_active_keys(&mut summary, "float", &self.floats);
+        push_active_keys(&mut summary, "dp", &self.dps);
+        push_active_keys(&mut summary, "point", &self.points);
+        push_active_keys(&mut summary, "insets", &self.insets);
+        if summary.is_empty() {
+            "none".to_string()
+        } else {
+            summary.join("|")
+        }
     }
 
     pub(crate) fn next_frame_deadline(&self, now: Instant) -> Option<Instant> {

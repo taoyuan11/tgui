@@ -1,29 +1,35 @@
 use std::fmt;
 
 use crate::animation::Transition;
-use crate::foundation::binding::Binding;
+use crate::foundation::binding::Signal;
 use crate::foundation::color::Color;
 use crate::ui::unit::Dp;
 
 #[derive(Clone)]
 pub enum Value<T> {
     Static(T),
-    Bound(Binding<T>),
+    Signal(Signal<T>),
 }
 
 impl<T: Clone> Value<T> {
     pub fn resolve(&self) -> T {
         match self {
             Self::Static(value) => value.clone(),
-            Self::Bound(binding) => binding.get(),
+            Self::Signal(signal) => signal.get(),
         }
     }
 
     pub(crate) fn transition(&self) -> Option<Transition> {
         match self {
             Self::Static(_) => None,
-            Self::Bound(binding) => binding.transition(),
+            Self::Signal(signal) => signal.transition(),
         }
+    }
+}
+
+impl<T: Clone + PartialEq> PartialEq for Value<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.resolve() == other.resolve()
     }
 }
 
@@ -33,9 +39,9 @@ impl<T> From<T> for Value<T> {
     }
 }
 
-impl<T> From<Binding<T>> for Value<T> {
-    fn from(value: Binding<T>) -> Self {
-        Self::Bound(value)
+impl<T> From<Signal<T>> for Value<T> {
+    fn from(value: Signal<T>) -> Self {
+        Self::Signal(value)
     }
 }
 
@@ -49,7 +55,7 @@ impl<T: fmt::Debug> fmt::Debug for Value<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Static(value) => f.debug_tuple("Static").field(value).finish(),
-            Self::Bound(_) => f.write_str("Bound(..)"),
+            Self::Signal(_) => f.write_str("Signal(..)"),
         }
     }
 }
@@ -315,7 +321,7 @@ impl Default for ScrollbarStyle {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct LayoutStyle {
     pub width: Option<Value<Length>>,
     pub height: Option<Value<Length>>,

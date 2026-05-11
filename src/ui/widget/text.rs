@@ -1,3 +1,6 @@
+use std::fmt::Display;
+
+use crate::foundation::binding::Signal;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
@@ -6,7 +9,8 @@ use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::Sp;
 
 use super::common::{
-    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
+    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
+    VisualStyle, WidgetId, WidgetKey, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -14,6 +18,7 @@ use super::style::{StyleResolver, TextWidgetStyle};
 
 #[derive(Clone)]
 pub struct Text {
+    pub(crate) key: Option<WidgetKey>,
     pub(crate) layout: LayoutStyle,
     pub(crate) visual: VisualStyle,
     pub(crate) content: Value<String>,
@@ -27,6 +32,40 @@ pub struct Text {
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
     pub(crate) user_select: bool,
     pub(crate) style: Option<StyleResolver<TextWidgetStyle>>,
+}
+
+pub trait IntoTextContent {
+    fn into_text_content(self) -> Value<String>;
+}
+
+impl<T> IntoTextContent for T
+where
+    T: Display,
+{
+    fn into_text_content(self) -> Value<String> {
+        Value::Static(self.to_string())
+    }
+}
+
+impl<T> IntoTextContent for Signal<T>
+where
+    T: Display + Clone + Send + Sync + 'static,
+{
+    fn into_text_content(self) -> Value<String> {
+        Value::Signal(self.map(|value| value.to_string()))
+    }
+}
+
+impl<T> IntoTextContent for Value<T>
+where
+    T: Display + Clone + Send + Sync + 'static,
+{
+    fn into_text_content(self) -> Value<String> {
+        match self {
+            Value::Static(value) => Value::Static(value.to_string()),
+            Value::Signal(signal) => Value::Signal(signal.map(|value| value.to_string())),
+        }
+    }
 }
 
 macro_rules! impl_text_layout_api {
@@ -162,11 +201,12 @@ macro_rules! impl_text_layout_api {
 }
 
 impl Text {
-    pub fn new(content: impl Into<Value<String>>) -> Self {
+    pub fn new(content: impl IntoTextContent) -> Self {
         Self {
+            key: None,
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
-            content: content.into(),
+            content: content.into_text_content(),
             font_family: None,
             background: None,
             color: None,
@@ -187,6 +227,11 @@ impl Text {
         resolver: impl Fn(ResolvedThemeMode) -> TextWidgetStyle + Send + Sync + 'static,
     ) -> Self {
         self.style = Some(StyleResolver::new(resolver));
+        self
+    }
+
+    pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
+        self.key = Some(key.into());
         self
     }
 
@@ -225,6 +270,27 @@ impl Text {
         })
     }
 
+    pub fn on_mount<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_mount: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_unmount<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_unmount: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_update<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_update: Some(command),
+            ..Default::default()
+        })
+    }
+
     pub fn cursor(mut self, cursor: impl Into<Value<CursorStyle>>) -> Self {
         self.cursor_style = Some(cursor.into());
         self
@@ -251,13 +317,68 @@ impl Text {
         interactions.cursor_style = self.resolved_cursor_style();
         Element {
             id: WidgetId::next(),
+            key: self.key.clone(),
             layout,
             visual,
             interactions,
+            lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background,
             kind: WidgetKind::Text { text: self },
         }
+    }
+
+    fn into_element_with_lifecycle_events<VM>(
+        self,
+        lifecycle_events: LifecycleEventHandlers<VM>,
+    ) -> Element<VM> {
+        let background = self.background.clone();
+        let layout = self.layout.clone();
+        let visual = self.visual.clone();
+        Element {
+            id: WidgetId::next(),
+            key: self.key.clone(),
+            layout,
+            visual,
+            interactions: InteractionHandlers {
+                cursor_style: self.resolved_cursor_style(),
+                ..InteractionHandlers::default()
+            },
+            lifecycle_events,
+            media_events: MediaEventHandlers::default(),
+            background,
+            kind: WidgetKind::Text { text: self },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::animation::AnimationCoordinator;
+    use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
+
+    use super::Text;
+
+    fn test_context() -> ViewModelContext {
+        ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
+    }
+
+    #[test]
+    fn text_new_accepts_display_values() {
+        let text = Text::new(42);
+
+        assert_eq!(text.content.resolve(), "42");
+    }
+
+    #[test]
+    fn text_new_accepts_display_signals() {
+        let ctx = test_context();
+        let count = ctx.state(7);
+        let text = Text::new(count.signal());
+
+        assert_eq!(text.content.resolve(), "7");
+        count.set(12);
+        assert_eq!(text.content.resolve(), "12");
     }
 }
 
@@ -268,12 +389,14 @@ impl<VM> From<Text> for Element<VM> {
         let visual = value.visual.clone();
         Element {
             id: WidgetId::next(),
+            key: value.key.clone(),
             layout,
             visual,
             interactions: InteractionHandlers {
                 cursor_style: value.resolved_cursor_style(),
                 ..InteractionHandlers::default()
             },
+            lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background,
             kind: WidgetKind::Text { text: value },

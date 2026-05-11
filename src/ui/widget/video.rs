@@ -7,7 +7,8 @@ use crate::ui::unit::Dp;
 use crate::video::VideoController;
 
 use super::common::{
-    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
+    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
+    VisualStyle, WidgetId, WidgetKey, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -15,6 +16,7 @@ use super::style::{StyleResolver, VideoSurfaceStyle};
 
 #[derive(Clone)]
 pub struct VideoSurface {
+    pub(crate) key: Option<WidgetKey>,
     pub(crate) layout: LayoutStyle,
     pub(crate) visual: VisualStyle,
     pub(crate) controller: VideoController,
@@ -159,6 +161,7 @@ macro_rules! impl_video_layout_api {
 impl VideoSurface {
     pub fn new(controller: VideoController) -> Self {
         Self {
+            key: None,
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
             controller,
@@ -170,6 +173,11 @@ impl VideoSurface {
     }
 
     impl_video_layout_api!();
+
+    pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
 
     pub fn style(
         mut self,
@@ -219,6 +227,27 @@ impl VideoSurface {
         })
     }
 
+    pub fn on_mount<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_mount: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_unmount<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_unmount: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_update<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_update: Some(command),
+            ..Default::default()
+        })
+    }
+
     pub fn on_loading<VM>(self, command: Command<VM>) -> Element<VM> {
         self.into_element_with_media_events(MediaEventHandlers {
             on_loading: Some(command),
@@ -247,9 +276,34 @@ impl VideoSurface {
         interactions.cursor_style = self.cursor_style.clone();
         Element {
             id: WidgetId::next(),
+            key: self.key.clone(),
             layout: self.layout.clone(),
             visual: self.visual.clone(),
             interactions,
+            lifecycle_events: LifecycleEventHandlers::default(),
+            media_events: MediaEventHandlers::default(),
+            background: self.background.clone(),
+            kind: WidgetKind::VideoSurface {
+                style: self.style.clone(),
+                video: self,
+            },
+        }
+    }
+
+    fn into_element_with_lifecycle_events<VM>(
+        self,
+        lifecycle_events: LifecycleEventHandlers<VM>,
+    ) -> Element<VM> {
+        Element {
+            id: WidgetId::next(),
+            key: self.key.clone(),
+            layout: self.layout.clone(),
+            visual: self.visual.clone(),
+            interactions: InteractionHandlers {
+                cursor_style: self.cursor_style.clone(),
+                ..Default::default()
+            },
+            lifecycle_events,
             media_events: MediaEventHandlers::default(),
             background: self.background.clone(),
             kind: WidgetKind::VideoSurface {
@@ -265,12 +319,14 @@ impl VideoSurface {
     ) -> Element<VM> {
         Element {
             id: WidgetId::next(),
+            key: self.key.clone(),
             layout: self.layout.clone(),
             visual: self.visual.clone(),
             interactions: InteractionHandlers {
                 cursor_style: self.cursor_style.clone(),
                 ..Default::default()
             },
+            lifecycle_events: LifecycleEventHandlers::default(),
             media_events,
             background: self.background.clone(),
             kind: WidgetKind::VideoSurface {
@@ -285,12 +341,14 @@ impl<VM> From<VideoSurface> for Element<VM> {
     fn from(value: VideoSurface) -> Self {
         Element {
             id: WidgetId::next(),
+            key: value.key.clone(),
             layout: value.layout.clone(),
             visual: value.visual.clone(),
             interactions: InteractionHandlers {
                 cursor_style: value.cursor_style.clone(),
                 ..Default::default()
             },
+            lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background: value.background.clone(),
             kind: WidgetKind::VideoSurface {

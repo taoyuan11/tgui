@@ -1,7 +1,30 @@
 use super::*;
+use crate::ui::widget::common::ChildSource;
 
 pub struct WidgetTree<VM> {
     pub(super) root: Element<VM>,
+}
+
+pub(super) fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    ))]
+    {
+        const WIDGET_STACK_SIZE: usize = 8 * 1024 * 1024;
+        const WIDGET_STACK_RED_ZONE: usize = WIDGET_STACK_SIZE;
+        return stacker::maybe_grow(WIDGET_STACK_RED_ZONE, WIDGET_STACK_SIZE, f);
+    }
+
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    )))]
+    {
+        f()
+    }
 }
 
 impl<VM> WidgetTree<VM> {
@@ -9,6 +32,9 @@ impl<VM> WidgetTree<VM> {
         Self { root: root.into() }
     }
 
+    pub(crate) fn has_lifecycle_handlers(&self) -> bool {
+        with_widget_stack(|| element_has_lifecycle_handlers(&self.root))
+    }
     #[allow(dead_code)]
     pub(crate) fn compute_scene(
         &self,
@@ -171,40 +197,53 @@ impl<VM> WidgetTree<VM> {
         units: UnitContext,
         viewport: Rect,
     ) -> ResolvedSceneLayout<VM> {
-        let mut taffy = TaffyTree::new();
-        let now = std::time::Instant::now();
-        let resolved_root = self.root.resolve(theme);
-        let root_layout = resolved_root
-            .build_layout_tree(
-                &mut taffy, animations, theme, units, None, viewport, true, now,
-            )
-            .expect("widget tree layout should build");
-        taffy
-            .compute_layout_with_measure(
-                root_layout.node,
-                TaffySize {
-                    width: AvailableSpace::Definite(viewport.width.get()),
-                    height: AvailableSpace::Definite(viewport.height.get()),
-                },
-                |known_dimensions, _, _, node_context, _| {
-                    measure_node(
-                        node_context,
-                        known_dimensions,
-                        font_manager,
-                        theme,
-                        media,
-                        units,
+        let (mut layout, dependencies) = with_widget_stack(|| {
+            with_dependency_collection(|| {
+                let mut taffy = TaffyTree::new();
+                let now = std::time::Instant::now();
+                let resolved_root = self.root.resolve(theme);
+                let root_layout = resolved_root
+                    .build_layout_tree(
+                        &mut taffy, animations, theme, units, None, viewport, true, now,
                     )
-                },
-            )
-            .expect("widget tree layout should compute");
+                    .expect("widget tree layout should build");
+                taffy
+                    .compute_layout_with_measure(
+                        root_layout.node,
+                        TaffySize {
+                            width: AvailableSpace::Definite(viewport.width.get()),
+                            height: AvailableSpace::Definite(viewport.height.get()),
+                        },
+                        |known_dimensions, _, _, node_context, _| {
+                            measure_node(
+                                node_context,
+                                known_dimensions,
+                                font_manager,
+                                theme,
+                                media,
+                                units,
+                            )
+                        },
+                    )
+                    .expect("widget tree layout should compute");
 
-        ResolvedSceneLayout {
-            resolved_root,
-            layout_root: root_layout,
-            taffy,
-            units,
-        }
+                ResolvedSceneLayout {
+                    source_root: self.root.clone(),
+                    root_id: resolved_root.id,
+                    resolved_root,
+                    layout_root: root_layout,
+                    taffy,
+                    units,
+                    dependencies: DependencyGraph::default(),
+                    paths: HashMap::new(),
+                    parents: HashMap::new(),
+                    depths: HashMap::new(),
+                }
+            })
+        });
+        layout.dependencies = dependencies;
+        layout.rebuild_indexes();
+        layout
     }
 
     pub(crate) fn collect_scene_from_layout(
@@ -226,7 +265,7 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
     ) -> ComputedScene<VM> {
-        self.collect_scene_from_layout_with_focus_value(
+        self.collect_scene_cache_from_layout_with_focus_value(
             font_manager,
             layout,
             theme,
@@ -242,12 +281,98 @@ impl<VM> WidgetTree<VM> {
             focused_text_state,
             None,
             None,
+            None,
             selected_text,
             selected_text_state,
             caret_visible,
         )
+        .computed
     }
 
+    pub(crate) fn collect_scene_cache_from_layout_with_focus_value(
+        &self,
+        font_manager: &FontManager,
+        layout: &ResolvedSceneLayout<VM>,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        select_open_states: &HashMap<WidgetId, bool>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
+        focused_text_value: Option<&str>,
+        focused_text_layout: Option<&TextLayoutInfo>,
+        text_layout_overrides: Option<&HashMap<WidgetId, TextInputLayoutOverride<'_>>>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&TextEditState>,
+        caret_visible: bool,
+    ) -> CollectedSceneCache<VM> {
+        let ((mut computed, lifecycle_states, chunks, chunk_parts, visual_contexts), dependencies) =
+            with_widget_stack(|| {
+                with_dependency_collection(|| {
+                    let mut lifecycle_states = HashMap::new();
+                    let mut chunks = HashMap::new();
+                    let mut chunk_parts = HashMap::new();
+                    let mut visual_contexts = HashMap::new();
+                    let mut context = CollectContext {
+                        taffy: &layout.taffy,
+                        font_manager,
+                        theme,
+                        media,
+                        focused_input,
+                        focused_text_state,
+                        focused_text_value,
+                        focused_text_layout,
+                        text_layout_overrides,
+                        caret_visible,
+                        selected_text,
+                        selected_text_state,
+                        hovered_scrollbar,
+                        active_scrollbar,
+                        widget_states,
+                        select_open_states,
+                        scroll_offsets,
+                        viewport,
+                        units: layout.units,
+                        animations,
+                        now: std::time::Instant::now(),
+                    };
+                    let computed = layout.resolved_root.collect_subtree_cache(
+                        &layout.layout_root,
+                        VisualContext {
+                            origin: Point {
+                                x: viewport.x,
+                                y: viewport.y,
+                            },
+                            opacity: 1.0,
+                            clip_rect: viewport,
+                            clip_mask: None,
+                        },
+                        &mut context,
+                        &mut lifecycle_states,
+                        &mut chunks,
+                        &mut chunk_parts,
+                        &mut visual_contexts,
+                    );
+                    (computed, lifecycle_states, chunks, chunk_parts, visual_contexts)
+                })
+            });
+        computed.dependencies = dependencies.clone();
+        CollectedSceneCache {
+            computed,
+            lifecycle_states,
+            chunks,
+            chunk_parts,
+            visual_contexts,
+            dependencies,
+        }
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn collect_scene_from_layout_with_focus_value(
         &self,
         font_manager: &FontManager,
@@ -265,48 +390,33 @@ impl<VM> WidgetTree<VM> {
         focused_text_state: Option<&TextEditState>,
         focused_text_value: Option<&str>,
         focused_text_layout: Option<&TextLayoutInfo>,
+        text_layout_overrides: Option<&HashMap<WidgetId, TextInputLayoutOverride<'_>>>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
     ) -> ComputedScene<VM> {
-        let mut computed = ComputedScene::default();
-        let mut context = CollectContext {
-            taffy: &layout.taffy,
+        self.collect_scene_cache_from_layout_with_focus_value(
             font_manager,
+            layout,
             theme,
             media,
-            focused_input,
-            focused_text_state,
-            focused_text_value,
-            focused_text_layout,
-            caret_visible,
-            selected_text,
-            selected_text_state,
+            animations,
             hovered_scrollbar,
             active_scrollbar,
             widget_states,
             select_open_states,
             scroll_offsets,
             viewport,
-            units: layout.units,
-            animations,
-            now: std::time::Instant::now(),
-        };
-        layout.resolved_root.collect_primitives(
-            &layout.layout_root,
-            VisualContext {
-                origin: Point {
-                    x: viewport.x,
-                    y: viewport.y,
-                },
-                opacity: 1.0,
-                clip_rect: viewport,
-                clip_mask: None,
-            },
-            &mut context,
-            &mut computed,
-        );
-        computed
+            focused_input,
+            focused_text_state,
+            focused_text_value,
+            focused_text_layout,
+            text_layout_overrides,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+        )
+        .computed
     }
 
     #[cfg(test)]
@@ -639,6 +749,34 @@ impl<VM> WidgetTree<VM> {
             .collect_media_event_states(media, &mut states);
         states
     }
+
+    pub(crate) fn lifecycle_event_states(&self, theme: &Theme) -> Vec<LifecycleEventState<VM>> {
+        let mut states = Vec::new();
+        self.root
+            .resolve(theme)
+            .collect_lifecycle_event_states(&mut states);
+        states
+    }
+}
+
+fn element_has_lifecycle_handlers<VM>(element: &Element<VM>) -> bool {
+    if element.lifecycle_events.has_any() {
+        return true;
+    }
+
+    match &element.kind {
+        WidgetKind::Container { children, .. } => children
+            .iter()
+            .any(child_source_has_lifecycle_handlers),
+        _ => false,
+    }
+}
+
+fn child_source_has_lifecycle_handlers<VM>(source: &ChildSource<VM>) -> bool {
+    source
+        .resolve(None)
+        .iter()
+        .any(element_has_lifecycle_handlers)
 }
 
 pub enum WidgetCommand<VM> {

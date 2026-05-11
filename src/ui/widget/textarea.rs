@@ -4,7 +4,8 @@ use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
-    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
+    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
+    VisualStyle, WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -155,9 +156,11 @@ impl<VM> Textarea<VM> {
         Self {
             element: Element {
                 id: WidgetId::next(),
+                key: None,
                 layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
                 interactions,
+                lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::TextEditor {
@@ -182,6 +185,11 @@ impl<VM> Textarea<VM> {
 
     impl_textarea_layout_api!();
 
+    pub fn key(mut self, key: impl Into<super::WidgetKey>) -> Self {
+        self.element.key = Some(key.into());
+        self
+    }
+
     pub fn placeholder(mut self, placeholder: impl Into<Value<String>>) -> Self {
         if let WidgetKind::TextEditor {
             placeholder: target,
@@ -193,7 +201,7 @@ impl<VM> Textarea<VM> {
         self
     }
 
-    pub fn on_change(mut self, command: ValueCommand<VM, String>) -> Self {
+    pub fn on_change(mut self, command: Command<VM>) -> Self {
         if let WidgetKind::TextEditor { on_change, .. } = &mut self.element.kind {
             *on_change = Some(command);
         }
@@ -273,6 +281,21 @@ impl<VM> Textarea<VM> {
 
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.element.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    pub fn on_mount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_mount = Some(command);
+        self
+    }
+
+    pub fn on_unmount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_unmount = Some(command);
+        self
+    }
+
+    pub fn on_update(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_update = Some(command);
         self
     }
 

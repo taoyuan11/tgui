@@ -33,10 +33,11 @@
 ### 状态与 MVVM
 
 - `ViewModelContext`：创建响应式状态与动画句柄
-- `Observable<T>`：可变状态，更新后自动触发重绘
-- `Binding<T>`：从状态派生 UI 值，支持 `map` 和 `animated`
+- `State<T>`：可变状态，更新后自动触发重绘
+- `Signal<T>`：从状态派生 UI 值，支持 `map` 和 `animated`
 - `TextController`：`Input` / `Textarea` 的保留式文本状态，支持程序化读写与批量变更通知
 - `Command<T>` / `ValueCommand<T, V>`：把按钮、输入、画布事件接回 ViewModel
+- 生命周期事件：`on_mount`、`on_unmount`、`on_update`
 - `CommandContext::window()`：在命令中请求窗口拖拽、拉伸、最小化、最大化/还原、关闭
 - `CommandContext::notifications()`：在命令中发送通知、请求权限、处理通知 action 回调
 
@@ -96,7 +97,7 @@ tgui = { version = "0.1.7", features = ["video"] }
 `tgui` 的公开类型按职责分类导出：
 
 - `application`：应用、窗口和运行入口
-- `mvvm`：`ViewModel`、`Observable`、`Binding`、`TextController`、`Command`、`CommandContext`、`WindowControl`
+- `mvvm`：`ViewModel`、`State`、`Signal`、`TextController`、`Command`、`CommandContext`、`WindowControl`
 - `layout`：布局容器、尺寸、间距和滚动相关类型
 - `widgets` / `canvas`：基础控件、控件树和 Canvas 绘制 API
 - `theme`：主题、色板、排版、状态和设计 token
@@ -114,7 +115,7 @@ tgui = { version = "0.1.7", features = ["video"] }
 use tgui::prelude::*;
 
 struct CounterVm {
-    count: Observable<u32>,
+    count: State<u32>,
 }
 
 impl CounterVm {
@@ -125,7 +126,7 @@ impl CounterVm {
     fn view(&self) -> Element<Self> {
         Flex::new(Axis::Vertical)
             .child(Text::new(
-                self.count.binding().map(|count| format!("Count: {count}")),
+                self.count.signal().map(|count| format!("Count: {count}")),
             ))
             .child(
                 Button::new("Increment")
@@ -138,7 +139,7 @@ impl CounterVm {
 impl ViewModel for CounterVm {
     fn new(ctx: &ViewModelContext) -> Self {
         Self {
-            count: ctx.observable(0),
+            count: ctx.state(0),
         }
     }
 
@@ -182,8 +183,8 @@ Application
 WindowSpec
 ViewModel
 ViewModelContext
-Observable<T>
-Binding<T>
+State<T>
+Signal<T>
 TextController
 Command<T>
 ValueCommand<T, V>
@@ -206,13 +207,33 @@ AnimationSpec<T>
 Keyframes<T>
 ```
 
+## 组件生命周期事件
+
+所有公开组件都支持：
+
+- `on_mount(Command<VM>)`
+- `on_unmount(Command<VM>)`
+- `on_update(Command<VM>)`
+
+语义说明：
+
+- `on_mount`：组件首次进入当前窗口的组件树时触发一次
+- `on_unmount`：组件在应用仍运行时从当前组件树移除时触发一次
+- `on_update`：同一组件身份在一次 view 重建后仍然存在时触发一次
+
+注意事项：
+
+- 动态列表建议始终显式设置 `.key(...)`，这样生命周期身份才会稳定
+- `on_update` 表示“同身份组件参与了一次重建”，不是“属性 diff 后确实有变化”
+- 关闭窗口或应用退出时，不额外保证补发 `on_unmount`
+
 ## 仓库示例
 
 仓库内示例基本覆盖了当前主要能力：
 
 - `basic_window`：命名空 ViewModel 驱动的最小完整窗口
 - `mvvm_counter`：响应式状态、标题绑定、清屏色绑定、快捷键输入
-- `animation_showcase`：`Binding::animated` 声明式过渡
+- `animation_showcase`：`Signal::animated` 声明式过渡
 - `timeline_controller`：时间线动画控制器
 - `multi_window`：共享 ViewModel 的多窗口
 - `dialogs`：同步/异步文件选择与消息框
@@ -399,7 +420,7 @@ Button::new("Close")
 
 - `src/lib.rs`：crate 导出总览
 - `src/application/mod.rs`：应用与窗口入口
-- `src/foundation/binding.rs`：`Observable` / `Binding`
+- `src/foundation/binding.rs`：`State` / `Signal`
 - `src/foundation/view_model.rs`：`Command` / `ValueCommand`
 - `src/notification.rs`：通知、权限与 action 回调
 - `src/foundation/window_control.rs`：`WindowControl` / `WindowResizeDirection`
@@ -430,7 +451,7 @@ cargo check --features ohos
 贡献时请注意：
 
 - 公共 API 变更需要同步更新 README、示例和 `src/lib.rs` 中的 re-export。
-- 新增 widget 或样式能力时，优先复用现有 `Element`、布局、事件、主题和 `Value<T>` / `Binding<T>` 模式。
+- 新增 widget 或样式能力时，优先复用现有 `Element`、布局、事件、主题和 `Value<T>` / `Signal<T>` 模式。
 - 文本输入或通知能力变更时，建议同时检查 `src/runtime.rs`、`src/notification.rs` 与相关示例。
 - 修改 `src/runtime.rs`、`src/ui/widget/core.rs`、渲染 primitive、文本输入、媒体加载或窗口控制时，建议补充针对性的单元测试。
 - 新增示例时保持示例独立、可运行，并同步更新 README 中的示例列表。

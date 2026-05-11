@@ -170,8 +170,9 @@ fn build_output_stream(
     config: &SupportedStreamConfig,
     shared: Arc<SharedAudioOutput>,
 ) -> Result<Stream, TguiError> {
-    let error_callback =
-        |error| crate::Log::with_tag("tgui-video").error(format!("audio stream error: {error}"));
+    let error_callback = |error| {
+        crate::Log::with_tag("tgui-video").error(format_args!("audio stream error: {error}"))
+    };
     let stream_config = config.config();
 
     match config.sample_format() {

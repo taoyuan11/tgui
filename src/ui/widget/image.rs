@@ -1,4 +1,4 @@
-use crate::foundation::binding::Binding;
+use crate::foundation::binding::Signal;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{ContentFit, MediaBytes, MediaSource};
@@ -6,7 +6,8 @@ use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
-    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
+    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
+    VisualStyle, WidgetId, WidgetKey, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -14,6 +15,7 @@ use super::style::{ImageStyle, StyleResolver};
 
 #[derive(Clone)]
 pub struct Image {
+    pub(crate) key: Option<WidgetKey>,
     pub(crate) layout: LayoutStyle,
     pub(crate) visual: VisualStyle,
     pub(crate) source: Value<MediaSource>,
@@ -187,13 +189,13 @@ impl IntoImagePathSource for &str {
     }
 }
 
-impl IntoImagePathSource for Binding<std::path::PathBuf> {
+impl IntoImagePathSource for Signal<std::path::PathBuf> {
     fn into_image_path_source(self) -> Value<MediaSource> {
         self.map(MediaSource::Path).into()
     }
 }
 
-impl IntoImagePathSource for Binding<String> {
+impl IntoImagePathSource for Signal<String> {
     fn into_image_path_source(self) -> Value<MediaSource> {
         self.map(|path| MediaSource::Path(path.into())).into()
     }
@@ -203,7 +205,7 @@ impl IntoImagePathSource for Value<std::path::PathBuf> {
     fn into_image_path_source(self) -> Value<MediaSource> {
         match self {
             Value::Static(path) => MediaSource::Path(path).into(),
-            Value::Bound(binding) => binding.map(MediaSource::Path).into(),
+            Value::Signal(signal) => signal.map(MediaSource::Path).into(),
         }
     }
 }
@@ -212,7 +214,7 @@ impl IntoImagePathSource for Value<String> {
     fn into_image_path_source(self) -> Value<MediaSource> {
         match self {
             Value::Static(path) => MediaSource::Path(path.into()).into(),
-            Value::Bound(binding) => binding.map(|path| MediaSource::Path(path.into())).into(),
+            Value::Signal(signal) => signal.map(|path| MediaSource::Path(path.into())).into(),
         }
     }
 }
@@ -229,7 +231,7 @@ impl IntoImageUrlSource for &str {
     }
 }
 
-impl IntoImageUrlSource for Binding<String> {
+impl IntoImageUrlSource for Signal<String> {
     fn into_image_url_source(self) -> Value<MediaSource> {
         self.map(MediaSource::Url).into()
     }
@@ -239,7 +241,7 @@ impl IntoImageUrlSource for Value<String> {
     fn into_image_url_source(self) -> Value<MediaSource> {
         match self {
             Value::Static(url) => MediaSource::Url(url).into(),
-            Value::Bound(binding) => binding.map(MediaSource::Url).into(),
+            Value::Signal(signal) => signal.map(MediaSource::Url).into(),
         }
     }
 }
@@ -247,6 +249,7 @@ impl IntoImageUrlSource for Value<String> {
 impl Image {
     pub fn new(source: impl Into<Value<MediaSource>>) -> Self {
         Self {
+            key: None,
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
             source: source.into(),
@@ -270,6 +273,11 @@ impl Image {
     }
 
     impl_image_layout_api!();
+
+    pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
 
     pub fn style(
         mut self,
@@ -314,6 +322,27 @@ impl Image {
         })
     }
 
+    pub fn on_mount<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_mount: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_unmount<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_unmount: Some(command),
+            ..Default::default()
+        })
+    }
+
+    pub fn on_update<VM>(self, command: Command<VM>) -> Element<VM> {
+        self.into_element_with_lifecycle_events(LifecycleEventHandlers {
+            on_update: Some(command),
+            ..Default::default()
+        })
+    }
+
     pub fn on_loading<VM>(self, command: Command<VM>) -> Element<VM> {
         self.into_element_with_media_events(MediaEventHandlers {
             on_loading: Some(command),
@@ -347,9 +376,31 @@ impl Image {
         interactions.cursor_style = self.cursor_style.clone();
         Element {
             id: WidgetId::next(),
+            key: self.key.clone(),
             layout: self.layout.clone(),
             visual: self.visual.clone(),
             interactions,
+            lifecycle_events: LifecycleEventHandlers::default(),
+            media_events: MediaEventHandlers::default(),
+            background: self.background.clone(),
+            kind: WidgetKind::Image { image: self },
+        }
+    }
+
+    fn into_element_with_lifecycle_events<VM>(
+        self,
+        lifecycle_events: LifecycleEventHandlers<VM>,
+    ) -> Element<VM> {
+        Element {
+            id: WidgetId::next(),
+            key: self.key.clone(),
+            layout: self.layout.clone(),
+            visual: self.visual.clone(),
+            interactions: InteractionHandlers {
+                cursor_style: self.cursor_style.clone(),
+                ..Default::default()
+            },
+            lifecycle_events,
             media_events: MediaEventHandlers::default(),
             background: self.background.clone(),
             kind: WidgetKind::Image { image: self },
@@ -362,12 +413,14 @@ impl Image {
     ) -> Element<VM> {
         Element {
             id: WidgetId::next(),
+            key: self.key.clone(),
             layout: self.layout.clone(),
             visual: self.visual.clone(),
             interactions: InteractionHandlers {
                 cursor_style: self.cursor_style.clone(),
                 ..Default::default()
             },
+            lifecycle_events: LifecycleEventHandlers::default(),
             media_events,
             background: self.background.clone(),
             kind: WidgetKind::Image { image: self },
@@ -379,12 +432,14 @@ impl<VM> From<Image> for Element<VM> {
     fn from(value: Image) -> Self {
         Element {
             id: WidgetId::next(),
+            key: value.key.clone(),
             layout: value.layout.clone(),
             visual: value.visual.clone(),
             interactions: InteractionHandlers {
                 cursor_style: value.cursor_style.clone(),
                 ..Default::default()
             },
+            lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background: value.background.clone(),
             kind: WidgetKind::Image { image: value },

@@ -8,9 +8,8 @@ impl Renderer {
         &mut self,
         texture_frame: &TextureFrame,
     ) -> Result<Option<wgpu::BindGroup>, TguiError> {
-        if let Some(entry) = self.texture_cache.iter().find(|entry| {
-            entry.id == texture_frame.id() && entry.revision == texture_frame.revision()
-        }) {
+        let key = (texture_frame.id(), texture_frame.revision());
+        if let Some(entry) = self.texture_cache.get(&key) {
             return Ok(Some(entry.bind_group.clone()));
         }
 
@@ -70,9 +69,7 @@ impl Renderer {
             ],
         });
 
-        self.texture_cache.push(TextureCacheEntry {
-            id: texture_frame.id(),
-            revision: texture_frame.revision(),
+        self.texture_cache.insert(key, TextureCacheEntry {
             bind_group: bind_group.clone(),
             _texture: texture,
         });

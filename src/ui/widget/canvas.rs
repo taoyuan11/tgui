@@ -15,10 +15,10 @@ use lyon::tessellation::{
 };
 use resvg::tiny_skia;
 
-use crate::foundation::binding::Binding;
+use crate::foundation::binding::Signal;
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
-use crate::foundation::view_model::ValueCommand;
+use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{
     resolve_media_rect, ContentFit, MediaManager, MediaSource, RasterRequest, TextureFrame,
 };
@@ -28,9 +28,9 @@ use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{Dp, Sp, UnitContext};
 
 use super::common::{
-    CanvasItemInteractionHandlers, ClipMask, CursorStyle, InteractionHandlers, MediaEventHandlers,
-    MeshPrimitive, MeshVertex, Point, Rect, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId,
-    WidgetKind,
+    CanvasItemInteractionHandlers, ClipMask, CursorStyle, InteractionHandlers,
+    LifecycleEventHandlers, MediaEventHandlers, MeshPrimitive, MeshVertex, Point, Rect,
+    TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -214,9 +214,9 @@ impl From<CanvasRadialGradient> for Value<CanvasBrush> {
     }
 }
 
-impl From<Binding<Color>> for Value<CanvasBrush> {
-    fn from(value: Binding<Color>) -> Self {
-        Value::Bound(value.map(CanvasBrush::Solid))
+impl From<Signal<Color>> for Value<CanvasBrush> {
+    fn from(value: Signal<Color>) -> Self {
+        Value::Signal(value.map(CanvasBrush::Solid))
     }
 }
 
@@ -224,7 +224,7 @@ impl From<Value<Color>> for Value<CanvasBrush> {
     fn from(value: Value<Color>) -> Self {
         match value {
             Value::Static(color) => Value::Static(CanvasBrush::Solid(color)),
-            Value::Bound(binding) => Value::Bound(binding.map(CanvasBrush::Solid)),
+            Value::Signal(signal) => Value::Signal(signal.map(CanvasBrush::Solid)),
         }
     }
 }
@@ -408,7 +408,7 @@ pub enum CanvasPathOpError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CanvasSvgPathError(pub String);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasStroke {
     pub width: Dp,
     pub brush: Value<CanvasBrush>,
@@ -1011,7 +1011,7 @@ impl PathBuilder {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasPath {
     pub style: CanvasItemStyle,
     pub path: PathBuilder,
@@ -1156,7 +1156,7 @@ impl Default for CanvasParagraphStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasText {
     pub style: CanvasItemStyle,
     pub frame: Rect,
@@ -1217,7 +1217,7 @@ impl CanvasText {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasImage {
     pub style: CanvasItemStyle,
     pub frame: Rect,
@@ -1278,7 +1278,7 @@ impl CanvasImage {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasGroup {
     pub style: CanvasItemStyle,
     pub items: Vec<CanvasItem>,
@@ -1318,14 +1318,14 @@ impl CanvasGroup {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CanvasClipShape {
     Rect(Rect),
     RoundedRect { rect: Rect, radius: Dp },
     Path(PathBuilder),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasClip {
     pub style: CanvasItemStyle,
     pub clip: CanvasClipShape,
@@ -1361,7 +1361,7 @@ impl CanvasClip {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasLayer {
     pub style: CanvasItemStyle,
     pub items: Vec<CanvasItem>,
@@ -1396,7 +1396,7 @@ impl CanvasLayer {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasMask {
     pub style: CanvasItemStyle,
     pub mask: Vec<CanvasItem>,
@@ -1437,7 +1437,7 @@ impl CanvasMask {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CanvasItem {
     Path(CanvasPath),
     Text(CanvasText),
@@ -2028,9 +2028,11 @@ impl<VM> Canvas<VM> {
         Self {
             element: Element {
                 id: WidgetId::next(),
+                key: None,
                 layout: LayoutStyle::default(),
                 visual: VisualStyle::default(),
                 interactions: InteractionHandlers::default(),
+                lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::Canvas {
@@ -2051,6 +2053,11 @@ impl<VM> Canvas<VM> {
         if let WidgetKind::Canvas { style, .. } = &mut self.element.kind {
             *style = Some(super::style::StyleResolver::new(resolver));
         }
+        self
+    }
+
+    pub fn key(mut self, key: impl Into<super::WidgetKey>) -> Self {
+        self.element.key = Some(key.into());
         self
     }
 
@@ -2076,6 +2083,21 @@ impl<VM> Canvas<VM> {
 
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.element.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    pub fn on_mount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_mount = Some(command);
+        self
+    }
+
+    pub fn on_unmount(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_unmount = Some(command);
+        self
+    }
+
+    pub fn on_update(mut self, command: Command<VM>) -> Self {
+        self.element.lifecycle_events.on_update = Some(command);
         self
     }
 

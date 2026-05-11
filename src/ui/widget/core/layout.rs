@@ -577,9 +577,61 @@ pub(super) fn measure_node(
     media: &MediaManager,
     units: UnitContext,
 ) -> TaffySize<f32> {
+    let owner = match node_context.as_ref() {
+        Some(MeasureContext::Text { id, .. })
+        | Some(MeasureContext::Image { id, .. })
+        | Some(MeasureContext::Canvas { id, .. })
+        | Some(MeasureContext::Button { id, .. })
+        | Some(MeasureContext::Checkbox { id, .. })
+        | Some(MeasureContext::Radio { id, .. })
+        | Some(MeasureContext::Switch { id, .. })
+        | Some(MeasureContext::Select { id, .. })
+        | Some(MeasureContext::TextEditor { id, .. }) => {
+            Some(id.dependency_owner(DependencyPhase::Layout))
+        }
+        #[cfg(feature = "video")]
+        Some(MeasureContext::VideoSurface { id, .. }) => {
+            Some(id.dependency_owner(DependencyPhase::Layout))
+        }
+        Some(MeasureContext::None) | None => None,
+    };
+
+    if let Some(owner) = owner {
+        return track_dependency_scope(owner, || {
+            measure_node_tracked(
+                node_context,
+                known_dimensions,
+                font_manager,
+                theme,
+                media,
+                units,
+            )
+        });
+    }
+
+    measure_node_tracked(
+        node_context,
+        known_dimensions,
+        font_manager,
+        theme,
+        media,
+        units,
+    )
+}
+
+fn measure_node_tracked(
+    node_context: Option<&mut MeasureContext>,
+    known_dimensions: TaffySize<Option<f32>>,
+    font_manager: &FontManager,
+    theme: &Theme,
+    media: &MediaManager,
+    units: UnitContext,
+) -> TaffySize<f32> {
     let measured = match node_context {
-        Some(MeasureContext::Text(text)) => measure_text_content(text, font_manager, theme, units),
-        Some(MeasureContext::Image(image)) => {
+        Some(MeasureContext::Text { text, .. }) => {
+            measure_text_content(text, font_manager, theme, units)
+        }
+        Some(MeasureContext::Image { image, .. }) => {
             let snapshot = media.image_snapshot(&image.source.resolve(), None);
             measure_media_content(
                 known_dimensions,
@@ -587,11 +639,11 @@ pub(super) fn measure_node(
                 snapshot.intrinsic_size,
             )
         }
-        Some(MeasureContext::Canvas(items)) => canvas_bounds(items)
+        Some(MeasureContext::Canvas { items, .. }) => canvas_bounds(&items.resolve())
             .map(|bounds| (bounds.width(), bounds.height()))
             .unwrap_or((0.0, 0.0)),
         #[cfg(feature = "video")]
-        Some(MeasureContext::VideoSurface(video)) => {
+        Some(MeasureContext::VideoSurface { video, .. }) => {
             let snapshot = video.controller.surface_snapshot();
             measure_media_content(
                 known_dimensions,
@@ -599,7 +651,7 @@ pub(super) fn measure_node(
                 snapshot.intrinsic_size,
             )
         }
-        Some(MeasureContext::Button { label, style }) => {
+        Some(MeasureContext::Button { label, style, .. }) => {
             let button_style = resolve_button_style(style, Default::default(), theme);
             let label_text = text_with_typography(label.clone(), &style.text_style);
             let text_size = measure_text_content(&label_text, font_manager, theme, units);
@@ -613,18 +665,18 @@ pub(super) fn measure_node(
                     .max(text_size.1 + vertical),
             )
         }
-        Some(MeasureContext::Switch { style }) => {
+        Some(MeasureContext::Switch { style, .. }) => {
             let switch_style = style;
             (
                 units.resolve_dp(switch_style.width),
                 units.resolve_dp(switch_style.height),
             )
         }
-        Some(MeasureContext::Checkbox { label, style }) => {
+        Some(MeasureContext::Checkbox { label, style, .. }) => {
             let checkbox_style = resolve_checkbox_style(style, Default::default(), false, theme);
             measure_checkbox_content(label.as_ref(), &checkbox_style, font_manager, theme, units)
         }
-        Some(MeasureContext::Radio { label, style }) => {
+        Some(MeasureContext::Radio { label, style, .. }) => {
             let radio_style = resolve_radio_style(style, Default::default(), false, theme);
             measure_radio_content(label.as_ref(), &radio_style, font_manager, theme, units)
         }
@@ -632,8 +684,9 @@ pub(super) fn measure_node(
             selected_label,
             placeholder,
             style,
+            ..
         }) => measure_select_content(
-            selected_label.as_deref(),
+            selected_label.resolve().as_deref(),
             placeholder,
             &resolve_select_style(style, Default::default(), theme),
             font_manager,
@@ -645,34 +698,19 @@ pub(super) fn measure_node(
             placeholder,
             style,
             multiline,
-            auto_wrap,
             ..
         }) => {
             let text_size = if *multiline {
-                if *auto_wrap {
-                    let text =
-                        text_with_typography(Value::Static(String::new()), &style.text_style);
-                    let (_, line_height, _) = resolved_text_metrics(&text, theme, units);
-                    (
-                        SELECT_DEFAULT_WIDTH,
-                        line_height.max(units.resolve_dp(style.min_height)),
-                    )
-                } else {
-                    let value = controller.text();
-                    let content = if value.is_empty() {
-                        placeholder.clone()
-                    } else {
-                        value
-                    };
-                    let text =
-                        text_with_typography(Value::Static(content.clone()), &style.text_style);
-                    let (width, height) = measure_text_content(&text, font_manager, theme, units);
-                    (width.max(SELECT_DEFAULT_WIDTH), height)
-                }
+                let text = text_with_typography(Value::Static(String::new()), &style.text_style);
+                let (_, line_height, _) = resolved_text_metrics(&text, theme, units);
+                (
+                    SELECT_DEFAULT_WIDTH,
+                    line_height.max(units.resolve_dp(style.min_height)),
+                )
             } else {
                 let value = controller.text();
                 let content = if value.is_empty() {
-                    placeholder.clone()
+                    placeholder.resolve()
                 } else {
                     value
                 };
@@ -721,7 +759,7 @@ pub(super) fn measure_text_content(
     )
 }
 
-pub(super) fn text_from_content(content: impl Into<Value<String>>) -> Text {
+pub(super) fn text_from_content(content: impl IntoTextContent) -> Text {
     Text::new(content)
 }
 
@@ -864,7 +902,7 @@ pub(super) fn resolved_text_metrics(
 }
 
 pub(super) fn text_with_typography(
-    content: impl Into<Value<String>>,
+    content: impl IntoTextContent,
     style: &crate::ui::theme::TextStyle,
 ) -> Text {
     let mut text = text_from_content(content);

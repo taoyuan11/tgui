@@ -7,15 +7,18 @@ use crate::animation::{AnimationEngine, AnimationKey, WidgetProperty};
 use crate::media::TextureFrame;
 use taffy::NodeId as TaffyNodeId;
 
-use crate::foundation::binding::{TextChangeSet, TextController};
+use crate::foundation::binding::{
+    track_dependency_scope, DependencyGraph, DependencyOwner, DependencyPhase, TextChangeSet,
+    TextController,
+};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::text::font::FontWeight;
+use crate::text::font::{FontWeight, TextLayoutInfo};
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, Length, Overflow, ScrollbarStyle, Track, Value, Wrap,
 };
-use crate::ui::theme::WidgetState;
-use crate::ui::unit::{Dp, UnitContext};
+use crate::ui::theme::{Theme, WidgetState};
+use crate::ui::unit::{dp, Dp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface;
 
@@ -27,9 +30,9 @@ use super::image::Image;
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle;
 use super::style::{
-    ButtonStyle as WidgetButtonStyle, CanvasStyle, CheckboxStyle as WidgetCheckboxStyle,
-    ContainerStyle, SelectStyle as WidgetSelectStyle, StyleResolver,
-    SwitchStyle as WidgetSwitchStyle,
+    infer_theme_mode, ButtonStyle as WidgetButtonStyle, CanvasStyle,
+    CheckboxStyle as WidgetCheckboxStyle, ContainerStyle, SelectStyle as WidgetSelectStyle,
+    StyleResolver, SwitchStyle as WidgetSwitchStyle,
 };
 use super::style::{InputStyle as WidgetInputStyle, TextareaStyle as WidgetTextareaStyle};
 use super::text::Text;
@@ -63,7 +66,53 @@ impl WidgetId {
     pub(crate) fn raw(self) -> u64 {
         self.0
     }
+
+    pub(crate) fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub(crate) fn dependency_owner(self, phase: DependencyPhase) -> DependencyOwner {
+        DependencyOwner {
+            widget_id: self.0,
+            phase,
+        }
+    }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct WidgetKey(String);
+
+impl From<String> for WidgetKey {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for WidgetKey {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<&String> for WidgetKey {
+    fn from(value: &String) -> Self {
+        Self(value.clone())
+    }
+}
+
+macro_rules! impl_widget_key_from_int {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl From<$ty> for WidgetKey {
+                fn from(value: $ty) -> Self {
+                    Self(value.to_string())
+                }
+            }
+        )*
+    };
+}
+
+impl_widget_key_from_int!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point {
@@ -143,7 +192,120 @@ impl Rect {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TextInputContentGeometry {
+    pub content_frame: Rect,
+    pub content_width: Dp,
+    pub content_height: Dp,
+    pub scroll_offset: Point,
+}
+
+pub(crate) fn text_input_content_viewport(
+    frame: Rect,
+    padding: Insets,
+    multiline: bool,
+    show_scrollbar: bool,
+    theme: &Theme,
+    units: UnitContext,
+) -> Rect {
+    let inner = frame.inset(padding);
+    if !multiline || !show_scrollbar {
+        return inner;
+    }
+
+    let defaults = ContainerStyle::default_for(infer_theme_mode(theme)).scrollbar;
+    let thickness = Dp::new(units.resolve_dp(defaults.thickness.unwrap_or(dp(5.0)).max(dp(2.0))));
+
+    Rect::new(
+        inner.x,
+        inner.y,
+        (inner.width - thickness.min(inner.width)).max(0.0),
+        inner.height,
+    )
+}
+
+pub(crate) fn text_input_content_geometry(
+    layout: &TextLayoutInfo,
+    line_height: f32,
+    content_viewport: Rect,
+    multiline: bool,
+    auto_wrap: bool,
+    scroll: Point,
+    trailing_padding: f32,
+) -> TextInputContentGeometry {
+    let content_width = if multiline && auto_wrap {
+        content_viewport.width.max(0.0)
+    } else {
+        Dp::new(
+            layout
+                .width
+                .max(content_viewport.width.get() + trailing_padding),
+        )
+    };
+    let content_height = if multiline {
+        Dp::new(layout.height.max(line_height))
+    } else {
+        content_viewport
+            .height
+            .min(layout.height.max(line_height))
+            .max(Dp::new(line_height))
+    };
+    let scroll_offset = Point::new(
+        if multiline && auto_wrap {
+            Dp::ZERO
+        } else {
+            scroll.x.clamp(
+                0.0,
+                (layout.width + trailing_padding - content_viewport.width.get()).max(0.0),
+            )
+        },
+        if multiline {
+            scroll.y.clamp(
+                0.0,
+                (layout.height.max(line_height) - content_viewport.height.get()).max(0.0),
+            )
+        } else {
+            Dp::ZERO
+        },
+    );
+    let content_frame = Rect::new(
+        content_viewport.x
+            - if multiline && auto_wrap {
+                Dp::ZERO
+            } else {
+                scroll_offset.x
+            },
+        if multiline {
+            content_viewport.y - scroll_offset.y
+        } else {
+            content_viewport.y + ((content_viewport.height - content_height).max(0.0) * 0.5)
+        },
+        content_width,
+        content_height,
+    );
+
+    TextInputContentGeometry {
+        content_frame,
+        content_width,
+        content_height,
+        scroll_offset,
+    }
+}
+
+pub(crate) fn text_input_layout_width(
+    content_viewport: Rect,
+    multiline: bool,
+    auto_wrap: bool,
+    trailing_padding: f32,
+) -> f32 {
+    if multiline && auto_wrap {
+        (content_viewport.width.get() - trailing_padding).max(0.0)
+    } else {
+        content_viewport.width.get().max(0.0)
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub struct VisualStyle {
     pub border_color: Option<Value<Color>>,
     pub border_radius: Option<Value<Dp>>,
@@ -208,6 +370,12 @@ pub(crate) struct MediaEventHandlers<VM> {
     pub on_error: Option<ValueCommand<VM, String>>,
 }
 
+pub(crate) struct LifecycleEventHandlers<VM> {
+    pub on_mount: Option<Command<VM>>,
+    pub on_unmount: Option<Command<VM>>,
+    pub on_update: Option<Command<VM>>,
+}
+
 impl<VM> Clone for MediaEventHandlers<VM> {
     fn clone(&self) -> Self {
         Self {
@@ -252,11 +420,69 @@ impl<VM> MediaEventHandlers<VM> {
     }
 }
 
+impl<VM> Clone for LifecycleEventHandlers<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            on_mount: self.on_mount.clone(),
+            on_unmount: self.on_unmount.clone(),
+            on_update: self.on_update.clone(),
+        }
+    }
+}
+
+impl<VM> Default for LifecycleEventHandlers<VM> {
+    fn default() -> Self {
+        Self {
+            on_mount: None,
+            on_unmount: None,
+            on_update: None,
+        }
+    }
+}
+
+impl<VM> LifecycleEventHandlers<VM> {
+    pub(crate) fn has_any(&self) -> bool {
+        self.on_mount.is_some() || self.on_unmount.is_some() || self.on_update.is_some()
+    }
+
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> LifecycleEventHandlers<RootVm>
+    where
+        VM: 'static,
+    {
+        LifecycleEventHandlers {
+            on_mount: self.on_mount.map(|command| command.scope(selector.clone())),
+            on_unmount: self
+                .on_unmount
+                .map(|command| command.scope(selector.clone())),
+            on_update: self.on_update.map(|command| command.scope(selector)),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct MediaEventState<VM> {
     pub widget_id: WidgetId,
     pub media_phase: Option<MediaEventPhase>,
     pub handlers: MediaEventHandlers<VM>,
+}
+
+pub(crate) struct LifecycleEventState<VM> {
+    pub widget_id: WidgetId,
+    pub snapshot: super::core::LifecycleSnapshot,
+    pub handlers: LifecycleEventHandlers<VM>,
+}
+
+impl<VM> Clone for LifecycleEventState<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            widget_id: self.widget_id,
+            snapshot: self.snapshot.clone(),
+            handlers: self.handlers.clone(),
+        }
+    }
 }
 
 impl<VM> Clone for InteractionHandlers<VM> {
@@ -508,8 +734,8 @@ impl Value<Length> {
     ) -> Length {
         match self {
             Value::Static(value) => *value,
-            Value::Bound(binding) => {
-                let target = binding.get();
+            Value::Signal(signal) => {
+                let target = signal.get();
                 match target {
                     Length::Px(target_dp) => Length::Px(animations.resolve_dp(
                         AnimationKey::Widget {
@@ -517,7 +743,7 @@ impl Value<Length> {
                             property,
                         },
                         target_dp,
-                        binding.transition(),
+                        signal.transition(),
                         now,
                     )),
                     Length::Auto | Length::Percent(_) => target,
@@ -571,7 +797,7 @@ impl Value<BackgroundBrush> {
     pub(crate) fn resolve_widget(&self) -> BackgroundBrush {
         match self {
             Value::Static(value) => value.clone(),
-            Value::Bound(binding) => binding.get(),
+            Value::Signal(signal) => signal.get(),
         }
     }
 }
@@ -580,7 +806,7 @@ impl Value<BackgroundImage> {
     pub(crate) fn resolve_widget(&self) -> BackgroundImage {
         match self {
             Value::Static(value) => value.clone(),
-            Value::Bound(binding) => binding.get(),
+            Value::Signal(signal) => signal.get(),
         }
     }
 }
@@ -738,6 +964,25 @@ impl ScenePrimitives {
         self.overlay_texts.push(primitive.clone());
         self.overlay_commands.push(RenderCommand::Text(primitive));
     }
+
+    pub(crate) fn extend(&mut self, other: &ScenePrimitives) {
+        self.backdrop_blurs
+            .extend(other.backdrop_blurs.iter().copied());
+        self.brushes.extend(other.brushes.iter().cloned());
+        self.shapes.extend(other.shapes.iter().copied());
+        self.meshes.extend(other.meshes.iter().cloned());
+        self.textures.extend(other.textures.iter().cloned());
+        self.texts.extend(other.texts.iter().cloned());
+        self.overlay_shapes
+            .extend(other.overlay_shapes.iter().copied());
+        self.overlay_meshes
+            .extend(other.overlay_meshes.iter().cloned());
+        self.overlay_texts
+            .extend(other.overlay_texts.iter().cloned());
+        self.commands.extend(other.commands.iter().cloned());
+        self.overlay_commands
+            .extend(other.overlay_commands.iter().cloned());
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -861,7 +1106,7 @@ fn solid_stop_colors(color: Color) -> [[f32; 4]; 7] {
     colors
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ContainerKind {
     Flow,
     Stack,
@@ -875,7 +1120,7 @@ pub(crate) enum ContainerKind {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ContainerLayout {
     pub kind: ContainerKind,
     pub padding: Option<Value<Insets>>,
@@ -908,10 +1153,19 @@ pub(crate) enum ChildSource<VM> {
 }
 
 impl<VM> ChildSource<VM> {
-    pub(crate) fn resolve(&self) -> Vec<super::core::Element<VM>> {
+    pub(crate) fn resolve(&self, owner: Option<WidgetId>) -> Vec<super::core::Element<VM>> {
         match self {
             Self::Static(children) => children.clone(),
-            Self::Dynamic(resolver) => resolve_dynamic_children(resolver),
+            Self::Dynamic(resolver) => {
+                if let Some(owner) = owner {
+                    track_dependency_scope(
+                        owner.dependency_owner(DependencyPhase::Structure),
+                        || resolve_dynamic_children(resolver),
+                    )
+                } else {
+                    resolve_dynamic_children(resolver)
+                }
+            }
         }
     }
 
@@ -1040,7 +1294,7 @@ pub(crate) enum WidgetKind<VM> {
     TextEditor {
         controller: TextController,
         placeholder: Value<String>,
-        on_change: Option<ValueCommand<VM, String>>,
+        on_change: Option<Command<VM>>,
         on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
         disabled: Value<bool>,
         input_style: Option<StyleResolver<WidgetInputStyle>>,
@@ -1210,37 +1464,54 @@ impl<VM> Clone for WidgetKind<VM> {
 #[derive(Clone)]
 pub(crate) enum MeasureContext {
     None,
-    Text(Text),
-    Image(Image),
-    Canvas(Vec<CanvasItem>),
+    Text {
+        id: WidgetId,
+        text: Text,
+    },
+    Image {
+        id: WidgetId,
+        image: Image,
+    },
+    Canvas {
+        id: WidgetId,
+        items: Value<Vec<CanvasItem>>,
+    },
     #[cfg(feature = "video")]
-    VideoSurface(VideoSurface),
+    VideoSurface {
+        id: WidgetId,
+        video: VideoSurface,
+    },
     Button {
+        id: WidgetId,
         label: Value<String>,
         style: crate::ui::widget::ButtonStyle,
     },
     Checkbox {
+        id: WidgetId,
         label: Option<Value<String>>,
         style: crate::ui::widget::CheckboxStyle,
     },
     Radio {
+        id: WidgetId,
         label: Option<Value<String>>,
         style: crate::ui::widget::RadioStyle,
     },
     Switch {
+        id: WidgetId,
         style: crate::ui::widget::SwitchStyle,
     },
     Select {
-        selected_label: Option<String>,
+        id: WidgetId,
+        selected_label: Value<Option<String>>,
         placeholder: Value<String>,
         style: crate::ui::widget::SelectStyle,
     },
     TextEditor {
+        id: WidgetId,
         controller: TextController,
-        placeholder: String,
+        placeholder: Value<String>,
         style: crate::ui::widget::InputStyle,
         multiline: bool,
-        auto_wrap: bool,
     },
 }
 
@@ -1295,7 +1566,7 @@ pub(crate) enum HitInteraction<VM> {
         id: WidgetId,
         interactions: InteractionHandlers<VM>,
         controller: TextController,
-        on_change: Option<ValueCommand<VM, String>>,
+        on_change: Option<Command<VM>>,
         on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
         multiline: bool,
         auto_wrap: bool,
@@ -1505,12 +1776,22 @@ impl HitGeometry {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct HitRegion<VM> {
     pub rect: Rect,
     pub clip_rect: Option<Rect>,
     pub geometry: HitGeometry,
     pub interaction: HitInteraction<VM>,
+}
+
+impl<VM> Clone for HitRegion<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            rect: self.rect,
+            clip_rect: self.clip_rect,
+            geometry: self.geometry.clone(),
+            interaction: self.interaction.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1557,13 +1838,26 @@ pub(crate) struct ScrollbarHandle {
     pub axis: ScrollbarAxis,
 }
 
-#[derive(Clone)]
 pub(crate) struct ComputedScene<VM> {
     pub scene: ScenePrimitives,
     pub hit_regions: Vec<HitRegion<VM>>,
     pub overlay_hit_regions: Vec<HitRegion<VM>>,
     pub scroll_regions: Vec<ScrollRegion>,
     pub ime_cursor_area: Option<Rect>,
+    pub(crate) dependencies: DependencyGraph,
+}
+
+impl<VM> Clone for ComputedScene<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            scene: self.scene.clone(),
+            hit_regions: self.hit_regions.clone(),
+            overlay_hit_regions: self.overlay_hit_regions.clone(),
+            scroll_regions: self.scroll_regions.clone(),
+            ime_cursor_area: self.ime_cursor_area,
+            dependencies: self.dependencies.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -1611,11 +1905,25 @@ impl<VM> Default for ComputedScene<VM> {
             overlay_hit_regions: Vec::new(),
             scroll_regions: Vec::new(),
             ime_cursor_area: None,
+            dependencies: DependencyGraph::default(),
         }
     }
 }
 
 impl<VM> ComputedScene<VM> {
+    pub(crate) fn extend(&mut self, other: &ComputedScene<VM>) {
+        self.scene.extend(&other.scene);
+        self.hit_regions.extend(other.hit_regions.iter().cloned());
+        self.overlay_hit_regions
+            .extend(other.overlay_hit_regions.iter().cloned());
+        self.scroll_regions
+            .extend(other.scroll_regions.iter().copied());
+        if self.ime_cursor_area.is_none() {
+            self.ime_cursor_area = other.ime_cursor_area;
+        }
+        self.dependencies.merge_from(&other.dependencies);
+    }
+
     #[cfg(test)]
     pub(crate) fn rendered(&self) -> RenderedWidgetScene {
         RenderedWidgetScene {

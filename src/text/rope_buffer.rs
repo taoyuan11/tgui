@@ -14,6 +14,10 @@ impl RopeBuffer {
         }
     }
 
+    pub(crate) fn from_parts(rope: Rope, snapshot: String) -> Self {
+        Self { rope, snapshot }
+    }
+
     pub(crate) fn len_bytes(&self) -> usize {
         self.rope.len_bytes()
     }
@@ -85,6 +89,10 @@ impl RopeBuffer {
 
     pub(crate) fn materialize_string(&self) -> String {
         self.snapshot.clone()
+    }
+
+    pub(crate) fn into_parts(self) -> (Rope, String) {
+        (self.rope, self.snapshot)
     }
 }
 

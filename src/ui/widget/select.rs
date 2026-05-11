@@ -4,14 +4,15 @@ use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
-    CursorStyle, InteractionHandlers, MediaEventHandlers, Point, SelectOptionState, VisualStyle,
-    WidgetId, WidgetKind,
+    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
+    SelectOptionState, VisualStyle, WidgetId, WidgetKey, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
 use super::style::{SelectStyle, StyleResolver};
 
 pub struct Select<VM, K, V> {
+    key: Option<WidgetKey>,
     options: Vec<SelectOption<K, V>>,
     selected_key: Value<Option<K>>,
     placeholder: Value<String>,
@@ -22,6 +23,7 @@ pub struct Select<VM, K, V> {
     layout: LayoutStyle,
     visual: VisualStyle,
     interactions: InteractionHandlers<VM>,
+    lifecycle_events: LifecycleEventHandlers<VM>,
     media_events: MediaEventHandlers<VM>,
     background: Option<Value<Color>>,
     style: Option<StyleResolver<SelectStyle>>,
@@ -168,6 +170,7 @@ impl<VM, K, V> Select<VM, K, V> {
         interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
 
         Self {
+            key: None,
             options: options.into_iter().map(Into::into).collect(),
             selected_key: selected_key.into(),
             placeholder: Value::Static(String::new()),
@@ -178,6 +181,7 @@ impl<VM, K, V> Select<VM, K, V> {
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
             interactions,
+            lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background: None,
             style: None,
@@ -219,6 +223,11 @@ impl<VM, K, V> Select<VM, K, V> {
         self
     }
 
+    pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
+
     pub fn on_click(mut self, command: Command<VM>) -> Self {
         self.interactions.on_click = Some(command);
         self
@@ -251,6 +260,21 @@ impl<VM, K, V> Select<VM, K, V> {
 
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    pub fn on_mount(mut self, command: Command<VM>) -> Self {
+        self.lifecycle_events.on_mount = Some(command);
+        self
+    }
+
+    pub fn on_unmount(mut self, command: Command<VM>) -> Self {
+        self.lifecycle_events.on_unmount = Some(command);
+        self
+    }
+
+    pub fn on_update(mut self, command: Command<VM>) -> Self {
+        self.lifecycle_events.on_update = Some(command);
         self
     }
 
@@ -307,9 +331,11 @@ where
 
         Element {
             id: WidgetId::next(),
+            key: select.key,
             layout: select.layout,
             visual: select.visual,
             interactions: select.interactions,
+            lifecycle_events: select.lifecycle_events,
             media_events: select.media_events,
             background: select.background,
             kind: WidgetKind::Select {
@@ -366,7 +392,7 @@ where
 {
     match selected_key {
         Value::Static(current) => Value::Static(current.as_ref() == Some(&option_key)),
-        Value::Bound(binding) => binding
+        Value::Signal(signal) => signal
             .map(move |current| current.as_ref() == Some(&option_key))
             .into(),
     }
@@ -385,7 +411,7 @@ where
                 .as_ref()
                 .and_then(|key| selected_label_for_key(key, &options)),
         ),
-        Value::Bound(binding) => binding
+        Value::Signal(signal) => signal
             .map(move |current| {
                 current
                     .as_ref()

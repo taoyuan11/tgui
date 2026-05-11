@@ -1,12 +1,14 @@
-use super::{centered_text_frame, resolved_text_metrics, SELECT_ARROW_ICON};
+use super::{centered_text_frame, resolved_text_metrics, ResolvedWidgetKind, SELECT_ARROW_ICON};
 use std::collections::HashMap;
 
 use crate::animation::{AnimationCoordinator, AnimationEngine};
-use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
+use crate::foundation::binding::{
+    DependencyOwner, DependencyPhase, InvalidationSignal, ViewModelContext,
+};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 use crate::media::{MediaManager, MediaSource};
-use crate::text::font::{FontCatalog, FontManager};
+use crate::text::font::{FontCatalog, FontManager, TextFontRequest};
 use crate::ui::layout::{Axis, Insets, Overflow};
 use crate::ui::theme::{Stateful, Theme};
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
@@ -19,7 +21,7 @@ use crate::ui::widget::{
     ButtonStyle, Canvas, CanvasItem, CanvasPath, CanvasStroke, CanvasStyle, Checkbox, ClipMask,
     ContainerStyle, Element, Image, Input, InputStyle, PathBuilder, Point, Radio, RadioGroup,
     RadioOption, ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack, Switch, SwitchStyle,
-    Text, TextEditState, TextWidgetStyle, Textarea, WidgetStateMap, WidgetTree,
+    Text, TextEditState, TextWidgetStyle, Textarea, TextareaStyle, WidgetStateMap, WidgetTree,
 };
 #[cfg(feature = "video")]
 use crate::video::backend::{
@@ -920,6 +922,455 @@ fn test_context() -> ViewModelContext {
     ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
 }
 
+#[test]
+fn text_signal_records_layout_and_scene_dependencies() {
+    let ctx = test_context();
+    let content = ctx.state(String::from("tracked"));
+    let text: Element<()> = Text::new(content.signal()).into();
+    let widget_id = text.id;
+    let tree = WidgetTree::new(text);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert!(layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Layout,
+    }));
+
+    let computed = tree.collect_scene_from_layout(
+        &font_manager,
+        &layout,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(computed.dependencies.contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Scene,
+    }));
+}
+
+fn dynamic_children_signal_records_structure_dependency() {
+    let ctx = test_context();
+    let show = ctx.state(true);
+    let container: Element<()> = Stack::new()
+        .child(show.signal().map(|show| {
+            if show {
+                Text::new("shown")
+            } else {
+                Text::new("hidden")
+            }
+        }))
+        .into();
+    let widget_id = container.id;
+    let tree = WidgetTree::new(container);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert!(layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Structure,
+    }));
+}
+
+#[test]
+fn keyed_dynamic_children_reuse_widget_ids_across_reorder_patch() {
+    let ctx = test_context();
+    let reversed = ctx.state(false);
+    let container: Element<()> = Stack::<()>::new()
+        .child(reversed.signal().map(|reversed| {
+            if reversed {
+                vec![
+                    Element::from(Text::new("second").key("second")),
+                    Element::from(Text::new("first").key("first")),
+                ]
+            } else {
+                vec![
+                    Element::from(Text::new("first").key("first")),
+                    Element::from(Text::new("second").key("second")),
+                ]
+            }
+        }))
+        .into();
+    let container_id = container.id;
+    let tree = WidgetTree::new(container);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let viewport = Rect::new(0.0, 0.0, 200.0, 120.0);
+    let mut animations = AnimationEngine::default();
+
+    let mut layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        viewport,
+    );
+
+    let initial_ids = match &layout.resolved_root.kind {
+        ResolvedWidgetKind::Container { children, .. } => {
+            children.iter().map(|child| child.id).collect::<Vec<_>>()
+        }
+        _ => panic!("stack root should resolve to a container"),
+    };
+
+    reversed.set(true);
+    let removed = layout
+        .patch_layout_roots(
+            &[container_id],
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            viewport,
+        )
+        .expect("keyed reorder should patch successfully");
+
+    assert!(removed.is_empty());
+    let reordered_ids = match &layout.resolved_root.kind {
+        ResolvedWidgetKind::Container { children, .. } => {
+            children.iter().map(|child| child.id).collect::<Vec<_>>()
+        }
+        _ => panic!("stack root should remain a container"),
+    };
+    assert_eq!(reordered_ids, vec![initial_ids[1], initial_ids[0]]);
+}
+
+#[test]
+fn canvas_items_signal_records_layout_and_scene_dependencies() {
+    let ctx = test_context();
+    let expanded = ctx.state(false);
+    let canvas: Element<()> = Canvas::new(expanded.signal().map(|expanded| {
+        let width = if expanded { 96.0 } else { 48.0 };
+        vec![CanvasItem::Path(
+            CanvasPath::new(
+                1_u64,
+                PathBuilder::new()
+                    .move_to(0.0, 0.0)
+                    .line_to(width, 0.0)
+                    .line_to(width, 24.0)
+                    .line_to(0.0, 24.0)
+                    .close(),
+            )
+            .fill(Color::WHITE),
+        )]
+    }))
+    .into();
+    let widget_id = canvas.id;
+    let tree = WidgetTree::new(canvas);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert!(!layout.dependencies().has_global_dependency());
+    assert!(layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Layout,
+    }));
+
+    let computed = tree.collect_scene_from_layout(
+        &font_manager,
+        &layout,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(!computed.dependencies.has_global_dependency());
+    assert!(computed.dependencies.contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Scene,
+    }));
+}
+
+#[test]
+fn multiline_textarea_layout_is_content_independent() {
+    let ctx = test_context();
+    let auto_wrap = ctx.state(true);
+    let textarea: Element<()> = Textarea::new("tracked text")
+        .auto_wrap(auto_wrap.signal())
+        .into();
+    let tree = WidgetTree::new(textarea);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert!(!layout.dependencies().has_global_dependency());
+    assert_eq!(layout.dependencies().dependency_count(), 0);
+}
+
+#[test]
+fn textarea_non_focused_render_reuses_stable_layout_snapshot() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let content = "line 0\nline 1\nline 2";
+    let textarea: Element<()> = Textarea::new(content).height(dp(52.0)).into();
+    let widget_id = textarea.id;
+    let tree = WidgetTree::new(textarea);
+    let viewport = Rect::new(0.0, 0.0, 220.0, 52.0);
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        viewport,
+    );
+
+    let baseline = tree.collect_scene_from_layout_with_focus_value(
+        &font_manager,
+        &layout,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let baseline_region = baseline
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == widget_id)
+        .expect("textarea scroll region should exist");
+
+    let style = TextareaStyle::default_for(infer_theme_mode(&theme));
+    let text = super::text_with_typography(content, &style.text_style);
+    let (font_size, line_height, letter_spacing) =
+        resolved_text_metrics(&text, &theme, UnitContext::default());
+    let request = TextFontRequest {
+        preferred_font: text.font_family.as_deref().or(theme
+            .typography
+            .body
+            .font_family
+            .as_deref()),
+        weight: text.font_weight.unwrap_or(theme.typography.body.weight),
+    };
+    let alternate_layout = font_manager.measure_text_layout(
+        content,
+        request,
+        font_size,
+        line_height * 2.0,
+        letter_spacing,
+    );
+    let overrides = HashMap::from([(
+        widget_id,
+        super::TextInputLayoutOverride {
+            revision: 1,
+            text: content,
+            layout: &alternate_layout,
+        },
+    )]);
+
+    let overridden = tree.collect_scene_from_layout_with_focus_value(
+        &font_manager,
+        &layout,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        Some(&overrides),
+        None,
+        None,
+        false,
+    );
+    let overridden_region = overridden
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == widget_id)
+        .expect("textarea scroll region should exist");
+
+    assert!(overridden_region.content_bounds.height > baseline_region.content_bounds.height);
+    assert_eq!(
+        overridden_region.content_bounds.height.get(),
+        alternate_layout
+            .height
+            .max(overridden_region.content_viewport.height.get())
+    );
+}
+
+#[test]
+fn textarea_show_scrollbar_signal_only_records_scene_dependency() {
+    let ctx = test_context();
+    let show_scrollbar = ctx.state(false);
+    let textarea: Element<()> = Textarea::new("line 0\nline 1\nline 2\nline 3")
+        .height(dp(52.0))
+        .show_scrollbar(show_scrollbar.signal())
+        .into();
+    let widget_id = textarea.id;
+    let tree = WidgetTree::new(textarea);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert!(!layout.dependencies().has_global_dependency());
+    assert_eq!(layout.dependencies().dependency_count(), 0);
+
+    let computed = tree.collect_scene_from_layout(
+        &font_manager,
+        &layout,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(!computed.dependencies.has_global_dependency());
+    assert_eq!(computed.dependencies.dependency_count(), 2);
+    assert!(computed.dependencies.contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Scene,
+    }));
+}
+
+#[test]
+fn textarea_lifecycle_snapshot_ignores_internal_text_revision() {
+    let ctx = test_context();
+    let controller = ctx.text_controller("hello");
+    let tree = WidgetTree::new(
+        Textarea::<()>::new(controller.clone()).on_update(Command::new(|_vm: &mut ()| {})),
+    );
+
+    let states_before = tree.lifecycle_event_states(&Theme::default());
+    let before = states_before
+        .first()
+        .expect("textarea lifecycle state should exist");
+
+    controller.set_text("hello world");
+
+    let states_after = tree.lifecycle_event_states(&Theme::default());
+    let after = states_after
+        .first()
+        .expect("textarea lifecycle state should still exist");
+
+    assert!(before.snapshot == after.snapshot);
+}
+
+#[test]
+fn widget_tree_detects_lifecycle_handlers_in_dynamic_children() {
+    let ctx = test_context();
+    let visible = ctx.state(false);
+    let tree = WidgetTree::new(Stack::<()>::new().child(visible.signal().map(|visible| {
+        let element: Element<()> = if visible {
+            Text::new("shown")
+                .on_update(Command::new(|_vm: &mut ()| {}))
+                .into()
+        } else {
+            Stack::<()>::new().into()
+        };
+        element
+    })));
+
+    assert!(!tree.has_lifecycle_handlers());
+
+    visible.set(true);
+
+    assert!(tree.has_lifecycle_handlers());
+}
+
 #[cfg(feature = "video")]
 fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoController {
     struct StaticVideoBackend;
@@ -943,23 +1394,23 @@ fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoC
 
     let ctx = test_context();
     let shared = BackendSharedState {
-        playback_state: ctx.observable(PlaybackState::Ready),
-        metrics: ctx.observable(VideoMetrics {
+        playback_state: ctx.state(PlaybackState::Ready),
+        metrics: ctx.state(VideoMetrics {
             duration: Some(std::time::Duration::from_secs(30)),
             position: std::time::Duration::ZERO,
             buffered: Some(std::time::Duration::from_secs(30)),
             video_width: snapshot.intrinsic_size.width as u32,
             video_height: snapshot.intrinsic_size.height as u32,
         }),
-        volume: ctx.observable(1.0),
-        muted: ctx.observable(false),
-        buffer_memory_limit_bytes: ctx.observable(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
-        video_size: ctx.observable(VideoSize {
+        volume: ctx.state(1.0),
+        muted: ctx.state(false),
+        buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+        video_size: ctx.state(VideoSize {
             width: snapshot.intrinsic_size.width as u32,
             height: snapshot.intrinsic_size.height as u32,
         }),
-        error: ctx.observable(snapshot.error.clone()),
-        surface: ctx.observable(snapshot),
+        error: ctx.state(snapshot.error.clone()),
+        surface: ctx.state(snapshot),
     };
     VideoController::from_parts(shared, std::sync::Arc::new(StaticVideoBackend))
 }
@@ -1463,8 +1914,8 @@ fn binding_driven_children_relayout_when_child_count_changes() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let context = test_context();
-    let expanded = context.observable(false);
-    let tree = WidgetTree::new(Stack::<()>::new().child(expanded.binding().map(|value| {
+    let expanded = context.state(false);
+    let tree = WidgetTree::new(Stack::<()>::new().child(expanded.signal().map(|value| {
         if value {
             vec![
                 Element::from(Text::new("first")),
@@ -1518,7 +1969,7 @@ fn hit_testing_tracks_currently_resolved_children() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let context = test_context();
-    let visible = context.observable(true);
+    let visible = context.state(true);
     let clickable: Element<()> = Stack::new()
         .size(dp(40.0), dp(40.0))
         .style(|mode| {
@@ -1536,7 +1987,7 @@ fn hit_testing_tracks_currently_resolved_children() {
         .on_click(Command::new(|_: &mut ()| {}))
         .into();
     let tree = WidgetTree::new(Stack::<()>::new().size(dp(100.0), dp(100.0)).child(
-        visible.binding().map(move |value| {
+        visible.signal().map(move |value| {
             if value {
                 vec![clickable.clone()]
             } else {
@@ -1629,6 +2080,24 @@ fn scoped_context_command_receives_child_context() {
     command.execute(&mut vm);
 
     assert_eq!(vm.child.context_hits, 1);
+}
+
+#[test]
+fn scoped_lifecycle_command_targets_child_view_model() {
+    let child: Element<ScopeChildVm> = Stack::new()
+        .on_mount(Command::new(|vm: &mut ScopeChildVm| vm.count += 1))
+        .into();
+    let root = child.scope(scope_child);
+
+    let command = root
+        .lifecycle_events
+        .on_mount
+        .expect("scoped lifecycle command");
+    let mut vm = ScopeRootVm::default();
+    command.execute(&mut vm);
+
+    assert_eq!(vm.child.count, 1);
+    assert_eq!(vm.root_count, 0);
 }
 
 #[test]
@@ -2851,7 +3320,7 @@ fn scoped_value_commands_cover_switch_canvas_and_media() {
 #[test]
 fn scoped_dynamic_children_resolve_to_root_commands() {
     let context = test_context();
-    let show = context.observable(true);
+    let show = context.state(true);
     let child_a: Element<ScopeChildVm> = Stack::new()
         .on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 1))
         .into();
@@ -2859,7 +3328,7 @@ fn scoped_dynamic_children_resolve_to_root_commands() {
         .on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 10))
         .into();
 
-    let tree = WidgetTree::new(Stack::<ScopeRootVm>::new().child(show.binding().map(
+    let tree = WidgetTree::new(Stack::<ScopeRootVm>::new().child(show.signal().map(
         move |visible| {
             if visible {
                 vec![child_a.clone().scope(scope_child)]
@@ -2870,7 +3339,7 @@ fn scoped_dynamic_children_resolve_to_root_commands() {
     )));
 
     let resolved = match &tree.root.kind {
-        WidgetKind::Container { children, .. } => children[0].resolve(),
+        WidgetKind::Container { children, .. } => children[0].resolve(None),
         _ => panic!("root should be a container"),
     };
 
@@ -2886,7 +3355,7 @@ fn scoped_dynamic_children_resolve_to_root_commands() {
 
     show.set(false);
     let resolved = match &tree.root.kind {
-        WidgetKind::Container { children, .. } => children[0].resolve(),
+        WidgetKind::Container { children, .. } => children[0].resolve(None),
         _ => panic!("root should be a container"),
     };
     let command = resolved[0]
@@ -3045,8 +3514,8 @@ fn binding_driven_children_can_switch_component_types() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let context = test_context();
-    let show_button = context.observable(false);
-    let tree = WidgetTree::new(Stack::<()>::new().child(show_button.binding().map(|value| {
+    let show_button = context.state(false);
+    let tree = WidgetTree::new(Stack::<()>::new().child(show_button.signal().map(|value| {
         if value {
             vec![super::Element::from(crate::ui::widget::Button::new(
                 "toggle button",
@@ -4245,8 +4714,8 @@ fn switch_thumb_animates_between_positions() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let context = test_context();
-    let checked = context.observable(false);
-    let tree: WidgetTree<()> = WidgetTree::new(Switch::new(checked.binding().animated(
+    let checked = context.state(false);
+    let tree: WidgetTree<()> = WidgetTree::new(Switch::new(checked.signal().animated(
         crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(180)),
     )));
 
@@ -4539,6 +5008,123 @@ fn textarea_shows_scrollbar_by_default() {
         .iter()
         .any(|region| region.vertical_thumb.is_some()));
     assert!(!rendered.primitives.overlay_shapes.is_empty());
+}
+
+#[test]
+fn textarea_keeps_wrapped_text_and_caret_clear_of_vertical_scrollbar() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let content = "W".repeat(240);
+    let text: Element<()> = Textarea::new(content.clone())
+        .size(dp(220.0), dp(52.0))
+        .auto_wrap(true)
+        .into();
+    let text_id = text.id;
+    let tree = WidgetTree::new(text);
+    let viewport = Rect::new(0.0, 0.0, 220.0, 52.0);
+
+    let baseline = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let baseline_region = baseline
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == text_id)
+        .expect("textarea should register a scroll region");
+    let style = TextareaStyle::default_for(infer_theme_mode(&theme));
+    let text = super::text_with_typography(content.clone(), &style.text_style);
+    let (font_size, line_height, letter_spacing) =
+        resolved_text_metrics(&text, &theme, UnitContext::default());
+    let request = TextFontRequest {
+        preferred_font: text.font_family.as_deref().or(theme
+            .typography
+            .body
+            .font_family
+            .as_deref()),
+        weight: text.font_weight.unwrap_or(theme.typography.body.weight),
+    };
+    let layout = font_manager.measure_text_layout_wrapped(
+        &content,
+        request,
+        font_size,
+        line_height,
+        letter_spacing,
+        crate::ui::widget::text_input_layout_width(
+            baseline_region.content_viewport,
+            true,
+            true,
+            super::CARET_WIDTH,
+        ),
+    );
+    let cursor = layout.line_end(0);
+
+    let focused = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        Some(text_id),
+        Some(&TextEditState {
+            cursor,
+            anchor: cursor,
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        }),
+        Some(text_id),
+        Some(&TextEditState::caret_at(&content)),
+        true,
+    );
+
+    let scroll_region = focused
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == text_id)
+        .expect("textarea should register a scroll region");
+    let vertical_track = scroll_region
+        .vertical_track
+        .expect("textarea should show a vertical scrollbar");
+    let max_right = vertical_track.x + dp(0.1);
+
+    assert!(focused
+        .primitives
+        .texts
+        .iter()
+        .all(|primitive| primitive.frame.right() <= max_right));
+
+    let caret = focused
+        .primitives
+        .overlay_shapes
+        .iter()
+        .find(|primitive| (primitive.rect.width.get() - super::CARET_WIDTH).abs() <= 0.01)
+        .expect("caret should be rendered");
+    assert!(
+        caret.rect.right() <= max_right,
+        "caret_right={} track_x={} viewport_right={}",
+        caret.rect.right().get(),
+        vertical_track.x.get(),
+        scroll_region.content_viewport.right().get(),
+    );
 }
 
 #[test]

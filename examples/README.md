@@ -40,8 +40,8 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 最基础的 MVVM 示例。演示：
 
 - `ViewModelContext`
-- `Observable`
-- `Binding`
+- `State`
+- `Signal`
 - `Command`
 - `bind_title`
 - `bind_clear_color`
@@ -108,7 +108,7 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 
 ### `animation_showcase`
 
-声明式动画示例。核心是 `Binding::animated(...)`，演示属性值变化时自动过渡，例如：
+声明式动画示例。核心是 `Signal::animated(...)`，演示属性值变化时自动过渡，例如：
 
 - 宽度
 - 内边距

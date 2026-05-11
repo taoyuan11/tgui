@@ -16,7 +16,7 @@ const SURFACE_HOVER_LIGHTEN: f32 = 0.06;
 const BORDER_HOVER_LIGHTEN: f32 = 0.12;
 const SCROLLBAR_HOVER_LIGHTEN: f32 = 0.18;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct FocusRingOverride {
     pub enabled: Option<bool>,
     pub color: Option<Color>,
@@ -76,7 +76,7 @@ pub(crate) fn infer_theme_mode(theme: &Theme) -> ResolvedThemeMode {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WidgetSurfaceStyle {
     pub background: Option<Value<Color>>,
     pub background_brush: Option<Value<BackgroundBrush>>,
@@ -105,7 +105,7 @@ impl Default for WidgetSurfaceStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TextWidgetStyle {
     pub surface: WidgetSurfaceStyle,
     pub color: Value<Color>,
@@ -123,7 +123,7 @@ impl TextWidgetStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ContainerStyle {
     pub surface: WidgetSurfaceStyle,
     pub scrollbar: ScrollbarStyle,
@@ -148,7 +148,7 @@ impl ContainerStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ImageStyle {
     pub surface: WidgetSurfaceStyle,
     pub fit: ContentFit,
@@ -163,7 +163,7 @@ impl ImageStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasStyle {
     pub surface: WidgetSurfaceStyle,
 }
@@ -176,7 +176,7 @@ impl CanvasStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct VideoSurfaceStyle {
     pub surface: WidgetSurfaceStyle,
     pub fit: ContentFit,
@@ -191,7 +191,7 @@ impl VideoSurfaceStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ButtonStyle {
     pub surface: WidgetSurfaceStyle,
     pub background: Stateful<Value<Color>>,
@@ -312,7 +312,7 @@ impl ButtonStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CheckboxStyle {
     pub surface: WidgetSurfaceStyle,
     pub background: Stateful<Value<Color>>,
@@ -380,7 +380,7 @@ impl CheckboxStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RadioStyle {
     pub surface: WidgetSurfaceStyle,
     pub background: Stateful<Value<Color>>,
@@ -448,7 +448,7 @@ impl RadioStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SwitchStyle {
     pub surface: WidgetSurfaceStyle,
     pub track: Stateful<Value<Color>>,
@@ -516,7 +516,7 @@ impl SwitchStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SelectStyle {
     pub surface: WidgetSurfaceStyle,
     pub background: Stateful<Value<Color>>,
@@ -594,7 +594,7 @@ impl SelectStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InputStyle {
     pub surface: WidgetSurfaceStyle,
     pub background: Stateful<Value<Color>>,
@@ -652,7 +652,7 @@ impl InputStyle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TextareaStyle {
     pub surface: WidgetSurfaceStyle,
     pub background: Stateful<Value<Color>>,
