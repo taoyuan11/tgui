@@ -219,7 +219,7 @@ pub(super) fn apply_android_system_bar_style(
     scheduler_app.run_on_java_main_thread(Box::new(move || {
         if let Err(error) = apply_android_system_bar_style_on_main_thread(&callback_app, style) {
             Log::with_tag("tgui-runtime")
-                .warn(format!("failed to sync Android system bars: {error}"));
+                .warn(format_args!("failed to sync Android system bars: {error}"));
         }
     }));
 

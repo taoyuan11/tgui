@@ -495,6 +495,22 @@ impl TextController {
         }
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn set_text_assuming_changed(&self, text: impl Into<String>) -> u64 {
+        let mut state = self.state.lock().expect("text controller lock poisoned");
+        state.text = text.into();
+        state.revision = state.revision.wrapping_add(1).max(1);
+        self.invalidation.mark_dependency_dirty(self.dependency);
+        state.revision
+    }
+
+    pub(crate) fn set_text_local_assuming_changed(&self, text: impl Into<String>) -> u64 {
+        let mut state = self.state.lock().expect("text controller lock poisoned");
+        state.text = text.into();
+        state.revision = state.revision.wrapping_add(1).max(1);
+        state.revision
+    }
+
     pub fn replace_all(&self, text: impl Into<String>) {
         self.set_text(text);
     }
@@ -613,6 +629,21 @@ impl<T: Clone + PartialEq> State<T> {
         if changed {
             self.invalidation.mark_dependency_dirty(self.dependency);
         }
+        result
+    }
+}
+
+impl<T> State<T> {
+    /// Mutates the current value in place and always requests a UI refresh afterwards.
+    ///
+    /// This avoids the full-value clone that [`State::update`] performs to detect
+    /// whether the value changed, which makes it a better fit for hot paths such as
+    /// text input callbacks that frequently touch large `String` or `Vec` states.
+    pub fn mutate<R>(&self, updater: impl FnOnce(&mut T) -> R) -> R {
+        let mut value = self.value.lock().expect("state lock poisoned");
+        let result = updater(&mut value);
+        drop(value);
+        self.invalidation.mark_dependency_dirty(self.dependency);
         result
     }
 }
@@ -756,6 +787,47 @@ mod tests {
 
         state.update(|value| value.push('!'));
         assert!(invalidation.revision() > before);
+    }
+
+    #[test]
+    fn state_mutate_invalidates_without_cloning_value() {
+        struct CloneTracked {
+            value: usize,
+            clone_count: Arc<AtomicUsize>,
+        }
+
+        impl PartialEq for CloneTracked {
+            fn eq(&self, other: &Self) -> bool {
+                self.value == other.value
+            }
+        }
+
+        impl Clone for CloneTracked {
+            fn clone(&self) -> Self {
+                self.clone_count.fetch_add(1, Ordering::SeqCst);
+                Self {
+                    value: self.value,
+                    clone_count: self.clone_count.clone(),
+                }
+            }
+        }
+
+        let invalidation = InvalidationSignal::new();
+        let clone_count = Arc::new(AtomicUsize::new(0));
+        let state = State::new(
+            CloneTracked {
+                value: 1,
+                clone_count: clone_count.clone(),
+            },
+            invalidation.clone(),
+        );
+        let before = invalidation.revision();
+
+        state.mutate(|value| value.value += 1);
+
+        assert_eq!(clone_count.load(Ordering::SeqCst), 0);
+        assert!(invalidation.revision() > before);
+        assert_eq!(state.read(|value| value.value), 2);
     }
 
     #[test]

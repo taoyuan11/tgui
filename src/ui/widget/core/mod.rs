@@ -49,7 +49,7 @@ use super::style::{
     InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
     SelectStyle as WidgetSelectStyle, SwitchStyle as WidgetSwitchStyle,
 };
-use super::text::Text;
+use super::text::{IntoTextContent, Text};
 
 mod element;
 mod layout;
@@ -116,7 +116,23 @@ pub(crate) struct ResolvedElement<VM> {
     pub(crate) lifecycle_events: LifecycleEventHandlers<VM>,
     pub(crate) media_events: MediaEventHandlers<VM>,
     pub(crate) background: Option<Value<Color>>,
+    pub(crate) child_source_spans: Vec<usize>,
     pub(crate) kind: ResolvedWidgetKind<VM>,
+}
+
+pub(crate) struct LifecycleSnapshot {
+    pub(crate) id: WidgetId,
+    pub(crate) key: Option<WidgetKey>,
+    pub(crate) layout: LayoutStyle,
+    pub(crate) visual: VisualStyle,
+    pub(crate) background: Option<Value<Color>>,
+    pub(crate) kind: LifecycleWidgetKind,
+}
+
+pub(crate) struct LifecycleSelectOption {
+    pub(crate) label: Value<String>,
+    pub(crate) selected: Value<bool>,
+    pub(crate) disabled: Value<bool>,
 }
 
 pub(crate) enum ResolvedWidgetKind<VM> {
@@ -190,6 +206,69 @@ pub(crate) enum ResolvedWidgetKind<VM> {
     },
 }
 
+pub(crate) enum LifecycleWidgetKind {
+    Container {
+        layout: ContainerLayout,
+        child_ids: Vec<WidgetId>,
+    },
+    Text {
+        text: Text,
+    },
+    Image {
+        image: super::image::Image,
+    },
+    Canvas {
+        items: Value<Vec<CanvasItem>>,
+    },
+    #[cfg(feature = "video")]
+    VideoSurface {
+        video: PublicVideoSurface,
+        style: WidgetVideoSurfaceStyle,
+    },
+    Button {
+        label: Value<String>,
+        disabled: Value<bool>,
+        style: WidgetButtonStyle,
+    },
+    Checkbox {
+        checked: Value<bool>,
+        label: Option<Value<String>>,
+        disabled: Value<bool>,
+        style: WidgetCheckboxStyle,
+    },
+    Radio {
+        checked: Value<bool>,
+        label: Option<Value<String>>,
+        disabled: Value<bool>,
+        style: WidgetRadioStyle,
+    },
+    Switch {
+        checked: Value<bool>,
+        active_background: Option<Value<Color>>,
+        inactive_background: Option<Value<Color>>,
+        active_thumb_color: Option<Value<Color>>,
+        inactive_thumb_color: Option<Value<Color>>,
+        disabled: Value<bool>,
+        style: WidgetSwitchStyle,
+    },
+    Select {
+        selected_label: Value<Option<String>>,
+        placeholder: Value<String>,
+        options: Vec<LifecycleSelectOption>,
+        open: Option<Value<bool>>,
+        disabled: Value<bool>,
+        style: WidgetSelectStyle,
+    },
+    TextEditor {
+        placeholder: Value<String>,
+        disabled: Value<bool>,
+        style: WidgetInputStyle,
+        multiline: bool,
+        show_scrollbar: Value<bool>,
+        auto_wrap: Value<bool>,
+    },
+}
+
 impl<VM> Clone for ResolvedElement<VM> {
     fn clone(&self) -> Self {
         Self {
@@ -201,7 +280,31 @@ impl<VM> Clone for ResolvedElement<VM> {
             lifecycle_events: self.lifecycle_events.clone(),
             media_events: self.media_events.clone(),
             background: self.background.clone(),
+            child_source_spans: self.child_source_spans.clone(),
             kind: self.kind.clone(),
+        }
+    }
+}
+
+impl Clone for LifecycleSnapshot {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            key: self.key.clone(),
+            layout: self.layout.clone(),
+            visual: self.visual.clone(),
+            background: self.background.clone(),
+            kind: self.kind.clone(),
+        }
+    }
+}
+
+impl Clone for LifecycleSelectOption {
+    fn clone(&self) -> Self {
+        Self {
+            label: self.label.clone(),
+            selected: self.selected.clone(),
+            disabled: self.disabled.clone(),
         }
     }
 }
@@ -325,6 +428,107 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
     }
 }
 
+impl Clone for LifecycleWidgetKind {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Container { layout, child_ids } => Self::Container {
+                layout: layout.clone(),
+                child_ids: child_ids.clone(),
+            },
+            Self::Text { text } => Self::Text { text: text.clone() },
+            Self::Image { image } => Self::Image {
+                image: image.clone(),
+            },
+            Self::Canvas { items } => Self::Canvas {
+                items: items.clone(),
+            },
+            #[cfg(feature = "video")]
+            Self::VideoSurface { video, style } => Self::VideoSurface {
+                video: video.clone(),
+                style: style.clone(),
+            },
+            Self::Button {
+                label,
+                disabled,
+                style,
+            } => Self::Button {
+                label: label.clone(),
+                disabled: disabled.clone(),
+                style: style.clone(),
+            },
+            Self::Checkbox {
+                checked,
+                label,
+                disabled,
+                style,
+            } => Self::Checkbox {
+                checked: checked.clone(),
+                label: label.clone(),
+                disabled: disabled.clone(),
+                style: style.clone(),
+            },
+            Self::Radio {
+                checked,
+                label,
+                disabled,
+                style,
+            } => Self::Radio {
+                checked: checked.clone(),
+                label: label.clone(),
+                disabled: disabled.clone(),
+                style: style.clone(),
+            },
+            Self::Switch {
+                checked,
+                active_background,
+                inactive_background,
+                active_thumb_color,
+                inactive_thumb_color,
+                disabled,
+                style,
+            } => Self::Switch {
+                checked: checked.clone(),
+                active_background: active_background.clone(),
+                inactive_background: inactive_background.clone(),
+                active_thumb_color: active_thumb_color.clone(),
+                inactive_thumb_color: inactive_thumb_color.clone(),
+                disabled: disabled.clone(),
+                style: style.clone(),
+            },
+            Self::Select {
+                selected_label,
+                placeholder,
+                options,
+                open,
+                disabled,
+                style,
+            } => Self::Select {
+                selected_label: selected_label.clone(),
+                placeholder: placeholder.clone(),
+                options: options.clone(),
+                open: open.clone(),
+                disabled: disabled.clone(),
+                style: style.clone(),
+            },
+            Self::TextEditor {
+                placeholder,
+                disabled,
+                style,
+                multiline,
+                show_scrollbar,
+                auto_wrap,
+            } => Self::TextEditor {
+                placeholder: placeholder.clone(),
+                disabled: disabled.clone(),
+                style: style.clone(),
+                multiline: *multiline,
+                show_scrollbar: show_scrollbar.clone(),
+                auto_wrap: auto_wrap.clone(),
+            },
+        }
+    }
+}
+
 struct CollectContext<'a, 'b> {
     taffy: &'a TaffyTree<MeasureContext>,
     font_manager: &'a FontManager,
@@ -396,6 +600,7 @@ impl From<VisualContextSnapshot> for VisualContext {
 #[derive(Clone)]
 pub(crate) struct CollectedSceneCache<VM> {
     pub(crate) computed: ComputedScene<VM>,
+    pub(crate) lifecycle_states: HashMap<WidgetId, LifecycleEventState<VM>>,
     pub(crate) chunks: HashMap<WidgetId, ComputedScene<VM>>,
     pub(crate) chunk_parts: HashMap<WidgetId, SceneChunkParts<VM>>,
     pub(crate) visual_contexts: HashMap<WidgetId, VisualContextSnapshot>,
@@ -451,6 +656,35 @@ impl<VM> ResolvedSceneLayout<VM> {
         let node = self.resolved_at_path(path);
         collect_resolved_widget_ids(node, &mut ids);
         ids
+    }
+
+    pub(crate) fn resolved_widget(&self, widget_id: WidgetId) -> Option<&ResolvedElement<VM>> {
+        let path = self.path_for(widget_id)?;
+        Some(self.resolved_at_path(path))
+    }
+
+    pub(crate) fn can_patch_layout_dependency_as_scene(&self, widget_id: WidgetId) -> bool {
+        let Some(node) = self.resolved_widget(widget_id) else {
+            return false;
+        };
+        match &node.kind {
+            ResolvedWidgetKind::Text { text } => {
+                !text.user_select
+                    && node.background.is_none()
+                    && !node.interactions.has_any()
+                    && !node.lifecycle_events.has_any()
+                    && !node.media_events.has_any()
+                    && node.visual.border_color.is_none()
+                    && node.visual.border_radius.is_none()
+                    && node.visual.border_width.is_none()
+                    && node.visual.background_brush.is_none()
+                    && node.visual.background_image.is_none()
+                    && node.visual.background_blur.resolve() == Dp::ZERO
+                    && node.visual.opacity.resolve() == 1.0
+                    && node.visual.offset.resolve() == Point::ZERO
+            }
+            _ => false,
+        }
     }
 
     pub(crate) fn rebuild_indexes(&mut self) {
@@ -536,9 +770,10 @@ impl<VM> ResolvedSceneLayout<VM> {
         caret_visible: bool,
     ) -> Option<CollectedSceneCache<VM>> {
         let path = self.path_for(widget_id)?;
-        let ((mut computed, chunks, chunk_parts, visual_contexts), dependencies): (
+        let ((mut computed, lifecycle_states, chunks, chunk_parts, visual_contexts), dependencies): (
             (
                 ComputedScene<VM>,
+                HashMap<WidgetId, LifecycleEventState<VM>>,
                 HashMap<WidgetId, ComputedScene<VM>>,
                 HashMap<WidgetId, SceneChunkParts<VM>>,
                 HashMap<WidgetId, VisualContextSnapshot>,
@@ -546,6 +781,7 @@ impl<VM> ResolvedSceneLayout<VM> {
             DependencyGraph,
         ) = with_widget_stack(|| {
             with_dependency_collection(|| {
+                let mut lifecycle_states = HashMap::new();
                 let mut chunks = HashMap::new();
                 let mut chunk_parts = HashMap::new();
                 let mut visual_contexts = HashMap::new();
@@ -576,16 +812,24 @@ impl<VM> ResolvedSceneLayout<VM> {
                     self.layout_at_path(path),
                     visual_context.into(),
                     &mut context,
+                    &mut lifecycle_states,
                     &mut chunks,
                     &mut chunk_parts,
                     &mut visual_contexts,
                 );
-                (computed, chunks, chunk_parts, visual_contexts)
+                (
+                    computed,
+                    lifecycle_states,
+                    chunks,
+                    chunk_parts,
+                    visual_contexts,
+                )
             })
         });
         computed.dependencies = dependencies.clone();
         Some(CollectedSceneCache {
             computed,
+            lifecycle_states,
             chunks,
             chunk_parts,
             visual_contexts,
@@ -699,6 +943,27 @@ impl<VM> ResolvedSceneLayout<VM> {
         self.dependencies.merge_from(&dependencies);
         self.rebuild_indexes();
         Ok(removed_ids)
+    }
+
+    pub(crate) fn patch_resolved_roots(&mut self, roots: &[WidgetId], theme: &Theme) -> bool {
+        for root_id in roots {
+            let Some(path) = self.path_for(*root_id).map(|path| path.to_vec()) else {
+                continue;
+            };
+            let Some(next) = resolve_subtree_from_source_path(
+                &self.source_root,
+                Some(&self.resolved_root),
+                theme,
+                &path,
+            ) else {
+                return false;
+            };
+            if !patch_resolved_at_path(&mut self.resolved_root, &path, next) {
+                return false;
+            }
+        }
+        self.rebuild_indexes();
+        true
     }
 }
 
@@ -899,6 +1164,25 @@ fn resolved_at_path<'a, VM>(
         panic!("resolved path descends into a non-container widget");
     };
     resolved_at_path(&children[path[0]], &path[1..])
+}
+
+fn patch_resolved_at_path<VM>(
+    node: &mut ResolvedElement<VM>,
+    path: &[usize],
+    next: ResolvedElement<VM>,
+) -> bool {
+    if path.is_empty() {
+        *node = next;
+        return true;
+    }
+
+    let ResolvedWidgetKind::Container { children, .. } = &mut node.kind else {
+        return false;
+    };
+    let Some(child) = children.get_mut(path[0]) else {
+        return false;
+    };
+    patch_resolved_at_path(child, &path[1..], next)
 }
 
 fn layout_at_path<'a>(node: &'a LayoutNode, path: &[usize]) -> &'a LayoutNode {

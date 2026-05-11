@@ -1,13 +1,13 @@
 use std::borrow::Cow;
 
 use super::*;
+#[cfg(feature = "video")]
+use crate::ui::widget::style::VideoSurfaceStyle;
 use crate::ui::widget::style::{
     ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
     InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
     SelectStyle as WidgetSelectStyle, SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle,
 };
-#[cfg(feature = "video")]
-use crate::ui::widget::style::VideoSurfaceStyle;
 use crate::ui::widget::{Image, Text};
 
 fn freeze_value<T: Clone>(value: &mut Value<T>) {
@@ -164,38 +164,74 @@ fn freeze_input_style(style: &mut WidgetInputStyle) {
     freeze_value(&mut style.radius);
 }
 
-fn freeze_resolved_element<VM>(element: &mut ResolvedElement<VM>) {
-    freeze_layout_style(&mut element.layout);
-    freeze_visual_style(&mut element.visual);
-    freeze_option_value(&mut element.background);
-    freeze_resolved_widget_kind(&mut element.kind);
+fn lifecycle_snapshot<VM>(element: &ResolvedElement<VM>) -> LifecycleSnapshot {
+    let mut layout = element.layout.clone();
+    freeze_layout_style(&mut layout);
+    let mut visual = element.visual.clone();
+    freeze_visual_style(&mut visual);
+    let mut background = element.background.clone();
+    freeze_option_value(&mut background);
+
+    LifecycleSnapshot {
+        id: element.id,
+        key: element.key.clone(),
+        layout,
+        visual,
+        background,
+        kind: lifecycle_widget_kind(&element.kind),
+    }
 }
 
-fn freeze_resolved_widget_kind<VM>(kind: &mut ResolvedWidgetKind<VM>) {
+fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> LifecycleWidgetKind {
     match kind {
         ResolvedWidgetKind::Container { layout, children } => {
-            freeze_container_layout(layout);
-            for child in children {
-                freeze_resolved_element(child);
+            let mut layout = layout.clone();
+            freeze_container_layout(&mut layout);
+            LifecycleWidgetKind::Container {
+                layout,
+                child_ids: children.iter().map(|child| child.id).collect(),
             }
         }
-        ResolvedWidgetKind::Text { text } => freeze_text(text),
-        ResolvedWidgetKind::Image { image } => freeze_image(image),
-        ResolvedWidgetKind::Canvas { items, .. } => freeze_value(items),
+        ResolvedWidgetKind::Text { text } => {
+            let mut text = text.clone();
+            freeze_text(&mut text);
+            LifecycleWidgetKind::Text { text }
+        }
+        ResolvedWidgetKind::Image { image } => {
+            let mut image = image.clone();
+            freeze_image(&mut image);
+            LifecycleWidgetKind::Image { image }
+        }
+        ResolvedWidgetKind::Canvas { items, .. } => {
+            let mut items = items.clone();
+            freeze_value(&mut items);
+            LifecycleWidgetKind::Canvas { items }
+        }
         #[cfg(feature = "video")]
         ResolvedWidgetKind::VideoSurface { video, style } => {
+            let mut video = video.clone();
+            let mut style = style.clone();
             freeze_option_value(&mut video.background);
             freeze_option_value(&mut video.cursor_style);
-            freeze_video_surface_style(style);
+            freeze_video_surface_style(&mut style);
+            LifecycleWidgetKind::VideoSurface { video, style }
         }
         ResolvedWidgetKind::Button {
             label,
             disabled,
             style,
         } => {
-            freeze_value(label);
-            freeze_value(disabled);
-            freeze_button_style(style);
+            let mut label = label.clone();
+            let mut disabled = disabled.clone();
+            let mut style = style.clone();
+            freeze_value(&mut label);
+            freeze_value(&mut disabled);
+            freeze_button_style(&mut style);
+            LifecycleWidgetKind::Button {
+                label,
+                disabled,
+                style,
+            }
         }
         ResolvedWidgetKind::Checkbox {
             checked,
@@ -204,10 +240,20 @@ fn freeze_resolved_widget_kind<VM>(kind: &mut ResolvedWidgetKind<VM>) {
             style,
             ..
         } => {
-            freeze_value(checked);
-            freeze_option_value(label);
-            freeze_value(disabled);
-            freeze_checkbox_style(style);
+            let mut checked = checked.clone();
+            let mut label = label.clone();
+            let mut disabled = disabled.clone();
+            let mut style = style.clone();
+            freeze_value(&mut checked);
+            freeze_option_value(&mut label);
+            freeze_value(&mut disabled);
+            freeze_checkbox_style(&mut style);
+            LifecycleWidgetKind::Checkbox {
+                checked,
+                label,
+                disabled,
+                style,
+            }
         }
         ResolvedWidgetKind::Radio {
             checked,
@@ -216,10 +262,20 @@ fn freeze_resolved_widget_kind<VM>(kind: &mut ResolvedWidgetKind<VM>) {
             style,
             ..
         } => {
-            freeze_value(checked);
-            freeze_option_value(label);
-            freeze_value(disabled);
-            freeze_radio_style(style);
+            let mut checked = checked.clone();
+            let mut label = label.clone();
+            let mut disabled = disabled.clone();
+            let mut style = style.clone();
+            freeze_value(&mut checked);
+            freeze_option_value(&mut label);
+            freeze_value(&mut disabled);
+            freeze_radio_style(&mut style);
+            LifecycleWidgetKind::Radio {
+                checked,
+                label,
+                disabled,
+                style,
+            }
         }
         ResolvedWidgetKind::Switch {
             checked,
@@ -231,13 +287,29 @@ fn freeze_resolved_widget_kind<VM>(kind: &mut ResolvedWidgetKind<VM>) {
             style,
             ..
         } => {
-            freeze_value(checked);
-            freeze_option_value(active_background);
-            freeze_option_value(inactive_background);
-            freeze_option_value(active_thumb_color);
-            freeze_option_value(inactive_thumb_color);
-            freeze_value(disabled);
-            freeze_switch_style(style);
+            let mut checked = checked.clone();
+            let mut active_background = active_background.clone();
+            let mut inactive_background = inactive_background.clone();
+            let mut active_thumb_color = active_thumb_color.clone();
+            let mut inactive_thumb_color = inactive_thumb_color.clone();
+            let mut disabled = disabled.clone();
+            let mut style = style.clone();
+            freeze_value(&mut checked);
+            freeze_option_value(&mut active_background);
+            freeze_option_value(&mut inactive_background);
+            freeze_option_value(&mut active_thumb_color);
+            freeze_option_value(&mut inactive_thumb_color);
+            freeze_value(&mut disabled);
+            freeze_switch_style(&mut style);
+            LifecycleWidgetKind::Switch {
+                checked,
+                active_background,
+                inactive_background,
+                active_thumb_color,
+                inactive_thumb_color,
+                disabled,
+                style,
+            }
         }
         ResolvedWidgetKind::Select {
             selected_label,
@@ -248,38 +320,82 @@ fn freeze_resolved_widget_kind<VM>(kind: &mut ResolvedWidgetKind<VM>) {
             style,
             ..
         } => {
-            freeze_value(selected_label);
-            freeze_value(placeholder);
-            for option in options {
+            let mut selected_label = selected_label.clone();
+            let mut placeholder = placeholder.clone();
+            let mut options = options
+                .iter()
+                .map(|option| LifecycleSelectOption {
+                    label: option.label.clone(),
+                    selected: option.selected.clone(),
+                    disabled: option.disabled.clone(),
+                })
+                .collect::<Vec<_>>();
+            let mut open = open.clone();
+            let mut disabled = disabled.clone();
+            let mut style = style.clone();
+            freeze_value(&mut selected_label);
+            freeze_value(&mut placeholder);
+            for option in &mut options {
                 freeze_value(&mut option.label);
                 freeze_value(&mut option.selected);
                 freeze_value(&mut option.disabled);
             }
-            freeze_option_value(open);
-            freeze_value(disabled);
-            freeze_select_style(style);
+            freeze_option_value(&mut open);
+            freeze_value(&mut disabled);
+            freeze_select_style(&mut style);
+            LifecycleWidgetKind::Select {
+                selected_label,
+                placeholder,
+                options,
+                open,
+                disabled,
+                style,
+            }
         }
         ResolvedWidgetKind::TextEditor {
-            controller,
+            controller: _,
             placeholder,
             disabled,
             style,
+            multiline,
             show_scrollbar,
             auto_wrap,
             ..
         } => {
-            let text = controller.text();
-            *controller = TextController::from(text);
-            freeze_value(placeholder);
-            freeze_value(disabled);
-            freeze_input_style(style);
-            freeze_value(show_scrollbar);
-            freeze_value(auto_wrap);
+            let mut placeholder = placeholder.clone();
+            let mut disabled = disabled.clone();
+            let mut style = style.clone();
+            let mut show_scrollbar = show_scrollbar.clone();
+            let mut auto_wrap = auto_wrap.clone();
+            freeze_value(&mut placeholder);
+            freeze_value(&mut disabled);
+            freeze_input_style(&mut style);
+            freeze_value(&mut show_scrollbar);
+            freeze_value(&mut auto_wrap);
+            LifecycleWidgetKind::TextEditor {
+                placeholder,
+                disabled,
+                style,
+                multiline: *multiline,
+                show_scrollbar,
+                auto_wrap,
+            }
         }
     }
 }
 
 impl<VM> PartialEq for ResolvedElement<VM> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.key == other.key
+            && self.layout == other.layout
+            && self.visual == other.visual
+            && self.background == other.background
+            && self.kind == other.kind
+    }
+}
+
+impl PartialEq for LifecycleSnapshot {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
             && self.key == other.key
@@ -498,6 +614,198 @@ impl<VM> PartialEq for ResolvedWidgetKind<VM> {
             ) => {
                 left_controller.text() == right_controller.text()
                     && left_placeholder == right_placeholder
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+                    && left_multiline == right_multiline
+                    && left_show_scrollbar == right_show_scrollbar
+                    && left_auto_wrap == right_auto_wrap
+            }
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq for LifecycleWidgetKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Container {
+                    layout: left_layout,
+                    child_ids: left_child_ids,
+                },
+                Self::Container {
+                    layout: right_layout,
+                    child_ids: right_child_ids,
+                },
+            ) => left_layout == right_layout && left_child_ids == right_child_ids,
+            (Self::Text { text: left }, Self::Text { text: right }) => {
+                left.content == right.content
+                    && left.font_family == right.font_family
+                    && left.background == right.background
+                    && left.color == right.color
+                    && left.font_size == right.font_size
+                    && left.line_height == right.line_height
+                    && left.font_weight == right.font_weight
+                    && left.letter_spacing == right.letter_spacing
+                    && left.cursor_style == right.cursor_style
+                    && left.user_select == right.user_select
+            }
+            (Self::Image { image: left }, Self::Image { image: right }) => {
+                left.source == right.source
+                    && left.background == right.background
+                    && left.fit == right.fit
+                    && left.cursor_style == right.cursor_style
+            }
+            (Self::Canvas { items: left }, Self::Canvas { items: right }) => left == right,
+            #[cfg(feature = "video")]
+            (
+                Self::VideoSurface {
+                    video: left_video,
+                    style: left_style,
+                },
+                Self::VideoSurface {
+                    video: right_video,
+                    style: right_style,
+                },
+            ) => {
+                left_video.background == right_video.background
+                    && left_video.fit == right_video.fit
+                    && left_video.cursor_style == right_video.cursor_style
+                    && left_style == right_style
+            }
+            (
+                Self::Button {
+                    label: left_label,
+                    disabled: left_disabled,
+                    style: left_style,
+                },
+                Self::Button {
+                    label: right_label,
+                    disabled: right_disabled,
+                    style: right_style,
+                },
+            ) => {
+                left_label == right_label
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+            }
+            (
+                Self::Checkbox {
+                    checked: left_checked,
+                    label: left_label,
+                    disabled: left_disabled,
+                    style: left_style,
+                },
+                Self::Checkbox {
+                    checked: right_checked,
+                    label: right_label,
+                    disabled: right_disabled,
+                    style: right_style,
+                },
+            ) => {
+                left_checked == right_checked
+                    && left_label == right_label
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+            }
+            (
+                Self::Radio {
+                    checked: left_checked,
+                    label: left_label,
+                    disabled: left_disabled,
+                    style: left_style,
+                },
+                Self::Radio {
+                    checked: right_checked,
+                    label: right_label,
+                    disabled: right_disabled,
+                    style: right_style,
+                },
+            ) => {
+                left_checked == right_checked
+                    && left_label == right_label
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+            }
+            (
+                Self::Switch {
+                    checked: left_checked,
+                    active_background: left_active_background,
+                    inactive_background: left_inactive_background,
+                    active_thumb_color: left_active_thumb_color,
+                    inactive_thumb_color: left_inactive_thumb_color,
+                    disabled: left_disabled,
+                    style: left_style,
+                },
+                Self::Switch {
+                    checked: right_checked,
+                    active_background: right_active_background,
+                    inactive_background: right_inactive_background,
+                    active_thumb_color: right_active_thumb_color,
+                    inactive_thumb_color: right_inactive_thumb_color,
+                    disabled: right_disabled,
+                    style: right_style,
+                },
+            ) => {
+                left_checked == right_checked
+                    && left_active_background == right_active_background
+                    && left_inactive_background == right_inactive_background
+                    && left_active_thumb_color == right_active_thumb_color
+                    && left_inactive_thumb_color == right_inactive_thumb_color
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+            }
+            (
+                Self::Select {
+                    selected_label: left_selected_label,
+                    placeholder: left_placeholder,
+                    options: left_options,
+                    open: left_open,
+                    disabled: left_disabled,
+                    style: left_style,
+                },
+                Self::Select {
+                    selected_label: right_selected_label,
+                    placeholder: right_placeholder,
+                    options: right_options,
+                    open: right_open,
+                    disabled: right_disabled,
+                    style: right_style,
+                },
+            ) => {
+                left_selected_label == right_selected_label
+                    && left_placeholder == right_placeholder
+                    && left_open == right_open
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+                    && left_options.len() == right_options.len()
+                    && left_options.iter().zip(right_options.iter()).all(
+                        |(left_option, right_option)| {
+                            left_option.label == right_option.label
+                                && left_option.selected == right_option.selected
+                                && left_option.disabled == right_option.disabled
+                        },
+                    )
+            }
+            (
+                Self::TextEditor {
+                    placeholder: left_placeholder,
+                    disabled: left_disabled,
+                    style: left_style,
+                    multiline: left_multiline,
+                    show_scrollbar: left_show_scrollbar,
+                    auto_wrap: left_auto_wrap,
+                },
+                Self::TextEditor {
+                    placeholder: right_placeholder,
+                    disabled: right_disabled,
+                    style: right_style,
+                    multiline: right_multiline,
+                    show_scrollbar: right_show_scrollbar,
+                    auto_wrap: right_auto_wrap,
+                },
+            ) => {
+                left_placeholder == right_placeholder
                     && left_disabled == right_disabled
                     && left_style == right_style
                     && left_multiline == right_multiline
@@ -917,6 +1225,7 @@ impl<VM> ResolvedElement<VM> {
         layout_node: &LayoutNode,
         visual_context: VisualContext,
         context: &mut CollectContext<'_, '_>,
+        lifecycle_states: &mut HashMap<WidgetId, LifecycleEventState<VM>>,
         chunks: &mut HashMap<WidgetId, ComputedScene<VM>>,
         chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
         visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
@@ -927,6 +1236,7 @@ impl<VM> ResolvedElement<VM> {
                 layout_node,
                 visual_context,
                 context,
+                lifecycle_states,
                 chunks,
                 chunk_parts,
                 visual_contexts,
@@ -939,10 +1249,21 @@ impl<VM> ResolvedElement<VM> {
         layout_node: &LayoutNode,
         visual_context: VisualContext,
         context: &mut CollectContext<'_, '_>,
+        lifecycle_states: &mut HashMap<WidgetId, LifecycleEventState<VM>>,
         chunks: &mut HashMap<WidgetId, ComputedScene<VM>>,
         chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
         visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
     ) -> ComputedScene<VM> {
+        if self.lifecycle_events.has_any() {
+            lifecycle_states.insert(
+                self.id,
+                LifecycleEventState {
+                    widget_id: self.id,
+                    snapshot: lifecycle_snapshot(self),
+                    handlers: self.lifecycle_events.clone(),
+                },
+            );
+        }
         let mut computed = ComputedScene::default();
         let layout = context
             .taffy
@@ -1650,6 +1971,7 @@ impl<VM> ResolvedElement<VM> {
                             clip_mask: child_clip_mask,
                         },
                         context,
+                        lifecycle_states,
                         chunks,
                         chunk_parts,
                         visual_contexts,
@@ -2156,11 +2478,11 @@ impl<VM> ResolvedElement<VM> {
                     Cow::Owned(controller.text())
                 };
                 let display_value = if resolved_value.is_empty() {
-                    placeholder.resolve()
+                    Cow::Owned(placeholder.resolve())
                 } else {
-                    resolved_value.to_string()
+                    Cow::Borrowed(resolved_value.as_ref())
                 };
-                let mut text = text_with_typography(display_value, &input_style.text_style);
+                let mut text = text_with_typography("", &input_style.text_style);
                 text.color = Some(Value::Static(input_style.text));
                 let precomputed_layout = if resolved_value.is_empty() {
                     None
@@ -2175,6 +2497,7 @@ impl<VM> ResolvedElement<VM> {
                     .copied()
                     .unwrap_or(Point::ZERO);
                 let text_render = push_text_input_primitives(
+                    display_value.as_ref(),
                     &text,
                     frame,
                     context.font_manager,
@@ -2350,11 +2673,10 @@ impl<VM> ResolvedElement<VM> {
 
     pub(super) fn collect_lifecycle_event_states(&self, states: &mut Vec<LifecycleEventState<VM>>) {
         if self.lifecycle_events.has_any() {
-            let mut resolved = self.clone();
-            freeze_resolved_element(&mut resolved);
             states.push(LifecycleEventState {
                 widget_id: self.id,
-                resolved,
+                snapshot: lifecycle_snapshot(self),
+                handlers: self.lifecycle_events.clone(),
             });
         }
 

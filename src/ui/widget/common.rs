@@ -469,10 +469,20 @@ pub(crate) struct MediaEventState<VM> {
     pub handlers: MediaEventHandlers<VM>,
 }
 
-#[derive(Clone)]
 pub(crate) struct LifecycleEventState<VM> {
     pub widget_id: WidgetId,
-    pub resolved: super::core::ResolvedElement<VM>,
+    pub snapshot: super::core::LifecycleSnapshot,
+    pub handlers: LifecycleEventHandlers<VM>,
+}
+
+impl<VM> Clone for LifecycleEventState<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            widget_id: self.widget_id,
+            snapshot: self.snapshot.clone(),
+            handlers: self.handlers.clone(),
+        }
+    }
 }
 
 impl<VM> Clone for InteractionHandlers<VM> {

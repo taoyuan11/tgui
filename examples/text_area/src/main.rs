@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 use tgui::prelude::*;
 
 fn card_style(mode: ResolvedThemeMode) -> ContainerStyle {
@@ -23,6 +23,7 @@ struct App {
     content: TextController,
     path_label: State<String>,
     count: State<i32>,
+    source_path: String,
 }
 
 impl App {
@@ -37,26 +38,48 @@ impl App {
                 .collect()
         })
     }
+
+    fn switch_source(&mut self) {
+        let path1 = String::from("D:\\Project\\Rust\\libs\\tgui\\src\\runtime\\mod.rs");
+        let path2 = String::from("D:\\Project\\Rust\\libs\\tgui\\src\\video\\backend\\ffmpeg\\mod.rs");
+
+        if self.source_path == path1 {
+            self.source_path = path2.clone();
+        } else {
+            self.source_path = path1.clone();
+        }
+        tgui_log(LogLevel::Info, self.source_path.clone());
+        self.path_label.set(self.source_path.clone());
+        let string = Self::get_source(self.path_label.get().as_str());
+        self.content.set_text(string);
+    }
+
+    fn get_source(path: &str) -> String {
+        let path = Path::new(path);
+        let content = fs::read_to_string(&path).unwrap_or_else(|error| {
+            format!("无法读取示例源码:\n{error}\n\n目标文件: {}", path.display())
+        });
+        content
+    }
 }
 
 impl ViewModel for App {
     fn new(context: &ViewModelContext) -> Self {
-        let path = source_path();
-        let content = fs::read_to_string(&path).unwrap_or_else(|error| {
-            format!("无法读取示例源码:\n{error}\n\n目标文件: {}", path.display())
-        });
+        let source_path = String::from("D:\\Project\\Rust\\libs\\tgui\\src\\runtime\\mod.rs");
+
+        let source = Self::get_source(source_path.as_str());
 
         Self {
             theme: context.state(ThemeMode::System),
             contact_method: context.state(String::from("system")),
-            content: context.text_controller(content),
-            path_label: context.state(path.display().to_string()),
+            content: context.text_controller(source),
+            path_label: context.state(source_path.clone()),
             count: context.state(0),
+            source_path,
         }
     }
 
     fn view(&self) -> Element<Self> {
-
         Flex::vertical()
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(20.0)))
@@ -90,10 +113,12 @@ impl ViewModel for App {
                 .child(el![
                     Button::new("添加一个块").on_click(Command::new(|app: &mut App| {
                         app.count.update(|count| *count += 1)
-
                     })),
                     Button::new("去掉一个块").on_click(Command::new(|app: &mut App| {
                         app.count.update(|count| *count -= 1)
+                    })),
+                    Button::new("切换源码").on_click(Command::new(|app: &mut App| {
+                        app.switch_source()
                     })),
                 ]),
                 Text::new(
@@ -101,9 +126,9 @@ impl ViewModel for App {
                 )
                 .user_select(true),
                 Text::new(self.path_label.signal()).user_select(true)
-                            .on_update(Command::new(|_| {
-                                tgui_log(LogLevel::Info, "path_label text update")
-                            })),
+                    .on_update(Command::new(|_| {
+                        tgui_log(LogLevel::Info, "path_label text update")
+                    })),
                 Flex::vertical()
                     .padding(Insets::all(dp(14.0)))
                     .gap(dp(10.0))
@@ -117,12 +142,14 @@ impl ViewModel for App {
                     .child(el![
                         Text::new("源码编辑区"),
                         Textarea::new(self.content.clone())
+                            .key("source_textarea")
                             .width(pct(100.0))
                             .min_height(dp(0.0))
                             .grow(1.0)
                             .on_change(Command::new(|app: &mut App| {
-                                app.path_label
-                                    .set(format!("已编辑: {:03}", app.content.revision() % 1000));
+                                app.path_label.update(|label| {
+                                    *label = format!("{label}1")
+                                });
                             }))
                             .on_update(Command::new(|_| {
                                 tgui_log(LogLevel::Info, "textarea update")
@@ -147,10 +174,6 @@ fn dynamic_block<VM>(num: i32) -> Stack<VM> {
         .style(card_style)
         .child(Text::new(format!("块 {num}")))
         .into()
-}
-
-fn source_path() -> PathBuf {
-    PathBuf::from("D:\\Project\\Rust\\libs\\tgui\\src\\runtime\\mod.rs")
 }
 
 fn main() -> Result<(), TguiError> {

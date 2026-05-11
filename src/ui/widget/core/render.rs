@@ -221,7 +221,13 @@ pub(super) fn push_text_primitives(
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
 ) {
+    let started_at = crate::log::text_profile_enabled().then_some(std::time::Instant::now());
+    let resolve_content_started_at =
+        crate::log::text_profile_enabled().then_some(std::time::Instant::now());
     let content = text.content.resolve();
+    let resolve_content_elapsed_ms = resolve_content_started_at
+        .map(|started_at| started_at.elapsed().as_secs_f64() * 1000.0)
+        .unwrap_or(0.0);
     let default_style = &theme.typography.body;
     let text_request = TextFontRequest {
         preferred_font: text
@@ -230,7 +236,12 @@ pub(super) fn push_text_primitives(
             .or(default_style.font_family.as_deref()),
         weight: text.font_weight.unwrap_or(default_style.weight),
     };
+    let resolve_font_started_at =
+        crate::log::text_profile_enabled().then_some(std::time::Instant::now());
     let resolved = font_manager.resolve_text(&content, text_request.clone());
+    let resolve_font_elapsed_ms = resolve_font_started_at
+        .map(|started_at| started_at.elapsed().as_secs_f64() * 1000.0)
+        .unwrap_or(0.0);
 
     let color = text
         .color
@@ -239,46 +250,66 @@ pub(super) fn push_text_primitives(
         .unwrap_or(fallback_color);
     let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
     let inner = frame.inset(padding);
-    let current_layout = font_manager.measure_text_layout(
-        &content,
-        text_request.clone(),
-        font_size,
-        line_height,
-        letter_spacing,
-    );
-    let content_frame = centered_text_frame(
-        inner,
-        current_layout.width,
-        current_layout.height,
-        line_height,
-        center_horizontally,
-    );
+    let requires_precise_layout = selection_state.is_some() || show_caret || center_horizontally;
+    let layout_started_at = crate::log::text_profile_enabled().then_some(std::time::Instant::now());
+    let current_layout = requires_precise_layout.then(|| {
+        font_manager.measure_text_layout(
+            &content,
+            text_request.clone(),
+            font_size,
+            line_height,
+            letter_spacing,
+        )
+    });
+    let layout_elapsed_ms = layout_started_at
+        .map(|started_at| started_at.elapsed().as_secs_f64() * 1000.0)
+        .unwrap_or(0.0);
+    let content_frame = if let Some(current_layout) = current_layout.as_ref() {
+        centered_text_frame(
+            inner,
+            current_layout.width,
+            current_layout.height,
+            line_height,
+            center_horizontally,
+        )
+    } else {
+        centered_text_frame(
+            inner,
+            inner.width.get(),
+            line_height,
+            line_height,
+            false,
+        )
+    };
+    let primary_font = resolved.primary_font.clone();
 
-    if let Some((selection_start, selection_end)) = selection_state
-        .cloned()
-        .unwrap_or_else(|| TextEditState::caret_at(&content))
-        .clamped_to(&content)
-        .selection_range()
-    {
-        let selection_start = selection_start.min(content.len());
-        let selection_end = selection_end.min(content.len());
-        let selection_start_x = current_layout.x_for_index(selection_start);
-        let selection_end_x = current_layout.x_for_index(selection_end);
-        let selection_width = (selection_end_x - selection_start_x).max(0.0);
-        if selection_width > 0.0 {
-            scene.push_shape(RenderPrimitive {
-                rect: Rect::new(
-                    content_frame.x + selection_start_x,
-                    content_frame.y,
-                    selection_width,
-                    content_frame.height.max(Dp::new(line_height)),
-                ),
-                color: theme.colors.selection.with_alpha_factor(opacity),
-                corner_radius: 4.0,
-                stroke_width: 0.0,
-                clip_rect,
-                clip_mask,
-            });
+    if let Some(current_layout) = current_layout.as_ref() {
+        if let Some((selection_start, selection_end)) = selection_state
+            .cloned()
+            .unwrap_or_else(|| TextEditState::caret_at(&content))
+            .clamped_to(&content)
+            .selection_range()
+        {
+            let selection_start = selection_start.min(content.len());
+            let selection_end = selection_end.min(content.len());
+            let selection_start_x = current_layout.x_for_index(selection_start);
+            let selection_end_x = current_layout.x_for_index(selection_end);
+            let selection_width = (selection_end_x - selection_start_x).max(0.0);
+            if selection_width > 0.0 {
+                scene.push_shape(RenderPrimitive {
+                    rect: Rect::new(
+                        content_frame.x + selection_start_x,
+                        content_frame.y,
+                        selection_width,
+                        content_frame.height.max(Dp::new(line_height)),
+                    ),
+                    color: theme.colors.selection.with_alpha_factor(opacity),
+                    corner_radius: 4.0,
+                    stroke_width: 0.0,
+                    clip_rect,
+                    clip_mask,
+                });
+            }
         }
     }
 
@@ -287,7 +318,7 @@ pub(super) fn push_text_primitives(
         frame: content_frame,
         color: color.with_alpha_factor(opacity),
         force_color: false,
-        font_family: Some(resolved.primary_font),
+        font_family: Some(primary_font.clone()),
         font_size,
         font_weight: text.font_weight.unwrap_or(default_style.weight),
         line_height,
@@ -297,6 +328,9 @@ pub(super) fn push_text_primitives(
     });
 
     if show_caret {
+        let current_layout = current_layout
+            .as_ref()
+            .expect("text caret rendering requires precise layout");
         let caret_width = caret_content
             .map(|caret_text| {
                 font_manager
@@ -325,6 +359,38 @@ pub(super) fn push_text_primitives(
             clip_mask,
         });
     }
+
+    if let Some(started_at) = started_at {
+        let elapsed = started_at.elapsed();
+        if elapsed >= std::time::Duration::from_millis(1)
+            || resolve_font_elapsed_ms >= 1.0
+            || layout_elapsed_ms >= 1.0
+        {
+            let mut preview = content.replace('\n', "\\n");
+            if preview.len() > 48 {
+                preview.truncate(48);
+                preview.push_str("...");
+            }
+            crate::log::log_text_profile(
+                "textarea_text_widget",
+                elapsed,
+                format!(
+                    "widget={:?} len={} resolve_content_ms={:.3} resolve_font_ms={:.3} layout_ms={:.3} fast_path={} selection={} caret={} center={} font={} preview={:?}",
+                    widget_id,
+                    content.len(),
+                    resolve_content_elapsed_ms,
+                    resolve_font_elapsed_ms,
+                    layout_elapsed_ms,
+                    !requires_precise_layout,
+                    selection_state.is_some(),
+                    show_caret,
+                    center_horizontally,
+                    primary_font,
+                    preview,
+                ),
+            );
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -336,6 +402,7 @@ pub(super) struct TextInputRenderOutput {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn push_text_input_primitives(
+    content: &str,
     text: &Text,
     frame: Rect,
     font_manager: &FontManager,
@@ -361,7 +428,6 @@ pub(super) fn push_text_input_primitives(
     clip_mask: Option<ClipMask>,
 ) -> TextInputRenderOutput {
     let started_at = crate::log::text_profile_enabled().then_some(std::time::Instant::now());
-    let resolved_content = text.content.resolve();
     let default_style = &theme.typography.body;
     let text_request = TextFontRequest {
         preferred_font: text
@@ -370,7 +436,7 @@ pub(super) fn push_text_input_primitives(
             .or(default_style.font_family.as_deref()),
         weight: text.font_weight.unwrap_or(default_style.weight),
     };
-    let resolved_font = font_manager.resolve_text(&resolved_content, text_request.clone());
+    let resolved_font = font_manager.resolve_text(content, text_request.clone());
 
     let text_color = text
         .color
@@ -389,20 +455,20 @@ pub(super) fn push_text_input_primitives(
         .unwrap_or_else(|| TextEditState {
             scroll_x: scroll_offset.x,
             scroll_y: scroll_offset.y,
-            ..TextEditState::caret_at(&resolved_content)
+            ..TextEditState::caret_at(content)
         })
-        .clamped_to(&resolved_content);
+        .clamped_to(content);
 
     let (display_content, display_state, composition_range) =
         if let Some(composition) = base_state.composition.as_ref() {
-            let start = composition.replace_range.0.min(resolved_content.len());
-            let end = composition.replace_range.1.min(resolved_content.len());
+            let start = composition.replace_range.0.min(content.len());
+            let end = composition.replace_range.1.min(content.len());
             let mut display = String::with_capacity(
-                resolved_content.len() + composition.text.len().saturating_sub(end - start),
+                content.len() + composition.text.len().saturating_sub(end - start),
             );
-            display.push_str(&resolved_content[..start]);
+            display.push_str(&content[..start]);
             display.push_str(&composition.text);
-            display.push_str(&resolved_content[end..]);
+            display.push_str(&content[end..]);
             let composition_end = start + composition.text.len();
             let caret_offset = composition
                 .cursor
@@ -410,7 +476,7 @@ pub(super) fn push_text_input_primitives(
                 .unwrap_or(composition.text.len());
             let caret = start + caret_offset;
             (
-                display,
+                std::borrow::Cow::Owned(display),
                 TextEditState {
                     cursor: caret,
                     anchor: caret,
@@ -422,7 +488,7 @@ pub(super) fn push_text_input_primitives(
                 Some((start, composition_end)),
             )
         } else {
-            (resolved_content.clone(), base_state.clone(), None)
+            (std::borrow::Cow::Borrowed(content), base_state.clone(), None)
         };
 
     let layout_started_at = std::time::Instant::now();
@@ -566,7 +632,7 @@ pub(super) fn push_text_input_primitives(
         }
     } else {
         scene.push_text(TextPrimitive {
-            content: display_content.clone(),
+            content: display_content.as_ref().to_string(),
             frame: content_frame,
             color: text_color,
             force_color: false,

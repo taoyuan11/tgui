@@ -217,9 +217,10 @@ pub mod prelude {
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
         ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Input,
-        InputStyle, Radio, RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle,
-        Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle, VideoSurfaceStyle,
-        WidgetCommand, WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
+        InputStyle, IntoTextContent, Radio, RadioGroup, RadioOption, RadioStyle, Select,
+        SelectOption, SelectStyle, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea,
+        TextareaStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle,
+        WidgetTree,
     };
 }
 
@@ -240,9 +241,10 @@ pub mod widgets {
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
         ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Input,
-        InputStyle, Radio, RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle,
-        Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle, VideoSurfaceStyle,
-        WidgetCommand, WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
+        InputStyle, IntoTextContent, Radio, RadioGroup, RadioOption, RadioStyle, Select,
+        SelectOption, SelectStyle, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea,
+        TextareaStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle,
+        WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

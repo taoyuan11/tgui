@@ -1470,6 +1470,34 @@ impl AnimationEngine {
             || self.insets.has_active()
     }
 
+    pub(crate) fn active_keys_summary(&self) -> String {
+        fn push_active_keys<T>(
+            summary: &mut Vec<String>,
+            kind: &str,
+            store: &AnimationStore<T>,
+        ) {
+            for key in store
+                .slots
+                .iter()
+                .filter_map(|(key, state)| state.animation.as_ref().map(|_| *key))
+            {
+                summary.push(format!("{kind}:{key:?}"));
+            }
+        }
+
+        let mut summary = Vec::new();
+        push_active_keys(&mut summary, "color", &self.colors);
+        push_active_keys(&mut summary, "float", &self.floats);
+        push_active_keys(&mut summary, "dp", &self.dps);
+        push_active_keys(&mut summary, "point", &self.points);
+        push_active_keys(&mut summary, "insets", &self.insets);
+        if summary.is_empty() {
+            "none".to_string()
+        } else {
+            summary.join("|")
+        }
+    }
+
     pub(crate) fn next_frame_deadline(&self, now: Instant) -> Option<Instant> {
         self.has_active_animations().then_some(now + FRAME_INTERVAL)
     }

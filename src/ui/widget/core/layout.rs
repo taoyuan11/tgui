@@ -759,7 +759,7 @@ pub(super) fn measure_text_content(
     )
 }
 
-pub(super) fn text_from_content(content: impl Into<Value<String>>) -> Text {
+pub(super) fn text_from_content(content: impl IntoTextContent) -> Text {
     Text::new(content)
 }
 
@@ -902,7 +902,7 @@ pub(super) fn resolved_text_metrics(
 }
 
 pub(super) fn text_with_typography(
-    content: impl Into<Value<String>>,
+    content: impl IntoTextContent,
     style: &crate::ui::theme::TextStyle,
 ) -> Text {
     let mut text = text_from_content(content);

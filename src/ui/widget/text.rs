@@ -1,3 +1,6 @@
+use std::fmt::Display;
+
+use crate::foundation::binding::Signal;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
@@ -29,6 +32,40 @@ pub struct Text {
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
     pub(crate) user_select: bool,
     pub(crate) style: Option<StyleResolver<TextWidgetStyle>>,
+}
+
+pub trait IntoTextContent {
+    fn into_text_content(self) -> Value<String>;
+}
+
+impl<T> IntoTextContent for T
+where
+    T: Display,
+{
+    fn into_text_content(self) -> Value<String> {
+        Value::Static(self.to_string())
+    }
+}
+
+impl<T> IntoTextContent for Signal<T>
+where
+    T: Display + Clone + Send + Sync + 'static,
+{
+    fn into_text_content(self) -> Value<String> {
+        Value::Signal(self.map(|value| value.to_string()))
+    }
+}
+
+impl<T> IntoTextContent for Value<T>
+where
+    T: Display + Clone + Send + Sync + 'static,
+{
+    fn into_text_content(self) -> Value<String> {
+        match self {
+            Value::Static(value) => Value::Static(value.to_string()),
+            Value::Signal(signal) => Value::Signal(signal.map(|value| value.to_string())),
+        }
+    }
 }
 
 macro_rules! impl_text_layout_api {
@@ -164,12 +201,12 @@ macro_rules! impl_text_layout_api {
 }
 
 impl Text {
-    pub fn new(content: impl Into<Value<String>>) -> Self {
+    pub fn new(content: impl IntoTextContent) -> Self {
         Self {
             key: None,
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
-            content: content.into(),
+            content: content.into_text_content(),
             font_family: None,
             background: None,
             color: None,
@@ -312,6 +349,36 @@ impl Text {
             background,
             kind: WidgetKind::Text { text: self },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::animation::AnimationCoordinator;
+    use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
+
+    use super::Text;
+
+    fn test_context() -> ViewModelContext {
+        ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
+    }
+
+    #[test]
+    fn text_new_accepts_display_values() {
+        let text = Text::new(42);
+
+        assert_eq!(text.content.resolve(), "42");
+    }
+
+    #[test]
+    fn text_new_accepts_display_signals() {
+        let ctx = test_context();
+        let count = ctx.state(7);
+        let text = Text::new(count.signal());
+
+        assert_eq!(text.content.resolve(), "7");
+        count.set(12);
+        assert_eq!(text.content.resolve(), "12");
     }
 }
 

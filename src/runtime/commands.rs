@@ -57,7 +57,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         };
         self.with_view_model(|view_model| command.execute_with_context(view_model, &context));
         if invalidate_scene {
-            self.invalidate_scene();
+            self.invalidate_scene_with_reason("execute_command");
             self.invalidation.mark_dirty();
         }
         if let Some(started_at) = started_at {
@@ -86,7 +86,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             command.execute_with_context(view_model, value, &context)
         });
         if invalidate_scene {
-            self.invalidate_scene();
+            self.invalidate_scene_with_reason("execute_value_command");
             self.invalidation.mark_dirty();
         }
         if let Some(started_at) = started_at {
@@ -131,7 +131,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     if let Some(window) = self.window.as_ref() {
                         if let Err(error) = window.drag_window() {
                             Log::with_tag("tgui-runtime")
-                                .warn(format!("window drag request failed: {error}"));
+                                .warn(format_args!("window drag request failed: {error}"));
                         }
                     }
                 }
@@ -139,7 +139,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     if let Some(window) = self.window.as_ref() {
                         if let Err(error) = window.drag_resize_window(direction.into()) {
                             Log::with_tag("tgui-runtime")
-                                .warn(format!("window resize request failed: {error}"));
+                                .warn(format_args!("window resize request failed: {error}"));
                         }
                     }
                 }
@@ -277,7 +277,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             let context = self.command_context();
             self.with_view_model(|view_model| (completion.callback)(view_model, &context));
-            self.invalidate_scene();
+            self.invalidate_scene_with_reason("dialog_completion");
             self.invalidation.mark_dirty();
         }
 
@@ -305,7 +305,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             let context = self.command_context();
             self.with_view_model(|view_model| (completion.callback)(view_model, &context));
-            self.invalidate_scene();
+            self.invalidate_scene_with_reason("notification_completion");
             self.invalidation.mark_dirty();
         }
 
@@ -337,7 +337,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
 
             let context = window.command_context();
             window.with_view_model(|view_model| (completion.callback)(view_model, &context));
-            window.invalidate_scene();
+            window.invalidate_scene_with_reason("multi_dialog_completion");
             self.invalidation.mark_dirty();
             if let Some(native_window) = window.window.as_ref() {
                 native_window.request_redraw();
@@ -357,7 +357,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
 
             let context = window.command_context();
             window.with_view_model(|view_model| (completion.callback)(view_model, &context));
-            window.invalidate_scene();
+            window.invalidate_scene_with_reason("multi_notification_completion");
             self.invalidation.mark_dirty();
             if let Some(native_window) = window.window.as_ref() {
                 native_window.request_redraw();

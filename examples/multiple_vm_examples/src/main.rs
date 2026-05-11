@@ -69,7 +69,7 @@ impl ViewModel for RootVM {
             page: context.state(Page::Home),
             home: HomePage::new(context),
             settings: SettingsPage::new(context, Some(Arc::new(|enabled| {
-                tgui_log(LogLevel::Debug, format!("Settings enabled: {}", enabled));
+                tgui_log(LogLevel::Debug, format_args!("Settings enabled: {}", enabled));
             }))),
             themes,
             current_theme,

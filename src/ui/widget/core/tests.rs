@@ -972,7 +972,6 @@ fn text_signal_records_layout_and_scene_dependencies() {
     }));
 }
 
-#[test]
 fn dynamic_children_signal_records_structure_dependency() {
     let ctx = test_context();
     let show = ctx.state(true);
@@ -1325,6 +1324,51 @@ fn textarea_show_scrollbar_signal_only_records_scene_dependency() {
         widget_id: widget_id.raw(),
         phase: DependencyPhase::Scene,
     }));
+}
+
+#[test]
+fn textarea_lifecycle_snapshot_ignores_internal_text_revision() {
+    let ctx = test_context();
+    let controller = ctx.text_controller("hello");
+    let tree = WidgetTree::new(
+        Textarea::<()>::new(controller.clone()).on_update(Command::new(|_vm: &mut ()| {})),
+    );
+
+    let states_before = tree.lifecycle_event_states(&Theme::default());
+    let before = states_before
+        .first()
+        .expect("textarea lifecycle state should exist");
+
+    controller.set_text("hello world");
+
+    let states_after = tree.lifecycle_event_states(&Theme::default());
+    let after = states_after
+        .first()
+        .expect("textarea lifecycle state should still exist");
+
+    assert!(before.snapshot == after.snapshot);
+}
+
+#[test]
+fn widget_tree_detects_lifecycle_handlers_in_dynamic_children() {
+    let ctx = test_context();
+    let visible = ctx.state(false);
+    let tree = WidgetTree::new(Stack::<()>::new().child(visible.signal().map(|visible| {
+        let element: Element<()> = if visible {
+            Text::new("shown")
+                .on_update(Command::new(|_vm: &mut ()| {}))
+                .into()
+        } else {
+            Stack::<()>::new().into()
+        };
+        element
+    })));
+
+    assert!(!tree.has_lifecycle_handlers());
+
+    visible.set(true);
+
+    assert!(tree.has_lifecycle_handlers());
 }
 
 #[cfg(feature = "video")]

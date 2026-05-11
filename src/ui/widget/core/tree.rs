@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widget::common::ChildSource;
 
 pub struct WidgetTree<VM> {
     pub(super) root: Element<VM>,
@@ -31,6 +32,9 @@ impl<VM> WidgetTree<VM> {
         Self { root: root.into() }
     }
 
+    pub(crate) fn has_lifecycle_handlers(&self) -> bool {
+        with_widget_stack(|| element_has_lifecycle_handlers(&self.root))
+    }
     #[allow(dead_code)]
     pub(crate) fn compute_scene(
         &self,
@@ -307,9 +311,10 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
     ) -> CollectedSceneCache<VM> {
-        let ((mut computed, chunks, chunk_parts, visual_contexts), dependencies) =
+        let ((mut computed, lifecycle_states, chunks, chunk_parts, visual_contexts), dependencies) =
             with_widget_stack(|| {
                 with_dependency_collection(|| {
+                    let mut lifecycle_states = HashMap::new();
                     let mut chunks = HashMap::new();
                     let mut chunk_parts = HashMap::new();
                     let mut visual_contexts = HashMap::new();
@@ -348,16 +353,18 @@ impl<VM> WidgetTree<VM> {
                             clip_mask: None,
                         },
                         &mut context,
+                        &mut lifecycle_states,
                         &mut chunks,
                         &mut chunk_parts,
                         &mut visual_contexts,
                     );
-                    (computed, chunks, chunk_parts, visual_contexts)
+                    (computed, lifecycle_states, chunks, chunk_parts, visual_contexts)
                 })
             });
         computed.dependencies = dependencies.clone();
         CollectedSceneCache {
             computed,
+            lifecycle_states,
             chunks,
             chunk_parts,
             visual_contexts,
@@ -750,6 +757,26 @@ impl<VM> WidgetTree<VM> {
             .collect_lifecycle_event_states(&mut states);
         states
     }
+}
+
+fn element_has_lifecycle_handlers<VM>(element: &Element<VM>) -> bool {
+    if element.lifecycle_events.has_any() {
+        return true;
+    }
+
+    match &element.kind {
+        WidgetKind::Container { children, .. } => children
+            .iter()
+            .any(child_source_has_lifecycle_handlers),
+        _ => false,
+    }
+}
+
+fn child_source_has_lifecycle_handlers<VM>(source: &ChildSource<VM>) -> bool {
+    source
+        .resolve(None)
+        .iter()
+        .any(element_has_lifecycle_handlers)
 }
 
 pub enum WidgetCommand<VM> {
