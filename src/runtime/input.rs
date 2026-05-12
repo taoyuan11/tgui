@@ -353,10 +353,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.text_input_regions.get(&widget_id).cloned()
     }
 
-    fn cached_text_input_flush_data(
-        &self,
-        widget_id: WidgetId,
-    ) -> Option<TextInputFlushData<VM>> {
+    fn cached_text_input_flush_data(&self, widget_id: WidgetId) -> Option<TextInputFlushData<VM>> {
         self.text_input_flush_data.get(&widget_id).cloned()
     }
 
@@ -432,16 +429,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         current_value: &str,
         state: &TextEditState,
     ) {
-        let (
-            config,
-            preferred_font,
-            weight,
-            font_size,
-            line_height,
-            letter_spacing,
-            width,
-            height,
-        ) = self.text_input_session_config(region);
+        let (config, preferred_font, weight, font_size, line_height, letter_spacing, width, height) =
+            self.text_input_session_config(region);
         let Some(session) = self.text_input_buffers.get_mut(&widget_id) else {
             return;
         };
@@ -1003,9 +992,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             super::resolved_input_text_metrics(&self.theme, self.unit_context(), text_style);
         let layout_owned;
         let (layout, caret) = if state.composition.is_none() {
-            let layout = self.text_input_buffers.get(&widget_id).and_then(|session| {
-                session.layout_snapshot.as_ref()
-            });
+            let layout = self
+                .text_input_buffers
+                .get(&widget_id)
+                .and_then(|session| session.layout_snapshot.as_ref());
             let layout = if let Some(layout) = layout {
                 layout
             } else {
@@ -1029,7 +1019,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             };
             (layout, state.cursor.min(text.len()))
         } else {
-            let composition = state.composition.as_ref().expect("composition should exist");
+            let composition = state
+                .composition
+                .as_ref()
+                .expect("composition should exist");
             let display_text = text_edit_display_text(text, state);
             let start = composition.replace_range.0.min(text.len());
             let caret_offset = composition

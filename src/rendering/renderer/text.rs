@@ -51,10 +51,13 @@ impl Renderer {
 
         let bind_group = match self.rasterize_text(text)? {
             Some((texture, bind_group)) => {
-                self.text_cache.insert(key, TextCacheEntry {
-                    bind_group: bind_group.clone(),
-                    _texture: texture,
-                });
+                self.text_cache.insert(
+                    key,
+                    TextCacheEntry {
+                        bind_group: bind_group.clone(),
+                        _texture: texture,
+                    },
+                );
                 bind_group
             }
             None => return Ok(None),

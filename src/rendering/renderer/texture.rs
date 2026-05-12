@@ -69,10 +69,13 @@ impl Renderer {
             ],
         });
 
-        self.texture_cache.insert(key, TextureCacheEntry {
-            bind_group: bind_group.clone(),
-            _texture: texture,
-        });
+        self.texture_cache.insert(
+            key,
+            TextureCacheEntry {
+                bind_group: bind_group.clone(),
+                _texture: texture,
+            },
+        );
 
         Ok(Some(bind_group))
     }

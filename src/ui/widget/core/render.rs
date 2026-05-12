@@ -273,13 +273,7 @@ pub(super) fn push_text_primitives(
             center_horizontally,
         )
     } else {
-        centered_text_frame(
-            inner,
-            inner.width.get(),
-            line_height,
-            line_height,
-            false,
-        )
+        centered_text_frame(inner, inner.width.get(), line_height, line_height, false)
     };
     let primary_font = resolved.primary_font.clone();
 
@@ -488,7 +482,11 @@ pub(super) fn push_text_input_primitives(
                 Some((start, composition_end)),
             )
         } else {
-            (std::borrow::Cow::Borrowed(content), base_state.clone(), None)
+            (
+                std::borrow::Cow::Borrowed(content),
+                base_state.clone(),
+                None,
+            )
         };
 
     let layout_started_at = std::time::Instant::now();

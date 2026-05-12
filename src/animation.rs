@@ -1471,11 +1471,7 @@ impl AnimationEngine {
     }
 
     pub(crate) fn active_keys_summary(&self) -> String {
-        fn push_active_keys<T>(
-            summary: &mut Vec<String>,
-            kind: &str,
-            store: &AnimationStore<T>,
-        ) {
+        fn push_active_keys<T>(summary: &mut Vec<String>, kind: &str, store: &AnimationStore<T>) {
             for key in store
                 .slots
                 .iter()

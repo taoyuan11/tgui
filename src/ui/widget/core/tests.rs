@@ -5242,6 +5242,67 @@ fn input_renders_composition_preview_text() {
 }
 
 #[test]
+fn input_keeps_same_font_family_when_mixed_with_cjk_text() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let latin_tree: WidgetTree<()> = WidgetTree::new(Input::new("abc123"));
+    let latin_id = latin_tree.root.id;
+    let latin = latin_tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 60.0),
+        Some(latin_id),
+        Some(&TextEditState::caret_at("abc123")),
+        Some(latin_id),
+        Some(&TextEditState::caret_at("abc123")),
+        true,
+    );
+
+    let mixed_tree: WidgetTree<()> = WidgetTree::new(Input::new("abc123中文"));
+    let mixed_id = mixed_tree.root.id;
+    let mixed = mixed_tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 60.0),
+        Some(mixed_id),
+        Some(&TextEditState::caret_at("abc123中文")),
+        Some(mixed_id),
+        Some(&TextEditState::caret_at("abc123中文")),
+        true,
+    );
+
+    let latin_font = latin
+        .primitives
+        .texts
+        .last()
+        .expect("latin input text should be rendered")
+        .font_family
+        .clone();
+    let mixed_font = mixed
+        .primitives
+        .texts
+        .last()
+        .expect("mixed input text should be rendered")
+        .font_family
+        .clone();
+
+    assert_eq!(latin_font, mixed_font);
+}
+
+#[test]
 fn input_uses_custom_selection_and_caret_colors() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
