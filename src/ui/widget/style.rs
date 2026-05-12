@@ -404,7 +404,7 @@ impl RadioStyle {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
                 palette.surface_low,
-                palette.surface_low.lighten(SURFACE_HOVER_LIGHTEN),
+                palette.surface_low,
                 palette.surface_low.darken(SURFACE_HOVER_LIGHTEN),
                 palette.disabled_surface,
             ),
@@ -545,8 +545,8 @@ impl SelectStyle {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
                 palette.surface_low,
-                palette.surface_low.lighten(SURFACE_HOVER_LIGHTEN),
-                palette.surface_low.darken(SURFACE_HOVER_LIGHTEN),
+                palette.surface_low,
+                palette.surface_low,
                 palette.disabled_surface,
             ),
             text: stateful_single(
@@ -563,14 +563,14 @@ impl SelectStyle {
             ),
             border: stateful_colors(
                 palette.outline,
-                palette.outline.lighten(BORDER_HOVER_LIGHTEN),
+                palette.outline,
                 palette.outline.darken(BORDER_HOVER_LIGHTEN),
                 palette.disabled_surface,
             ),
             focus_ring: None,
             arrow: stateful_single(
                 palette.on_surface_muted,
-                palette.on_surface,
+                palette.on_surface_muted,
                 palette.on_surface,
                 palette.disabled_content,
             ),
@@ -636,8 +636,8 @@ impl InputStyle {
             ),
             border: stateful_colors(
                 palette.outline,
-                palette.primary,
-                palette.primary,
+                palette.outline,
+                palette.outline,
                 palette.disabled_surface,
             ),
             selection: None,

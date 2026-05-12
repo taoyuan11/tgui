@@ -1,5 +1,9 @@
 use super::*;
 
+pub(super) fn default_select_menu_transition() -> crate::animation::Transition {
+    crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(160))
+}
+
 pub(super) fn push_media_texture_or_placeholder<VM>(
     widget_id: WidgetId,
     source: &crate::media::MediaSource,
@@ -821,8 +825,9 @@ pub(super) fn push_select_menu_primitives<VM>(
     context: &mut CollectContext<'_, '_>,
     computed: &mut ComputedScene<VM>,
     opacity: f32,
+    open_progress: f32,
 ) {
-    if options.is_empty() {
+    if options.is_empty() || open_progress <= f32::EPSILON {
         return;
     }
 
@@ -836,7 +841,8 @@ pub(super) fn push_select_menu_primitives<VM>(
     let above_space = (trigger_frame.y.get() - viewport.y.get() - menu_gap).max(0.0);
     let open_down = below_space >= menu_height || below_space >= above_space;
     let available_height = if open_down { below_space } else { above_space };
-    let visible_height = menu_height.min(available_height).max(0.0);
+    let target_visible_height = menu_height.min(available_height).max(0.0);
+    let visible_height = (target_visible_height * open_progress).max(0.0);
     if visible_height <= 0.0 {
         return;
     }
@@ -872,12 +878,19 @@ pub(super) fn push_select_menu_primitives<VM>(
     option_interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
 
     for (index, option) in options.iter().enumerate() {
-        let option_frame = Rect::new(
+        let full_option_frame = Rect::new(
             menu_frame.x,
-            menu_frame.y + option_height * index as f32,
+            if open_down {
+                trigger_frame.bottom().get() + menu_gap + option_height * index as f32
+            } else {
+                menu_y + option_height * index as f32
+            },
             menu_frame.width,
             option_height,
         );
+        let Some(option_frame) = full_option_frame.intersect(menu_frame) else {
+            continue;
+        };
         let selected = option.selected.resolve();
         let option_disabled = option.disabled.resolve();
         let mut option_state = context.widget_states.get_select_option(widget_id, index);
@@ -923,22 +936,24 @@ pub(super) fn push_select_menu_primitives<VM>(
             true,
         );
 
-        computed.overlay_hit_regions.push(HitRegion {
-            rect: option_frame,
-            clip_rect: menu_clip,
-            geometry: HitGeometry::Rect,
-            interaction: if option_disabled {
-                HitInteraction::Disabled { id: widget_id }
-            } else {
-                HitInteraction::SelectOption {
-                    id: widget_id,
-                    option_index: index,
-                    interactions: option_interactions.clone(),
-                    on_select: option.on_select.clone(),
-                    on_open_change: on_open_change.cloned(),
-                }
-            },
-        });
+        if open_progress >= 1.0 - f32::EPSILON {
+            computed.overlay_hit_regions.push(HitRegion {
+                rect: option_frame,
+                clip_rect: menu_clip,
+                geometry: HitGeometry::Rect,
+                interaction: if option_disabled {
+                    HitInteraction::Disabled { id: widget_id }
+                } else {
+                    HitInteraction::SelectOption {
+                        id: widget_id,
+                        option_index: index,
+                        interactions: option_interactions.clone(),
+                        on_select: option.on_select.clone(),
+                        on_open_change: on_open_change.cloned(),
+                    }
+                },
+            });
+        }
     }
 }
 

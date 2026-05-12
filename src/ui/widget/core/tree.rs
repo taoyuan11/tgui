@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(test)]
 use crate::ui::widget::common::ChildSource;
+use std::time::Instant;
 
 pub struct WidgetTree<VM> {
     pub(super) root: Element<VM>,
@@ -168,9 +169,57 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
     ) -> ComputedScene<VM> {
-        let layout =
-            self.build_scene_layout(font_manager, theme, media, animations, units, viewport);
-        self.collect_scene_from_layout(
+        self.compute_scene_with_units_and_widget_state_at(
+            font_manager,
+            theme,
+            media,
+            units,
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            select_open_states,
+            scroll_offsets,
+            viewport,
+            focused_input,
+            focused_text_state,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+            Instant::now(),
+        )
+    }
+
+    pub(crate) fn compute_scene_with_units_and_widget_state_at(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        units: UnitContext,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        select_open_states: &HashMap<WidgetId, bool>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&TextEditState>,
+        caret_visible: bool,
+        now: Instant,
+    ) -> ComputedScene<VM> {
+        let layout = self.build_scene_layout_at(
+            font_manager,
+            theme,
+            media,
+            animations,
+            units,
+            viewport,
+            now,
+        );
+        self.collect_scene_from_layout_at(
             font_manager,
             &layout,
             theme,
@@ -187,6 +236,7 @@ impl<VM> WidgetTree<VM> {
             selected_text,
             selected_text_state,
             caret_visible,
+            now,
         )
     }
 
@@ -199,10 +249,30 @@ impl<VM> WidgetTree<VM> {
         units: UnitContext,
         viewport: Rect,
     ) -> ResolvedSceneLayout<VM> {
+        self.build_scene_layout_at(
+            font_manager,
+            theme,
+            media,
+            animations,
+            units,
+            viewport,
+            Instant::now(),
+        )
+    }
+
+    pub(crate) fn build_scene_layout_at(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        units: UnitContext,
+        viewport: Rect,
+        now: Instant,
+    ) -> ResolvedSceneLayout<VM> {
         let (mut layout, dependencies) = with_widget_stack(|| {
             with_dependency_collection(|| {
                 let mut taffy = TaffyTree::new();
-                let now = std::time::Instant::now();
                 let resolved_root = self.root.resolve(theme);
                 let root_layout = resolved_root
                     .build_layout_tree(
@@ -248,6 +318,7 @@ impl<VM> WidgetTree<VM> {
         layout
     }
 
+    #[cfg(test)]
     pub(crate) fn collect_scene_from_layout(
         &self,
         font_manager: &FontManager,
@@ -267,7 +338,48 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
     ) -> ComputedScene<VM> {
-        self.collect_scene_cache_from_layout_with_focus_value(
+        self.collect_scene_from_layout_at(
+            font_manager,
+            layout,
+            theme,
+            media,
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            select_open_states,
+            scroll_offsets,
+            viewport,
+            focused_input,
+            focused_text_state,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+            Instant::now(),
+        )
+    }
+
+    pub(crate) fn collect_scene_from_layout_at(
+        &self,
+        font_manager: &FontManager,
+        layout: &ResolvedSceneLayout<VM>,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        select_open_states: &HashMap<WidgetId, bool>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&TextEditState>,
+        caret_visible: bool,
+        now: Instant,
+    ) -> ComputedScene<VM> {
+        self.collect_scene_cache_from_layout_with_focus_value_at(
             font_manager,
             layout,
             theme,
@@ -287,6 +399,7 @@ impl<VM> WidgetTree<VM> {
             selected_text,
             selected_text_state,
             caret_visible,
+            now,
         )
         .computed
     }
@@ -312,6 +425,53 @@ impl<VM> WidgetTree<VM> {
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
+    ) -> CollectedSceneCache<VM> {
+        self.collect_scene_cache_from_layout_with_focus_value_at(
+            font_manager,
+            layout,
+            theme,
+            media,
+            animations,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            select_open_states,
+            scroll_offsets,
+            viewport,
+            focused_input,
+            focused_text_state,
+            focused_text_value,
+            focused_text_layout,
+            text_layout_overrides,
+            selected_text,
+            selected_text_state,
+            caret_visible,
+            Instant::now(),
+        )
+    }
+
+    pub(crate) fn collect_scene_cache_from_layout_with_focus_value_at(
+        &self,
+        font_manager: &FontManager,
+        layout: &ResolvedSceneLayout<VM>,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        select_open_states: &HashMap<WidgetId, bool>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
+        focused_text_value: Option<&str>,
+        focused_text_layout: Option<&TextLayoutInfo>,
+        text_layout_overrides: Option<&HashMap<WidgetId, TextInputLayoutOverride<'_>>>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&TextEditState>,
+        caret_visible: bool,
+        now: Instant,
     ) -> CollectedSceneCache<VM> {
         let ((mut computed, lifecycle_states, chunks, chunk_parts, visual_contexts), dependencies) =
             with_widget_stack(|| {
@@ -341,7 +501,7 @@ impl<VM> WidgetTree<VM> {
                         viewport,
                         units: layout.units,
                         animations,
-                        now: std::time::Instant::now(),
+                        now,
                     };
                     let computed = layout.resolved_root.collect_subtree_cache(
                         &layout.layout_root,
@@ -380,7 +540,7 @@ impl<VM> WidgetTree<VM> {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn collect_scene_from_layout_with_focus_value(
         &self,
         font_manager: &FontManager,

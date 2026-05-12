@@ -2382,6 +2382,15 @@ impl<VM> ResolvedElement<VM> {
                     .map(Value::resolve)
                     .or_else(|| context.select_open_states.get(&self.id).copied())
                     .unwrap_or(false);
+                let menu_progress = context.animations.resolve_f32(
+                    crate::animation::AnimationKey::Widget {
+                        id: self.id.raw(),
+                        property: WidgetProperty::SelectMenuOpen,
+                    },
+                    if active { 1.0 } else { 0.0 },
+                    Some(default_select_menu_transition()),
+                    context.now,
+                );
                 let select_style = select_style
                     .as_ref()
                     .expect("select style should be resolved for select widgets");
@@ -2403,7 +2412,7 @@ impl<VM> ResolvedElement<VM> {
                     primitive_clip,
                     primitive_clip_mask,
                 );
-                if active && !disabled {
+                if menu_progress > f32::EPSILON && !disabled {
                     push_select_menu_primitives(
                         self.id,
                         frame,
@@ -2414,6 +2423,7 @@ impl<VM> ResolvedElement<VM> {
                         context,
                         &mut computed,
                         opacity,
+                        menu_progress,
                     );
                 }
                 if !disabled {

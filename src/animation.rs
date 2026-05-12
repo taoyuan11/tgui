@@ -1085,6 +1085,7 @@ pub(crate) enum WidgetProperty {
     Offset,
     SwitchThumbColor,
     SwitchThumbOffset,
+    SelectMenuOpen,
     Width,
     Height,
     Margin,

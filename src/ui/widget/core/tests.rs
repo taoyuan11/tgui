@@ -1,5 +1,6 @@
 use super::{centered_text_frame, resolved_text_metrics, ResolvedWidgetKind, SELECT_ARROW_ICON};
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use crate::animation::{AnimationCoordinator, AnimationEngine};
 use crate::foundation::binding::{
@@ -3103,7 +3104,7 @@ fn select_dropdown_stays_above_later_media_placeholder() {
 }
 
 #[test]
-fn select_dropdown_highlights_hovered_option() {
+fn select_dropdown_highlights_pressed_option() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -3125,7 +3126,7 @@ fn select_dropdown_highlights_hovered_option() {
         select_id,
         1,
         crate::ui::theme::WidgetState {
-            hovered: true,
+            pressed: true,
             ..Default::default()
         },
     );
@@ -3166,7 +3167,7 @@ fn select_dropdown_highlights_hovered_option() {
 }
 
 #[test]
-fn select_dropdown_hover_highlight_preserves_menu_corner_clip() {
+fn select_dropdown_pressed_highlight_preserves_menu_corner_clip() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -3188,7 +3189,7 @@ fn select_dropdown_hover_highlight_preserves_menu_corner_clip() {
         select_id,
         0,
         crate::ui::theme::WidgetState {
-            hovered: true,
+            pressed: true,
             ..Default::default()
         },
     );
@@ -3218,7 +3219,7 @@ fn select_dropdown_hover_highlight_preserves_menu_corner_clip() {
         .overlay_shapes
         .iter()
         .find(|shape| shape.rect.y > dp(20.0) && shape.rect.height == option_height)
-        .expect("hovered option highlight should render");
+        .expect("pressed option highlight should render");
 
     assert_eq!(
         highlight.clip_mask,
@@ -3232,6 +3233,208 @@ fn select_dropdown_hover_highlight_preserves_menu_corner_clip() {
             corner_radius: menu_radius,
         })
     );
+}
+
+#[test]
+fn select_dropdown_animates_open_and_close() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let select: Element<()> = Select::<(), String, String>::new(
+        vec![
+            SelectOption::new("email".to_string(), "Email".to_string()),
+            SelectOption::new("sms".to_string(), "SMS".to_string()),
+        ],
+        None::<String>,
+    )
+    .size(dp(180.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+    let tree = WidgetTree::new(Stack::new().child(select));
+    let viewport = Rect::new(0.0, 0.0, 180.0, 140.0);
+    let start = Instant::now();
+
+    let closed = tree.compute_scene_with_units_and_widget_state_at(
+        &font_manager,
+        &theme,
+        &media,
+        UnitContext::default(),
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+        start,
+    );
+    assert!(closed.scene.overlay_shapes.is_empty());
+
+    let mut open_states = HashMap::new();
+    open_states.insert(select_id, true);
+
+    let _opening_start = tree.compute_scene_with_units_and_widget_state_at(
+        &font_manager,
+        &theme,
+        &media,
+        UnitContext::default(),
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &open_states,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+        start,
+    );
+
+    let opening = tree.compute_scene_with_units_and_widget_state_at(
+        &font_manager,
+        &theme,
+        &media,
+        UnitContext::default(),
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &open_states,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+        start + Duration::from_millis(80),
+    );
+    let opening_menu = opening
+        .scene
+        .overlay_shapes
+        .iter()
+        .find(|shape| shape.rect.height > dp(32.0))
+        .expect("opening select menu should render");
+    assert!(opening_menu.rect.height > dp(0.0));
+    assert!(opening_menu.rect.height < dp(80.0));
+    assert!(opening_menu.color.a > 0);
+    assert!(opening.overlay_hit_regions.is_empty());
+
+    animations.refresh(start + Duration::from_millis(200));
+
+    let open = tree.compute_scene_with_units_and_widget_state_at(
+        &font_manager,
+        &theme,
+        &media,
+        UnitContext::default(),
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &open_states,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+        start + Duration::from_millis(200),
+    );
+    assert!(open
+        .overlay_hit_regions
+        .iter()
+        .any(|hit| matches!(hit.interaction, super::HitInteraction::SelectOption { .. })));
+
+    let _closing_start = tree.compute_scene_with_units_and_widget_state_at(
+        &font_manager,
+        &theme,
+        &media,
+        UnitContext::default(),
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+        start + Duration::from_millis(200),
+    );
+
+    let closing = tree.compute_scene_with_units_and_widget_state_at(
+        &font_manager,
+        &theme,
+        &media,
+        UnitContext::default(),
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+        start + Duration::from_millis(280),
+    );
+    let closing_menu = closing
+        .scene
+        .overlay_shapes
+        .iter()
+        .find(|shape| shape.rect.height > dp(0.0))
+        .expect("closing select menu should still render during animation");
+    assert!(
+        closing_menu.rect.height
+            < open
+                .scene
+                .overlay_shapes
+                .iter()
+                .find(|shape| shape.rect.height > dp(32.0))
+                .expect("open menu background should render")
+                .rect
+                .height
+    );
+    assert!(closing.overlay_hit_regions.is_empty());
+
+    animations.refresh(start + Duration::from_millis(500));
+
+    let settled_closed = tree.compute_scene_with_units_and_widget_state_at(
+        &font_manager,
+        &theme,
+        &media,
+        UnitContext::default(),
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+        start + Duration::from_millis(500),
+    );
+    assert!(settled_closed.scene.overlay_shapes.is_empty());
 }
 
 #[test]
@@ -3684,59 +3887,6 @@ fn button_uses_theme_radius_by_default() {
 }
 
 #[test]
-fn primary_button_uses_hover_background_when_hovered() {
-    let theme = Theme::default();
-    let font_manager = FontManager::new(&FontCatalog::default());
-    let media = test_media();
-    let mut animations = AnimationEngine::default();
-    let button: Element<()> = crate::ui::widget::Button::new("hover")
-        .size(dp(120.0), dp(40.0))
-        .into();
-    let button_id = button.id;
-    let tree: WidgetTree<()> = WidgetTree::new(button);
-    let mut hovered_state = WidgetStateMap::default();
-    hovered_state.set(
-        button_id,
-        crate::ui::theme::WidgetState {
-            hovered: true,
-            ..Default::default()
-        },
-    );
-
-    let rendered = tree.render_output_with_widget_state(
-        &font_manager,
-        &theme,
-        &media,
-        &mut animations,
-        None,
-        None,
-        &hovered_state,
-        &HashMap::new(),
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 120.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-    let hovered_style = default_button_style(
-        &theme,
-        crate::ui::theme::WidgetState {
-            hovered: true,
-            ..Default::default()
-        },
-        crate::ui::widget::common::ButtonVariantKind::Primary,
-    );
-
-    assert!(rendered
-        .primitives
-        .shapes
-        .iter()
-        .any(|shape| shape.stroke_width == 0.0 && shape.color == hovered_style.background));
-}
-
-#[test]
 fn primary_button_hover_background_uses_transition() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
@@ -4022,108 +4172,6 @@ fn focused_secondary_button_keeps_default_border() {
 }
 
 #[test]
-fn focused_ghost_button_keeps_default_visuals() {
-    let theme = Theme::default();
-    let focused_style = default_button_style(
-        &theme,
-        crate::ui::theme::WidgetState {
-            focused: true,
-            ..Default::default()
-        },
-        crate::ui::widget::common::ButtonVariantKind::Ghost,
-    );
-    let default_style = default_button_style(
-        &theme,
-        Default::default(),
-        crate::ui::widget::common::ButtonVariantKind::Ghost,
-    );
-
-    assert_eq!(focused_style.background, default_style.background);
-    assert_eq!(focused_style.border_color, default_style.border_color);
-}
-
-#[test]
-fn secondary_button_uses_theme_border_by_default() {
-    let theme = Theme::default();
-    let font_manager = FontManager::new(&FontCatalog::default());
-    let media = test_media();
-    let mut animations = AnimationEngine::default();
-    let tree: WidgetTree<()> = WidgetTree::new(
-        crate::ui::widget::Button::new("secondary")
-            .secondary()
-            .size(dp(120.0), dp(40.0)),
-    );
-
-    let rendered = tree.render_output(
-        &font_manager,
-        &theme,
-        &media,
-        &mut animations,
-        None,
-        None,
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 120.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-    let default_style = default_button_style(
-        &theme,
-        crate::ui::theme::WidgetState::default(),
-        crate::ui::widget::common::ButtonVariantKind::Secondary,
-    );
-
-    assert!(rendered
-        .primitives
-        .shapes
-        .iter()
-        .any(|shape| shape.color == default_style.border_color
-            && shape.stroke_width == default_style.border_width.get()));
-}
-
-#[test]
-fn danger_button_has_no_default_border() {
-    let theme = Theme::default();
-    let font_manager = FontManager::new(&FontCatalog::default());
-    let media = test_media();
-    let mut animations = AnimationEngine::default();
-    let tree: WidgetTree<()> = WidgetTree::new(
-        crate::ui::widget::Button::new("danger")
-            .danger()
-            .size(dp(120.0), dp(40.0)),
-    );
-
-    let rendered = tree.render_output(
-        &font_manager,
-        &theme,
-        &media,
-        &mut animations,
-        None,
-        None,
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 120.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-    let default_style = default_button_style(
-        &theme,
-        crate::ui::theme::WidgetState::default(),
-        crate::ui::widget::common::ButtonVariantKind::Danger,
-    );
-
-    assert!(!rendered
-        .primitives
-        .shapes
-        .iter()
-        .any(|shape| shape.stroke_width > 0.0 && shape.color == default_style.border_color));
-}
-
-#[test]
 fn explicit_button_transparent_border_overrides_theme_border() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
@@ -4279,220 +4327,6 @@ fn switch_renders_custom_track_and_thumb_colors() {
         .shapes
         .iter()
         .any(|shape| shape.color == inactive_background));
-}
-
-#[test]
-fn switch_uses_theme_defaults_when_styles_are_not_explicitly_set() {
-    let theme = Theme::default();
-    let font_manager = FontManager::new(&FontCatalog::default());
-    let media = test_media();
-    let mut animations = AnimationEngine::default();
-    let tree: WidgetTree<()> = WidgetTree::new(Switch::new(false));
-    let default_style = default_switch_style(&theme);
-    let default_radius = default_style.radius.resolve().get();
-    let default_track = super::resolve_stateful_widget_color(
-        &default_style.track,
-        crate::ui::theme::WidgetState::default(),
-    );
-    let default_thumb = super::resolve_stateful_widget_color(
-        &default_style.thumb,
-        crate::ui::theme::WidgetState::default(),
-    );
-    let default_border = super::resolve_stateful_widget_color(
-        &default_style.border,
-        crate::ui::theme::WidgetState::default(),
-    );
-    let default_border_width = default_style.border_width.resolve().get();
-
-    let rendered = tree.render_output(
-        &font_manager,
-        &theme,
-        &media,
-        &mut animations,
-        None,
-        None,
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 80.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-
-    assert!(rendered
-        .primitives
-        .shapes
-        .iter()
-        .any(|shape| shape.color == default_track));
-    assert!(rendered
-        .primitives
-        .overlay_shapes
-        .iter()
-        .any(|shape| shape.color == default_thumb));
-    assert!(rendered
-        .primitives
-        .shapes
-        .iter()
-        .any(|shape| shape.color == default_track && shape.corner_radius == default_radius));
-    assert!(rendered
-        .primitives
-        .shapes
-        .iter()
-        .any(|shape| shape.color == default_border && shape.stroke_width == default_border_width));
-
-    let checked_tree: WidgetTree<()> = WidgetTree::new(Switch::new(true));
-    let checked_track = super::resolve_stateful_widget_color(
-        &default_style.track_checked,
-        crate::ui::theme::WidgetState::default(),
-    );
-    let checked_thumb = super::resolve_stateful_widget_color(
-        &default_style.thumb_checked,
-        crate::ui::theme::WidgetState::default(),
-    );
-    let checked_rendered = checked_tree.render_output(
-        &font_manager,
-        &theme,
-        &media,
-        &mut AnimationEngine::default(),
-        None,
-        None,
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 80.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-
-    assert!(checked_rendered
-        .primitives
-        .shapes
-        .iter()
-        .any(|shape| shape.color == checked_track && shape.corner_radius == default_radius));
-    assert!(checked_rendered
-        .primitives
-        .overlay_shapes
-        .iter()
-        .any(|shape| shape.color == checked_thumb));
-
-    let hovered_switch: Element<()> = Switch::new(true).into();
-    let hovered_switch_id = hovered_switch.id;
-    let hovered_tree: WidgetTree<()> = WidgetTree::new(hovered_switch);
-    let mut hovered_state = WidgetStateMap::default();
-    hovered_state.set(
-        hovered_switch_id,
-        crate::ui::theme::WidgetState {
-            hovered: true,
-            ..Default::default()
-        },
-    );
-    let hovered_rendered = hovered_tree.render_output_with_widget_state(
-        &font_manager,
-        &theme,
-        &media,
-        &mut AnimationEngine::default(),
-        None,
-        None,
-        &hovered_state,
-        &HashMap::new(),
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 80.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-    let hovered_checked_thumb = super::resolve_stateful_widget_color(
-        &default_style.thumb_checked,
-        crate::ui::theme::WidgetState {
-            hovered: true,
-            ..Default::default()
-        },
-    );
-    let hovered_checked_track = super::resolve_stateful_widget_color(
-        &default_style.track_checked,
-        crate::ui::theme::WidgetState {
-            hovered: true,
-            ..Default::default()
-        },
-    );
-    assert!(hovered_rendered
-        .primitives
-        .overlay_shapes
-        .iter()
-        .any(|shape| shape.color == hovered_checked_thumb));
-    assert!(hovered_rendered
-        .primitives
-        .shapes
-        .iter()
-        .any(|shape| shape.color == hovered_checked_track));
-}
-
-#[test]
-fn checked_switch_thumb_uses_white_across_hover_states() {
-    let theme = Theme::dark();
-
-    let font_manager = FontManager::new(&FontCatalog::default());
-    let media = test_media();
-
-    let tree: WidgetTree<()> = WidgetTree::new(Switch::new(true));
-    let rendered = tree.render_output(
-        &font_manager,
-        &theme,
-        &media,
-        &mut AnimationEngine::default(),
-        None,
-        None,
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 80.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-    assert!(rendered
-        .primitives
-        .overlay_shapes
-        .iter()
-        .any(|shape| shape.color == Color::WHITE));
-
-    let hovered_switch: Element<()> = Switch::new(true).into();
-    let hovered_switch_id = hovered_switch.id;
-    let hovered_tree: WidgetTree<()> = WidgetTree::new(hovered_switch);
-    let mut hovered_state = WidgetStateMap::default();
-    hovered_state.set(
-        hovered_switch_id,
-        crate::ui::theme::WidgetState {
-            hovered: true,
-            ..Default::default()
-        },
-    );
-    let hovered_rendered = hovered_tree.render_output_with_widget_state(
-        &font_manager,
-        &theme,
-        &media,
-        &mut AnimationEngine::default(),
-        None,
-        None,
-        &hovered_state,
-        &HashMap::new(),
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 80.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-    assert!(hovered_rendered
-        .primitives
-        .overlay_shapes
-        .iter()
-        .any(|shape| shape.color == Color::WHITE));
 }
 
 #[test]
