@@ -1597,11 +1597,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let mut patched_widget_count = 0usize;
         let mut patch_command_count = 0usize;
         let mut patch_text_count = 0usize;
-        let mut ancestor_count = 0usize;
+        let ancestor_count;
         let mut root_command_count = 0usize;
         let mut root_text_count = 0usize;
-        let mut root_hit_region_count = 0usize;
-        let mut root_scroll_region_count = 0usize;
+        let root_hit_region_count;
+        let root_scroll_region_count;
         let theme = self.animated_theme(now);
         let resolve_roots_started_at = text_profile_enabled().then_some(Instant::now());
         {
@@ -3000,10 +3000,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         Rect::new(0.0, 0.0, size.width, size.height)
     }
 
-    fn invalidate_scene(&mut self) {
-        self.invalidate_scene_with_reason("unknown");
-    }
-
     fn invalidate_scene_with_reason(&mut self, reason: &'static str) {
         if text_profile_enabled() {
             Log::with_tag("tgui-text-prof").debug(format_args!(
@@ -3231,17 +3227,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let key_repeat_deadline = self.next_key_repeat_deadline();
         let smooth_scroll_deadline =
             (!self.smooth_scroll_states.is_empty()).then_some(now + Duration::from_millis(16));
-        let next_deadline = [
-            animation_deadline,
-            controller_deadline,
-            click_deadline,
-            caret_deadline,
-            key_repeat_deadline,
-            smooth_scroll_deadline,
-        ]
-        .into_iter()
-        .flatten()
-        .min();
+        let next_deadline = self.next_deadline(now);
 
         if let Some(deadline) = next_deadline {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));

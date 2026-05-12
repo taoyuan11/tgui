@@ -87,6 +87,7 @@ impl RopeBuffer {
         self.rope.slice(start_char..end_char).to_string()
     }
 
+    #[cfg(test)]
     pub(crate) fn materialize_string(&self) -> String {
         self.snapshot.clone()
     }

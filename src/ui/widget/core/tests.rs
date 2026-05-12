@@ -972,6 +972,7 @@ fn text_signal_records_layout_and_scene_dependencies() {
     }));
 }
 
+#[test]
 fn dynamic_children_signal_records_structure_dependency() {
     let ctx = test_context();
     let show = ctx.state(true);
