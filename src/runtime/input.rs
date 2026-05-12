@@ -20,6 +20,14 @@ use crate::ui::widget::{
     Rect, ScrollbarAxis, ScrollbarHandle, Text, TextEditState, WidgetId, WidgetTree,
 };
 use cosmic_text::{Edit, Editor, Metrics, Wrap};
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, VK_ADD, VK_BACK, VK_DECIMAL, VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END, VK_HOME,
+    VK_LEFT, VK_MULTIPLY, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3, VK_NUMPAD4, VK_NUMPAD5,
+    VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD8, VK_NUMPAD9, VK_OEM_1, VK_OEM_102, VK_OEM_2, VK_OEM_3,
+    VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS,
+    VK_RETURN, VK_RIGHT, VK_SEPARATOR, VK_SPACE, VK_SUBTRACT, VK_UP,
+};
 
 use super::{
     canvas_mouse_button, cursor_icon, is_primary_shortcut_modifier, mouse_scroll_delta,
@@ -1782,6 +1790,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         handled
     }
 
+    pub(super) fn handle_platform_keyboard_input(&mut self, event: &KeyEvent) -> bool {
+        match event.state {
+            ElementState::Released => {
+                self.disarm_key_repeat(event.physical_key);
+                false
+            }
+            ElementState::Pressed if event.repeat => false,
+            ElementState::Pressed => {
+                let handled = self.handle_keyboard_input(event);
+                if handled && self.allows_repeated_keyboard_input(event) {
+                    self.arm_key_repeat(event, Instant::now());
+                }
+                handled
+            }
+        }
+    }
+
     fn allows_repeated_keyboard_input(&mut self, event: &KeyEvent) -> bool {
         match event.physical_key {
             PhysicalKey::Code(
@@ -1809,6 +1834,69 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         .unwrap_or(false)
             }
             _ => false,
+        }
+    }
+
+    pub(super) fn drive_key_repeat(&mut self, now: Instant) -> bool {
+        let Some(active) = self.active_key_repeat.clone() else {
+            return false;
+        };
+        if active.next_fire_at > now {
+            return false;
+        }
+
+        if !is_key_physically_pressed(active.event.physical_key) {
+            self.disarm_key_repeat(active.event.physical_key);
+            return false;
+        }
+
+        let mut repeated_event = active.event;
+        repeated_event.repeat = true;
+        if !self.allows_repeated_keyboard_input(&repeated_event) {
+            self.disarm_key_repeat(repeated_event.physical_key);
+            return false;
+        }
+
+        let handled = self.handle_keyboard_input(&repeated_event);
+        if self
+            .active_key_repeat
+            .as_ref()
+            .map(|state| state.event.physical_key == repeated_event.physical_key)
+            .unwrap_or(false)
+        {
+            if self.allows_repeated_keyboard_input(&repeated_event) {
+                if let Some(state) = self.active_key_repeat.as_mut() {
+                    state.next_fire_at = now + super::KEY_REPEAT_INTERVAL;
+                }
+            } else {
+                self.disarm_key_repeat(repeated_event.physical_key);
+            }
+        }
+        handled
+    }
+
+    pub(super) fn next_key_repeat_deadline(&self) -> Option<Instant> {
+        self.active_key_repeat
+            .as_ref()
+            .map(|state| state.next_fire_at)
+    }
+
+    fn arm_key_repeat(&mut self, event: &KeyEvent, now: Instant) {
+        let next_fire_at = now + super::KEY_REPEAT_INITIAL_DELAY;
+        self.active_key_repeat = Some(super::ActiveKeyRepeat {
+            event: event.clone(),
+            next_fire_at,
+        });
+    }
+
+    fn disarm_key_repeat(&mut self, physical_key: PhysicalKey) {
+        if self
+            .active_key_repeat
+            .as_ref()
+            .map(|state| state.event.physical_key == physical_key)
+            .unwrap_or(false)
+        {
+            self.active_key_repeat = None;
         }
     }
 
@@ -2572,6 +2660,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         }
 
+        self.active_key_repeat = None;
+
         if let Some(previous) = self.focused_widget.take() {
             if let Some((widget_id, region)) = previous_single_line_input.as_ref() {
                 if *widget_id == previous.widget_id {
@@ -3178,7 +3268,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     }
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
-                    needs_redraw |= self.handle_keyboard_input(event);
+                    needs_redraw |= self.handle_platform_keyboard_input(event);
                 }
                 _ => {}
             }
@@ -3305,6 +3395,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn handle_bound_about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) -> bool {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let now = Instant::now();
+        let repeated_key_handled = self.drive_key_repeat(now);
+        if repeated_key_handled {
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
         let flush_started_at = Instant::now();
         let flush_outcome = self.flush_pending_text_input_changes();
         let flush_duration = flush_started_at.elapsed();
@@ -3348,7 +3444,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 "textarea_about_to_wait",
                 started_at.elapsed(),
                 format!(
-                    "flushed_text_changes={} flush_ms={:.3} lifecycle_ms={:.3} theme_changed={} theme_ms={:.3} redraw_ms={:.3} animation_ms={:.3} close_requested={}",
+                    "repeated_key_handled={} flushed_text_changes={} flush_ms={:.3} lifecycle_ms={:.3} theme_changed={} theme_ms={:.3} redraw_ms={:.3} animation_ms={:.3} close_requested={}",
+                    repeated_key_handled,
                     flush_outcome.changed,
                     flush_duration.as_secs_f64() * 1000.0,
                     lifecycle_duration.as_secs_f64() * 1000.0,
@@ -3362,6 +3459,101 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         close_requested
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_key_physically_pressed(_physical_key: PhysicalKey) -> bool {
+    true
+}
+
+#[cfg(target_os = "windows")]
+fn is_key_physically_pressed(physical_key: PhysicalKey) -> bool {
+    let Some(virtual_key) = physical_key_to_windows_virtual_key(physical_key) else {
+        return true;
+    };
+    unsafe { (GetAsyncKeyState(i32::from(virtual_key)) as u16 & 0x8000) != 0 }
+}
+
+#[cfg(target_os = "windows")]
+fn physical_key_to_windows_virtual_key(physical_key: PhysicalKey) -> Option<u16> {
+    let code = match physical_key {
+        PhysicalKey::Code(KeyCode::Backspace) => VK_BACK.0,
+        PhysicalKey::Code(KeyCode::Delete) => VK_DELETE.0,
+        PhysicalKey::Code(KeyCode::ArrowLeft) => VK_LEFT.0,
+        PhysicalKey::Code(KeyCode::ArrowRight) => VK_RIGHT.0,
+        PhysicalKey::Code(KeyCode::ArrowUp) => VK_UP.0,
+        PhysicalKey::Code(KeyCode::ArrowDown) => VK_DOWN.0,
+        PhysicalKey::Code(KeyCode::Home) => VK_HOME.0,
+        PhysicalKey::Code(KeyCode::End) => VK_END.0,
+        PhysicalKey::Code(KeyCode::Enter | KeyCode::NumpadEnter) => VK_RETURN.0,
+        PhysicalKey::Code(KeyCode::Space) => VK_SPACE.0,
+        PhysicalKey::Code(KeyCode::Numpad0) => VK_NUMPAD0.0,
+        PhysicalKey::Code(KeyCode::Numpad1) => VK_NUMPAD1.0,
+        PhysicalKey::Code(KeyCode::Numpad2) => VK_NUMPAD2.0,
+        PhysicalKey::Code(KeyCode::Numpad3) => VK_NUMPAD3.0,
+        PhysicalKey::Code(KeyCode::Numpad4) => VK_NUMPAD4.0,
+        PhysicalKey::Code(KeyCode::Numpad5) => VK_NUMPAD5.0,
+        PhysicalKey::Code(KeyCode::Numpad6) => VK_NUMPAD6.0,
+        PhysicalKey::Code(KeyCode::Numpad7) => VK_NUMPAD7.0,
+        PhysicalKey::Code(KeyCode::Numpad8) => VK_NUMPAD8.0,
+        PhysicalKey::Code(KeyCode::Numpad9) => VK_NUMPAD9.0,
+        PhysicalKey::Code(KeyCode::NumpadAdd) => VK_ADD.0,
+        PhysicalKey::Code(KeyCode::NumpadSubtract) => VK_SUBTRACT.0,
+        PhysicalKey::Code(KeyCode::NumpadDecimal) => VK_DECIMAL.0,
+        PhysicalKey::Code(KeyCode::NumpadMultiply) => VK_MULTIPLY.0,
+        PhysicalKey::Code(KeyCode::NumpadDivide) => VK_DIVIDE.0,
+        PhysicalKey::Code(KeyCode::NumpadComma) => VK_SEPARATOR.0,
+        PhysicalKey::Code(KeyCode::Minus) => VK_OEM_MINUS.0,
+        PhysicalKey::Code(KeyCode::Equal) => VK_OEM_PLUS.0,
+        PhysicalKey::Code(KeyCode::BracketLeft) => VK_OEM_4.0,
+        PhysicalKey::Code(KeyCode::BracketRight) => VK_OEM_6.0,
+        PhysicalKey::Code(KeyCode::Backslash) => VK_OEM_5.0,
+        PhysicalKey::Code(KeyCode::IntlBackslash) => VK_OEM_102.0,
+        PhysicalKey::Code(KeyCode::Semicolon) => VK_OEM_1.0,
+        PhysicalKey::Code(KeyCode::Quote) => VK_OEM_7.0,
+        PhysicalKey::Code(KeyCode::Backquote) => VK_OEM_3.0,
+        PhysicalKey::Code(KeyCode::Comma) => VK_OEM_COMMA.0,
+        PhysicalKey::Code(KeyCode::Period) => VK_OEM_PERIOD.0,
+        PhysicalKey::Code(KeyCode::Slash) => VK_OEM_2.0,
+        PhysicalKey::Code(KeyCode::Digit0) => b'0' as u16,
+        PhysicalKey::Code(KeyCode::Digit1) => b'1' as u16,
+        PhysicalKey::Code(KeyCode::Digit2) => b'2' as u16,
+        PhysicalKey::Code(KeyCode::Digit3) => b'3' as u16,
+        PhysicalKey::Code(KeyCode::Digit4) => b'4' as u16,
+        PhysicalKey::Code(KeyCode::Digit5) => b'5' as u16,
+        PhysicalKey::Code(KeyCode::Digit6) => b'6' as u16,
+        PhysicalKey::Code(KeyCode::Digit7) => b'7' as u16,
+        PhysicalKey::Code(KeyCode::Digit8) => b'8' as u16,
+        PhysicalKey::Code(KeyCode::Digit9) => b'9' as u16,
+        PhysicalKey::Code(KeyCode::KeyA) => b'A' as u16,
+        PhysicalKey::Code(KeyCode::KeyB) => b'B' as u16,
+        PhysicalKey::Code(KeyCode::KeyC) => b'C' as u16,
+        PhysicalKey::Code(KeyCode::KeyD) => b'D' as u16,
+        PhysicalKey::Code(KeyCode::KeyE) => b'E' as u16,
+        PhysicalKey::Code(KeyCode::KeyF) => b'F' as u16,
+        PhysicalKey::Code(KeyCode::KeyG) => b'G' as u16,
+        PhysicalKey::Code(KeyCode::KeyH) => b'H' as u16,
+        PhysicalKey::Code(KeyCode::KeyI) => b'I' as u16,
+        PhysicalKey::Code(KeyCode::KeyJ) => b'J' as u16,
+        PhysicalKey::Code(KeyCode::KeyK) => b'K' as u16,
+        PhysicalKey::Code(KeyCode::KeyL) => b'L' as u16,
+        PhysicalKey::Code(KeyCode::KeyM) => b'M' as u16,
+        PhysicalKey::Code(KeyCode::KeyN) => b'N' as u16,
+        PhysicalKey::Code(KeyCode::KeyO) => b'O' as u16,
+        PhysicalKey::Code(KeyCode::KeyP) => b'P' as u16,
+        PhysicalKey::Code(KeyCode::KeyQ) => b'Q' as u16,
+        PhysicalKey::Code(KeyCode::KeyR) => b'R' as u16,
+        PhysicalKey::Code(KeyCode::KeyS) => b'S' as u16,
+        PhysicalKey::Code(KeyCode::KeyT) => b'T' as u16,
+        PhysicalKey::Code(KeyCode::KeyU) => b'U' as u16,
+        PhysicalKey::Code(KeyCode::KeyV) => b'V' as u16,
+        PhysicalKey::Code(KeyCode::KeyW) => b'W' as u16,
+        PhysicalKey::Code(KeyCode::KeyX) => b'X' as u16,
+        PhysicalKey::Code(KeyCode::KeyY) => b'Y' as u16,
+        PhysicalKey::Code(KeyCode::KeyZ) => b'Z' as u16,
+        _ => return None,
+    };
+    Some(code)
 }
 
 struct HoverMoveOrTransition;

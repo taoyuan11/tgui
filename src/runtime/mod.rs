@@ -74,6 +74,8 @@ use winit_win32::{WindowAttributesWindows, WindowExtWindows};
 
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
+const KEY_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(300);
+const KEY_REPEAT_INTERVAL: Duration = Duration::from_millis(33);
 #[cfg(all(target_os = "android", feature = "android"))]
 const ANDROID_SYSTEM_THEME_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -473,6 +475,7 @@ pub struct BoundRuntimeHandler<VM> {
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
     active_canvas_drag: Option<ActiveCanvasDrag<VM>>,
+    active_key_repeat: Option<ActiveKeyRepeat>,
     pending_click: Option<PendingClick<VM>>,
     pressed_widget: Option<WidgetId>,
     focused_widget: Option<FocusedWidget<VM>>,
@@ -701,6 +704,12 @@ struct PendingClick<VM> {
     target_id: HoverTargetId,
     deadline: Instant,
     command: Option<ClickHandler<VM>>,
+}
+
+#[derive(Clone)]
+struct ActiveKeyRepeat {
+    event: crate::platform::event::KeyEvent,
+    next_fire_at: Instant,
 }
 
 struct ActiveCanvasDrag<VM> {
@@ -1020,6 +1029,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
             active_canvas_drag: None,
+            active_key_repeat: None,
             pending_click: None,
             pressed_widget: None,
             focused_widget: None,
@@ -2000,6 +2010,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         {
             self.focused_widget = None;
             self.focus_visible = false;
+            self.active_key_repeat = None;
         }
         if self
             .selected_text
@@ -3217,6 +3228,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let controller_deadline = self.animations.next_frame_deadline(now);
         let click_deadline = self.pending_click.as_ref().map(|pending| pending.deadline);
         let caret_deadline = self.next_caret_blink_deadline(now);
+        let key_repeat_deadline = self.next_key_repeat_deadline();
         let smooth_scroll_deadline =
             (!self.smooth_scroll_states.is_empty()).then_some(now + Duration::from_millis(16));
         let next_deadline = [
@@ -3224,6 +3236,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             controller_deadline,
             click_deadline,
             caret_deadline,
+            key_repeat_deadline,
             smooth_scroll_deadline,
         ]
         .into_iter()
@@ -3261,7 +3274,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 "textarea_animation",
                 started_at.elapsed(),
                 format!(
-                    "smooth_scroll_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} animation_active={} controller_active={} pending_click={} caret_deadline={} smooth_scroll_deadline={} next_deadline={}",
+                    "smooth_scroll_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} animation_active={} controller_active={} pending_click={} caret_deadline={} key_repeat_deadline={} smooth_scroll_deadline={} next_deadline={}",
                     smooth_scroll_advanced,
                     controller_changed,
                     animation_refresh.changed,
@@ -3271,6 +3284,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     controller_deadline.is_some(),
                     click_deadline.is_some(),
                     caret_deadline.is_some(),
+                    key_repeat_deadline.is_some(),
                     smooth_scroll_deadline.is_some(),
                     next_deadline.is_some(),
                 ),
@@ -3444,6 +3458,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let controller_deadline = self.animations.next_frame_deadline(now);
         let click_deadline = self.pending_click.as_ref().map(|pending| pending.deadline);
         let caret_deadline = self.next_caret_blink_deadline(now);
+        let key_repeat_deadline = self.next_key_repeat_deadline();
         let smooth_scroll_deadline =
             (!self.smooth_scroll_states.is_empty()).then_some(now + Duration::from_millis(16));
         [
@@ -3451,6 +3466,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             controller_deadline,
             click_deadline,
             caret_deadline,
+            key_repeat_deadline,
             smooth_scroll_deadline,
         ]
         .into_iter()
