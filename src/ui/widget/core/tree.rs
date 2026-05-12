@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(test)]
 use crate::ui::widget::common::ChildSource;
 
 pub struct WidgetTree<VM> {
@@ -32,6 +33,7 @@ impl<VM> WidgetTree<VM> {
         Self { root: root.into() }
     }
 
+    #[cfg(test)]
     pub(crate) fn has_lifecycle_handlers(&self) -> bool {
         with_widget_stack(|| element_has_lifecycle_handlers(&self.root))
     }
@@ -765,6 +767,7 @@ impl<VM> WidgetTree<VM> {
     }
 }
 
+#[cfg(test)]
 fn element_has_lifecycle_handlers<VM>(element: &Element<VM>) -> bool {
     if element.lifecycle_events.has_any() {
         return true;
@@ -778,6 +781,7 @@ fn element_has_lifecycle_handlers<VM>(element: &Element<VM>) -> bool {
     }
 }
 
+#[cfg(test)]
 fn child_source_has_lifecycle_handlers<VM>(source: &ChildSource<VM>) -> bool {
     source
         .resolve(None)

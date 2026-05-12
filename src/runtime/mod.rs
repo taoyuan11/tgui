@@ -2969,13 +2969,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         }
 
-        let tree_has_lifecycle_handlers = self
-            .widget_tree
+        let cached_has_lifecycle_handlers = self
+            .cached_scene
             .as_ref()
-            .map(WidgetTree::has_lifecycle_handlers)
-            .unwrap_or(false);
+            .map(|cached| !cached.lifecycle_states.is_empty());
 
-        if !tree_has_lifecycle_handlers && self.lifecycle_event_states.is_empty() {
+        if cached_has_lifecycle_handlers == Some(false) && self.lifecycle_event_states.is_empty() {
             self.last_lifecycle_dispatch_revision = revision;
             return;
         }

@@ -75,14 +75,14 @@
 
 ```toml
 [dependencies]
-tgui = "0.1.7"
+tgui = "0.1.8"
 ```
 
 如果需要视频能力：
 
 ```toml
 [dependencies]
-tgui = { version = "0.1.7", features = ["video"] }
+tgui = { version = "0.1.8", features = ["video"] }
 ```
 
 可选 feature：
