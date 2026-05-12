@@ -402,17 +402,17 @@ impl FontManager {
         let preferred = request
             .preferred_font
             .and_then(|name| self.resolve_family_name_in_database(database, name, request.weight));
+        let configured_default = self
+            .default_font
+            .as_deref()
+            .and_then(|name| self.resolve_family_name_in_database(database, name, request.weight));
         let script_aware_default =
             self.script_aware_default_family_in_database(database, text, request.weight);
 
         ResolvedText {
             primary_font: preferred
+                .or(configured_default)
                 .or(script_aware_default)
-                .or_else(|| {
-                    self.default_font.as_deref().and_then(|name| {
-                        self.resolve_family_name_in_database(database, name, request.weight)
-                    })
-                })
                 .or_else(|| self.system_default_family_in_database(database, request.weight))
                 .unwrap_or_else(|| "sans-serif".to_string()),
         }
@@ -855,7 +855,7 @@ impl FontManager {
         text: &str,
         weight: FontWeight,
     ) -> Option<String> {
-        if !contains_cjk(text) {
+        if !contains_cjk(text) || contains_non_cjk_alphanumeric(text) {
             return None;
         }
 
@@ -1241,6 +1241,27 @@ mod tests {
 
         assert!(!resolved.primary_font.trim().is_empty());
     }
+
+    #[test]
+    fn mixed_cjk_text_keeps_same_primary_font_as_latin_text() {
+        let manager = FontManager::new(&FontCatalog::default());
+        let latin = manager.resolve_text(
+            "abc123",
+            TextFontRequest {
+                preferred_font: None,
+                weight: FontWeight::NORMAL,
+            },
+        );
+        let mixed = manager.resolve_text(
+            "abc123中文",
+            TextFontRequest {
+                preferred_font: None,
+                weight: FontWeight::NORMAL,
+            },
+        );
+
+        assert_eq!(latin.primary_font, mixed.primary_font);
+    }
 }
 
 #[cfg(any(target_os = "android", target_env = "ohos"))]
@@ -1276,6 +1297,11 @@ fn load_mobile_system_fonts(database: &mut cosmic_text::fontdb::Database) {
 
 fn contains_cjk(text: &str) -> bool {
     text.chars().any(is_cjk_character)
+}
+
+fn contains_non_cjk_alphanumeric(text: &str) -> bool {
+    text.chars()
+        .any(|ch| !is_cjk_character(ch) && ch.is_alphanumeric())
 }
 
 fn is_cjk_character(ch: char) -> bool {

@@ -358,7 +358,13 @@ impl<VM> WidgetTree<VM> {
                         &mut chunk_parts,
                         &mut visual_contexts,
                     );
-                    (computed, lifecycle_states, chunks, chunk_parts, visual_contexts)
+                    (
+                        computed,
+                        lifecycle_states,
+                        chunks,
+                        chunk_parts,
+                        visual_contexts,
+                    )
                 })
             });
         computed.dependencies = dependencies.clone();
@@ -765,9 +771,9 @@ fn element_has_lifecycle_handlers<VM>(element: &Element<VM>) -> bool {
     }
 
     match &element.kind {
-        WidgetKind::Container { children, .. } => children
-            .iter()
-            .any(child_source_has_lifecycle_handlers),
+        WidgetKind::Container { children, .. } => {
+            children.iter().any(child_source_has_lifecycle_handlers)
+        }
         _ => false,
     }
 }

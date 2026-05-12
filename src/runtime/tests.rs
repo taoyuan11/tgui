@@ -1941,13 +1941,9 @@ fn textarea_on_change_state_update_keeps_text_input_scene_in_sync() {
         Flex::<TextInputVm>::vertical()
             .width(dp(180.0))
             .height(dp(120.0))
-            .child(
-                Text::new(
-                    change_count
-                        .signal()
-                        .map(|count| format!("count={count}")),
-                ),
-            )
+            .child(Text::new(
+                change_count.signal().map(|count| format!("count={count}")),
+            ))
             .child(
                 Textarea::new(controller)
                     .width(dp(180.0))
@@ -2024,8 +2020,16 @@ fn textarea_on_change_state_update_keeps_text_input_scene_in_sync() {
         .iter()
         .map(|primitive| primitive.content.clone())
         .collect::<Vec<_>>();
-    assert!(texts.iter().any(|content| content.contains('a') && content.contains("hi")), "{texts:?}");
-    assert!(texts.iter().any(|content| content == "count=1"), "{texts:?}");
+    assert!(
+        texts
+            .iter()
+            .any(|content| content.contains('a') && content.contains("hi")),
+        "{texts:?}"
+    );
+    assert!(
+        texts.iter().any(|content| content == "count=1"),
+        "{texts:?}"
+    );
 }
 
 #[test]
@@ -2118,8 +2122,16 @@ fn textarea_on_change_state_update_does_not_resolve_unrelated_dynamic_sibling() 
         .collect::<Vec<_>>();
 
     assert_eq!(probe_reads.load(Ordering::SeqCst), baseline);
-    assert!(texts.iter().any(|content| content.contains('a') && content.contains("hi")), "{texts:?}");
-    assert!(texts.iter().any(|content| content == "count=1"), "{texts:?}");
+    assert!(
+        texts
+            .iter()
+            .any(|content| content.contains('a') && content.contains("hi")),
+        "{texts:?}"
+    );
+    assert!(
+        texts.iter().any(|content| content == "count=1"),
+        "{texts:?}"
+    );
 }
 
 #[test]
@@ -2459,10 +2471,7 @@ fn textarea_ime_composition_ignores_keyboard_text_until_commit() {
     });
     handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
 
-    assert!(handler.handle_ime_event(&Ime::Preedit(
-        "ni".to_string(),
-        Some((0, "ni".len())),
-    )));
+    assert!(handler.handle_ime_event(&Ime::Preedit("ni".to_string(), Some((0, "ni".len())),)));
     assert!(!handler.handle_keyboard_input(&text_key_event("n")));
 
     let text_id = handler
@@ -2472,7 +2481,13 @@ fn textarea_ime_composition_ignores_keyboard_text_until_commit() {
         .text_edit_states
         .get(&text_id)
         .expect("composition state should exist");
-    assert_eq!(state.composition.as_ref().map(|composition| composition.text.as_str()), Some("ni"));
+    assert_eq!(
+        state
+            .composition
+            .as_ref()
+            .map(|composition| composition.text.as_str()),
+        Some("ni")
+    );
 
     assert!(handler.handle_ime_event(&Ime::Commit("你".to_string())));
     flush_text_input_commits(&mut handler);
@@ -2512,10 +2527,7 @@ fn textarea_ime_preedit_updates_session_display_layout_snapshot() {
         .expect("textarea should stay focused during composition");
     let _ = handler.sync_text_input_buffer(text_id);
 
-    assert!(handler.handle_ime_event(&Ime::Preedit(
-        "ni".to_string(),
-        Some((0, "ni".len())),
-    )));
+    assert!(handler.handle_ime_event(&Ime::Preedit("ni".to_string(), Some((0, "ni".len())),)));
 
     let session = handler
         .text_input_buffers
@@ -2768,6 +2780,41 @@ fn focused_text_input_schedules_caret_blink_deadline() {
     handler.update_focus(None, None, false);
     let deadline = handler.next_deadline(Instant::now());
     assert!(deadline.is_none());
+}
+
+#[test]
+fn caret_blink_requests_redraw_when_visibility_flips() {
+    let invalidation = InvalidationSignal::new();
+    let tree: WidgetTree<TestVm> = WidgetTree::new(Input::<TestVm>::new("hello"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + (frame.width * 0.5),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    let _ = handler.computed_scene();
+
+    handler
+        .cached_scene
+        .as_mut()
+        .expect("cached scene should exist after rendering")
+        .caret_visible = false;
+
+    let now = handler.caret_blink_origin + std::time::Duration::from_millis(1);
+    assert!(handler.caret_blink_needs_redraw(now));
 }
 
 #[test]

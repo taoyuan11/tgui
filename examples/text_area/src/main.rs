@@ -142,7 +142,6 @@ impl ViewModel for App {
                     .child(el![
                         Text::new("源码编辑区"),
                         Textarea::new(self.content.clone())
-                            .key("source_textarea")
                             .width(pct(100.0))
                             .min_height(dp(0.0))
                             .grow(1.0)

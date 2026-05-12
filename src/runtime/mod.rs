@@ -45,8 +45,7 @@ use crate::platform::keyboard::ModifiersState;
 use crate::platform::ohos::{OhosApp, WindowExtOhos};
 use crate::platform::window::{
     ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeSurroundingText,
-    ResizeDirection,
-    Theme as WindowTheme, WindowAttributes, WindowId,
+    ResizeDirection, Theme as WindowTheme, WindowAttributes, WindowId,
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::text::font::{FontManager, FontWeight, TextFontRequest, TextLayoutInfo};
@@ -1267,6 +1266,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn request_redraw_if_dirty(&mut self, now: Instant) {
         let revision = self.invalidation.revision();
+        let caret_blink_changed = self.caret_blink_needs_redraw(now);
         if revision != self.last_invalidation_revision {
             let started_at = text_profile_enabled().then_some(Instant::now());
             let previous_revision = self.last_invalidation_revision;
@@ -1300,6 +1300,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         requested_redraw
                     ),
                 );
+            }
+        }
+
+        if caret_blink_changed {
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
             }
         }
     }
@@ -1346,6 +1352,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
         }
+
         if let Some(layout) = cached.layout.as_ref() {
             let scene_only_layout_ids = layout_affected_ids
                 .iter()
@@ -1635,8 +1642,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             focused_text_state.as_ref(),
         );
         if let Some(focus_override_started_at) = focus_override_started_at {
-            focus_override_elapsed_ms =
-                focus_override_started_at.elapsed().as_secs_f64() * 1000.0;
+            focus_override_elapsed_ms = focus_override_started_at.elapsed().as_secs_f64() * 1000.0;
             log_text_profile(
                 "textarea_patch_scene_focus_override",
                 focus_override_started_at.elapsed(),
@@ -1796,9 +1802,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 cached.scene_chunks.extend(patch.cache.chunks);
                 cached.scene_chunk_parts.extend(patch.cache.chunk_parts);
                 cached.visual_contexts.extend(patch.cache.visual_contexts);
-                cached
-                    .lifecycle_states
-                    .extend(patch.cache.lifecycle_states);
+                cached.lifecycle_states.extend(patch.cache.lifecycle_states);
                 cached.dependencies.merge_from(&patch.cache.dependencies);
             }
 
@@ -1836,10 +1840,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     std::time::Duration::from_secs_f64(recompose_elapsed_ms / 1000.0),
                     format!(
                         "roots={:?} ancestors={} root_commands={} root_texts={}",
-                        roots,
-                        ancestor_count,
-                        root_commands,
-                        root_texts
+                        roots, ancestor_count, root_commands, root_texts
                     ),
                 );
             }
@@ -2199,6 +2200,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 == 0)
     }
 
+    fn caret_blink_needs_redraw(&self, now: Instant) -> bool {
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
+        };
+        let focused_input = self.focused_text_input_id_cached(&cached.computed);
+        cached.caret_visible != self.caret_visible_at(now, focused_input)
+    }
+
     fn next_caret_blink_deadline(&self, now: Instant) -> Option<Instant> {
         let focused = self.focused_widget_id()?;
         if !self.text_input_regions.contains_key(&focused) {
@@ -2370,42 +2379,36 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             caret_visible,
             cache_mismatch,
         ) = if let Some(cached) = self.cached_scene.as_ref() {
-                let focused_input = self.focused_text_input_id_cached(&cached.computed);
-                let focused_text_state = focused_input
-                    .and_then(|id| self.text_edit_state(id))
-                    .cloned();
-                let caret_visible = self.caret_visible_at(now, focused_input);
-                let cache_mismatch = self.scene_cache_mismatch_summary(
-                    cached,
-                    viewport,
-                    units,
-                    caret_visible,
-                    active_scrollbar,
-                );
-                (
-                    self.scene_cache_matches(
-                        cached,
-                        viewport,
-                        units,
-                        caret_visible,
-                        active_scrollbar,
-                    ),
-                    self.scene_layout_cache_matches(cached, viewport, units),
-                    focused_input,
-                    focused_text_state,
-                    caret_visible,
-                    cache_mismatch,
-                )
-            } else {
-                (
-                    false,
-                    false,
-                    None,
-                    None,
-                    false,
-                    "no_cached_scene".to_string(),
-                )
-            };
+            let focused_input = self.focused_text_input_id_cached(&cached.computed);
+            let focused_text_state = focused_input
+                .and_then(|id| self.text_edit_state(id))
+                .cloned();
+            let caret_visible = self.caret_visible_at(now, focused_input);
+            let cache_mismatch = self.scene_cache_mismatch_summary(
+                cached,
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+            );
+            (
+                self.scene_cache_matches(cached, viewport, units, caret_visible, active_scrollbar),
+                self.scene_layout_cache_matches(cached, viewport, units),
+                focused_input,
+                focused_text_state,
+                caret_visible,
+                cache_mismatch,
+            )
+        } else {
+            (
+                false,
+                false,
+                None,
+                None,
+                false,
+                "no_cached_scene".to_string(),
+            )
+        };
         let selected_text_state = self
             .selected_text
             .and_then(|id| self.text_edit_state(id))
@@ -2439,7 +2442,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         cache_mismatch
                     ),
                 );
-            }
+                }
                 return &self
                     .cached_scene
                     .as_ref()
@@ -2879,21 +2882,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         }
 
-        let fallback_states = self
-            .cached_scene
-            .is_none()
-            .then(|| {
-                self.widget_tree
-                    .as_ref()
-                    .expect("widget tree should exist")
-                    .lifecycle_event_states(&self.theme)
-                    .into_iter()
-                    .map(|state| (state.widget_id, state))
-                    .collect::<HashMap<_, _>>()
-            });
+        let fallback_states = self.cached_scene.is_none().then(|| {
+            self.widget_tree
+                .as_ref()
+                .expect("widget tree should exist")
+                .lifecycle_event_states(&self.theme)
+                .into_iter()
+                .map(|state| (state.widget_id, state))
+                .collect::<HashMap<_, _>>()
+        });
         let states = fallback_states
             .as_ref()
-            .or_else(|| self.cached_scene.as_ref().map(|cached| &cached.lifecycle_states))
+            .or_else(|| {
+                self.cached_scene
+                    .as_ref()
+                    .map(|cached| &cached.lifecycle_states)
+            })
             .expect("lifecycle states should be available");
         let current_ids: HashSet<_> = states.keys().copied().collect();
 

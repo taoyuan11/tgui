@@ -1,6 +1,6 @@
 use super::*;
-use crate::ui::widget::common::ChildSource;
 use crate::log::{log_text_profile, text_profile_enabled};
+use crate::ui::widget::common::ChildSource;
 use std::time::Instant;
 
 impl<VM> Element<VM> {
@@ -500,10 +500,7 @@ pub(super) fn resolve_subtree_from_source_path<'a, VM>(
             log_text_profile(
                 "textarea_patch_scene_resolve_roots",
                 started_at.elapsed(),
-                format!(
-                    "path={:?} terminal=true widget_id={:?}",
-                    path, resolved.id
-                ),
+                format!("path={:?} terminal=true widget_id={:?}", path, resolved.id),
             );
         }
         return Some(resolved);
@@ -519,10 +516,10 @@ pub(super) fn resolve_subtree_from_source_path<'a, VM>(
         })
         .unwrap_or(&[]);
     let owner_id = previous.map(|previous| previous.id).unwrap_or(source.id);
-    let (source_index, local_index) =
-        previous.and_then(|previous| previous.child_source_spans.get(..children.len()))
-            .and_then(|spans| child_source_position(spans, path[0]))
-            .or_else(|| child_source_position_from_source(children, owner_id, path[0]))?;
+    let (source_index, local_index) = previous
+        .and_then(|previous| previous.child_source_spans.get(..children.len()))
+        .and_then(|spans| child_source_position(spans, path[0]))
+        .or_else(|| child_source_position_from_source(children, owner_id, path[0]))?;
     let source_children = children.get(source_index)?.resolve(Some(owner_id));
     let resolved_children_len = source_children.len();
     let mut child = source_children.into_iter().nth(local_index)?;
