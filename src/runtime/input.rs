@@ -2190,6 +2190,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 ..
             } = interaction
             {
+                if !frame.contains(cursor_position) {
+                    continue;
+                }
                 let value = self.text_input_current_value(id, &controller);
                 if self.scroll_multiline_text_input(
                     id,
@@ -3211,8 +3214,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         event_loop: &dyn ActiveEventLoop,
         event: WindowEvent,
     ) -> bool {
-        if let WindowEvent::PointerMoved { position, .. } = &event {
-            self.set_pointer_position(*position);
+        match &event {
+            WindowEvent::PointerMoved { position, .. }
+            | WindowEvent::PointerEntered { position, .. } => {
+                self.set_pointer_position(*position);
+            }
+            _ => {}
         }
 
         if let WindowEvent::ModifiersChanged(modifiers) = &event {
@@ -3229,10 +3236,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if Self::should_dispatch_widget_event(&event) {
             let viewport = self.viewport_rect();
             let revision_before = self.invalidation.revision();
-            let mut needs_redraw = !matches!(event, WindowEvent::PointerMoved { .. });
+            let mut needs_redraw =
+                !matches!(event, WindowEvent::PointerMoved { .. } | WindowEvent::PointerEntered { .. });
 
             match &event {
-                WindowEvent::PointerMoved { .. } => {
+                WindowEvent::PointerMoved { .. } | WindowEvent::PointerEntered { .. } => {
                     if self.active_scrollbar_drag.is_some() {
                         needs_redraw |= self.handle_scrollbar_drag();
                         needs_redraw |= self.sync_scrollbar_hover();

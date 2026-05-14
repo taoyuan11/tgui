@@ -2357,7 +2357,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && cached.active_scrollbar == active_scrollbar;
         stable_shell
             && (cached.text_input_epoch != self.text_input_epoch
-                || cached.scroll_epoch != self.scroll_epoch
                 || cached.caret_visible != caret_visible)
     }
 
@@ -3031,7 +3030,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn should_dispatch_widget_event(event: &WindowEvent) -> bool {
         match event {
-            WindowEvent::PointerMoved { .. } | WindowEvent::MouseWheel { .. } => true,
+            WindowEvent::PointerMoved { .. }
+            | WindowEvent::PointerEntered { .. }
+            | WindowEvent::MouseWheel { .. } => true,
             WindowEvent::PointerButton {
                 state: ElementState::Pressed,
                 button,

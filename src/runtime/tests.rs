@@ -10,7 +10,9 @@ use crate::foundation::binding::{InvalidationSignal, Signal, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-use crate::platform::event::{ElementState, Ime, KeyEvent, MouseScrollDelta};
+use crate::platform::event::{
+    ElementState, Ime, KeyEvent, MouseScrollDelta, PointerKind, TouchPhase, WindowEvent,
+};
 use crate::platform::keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey};
 use crate::platform::window::{ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose};
 use crate::text::font::FontCatalog;
@@ -27,6 +29,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
+use crate::platform::backend::event_loop::{
+    ActiveEventLoop, ControlFlow, DeviceEvents, EventLoopProxy, OwnedDisplayHandle,
+};
+use crate::platform::cursor::{CustomCursor, CustomCursorSource};
+use crate::platform::error::RequestError;
+use crate::platform::window::{Theme as WindowTheme, Window, WindowAttributes};
+use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle};
+use winit_core::monitor::MonitorHandle;
 
 #[cfg(feature = "video")]
 use crate::media::TextureFrame;
@@ -94,6 +104,13 @@ fn test_config_with_theme(theme: ThemeSelection, theme_set: ThemeSet) -> Applica
         theme,
         theme_set,
         window_icon: None,
+    }
+}
+
+fn test_config_with_size(width: f64, height: f64) -> ApplicationConfig {
+    ApplicationConfig {
+        size: LogicalSize::new(width, height),
+        ..test_config()
     }
 }
 
@@ -210,6 +227,73 @@ fn custom_theme_set() -> (ThemeSet, Theme, Theme) {
     dark.colors.background = Color::hexa(0x06101DFF);
     dark.colors.primary = Color::hexa(0x66D9E8FF);
     (ThemeSet::new(light.clone(), dark.clone()), light, dark)
+}
+
+#[derive(Debug)]
+struct TestEventLoop;
+
+#[derive(Debug)]
+struct TestDisplayHandle;
+
+impl HasDisplayHandle for TestDisplayHandle {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+        Ok(DisplayHandle::windows())
+    }
+}
+
+impl ActiveEventLoop for TestEventLoop {
+    fn create_proxy(&self) -> EventLoopProxy {
+        panic!("not needed in runtime tests")
+    }
+
+    fn create_window(
+        &self,
+        _window_attributes: WindowAttributes,
+    ) -> Result<Box<dyn Window>, RequestError> {
+        panic!("not needed in runtime tests")
+    }
+
+    fn create_custom_cursor(
+        &self,
+        _custom_cursor: CustomCursorSource,
+    ) -> Result<CustomCursor, RequestError> {
+        panic!("not needed in runtime tests")
+    }
+
+    fn available_monitors(&self) -> Box<dyn Iterator<Item = MonitorHandle>> {
+        Box::new(std::iter::empty())
+    }
+
+    fn primary_monitor(&self) -> Option<MonitorHandle> {
+        None
+    }
+
+    fn listen_device_events(&self, _allowed: DeviceEvents) {}
+
+    fn system_theme(&self) -> Option<WindowTheme> {
+        None
+    }
+
+    fn set_control_flow(&self, _control_flow: ControlFlow) {}
+
+    fn control_flow(&self) -> ControlFlow {
+        ControlFlow::Wait
+    }
+
+    fn exit(&self) {}
+
+    fn exiting(&self) -> bool {
+        false
+    }
+
+    fn owned_display_handle(&self) -> OwnedDisplayHandle {
+        OwnedDisplayHandle::new(Arc::new(TestDisplayHandle))
+    }
+
+    fn rwh_06_handle(&self) -> &dyn HasDisplayHandle {
+        static DISPLAY: TestDisplayHandle = TestDisplayHandle;
+        &DISPLAY
+    }
 }
 
 fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
@@ -3964,6 +4048,200 @@ fn mouse_wheel_scrolls_stack_wrapped_grid_of_canvas_cards() {
             .unwrap_or(Dp::ZERO)
             > Dp::ZERO
             || handler.smooth_scroll_states.contains_key(&scroller_id)
+    );
+}
+
+#[test]
+fn pointer_entered_restores_mouse_wheel_scrolling_after_pointer_left() {
+    let invalidation = InvalidationSignal::new();
+    let scroller: Element<TestVm> = Stack::new()
+        .size(dp(320.0), dp(240.0))
+        .overflow_y(Overflow::Scroll)
+        .child(
+            Flex::vertical()
+                .height(dp(860.0))
+                .gap(dp(12.0))
+                .child([
+                    Element::<TestVm>::from(Input::new("hello world").height(dp(40.0))),
+                    Element::<TestVm>::from(Textarea::new(
+                        (0..10)
+                            .map(|index| format!("line {index}"))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                    .height(dp(72.0))),
+                    Element::<TestVm>::from(Stack::new().height(dp(640.0))),
+                ]),
+        )
+        .into();
+    let scroller_id = scroller.id;
+    let tree = WidgetTree::new(scroller);
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(320.0, 240.0),
+    );
+    let viewport = handler.viewport_rect();
+    let event_loop = TestEventLoop;
+
+    let target = {
+        let computed = handler.computed_scene();
+        let scroll_region = computed
+            .scroll_regions
+            .iter()
+            .find(|region| region.id == scroller_id)
+            .copied()
+            .expect("parent scroll region should exist");
+        assert!(scroll_region.max_offset().y > Dp::ZERO);
+        PhysicalPosition::new(
+            f64::from((scroll_region.visible_frame.x + dp(24.0)).get()),
+            f64::from((scroll_region.visible_frame.bottom() - dp(24.0)).get()),
+        )
+    };
+
+    let input_frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: false, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: input_frame.x + dp(8.0),
+        y: input_frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert!(handler.focused_widget_id().is_some());
+
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerLeft {
+            device_id: None,
+            position: None,
+            primary: true,
+            kind: PointerKind::Mouse,
+        },
+    );
+    assert!(handler.cursor_position.is_none());
+
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerEntered {
+            device_id: None,
+            position: target,
+            primary: true,
+            kind: PointerKind::Mouse,
+        },
+    );
+    assert!(handler.cursor_position.is_some());
+
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::MouseWheel {
+            device_id: None,
+            delta: MouseScrollDelta::LineDelta(0.0, -2.0),
+            phase: TouchPhase::Moved,
+        },
+    );
+    assert!(
+        handler
+            .scroll_states
+            .get(&scroller_id)
+            .map(|offset| offset.y > Dp::ZERO)
+            .unwrap_or(false)
+            || handler.smooth_scroll_states.contains_key(&scroller_id),
+        "parent scroller should respond after pointer re-enters the window"
+    );
+}
+
+#[test]
+fn focused_text_input_page_scroll_updates_scene_without_blur() {
+    let invalidation = InvalidationSignal::new();
+    let scroller: Element<TestVm> = Stack::new()
+        .size(dp(320.0), dp(240.0))
+        .overflow_y(Overflow::Scroll)
+        .child(
+            Flex::vertical()
+                .height(dp(860.0))
+                .gap(dp(12.0))
+                .child([
+                    Element::<TestVm>::from(Input::new("hello world").height(dp(40.0))),
+                    Element::<TestVm>::from(Textarea::new(
+                        (0..10)
+                            .map(|index| format!("line {index}"))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                    .height(dp(72.0))),
+                    Element::<TestVm>::from(Stack::new().height(dp(640.0))),
+                ]),
+        )
+        .into();
+    let scroller_id = scroller.id;
+    let tree = WidgetTree::new(scroller);
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(320.0, 240.0),
+    );
+    let viewport = handler.viewport_rect();
+
+    let (input_frame, scroll_region) = {
+        let computed = handler.computed_scene();
+        let input_frame = computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: false, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist");
+        let scroll_region = computed
+            .scroll_regions
+            .iter()
+            .find(|region| region.id == scroller_id)
+            .copied()
+            .expect("parent scroll region should exist");
+        (input_frame, scroll_region)
+    };
+
+    handler.cursor_position = Some(Point {
+        x: input_frame.x + dp(8.0),
+        y: input_frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert!(handler.focused_widget_id().is_some());
+
+    handler.cursor_position = Some(Point {
+        x: scroll_region.visible_frame.x + dp(24.0),
+        y: (scroll_region.visible_frame.bottom() - dp(24.0)).max(input_frame.bottom() + dp(24.0)),
+    });
+
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -2.0)));
+
+    let focused_scroll = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == scroller_id)
+        .copied()
+        .expect("parent scroll region should still exist while focused")
+        .scroll_offset
+        .y;
+    assert!(
+        focused_scroll > Dp::ZERO || handler.smooth_scroll_states.contains_key(&scroller_id),
+        "focused page scroll should update the rendered scene immediately"
     );
 }
 
