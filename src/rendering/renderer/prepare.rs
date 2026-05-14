@@ -208,6 +208,7 @@ impl Renderer {
                                     texture.frame,
                                     logical_width,
                                     logical_height,
+                                    texture.uv_rect,
                                     texture.corner_radius,
                                     texture.clip_mask,
                                     physical_width,
@@ -219,6 +220,7 @@ impl Renderer {
                                 TextVertex::transformed(
                                     texture.frame,
                                     quad,
+                                    texture.uv_rect,
                                     texture.corner_radius,
                                     texture.clip_mask,
                                     physical_width,
@@ -252,6 +254,7 @@ impl Renderer {
                                     snapped_frame,
                                     logical_width,
                                     logical_height,
+                                    None,
                                     0.0,
                                     text.clip_mask,
                                     physical_width,
@@ -263,6 +266,7 @@ impl Renderer {
                                 TextVertex::transformed(
                                     snapped_frame,
                                     quad,
+                                    None,
                                     0.0,
                                     text.clip_mask,
                                     physical_width,

@@ -2,11 +2,12 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use geo::{BooleanOps, Coord, LineString, MultiPolygon, Polygon};
+use geo::{BooleanOps, Contains, Coord, LineString, MultiPolygon, Polygon};
+use lyon::geom::{Angle, ArcFlags, SvgArc};
 use image::{DynamicImage, RgbaImage};
 use lyon::algorithms::aabb::bounding_box;
 use lyon::algorithms::measure::{PathMeasurements, SampleType};
-use lyon::math::point;
+use lyon::math::{point, vector};
 use lyon::path::iterator::PathIterator;
 use lyon::path::{Path, PathEvent};
 use lyon::tessellation::{
@@ -20,7 +21,8 @@ use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{
-    resolve_media_rect, ContentFit, MediaManager, MediaSource, RasterRequest, TextureFrame,
+    resolve_media_rect, ContentFit, IntrinsicSize, MediaManager, MediaSource, RasterRequest,
+    TextureFrame,
 };
 use crate::text::font::FontWeight;
 use crate::theme::ResolvedThemeMode;
@@ -291,6 +293,29 @@ pub enum CanvasStrokeAlignment {
     Outside,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum CanvasFillRule {
+    #[default]
+    NonZero,
+    EvenOdd,
+}
+
+impl CanvasFillRule {
+    fn to_lyon(self) -> lyon::path::FillRule {
+        match self {
+            Self::NonZero => lyon::path::FillRule::NonZero,
+            Self::EvenOdd => lyon::path::FillRule::EvenOdd,
+        }
+    }
+
+    fn to_tiny_skia(self) -> tiny_skia::FillRule {
+        match self {
+            Self::NonZero => tiny_skia::FillRule::Winding,
+            Self::EvenOdd => tiny_skia::FillRule::EvenOdd,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CanvasTransform2D {
     pub matrix: [f32; 6],
@@ -388,9 +413,19 @@ impl CanvasItemStyle {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum CanvasPathOpError {
+pub enum CanvasPathOpError {
     OpenSubpath,
 }
+
+impl std::fmt::Display for CanvasPathOpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OpenSubpath => write!(f, "canvas path operations require closed subpaths"),
+        }
+    }
+}
+
+impl std::error::Error for CanvasPathOpError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CanvasSvgPathError(pub String);
@@ -481,9 +516,10 @@ enum PathShapeHint {
     RoundedRect { rect: Rect, radius: Dp },
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-struct PathBuilder {
+#[derive(Clone, Debug, PartialEq)]
+pub struct PathBuilder {
     commands: Vec<PathCommand>,
+    fill_rule: CanvasFillRule,
     shape_hint: Option<PathShapeHint>,
 }
 
@@ -491,8 +527,22 @@ impl PathBuilder {
     pub fn new() -> Self {
         Self {
             commands: Vec::new(),
+            fill_rule: CanvasFillRule::NonZero,
             shape_hint: None,
         }
+    }
+
+    pub fn fill_rule(mut self, fill_rule: CanvasFillRule) -> Self {
+        self.fill_rule = fill_rule;
+        self
+    }
+
+    pub fn even_odd(self) -> Self {
+        self.fill_rule(CanvasFillRule::EvenOdd)
+    }
+
+    pub fn non_zero(self) -> Self {
+        self.fill_rule(CanvasFillRule::NonZero)
     }
 
     pub fn move_to(mut self, x: impl Into<Dp>, y: impl Into<Dp>) -> Self {
@@ -853,9 +903,27 @@ impl PathBuilder {
                     last_quad_ctrl = Some(ctrl);
                     last_cubic_ctrl = None;
                 }
-                svgtypes::PathSegment::EllipticalArc { abs, x, y, .. } => {
+                svgtypes::PathSegment::EllipticalArc {
+                    abs,
+                    rx,
+                    ry,
+                    x_axis_rotation,
+                    large_arc,
+                    sweep,
+                    x,
+                    y,
+                } => {
                     let to = svg_point(abs, current, x as f32, y as f32);
-                    self = self.line_to(to.0, to.1);
+                    self = append_svg_arc_segments(
+                        self,
+                        current,
+                        to,
+                        rx as f32,
+                        ry as f32,
+                        x_axis_rotation as f32,
+                        large_arc,
+                        sweep,
+                    );
                     current = to;
                     last_cubic_ctrl = None;
                     last_quad_ctrl = None;
@@ -872,11 +940,58 @@ impl PathBuilder {
         Ok(self)
     }
 
-    fn intersection(&self, other: &PathBuilder) -> Result<PathBuilder, CanvasPathOpError> {
-        let lhs = self.to_multi_polygon()?;
-        let rhs = other.to_multi_polygon()?;
-        let result = lhs.intersection(&rhs);
-        Ok(Self::from_multi_polygon(&result))
+    pub fn union(&self, other: &PathBuilder) -> Result<PathBuilder, CanvasPathOpError> {
+        self.boolean_operation_with_rules(
+            other,
+            self.fill_rule,
+            other.fill_rule,
+            CanvasPathBooleanOperation::Union,
+        )
+    }
+
+    pub fn intersect(&self, other: &PathBuilder) -> Result<PathBuilder, CanvasPathOpError> {
+        self.boolean_operation_with_rules(
+            other,
+            self.fill_rule,
+            other.fill_rule,
+            CanvasPathBooleanOperation::Intersection,
+        )
+    }
+
+    pub fn difference(&self, other: &PathBuilder) -> Result<PathBuilder, CanvasPathOpError> {
+        self.boolean_operation_with_rules(
+            other,
+            self.fill_rule,
+            other.fill_rule,
+            CanvasPathBooleanOperation::Difference,
+        )
+    }
+
+    pub fn xor(&self, other: &PathBuilder) -> Result<PathBuilder, CanvasPathOpError> {
+        self.boolean_operation_with_rules(
+            other,
+            self.fill_rule,
+            other.fill_rule,
+            CanvasPathBooleanOperation::Xor,
+        )
+    }
+
+    fn boolean_operation_with_rules(
+        &self,
+        other: &PathBuilder,
+        lhs_rule: CanvasFillRule,
+        rhs_rule: CanvasFillRule,
+        operation: CanvasPathBooleanOperation,
+    ) -> Result<PathBuilder, CanvasPathOpError> {
+        let lhs = self.to_multi_polygon_with_rule(lhs_rule)?;
+        let rhs = other.to_multi_polygon_with_rule(rhs_rule)?;
+        let result = match operation {
+            CanvasPathBooleanOperation::Union => lhs.union(&rhs),
+            CanvasPathBooleanOperation::Intersection => lhs.intersection(&rhs),
+            CanvasPathBooleanOperation::Difference => lhs.difference(&rhs),
+            CanvasPathBooleanOperation::Xor => lhs.xor(&rhs),
+        };
+        Ok(Self::from_multi_polygon(&result).fill_rule(lhs_rule))
     }
 
     fn commands_internal(&self) -> &[PathCommand] {
@@ -932,26 +1047,12 @@ impl PathBuilder {
         (path.iter().next().is_some()).then(|| bounding_box(path.iter()))
     }
 
-    fn to_multi_polygon(&self) -> Result<MultiPolygon<f64>, CanvasPathOpError> {
+    fn to_multi_polygon_with_rule(
+        &self,
+        fill_rule: CanvasFillRule,
+    ) -> Result<MultiPolygon<f64>, CanvasPathOpError> {
         let rings = self.flattened_closed_rings()?;
-        Ok(MultiPolygon(
-            rings
-                .into_iter()
-                .map(|ring| {
-                    Polygon::new(
-                        LineString::from(
-                            ring.into_iter()
-                                .map(|point_value| Coord {
-                                    x: point_value.x as f64,
-                                    y: point_value.y as f64,
-                                })
-                                .collect::<Vec<_>>(),
-                        ),
-                        Vec::new(),
-                    )
-                })
-                .collect(),
-        ))
+        Ok(rings_to_multi_polygon(rings, fill_rule))
     }
 
     fn flattened_closed_rings(&self) -> Result<Vec<Vec<lyon::math::Point>>, CanvasPathOpError> {
@@ -1011,10 +1112,17 @@ impl PathBuilder {
     }
 }
 
+impl Default for PathBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct CanvasPath {
     pub style: CanvasItemStyle,
     pub path: PathBuilder,
+    pub fill_rule: CanvasFillRule,
     pub fill: Option<Value<CanvasBrush>>,
     pub stroke: Option<CanvasStroke>,
     pub shadow: Option<Value<CanvasShadow>>,
@@ -1025,10 +1133,16 @@ impl CanvasPath {
         Self {
             style: CanvasItemStyle::new(id),
             path,
+            fill_rule: CanvasFillRule::NonZero,
             fill: None,
             stroke: None,
             shadow: None,
         }
+    }
+
+    pub fn fill_rule(mut self, fill_rule: CanvasFillRule) -> Self {
+        self.fill_rule = fill_rule;
+        self
     }
 
     pub fn fill(mut self, brush: impl Into<Value<CanvasBrush>>) -> Self {
@@ -1213,6 +1327,45 @@ struct CanvasImage {
     pub source: MediaSource,
     pub fit: ContentFit,
     pub corner_radius: Dp,
+    pub source_rect: Option<Rect>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanvasImageOptions {
+    pub fit: ContentFit,
+    pub corner_radius: Dp,
+    pub source_rect: Option<Rect>,
+}
+
+impl Default for CanvasImageOptions {
+    fn default() -> Self {
+        Self {
+            fit: ContentFit::Contain,
+            corner_radius: Dp::ZERO,
+            source_rect: None,
+        }
+    }
+}
+
+impl CanvasImageOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn fit(mut self, fit: ContentFit) -> Self {
+        self.fit = fit;
+        self
+    }
+
+    pub fn corner_radius(mut self, corner_radius: impl Into<Dp>) -> Self {
+        self.corner_radius = corner_radius.into();
+        self
+    }
+
+    pub fn source_rect(mut self, source_rect: Rect) -> Self {
+        self.source_rect = Some(source_rect);
+        self
+    }
 }
 
 impl CanvasImage {
@@ -1223,7 +1376,15 @@ impl CanvasImage {
             source: source.into(),
             fit: ContentFit::Contain,
             corner_radius: Dp::ZERO,
+            source_rect: None,
         }
+    }
+
+    pub fn options(mut self, options: CanvasImageOptions) -> Self {
+        self.fit = options.fit;
+        self.corner_radius = options.corner_radius;
+        self.source_rect = options.source_rect;
+        self
     }
 
     pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
@@ -1259,7 +1420,10 @@ impl CanvasImage {
 
 #[derive(Clone, Debug, PartialEq)]
 enum CanvasClipShape {
-    Path(PathBuilder),
+    Path {
+        path: PathBuilder,
+        fill_rule: CanvasFillRule,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1490,7 +1654,7 @@ fn transform_bounds(bounds: RectBounds, transform: CanvasTransform2D) -> RectBou
 
 fn clip_shape_bounds(shape: &CanvasClipShape) -> Option<RectBounds> {
     match shape {
-        CanvasClipShape::Path(path) => path.control_bounds().map(|bounds| {
+        CanvasClipShape::Path { path, .. } => path.control_bounds().map(|bounds| {
             RectBounds::from_min_max(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y)
         }),
     }
@@ -1504,7 +1668,7 @@ pub(crate) struct CanvasClipContext {
 
 fn clip_shape_clip_rect(shape: &CanvasClipShape, origin: Point) -> Option<Rect> {
     match shape {
-        CanvasClipShape::Path(path) => path.control_bounds().map(|bounds| {
+        CanvasClipShape::Path { path, .. } => path.control_bounds().map(|bounds| {
             Rect::new(
                 origin.x + bounds.min.x,
                 origin.y + bounds.min.y,
@@ -1538,7 +1702,7 @@ fn transform_path_builder(path: &PathBuilder, transform: CanvasTransform2D) -> P
         return path.clone();
     }
 
-    let mut builder = PathBuilder::new();
+    let mut builder = PathBuilder::new().fill_rule(path.fill_rule);
     for command in path.commands_internal() {
         builder = match *command {
             PathCommand::MoveTo(point_value) => {
@@ -1627,9 +1791,11 @@ fn tessellate_composite_item(
         CanvasItem::Clip(clip_item) => {
             let nested_output =
                 tessellate_items(&clip_item.items, origin, opacity, clip, media, units);
-            let CanvasClipShape::Path(path) = &clip_item.clip;
+            let CanvasClipShape::Path { path, fill_rule } = &clip_item.clip;
             let mask = tessellate_path(
-                &CanvasPath::new(clip_item.style.id, path.clone()).fill(Color::WHITE),
+                &CanvasPath::new(clip_item.style.id, path.clone())
+                    .fill_rule(*fill_rule)
+                    .fill(Color::WHITE),
                 origin,
                 1.0,
                 CanvasClipContext::default(),
@@ -1708,9 +1874,14 @@ fn tessellate_image(
 ) -> CanvasRenderOutput {
     let frame = offset_rect(image.frame, origin);
     let metadata = media.image_snapshot(&image.source, None);
-    let target_frame = resolve_media_rect(frame, metadata.intrinsic_size, image.fit);
+    let intrinsic_size = metadata.intrinsic_size;
+    let source_rect = normalized_source_rect(image.source_rect, intrinsic_size);
+    let source_size = source_rect
+        .map(|rect| intrinsic_size_from_rect(rect))
+        .unwrap_or(intrinsic_size);
+    let target_frame = resolve_media_rect(frame, source_size, image.fit);
     let snapshot = if let Some(raster_request) =
-        RasterRequest::from_frame(target_frame, units.scale_factor())
+        raster_request_for_image(metadata.intrinsic_size, source_rect, target_frame, units)
     {
         media.image_snapshot(&image.source, Some(raster_request))
     } else {
@@ -1725,6 +1896,7 @@ fn tessellate_image(
             texture,
             frame: target_frame,
             quad: None,
+            uv_rect: source_rect.and_then(|rect| source_rect_to_uv_rect(rect, intrinsic_size)),
             corner_radius: image.corner_radius.get(),
             opacity: opacity * image.style.opacity,
             clip_rect: clip.clip_rect,
@@ -1862,6 +2034,7 @@ pub(crate) fn canvas_scene_bounds(scene: &CanvasScene) -> Option<RectBounds> {
 struct CanvasRecorderState {
     transform: CanvasTransform2D,
     fill: Option<Value<CanvasBrush>>,
+    fill_rule: CanvasFillRule,
     stroke: Option<CanvasStroke>,
     shadow: Option<Value<CanvasShadow>>,
     opacity: f32,
@@ -1878,6 +2051,7 @@ impl Default for CanvasRecorderState {
         Self {
             transform: CanvasTransform2D::IDENTITY,
             fill: Some(Value::Static(CanvasBrush::Solid(Color::BLACK))),
+            fill_rule: CanvasFillRule::NonZero,
             stroke: Some(CanvasStroke::new(Dp::new(1.0), Color::BLACK)),
             shadow: None,
             opacity: 1.0,
@@ -1977,7 +2151,7 @@ impl CanvasRecorder {
     }
 
     pub fn begin_path(&mut self) -> &mut Self {
-        self.current_path = PathBuilder::new();
+        self.current_path = PathBuilder::new().fill_rule(self.current_state().fill_rule);
         self
     }
 
@@ -2108,8 +2282,13 @@ impl CanvasRecorder {
         Ok(self)
     }
 
+    pub fn draw_path(&mut self, path: impl Into<PathBuilder>) -> &mut Self {
+        self.draw_path_internal(path.into())
+    }
+
     pub fn fill(&mut self) -> &mut Self {
-        let mut item = CanvasPath::new(self.take_item_id(), self.transformed_current_path());
+        let mut item = CanvasPath::new(self.take_item_id(), self.transformed_current_path())
+            .fill_rule(self.current_state().fill_rule);
         if let Some(fill) = self.current_state().fill.clone() {
             item = item.fill(fill);
         }
@@ -2118,7 +2297,8 @@ impl CanvasRecorder {
     }
 
     pub fn stroke(&mut self) -> &mut Self {
-        let mut item = CanvasPath::new(self.take_item_id(), self.transformed_current_path());
+        let mut item = CanvasPath::new(self.take_item_id(), self.transformed_current_path())
+            .fill_rule(self.current_state().fill_rule);
         if let Some(stroke) = self.current_state().stroke.clone() {
             item = item.stroke(stroke);
         }
@@ -2127,7 +2307,8 @@ impl CanvasRecorder {
     }
 
     pub fn fill_and_stroke(&mut self) -> &mut Self {
-        let mut item = CanvasPath::new(self.take_item_id(), self.transformed_current_path());
+        let mut item = CanvasPath::new(self.take_item_id(), self.transformed_current_path())
+            .fill_rule(self.current_state().fill_rule);
         if let Some(fill) = self.current_state().fill.clone() {
             item = item.fill(fill);
         }
@@ -2150,7 +2331,7 @@ impl CanvasRecorder {
         }
 
         let new_clip = match self.current_frame().clip_path.clone() {
-            Some(existing) => existing.intersection(&path).unwrap_or(path.clone()),
+            Some(existing) => existing.intersect(&path).unwrap_or(path.clone()),
             None => path,
         };
         self.current_frame().clip_path = Some(new_clip);
@@ -2188,6 +2369,12 @@ impl CanvasRecorder {
 
     pub fn set_fill(&mut self, fill: impl Into<Value<CanvasBrush>>) -> &mut Self {
         self.current_state_mut().fill = Some(fill.into());
+        self
+    }
+
+    pub fn set_fill_rule(&mut self, fill_rule: CanvasFillRule) -> &mut Self {
+        self.current_state_mut().fill_rule = fill_rule;
+        self.current_path = self.current_path.clone().fill_rule(fill_rule);
         self
     }
 
@@ -2354,7 +2541,8 @@ impl CanvasRecorder {
         let mut item = CanvasPath::new(
             self.take_item_id(),
             transform_path_builder(&path, self.current_state().transform),
-        );
+        )
+        .fill_rule(path.fill_rule);
         if let Some(fill) = self.current_state().fill.clone() {
             item = item.fill(fill);
         }
@@ -2366,7 +2554,9 @@ impl CanvasRecorder {
     }
 
     pub fn draw_svg_path(&mut self, data: &str) -> Result<&mut Self, CanvasSvgPathError> {
-        let path = PathBuilder::new().svg_path(data)?;
+        let path = PathBuilder::new()
+            .fill_rule(self.current_state().fill_rule)
+            .svg_path(data)?;
         Ok(self.draw_path_internal(path))
     }
 
@@ -2387,7 +2577,17 @@ impl CanvasRecorder {
     }
 
     pub fn draw_image(&mut self, frame: Rect, source: impl Into<MediaSource>) -> &mut Self {
+        self.draw_image_with_options(frame, source, CanvasImageOptions::default())
+    }
+
+    pub fn draw_image_with_options(
+        &mut self,
+        frame: Rect,
+        source: impl Into<MediaSource>,
+        options: CanvasImageOptions,
+    ) -> &mut Self {
         let mut image = CanvasImage::new(self.take_item_id(), frame, source)
+            .options(options)
             .transform(self.current_state().transform)
             .opacity(self.current_state().opacity)
             .blend_mode(self.current_state().blend_mode)
@@ -2404,7 +2604,8 @@ impl CanvasRecorder {
         let mut item = CanvasPath::new(
             self.take_item_id(),
             transform_path_builder(&path, self.current_state().transform),
-        );
+        )
+        .fill_rule(self.current_state().fill_rule);
         if let Some(fill) = self.current_state().fill.clone() {
             item = item.fill(fill);
         }
@@ -2416,7 +2617,8 @@ impl CanvasRecorder {
         let mut item = CanvasPath::new(
             self.take_item_id(),
             transform_path_builder(&path, self.current_state().transform),
-        );
+        )
+        .fill_rule(self.current_state().fill_rule);
         if let Some(stroke) = self.current_state().stroke.clone() {
             item = item.stroke(stroke);
         }
@@ -2486,9 +2688,13 @@ impl CanvasRecorder {
         if frame.clip_path.is_some() && !frame.clipped_items.is_empty() {
             let clip_id = self.take_generated_id();
             let clip_path = frame.clip_path.take().expect("clip path should exist");
+            let fill_rule = clip_path.fill_rule;
             frame.items.push(CanvasItem::Clip(CanvasClip::new(
                 clip_id,
-                CanvasClipShape::Path(clip_path),
+                CanvasClipShape::Path {
+                    path: clip_path,
+                    fill_rule,
+                },
                 frame.clipped_items,
             )));
         }
@@ -2502,9 +2708,13 @@ impl CanvasRecorder {
             .clone()
             .expect("clip path should exist before finalizing a clip group");
         let clipped_items = std::mem::take(&mut frame.clipped_items);
+        let fill_rule = clip_path.fill_rule;
         CanvasItem::Clip(CanvasClip::new(
             self.take_generated_id(),
-            CanvasClipShape::Path(clip_path),
+            CanvasClipShape::Path {
+                path: clip_path,
+                fill_rule,
+            },
             clipped_items,
         ))
     }
@@ -2977,6 +3187,7 @@ fn tessellate_path(
     if let Some(fill_brush) = fill.as_ref() {
         if let Some(mesh) = tessellate_fill(
             &lyon_path,
+            path.fill_rule,
             fill_brush,
             effective_opacity,
             origin,
@@ -3185,6 +3396,7 @@ fn background_brush_from_canvas(brush: &CanvasBrush, opacity: f32) -> Option<Bac
 
 fn tessellate_fill(
     path: &Path,
+    fill_rule: CanvasFillRule,
     brush: &CanvasBrush,
     opacity: f32,
     origin: Point,
@@ -3194,7 +3406,7 @@ fn tessellate_fill(
     let mut geometry = VertexBuffers::<[f32; 2], u32>::new();
     let mut tessellator = FillTessellator::new();
     let mut options = FillOptions::default();
-    options.fill_rule = lyon::path::FillRule::NonZero;
+    options.fill_rule = fill_rule.to_lyon();
     tessellator
         .tessellate_path(
             path,
@@ -3504,6 +3716,7 @@ fn shadow_texture_for_path(
                 lyon_path,
                 fill.is_some(),
                 stroke,
+                path.fill_rule,
                 shadow,
                 opacity,
                 min_x,
@@ -3517,6 +3730,7 @@ fn shadow_texture_for_path(
         texture,
         frame,
         quad: None,
+        uv_rect: None,
         corner_radius: 0.0,
         opacity: 1.0,
         clip_rect: clip.clip_rect,
@@ -3528,6 +3742,7 @@ fn rasterize_canvas_shadow(
     path: &Path,
     has_fill: bool,
     stroke: Option<&CanvasStroke>,
+    fill_rule: CanvasFillRule,
     shadow: CanvasShadow,
     opacity: f32,
     min_x: f32,
@@ -3553,7 +3768,7 @@ fn rasterize_canvas_shadow(
         pixmap.as_mut().fill_path(
             &tiny_path,
             &paint,
-            tiny_skia::FillRule::EvenOdd,
+            fill_rule.to_tiny_skia(),
             tiny_skia::Transform::identity(),
             None,
         );
@@ -3673,6 +3888,7 @@ fn canvas_shadow_cache_key(
     scale_factor: f32,
 ) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.fill_rule.hash(&mut hasher);
     for command in path.path.commands_internal() {
         match *command {
             PathCommand::MoveTo(point_value) => {
@@ -3817,6 +4033,108 @@ fn svg_point(abs: bool, current: (f32, f32), x: f32, y: f32) -> (f32, f32) {
     }
 }
 
+fn append_svg_arc_segments(
+    mut builder: PathBuilder,
+    from: (f32, f32),
+    to: (f32, f32),
+    radius_x: f32,
+    radius_y: f32,
+    x_axis_rotation_degrees: f32,
+    large_arc: bool,
+    sweep: bool,
+) -> PathBuilder {
+    if (from.0 - to.0).abs() <= f32::EPSILON && (from.1 - to.1).abs() <= f32::EPSILON {
+        return builder;
+    }
+
+    if radius_x.abs() <= f32::EPSILON || radius_y.abs() <= f32::EPSILON {
+        return builder.line_to(to.0, to.1);
+    }
+
+    let arc = SvgArc {
+        from: point(from.0, from.1),
+        to: point(to.0, to.1),
+        radii: vector(radius_x.abs(), radius_y.abs()),
+        x_rotation: Angle::degrees(x_axis_rotation_degrees),
+        flags: ArcFlags { large_arc, sweep },
+    };
+
+    let mut segments = Vec::new();
+    arc.for_each_cubic_bezier(&mut |segment| {
+        segments.push((
+            segment.ctrl1.x,
+            segment.ctrl1.y,
+            segment.ctrl2.x,
+            segment.ctrl2.y,
+            segment.to.x,
+            segment.to.y,
+        ));
+    });
+    for (ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, to_x, to_y) in segments {
+        builder = builder.cubic_to(
+            ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, to_x, to_y,
+        );
+    }
+
+    builder
+}
+
+fn normalized_source_rect(source_rect: Option<Rect>, intrinsic_size: IntrinsicSize) -> Option<Rect> {
+    let mut rect = source_rect?;
+    if intrinsic_size.width <= 0.0 || intrinsic_size.height <= 0.0 {
+        return None;
+    }
+
+    let min_x = rect.x.get().clamp(0.0, intrinsic_size.width);
+    let min_y = rect.y.get().clamp(0.0, intrinsic_size.height);
+    let max_x = (rect.x + rect.width).get().clamp(min_x, intrinsic_size.width);
+    let max_y = (rect.y + rect.height).get().clamp(min_y, intrinsic_size.height);
+    rect.x = Dp::new(min_x);
+    rect.y = Dp::new(min_y);
+    rect.width = Dp::new((max_x - min_x).max(0.0));
+    rect.height = Dp::new((max_y - min_y).max(0.0));
+    (!rect.is_empty()).then_some(rect)
+}
+
+fn intrinsic_size_from_rect(rect: Rect) -> IntrinsicSize {
+    IntrinsicSize {
+        width: rect.width.get().max(0.0),
+        height: rect.height.get().max(0.0),
+    }
+}
+
+fn source_rect_to_uv_rect(source_rect: Rect, intrinsic_size: IntrinsicSize) -> Option<Rect> {
+    if intrinsic_size.width <= 0.0 || intrinsic_size.height <= 0.0 {
+        return None;
+    }
+
+    Some(Rect::new(
+        source_rect.x.get() / intrinsic_size.width,
+        source_rect.y.get() / intrinsic_size.height,
+        source_rect.width.get() / intrinsic_size.width,
+        source_rect.height.get() / intrinsic_size.height,
+    ))
+}
+
+fn raster_request_for_image(
+    intrinsic_size: IntrinsicSize,
+    source_rect: Option<Rect>,
+    target_frame: Rect,
+    units: UnitContext,
+) -> Option<RasterRequest> {
+    let mut request = RasterRequest::from_frame(target_frame, units.scale_factor())?;
+    if let Some(source_rect) = source_rect {
+        if source_rect.width > 0.0 && source_rect.height > 0.0 {
+            let width_ratio = intrinsic_size.width / source_rect.width.get().max(f32::EPSILON);
+            let height_ratio = intrinsic_size.height / source_rect.height.get().max(f32::EPSILON);
+            let width = (request.width() as f32 * width_ratio).ceil().max(1.0) as u32;
+            let height = (request.height() as f32 * height_ratio).ceil().max(1.0) as u32;
+            request = RasterRequest::new_clamped(width, height);
+        }
+    }
+    Some(request)
+}
+
 fn points_approx_equal(lhs: lyon::math::Point, rhs: lyon::math::Point) -> bool {
     (lhs.x - rhs.x).abs() <= 1e-3 && (lhs.y - rhs.y).abs() <= 1e-3
 }
@@ -3842,6 +4160,151 @@ fn dedupe_ring_points(points: &mut Vec<lyon::math::Point>) {
         deduped.push(deduped[0]);
     }
     *points = deduped;
+}
+
+#[derive(Clone, Copy)]
+enum CanvasPathBooleanOperation {
+    Union,
+    Intersection,
+    Difference,
+    Xor,
+}
+
+struct PolygonizedRing {
+    line: LineString<f64>,
+    polygon: Polygon<f64>,
+    abs_area: f64,
+    orientation: i32,
+    parent: Option<usize>,
+    winding: i32,
+    inside_filled: bool,
+    active_shell: Option<usize>,
+}
+
+fn rings_to_multi_polygon(
+    rings: Vec<Vec<lyon::math::Point>>,
+    fill_rule: CanvasFillRule,
+) -> MultiPolygon<f64> {
+    let mut ring_infos = rings
+        .into_iter()
+        .filter_map(|ring| {
+            let coords = ring
+                .into_iter()
+                .map(|point_value| Coord {
+                    x: point_value.x as f64,
+                    y: point_value.y as f64,
+                })
+                .collect::<Vec<_>>();
+            if coords.len() < 4 {
+                return None;
+            }
+
+            let line = LineString::from(coords);
+            let area = signed_ring_area(&line);
+            Some(PolygonizedRing {
+                polygon: Polygon::new(line.clone(), Vec::new()),
+                line,
+                abs_area: area.abs(),
+                orientation: if area >= 0.0 { 1 } else { -1 },
+                parent: None,
+                winding: 0,
+                inside_filled: false,
+                active_shell: None,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for index in 0..ring_infos.len() {
+        let point_value = ring_infos[index]
+            .line
+            .0
+            .first()
+            .copied()
+            .unwrap_or(Coord { x: 0.0, y: 0.0 });
+        let test_point = geo::Point::new(point_value.x, point_value.y);
+        ring_infos[index].parent = (0..ring_infos.len())
+            .filter(|candidate| *candidate != index && ring_infos[*candidate].abs_area > ring_infos[index].abs_area)
+            .filter(|candidate| ring_infos[*candidate].polygon.contains(&test_point))
+            .min_by(|left, right| {
+                ring_infos[*left]
+                    .abs_area
+                    .total_cmp(&ring_infos[*right].abs_area)
+            });
+    }
+
+    let mut order = (0..ring_infos.len()).collect::<Vec<_>>();
+    order.sort_by(|left, right| {
+        ring_infos[*right]
+            .abs_area
+            .total_cmp(&ring_infos[*left].abs_area)
+    });
+
+    let mut polygons = Vec::<(LineString<f64>, Vec<LineString<f64>>)>::new();
+    for index in order {
+        let parent = ring_infos[index].parent;
+        let parent_filled = parent.map(|value| ring_infos[value].inside_filled).unwrap_or(false);
+        let parent_winding = parent.map(|value| ring_infos[value].winding).unwrap_or(0);
+        let active_shell_outside = parent.and_then(|value| ring_infos[value].active_shell);
+        let current_winding = match fill_rule {
+            CanvasFillRule::NonZero => parent_winding + ring_infos[index].orientation,
+            CanvasFillRule::EvenOdd => parent_winding + 1,
+        };
+        let current_filled = match fill_rule {
+            CanvasFillRule::NonZero => current_winding != 0,
+            CanvasFillRule::EvenOdd => !parent_filled,
+        };
+
+        ring_infos[index].winding = current_winding;
+        ring_infos[index].inside_filled = current_filled;
+        ring_infos[index].active_shell = match (parent_filled, current_filled) {
+            (false, true) => {
+                polygons.push((oriented_ring(&ring_infos[index].line, true), Vec::new()));
+                Some(polygons.len() - 1)
+            }
+            (true, false) => {
+                if let Some(shell_index) = active_shell_outside {
+                    polygons[shell_index]
+                        .1
+                        .push(oriented_ring(&ring_infos[index].line, false));
+                }
+                None
+            }
+            (_, true) => active_shell_outside,
+            (_, false) => None,
+        };
+    }
+
+    MultiPolygon(
+        polygons
+            .into_iter()
+            .map(|(shell, holes)| Polygon::new(shell, holes))
+            .collect(),
+    )
+}
+
+fn signed_ring_area(ring: &LineString<f64>) -> f64 {
+    let coords = &ring.0;
+    if coords.len() < 3 {
+        return 0.0;
+    }
+
+    let mut area = 0.0;
+    for window in coords.windows(2) {
+        area += window[0].x * window[1].y - window[1].x * window[0].y;
+    }
+    area * 0.5
+}
+
+fn oriented_ring(ring: &LineString<f64>, counter_clockwise: bool) -> LineString<f64> {
+    let area = signed_ring_area(ring);
+    let is_counter_clockwise = area >= 0.0;
+    if is_counter_clockwise == counter_clockwise {
+        return ring.clone();
+    }
+
+    let mut coords = ring.0.clone();
+    coords.reverse();
+    LineString::from(coords)
 }
 
 fn append_ring(mut builder: PathBuilder, ring: &LineString<f64>) -> PathBuilder {
@@ -3892,13 +4355,14 @@ impl StrokeVertexConstructor<[f32; 2]> for StrokeVertexCtor {
 #[cfg(test)]
 mod tests {
     use super::{
-        canvas_scene_bounds, tessellate_axis_aligned_rounded_rect, tessellate_canvas_scene_items,
-        CanvasBrush, CanvasGradientStop, CanvasRecorder, CanvasScene, CanvasShadow, CanvasStroke,
-        CanvasTextOverflow,
+        canvas_scene_bounds, normalized_source_rect, source_rect_to_uv_rect,
+        tessellate_axis_aligned_rounded_rect, tessellate_canvas_scene_items, CanvasBrush,
+        CanvasFillRule, CanvasGradientStop, CanvasImageOptions, CanvasRecorder, CanvasScene,
+        CanvasShadow, CanvasStroke, CanvasTextOverflow, PathBuilder, PathCommand,
     };
     use crate::foundation::binding::InvalidationSignal;
     use crate::foundation::color::Color;
-    use crate::media::MediaManager;
+    use crate::media::{ContentFit, IntrinsicSize, MediaManager, MediaSource};
     use crate::ui::layout::Value;
     use crate::ui::unit::dp;
     use crate::ui::unit::UnitContext;
@@ -4109,5 +4573,81 @@ mod tests {
             .expect("text primitive should exist");
 
         assert_eq!(text.overflow, CanvasTextOverflow::Ellipsis);
+    }
+
+    #[test]
+    fn svg_elliptical_arc_generates_curve_segments() {
+        let path = PathBuilder::new()
+            .svg_path("M 10 10 A 30 20 0 0 1 60 40")
+            .expect("svg path should parse");
+
+        assert!(path
+            .commands_internal()
+            .iter()
+            .any(|command| matches!(command, PathCommand::CubicTo { .. })));
+    }
+
+    #[test]
+    fn even_odd_boolean_conversion_preserves_hole() {
+        let path = PathBuilder::new()
+            .rect(0.0, 0.0, 100.0, 100.0)
+            .rect(25.0, 25.0, 50.0, 50.0)
+            .fill_rule(CanvasFillRule::EvenOdd);
+
+        let polygon = path
+            .to_multi_polygon_with_rule(CanvasFillRule::EvenOdd)
+            .expect("closed rings should polygonize");
+
+        assert_eq!(polygon.0.len(), 1);
+        assert_eq!(polygon.0[0].interiors().len(), 1);
+    }
+
+    #[test]
+    fn path_boolean_difference_returns_hollow_shape() {
+        let outer = PathBuilder::new().rect(0.0, 0.0, 100.0, 100.0);
+        let inner = PathBuilder::new().rect(25.0, 25.0, 50.0, 50.0);
+        let diff = outer.difference(&inner).expect("difference should succeed");
+        let polygon = diff
+            .to_multi_polygon_with_rule(CanvasFillRule::NonZero)
+            .expect("difference result should polygonize");
+
+        assert_eq!(polygon.0.len(), 1);
+        assert_eq!(polygon.0[0].interiors().len(), 1);
+    }
+
+    #[test]
+    fn draw_image_with_options_records_configuration() {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas.draw_image_with_options(
+                Rect::new(0.0, 0.0, 100.0, 60.0),
+                MediaSource::bytes(vec![137, 80, 78, 71]),
+                CanvasImageOptions::new()
+                    .fit(ContentFit::Cover)
+                    .corner_radius(dp(12.0))
+                    .source_rect(Rect::new(10.0, 20.0, 30.0, 40.0)),
+            );
+        });
+
+        let super::CanvasItem::Image(image) = &scene.items()[0] else {
+            panic!("expected image item");
+        };
+        assert_eq!(image.fit, ContentFit::Cover);
+        assert_eq!(image.corner_radius, dp(12.0));
+        assert_eq!(image.source_rect, Some(Rect::new(10.0, 20.0, 30.0, 40.0)));
+    }
+
+    #[test]
+    fn source_rect_is_normalized_and_converted_to_uv() {
+        let intrinsic = IntrinsicSize {
+            width: 200.0,
+            height: 100.0,
+        };
+        let normalized =
+            normalized_source_rect(Some(Rect::new(-20.0, 10.0, 80.0, 120.0)), intrinsic)
+                .expect("source rect should normalize");
+        let uv = source_rect_to_uv_rect(normalized, intrinsic).expect("uv rect should resolve");
+
+        assert_eq!(normalized, Rect::new(0.0, 10.0, 60.0, 90.0));
+        assert_eq!(uv, Rect::new(0.0, 0.1, 0.3, 0.9));
     }
 }

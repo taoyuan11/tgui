@@ -806,14 +806,26 @@ fn canvas_border_radius_clips_item_meshes() {
         false,
     );
 
-    assert!(!rendered.primitives.meshes.is_empty());
-    assert!(rendered.primitives.meshes.iter().all(|mesh| {
-        mesh.clip_mask
-            == Some(ClipMask {
-                rect: Rect::new(0.0, 0.0, 120.0, 80.0),
-                corner_radius: 18.0,
-            })
-    }));
+    let expected_clip = Some(ClipMask {
+        rect: Rect::new(0.0, 0.0, 120.0, 80.0),
+        corner_radius: 18.0,
+    });
+    let mesh_matches = rendered
+        .primitives
+        .meshes
+        .iter()
+        .all(|mesh| mesh.clip_mask == expected_clip);
+    let shape_matches = rendered
+        .primitives
+        .shapes
+        .iter()
+        .all(|shape| shape.clip_mask == expected_clip);
+
+    assert!(
+        !rendered.primitives.meshes.is_empty() || !rendered.primitives.shapes.is_empty()
+    );
+    assert!(mesh_matches);
+    assert!(shape_matches);
 }
 
 #[test]

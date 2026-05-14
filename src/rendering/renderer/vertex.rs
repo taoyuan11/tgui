@@ -541,6 +541,7 @@ impl TextVertex {
         rect: Rect,
         _width: f32,
         _height: f32,
+        uv_rect: Option<Rect>,
         corner_radius: f32,
         clip_mask: Option<ClipMask>,
         _physical_width: f32,
@@ -556,6 +557,7 @@ impl TextVertex {
         Self::transformed(
             rect,
             quad,
+            uv_rect,
             corner_radius,
             clip_mask,
             _physical_width,
@@ -568,6 +570,7 @@ impl TextVertex {
     pub(super) fn transformed(
         rect: Rect,
         quad: [crate::ui::widget::Point; 4],
+        uv_rect: Option<Rect>,
         corner_radius: f32,
         clip_mask: Option<ClipMask>,
         physical_width: f32,
@@ -587,6 +590,11 @@ impl TextVertex {
         let local_tr = [rect_size[0], 0.0];
         let local_br = [rect_size[0], rect_size[1]];
         let local_bl = [0.0, rect_size[1]];
+        let uv_rect = uv_rect.unwrap_or(Rect::new(0.0, 0.0, 1.0, 1.0));
+        let uv_tl = [uv_rect.x.get(), uv_rect.y.get()];
+        let uv_tr = [uv_rect.right().get(), uv_rect.y.get()];
+        let uv_br = [uv_rect.right().get(), uv_rect.bottom().get()];
+        let uv_bl = [uv_rect.x.get(), uv_rect.bottom().get()];
 
         let build = |point: crate::ui::widget::Point, uv: [f32; 2], local_position: [f32; 2]| {
             let point_x = point.x.get() * scale_factor;
@@ -611,12 +619,12 @@ impl TextVertex {
         };
 
         [
-            build(quad[0], [0.0, 0.0], local_tl),
-            build(quad[1], [1.0, 0.0], local_tr),
-            build(quad[2], [1.0, 1.0], local_br),
-            build(quad[0], [0.0, 0.0], local_tl),
-            build(quad[2], [1.0, 1.0], local_br),
-            build(quad[3], [0.0, 1.0], local_bl),
+            build(quad[0], uv_tl, local_tl),
+            build(quad[1], uv_tr, local_tr),
+            build(quad[2], uv_br, local_br),
+            build(quad[0], uv_tl, local_tl),
+            build(quad[2], uv_br, local_br),
+            build(quad[3], uv_bl, local_bl),
         ]
     }
 }

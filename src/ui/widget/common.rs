@@ -866,6 +866,7 @@ pub struct TexturePrimitive {
     pub texture: Arc<TextureFrame>,
     pub frame: Rect,
     pub quad: Option<[Point; 4]>,
+    pub uv_rect: Option<Rect>,
     pub corner_radius: f32,
     pub opacity: f32,
     pub clip_rect: Option<Rect>,

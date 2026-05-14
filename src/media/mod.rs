@@ -272,6 +272,10 @@ pub(crate) struct RasterRequest {
 }
 
 impl RasterRequest {
+    pub(crate) fn new_clamped(width: u32, height: u32) -> Self {
+        clamp_raster_request(width, height)
+    }
+
     pub(crate) fn from_frame(frame: Rect, scale_factor: f32) -> Option<Self> {
         if frame.width <= 0.0 || frame.height <= 0.0 {
             return None;
@@ -281,6 +285,14 @@ impl RasterRequest {
         let width = (frame.width.get() * scale_factor).ceil().max(1.0) as u32;
         let height = (frame.height.get() * scale_factor).ceil().max(1.0) as u32;
         Some(clamp_raster_request(width, height))
+    }
+
+    pub(crate) fn width(self) -> u32 {
+        self.width
+    }
+
+    pub(crate) fn height(self) -> u32 {
+        self.height
     }
 }
 
