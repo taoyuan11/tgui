@@ -24,8 +24,9 @@ use crate::video::VideoSurface;
 
 use super::background::{BackgroundBrush, BackgroundGradientStop, BackgroundImage};
 use super::canvas::{
-    CanvasBlendMode, CanvasDragEvent, CanvasItem, CanvasItemId, CanvasMouseEvent,
-    CanvasTextHorizontalAlign, CanvasTextVerticalAlign, CanvasTextWrap, CanvasWheelEvent,
+    CanvasBlendMode, CanvasDragEvent, CanvasItemId, CanvasMouseEvent, CanvasScene,
+    CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextVerticalAlign, CanvasTextWrap,
+    CanvasWheelEvent,
 };
 use super::image::Image;
 #[cfg(feature = "video")]
@@ -853,6 +854,7 @@ pub struct TextPrimitive {
     pub line_height: f32,
     pub letter_spacing: f32,
     pub wrap: CanvasTextWrap,
+    pub overflow: CanvasTextOverflow,
     pub horizontal_align: CanvasTextHorizontalAlign,
     pub vertical_align: CanvasTextVerticalAlign,
     pub clip_rect: Option<Rect>,
@@ -1283,7 +1285,7 @@ pub(crate) enum WidgetKind<VM> {
         image: Image,
     },
     Canvas {
-        items: Value<Vec<CanvasItem>>,
+        scene: Value<CanvasScene>,
         item_interactions: CanvasItemInteractionHandlers<VM>,
         style: Option<StyleResolver<CanvasStyle>>,
     },
@@ -1388,11 +1390,11 @@ impl<VM> Clone for WidgetKind<VM> {
                 image: image.clone(),
             },
             Self::Canvas {
-                items,
+                scene,
                 item_interactions,
                 style,
             } => Self::Canvas {
-                items: items.clone(),
+                scene: scene.clone(),
                 item_interactions: item_interactions.clone(),
                 style: style.clone(),
             },
@@ -1514,7 +1516,7 @@ pub(crate) enum MeasureContext {
     },
     Canvas {
         id: WidgetId,
-        items: Value<Vec<CanvasItem>>,
+        scene: Value<CanvasScene>,
     },
     #[cfg(feature = "video")]
     VideoSurface {

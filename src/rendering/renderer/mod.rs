@@ -107,6 +107,7 @@ struct TextCacheKey {
     letter_spacing_bits: u32,
     font_weight: u16,
     wrap_mode: u8,
+    overflow_mode: u8,
     horizontal_align: u8,
     vertical_align: u8,
 }

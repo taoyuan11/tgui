@@ -639,7 +639,7 @@ fn measure_node_tracked(
                 snapshot.intrinsic_size,
             )
         }
-        Some(MeasureContext::Canvas { items, .. }) => canvas_bounds(&items.resolve())
+        Some(MeasureContext::Canvas { scene, .. }) => canvas_scene_bounds(&scene.resolve())
             .map(|bounds| (bounds.width(), bounds.height()))
             .unwrap_or((0.0, 0.0)),
         #[cfg(feature = "video")]

@@ -35,6 +35,7 @@ impl Renderer {
             letter_spacing_bits: letter_spacing.to_bits(),
             font_weight: text.font_weight.to_raw(),
             wrap_mode: wrap_mode_key(text),
+            overflow_mode: overflow_mode_key(text),
             horizontal_align: horizontal_align_key(text),
             vertical_align: vertical_align_key(text),
         })
@@ -93,7 +94,8 @@ impl Renderer {
         buffer.set_size(Some(width as f32), Some(height as f32));
         buffer.set_wrap(text_wrap(text));
         let attrs = attrs_for_text(text, font_size, letter_spacing);
-        buffer.set_text(&text.content, &attrs, Shaping::Advanced, None);
+        let content = overflow_content(text, &mut buffer, &mut self.text_system.font_system, &attrs);
+        buffer.set_text(&content, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.text_system.font_system, false);
 
         let (offset_x, offset_y) = text_offsets(text, &buffer, width as f32, height as f32);
@@ -263,6 +265,13 @@ fn wrap_mode_key(text: &TextPrimitive) -> u8 {
     }
 }
 
+fn overflow_mode_key(text: &TextPrimitive) -> u8 {
+    match text.overflow {
+        crate::ui::widget::CanvasTextOverflow::Clip => 0,
+        crate::ui::widget::CanvasTextOverflow::Ellipsis => 1,
+    }
+}
+
 fn horizontal_align_key(text: &TextPrimitive) -> u8 {
     match text.horizontal_align {
         crate::ui::widget::CanvasTextHorizontalAlign::Start => 0,
@@ -277,6 +286,48 @@ fn vertical_align_key(text: &TextPrimitive) -> u8 {
         crate::ui::widget::CanvasTextVerticalAlign::Center => 1,
         crate::ui::widget::CanvasTextVerticalAlign::End => 2,
     }
+}
+
+fn overflow_content(
+    text: &TextPrimitive,
+    buffer: &mut Buffer,
+    font_system: &mut cosmic_text::FontSystem,
+    attrs: &Attrs<'_>,
+) -> String {
+    if !matches!(text.overflow, crate::ui::widget::CanvasTextOverflow::Ellipsis) {
+        return text.content.clone();
+    }
+
+    buffer.set_text(&text.content, attrs, Shaping::Advanced, None);
+    buffer.shape_until_scroll(font_system, false);
+
+    if !text_requires_ellipsis(text, buffer) {
+        return text.content.clone();
+    }
+
+    let mut candidate = text.content.clone();
+    while !candidate.is_empty() {
+        candidate.pop();
+        let ellipsized = format!("{}…", candidate.trim_end_matches(char::is_whitespace));
+        buffer.set_text(&ellipsized, attrs, Shaping::Advanced, None);
+        buffer.shape_until_scroll(font_system, false);
+        if !text_requires_ellipsis(text, buffer) {
+            return ellipsized;
+        }
+    }
+
+    "…".to_string()
+}
+
+fn text_requires_ellipsis(text: &TextPrimitive, buffer: &Buffer) -> bool {
+    let width = buffer.size().0.unwrap_or_default();
+    let height = buffer.size().1.unwrap_or_default();
+    let max_lines = ((height / text.line_height.max(1.0)).floor() as usize).max(1);
+    let runs = buffer.layout_runs().collect::<Vec<_>>();
+    if runs.len() > max_lines {
+        return true;
+    }
+    runs.iter().any(|run| run.line_w > width + 0.5)
 }
 
 fn text_weight(weight: FontWeight) -> Weight {

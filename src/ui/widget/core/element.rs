@@ -47,11 +47,11 @@ impl<VM> Element<VM> {
             WidgetKind::Text { text } => WidgetKind::Text { text },
             WidgetKind::Image { image } => WidgetKind::Image { image },
             WidgetKind::Canvas {
-                items,
+                scene,
                 item_interactions,
                 style,
             } => WidgetKind::Canvas {
-                items,
+                scene,
                 item_interactions: item_interactions.scope(selector.clone()),
                 style,
             },
@@ -297,14 +297,14 @@ impl<VM> Element<VM> {
                 ResolvedWidgetKind::Image { image }
             }
             WidgetKind::Canvas {
-                items,
+                scene,
                 item_interactions,
                 style,
             } => {
                 let resolved_style = resolved_canvas_style(style.as_ref(), theme);
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 ResolvedWidgetKind::Canvas {
-                    items: items.clone(),
+                    scene: scene.clone(),
                     item_interactions: item_interactions.clone(),
                 }
             }

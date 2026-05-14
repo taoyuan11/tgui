@@ -45,7 +45,7 @@
 
 - 布局：`Stack`、`Grid`、`Flex`
 - 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Image`
-- 画布：`Canvas`、`CanvasPath`、`PathBuilder`、渐变/阴影/布尔运算
+- 画布：`Canvas`、`CanvasRecorder`、渐变/阴影/混合/裁剪/文字与图片绘制
 - 视频：`VideoSurface`、`VideoController`、`VideoSource`（需启用 `video` feature）
 
 ### 样式与基础类型
@@ -312,21 +312,34 @@ Button::new("发送通知").on_click(Command::new_with_context(|_, ctx| {
 
 ### 画布
 
-`Canvas` 适合做自定义图形与交互式绘制，目前公开能力包括：
+`Canvas` 适合做自定义图形与交互式绘制，公开入口现在统一为记录式 API。常用能力包括：
 
-- `PathBuilder`
-- `CanvasPath`
-- `CanvasText`
-- `CanvasImage`
-- `CanvasGroup` / `CanvasClip` / `CanvasLayer` / `CanvasMask`
+- `CanvasRecorder`
 - `CanvasStroke`
-- `CanvasFillRule`
 - `CanvasTransform2D`
 - `CanvasLinearGradient`
 - `CanvasRadialGradient`
 - `CanvasShadow`
-- `CanvasBooleanOp`
+- `CanvasBlendMode`
+- `CanvasTextStyle` / `CanvasParagraphStyle`
 - `CanvasMouseEvent` / `CanvasWheelEvent` / `CanvasDragEvent`
+
+示例：
+
+```rust
+Canvas::new(CanvasRecorder::build(|canvas| {
+    canvas
+        .set_fill(Color::hexa(0x0EA5E9FF))
+        .fill_round_rect(24.0, 24.0, 180.0, 96.0, dp(24.0));
+    canvas
+        .set_text_style(CanvasTextStyle {
+            color: Color::WHITE,
+            font_size: sp(18.0),
+            ..Default::default()
+        })
+        .draw_text(Rect::new(36.0, 44.0, 140.0, 32.0), "Recorded items");
+}))
+```
 
 ### 通用背景
 

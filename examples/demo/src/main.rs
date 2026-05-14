@@ -227,18 +227,9 @@ fn demo_image_path() -> PathBuf {
 }
 
 fn demo_canvas() -> Element<App> {
-    let items = vec![
-        CanvasItem::Path(
-            CanvasPath::new(
-                1_u64,
-                PathBuilder::new()
-                    .move_to(24.0, 20.0)
-                    .line_to(208.0, 20.0)
-                    .line_to(208.0, 128.0)
-                    .line_to(24.0, 128.0)
-                    .close(),
-            )
-            .fill(CanvasLinearGradient::new(
+    Canvas::new(CanvasRecorder::build(|canvas| {
+        canvas
+            .set_fill(CanvasLinearGradient::new(
                 Point::new(24.0, 20.0),
                 Point::new(208.0, 128.0),
                 vec![
@@ -246,24 +237,26 @@ fn demo_canvas() -> Element<App> {
                     CanvasGradientStop::new(1.0, Color::hexa(0x1D4ED8FF)),
                 ],
             ))
-            .stroke(CanvasStroke::new(dp(3.0), Color::hexa(0xE0F2FEFF))),
-        ),
-        CanvasItem::Path(
-            CanvasPath::new(
-                2_u64,
-                PathBuilder::new()
-                    .move_to(44.0, 146.0)
-                    .quad_to(116.0, 92.0, 188.0, 146.0)
-                    .line_to(188.0, 188.0)
-                    .line_to(44.0, 188.0)
-                    .close(),
-            )
-            .fill(Color::hexa(0x22C55EFF))
-            .stroke(CanvasStroke::new(dp(3.0), Color::hexa(0x14532DFF))),
-        ),
-    ];
+            .set_stroke(CanvasStroke::new(dp(3.0), Color::hexa(0xE0F2FEFF)))
+            .begin_path()
+            .move_to(24.0, 20.0)
+            .line_to(208.0, 20.0)
+            .line_to(208.0, 128.0)
+            .line_to(24.0, 128.0)
+            .close_path()
+            .fill_and_stroke();
 
-    Canvas::new(items)
+        canvas
+            .set_fill(Color::hexa(0x22C55EFF))
+            .set_stroke(CanvasStroke::new(dp(3.0), Color::hexa(0x14532DFF)))
+            .begin_path()
+            .move_to(44.0, 146.0)
+            .quad_to(116.0, 92.0, 188.0, 146.0)
+            .line_to(188.0, 188.0)
+            .line_to(44.0, 188.0)
+            .close_path()
+            .fill_and_stroke();
+    }))
         .size(dp(232.0), dp(212.0))
         .style(canvas_style)
         .into()

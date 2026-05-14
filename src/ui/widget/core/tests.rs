@@ -19,10 +19,9 @@ use crate::ui::widget::{
     BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient, BackgroundRadialGradient,
 };
 use crate::ui::widget::{
-    ButtonStyle, Canvas, CanvasClip, CanvasClipShape, CanvasItem, CanvasLayer,
-    CanvasParagraphStyle, CanvasPath, CanvasStroke, CanvasStyle, CanvasText,
-    CanvasTextHorizontalAlign, CanvasTextVerticalAlign, CanvasTextWrap, CanvasTransform2D,
-    Checkbox, ClipMask, ContainerStyle, Element, Image, Input, InputStyle, PathBuilder, Point,
+    ButtonStyle, Canvas, CanvasParagraphStyle, CanvasRecorder, CanvasStroke, CanvasStyle,
+    CanvasTextHorizontalAlign, CanvasTextVerticalAlign, CanvasTextWrap,
+    Checkbox, ClipMask, ContainerStyle, Element, Image, Input, InputStyle, Point,
     Radio, RadioGroup, RadioOption, ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack,
     Switch, SwitchStyle, Text, TextEditState, TextWidgetStyle, Textarea, TextareaStyle,
     WidgetStateMap, WidgetTree,
@@ -316,18 +315,18 @@ fn canvas_without_explicit_size_uses_item_bounds_for_layout() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();
-    let canvas: Element<()> = Canvas::new(vec![CanvasItem::Path(
-        CanvasPath::new(
-            1_u64,
-            PathBuilder::new()
-                .move_to(0.0, 0.0)
-                .line_to(80.0, 0.0)
-                .line_to(80.0, 30.0)
-                .line_to(0.0, 30.0)
-                .close(),
-        )
-        .fill(Color::WHITE),
-    )])
+    let canvas: Element<()> = Canvas::new(CanvasRecorder::build(|canvas| {
+        canvas
+            .next_item_id(1_u64)
+            .set_fill(Color::WHITE)
+            .begin_path()
+            .move_to(0.0, 0.0)
+            .line_to(80.0, 0.0)
+            .line_to(80.0, 30.0)
+            .line_to(0.0, 30.0)
+            .close_path()
+            .fill();
+    }))
     .cursor(crate::ui::widget::CursorStyle::Pointer)
     .into();
     let canvas_id = canvas.id;
@@ -738,19 +737,19 @@ fn canvas_renders_fill_and_stroke_meshes() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> = WidgetTree::new(
-        Canvas::new(vec![CanvasItem::Path(
-            CanvasPath::new(
-                1_u64,
-                PathBuilder::new()
-                    .move_to(10.0, 10.0)
-                    .line_to(100.0, 10.0)
-                    .line_to(100.0, 60.0)
-                    .line_to(10.0, 60.0)
-                    .close(),
-            )
-            .fill(Color::hexa(0x22C55EFF))
-            .stroke(CanvasStroke::new(dp(4.0), Color::WHITE)),
-        )])
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(1_u64)
+                .set_fill(Color::hexa(0x22C55EFF))
+                .set_stroke(CanvasStroke::new(dp(4.0), Color::WHITE))
+                .begin_path()
+                .move_to(10.0, 10.0)
+                .line_to(100.0, 10.0)
+                .line_to(100.0, 60.0)
+                .line_to(10.0, 60.0)
+                .close_path()
+                .fill_and_stroke();
+        }))
         .size(dp(120.0), dp(80.0)),
     );
 
@@ -781,10 +780,12 @@ fn canvas_border_radius_clips_item_meshes() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> = WidgetTree::new(
-        Canvas::new(vec![CanvasItem::Path(
-            CanvasPath::new(1_u64, PathBuilder::new().rect(0.0, 0.0, 120.0, 80.0))
-                .fill(Color::hexa(0x22C55EFF)),
-        )])
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(1_u64)
+                .set_fill(Color::hexa(0x22C55EFF))
+                .fill_rect(0.0, 0.0, 120.0, 80.0);
+        }))
         .size(dp(120.0), dp(80.0))
         .style(|mode| canvas_style(mode, dp(18.0))),
     );
@@ -822,32 +823,15 @@ fn canvas_hit_testing_prefers_topmost_item() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> = WidgetTree::new(
-        Canvas::new(vec![
-            CanvasItem::Path(
-                CanvasPath::new(
-                    1_u64,
-                    PathBuilder::new()
-                        .move_to(0.0, 0.0)
-                        .line_to(80.0, 0.0)
-                        .line_to(80.0, 80.0)
-                        .line_to(0.0, 80.0)
-                        .close(),
-                )
-                .fill(Color::hexa(0x1D4ED8FF)),
-            ),
-            CanvasItem::Path(
-                CanvasPath::new(
-                    2_u64,
-                    PathBuilder::new()
-                        .move_to(20.0, 20.0)
-                        .line_to(90.0, 20.0)
-                        .line_to(90.0, 90.0)
-                        .line_to(20.0, 90.0)
-                        .close(),
-                )
-                .fill(Color::hexa(0xF97316FF)),
-            ),
-        ])
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(1_u64)
+                .set_fill(Color::hexa(0x1D4ED8FF))
+                .fill_rect(0.0, 0.0, 80.0, 80.0)
+                .next_item_id(2_u64)
+                .set_fill(Color::hexa(0xF97316FF))
+                .fill_rect(20.0, 20.0, 70.0, 70.0);
+        }))
         .size(dp(120.0), dp(120.0))
         .on_item_click(ValueCommand::new(|_: &mut (), _| {})),
     );
@@ -878,19 +862,17 @@ fn canvas_text_paragraph_style_is_carried_into_text_primitive() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> = WidgetTree::new(
-        Canvas::new(vec![CanvasItem::Text(
-            CanvasText::new(
-                1_u64,
-                Rect::new(0.0, 0.0, 160.0, 80.0),
-                "wrapped canvas text",
-            )
-            .paragraph_style(CanvasParagraphStyle {
-                wrap: CanvasTextWrap::Glyph,
-                horizontal_align: CanvasTextHorizontalAlign::Center,
-                vertical_align: CanvasTextVerticalAlign::End,
-                ..Default::default()
-            }),
-        )])
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(1_u64)
+                .set_paragraph_style(CanvasParagraphStyle {
+                    wrap: CanvasTextWrap::Glyph,
+                    horizontal_align: CanvasTextHorizontalAlign::Center,
+                    vertical_align: CanvasTextVerticalAlign::End,
+                    ..Default::default()
+                })
+                .draw_text(Rect::new(0.0, 0.0, 160.0, 80.0), "wrapped canvas text");
+        }))
         .size(dp(160.0), dp(80.0)),
     );
 
@@ -927,10 +909,14 @@ fn canvas_rotated_text_generates_transformed_quad() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> = WidgetTree::new(
-        Canvas::new(vec![CanvasItem::Text(
-            CanvasText::new(1_u64, Rect::new(20.0, 20.0, 80.0, 40.0), "rotate me")
-                .transform(CanvasTransform2D::rotate(0.5)),
-        )])
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .save()
+                .rotate(0.5)
+                .next_item_id(1_u64)
+                .draw_text(Rect::new(20.0, 20.0, 80.0, 40.0), "rotate me")
+                .restore();
+        }))
         .size(dp(120.0), dp(120.0)),
     );
 
@@ -965,26 +951,25 @@ fn canvas_clip_and_layer_emit_composite_commands() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> = WidgetTree::new(
-        Canvas::new(vec![
-            CanvasItem::Clip(CanvasClip::new(
-                1_u64,
-                CanvasClipShape::RoundedRect {
-                    rect: Rect::new(0.0, 0.0, 80.0, 80.0),
-                    radius: dp(12.0),
-                },
-                vec![CanvasItem::Path(
-                    CanvasPath::new(2_u64, PathBuilder::new().rect(0.0, 0.0, 80.0, 80.0))
-                        .fill(Color::WHITE),
-                )],
-            )),
-            CanvasItem::Layer(CanvasLayer::new(
-                3_u64,
-                vec![CanvasItem::Path(
-                    CanvasPath::new(4_u64, PathBuilder::new().rect(20.0, 20.0, 40.0, 40.0))
-                        .fill(Color::hexa(0x1D4ED8FF)),
-                )],
-            )),
-        ])
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .save()
+                .begin_path()
+                .rounded_rect(0.0, 0.0, 80.0, 80.0, 12.0)
+                .clip()
+                .next_item_id(1_u64)
+                .set_fill(Color::WHITE)
+                .fill_rect(0.0, 0.0, 80.0, 80.0)
+                .restore()
+                .save()
+                .begin_path()
+                .circle(40.0, 40.0, 24.0)
+                .clip()
+                .next_item_id(2_u64)
+                .set_fill(Color::hexa(0x1D4ED8FF))
+                .fill_rect(20.0, 20.0, 40.0, 40.0)
+                .restore();
+        }))
         .size(dp(120.0), dp(120.0)),
     );
 
@@ -1026,13 +1011,17 @@ fn canvas_composite_bounds_include_canvas_origin() {
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> = WidgetTree::new(
         Stack::new().padding(Insets::all(dp(24.0))).child(
-            Canvas::new(vec![CanvasItem::Layer(CanvasLayer::new(
-                1_u64,
-                vec![CanvasItem::Path(
-                    CanvasPath::new(2_u64, PathBuilder::new().rect(10.0, 12.0, 40.0, 30.0))
-                        .fill(Color::hexa(0x1D4ED8FF)),
-                )],
-            ))])
+            Canvas::new(CanvasRecorder::build(|canvas| {
+                canvas
+                    .save()
+                    .begin_path()
+                    .rounded_rect(10.0, 12.0, 40.0, 30.0, 8.0)
+                    .clip()
+                    .next_item_id(1_u64)
+                    .set_fill(Color::hexa(0x1D4ED8FF))
+                    .fill_rect(10.0, 12.0, 40.0, 30.0)
+                    .restore();
+            }))
             .size(dp(120.0), dp(120.0)),
         ),
     );
@@ -1079,13 +1068,17 @@ fn canvas_outside_clip_does_not_emit_composite_commands() {
             .overflow_y(Overflow::Scroll)
             .child(
                 Stack::new().height(dp(520.0)).child(
-                    Canvas::new(vec![CanvasItem::Layer(CanvasLayer::new(
-                        1_u64,
-                        vec![CanvasItem::Path(
-                            CanvasPath::new(2_u64, PathBuilder::new().rect(0.0, 0.0, 80.0, 80.0))
-                                .fill(Color::hexa(0x1D4ED8FF)),
-                        )],
-                    ))])
+                    Canvas::new(CanvasRecorder::build(|canvas| {
+                        canvas
+                            .save()
+                            .begin_path()
+                            .rounded_rect(0.0, 0.0, 80.0, 80.0, 12.0)
+                            .clip()
+                            .next_item_id(1_u64)
+                            .set_fill(Color::hexa(0x1D4ED8FF))
+                            .fill_rect(0.0, 0.0, 80.0, 80.0)
+                            .restore();
+                    }))
                     .size(dp(120.0), dp(120.0))
                     .top(dp(340.0)),
                 ),
@@ -1327,18 +1320,18 @@ fn canvas_items_signal_records_layout_and_scene_dependencies() {
     let expanded = ctx.state(false);
     let canvas: Element<()> = Canvas::new(expanded.signal().map(|expanded| {
         let width = if expanded { 96.0 } else { 48.0 };
-        vec![CanvasItem::Path(
-            CanvasPath::new(
-                1_u64,
-                PathBuilder::new()
-                    .move_to(0.0, 0.0)
-                    .line_to(width, 0.0)
-                    .line_to(width, 24.0)
-                    .line_to(0.0, 24.0)
-                    .close(),
-            )
-            .fill(Color::WHITE),
-        )]
+        CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(1_u64)
+                .set_fill(Color::WHITE)
+                .begin_path()
+                .move_to(0.0, 0.0)
+                .line_to(width, 0.0)
+                .line_to(width, 24.0)
+                .line_to(0.0, 24.0)
+                .close_path()
+                .fill();
+        })
     }))
     .into();
     let widget_id = canvas.id;
@@ -1929,10 +1922,12 @@ fn scroll_container_with_grid_of_canvas_cards_produces_vertical_scroll_range() {
     let card: Element<()> = Stack::new()
         .height(dp(180.0))
         .child(
-            Canvas::new(vec![CanvasItem::Path(
-                CanvasPath::new(1_u64, PathBuilder::new().rect(0.0, 0.0, 80.0, 80.0))
-                    .fill(Color::hexa(0x1D4ED8FF)),
-            )])
+            Canvas::new(CanvasRecorder::build(|canvas| {
+                canvas
+                    .next_item_id(1_u64)
+                    .set_fill(Color::hexa(0x1D4ED8FF))
+                    .fill_rect(0.0, 0.0, 80.0, 80.0);
+            }))
             .size(dp(120.0), dp(120.0)),
         )
         .into();
@@ -3795,7 +3790,7 @@ fn scoped_value_commands_cover_switch_canvas_and_media() {
     }
     assert!(vm.child.checked);
 
-    let canvas: Element<ScopeChildVm> = Canvas::new(Vec::<CanvasItem>::new())
+    let canvas: Element<ScopeChildVm> = Canvas::new(CanvasRecorder::build(|_| {}))
         .on_item_click(ValueCommand::new(|vm: &mut ScopeChildVm, _event| {
             vm.canvas_hits += 1;
         }))
@@ -4825,7 +4820,7 @@ fn neutral_components_remain_transparent_by_default() {
         Stack::new()
             .size(dp(120.0), dp(80.0))
             .child(Image::from_bytes(ONE_BY_ONE_GIF).size(dp(40.0), dp(40.0)))
-            .child(Canvas::new(Vec::<CanvasItem>::new()).size(dp(40.0), dp(20.0))),
+            .child(Canvas::new(CanvasRecorder::build(|_| {})).size(dp(40.0), dp(20.0))),
     );
 
     let rendered = tree.render_output(

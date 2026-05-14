@@ -63,63 +63,17 @@ fn gallery_scroll_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn panel_path(id: u64, rect: Rect, fill: Color) -> CanvasItem {
-    CanvasItem::Path(
-        CanvasPath::new(
-            id,
-            PathBuilder::new().rounded_rect(
-                rect.x.get(),
-                rect.y.get(),
-                rect.width.get(),
-                rect.height.get(),
-                dp(18.0),
-            ),
-        )
-        .fill(fill),
-    )
+fn card_scene_background(canvas: &mut CanvasRecorder, color: Color) {
+    canvas
+        .set_fill(color)
+        .fill_round_rect(0.0, 0.0, CARD_CANVAS_WIDTH, CARD_CANVAS_HEIGHT, dp(20.0));
 }
 
-fn path_gallery_items() -> Vec<CanvasItem> {
-    let cutout = PathBuilder::new()
-        .rect(0.0, 0.0, 96.0, 96.0)
-        .difference(&PathBuilder::new().circle(48.0, 48.0, 22.0))
-        .expect("boolean difference should work");
-
-    vec![
-        panel_path(
-            100,
-            Rect::new(0.0, 0.0, CARD_CANVAS_WIDTH, CARD_CANVAS_HEIGHT),
-            Color::hexa(0x0F172AFF),
-        ),
-        CanvasItem::Path(
-            CanvasPath::new(
-                101_u64,
-                PathBuilder::new()
-                    .move_to(54.0, 160.0)
-                    .line_to(132.0, 68.0)
-                    .line_to(210.0, 140.0)
-                    .line_to(286.0, 56.0)
-                    .line_to(366.0, 150.0)
-                    .line_to(452.0, 88.0),
-            )
-            .stroke(
-                CanvasStroke::new(dp(18.0), Color::hexa(0xE0F2FEFF))
-                    .line_cap(CanvasStrokeCap::Round)
-                    .line_join(CanvasStrokeJoin::Round)
-                    .dash([dp(24.0), dp(14.0)]),
-            )
-            .shadow(CanvasShadow::new(
-                Color::hexa(0x0EA5E966),
-                Point::new(0.0, 10.0),
-                dp(18.0),
-            )),
-        ),
-        CanvasItem::Path(
-            CanvasPath::new(
-                102_u64,
-                PathBuilder::new().rounded_rect(44.0, 34.0, 168.0, 84.0, dp(26.0)),
-            )
-            .fill(CanvasLinearGradient::new(
+fn paths_scene() -> CanvasScene {
+    CanvasRecorder::build(|canvas| {
+        card_scene_background(canvas, Color::hexa(0x0F172AFF));
+        canvas
+            .set_fill(CanvasLinearGradient::new(
                 Point::new(44.0, 34.0),
                 Point::new(212.0, 118.0),
                 vec![
@@ -127,519 +81,331 @@ fn path_gallery_items() -> Vec<CanvasItem> {
                     CanvasGradientStop::new(1.0, Color::hexa(0x1D4ED8FF)),
                 ],
             ))
-            .opacity(0.92),
-        ),
-        CanvasItem::Path(
-            CanvasPath::new(103_u64, cutout)
-                .fill(Color::hexa(0xF8FAFCFF))
-                .transform(CanvasTransform2D::translate(dp(340.0), dp(74.0)))
-                .opacity(0.85),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(
-                104_u64,
-                Rect::new(48.0, 188.0, 420.0, 24.0),
-                "Gradients, dash strokes, shadows, and boolean paths",
+            .fill_round_rect(44.0, 34.0, 168.0, 84.0, dp(26.0));
+
+        canvas
+            .set_stroke(
+                CanvasStroke::new(dp(18.0), Color::hexa(0xE0F2FEFF))
+                    .line_cap(CanvasStrokeCap::Round)
+                    .line_join(CanvasStrokeJoin::Round)
+                    .dash([dp(24.0), dp(14.0)]),
             )
-            .text_style(CanvasTextStyle {
+            .set_shadow(CanvasShadow::new(
+                Color::hexa(0x0EA5E966),
+                Point::new(0.0, 10.0),
+                dp(18.0),
+            ))
+            .begin_path()
+            .move_to(54.0, 160.0)
+            .line_to(132.0, 68.0)
+            .line_to(210.0, 140.0)
+            .line_to(286.0, 56.0)
+            .line_to(366.0, 150.0)
+            .line_to(452.0, 88.0)
+            .stroke();
+
+        canvas
+            .clear_shadow()
+            .set_fill(Color::hexa(0xF8FAFCFF))
+            .fill_circle(388.0, 122.0, 54.0)
+            .set_text_style(CanvasTextStyle {
                 color: Color::hexa(0xBFDBFEFF),
                 font_size: sp(15.0),
                 ..Default::default()
-            }),
-        ),
-    ]
+            })
+            .draw_text(
+                Rect::new(48.0, 188.0, 420.0, 24.0),
+                "Recorder paths cover gradients, dash strokes, shadows, and freeform drawing.",
+            );
+    })
 }
 
-fn paragraph_gallery_items() -> Vec<CanvasItem> {
-    vec![
-        panel_path(
-            200_u64,
-            Rect::new(0.0, 0.0, CARD_CANVAS_WIDTH, CARD_CANVAS_HEIGHT),
-            Color::hexa(0xF8FAFCFF),
-        ),
-        panel_path(
-            201_u64,
-            Rect::new(24.0, 24.0, 226.0, 88.0),
-            Color::hexa(0xE2E8F0FF),
-        ),
-        panel_path(
-            202_u64,
-            Rect::new(270.0, 24.0, 226.0, 88.0),
-            Color::hexa(0xDBEAFEFF),
-        ),
-        panel_path(
-            203_u64,
-            Rect::new(24.0, 132.0, 472.0, 84.0),
-            Color::hexa(0xE0F2FEFF),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(
-                204_u64,
-                Rect::new(36.0, 36.0, 202.0, 64.0),
-                "Word wrap keeps phrases together and centers the block.",
-            )
-            .text_style(CanvasTextStyle {
+fn text_scene() -> CanvasScene {
+    CanvasRecorder::build(|canvas| {
+        card_scene_background(canvas, Color::hexa(0xF8FAFCFF));
+        canvas
+            .set_fill(Color::hexa(0xE2E8F0FF))
+            .fill_round_rect(24.0, 24.0, 226.0, 88.0, dp(20.0))
+            .set_fill(Color::hexa(0xDBEAFEFF))
+            .fill_round_rect(270.0, 24.0, 226.0, 88.0, dp(20.0))
+            .set_fill(Color::hexa(0xE0F2FEFF))
+            .fill_round_rect(24.0, 132.0, 472.0, 84.0, dp(20.0));
+
+        canvas
+            .set_text_style(CanvasTextStyle {
                 color: Color::hexa(0x0F172AFF),
                 font_size: sp(15.0),
                 line_height: Some(sp(20.0)),
                 ..Default::default()
             })
-            .paragraph_style(CanvasParagraphStyle {
+            .set_paragraph_style(CanvasParagraphStyle {
                 wrap: CanvasTextWrap::Word,
                 horizontal_align: CanvasTextHorizontalAlign::Center,
                 vertical_align: CanvasTextVerticalAlign::Center,
                 ..Default::default()
-            }),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(
-                205_u64,
-                Rect::new(282.0, 36.0, 202.0, 64.0),
-                "Glyph wrap can break superlongtokenswithoutspaces cleanly.",
-            )
-            .text_style(CanvasTextStyle {
-                color: Color::hexa(0x0F172AFF),
-                font_size: sp(15.0),
-                line_height: Some(sp(20.0)),
-                ..Default::default()
             })
-            .paragraph_style(CanvasParagraphStyle {
+            .draw_text(
+                Rect::new(36.0, 36.0, 202.0, 64.0),
+                "Word wrap keeps phrases together and centers the block.",
+            )
+            .set_paragraph_style(CanvasParagraphStyle {
                 wrap: CanvasTextWrap::Glyph,
                 horizontal_align: CanvasTextHorizontalAlign::Start,
                 vertical_align: CanvasTextVerticalAlign::Center,
                 ..Default::default()
-            }),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(
-                206_u64,
-                Rect::new(40.0, 144.0, 440.0, 60.0),
-                "No wrap stays on one line, clips overflow, and can align to the trailing edge.",
-            )
-            .text_style(CanvasTextStyle {
-                color: Color::hexa(0x0F172AFF),
-                font_size: sp(16.0),
-                line_height: Some(sp(21.0)),
-                ..Default::default()
             })
-            .paragraph_style(CanvasParagraphStyle {
-                wrap: CanvasTextWrap::None,
-                horizontal_align: CanvasTextHorizontalAlign::End,
+            .draw_text(
+                Rect::new(282.0, 36.0, 202.0, 64.0),
+                "Glyph wrap can break superlongtokenswithoutspaces cleanly.",
+            )
+            .set_paragraph_style(CanvasParagraphStyle {
+                wrap: CanvasTextWrap::Word,
+                overflow: CanvasTextOverflow::Ellipsis,
                 vertical_align: CanvasTextVerticalAlign::Center,
                 ..Default::default()
-            }),
-        ),
-    ]
+            })
+            .draw_text(
+                Rect::new(40.0, 144.0, 440.0, 54.0),
+                "Ellipsis now works in the public recorder API and keeps long labels readable inside fixed cards.",
+            );
+    })
 }
 
-fn transform_gallery_items() -> Vec<CanvasItem> {
+fn transform_scene() -> CanvasScene {
     let logo = MediaSource::bytes(include_bytes!("../../../docs/images/tgui_logo.png"));
-    let shear = CanvasTransform2D::from_matrix([1.0, 0.0, 0.35, 1.0, 0.0, 0.0]);
+    CanvasRecorder::build(|canvas| {
+        card_scene_background(canvas, Color::hexa(0x111827FF));
+        canvas
+            .set_fill(Color::hexa(0x111827FF))
+            .set_stroke(CanvasStroke::new(dp(2.0), Color::hexa(0x334155FF)))
+            .fill_round_rect(48.0, 40.0, 150.0, 150.0, dp(28.0))
+            .stroke_round_rect(48.0, 40.0, 150.0, 150.0, dp(28.0));
 
-    vec![
-        panel_path(300_u64, Rect::new(0.0, 0.0, CARD_CANVAS_WIDTH, CARD_CANVAS_HEIGHT), Color::hexa(0x111827FF)),
-        CanvasItem::Path(
-            CanvasPath::new(
-                301_u64,
-                PathBuilder::new().rounded_rect(48.0, 40.0, 150.0, 150.0, dp(28.0)),
-            )
-            .stroke(CanvasStroke::new(dp(2.0), Color::hexa(0x334155FF))),
-        ),
-        CanvasItem::Image(
-            CanvasImage::new(302_u64, Rect::new(66.0, 58.0, 114.0, 114.0), logo)
-                .fit(ContentFit::Contain)
-                .corner_radius(dp(18.0))
-                .transform(
-                    CanvasTransform2D::rotate(-0.24)
-                        .then(CanvasTransform2D::translate(dp(-18.0), dp(32.0))),
-                ),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(303_u64, Rect::new(250.0, 44.0, 200.0, 86.0), "Rotated image")
-                .text_style(CanvasTextStyle {
-                    color: Color::hexa(0xE2E8F0FF),
-                    font_size: sp(24.0),
-                    font_weight: FontWeight::Bold,
-                    ..Default::default()
-                })
-                .transform(
-                    shear.then(CanvasTransform2D::translate(dp(22.0), dp(-8.0))),
-                )
-                .opacity(0.94),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(
-                304_u64,
-                Rect::new(232.0, 120.0, 238.0, 74.0),
-                "Text now follows arbitrary affine transforms instead of snapping back to axis-aligned rectangles.",
-            )
-            .text_style(CanvasTextStyle {
-                color: Color::hexa(0xBFDBFEFF),
-                font_size: sp(15.0),
-                line_height: Some(sp(21.0)),
+        canvas
+            .save()
+            .translate(124.0, 115.0)
+            .rotate(-0.24)
+            .translate(-58.0, -57.0)
+            .draw_image(Rect::new(0.0, 0.0, 114.0, 114.0), logo)
+            .restore();
+
+        canvas
+            .set_text_style(CanvasTextStyle {
+                color: Color::hexa(0xE2E8F0FF),
+                font_size: sp(22.0),
+                font_weight: FontWeight::Bold,
                 ..Default::default()
             })
-            .paragraph_style(CanvasParagraphStyle {
+            .draw_text(Rect::new(250.0, 44.0, 200.0, 36.0), "Transforms")
+            .set_text_style(CanvasTextStyle {
+                color: Color::hexa(0xCBD5E1FF),
+                font_size: sp(15.0),
+                line_height: Some(sp(20.0)),
+                ..Default::default()
+            })
+            .draw_text(
+                Rect::new(250.0, 92.0, 214.0, 92.0),
+                "save/restore isolates transforms so rotated images and translated labels stay local to each drawing pass.",
+            );
+    })
+}
+
+fn clip_scene() -> CanvasScene {
+    CanvasRecorder::build(|canvas| {
+        card_scene_background(canvas, Color::hexa(0xF8FAFCFF));
+        canvas
+            .save()
+            .rect(24.0, 28.0, 220.0, 180.0)
+            .clip()
+            .set_fill(CanvasRadialGradient::new(
+                Point::new(120.0, 104.0),
+                dp(156.0),
+                vec![
+                    CanvasGradientStop::new(0.0, Color::hexa(0xFDE68AFF)),
+                    CanvasGradientStop::new(0.5, Color::hexa(0xFB7185FF)),
+                    CanvasGradientStop::new(1.0, Color::hexa(0x7C3AEDFF)),
+                ],
+            ))
+            .fill_ellipse(130.0, 118.0, 148.0, 106.0)
+            .set_text_style(CanvasTextStyle {
+                color: Color::WHITE,
+                font_size: sp(20.0),
+                font_weight: FontWeight::Bold,
+                ..Default::default()
+            })
+            .draw_text(Rect::new(54.0, 148.0, 160.0, 40.0), "Rect clip")
+            .restore();
+
+        canvas
+            .save()
+            .begin_path()
+            .move_to(388.0, 40.0)
+            .line_to(470.0, 74.0)
+            .line_to(454.0, 174.0)
+            .line_to(360.0, 196.0)
+            .line_to(306.0, 124.0)
+            .close_path()
+            .clip()
+            .set_fill(CanvasLinearGradient::new(
+                Point::new(276.0, 30.0),
+                Point::new(486.0, 206.0),
+                vec![
+                    CanvasGradientStop::new(0.0, Color::hexa(0x0EA5E9FF)),
+                    CanvasGradientStop::new(1.0, Color::hexa(0x1D4ED8FF)),
+                ],
+            ))
+            .fill_round_rect(276.0, 30.0, 210.0, 176.0, dp(28.0))
+            .set_fill(Color::hexa(0xF8FAFCFF))
+            .fill_circle(420.0, 116.0, 56.0)
+            .set_text_style(CanvasTextStyle {
+                color: Color::hexa(0x0F172AFF),
+                font_size: sp(18.0),
+                font_weight: FontWeight::Bold,
+                ..Default::default()
+            })
+            .draw_text(Rect::new(328.0, 150.0, 126.0, 32.0), "Path clip")
+            .restore();
+    })
+}
+
+fn blend_scene() -> CanvasScene {
+    CanvasRecorder::build(|canvas| {
+        card_scene_background(canvas, Color::hexa(0x020617FF));
+        canvas
+            .set_fill(Color::hexa(0x14B8A6FF))
+            .fill_circle(176.0, 112.0, 74.0)
+            .set_fill(Color::hexa(0xF43F5EFF))
+            .set_opacity(0.92)
+            .fill_circle(240.0, 112.0, 74.0)
+            .set_blend_mode(CanvasBlendMode::Screen)
+            .set_fill(Color::hexa(0x38BDF8FF))
+            .fill_circle(206.0, 88.0, 62.0)
+            .set_fill(Color::hexa(0xFDE047FF))
+            .fill_circle(252.0, 136.0, 62.0)
+            .set_blend_mode(CanvasBlendMode::Normal)
+            .set_opacity(1.0)
+            .save()
+            .translate(348.0, 106.0)
+            .rotate(-0.16)
+            .translate(-66.0, -56.0)
+            .set_fill(Color::hexa(0x111827FF))
+            .set_opacity(0.64)
+            .fill_round_rect(0.0, 0.0, 132.0, 112.0, dp(20.0))
+            .set_text_style(CanvasTextStyle {
+                color: Color::WHITE,
+                font_size: sp(22.0),
+                font_weight: FontWeight::Bold,
+                ..Default::default()
+            })
+            .set_paragraph_style(CanvasParagraphStyle {
                 wrap: CanvasTextWrap::Word,
+                horizontal_align: CanvasTextHorizontalAlign::Center,
+                vertical_align: CanvasTextVerticalAlign::Center,
                 ..Default::default()
-            }),
-        ),
-    ]
+            })
+            .draw_text(Rect::new(16.0, 24.0, 100.0, 48.0), "Blend + alpha")
+            .restore();
+    })
 }
 
-fn opacity_gallery_items() -> Vec<CanvasItem> {
-    let logo = MediaSource::bytes(include_bytes!("../../../docs/images/tgui_logo.png"));
-
-    vec![
-        panel_path(
-            400_u64,
-            Rect::new(0.0, 0.0, CARD_CANVAS_WIDTH, CARD_CANVAS_HEIGHT),
-            Color::hexa(0x0F172AFF),
-        ),
-        CanvasItem::Path(
-            CanvasPath::new(401_u64, PathBuilder::new().circle(128.0, 106.0, 74.0))
-                .fill(Color::hexa(0x22C55EFF))
-                .opacity(0.28),
-        ),
-        CanvasItem::Image(
-            CanvasImage::new(402_u64, Rect::new(186.0, 48.0, 148.0, 148.0), logo)
-                .fit(ContentFit::Contain)
-                .corner_radius(dp(18.0))
-                .opacity(0.58),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(403_u64, Rect::new(314.0, 74.0, 138.0, 82.0), "Text opacity")
-                .text_style(CanvasTextStyle {
-                    color: Color::hexa(0xF8FAFCFF),
-                    font_size: sp(28.0),
-                    font_weight: FontWeight::Bold,
-                    ..Default::default()
-                })
-                .transform(
-                    CanvasTransform2D::rotate(0.18)
-                        .then(CanvasTransform2D::translate(dp(44.0), dp(-30.0))),
-                )
-                .opacity(0.52),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(
-                404_u64,
-                Rect::new(42.0, 188.0, 430.0, 24.0),
-                "Path, image, and text opacity all blend with parent opacity now.",
-            )
-            .text_style(CanvasTextStyle {
-                color: Color::hexa(0xCBD5E1FF),
-                font_size: sp(15.0),
-                ..Default::default()
-            }),
-        ),
-    ]
-}
-
-fn clip_gallery_items() -> Vec<CanvasItem> {
-    let path_clip = PathBuilder::new()
-        .move_to(388.0, 40.0)
-        .line_to(470.0, 74.0)
-        .line_to(454.0, 174.0)
-        .line_to(360.0, 196.0)
-        .line_to(306.0, 124.0)
-        .close();
-
-    vec![
-        panel_path(
-            500_u64,
-            Rect::new(0.0, 0.0, CARD_CANVAS_WIDTH, CARD_CANVAS_HEIGHT),
-            Color::hexa(0xF8FAFCFF),
-        ),
-        CanvasItem::Clip(CanvasClip::new(
-            501_u64,
-            CanvasClipShape::RoundedRect {
-                rect: Rect::new(24.0, 28.0, 220.0, 180.0),
-                radius: dp(30.0),
-            },
-            vec![
-                CanvasItem::Path(
-                    CanvasPath::new(
-                        502_u64,
-                        PathBuilder::new().ellipse(130.0, 118.0, 148.0, 106.0),
-                    )
-                    .fill(CanvasRadialGradient::new(
-                        Point::new(120.0, 104.0),
-                        dp(156.0),
-                        vec![
-                            CanvasGradientStop::new(0.0, Color::hexa(0xFDE68AFF)),
-                            CanvasGradientStop::new(0.5, Color::hexa(0xFB7185FF)),
-                            CanvasGradientStop::new(1.0, Color::hexa(0x7C3AEDFF)),
-                        ],
-                    )),
-                ),
-                CanvasItem::Text(
-                    CanvasText::new(503_u64, Rect::new(54.0, 148.0, 160.0, 40.0), "Rounded clip")
-                        .text_style(CanvasTextStyle {
-                            color: Color::WHITE,
-                            font_size: sp(20.0),
-                            font_weight: FontWeight::Bold,
-                            ..Default::default()
-                        }),
-                ),
-            ],
-        )),
-        CanvasItem::Clip(CanvasClip::new(
-            504_u64,
-            CanvasClipShape::Path(path_clip),
-            vec![
-                CanvasItem::Path(
-                    CanvasPath::new(
-                        505_u64,
-                        PathBuilder::new().rounded_rect(276.0, 30.0, 210.0, 176.0, dp(28.0)),
-                    )
-                    .fill(CanvasLinearGradient::new(
-                        Point::new(276.0, 30.0),
-                        Point::new(486.0, 206.0),
-                        vec![
-                            CanvasGradientStop::new(0.0, Color::hexa(0x0EA5E9FF)),
-                            CanvasGradientStop::new(1.0, Color::hexa(0x1D4ED8FF)),
-                        ],
-                    )),
-                ),
-                CanvasItem::Path(
-                    CanvasPath::new(506_u64, PathBuilder::new().circle(420.0, 116.0, 56.0))
-                        .fill(Color::hexa(0xF8FAFCFF))
-                        .opacity(0.9),
-                ),
-                CanvasItem::Text(
-                    CanvasText::new(507_u64, Rect::new(328.0, 150.0, 126.0, 32.0), "Path clip")
-                        .text_style(CanvasTextStyle {
-                            color: Color::hexa(0x0F172AFF),
-                            font_size: sp(18.0),
-                            font_weight: FontWeight::Bold,
-                            ..Default::default()
-                        }),
-                ),
-            ],
-        )),
-    ]
-}
-
-fn mask_gallery_items() -> Vec<CanvasItem> {
-    vec![
-        panel_path(
-            600_u64,
-            Rect::new(0.0, 0.0, CARD_CANVAS_WIDTH, CARD_CANVAS_HEIGHT),
-            Color::hexa(0x0F172AFF),
-        ),
-        CanvasItem::Mask(CanvasMask::new(
-            601_u64,
-            vec![
-                CanvasItem::Text(
-                    CanvasText::new(602_u64, Rect::new(78.0, 70.0, 364.0, 88.0), "MASK")
-                        .text_style(CanvasTextStyle {
-                            color: Color::WHITE,
-                            font_size: sp(78.0),
-                            font_weight: FontWeight::Bold,
-                            ..Default::default()
-                        }),
-                ),
-                CanvasItem::Path(
-                    CanvasPath::new(603_u64, PathBuilder::new().circle(420.0, 86.0, 28.0))
-                        .fill(Color::WHITE),
-                ),
-            ],
-            vec![
-                CanvasItem::Path(
-                    CanvasPath::new(
-                        604_u64,
-                        PathBuilder::new().rounded_rect(52.0, 54.0, 416.0, 122.0, dp(28.0)),
-                    )
-                    .fill(CanvasLinearGradient::new(
-                        Point::new(52.0, 54.0),
-                        Point::new(468.0, 176.0),
-                        vec![
-                            CanvasGradientStop::new(0.0, Color::hexa(0x14B8A6FF)),
-                            CanvasGradientStop::new(0.5, Color::hexa(0x22D3EEFF)),
-                            CanvasGradientStop::new(1.0, Color::hexa(0x818CF8FF)),
-                        ],
-                    )),
-                ),
-                CanvasItem::Path(
-                    CanvasPath::new(
-                        605_u64,
-                        PathBuilder::new().ellipse(258.0, 114.0, 190.0, 64.0),
-                    )
-                    .fill(Color::hexa(0xFFFFFF44)),
-                ),
-            ],
-        )),
-        CanvasItem::Text(
-            CanvasText::new(
-                606_u64,
-                Rect::new(64.0, 188.0, 390.0, 24.0),
-                "Mask alpha comes from its own subtree, then gates the content subtree.",
-            )
-            .text_style(CanvasTextStyle {
-                color: Color::hexa(0xCBD5E1FF),
-                font_size: sp(15.0),
-                ..Default::default()
-            }),
-        ),
-    ]
-}
-
-fn layer_blend_gallery_items() -> Vec<CanvasItem> {
-    vec![
-        panel_path(
-            700_u64,
-            Rect::new(0.0, 0.0, CARD_CANVAS_WIDTH, CARD_CANVAS_HEIGHT),
-            Color::hexa(0x020617FF),
-        ),
-        CanvasItem::Path(
-            CanvasPath::new(701_u64, PathBuilder::new().circle(176.0, 112.0, 74.0))
-                .fill(Color::hexa(0x14B8A6FF)),
-        ),
-        CanvasItem::Path(
-            CanvasPath::new(702_u64, PathBuilder::new().circle(240.0, 112.0, 74.0))
-                .fill(Color::hexa(0xF43F5EFF))
-                .opacity(0.92),
-        ),
-        CanvasItem::Layer(
-            CanvasLayer::new(
-                703_u64,
+fn recorder_scene() -> CanvasScene {
+    CanvasRecorder::build(|canvas| {
+        card_scene_background(canvas, Color::hexa(0xF8FAFCFF));
+        canvas
+            .set_fill(CanvasLinearGradient::new(
+                Point::new(24.0, 28.0),
+                Point::new(220.0, 148.0),
                 vec![
-                    CanvasItem::Path(
-                        CanvasPath::new(704_u64, PathBuilder::new().circle(206.0, 88.0, 62.0))
-                            .fill(Color::hexa(0x38BDF8FF)),
-                    ),
-                    CanvasItem::Path(
-                        CanvasPath::new(705_u64, PathBuilder::new().circle(252.0, 136.0, 62.0))
-                            .fill(Color::hexa(0xFDE047FF)),
-                    ),
+                    CanvasGradientStop::new(0.0, Color::hexa(0x0EA5E9FF)),
+                    CanvasGradientStop::new(1.0, Color::hexa(0x1D4ED8FF)),
                 ],
-            )
-            .blend_mode(CanvasBlendMode::Screen)
-            .opacity(0.86),
-        ),
-        CanvasItem::Group(
-            CanvasGroup::new(
-                706_u64,
-                vec![
-                    panel_path(
-                        707_u64,
-                        Rect::new(330.0, 48.0, 132.0, 112.0),
-                        Color::hexa(0x111827FF),
-                    ),
-                    CanvasItem::Text(
-                        CanvasText::new(
-                            708_u64,
-                            Rect::new(346.0, 72.0, 100.0, 48.0),
-                            "Group opacity",
-                        )
-                        .text_style(CanvasTextStyle {
-                            color: Color::WHITE,
-                            font_size: sp(22.0),
-                            font_weight: FontWeight::Bold,
-                            ..Default::default()
-                        })
-                        .paragraph_style(CanvasParagraphStyle {
-                            horizontal_align: CanvasTextHorizontalAlign::Center,
-                            vertical_align: CanvasTextVerticalAlign::Center,
-                            wrap: CanvasTextWrap::Word,
-                            ..Default::default()
-                        }),
-                    ),
-                ],
-            )
-            .opacity(0.64)
-            .transform(
-                CanvasTransform2D::rotate(-0.16)
-                    .then(CanvasTransform2D::translate(dp(-10.0), dp(66.0))),
-            ),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(
-                709_u64,
-                Rect::new(42.0, 190.0, 432.0, 24.0),
-                "Layers isolate blend math; group opacity no longer leaks into child primitives.",
-            )
-            .text_style(CanvasTextStyle {
-                color: Color::hexa(0xBFDBFEFF),
-                font_size: sp(15.0),
+            ))
+            .fill_round_rect(24.0, 28.0, 180.0, 118.0, dp(26.0))
+            .save()
+            .translate(288.0, 34.0)
+            .rotate(-0.14)
+            .set_fill(Color::hexa(0x0F172AFF))
+            .fill_round_rect(0.0, 0.0, 168.0, 110.0, dp(24.0))
+            .set_text_style(CanvasTextStyle {
+                color: Color::hexa(0xE2E8F0FF),
+                font_size: sp(18.0),
+                line_height: Some(sp(24.0)),
                 ..Default::default()
-            }),
-        ),
-    ]
+            })
+            .draw_text(Rect::new(20.0, 18.0, 128.0, 70.0), "save/restore keeps transform state local")
+            .restore()
+            .save()
+            .rect(236.0, 32.0, 238.0, 86.0)
+            .clip()
+            .set_fill(Color::hexa(0xCBD5E1FF))
+            .fill_rect(246.0, 42.0, 92.0, 92.0)
+            .set_fill(Color::hexa(0x38BDF8AA))
+            .fill_circle(402.0, 82.0, 56.0)
+            .restore()
+            .next_item_id(950_u64)
+            .set_fill(Color::hexa(0x0F172AFF))
+            .fill_circle(92.0, 184.0, 28.0)
+            .set_stroke(
+                CanvasStroke::new(dp(10.0), Color::hexa(0xF97316FF))
+                    .line_cap(CanvasStrokeCap::Round)
+                    .line_join(CanvasStrokeJoin::Round),
+            )
+            .draw_line(148.0, 186.0, 244.0, 186.0)
+            .set_text_style(CanvasTextStyle {
+                color: Color::hexa(0x0F172AFF),
+                font_size: sp(16.0),
+                line_height: Some(sp(22.0)),
+                ..Default::default()
+            })
+            .set_paragraph_style(CanvasParagraphStyle {
+                wrap: CanvasTextWrap::Word,
+                overflow: CanvasTextOverflow::Ellipsis,
+                ..Default::default()
+            })
+            .draw_text(
+                Rect::new(270.0, 154.0, 210.0, 54.0),
+                "Recorder API emits scene data, preserves IDs, and ellipsizes long labels cleanly.",
+            );
+    })
 }
 
-fn interaction_gallery_items() -> Vec<CanvasItem> {
-    vec![
-        panel_path(800_u64, Rect::new(0.0, 0.0, CARD_CANVAS_WIDTH, CARD_CANVAS_HEIGHT), Color::hexa(0xF8FAFCFF)),
-        CanvasItem::Path(
-            CanvasPath::new(
-                801_u64,
-                PathBuilder::new().rounded_rect(42.0, 54.0, 128.0, 72.0, dp(18.0)),
-            )
-            .fill(Color::hexa(0x2563EBFF)),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(802_u64, Rect::new(58.0, 76.0, 96.0, 28.0), "Click me")
-                .text_style(CanvasTextStyle {
-                    color: Color::WHITE,
-                    font_size: sp(22.0),
-                    font_weight: FontWeight::Bold,
-                    ..Default::default()
-                })
-                .cursor(CursorStyle::Pointer),
-        ),
-        CanvasItem::Path(
-            CanvasPath::new(
-                803_u64,
-                PathBuilder::new().rounded_rect(212.0, 52.0, 108.0, 76.0, dp(18.0)),
-            )
-            .fill(Color::hexa(0x0F766EFF))
-            .cursor(CursorStyle::Grab),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(804_u64, Rect::new(226.0, 76.0, 80.0, 28.0), "Drag")
-                .text_style(CanvasTextStyle {
-                    color: Color::WHITE,
-                    font_size: sp(22.0),
-                    font_weight: FontWeight::Bold,
-                    ..Default::default()
-                })
-                .cursor(CursorStyle::Grab),
-        ),
-        CanvasItem::Path(
-            CanvasPath::new(805_u64, PathBuilder::new().circle(410.0, 92.0, 42.0))
-                .fill(Color::hexa(0xF59E0BFF))
-                .cursor(CursorStyle::Crosshair),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(806_u64, Rect::new(378.0, 82.0, 64.0, 20.0), "Wheel")
-                .text_style(CanvasTextStyle {
-                    color: Color::hexa(0x0F172AFF),
-                    font_size: sp(18.0),
-                    font_weight: FontWeight::Bold,
-                    ..Default::default()
-                })
-                .cursor(CursorStyle::Crosshair),
-        ),
-        CanvasItem::Text(
-            CanvasText::new(
-                807_u64,
-                Rect::new(40.0, 158.0, 436.0, 42.0),
-                "Hover, click, wheel, and drag any of the targets above. The live payload summary below the header updates from item-level canvas events.",
-            )
-            .text_style(CanvasTextStyle {
+fn interaction_scene() -> CanvasScene {
+    CanvasRecorder::build(|canvas| {
+        card_scene_background(canvas, Color::hexa(0xF8FAFCFF));
+        canvas
+            .next_item_id(801_u64)
+            .set_fill(Color::hexa(0x38BDF8FF))
+            .fill_round_rect(42.0, 54.0, 128.0, 72.0, dp(18.0))
+            .set_text_style(CanvasTextStyle {
+                color: Color::WHITE,
+                font_size: sp(18.0),
+                font_weight: FontWeight::Bold,
+                ..Default::default()
+            })
+            .draw_text(Rect::new(70.0, 76.0, 76.0, 28.0), "Click")
+            .next_item_id(803_u64)
+            .set_fill(Color::hexa(0x22C55EFF))
+            .fill_round_rect(212.0, 52.0, 108.0, 76.0, dp(18.0))
+            .draw_text(Rect::new(234.0, 76.0, 70.0, 28.0), "Drag")
+            .next_item_id(805_u64)
+            .set_fill(Color::hexa(0xF97316FF))
+            .fill_circle(410.0, 92.0, 42.0)
+            .draw_text(Rect::new(382.0, 82.0, 58.0, 22.0), "Hover")
+            .set_text_style(CanvasTextStyle {
                 color: Color::hexa(0x334155FF),
                 font_size: sp(15.0),
                 line_height: Some(sp(21.0)),
                 ..Default::default()
             })
-            .paragraph_style(CanvasParagraphStyle {
+            .set_paragraph_style(CanvasParagraphStyle {
                 wrap: CanvasTextWrap::Word,
                 ..Default::default()
-            }),
-        ),
-    ]
+            })
+            .draw_text(
+                Rect::new(40.0, 158.0, 436.0, 42.0),
+                "Hover, click, wheel, and drag the targets above. The live summary below updates from item-level recorder IDs.",
+            );
+    })
 }
 
 struct CanvasVm {
@@ -648,8 +414,8 @@ struct CanvasVm {
 }
 
 impl CanvasVm {
-    fn sample_canvas(&self, items: Vec<CanvasItem>) -> Canvas<Self> {
-        Canvas::new(items)
+    fn sample_canvas(&self, scene: CanvasScene) -> Canvas<Self> {
+        Canvas::new(scene)
             .size(dp(CARD_CANVAS_WIDTH), dp(CARD_CANVAS_HEIGHT))
             .style(canvas_frame_style)
             .on_item_mouse_move(ValueCommand::new(Self::on_hover))
@@ -661,7 +427,7 @@ impl CanvasVm {
         &self,
         title: &'static str,
         description: &'static str,
-        items: Vec<CanvasItem>,
+        scene: CanvasScene,
     ) -> Element<Self> {
         Flex::new(Axis::Vertical)
             .height(dp(CARD_PANEL_HEIGHT))
@@ -670,7 +436,7 @@ impl CanvasVm {
             .style(card_style)
             .child(Text::new(title).style(|mode| text_style(mode, sp(22.0))))
             .child(Text::new(description).style(|mode| muted_text_style(mode, sp(14.0))))
-            .child(self.sample_canvas(items))
+            .child(self.sample_canvas(scene))
             .into()
     }
 
@@ -725,10 +491,10 @@ impl ViewModel for CanvasVm {
                     .padding(Insets::all(dp(20.0)))
                     .gap(dp(10.0))
                     .style(hero_style)
-                    .child(Text::new("Canvas API Gallery").style(|mode| text_style(mode, sp(30.0))))
+                    .child(Text::new("Canvas Recorder Gallery").style(|mode| text_style(mode, sp(30.0))))
                     .child(
                         Text::new(
-                            "Each grid cell below isolates one Canvas capability so the public API is easier to verify visually: paths, paragraph layout, transforms, opacity, clip, mask, layer blending, and item-level events.",
+                            "This gallery uses only the public recorder-style Canvas API: path commands, transforms, clipping, blending, text overflow, image drawing, and stable item IDs.",
                         )
                         .style(|mode| muted_text_style(mode, sp(15.0))),
                     ),
@@ -762,43 +528,38 @@ impl ViewModel for CanvasVm {
                             .child(el![
                                 self.example_card(
                                     "Paths",
-                                    "Gradient fills, dash strokes, shadows, and boolean path helpers.",
-                                    path_gallery_items(),
+                                    "Gradients, dash strokes, shadows, and freeform path recording.",
+                                    paths_scene(),
                                 ),
                                 self.example_card(
-                                    "Paragraph Style",
-                                    "Word, glyph, and no-wrap modes with horizontal and vertical alignment.",
-                                    paragraph_gallery_items(),
+                                    "Text",
+                                    "Wrap, alignment, and ellipsis now all live in the recorder API.",
+                                    text_scene(),
                                 ),
                                 self.example_card(
                                     "Transforms",
-                                    "Images and text rendered through arbitrary affine quads instead of axis-only shortcuts.",
-                                    transform_gallery_items(),
+                                    "save/restore isolates rotated and translated drawing passes.",
+                                    transform_scene(),
                                 ),
                                 self.example_card(
-                                    "Leaf Opacity",
-                                    "Path, image, and text opacity all participate in final compositing.",
-                                    opacity_gallery_items(),
+                                    "Clip",
+                                    "Rect and path clips gate later drawing commands without exposing retained nodes.",
+                                    clip_scene(),
                                 ),
                                 self.example_card(
-                                    "Clip Shapes",
-                                    "Rounded-rect and path clips both isolate their nested content visually.",
-                                    clip_gallery_items(),
+                                    "Blend",
+                                    "Global alpha and blend modes stay available through recorder state.",
+                                    blend_scene(),
                                 ),
                                 self.example_card(
-                                    "Mask",
-                                    "Mask alpha comes from its own subtree and gates a separate content subtree.",
-                                    mask_gallery_items(),
-                                ),
-                                self.example_card(
-                                    "Layer and Blend",
-                                    "Isolated layers preserve blend math and group opacity semantics.",
-                                    layer_blend_gallery_items(),
+                                    "Recorder",
+                                    "Shortcuts, stable IDs, clip scoping, and long-label overflow in one scene.",
+                                    recorder_scene(),
                                 ),
                                 self.example_card(
                                     "Events",
-                                    "Item-level hover, click, and drag stay active in each independent canvas cell while the page itself keeps wheel scrolling.",
-                                    interaction_gallery_items(),
+                                    "Recorder-generated item IDs still participate in hover, click, wheel, and drag dispatch.",
+                                    interaction_scene(),
                                 )
                             ]),
                     ),
@@ -811,7 +572,7 @@ fn main() -> Result<(), TguiError> {
     Application::new()
         .msaa(MsaaMode::X4)
         .theme_mode(ThemeMode::Light)
-        .title("tgui Canvas Gallery")
+        .title("tgui Canvas Recorder Gallery")
         .window_size(dp(1480.0), dp(1080.0))
         .with_view_model(CanvasVm::new)
         .root_view(CanvasVm::view)

@@ -268,13 +268,6 @@ pub enum CanvasBlendMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum CanvasFillRule {
-    #[default]
-    NonZero,
-    EvenOdd,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CanvasStrokeCap {
     #[default]
     Butt,
@@ -370,7 +363,7 @@ impl CanvasTransform2D {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CanvasItemStyle {
+struct CanvasItemStyle {
     pub id: CanvasItemId,
     pub transform: CanvasTransform2D,
     pub opacity: f32,
@@ -394,18 +387,9 @@ impl CanvasItemStyle {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CanvasBooleanOp {
-    Union,
-    Intersection,
-    Difference,
-    Xor,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CanvasPathOpError {
+enum CanvasPathOpError {
     OpenSubpath,
-    InvalidGeometry,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -498,7 +482,7 @@ enum PathShapeHint {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct PathBuilder {
+struct PathBuilder {
     commands: Vec<PathCommand>,
     shape_hint: Option<PathShapeHint>,
 }
@@ -888,36 +872,11 @@ impl PathBuilder {
         Ok(self)
     }
 
-    pub fn boolean(
-        &self,
-        op: CanvasBooleanOp,
-        other: &PathBuilder,
-    ) -> Result<PathBuilder, CanvasPathOpError> {
+    fn intersection(&self, other: &PathBuilder) -> Result<PathBuilder, CanvasPathOpError> {
         let lhs = self.to_multi_polygon()?;
         let rhs = other.to_multi_polygon()?;
-        let result = match op {
-            CanvasBooleanOp::Union => lhs.union(&rhs),
-            CanvasBooleanOp::Intersection => lhs.intersection(&rhs),
-            CanvasBooleanOp::Difference => lhs.difference(&rhs),
-            CanvasBooleanOp::Xor => lhs.xor(&rhs),
-        };
+        let result = lhs.intersection(&rhs);
         Ok(Self::from_multi_polygon(&result))
-    }
-
-    pub fn union(&self, other: &PathBuilder) -> Result<PathBuilder, CanvasPathOpError> {
-        self.boolean(CanvasBooleanOp::Union, other)
-    }
-
-    pub fn intersection(&self, other: &PathBuilder) -> Result<PathBuilder, CanvasPathOpError> {
-        self.boolean(CanvasBooleanOp::Intersection, other)
-    }
-
-    pub fn difference(&self, other: &PathBuilder) -> Result<PathBuilder, CanvasPathOpError> {
-        self.boolean(CanvasBooleanOp::Difference, other)
-    }
-
-    pub fn xor(&self, other: &PathBuilder) -> Result<PathBuilder, CanvasPathOpError> {
-        self.boolean(CanvasBooleanOp::Xor, other)
     }
 
     fn commands_internal(&self) -> &[PathCommand] {
@@ -1053,11 +1012,10 @@ impl PathBuilder {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CanvasPath {
+struct CanvasPath {
     pub style: CanvasItemStyle,
     pub path: PathBuilder,
     pub fill: Option<Value<CanvasBrush>>,
-    pub fill_rule: CanvasFillRule,
     pub stroke: Option<CanvasStroke>,
     pub shadow: Option<Value<CanvasShadow>>,
 }
@@ -1068,7 +1026,6 @@ impl CanvasPath {
             style: CanvasItemStyle::new(id),
             path,
             fill: None,
-            fill_rule: CanvasFillRule::NonZero,
             stroke: None,
             shadow: None,
         }
@@ -1084,18 +1041,8 @@ impl CanvasPath {
         self
     }
 
-    pub fn fill_rule(mut self, fill_rule: CanvasFillRule) -> Self {
-        self.fill_rule = fill_rule;
-        self
-    }
-
     pub fn shadow(mut self, shadow: impl Into<Value<CanvasShadow>>) -> Self {
         self.shadow = Some(shadow.into());
-        self
-    }
-
-    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
-        self.style.transform = transform;
         self
     }
 
@@ -1176,6 +1123,7 @@ pub enum CanvasTextVerticalAlign {
 pub enum CanvasTextOverflow {
     #[default]
     Clip,
+    Ellipsis,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1198,7 +1146,7 @@ impl Default for CanvasParagraphStyle {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CanvasText {
+struct CanvasText {
     pub style: CanvasItemStyle,
     pub frame: Rect,
     pub content: String,
@@ -1259,7 +1207,7 @@ impl CanvasText {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CanvasImage {
+struct CanvasImage {
     pub style: CanvasItemStyle,
     pub frame: Rect,
     pub source: MediaSource,
@@ -1276,16 +1224,6 @@ impl CanvasImage {
             fit: ContentFit::Contain,
             corner_radius: Dp::ZERO,
         }
-    }
-
-    pub fn fit(mut self, fit: ContentFit) -> Self {
-        self.fit = fit;
-        self
-    }
-
-    pub fn corner_radius(mut self, corner_radius: impl Into<Dp>) -> Self {
-        self.corner_radius = corner_radius.into().max(Dp::ZERO);
-        self
     }
 
     pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
@@ -1320,54 +1258,12 @@ impl CanvasImage {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CanvasGroup {
-    pub style: CanvasItemStyle,
-    pub items: Vec<CanvasItem>,
-}
-
-impl CanvasGroup {
-    pub fn new(id: impl Into<CanvasItemId>, items: impl Into<Vec<CanvasItem>>) -> Self {
-        Self {
-            style: CanvasItemStyle::new(id),
-            items: items.into(),
-        }
-    }
-
-    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
-        self.style.transform = transform;
-        self
-    }
-
-    pub fn opacity(mut self, opacity: f32) -> Self {
-        self.style.opacity = opacity.clamp(0.0, 1.0);
-        self
-    }
-
-    pub fn blend_mode(mut self, blend_mode: CanvasBlendMode) -> Self {
-        self.style.blend_mode = blend_mode;
-        self
-    }
-
-    pub fn visible(mut self, visible: bool) -> Self {
-        self.style.visible = visible;
-        self
-    }
-
-    pub fn hit_test(mut self, hit_test: bool) -> Self {
-        self.style.hit_test = hit_test;
-        self
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum CanvasClipShape {
-    Rect(Rect),
-    RoundedRect { rect: Rect, radius: Dp },
+enum CanvasClipShape {
     Path(PathBuilder),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CanvasClip {
+struct CanvasClip {
     pub style: CanvasItemStyle,
     pub clip: CanvasClipShape,
     pub items: Vec<CanvasItem>,
@@ -1386,135 +1282,23 @@ impl CanvasClip {
         }
     }
 
-    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
-        self.style.transform = transform;
-        self
-    }
-
-    pub fn opacity(mut self, opacity: f32) -> Self {
-        self.style.opacity = opacity.clamp(0.0, 1.0);
-        self
-    }
-
-    pub fn visible(mut self, visible: bool) -> Self {
-        self.style.visible = visible;
-        self
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CanvasLayer {
-    pub style: CanvasItemStyle,
-    pub items: Vec<CanvasItem>,
-}
-
-impl CanvasLayer {
-    pub fn new(id: impl Into<CanvasItemId>, items: impl Into<Vec<CanvasItem>>) -> Self {
-        Self {
-            style: CanvasItemStyle::new(id),
-            items: items.into(),
-        }
-    }
-
-    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
-        self.style.transform = transform;
-        self
-    }
-
-    pub fn opacity(mut self, opacity: f32) -> Self {
-        self.style.opacity = opacity.clamp(0.0, 1.0);
-        self
-    }
-
-    pub fn blend_mode(mut self, blend_mode: CanvasBlendMode) -> Self {
-        self.style.blend_mode = blend_mode;
-        self
-    }
-
-    pub fn visible(mut self, visible: bool) -> Self {
-        self.style.visible = visible;
-        self
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct CanvasMask {
-    pub style: CanvasItemStyle,
-    pub mask: Vec<CanvasItem>,
-    pub content: Vec<CanvasItem>,
-}
-
-impl CanvasMask {
-    pub fn new(
-        id: impl Into<CanvasItemId>,
-        mask: impl Into<Vec<CanvasItem>>,
-        content: impl Into<Vec<CanvasItem>>,
-    ) -> Self {
-        Self {
-            style: CanvasItemStyle::new(id),
-            mask: mask.into(),
-            content: content.into(),
-        }
-    }
-
-    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
-        self.style.transform = transform;
-        self
-    }
-
-    pub fn opacity(mut self, opacity: f32) -> Self {
-        self.style.opacity = opacity.clamp(0.0, 1.0);
-        self
-    }
-
-    pub fn blend_mode(mut self, blend_mode: CanvasBlendMode) -> Self {
-        self.style.blend_mode = blend_mode;
-        self
-    }
-
-    pub fn visible(mut self, visible: bool) -> Self {
-        self.style.visible = visible;
-        self
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum CanvasItem {
+enum CanvasItem {
     Path(CanvasPath),
     Text(CanvasText),
     Image(CanvasImage),
-    Group(CanvasGroup),
     Clip(CanvasClip),
-    Layer(CanvasLayer),
-    Mask(CanvasMask),
 }
 
 impl CanvasItem {
-    pub fn path(id: impl Into<CanvasItemId>, path: PathBuilder) -> Self {
-        Self::Path(CanvasPath::new(id, path))
-    }
-
-    pub fn text(id: impl Into<CanvasItemId>, frame: Rect, content: impl Into<String>) -> Self {
-        Self::Text(CanvasText::new(id, frame, content))
-    }
-
-    pub fn image(id: impl Into<CanvasItemId>, frame: Rect, source: impl Into<MediaSource>) -> Self {
-        Self::Image(CanvasImage::new(id, frame, source))
-    }
-
-    pub fn group(id: impl Into<CanvasItemId>, items: impl Into<Vec<CanvasItem>>) -> Self {
-        Self::Group(CanvasGroup::new(id, items))
-    }
-
     pub(crate) fn id(&self) -> CanvasItemId {
         match self {
             Self::Path(path) => path.style.id,
             Self::Text(text) => text.style.id,
             Self::Image(image) => image.style.id,
-            Self::Group(group) => group.style.id,
             Self::Clip(clip) => clip.style.id,
-            Self::Layer(layer) => layer.style.id,
-            Self::Mask(mask) => mask.style.id,
         }
     }
 
@@ -1529,12 +1313,9 @@ impl CanvasItem {
             }
             Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
             Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
-            Self::Group(group) => canvas_bounds(&group.items),
             Self::Clip(clip) => {
                 clip_shape_bounds(&clip.clip).or_else(|| canvas_bounds(&clip.items))
             }
-            Self::Layer(layer) => canvas_bounds(&layer.items),
-            Self::Mask(mask) => canvas_bounds(&mask.content),
         }?;
         Some(transform_bounds(bounds, self.style().transform))
     }
@@ -1547,12 +1328,9 @@ impl CanvasItem {
             Self::Path(path) => path_base_bounds(path),
             Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
             Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
-            Self::Group(group) => canvas_bounds(&group.items),
             Self::Clip(clip) => {
                 clip_shape_bounds(&clip.clip).or_else(|| canvas_bounds(&clip.items))
             }
-            Self::Layer(layer) => canvas_bounds(&layer.items),
-            Self::Mask(mask) => canvas_bounds(&mask.content),
         }?;
         Some(transform_bounds(bounds, self.style().transform))
     }
@@ -1579,14 +1357,6 @@ impl CanvasItem {
             Self::Image(image) => {
                 tessellate_image(image, origin, opacity, clip_context, media, units)
             }
-            Self::Group(group) => tessellate_items(
-                &group.items,
-                origin,
-                opacity * group.style.opacity,
-                clip_context,
-                media,
-                units,
-            ),
             Self::Clip(clip) => {
                 let nested_clip = CanvasClipContext {
                     clip_rect: compose_clip_rect(
@@ -1604,22 +1374,6 @@ impl CanvasItem {
                     units,
                 )
             }
-            Self::Layer(layer) => tessellate_items(
-                &layer.items,
-                origin,
-                opacity * layer.style.opacity,
-                clip_context,
-                media,
-                units,
-            ),
-            Self::Mask(mask) => tessellate_items(
-                &mask.content,
-                origin,
-                opacity * mask.style.opacity,
-                clip_context,
-                media,
-                units,
-            ),
         };
 
         apply_transform_to_output(&mut output, self.style().transform, origin);
@@ -1631,10 +1385,7 @@ impl CanvasItem {
             Self::Path(path) => &path.style,
             Self::Text(text) => &text.style,
             Self::Image(image) => &image.style,
-            Self::Group(group) => &group.style,
             Self::Clip(clip) => &clip.style,
-            Self::Layer(layer) => &layer.style,
-            Self::Mask(mask) => &mask.style,
         }
     }
 }
@@ -1644,16 +1395,7 @@ fn item_requires_composite(item: &CanvasItem) -> bool {
         CanvasItem::Path(path) => path.style.blend_mode != CanvasBlendMode::Normal,
         CanvasItem::Text(text) => text.style.blend_mode != CanvasBlendMode::Normal,
         CanvasItem::Image(image) => image.style.blend_mode != CanvasBlendMode::Normal,
-        CanvasItem::Group(group) => {
-            group.style.opacity < 1.0 || group.style.blend_mode != CanvasBlendMode::Normal
-        }
-        CanvasItem::Clip(clip) => {
-            clip.style.opacity < 1.0
-                || clip.style.transform != CanvasTransform2D::IDENTITY
-                || !matches!(clip.clip, CanvasClipShape::Rect(_))
-        }
-        CanvasItem::Layer(_) => true,
-        CanvasItem::Mask(_) => true,
+        CanvasItem::Clip(_) => true,
     }
 }
 
@@ -1748,8 +1490,6 @@ fn transform_bounds(bounds: RectBounds, transform: CanvasTransform2D) -> RectBou
 
 fn clip_shape_bounds(shape: &CanvasClipShape) -> Option<RectBounds> {
     match shape {
-        CanvasClipShape::Rect(rect) => Some(RectBounds::from_rect(*rect)),
-        CanvasClipShape::RoundedRect { rect, .. } => Some(RectBounds::from_rect(*rect)),
         CanvasClipShape::Path(path) => path.control_bounds().map(|bounds| {
             RectBounds::from_min_max(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y)
         }),
@@ -1764,8 +1504,6 @@ pub(crate) struct CanvasClipContext {
 
 fn clip_shape_clip_rect(shape: &CanvasClipShape, origin: Point) -> Option<Rect> {
     match shape {
-        CanvasClipShape::Rect(rect) => Some(offset_rect(*rect, origin)),
-        CanvasClipShape::RoundedRect { rect, .. } => Some(offset_rect(*rect, origin)),
         CanvasClipShape::Path(path) => path.control_bounds().map(|bounds| {
             Rect::new(
                 origin.x + bounds.min.x,
@@ -1793,6 +1531,39 @@ fn offset_rect(rect: Rect, origin: Point) -> Rect {
         rect.width,
         rect.height,
     )
+}
+
+fn transform_path_builder(path: &PathBuilder, transform: CanvasTransform2D) -> PathBuilder {
+    if transform == CanvasTransform2D::IDENTITY {
+        return path.clone();
+    }
+
+    let mut builder = PathBuilder::new();
+    for command in path.commands_internal() {
+        builder = match *command {
+            PathCommand::MoveTo(point_value) => {
+                let point_value = transform.apply(point_value);
+                builder.move_to(point_value.x, point_value.y)
+            }
+            PathCommand::LineTo(point_value) => {
+                let point_value = transform.apply(point_value);
+                builder.line_to(point_value.x, point_value.y)
+            }
+            PathCommand::QuadTo { ctrl, to } => {
+                let ctrl = transform.apply(ctrl);
+                let to = transform.apply(to);
+                builder.quad_to(ctrl.x, ctrl.y, to.x, to.y)
+            }
+            PathCommand::CubicTo { ctrl1, ctrl2, to } => {
+                let ctrl1 = transform.apply(ctrl1);
+                let ctrl2 = transform.apply(ctrl2);
+                let to = transform.apply(to);
+                builder.cubic_to(ctrl1.x, ctrl1.y, ctrl2.x, ctrl2.y, to.x, to.y)
+            }
+            PathCommand::Close => builder.close(),
+        };
+    }
+    builder
 }
 
 fn tessellate_items(
@@ -1853,68 +1624,20 @@ fn tessellate_composite_item(
             None,
             style.blend_mode,
         ),
-        CanvasItem::Group(group) => (
-            tessellate_items(&group.items, origin, opacity, clip, media, units),
-            None,
-            group.style.blend_mode,
-        ),
         CanvasItem::Clip(clip_item) => {
             let nested_output =
                 tessellate_items(&clip_item.items, origin, opacity, clip, media, units);
-            let mask_commands = match &clip_item.clip {
-                CanvasClipShape::Rect(_) => None,
-                CanvasClipShape::RoundedRect { rect, radius } => {
-                    let path = PathBuilder::new().rounded_rect(
-                        rect.x.get(),
-                        rect.y.get(),
-                        rect.width.get(),
-                        rect.height.get(),
-                        radius.get(),
-                    );
-                    let mask = tessellate_path(
-                        &CanvasPath::new(clip_item.style.id, path).fill(Color::WHITE),
-                        origin,
-                        1.0,
-                        CanvasClipContext::default(),
-                        media,
-                        units,
-                    );
-                    Some(output_to_commands(mask).into())
-                }
-                CanvasClipShape::Path(path) => {
-                    let mask = tessellate_path(
-                        &CanvasPath::new(clip_item.style.id, path.clone()).fill(Color::WHITE),
-                        origin,
-                        1.0,
-                        CanvasClipContext::default(),
-                        media,
-                        units,
-                    );
-                    Some(output_to_commands(mask).into())
-                }
-            };
-            (nested_output, mask_commands, CanvasBlendMode::Normal)
-        }
-        CanvasItem::Layer(layer) => (
-            tessellate_items(&layer.items, origin, opacity, clip, media, units),
-            None,
-            layer.style.blend_mode,
-        ),
-        CanvasItem::Mask(mask) => {
-            let content = tessellate_items(&mask.content, origin, opacity, clip, media, units);
-            let mask_output = tessellate_items(
-                &mask.mask,
+            let CanvasClipShape::Path(path) = &clip_item.clip;
+            let mask = tessellate_path(
+                &CanvasPath::new(clip_item.style.id, path.clone()).fill(Color::WHITE),
                 origin,
                 1.0,
                 CanvasClipContext::default(),
                 media,
                 units,
             );
-            (
-                content,
-                Some(output_to_commands(mask_output).into()),
-                mask.style.blend_mode,
-            )
+            let mask_commands = Some(output_to_commands(mask).into());
+            (nested_output, mask_commands, CanvasBlendMode::Normal)
         }
     };
 
@@ -1965,6 +1688,7 @@ fn tessellate_text(
             line_height: line_height.get(),
             letter_spacing: text.text_style.letter_spacing.get(),
             wrap: text.paragraph_style.wrap,
+            overflow: text.paragraph_style.overflow,
             horizontal_align: text.paragraph_style.horizontal_align,
             vertical_align: text.paragraph_style.vertical_align,
             clip_rect: clip.clip_rect,
@@ -2098,7 +1822,7 @@ fn quad_bounds_rect(quad: [Point; 4]) -> Option<Rect> {
     ))
 }
 
-pub(crate) fn canvas_bounds(items: &[CanvasItem]) -> Option<RectBounds> {
+fn canvas_bounds(items: &[CanvasItem]) -> Option<RectBounds> {
     let mut bounds: Option<RectBounds> = None;
     for item in items {
         if let Some(item_bounds) = item.layout_bounds() {
@@ -2109,6 +1833,704 @@ pub(crate) fn canvas_bounds(items: &[CanvasItem]) -> Option<RectBounds> {
         }
     }
     bounds
+}
+
+#[derive(Clone, Default, PartialEq)]
+pub struct CanvasScene {
+    items: Vec<CanvasItem>,
+}
+
+impl CanvasScene {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    fn from_items(items: Vec<CanvasItem>) -> Self {
+        Self { items }
+    }
+
+    fn items(&self) -> &[CanvasItem] {
+        &self.items
+    }
+}
+
+pub(crate) fn canvas_scene_bounds(scene: &CanvasScene) -> Option<RectBounds> {
+    canvas_bounds(scene.items())
+}
+
+#[derive(Clone)]
+struct CanvasRecorderState {
+    transform: CanvasTransform2D,
+    fill: Option<Value<CanvasBrush>>,
+    stroke: Option<CanvasStroke>,
+    shadow: Option<Value<CanvasShadow>>,
+    opacity: f32,
+    blend_mode: CanvasBlendMode,
+    cursor: Option<CursorStyle>,
+    visible: bool,
+    hit_test: bool,
+    text_style: CanvasTextStyle,
+    paragraph_style: CanvasParagraphStyle,
+}
+
+impl Default for CanvasRecorderState {
+    fn default() -> Self {
+        Self {
+            transform: CanvasTransform2D::IDENTITY,
+            fill: Some(Value::Static(CanvasBrush::Solid(Color::BLACK))),
+            stroke: Some(CanvasStroke::new(Dp::new(1.0), Color::BLACK)),
+            shadow: None,
+            opacity: 1.0,
+            blend_mode: CanvasBlendMode::Normal,
+            cursor: None,
+            visible: true,
+            hit_test: true,
+            text_style: CanvasTextStyle::default(),
+            paragraph_style: CanvasParagraphStyle::default(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct CanvasRecorderFrame {
+    state: CanvasRecorderState,
+    items: Vec<CanvasItem>,
+    clip_path: Option<PathBuilder>,
+    clipped_items: Vec<CanvasItem>,
+}
+
+impl CanvasRecorderFrame {
+    fn new(state: CanvasRecorderState) -> Self {
+        Self {
+            state,
+            items: Vec::new(),
+            clip_path: None,
+            clipped_items: Vec::new(),
+        }
+    }
+}
+
+pub struct CanvasRecorder {
+    frames: Vec<CanvasRecorderFrame>,
+    current_path: PathBuilder,
+    next_auto_id: u64,
+    pending_item_id: Option<CanvasItemId>,
+}
+
+impl Default for CanvasRecorder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CanvasRecorder {
+    pub fn new() -> Self {
+        Self::with_auto_ids(1_u64)
+    }
+
+    pub fn with_auto_ids(start: impl Into<CanvasItemId>) -> Self {
+        let start = start.into().get();
+        Self {
+            frames: vec![CanvasRecorderFrame::new(CanvasRecorderState::default())],
+            current_path: PathBuilder::new(),
+            next_auto_id: start,
+            pending_item_id: None,
+        }
+    }
+
+    pub fn build(builder: impl FnOnce(&mut Self)) -> CanvasScene {
+        let mut recorder = Self::new();
+        builder(&mut recorder);
+        recorder.finish()
+    }
+
+    pub fn finish(mut self) -> CanvasScene {
+        while self.frames.len() > 1 {
+            self.restore();
+        }
+        let frame = self.frames.pop().expect("recorder root frame should exist");
+        CanvasScene::from_items(self.finalize_frame(frame))
+    }
+
+    pub fn save(&mut self) -> &mut Self {
+        let state = self.current_state().clone();
+        self.frames.push(CanvasRecorderFrame::new(state));
+        self
+    }
+
+    pub fn restore(&mut self) -> &mut Self {
+        if self.frames.len() <= 1 {
+            return self;
+        }
+
+        let frame = self.frames.pop().expect("nested recorder frame should exist");
+        let items = self.finalize_frame(frame);
+        for item in items {
+            self.push_item(item);
+        }
+        self
+    }
+
+    pub fn next_item_id(&mut self, id: impl Into<CanvasItemId>) -> &mut Self {
+        self.pending_item_id = Some(id.into());
+        self
+    }
+
+    pub fn begin_path(&mut self) -> &mut Self {
+        self.current_path = PathBuilder::new();
+        self
+    }
+
+    pub fn close_path(&mut self) -> &mut Self {
+        self.current_path = self.current_path.clone().close();
+        self
+    }
+
+    pub fn move_to(&mut self, x: impl Into<Dp>, y: impl Into<Dp>) -> &mut Self {
+        self.current_path = self.current_path.clone().move_to(x, y);
+        self
+    }
+
+    pub fn line_to(&mut self, x: impl Into<Dp>, y: impl Into<Dp>) -> &mut Self {
+        self.current_path = self.current_path.clone().line_to(x, y);
+        self
+    }
+
+    pub fn quad_to(
+        &mut self,
+        ctrl_x: impl Into<Dp>,
+        ctrl_y: impl Into<Dp>,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+    ) -> &mut Self {
+        self.current_path = self.current_path.clone().quad_to(ctrl_x, ctrl_y, x, y);
+        self
+    }
+
+    pub fn cubic_to(
+        &mut self,
+        ctrl1_x: impl Into<Dp>,
+        ctrl1_y: impl Into<Dp>,
+        ctrl2_x: impl Into<Dp>,
+        ctrl2_y: impl Into<Dp>,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+    ) -> &mut Self {
+        self.current_path = self
+            .current_path
+            .clone()
+            .cubic_to(ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, x, y);
+        self
+    }
+
+    pub fn arc(
+        &mut self,
+        center_x: impl Into<Dp>,
+        center_y: impl Into<Dp>,
+        radius: impl Into<Dp>,
+        start_angle: f32,
+        sweep_angle: f32,
+    ) -> &mut Self {
+        self.current_path = self
+            .current_path
+            .clone()
+            .arc(center_x, center_y, radius, start_angle, sweep_angle);
+        self
+    }
+
+    pub fn arc_to(
+        &mut self,
+        ctrl_x: impl Into<Dp>,
+        ctrl_y: impl Into<Dp>,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+        radius: impl Into<Dp>,
+    ) -> &mut Self {
+        self.current_path = self
+            .current_path
+            .clone()
+            .arc_to(ctrl_x, ctrl_y, x, y, radius);
+        self
+    }
+
+    pub fn rect(
+        &mut self,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+        width: impl Into<Dp>,
+        height: impl Into<Dp>,
+    ) -> &mut Self {
+        self.current_path = self.current_path.clone().rect(x, y, width, height);
+        self
+    }
+
+    pub fn rounded_rect(
+        &mut self,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+        width: impl Into<Dp>,
+        height: impl Into<Dp>,
+        radius: impl Into<Dp>,
+    ) -> &mut Self {
+        self.current_path = self
+            .current_path
+            .clone()
+            .rounded_rect(x, y, width, height, radius);
+        self
+    }
+
+    pub fn circle(
+        &mut self,
+        center_x: impl Into<Dp>,
+        center_y: impl Into<Dp>,
+        radius: impl Into<Dp>,
+    ) -> &mut Self {
+        self.current_path = self.current_path.clone().circle(center_x, center_y, radius);
+        self
+    }
+
+    pub fn ellipse(
+        &mut self,
+        center_x: impl Into<Dp>,
+        center_y: impl Into<Dp>,
+        radius_x: impl Into<Dp>,
+        radius_y: impl Into<Dp>,
+    ) -> &mut Self {
+        self.current_path = self
+            .current_path
+            .clone()
+            .ellipse(center_x, center_y, radius_x, radius_y);
+        self
+    }
+
+    pub fn svg_path(&mut self, data: &str) -> Result<&mut Self, CanvasSvgPathError> {
+        self.current_path = self.current_path.clone().svg_path(data)?;
+        Ok(self)
+    }
+
+    pub fn fill(&mut self) -> &mut Self {
+        let mut item = CanvasPath::new(self.take_item_id(), self.transformed_current_path());
+        if let Some(fill) = self.current_state().fill.clone() {
+            item = item.fill(fill);
+        }
+        self.push_item(self.apply_path_state(item, true));
+        self
+    }
+
+    pub fn stroke(&mut self) -> &mut Self {
+        let mut item = CanvasPath::new(self.take_item_id(), self.transformed_current_path());
+        if let Some(stroke) = self.current_state().stroke.clone() {
+            item = item.stroke(stroke);
+        }
+        self.push_item(self.apply_path_state(item, false));
+        self
+    }
+
+    pub fn fill_and_stroke(&mut self) -> &mut Self {
+        let mut item = CanvasPath::new(self.take_item_id(), self.transformed_current_path());
+        if let Some(fill) = self.current_state().fill.clone() {
+            item = item.fill(fill);
+        }
+        if let Some(stroke) = self.current_state().stroke.clone() {
+            item = item.stroke(stroke);
+        }
+        self.push_item(self.apply_path_state(item, true));
+        self
+    }
+
+    pub fn clip(&mut self) -> &mut Self {
+        let path = self.transformed_current_path();
+        if path.commands_internal().is_empty() {
+            return self;
+        }
+
+        if self.current_frame().clip_path.is_some() && !self.current_frame().clipped_items.is_empty() {
+            let clip_item = self.take_pending_clip_group();
+            self.current_frame().items.push(clip_item);
+        }
+
+        let new_clip = match self.current_frame().clip_path.clone() {
+            Some(existing) => existing.intersection(&path).unwrap_or(path.clone()),
+            None => path,
+        };
+        self.current_frame().clip_path = Some(new_clip);
+        self
+    }
+
+    pub fn translate(&mut self, x: impl Into<Dp>, y: impl Into<Dp>) -> &mut Self {
+        self.current_state_mut().transform = self
+            .current_state()
+            .transform
+            .then(CanvasTransform2D::translate(x, y));
+        self
+    }
+
+    pub fn scale(&mut self, x: f32, y: f32) -> &mut Self {
+        self.current_state_mut().transform = self
+            .current_state()
+            .transform
+            .then(CanvasTransform2D::scale(x, y));
+        self
+    }
+
+    pub fn rotate(&mut self, radians: f32) -> &mut Self {
+        self.current_state_mut().transform = self
+            .current_state()
+            .transform
+            .then(CanvasTransform2D::rotate(radians));
+        self
+    }
+
+    pub fn transform(&mut self, transform: CanvasTransform2D) -> &mut Self {
+        self.current_state_mut().transform = self.current_state().transform.then(transform);
+        self
+    }
+
+    pub fn set_fill(&mut self, fill: impl Into<Value<CanvasBrush>>) -> &mut Self {
+        self.current_state_mut().fill = Some(fill.into());
+        self
+    }
+
+    pub fn clear_fill(&mut self) -> &mut Self {
+        self.current_state_mut().fill = None;
+        self
+    }
+
+    pub fn set_stroke(&mut self, stroke: CanvasStroke) -> &mut Self {
+        self.current_state_mut().stroke = Some(stroke);
+        self
+    }
+
+    pub fn clear_stroke(&mut self) -> &mut Self {
+        self.current_state_mut().stroke = None;
+        self
+    }
+
+    pub fn set_shadow(&mut self, shadow: impl Into<Value<CanvasShadow>>) -> &mut Self {
+        self.current_state_mut().shadow = Some(shadow.into());
+        self
+    }
+
+    pub fn clear_shadow(&mut self) -> &mut Self {
+        self.current_state_mut().shadow = None;
+        self
+    }
+
+    pub fn set_opacity(&mut self, opacity: f32) -> &mut Self {
+        self.current_state_mut().opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn set_blend_mode(&mut self, blend_mode: CanvasBlendMode) -> &mut Self {
+        self.current_state_mut().blend_mode = blend_mode;
+        self
+    }
+
+    pub fn set_cursor(&mut self, cursor: CursorStyle) -> &mut Self {
+        self.current_state_mut().cursor = Some(cursor);
+        self
+    }
+
+    pub fn clear_cursor(&mut self) -> &mut Self {
+        self.current_state_mut().cursor = None;
+        self
+    }
+
+    pub fn set_hit_test(&mut self, hit_test: bool) -> &mut Self {
+        self.current_state_mut().hit_test = hit_test;
+        self
+    }
+
+    pub fn set_visible(&mut self, visible: bool) -> &mut Self {
+        self.current_state_mut().visible = visible;
+        self
+    }
+
+    pub fn set_text_style(&mut self, text_style: CanvasTextStyle) -> &mut Self {
+        self.current_state_mut().text_style = text_style;
+        self
+    }
+
+    pub fn set_paragraph_style(&mut self, paragraph_style: CanvasParagraphStyle) -> &mut Self {
+        self.current_state_mut().paragraph_style = paragraph_style;
+        self
+    }
+
+    pub fn fill_rect(
+        &mut self,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+        width: impl Into<Dp>,
+        height: impl Into<Dp>,
+    ) -> &mut Self {
+        self.draw_fill_shape(PathBuilder::new().rect(x, y, width, height))
+    }
+
+    pub fn stroke_rect(
+        &mut self,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+        width: impl Into<Dp>,
+        height: impl Into<Dp>,
+    ) -> &mut Self {
+        self.draw_stroke_shape(PathBuilder::new().rect(x, y, width, height))
+    }
+
+    pub fn fill_round_rect(
+        &mut self,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+        width: impl Into<Dp>,
+        height: impl Into<Dp>,
+        radius: impl Into<Dp>,
+    ) -> &mut Self {
+        self.draw_fill_shape(PathBuilder::new().rounded_rect(x, y, width, height, radius))
+    }
+
+    pub fn stroke_round_rect(
+        &mut self,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+        width: impl Into<Dp>,
+        height: impl Into<Dp>,
+        radius: impl Into<Dp>,
+    ) -> &mut Self {
+        self.draw_stroke_shape(PathBuilder::new().rounded_rect(x, y, width, height, radius))
+    }
+
+    pub fn fill_circle(
+        &mut self,
+        center_x: impl Into<Dp>,
+        center_y: impl Into<Dp>,
+        radius: impl Into<Dp>,
+    ) -> &mut Self {
+        self.draw_fill_shape(PathBuilder::new().circle(center_x, center_y, radius))
+    }
+
+    pub fn stroke_circle(
+        &mut self,
+        center_x: impl Into<Dp>,
+        center_y: impl Into<Dp>,
+        radius: impl Into<Dp>,
+    ) -> &mut Self {
+        self.draw_stroke_shape(PathBuilder::new().circle(center_x, center_y, radius))
+    }
+
+    pub fn fill_ellipse(
+        &mut self,
+        center_x: impl Into<Dp>,
+        center_y: impl Into<Dp>,
+        radius_x: impl Into<Dp>,
+        radius_y: impl Into<Dp>,
+    ) -> &mut Self {
+        self.draw_fill_shape(PathBuilder::new().ellipse(center_x, center_y, radius_x, radius_y))
+    }
+
+    pub fn stroke_ellipse(
+        &mut self,
+        center_x: impl Into<Dp>,
+        center_y: impl Into<Dp>,
+        radius_x: impl Into<Dp>,
+        radius_y: impl Into<Dp>,
+    ) -> &mut Self {
+        self.draw_stroke_shape(PathBuilder::new().ellipse(center_x, center_y, radius_x, radius_y))
+    }
+
+    pub fn draw_line(
+        &mut self,
+        start_x: impl Into<Dp>,
+        start_y: impl Into<Dp>,
+        end_x: impl Into<Dp>,
+        end_y: impl Into<Dp>,
+    ) -> &mut Self {
+        self.draw_stroke_shape(
+            PathBuilder::new()
+                .move_to(start_x, start_y)
+                .line_to(end_x, end_y),
+        )
+    }
+
+    fn draw_path_internal(&mut self, path: PathBuilder) -> &mut Self {
+        let mut item = CanvasPath::new(
+            self.take_item_id(),
+            transform_path_builder(&path, self.current_state().transform),
+        );
+        if let Some(fill) = self.current_state().fill.clone() {
+            item = item.fill(fill);
+        }
+        if let Some(stroke) = self.current_state().stroke.clone() {
+            item = item.stroke(stroke);
+        }
+        self.push_item(self.apply_path_state(item, true));
+        self
+    }
+
+    pub fn draw_svg_path(&mut self, data: &str) -> Result<&mut Self, CanvasSvgPathError> {
+        let path = PathBuilder::new().svg_path(data)?;
+        Ok(self.draw_path_internal(path))
+    }
+
+    pub fn draw_text(&mut self, frame: Rect, content: impl Into<String>) -> &mut Self {
+        let mut text = CanvasText::new(self.take_item_id(), frame, content)
+            .text_style(self.current_state().text_style.clone())
+            .paragraph_style(self.current_state().paragraph_style.clone())
+            .transform(self.current_state().transform)
+            .opacity(self.current_state().opacity)
+            .blend_mode(self.current_state().blend_mode)
+            .visible(self.current_state().visible)
+            .hit_test(self.current_state().hit_test);
+        if let Some(cursor) = self.current_state().cursor {
+            text = text.cursor(cursor);
+        }
+        self.push_item(CanvasItem::Text(text));
+        self
+    }
+
+    pub fn draw_image(&mut self, frame: Rect, source: impl Into<MediaSource>) -> &mut Self {
+        let mut image = CanvasImage::new(self.take_item_id(), frame, source)
+            .transform(self.current_state().transform)
+            .opacity(self.current_state().opacity)
+            .blend_mode(self.current_state().blend_mode)
+            .visible(self.current_state().visible)
+            .hit_test(self.current_state().hit_test);
+        if let Some(cursor) = self.current_state().cursor {
+            image = image.cursor(cursor);
+        }
+        self.push_item(CanvasItem::Image(image));
+        self
+    }
+
+    fn draw_fill_shape(&mut self, path: PathBuilder) -> &mut Self {
+        let mut item = CanvasPath::new(
+            self.take_item_id(),
+            transform_path_builder(&path, self.current_state().transform),
+        );
+        if let Some(fill) = self.current_state().fill.clone() {
+            item = item.fill(fill);
+        }
+        self.push_item(self.apply_path_state(item, true));
+        self
+    }
+
+    fn draw_stroke_shape(&mut self, path: PathBuilder) -> &mut Self {
+        let mut item = CanvasPath::new(
+            self.take_item_id(),
+            transform_path_builder(&path, self.current_state().transform),
+        );
+        if let Some(stroke) = self.current_state().stroke.clone() {
+            item = item.stroke(stroke);
+        }
+        self.push_item(self.apply_path_state(item, false));
+        self
+    }
+
+    fn transformed_current_path(&self) -> PathBuilder {
+        transform_path_builder(&self.current_path, self.current_state().transform)
+    }
+
+    fn apply_path_state(&self, mut item: CanvasPath, include_shadow: bool) -> CanvasItem {
+        if include_shadow {
+            if let Some(shadow) = self.current_state().shadow.clone() {
+                item = item.shadow(shadow);
+            }
+        }
+        item = item
+            .opacity(self.current_state().opacity)
+            .blend_mode(self.current_state().blend_mode)
+            .visible(self.current_state().visible)
+            .hit_test(self.current_state().hit_test);
+        if let Some(cursor) = self.current_state().cursor {
+            item = item.cursor(cursor);
+        }
+        CanvasItem::Path(item)
+    }
+
+    fn current_frame(&mut self) -> &mut CanvasRecorderFrame {
+        self.frames
+            .last_mut()
+            .expect("recorder should always have an active frame")
+    }
+
+    fn current_state(&self) -> &CanvasRecorderState {
+        &self
+            .frames
+            .last()
+            .expect("recorder should always have an active frame")
+            .state
+    }
+
+    fn current_state_mut(&mut self) -> &mut CanvasRecorderState {
+        &mut self.current_frame().state
+    }
+
+    fn take_item_id(&mut self) -> CanvasItemId {
+        self.pending_item_id.take().unwrap_or_else(|| self.take_generated_id())
+    }
+
+    fn take_generated_id(&mut self) -> CanvasItemId {
+        let id = CanvasItemId::new(self.next_auto_id);
+        self.next_auto_id = self.next_auto_id.saturating_add(1);
+        id
+    }
+
+    fn push_item(&mut self, item: CanvasItem) {
+        let frame = self.current_frame();
+        if frame.clip_path.is_some() {
+            frame.clipped_items.push(item);
+        } else {
+            frame.items.push(item);
+        }
+    }
+
+    fn finalize_frame(&mut self, mut frame: CanvasRecorderFrame) -> Vec<CanvasItem> {
+        if frame.clip_path.is_some() && !frame.clipped_items.is_empty() {
+            let clip_id = self.take_generated_id();
+            let clip_path = frame.clip_path.take().expect("clip path should exist");
+            frame.items.push(CanvasItem::Clip(CanvasClip::new(
+                clip_id,
+                CanvasClipShape::Path(clip_path),
+                frame.clipped_items,
+            )));
+        }
+        frame.items
+    }
+
+    fn take_pending_clip_group(&mut self) -> CanvasItem {
+        let frame = self.current_frame();
+        let clip_path = frame
+            .clip_path
+            .clone()
+            .expect("clip path should exist before finalizing a clip group");
+        let clipped_items = std::mem::take(&mut frame.clipped_items);
+        CanvasItem::Clip(CanvasClip::new(
+            self.take_generated_id(),
+            CanvasClipShape::Path(clip_path),
+            clipped_items,
+        ))
+    }
+}
+
+#[doc(hidden)]
+pub trait IntoCanvasContent {
+    fn into_canvas_scene(self) -> Value<CanvasScene>;
+}
+
+impl IntoCanvasContent for CanvasScene {
+    fn into_canvas_scene(self) -> Value<CanvasScene> {
+        Value::Static(self)
+    }
+}
+
+impl IntoCanvasContent for Value<CanvasScene> {
+    fn into_canvas_scene(self) -> Value<CanvasScene> {
+        self
+    }
+}
+
+impl IntoCanvasContent for Signal<CanvasScene> {
+    fn into_canvas_scene(self) -> Value<CanvasScene> {
+        Value::Signal(self)
+    }
 }
 
 pub struct Canvas<VM> {
@@ -2248,7 +2670,11 @@ macro_rules! impl_canvas_layout_api {
 }
 
 impl<VM> Canvas<VM> {
-    pub fn new(items: impl Into<Value<Vec<CanvasItem>>>) -> Self {
+    pub fn new(scene: impl IntoCanvasContent) -> Self {
+        Self::from_scene(scene.into_canvas_scene())
+    }
+
+    pub(crate) fn from_scene(scene: impl Into<Value<CanvasScene>>) -> Self {
         Self {
             element: Element {
                 id: WidgetId::next(),
@@ -2260,7 +2686,7 @@ impl<VM> Canvas<VM> {
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 kind: WidgetKind::Canvas {
-                    items: items.into(),
+                    scene: scene.into(),
                     item_interactions: CanvasItemInteractionHandlers::default(),
                     style: None,
                 },
@@ -2455,6 +2881,38 @@ pub(crate) struct CanvasRenderOutput {
     pub commands: Vec<RenderCommand>,
 }
 
+pub(crate) struct CanvasSceneItemRender {
+    pub item_id: CanvasItemId,
+    pub cursor: Option<CursorStyle>,
+    pub hit_bounds: Option<RectBounds>,
+    pub output: CanvasRenderOutput,
+}
+
+pub(crate) fn tessellate_canvas_scene_items(
+    scene: &CanvasScene,
+    origin: Point,
+    opacity: f32,
+    clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
+    media: &MediaManager,
+    units: UnitContext,
+) -> Vec<CanvasSceneItemRender> {
+    let clip = CanvasClipContext {
+        clip_rect,
+        clip_mask,
+    };
+    scene
+        .items()
+        .iter()
+        .map(|item| CanvasSceneItemRender {
+            item_id: item.id(),
+            cursor: item.style().cursor,
+            hit_bounds: item.hit_bounds(),
+            output: item.tessellate(origin, opacity, clip, media, units),
+        })
+        .collect()
+}
+
 fn path_base_bounds(path: &CanvasPath) -> Option<RectBounds> {
     let bounds = path.path.control_bounds()?;
     let mut rect = RectBounds::from_min_max(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y);
@@ -2520,7 +2978,6 @@ fn tessellate_path(
         if let Some(mesh) = tessellate_fill(
             &lyon_path,
             fill_brush,
-            path.fill_rule,
             effective_opacity,
             origin,
             clip,
@@ -2729,7 +3186,6 @@ fn background_brush_from_canvas(brush: &CanvasBrush, opacity: f32) -> Option<Bac
 fn tessellate_fill(
     path: &Path,
     brush: &CanvasBrush,
-    fill_rule: CanvasFillRule,
     opacity: f32,
     origin: Point,
     clip: CanvasClipContext,
@@ -2738,10 +3194,7 @@ fn tessellate_fill(
     let mut geometry = VertexBuffers::<[f32; 2], u32>::new();
     let mut tessellator = FillTessellator::new();
     let mut options = FillOptions::default();
-    options.fill_rule = match fill_rule {
-        CanvasFillRule::NonZero => lyon::path::FillRule::NonZero,
-        CanvasFillRule::EvenOdd => lyon::path::FillRule::EvenOdd,
-    };
+    options.fill_rule = lyon::path::FillRule::NonZero;
     tessellator
         .tessellate_path(
             path,
@@ -3439,114 +3892,95 @@ impl StrokeVertexConstructor<[f32; 2]> for StrokeVertexCtor {
 #[cfg(test)]
 mod tests {
     use super::{
-        canvas_bounds, tessellate_axis_aligned_rounded_rect, CanvasBooleanOp, CanvasBrush,
-        CanvasGradientStop, CanvasItem, CanvasPath, CanvasShadow, CanvasStroke, PathBuilder,
+        canvas_scene_bounds, tessellate_axis_aligned_rounded_rect, tessellate_canvas_scene_items,
+        CanvasBrush, CanvasGradientStop, CanvasRecorder, CanvasScene, CanvasShadow, CanvasStroke,
+        CanvasTextOverflow,
     };
+    use crate::foundation::binding::InvalidationSignal;
     use crate::foundation::color::Color;
+    use crate::media::MediaManager;
+    use crate::ui::layout::Value;
     use crate::ui::unit::dp;
-    use crate::ui::widget::Point;
+    use crate::ui::unit::UnitContext;
+    use crate::ui::widget::{Point, Rect, RenderCommand};
+
+    fn test_media() -> MediaManager {
+        MediaManager::new(InvalidationSignal::new())
+    }
+
+    fn rendered_items(scene: &CanvasScene) -> Vec<super::CanvasSceneItemRender> {
+        tessellate_canvas_scene_items(
+            scene,
+            Point::ZERO,
+            1.0,
+            None,
+            None,
+            &test_media(),
+            UnitContext::default(),
+        )
+    }
 
     #[test]
     fn bounds_include_stroke_width() {
-        let item = CanvasItem::Path(
-            CanvasPath::new(
-                7_u64,
-                PathBuilder::new()
-                    .move_to(10.0, 10.0)
-                    .line_to(30.0, 10.0)
-                    .line_to(30.0, 20.0)
-                    .close(),
-            )
-            .stroke(CanvasStroke::new(dp(8.0), Color::WHITE)),
-        );
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(7_u64)
+                .set_stroke(CanvasStroke::new(dp(8.0), Color::WHITE))
+                .begin_path()
+                .move_to(10.0, 10.0)
+                .line_to(30.0, 10.0)
+                .line_to(30.0, 20.0)
+                .close_path()
+                .stroke();
+        });
 
-        let bounds = item.hit_bounds().expect("bounds should exist");
+        let rendered = rendered_items(&scene);
+        let bounds = rendered[0].hit_bounds.expect("bounds should exist");
         assert_eq!(bounds.min_x, 6.0);
         assert_eq!(bounds.max_x, 34.0);
     }
 
     #[test]
     fn canvas_bounds_union_all_items() {
-        let items = vec![
-            CanvasItem::path(
-                1_u64,
-                PathBuilder::new()
-                    .move_to(0.0, 0.0)
-                    .line_to(20.0, 0.0)
-                    .line_to(20.0, 10.0)
-                    .close(),
-            ),
-            CanvasItem::path(
-                2_u64,
-                PathBuilder::new()
-                    .move_to(50.0, 25.0)
-                    .line_to(80.0, 25.0)
-                    .line_to(80.0, 40.0)
-                    .close(),
-            ),
-        ];
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(1_u64)
+                .begin_path()
+                .move_to(0.0, 0.0)
+                .line_to(20.0, 0.0)
+                .line_to(20.0, 10.0)
+                .close_path()
+                .fill()
+                .next_item_id(2_u64)
+                .begin_path()
+                .move_to(50.0, 25.0)
+                .line_to(80.0, 25.0)
+                .line_to(80.0, 40.0)
+                .close_path()
+                .fill();
+        });
 
-        let bounds = canvas_bounds(&items).expect("bounds should exist");
+        let bounds = canvas_scene_bounds(&scene).expect("bounds should exist");
         assert_eq!(bounds.width(), 80.0);
         assert_eq!(bounds.height(), 40.0);
     }
 
     #[test]
     fn canvas_bounds_include_shadow_expansion() {
-        let item = CanvasItem::Path(
-            CanvasPath::new(
-                1_u64,
-                PathBuilder::new()
-                    .move_to(0.0, 0.0)
-                    .line_to(20.0, 0.0)
-                    .line_to(20.0, 20.0)
-                    .close(),
-            )
-            .shadow(CanvasShadow::new(
-                Color::BLACK,
-                crate::ui::widget::Point::new(4.0, 6.0),
-                dp(5.0),
-            )),
-        );
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(1_u64)
+                .set_shadow(CanvasShadow::new(
+                    Color::BLACK,
+                    crate::ui::widget::Point::new(4.0, 6.0),
+                    dp(5.0),
+                ))
+                .fill_rect(0.0, 0.0, 20.0, 20.0);
+        });
 
-        let bounds = item.layout_bounds().expect("layout bounds should exist");
+        let bounds = canvas_scene_bounds(&scene).expect("layout bounds should exist");
         assert!(bounds.max_x > 20.0);
         assert!(bounds.max_y > 20.0);
-    }
-
-    #[test]
-    fn boolean_union_combines_rectangles() {
-        let lhs = PathBuilder::new()
-            .move_to(0.0, 0.0)
-            .line_to(20.0, 0.0)
-            .line_to(20.0, 20.0)
-            .line_to(0.0, 20.0)
-            .close();
-        let rhs = PathBuilder::new()
-            .move_to(10.0, 0.0)
-            .line_to(30.0, 0.0)
-            .line_to(30.0, 20.0)
-            .line_to(10.0, 20.0)
-            .close();
-
-        let union = lhs
-            .boolean(CanvasBooleanOp::Union, &rhs)
-            .expect("boolean union should succeed");
-        let union_bounds = union.control_bounds().expect("union bounds");
-        assert_eq!(union_bounds.min.x, 0.0);
-        assert_eq!(union_bounds.max.x, 30.0);
-    }
-
-    #[test]
-    fn boolean_difference_rejects_open_subpaths() {
-        let lhs = PathBuilder::new().move_to(0.0, 0.0).line_to(10.0, 0.0);
-        let rhs = PathBuilder::new()
-            .move_to(0.0, 0.0)
-            .line_to(10.0, 0.0)
-            .line_to(10.0, 10.0)
-            .close();
-
-        assert!(lhs.difference(&rhs).is_err());
     }
 
     #[test]
@@ -3564,42 +3998,21 @@ mod tests {
     }
 
     #[test]
-    fn fill_and_stroke_tessellate_separately() {
-        let path = PathBuilder::new()
-            .move_to(0.0, 0.0)
-            .line_to(40.0, 0.0)
-            .line_to(40.0, 30.0)
-            .line_to(0.0, 30.0)
-            .close()
-            .to_lyon_path();
-
-        assert!(super::tessellate_fill(
-            &path,
-            &CanvasBrush::Solid(Color::WHITE),
-            super::CanvasFillRule::NonZero,
-            1.0,
-            Point::ZERO,
-            super::CanvasClipContext::default()
-        )
-        .is_some());
-        assert!(super::tessellate_stroke(
-            &path,
-            &CanvasStroke::new(dp(4.0), Color::WHITE),
-            1.0,
-            Point::ZERO,
-            super::CanvasClipContext::default()
-        )
-        .is_some());
-    }
-
-    #[test]
     fn rounded_rect_fill_prefers_non_mesh_fast_path() {
-        let path = CanvasPath::new(1_u64, PathBuilder::new().rounded_rect(0.0, 0.0, 80.0, 40.0, 12.0))
-            .fill(Color::WHITE);
-        let fill = path.fill.as_ref().map(crate::ui::layout::Value::resolve);
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(1_u64)
+                .set_fill(Color::WHITE)
+                .fill_round_rect(0.0, 0.0, 80.0, 40.0, 12.0);
+        });
+        let item = scene.items().first().expect("rounded rect item should exist");
+        let super::CanvasItem::Path(path) = item else {
+            panic!("rounded rect should record as a path");
+        };
+        let fill = path.fill.as_ref().map(Value::resolve);
 
         let output = tessellate_axis_aligned_rounded_rect(
-            &path,
+            path,
             Point::ZERO,
             super::CanvasClipContext::default(),
             fill.as_ref(),
@@ -3611,5 +4024,90 @@ mod tests {
         assert!(output.meshes.is_empty());
         assert_eq!(output.commands.len(), 1);
         assert!(matches!(output.commands[0], crate::ui::widget::RenderCommand::Shape(_)));
+    }
+
+    #[test]
+    fn canvas_recorder_auto_ids_are_stable() {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas.fill_rect(0.0, 0.0, 20.0, 20.0);
+            canvas.draw_text(Rect::new(0.0, 0.0, 40.0, 20.0), "hello");
+            canvas.stroke_circle(20.0, 20.0, 8.0);
+        });
+        let rendered = rendered_items(&scene);
+
+        assert_eq!(rendered[0].item_id, 1_u64.into());
+        assert_eq!(rendered[1].item_id, 2_u64.into());
+        assert_eq!(rendered[2].item_id, 3_u64.into());
+    }
+
+    #[test]
+    fn canvas_recorder_save_restore_restores_state() {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas.set_opacity(0.25).translate(10.0, 5.0);
+            canvas.save();
+            canvas.set_opacity(0.9).translate(50.0, 0.0);
+            canvas.fill_rect(0.0, 0.0, 10.0, 10.0);
+            canvas.restore();
+            canvas.fill_rect(0.0, 0.0, 10.0, 10.0);
+        });
+        let rendered = rendered_items(&scene);
+        let first_bounds = rendered[0].hit_bounds.expect("first bounds");
+        let second_bounds = rendered[1].hit_bounds.expect("second bounds");
+        assert!(first_bounds.min_x > second_bounds.min_x);
+    }
+
+    #[test]
+    fn canvas_recorder_clip_scopes_items_inside_current_frame() {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas.save();
+            canvas.rect(0.0, 0.0, 40.0, 40.0).clip();
+            canvas.fill_rect(10.0, 10.0, 20.0, 20.0);
+            canvas.restore();
+            canvas.fill_rect(50.0, 0.0, 20.0, 20.0);
+        });
+        let rendered = rendered_items(&scene);
+
+        assert!(matches!(
+            rendered[0].output.commands.first(),
+            Some(RenderCommand::CanvasComposite(_))
+        ));
+        assert_eq!(rendered.len(), 2);
+    }
+
+    #[test]
+    fn canvas_recorder_shortcuts_match_manual_paths() {
+        let shortcut = CanvasRecorder::build(|canvas| {
+            canvas.fill_round_rect(0.0, 0.0, 80.0, 40.0, 12.0);
+        });
+        let manual = CanvasRecorder::build(|canvas| {
+            canvas.begin_path();
+            canvas.rounded_rect(0.0, 0.0, 80.0, 40.0, 12.0);
+            canvas.fill();
+        });
+
+        assert_eq!(
+            canvas_scene_bounds(&shortcut).expect("shortcut bounds"),
+            canvas_scene_bounds(&manual).expect("manual bounds")
+        );
+    }
+
+    #[test]
+    fn canvas_text_overflow_ellipsis_can_be_configured() {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas
+                .set_paragraph_style(super::CanvasParagraphStyle {
+                    overflow: CanvasTextOverflow::Ellipsis,
+                    ..Default::default()
+                })
+                .draw_text(Rect::new(0.0, 0.0, 60.0, 20.0), "hello");
+        });
+        let rendered = rendered_items(&scene);
+        let text = rendered[0]
+            .output
+            .texts
+            .first()
+            .expect("text primitive should exist");
+
+        assert_eq!(text.overflow, CanvasTextOverflow::Ellipsis);
     }
 }

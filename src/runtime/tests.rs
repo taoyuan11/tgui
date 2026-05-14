@@ -20,9 +20,9 @@ use crate::ui::layout::{Axis, Overflow};
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::{dp, Dp, UnitContext};
 use crate::ui::widget::{
-    Button, Canvas, CanvasItem, CanvasMouseButton, CanvasPath, CanvasPointerEvent, CanvasShadow,
-    CanvasStroke, Checkbox, ContainerStyle, CursorStyle, Flex, HitInteraction, Input, PathBuilder,
-    Point, Rect, Select, SelectOption, Text, TextEditState, Textarea, WidgetTree,
+    Button, Canvas, CanvasMouseButton, CanvasPointerEvent, CanvasRecorder, CanvasShadow,
+    CanvasStroke, Checkbox, ContainerStyle, CursorStyle, Flex, HitInteraction, Input, Point,
+    Rect, Select, SelectOption, Text, TextEditState, Textarea, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1125,18 +1125,18 @@ fn canvas_items_dependency_update_preserves_cached_layout_shell() {
     let expanded = context.state(false);
     let tree = WidgetTree::new(Canvas::new(expanded.signal().map(|expanded| {
         let width = if expanded { 96.0 } else { 48.0 };
-        vec![CanvasItem::Path(
-            CanvasPath::new(
-                1_u64,
-                PathBuilder::new()
-                    .move_to(0.0, 0.0)
-                    .line_to(width, 0.0)
-                    .line_to(width, 24.0)
-                    .line_to(0.0, 24.0)
-                    .close(),
-            )
-            .fill(Color::WHITE),
-        )]
+        CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(1_u64)
+                .set_fill(Color::WHITE)
+                .begin_path()
+                .move_to(0.0, 0.0)
+                .line_to(width, 0.0)
+                .line_to(width, 24.0)
+                .line_to(0.0, 24.0)
+                .close_path()
+                .fill();
+        })
     })));
     let mut handler = test_handler(Some(tree), invalidation);
 
@@ -4000,10 +4000,12 @@ fn mouse_wheel_scrolls_stack_wrapped_grid_of_canvas_cards() {
     let invalidation = InvalidationSignal::new();
     let card = || {
         Stack::new().height(dp(180.0)).child(
-            Canvas::new(vec![CanvasItem::Path(
-                CanvasPath::new(1_u64, PathBuilder::new().rect(0.0, 0.0, 80.0, 80.0))
-                    .fill(Color::hexa(0x1D4ED8FF)),
-            )])
+            Canvas::new(CanvasRecorder::build(|canvas| {
+                canvas
+                    .next_item_id(1_u64)
+                    .set_fill(Color::hexa(0x1D4ED8FF))
+                    .fill_rect(0.0, 0.0, 80.0, 80.0);
+            }))
             .size(dp(120.0), dp(120.0)),
         )
     };
@@ -4735,18 +4737,12 @@ impl crate::foundation::view_model::ViewModel for CanvasEventVm {
 fn canvas_item_hover_dispatches_canvas_pointer_payload() {
     let invalidation = InvalidationSignal::new();
     let tree = WidgetTree::new(
-        Canvas::new(vec![CanvasItem::Path(
-            CanvasPath::new(
-                7_u64,
-                PathBuilder::new()
-                    .move_to(10.0, 10.0)
-                    .line_to(60.0, 10.0)
-                    .line_to(60.0, 40.0)
-                    .line_to(10.0, 40.0)
-                    .close(),
-            )
-            .fill(Color::WHITE),
-        )])
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(7_u64)
+                .set_fill(Color::WHITE)
+                .fill_rect(10.0, 10.0, 50.0, 30.0);
+        }))
         .size(dp(100.0), dp(80.0))
         .on_item_mouse_move(ValueCommand::new(|vm: &mut CanvasEventVm, event| {
             vm.hover_events.push(event);
@@ -4777,18 +4773,12 @@ fn canvas_item_hover_dispatches_canvas_pointer_payload() {
 fn canvas_item_click_takes_priority_over_widget_click() {
     let invalidation = InvalidationSignal::new();
     let tree = WidgetTree::new(
-        Canvas::new(vec![CanvasItem::Path(
-            CanvasPath::new(
-                11_u64,
-                PathBuilder::new()
-                    .move_to(10.0, 10.0)
-                    .line_to(60.0, 10.0)
-                    .line_to(60.0, 40.0)
-                    .line_to(10.0, 40.0)
-                    .close(),
-            )
-            .fill(Color::WHITE),
-        )])
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(11_u64)
+                .set_fill(Color::WHITE)
+                .fill_rect(10.0, 10.0, 50.0, 30.0);
+        }))
         .size(dp(100.0), dp(80.0))
         .on_click(Command::new(|vm: &mut CanvasEventVm| {
             vm.widget_clicks += 1;
@@ -4818,18 +4808,12 @@ fn canvas_item_click_takes_priority_over_widget_click() {
 fn canvas_item_mouse_down_up_wheel_and_drag_dispatch() {
     let invalidation = InvalidationSignal::new();
     let tree = WidgetTree::new(
-        Canvas::new(vec![CanvasItem::Path(
-            CanvasPath::new(
-                12_u64,
-                PathBuilder::new()
-                    .move_to(10.0, 10.0)
-                    .line_to(60.0, 10.0)
-                    .line_to(60.0, 40.0)
-                    .line_to(10.0, 40.0)
-                    .close(),
-            )
-            .fill(Color::WHITE),
-        )])
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(12_u64)
+                .set_fill(Color::WHITE)
+                .fill_rect(10.0, 10.0, 50.0, 30.0);
+        }))
         .size(dp(100.0), dp(80.0))
         .on_item_mouse_down(ValueCommand::new(|vm: &mut CanvasEventVm, _event| {
             vm.mouse_downs += 1;
@@ -4869,16 +4853,51 @@ fn canvas_item_mouse_down_up_wheel_and_drag_dispatch() {
 }
 
 #[test]
+fn canvas_recorder_items_preserve_item_interaction_dispatch() {
+    let invalidation = InvalidationSignal::new();
+    let items = CanvasRecorder::build(|canvas| {
+        canvas
+            .next_item_id(33_u64)
+            .set_fill(Color::WHITE)
+            .fill_rect(10.0, 10.0, 50.0, 30.0);
+    });
+    let tree = WidgetTree::new(
+        Canvas::new(items)
+            .size(dp(100.0), dp(80.0))
+            .on_item_click(ValueCommand::new(|vm: &mut CanvasEventVm, event| {
+                vm.hover_events.push(event);
+                vm.clicks += 1;
+            })),
+    );
+    let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+    handler.cursor_position = Some(Point::new(dp(20.0), dp(20.0)));
+
+    handler.handle_mouse_press(
+        handler.viewport_rect(),
+        Instant::now(),
+        CanvasMouseButton::Left,
+    );
+
+    let view_model = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!(view_model.clicks, 1);
+    assert_eq!(view_model.hover_events[0].item_id, 33_u64.into());
+}
+
+#[test]
 fn dashed_canvas_item_hit_testing_skips_gaps() {
     let make_tree = || {
         WidgetTree::new(
-            Canvas::new(vec![CanvasItem::Path(
-                CanvasPath::new(
-                    21_u64,
-                    PathBuilder::new().move_to(10.0, 20.0).line_to(90.0, 20.0),
-                )
-                .stroke(CanvasStroke::new(dp(6.0), Color::WHITE).dash([dp(10.0), dp(10.0)])),
-            )])
+            Canvas::new(CanvasRecorder::build(|canvas| {
+                canvas
+                    .next_item_id(21_u64)
+                    .set_stroke(
+                        CanvasStroke::new(dp(6.0), Color::WHITE).dash([dp(10.0), dp(10.0)]),
+                    )
+                    .draw_line(10.0, 20.0, 90.0, 20.0);
+            }))
             .size(dp(100.0), dp(60.0))
             .on_item_mouse_move(ValueCommand::new(
                 |vm: &mut CanvasEventVm, event| {
@@ -4920,23 +4939,17 @@ fn dashed_canvas_item_hit_testing_skips_gaps() {
 fn canvas_shadow_does_not_extend_item_hit_region() {
     let invalidation = InvalidationSignal::new();
     let tree = WidgetTree::new(
-        Canvas::new(vec![CanvasItem::Path(
-            CanvasPath::new(
-                31_u64,
-                PathBuilder::new()
-                    .move_to(10.0, 10.0)
-                    .line_to(40.0, 10.0)
-                    .line_to(40.0, 40.0)
-                    .line_to(10.0, 40.0)
-                    .close(),
-            )
-            .fill(Color::WHITE)
-            .shadow(CanvasShadow::new(
-                Color::BLACK,
-                Point::new(18.0, 0.0),
-                dp(8.0),
-            )),
-        )])
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(31_u64)
+                .set_fill(Color::WHITE)
+                .set_shadow(CanvasShadow::new(
+                    Color::BLACK,
+                    Point::new(18.0, 0.0),
+                    dp(8.0),
+                ))
+                .fill_rect(10.0, 10.0, 30.0, 30.0);
+        }))
         .size(dp(100.0), dp(80.0))
         .on_item_mouse_move(ValueCommand::new(|vm: &mut CanvasEventVm, event| {
             vm.hover_events.push(event);

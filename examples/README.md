@@ -54,11 +54,10 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 自定义绘制示例。演示：
 
 - `Canvas`
-- `PathBuilder`
-- `CanvasPath`
+- `CanvasRecorder`
 - 线性渐变 / 径向渐变
-- 描边、阴影
-- 布尔运算路径
+- 描边、阴影、混合模式、裁剪
+- 文本省略与图片绘制
 - 画布命中与点击事件
 
 适合做图形编辑、可视化、流程图或定制图表表面。

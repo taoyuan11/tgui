@@ -22,14 +22,12 @@ pub use background::{
 };
 pub use button::Button;
 pub use canvas::{
-    Canvas, CanvasBlendMode, CanvasBooleanOp, CanvasBrush, CanvasClip, CanvasClipShape,
-    CanvasDragEvent, CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasImage, CanvasItem,
-    CanvasItemId, CanvasItemStyle, CanvasLayer, CanvasLinearGradient, CanvasMask,
-    CanvasMouseButton, CanvasMouseEvent, CanvasParagraphStyle, CanvasPath, CanvasPathOpError,
-    CanvasPointerEvent, CanvasRadialGradient, CanvasShadow, CanvasStroke, CanvasStrokeAlignment,
-    CanvasStrokeCap, CanvasStrokeJoin, CanvasSvgPathError, CanvasText, CanvasTextHorizontalAlign,
-    CanvasTextOverflow, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap,
-    CanvasTransform2D, CanvasWheelEvent, PathBuilder,
+    Canvas, CanvasBlendMode, CanvasBrush, CanvasDragEvent, CanvasGradientStop, CanvasItemId,
+    CanvasLinearGradient, CanvasMouseButton, CanvasMouseEvent, CanvasParagraphStyle,
+    CanvasPointerEvent, CanvasRadialGradient, CanvasRecorder, CanvasScene, CanvasShadow,
+    CanvasStroke, CanvasStrokeAlignment, CanvasStrokeCap, CanvasStrokeJoin, CanvasSvgPathError,
+    CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextStyle, CanvasTextVerticalAlign,
+    CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent,
 };
 pub use checkbox::Checkbox;
 pub(crate) use common::{

@@ -30,7 +30,7 @@ use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface as PublicVideoSurface;
 
-use super::canvas::{canvas_bounds, CanvasClipContext, CanvasItem};
+use super::canvas::{canvas_scene_bounds, tessellate_canvas_scene_items, CanvasScene};
 #[cfg(test)]
 use super::common::RenderedWidgetScene;
 use super::common::{
@@ -147,7 +147,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         image: super::image::Image,
     },
     Canvas {
-        items: Value<Vec<CanvasItem>>,
+        scene: Value<CanvasScene>,
         item_interactions: super::common::CanvasItemInteractionHandlers<VM>,
     },
     #[cfg(feature = "video")]
@@ -218,7 +218,7 @@ pub(crate) enum LifecycleWidgetKind {
         image: super::image::Image,
     },
     Canvas {
-        items: Value<Vec<CanvasItem>>,
+        scene: Value<CanvasScene>,
     },
     #[cfg(feature = "video")]
     VideoSurface {
@@ -321,10 +321,10 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 image: image.clone(),
             },
             Self::Canvas {
-                items,
+                scene,
                 item_interactions,
             } => Self::Canvas {
-                items: items.clone(),
+                scene: scene.clone(),
                 item_interactions: item_interactions.clone(),
             },
             #[cfg(feature = "video")]
@@ -439,8 +439,8 @@ impl Clone for LifecycleWidgetKind {
             Self::Image { image } => Self::Image {
                 image: image.clone(),
             },
-            Self::Canvas { items } => Self::Canvas {
-                items: items.clone(),
+            Self::Canvas { scene } => Self::Canvas {
+                scene: scene.clone(),
             },
             #[cfg(feature = "video")]
             Self::VideoSurface { video, style } => Self::VideoSurface {

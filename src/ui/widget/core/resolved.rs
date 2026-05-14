@@ -202,10 +202,10 @@ fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> LifecycleWidgetKi
             freeze_image(&mut image);
             LifecycleWidgetKind::Image { image }
         }
-        ResolvedWidgetKind::Canvas { items, .. } => {
-            let mut items = items.clone();
-            freeze_value(&mut items);
-            LifecycleWidgetKind::Canvas { items }
+        ResolvedWidgetKind::Canvas { scene, .. } => {
+            let mut scene = scene.clone();
+            freeze_value(&mut scene);
+            LifecycleWidgetKind::Canvas { scene }
         }
         #[cfg(feature = "video")]
         ResolvedWidgetKind::VideoSurface { video, style } => {
@@ -446,12 +446,12 @@ impl<VM> PartialEq for ResolvedWidgetKind<VM> {
             }
             (
                 Self::Canvas {
-                    items: left_items, ..
+                    scene: left_scene, ..
                 },
                 Self::Canvas {
-                    items: right_items, ..
+                    scene: right_scene, ..
                 },
-            ) => left_items == right_items,
+            ) => left_scene == right_scene,
             #[cfg(feature = "video")]
             (
                 Self::VideoSurface {
@@ -656,7 +656,7 @@ impl PartialEq for LifecycleWidgetKind {
                     && left.fit == right.fit
                     && left.cursor_style == right.cursor_style
             }
-            (Self::Canvas { items: left }, Self::Canvas { items: right }) => left == right,
+            (Self::Canvas { scene: left }, Self::Canvas { scene: right }) => left == right,
             #[cfg(feature = "video")]
             (
                 Self::VideoSurface {
@@ -829,9 +829,9 @@ impl<VM> ResolvedElement<VM> {
                 id: self.id,
                 image: image.clone(),
             },
-            ResolvedWidgetKind::Canvas { items, .. } => MeasureContext::Canvas {
+            ResolvedWidgetKind::Canvas { scene, .. } => MeasureContext::Canvas {
                 id: self.id,
-                items: items.clone(),
+                scene: scene.clone(),
             },
             #[cfg(feature = "video")]
             ResolvedWidgetKind::VideoSurface { video, .. } => MeasureContext::VideoSurface {
@@ -2082,10 +2082,10 @@ impl<VM> ResolvedElement<VM> {
                 );
             }
             ResolvedWidgetKind::Canvas {
-                items,
+                scene,
                 item_interactions,
             } => {
-                let items = items.resolve();
+                let scene = scene.resolve();
                 let padding = self
                     .layout
                     .padding
@@ -2120,25 +2120,23 @@ impl<VM> ResolvedElement<VM> {
                     && !visual_context.clip_rect.is_empty()
                     && canvas_visible
                 {
-                    for item in &items {
-                        let rendered = item.tessellate(
-                            canvas_origin,
-                            opacity,
-                            CanvasClipContext {
-                                clip_rect: canvas_clip,
-                                clip_mask: canvas_clip_mask,
-                            },
-                            context.media,
-                            context.units,
-                        );
-                        let meshes = rendered.meshes;
-                        for command in rendered.commands {
+                    for rendered in tessellate_canvas_scene_items(
+                        &scene,
+                        canvas_origin,
+                        opacity,
+                        canvas_clip,
+                        canvas_clip_mask,
+                        context.media,
+                        context.units,
+                    ) {
+                        let meshes = rendered.output.meshes;
+                        for command in rendered.output.commands {
                             computed.scene.push_render_command(command);
                         }
-                        for texture in rendered.textures {
+                        for texture in rendered.output.textures {
                             computed.scene.push_texture(texture);
                         }
-                        for text in rendered.texts {
+                        for text in rendered.output.texts {
                             computed.scene.push_text(text);
                         }
                         for mesh in &meshes {
@@ -2146,7 +2144,7 @@ impl<VM> ResolvedElement<VM> {
                         }
 
                         if item_interactions.has_any() {
-                            if let Some(bounds) = item.hit_bounds() {
+                            if let Some(bounds) = rendered.hit_bounds {
                                 let triangles = meshes
                                     .iter()
                                     .flat_map(|mesh| mesh.triangles.iter().copied())
@@ -2167,9 +2165,9 @@ impl<VM> ResolvedElement<VM> {
                                     geometry,
                                     interaction: HitInteraction::CanvasItem {
                                         id: self.id,
-                                        item_id: item.id(),
+                                        item_id: rendered.item_id,
                                         item_interactions: item_interactions.clone(),
-                                        cursor_style: item.style().cursor,
+                                        cursor_style: rendered.cursor,
                                         canvas_origin,
                                         item_origin: Point::new(
                                             canvas_frame.x + bounds.min_x,
