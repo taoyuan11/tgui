@@ -7,6 +7,8 @@ pub(super) struct RendererTargets {
     pub(super) scene_target: Option<OffscreenTarget>,
     pub(super) blur_target: Option<OffscreenTarget>,
     pub(super) blur_scratch_target: Option<OffscreenTarget>,
+    pub(super) composite_target: Option<OffscreenTarget>,
+    pub(super) composite_mask_target: Option<OffscreenTarget>,
 }
 
 impl RendererTargets {
@@ -23,6 +25,16 @@ impl RendererTargets {
                 device,
                 config,
                 "tgui-blur-scratch-target",
+            ),
+            composite_target: surface::create_offscreen_target(
+                device,
+                config,
+                "tgui-composite-target",
+            ),
+            composite_mask_target: surface::create_offscreen_target(
+                device,
+                config,
+                "tgui-composite-mask-target",
             ),
         }
     }
@@ -43,6 +55,13 @@ impl Renderer {
             &self.device,
             &self.config,
             "tgui-blur-scratch-target",
+        );
+        self.composite_target =
+            surface::create_offscreen_target(&self.device, &self.config, "tgui-composite-target");
+        self.composite_mask_target = surface::create_offscreen_target(
+            &self.device,
+            &self.config,
+            "tgui-composite-mask-target",
         );
     }
 

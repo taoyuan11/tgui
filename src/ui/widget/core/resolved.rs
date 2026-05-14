@@ -2101,6 +2101,7 @@ impl<VM> ResolvedElement<VM> {
                     .unwrap_or(Insets::ZERO);
                 let canvas_frame = background_frame.inset(padding);
                 let canvas_clip = primitive_clip.and_then(|clip| clip.intersect(canvas_frame));
+                let canvas_visible = primitive_clip.is_none() || canvas_clip.is_some();
                 let canvas_clip_mask = if background_radius > 0.0
                     && canvas_frame.width > Dp::ZERO
                     && canvas_frame.height > Dp::ZERO
@@ -2114,7 +2115,11 @@ impl<VM> ResolvedElement<VM> {
                 };
                 let canvas_origin = Point::new(canvas_frame.x, canvas_frame.y);
 
-                if canvas_frame.width > Dp::ZERO && canvas_frame.height > Dp::ZERO {
+                if canvas_frame.width > Dp::ZERO
+                    && canvas_frame.height > Dp::ZERO
+                    && !visual_context.clip_rect.is_empty()
+                    && canvas_visible
+                {
                     for item in &items {
                         let rendered = item.tessellate(
                             canvas_origin,
@@ -2127,6 +2132,9 @@ impl<VM> ResolvedElement<VM> {
                             context.units,
                         );
                         let meshes = rendered.meshes;
+                        for command in rendered.commands {
+                            computed.scene.push_render_command(command);
+                        }
                         for texture in rendered.textures {
                             computed.scene.push_texture(texture);
                         }

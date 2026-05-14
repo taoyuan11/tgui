@@ -3910,6 +3910,62 @@ fn mouse_wheel_starts_immediately_and_keeps_smooth_target() {
 }
 
 #[test]
+fn mouse_wheel_scrolls_stack_wrapped_grid_of_canvas_cards() {
+    let invalidation = InvalidationSignal::new();
+    let card = || {
+        Stack::new().height(dp(180.0)).child(
+            Canvas::new(vec![CanvasItem::Path(
+                CanvasPath::new(1_u64, PathBuilder::new().rect(0.0, 0.0, 80.0, 80.0))
+                    .fill(Color::hexa(0x1D4ED8FF)),
+            )])
+            .size(dp(120.0), dp(120.0)),
+        )
+    };
+    let scroller: Element<TestVm> = Stack::new()
+        .size(dp(320.0), dp(240.0))
+        .overflow_y(Overflow::Scroll)
+        .child(
+            crate::ui::widget::Grid::columns([
+                crate::ui::layout::fr(1.0),
+                crate::ui::layout::fr(1.0),
+            ])
+            .height(dp(780.0))
+            .gap(dp(12.0))
+            .child(card())
+            .child(card())
+            .child(card())
+            .child(card()),
+        )
+        .into();
+    let scroller_id = scroller.id;
+    let tree = WidgetTree::new(scroller);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let region = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == scroller_id)
+        .copied()
+        .expect("scroll region should exist");
+
+    handler.cursor_position = Some(Point {
+        x: region.visible_frame.x + dp(24.0),
+        y: region.visible_frame.y + dp(24.0),
+    });
+
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -2.0)));
+    assert!(
+        handler
+            .scroll_states
+            .get(&scroller_id)
+            .map(|offset| offset.y)
+            .unwrap_or(Dp::ZERO)
+            > Dp::ZERO
+            || handler.smooth_scroll_states.contains_key(&scroller_id)
+    );
+}
+
+#[test]
 fn textarea_click_after_prefocus_scroll_keeps_scrolled_viewport() {
     let invalidation = InvalidationSignal::new();
     let value = (0..8)

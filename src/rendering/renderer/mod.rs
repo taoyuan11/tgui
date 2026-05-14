@@ -47,10 +47,12 @@ pub struct Renderer {
     text_pipeline: wgpu::RenderPipeline,
     backdrop_blur_pipeline: wgpu::RenderPipeline,
     backdrop_composite_pipeline: wgpu::RenderPipeline,
+    canvas_composite_pipeline: wgpu::RenderPipeline,
     text_bind_group_layout: wgpu::BindGroupLayout,
     mesh_clip_bind_group_layout: wgpu::BindGroupLayout,
     backdrop_blur_bind_group_layout: wgpu::BindGroupLayout,
     backdrop_composite_bind_group_layout: wgpu::BindGroupLayout,
+    canvas_composite_bind_group_layout: wgpu::BindGroupLayout,
     text_sampler: wgpu::Sampler,
     size: PhysicalSize<u32>,
     scale_factor: f32,
@@ -59,6 +61,8 @@ pub struct Renderer {
     scene_target: Option<OffscreenTarget>,
     blur_target: Option<OffscreenTarget>,
     blur_scratch_target: Option<OffscreenTarget>,
+    composite_target: Option<OffscreenTarget>,
+    composite_mask_target: Option<OffscreenTarget>,
     clear_color: TguiColor,
     text_system: TextSystem,
     text_cache: HashMap<TextCacheKey, TextCacheEntry>,
@@ -70,11 +74,13 @@ struct TextSystem {
     swash_cache: SwashCache,
 }
 
+#[derive(Clone)]
 struct MultisampleTarget {
     _texture: wgpu::Texture,
-    view: wgpu::TextureView,
+    _view: wgpu::TextureView,
 }
 
+#[derive(Clone)]
 struct OffscreenTarget {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -102,6 +108,9 @@ struct TextCacheKey {
     line_height_bits: u32,
     letter_spacing_bits: u32,
     font_weight: u16,
+    wrap_mode: u8,
+    horizontal_align: u8,
+    vertical_align: u8,
 }
 
 #[repr(C)]
@@ -111,6 +120,15 @@ struct BlurUniform {
     texel_size: [f32; 2],
     radius: f32,
     _pad: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct CompositeUniform {
+    data0: [f32; 4],
+    data1: [f32; 4],
+    data2: [f32; 4],
+    data3: [f32; 4],
 }
 
 impl Renderer {
@@ -193,6 +211,12 @@ impl Renderer {
                 include_str!("../shader/backdrop_composite.wgsl").into(),
             ),
         });
+        let canvas_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tgui-canvas-composite-shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../shader/canvas_composite.wgsl").into(),
+            ),
+        });
 
         let rect_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("tgui-rect-pipeline-layout"),
@@ -219,10 +243,7 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: msaa_sample_count,
-                ..Default::default()
-            },
+            multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &rect_shader,
                 entry_point: Some("fs_main"),
@@ -263,10 +284,7 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: msaa_sample_count,
-                ..Default::default()
-            },
+            multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &brush_shader,
                 entry_point: Some("fs_main"),
@@ -321,10 +339,7 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: msaa_sample_count,
-                ..Default::default()
-            },
+            multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &mesh_shader,
                 entry_point: Some("fs_main"),
@@ -427,6 +442,58 @@ impl Renderer {
                     },
                 ],
             });
+        let canvas_composite_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("tgui-canvas-composite-bind-group-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
 
         let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("tgui-text-pipeline-layout"),
@@ -453,10 +520,7 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: msaa_sample_count,
-                ..Default::default()
-            },
+            multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &text_shader,
                 entry_point: Some("fs_main"),
@@ -586,6 +650,46 @@ impl Renderer {
                 multiview_mask: None,
                 cache: None,
             });
+        let canvas_composite_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("tgui-canvas-composite-pipeline-layout"),
+                bind_group_layouts: &[Some(&canvas_composite_bind_group_layout)],
+                immediate_size: 0,
+            });
+        let canvas_composite_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("tgui-canvas-composite-pipeline"),
+                layout: Some(&canvas_composite_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &backdrop_composite_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[CompositeVertex::layout()],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &canvas_composite_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
 
         let text_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("tgui-text-sampler"),
@@ -618,10 +722,12 @@ impl Renderer {
             text_pipeline,
             backdrop_blur_pipeline,
             backdrop_composite_pipeline,
+            canvas_composite_pipeline,
             text_bind_group_layout,
             mesh_clip_bind_group_layout,
             backdrop_blur_bind_group_layout,
             backdrop_composite_bind_group_layout,
+            canvas_composite_bind_group_layout,
             text_sampler,
             size,
             scale_factor,
@@ -630,6 +736,8 @@ impl Renderer {
             scene_target: targets.scene_target,
             blur_target: targets.blur_target,
             blur_scratch_target: targets.blur_scratch_target,
+            composite_target: targets.composite_target,
+            composite_mask_target: targets.composite_mask_target,
             clear_color,
             text_system: TextSystem {
                 font_system,

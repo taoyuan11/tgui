@@ -33,7 +33,9 @@ pub(super) fn push_media_texture_or_placeholder<VM>(
         computed.scene.push_texture(TexturePrimitive {
             texture: Arc::clone(texture),
             frame: target_frame,
+            quad: None,
             corner_radius: content_corner_radius,
+            opacity: 1.0,
             clip_rect,
             clip_mask,
         });
@@ -82,7 +84,9 @@ pub(super) fn push_background_media_texture<VM>(
         computed.scene.push_texture(TexturePrimitive {
             texture: Arc::clone(texture),
             frame: target_frame,
+            quad: None,
             corner_radius: content_corner_radius,
+            opacity: 1.0,
             clip_rect,
             clip_mask,
         });
@@ -112,7 +116,9 @@ pub(super) fn push_video_texture_or_placeholder<VM>(
         computed.scene.push_texture(TexturePrimitive {
             texture: Arc::clone(texture),
             frame: target_frame,
+            quad: None,
             corner_radius: content_corner_radius,
+            opacity: 1.0,
             clip_rect,
             clip_mask,
         });
@@ -314,6 +320,7 @@ pub(super) fn push_text_primitives(
     scene.push_text(TextPrimitive {
         content: content.clone(),
         frame: content_frame,
+        quad: None,
         color: color.with_alpha_factor(opacity),
         force_color: false,
         font_family: Some(primary_font.clone()),
@@ -321,6 +328,9 @@ pub(super) fn push_text_primitives(
         font_weight: text.font_weight.unwrap_or(default_style.weight),
         line_height,
         letter_spacing,
+        wrap: crate::ui::widget::CanvasTextWrap::Word,
+        horizontal_align: crate::ui::widget::CanvasTextHorizontalAlign::Start,
+        vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Start,
         clip_rect,
         clip_mask,
     });
@@ -621,6 +631,7 @@ pub(super) fn push_text_input_primitives(
                     layout.line_width(line_index).max(1.0),
                     line_height_value,
                 ),
+                quad: None,
                 color: text_color,
                 force_color: false,
                 font_family: font_family.clone(),
@@ -628,6 +639,9 @@ pub(super) fn push_text_input_primitives(
                 font_weight,
                 line_height,
                 letter_spacing,
+                wrap: crate::ui::widget::CanvasTextWrap::None,
+                horizontal_align: crate::ui::widget::CanvasTextHorizontalAlign::Start,
+                vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Start,
                 clip_rect: content_clip_rect,
                 clip_mask,
             });
@@ -636,6 +650,7 @@ pub(super) fn push_text_input_primitives(
         scene.push_text(TextPrimitive {
             content: display_content.as_ref().to_string(),
             frame: content_frame,
+            quad: None,
             color: text_color,
             force_color: false,
             font_family,
@@ -643,6 +658,9 @@ pub(super) fn push_text_input_primitives(
             font_weight,
             line_height,
             letter_spacing,
+            wrap: crate::ui::widget::CanvasTextWrap::Word,
+            horizontal_align: crate::ui::widget::CanvasTextHorizontalAlign::Start,
+            vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Start,
             clip_rect: content_clip_rect,
             clip_mask,
         });
@@ -1004,6 +1022,7 @@ pub(super) fn push_select_text(
     let primitive = TextPrimitive {
         content,
         frame: content_frame,
+        quad: None,
         color,
         force_color: false,
         font_family: Some(resolved.primary_font),
@@ -1011,6 +1030,9 @@ pub(super) fn push_select_text(
         font_weight: text.font_weight.unwrap_or(default_style.weight),
         line_height,
         letter_spacing,
+        wrap: crate::ui::widget::CanvasTextWrap::None,
+        horizontal_align: crate::ui::widget::CanvasTextHorizontalAlign::Start,
+        vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Start,
         clip_rect,
         clip_mask,
     };
@@ -1061,6 +1083,7 @@ pub(super) fn push_select_icon(
     scene.push_text(TextPrimitive {
         content: SELECT_ARROW_ICON.to_string(),
         frame: icon_frame,
+        quad: None,
         color: select_style.arrow.with_alpha_factor(opacity),
         force_color: true,
         font_family: Some(resolved.primary_font),
@@ -1068,6 +1091,9 @@ pub(super) fn push_select_icon(
         font_weight: select_style.text_style.weight,
         line_height,
         letter_spacing,
+        wrap: crate::ui::widget::CanvasTextWrap::None,
+        horizontal_align: crate::ui::widget::CanvasTextHorizontalAlign::Start,
+        vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Start,
         clip_rect,
         clip_mask,
     });
@@ -1215,6 +1241,7 @@ pub(super) fn push_checkbox_checkmark_primitives(
     scene.push_text(TextPrimitive {
         content: CHECKBOX_CHECKMARK_ICON.to_string(),
         frame: icon_frame,
+        quad: None,
         color: checkbox_style.checkmark.with_alpha_factor(opacity),
         force_color: true,
         font_family: Some(resolved.primary_font),
@@ -1222,6 +1249,9 @@ pub(super) fn push_checkbox_checkmark_primitives(
         font_weight: checkbox_style.text_style.weight,
         line_height,
         letter_spacing,
+        wrap: crate::ui::widget::CanvasTextWrap::None,
+        horizontal_align: crate::ui::widget::CanvasTextHorizontalAlign::Start,
+        vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Start,
         clip_rect,
         clip_mask,
     });

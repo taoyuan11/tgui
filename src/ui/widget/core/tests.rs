@@ -19,10 +19,13 @@ use crate::ui::widget::{
     BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient, BackgroundRadialGradient,
 };
 use crate::ui::widget::{
-    ButtonStyle, Canvas, CanvasItem, CanvasPath, CanvasStroke, CanvasStyle, Checkbox, ClipMask,
-    ContainerStyle, Element, Image, Input, InputStyle, PathBuilder, Point, Radio, RadioGroup,
-    RadioOption, ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack, Switch, SwitchStyle,
-    Text, TextEditState, TextWidgetStyle, Textarea, TextareaStyle, WidgetStateMap, WidgetTree,
+    ButtonStyle, Canvas, CanvasClip, CanvasClipShape, CanvasItem, CanvasLayer,
+    CanvasParagraphStyle, CanvasPath, CanvasStroke, CanvasStyle, CanvasText,
+    CanvasTextHorizontalAlign, CanvasTextVerticalAlign, CanvasTextWrap, CanvasTransform2D,
+    Checkbox, ClipMask, ContainerStyle, Element, Image, Input, InputStyle, PathBuilder, Point,
+    Radio, RadioGroup, RadioOption, ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack,
+    Switch, SwitchStyle, Text, TextEditState, TextWidgetStyle, Textarea, TextareaStyle,
+    WidgetStateMap, WidgetTree,
 };
 #[cfg(feature = "video")]
 use crate::video::backend::{
@@ -868,6 +871,252 @@ fn canvas_hit_testing_prefers_topmost_item() {
     ));
 }
 
+#[test]
+fn canvas_text_paragraph_style_is_carried_into_text_primitive() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Canvas::new(vec![CanvasItem::Text(
+            CanvasText::new(
+                1_u64,
+                Rect::new(0.0, 0.0, 160.0, 80.0),
+                "wrapped canvas text",
+            )
+            .paragraph_style(CanvasParagraphStyle {
+                wrap: CanvasTextWrap::Glyph,
+                horizontal_align: CanvasTextHorizontalAlign::Center,
+                vertical_align: CanvasTextVerticalAlign::End,
+                ..Default::default()
+            }),
+        )])
+        .size(dp(160.0), dp(80.0)),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 160.0, 80.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let text = rendered
+        .primitives
+        .texts
+        .first()
+        .expect("canvas text primitive should exist");
+    assert_eq!(text.wrap, CanvasTextWrap::Glyph);
+    assert_eq!(text.horizontal_align, CanvasTextHorizontalAlign::Center);
+    assert_eq!(text.vertical_align, CanvasTextVerticalAlign::End);
+}
+
+#[test]
+fn canvas_rotated_text_generates_transformed_quad() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Canvas::new(vec![CanvasItem::Text(
+            CanvasText::new(1_u64, Rect::new(20.0, 20.0, 80.0, 40.0), "rotate me")
+                .transform(CanvasTransform2D::rotate(0.5)),
+        )])
+        .size(dp(120.0), dp(120.0)),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 120.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let text = rendered
+        .primitives
+        .texts
+        .first()
+        .expect("canvas text should render");
+    assert!(text.quad.is_some());
+}
+
+#[test]
+fn canvas_clip_and_layer_emit_composite_commands() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Canvas::new(vec![
+            CanvasItem::Clip(CanvasClip::new(
+                1_u64,
+                CanvasClipShape::RoundedRect {
+                    rect: Rect::new(0.0, 0.0, 80.0, 80.0),
+                    radius: dp(12.0),
+                },
+                vec![CanvasItem::Path(
+                    CanvasPath::new(2_u64, PathBuilder::new().rect(0.0, 0.0, 80.0, 80.0))
+                        .fill(Color::WHITE),
+                )],
+            )),
+            CanvasItem::Layer(CanvasLayer::new(
+                3_u64,
+                vec![CanvasItem::Path(
+                    CanvasPath::new(4_u64, PathBuilder::new().rect(20.0, 20.0, 40.0, 40.0))
+                        .fill(Color::hexa(0x1D4ED8FF)),
+                )],
+            )),
+        ])
+        .size(dp(120.0), dp(120.0)),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 120.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let composite_count = rendered
+        .primitives
+        .commands
+        .iter()
+        .filter(|command| {
+            matches!(
+                command,
+                crate::ui::widget::RenderCommand::CanvasComposite(_)
+            )
+        })
+        .count();
+    assert!(composite_count >= 2);
+}
+
+#[test]
+fn canvas_composite_bounds_include_canvas_origin() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Stack::new().padding(Insets::all(dp(24.0))).child(
+            Canvas::new(vec![CanvasItem::Layer(CanvasLayer::new(
+                1_u64,
+                vec![CanvasItem::Path(
+                    CanvasPath::new(2_u64, PathBuilder::new().rect(10.0, 12.0, 40.0, 30.0))
+                        .fill(Color::hexa(0x1D4ED8FF)),
+                )],
+            ))])
+            .size(dp(120.0), dp(120.0)),
+        ),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 180.0, 180.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let composite = rendered
+        .primitives
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            crate::ui::widget::RenderCommand::CanvasComposite(primitive) => Some(primitive),
+            _ => None,
+        })
+        .expect("composite command should exist");
+
+    assert_eq!(composite.bounds.x, dp(34.0));
+    assert_eq!(composite.bounds.y, dp(36.0));
+}
+
+#[test]
+fn canvas_outside_clip_does_not_emit_composite_commands() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Stack::new()
+            .size(dp(120.0), dp(120.0))
+            .overflow_y(Overflow::Scroll)
+            .child(
+                Stack::new().height(dp(520.0)).child(
+                    Canvas::new(vec![CanvasItem::Layer(CanvasLayer::new(
+                        1_u64,
+                        vec![CanvasItem::Path(
+                            CanvasPath::new(2_u64, PathBuilder::new().rect(0.0, 0.0, 80.0, 80.0))
+                                .fill(Color::hexa(0x1D4ED8FF)),
+                        )],
+                    ))])
+                    .size(dp(120.0), dp(120.0))
+                    .top(dp(340.0)),
+                ),
+            ),
+    );
+
+    let mut scroll_offsets = HashMap::new();
+    scroll_offsets.insert(tree.root.id, Point::new(dp(0.0), dp(220.0)));
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &scroll_offsets,
+        Rect::new(0.0, 0.0, 120.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered.primitives.commands.iter().all(|command| !matches!(
+        command,
+        crate::ui::widget::RenderCommand::CanvasComposite(_)
+    )));
+}
+
 fn test_media() -> MediaManager {
     MediaManager::new(InvalidationSignal::new())
 }
@@ -1669,6 +1918,65 @@ fn scroll_content_bounds_include_container_bottom_padding() {
     assert_eq!(region.content_viewport, Rect::new(0.0, 0.0, 100.0, 100.0));
     assert_eq!(region.content_bounds.bottom(), dp(160.0));
     assert_eq!(region.max_offset().y, 60.0);
+}
+
+#[test]
+fn scroll_container_with_grid_of_canvas_cards_produces_vertical_scroll_range() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let card: Element<()> = Stack::new()
+        .height(dp(180.0))
+        .child(
+            Canvas::new(vec![CanvasItem::Path(
+                CanvasPath::new(1_u64, PathBuilder::new().rect(0.0, 0.0, 80.0, 80.0))
+                    .fill(Color::hexa(0x1D4ED8FF)),
+            )])
+            .size(dp(120.0), dp(120.0)),
+        )
+        .into();
+    let scroller: Element<()> = Stack::new()
+        .size(dp(320.0), dp(240.0))
+        .overflow_y(Overflow::Scroll)
+        .child(
+            crate::ui::widget::Grid::columns([
+                crate::ui::layout::fr(1.0),
+                crate::ui::layout::fr(1.0),
+            ])
+            .height(dp(780.0))
+            .gap(dp(12.0))
+            .child(card.clone())
+            .child(card.clone())
+            .child(card.clone())
+            .child(card),
+        )
+        .into();
+    let scroller_id = scroller.id;
+    let tree = WidgetTree::new(scroller);
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 320.0, 240.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let region = rendered
+        .scroll_regions
+        .into_iter()
+        .find(|region| region.id == scroller_id)
+        .expect("scroll region should exist");
+    assert!(region.max_offset().y > Dp::ZERO);
 }
 
 #[test]

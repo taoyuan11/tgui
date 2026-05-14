@@ -24,7 +24,8 @@ use crate::video::VideoSurface;
 
 use super::background::{BackgroundBrush, BackgroundGradientStop, BackgroundImage};
 use super::canvas::{
-    CanvasDragEvent, CanvasItem, CanvasItemId, CanvasMouseEvent, CanvasWheelEvent,
+    CanvasBlendMode, CanvasDragEvent, CanvasItem, CanvasItemId, CanvasMouseEvent,
+    CanvasTextHorizontalAlign, CanvasTextVerticalAlign, CanvasTextWrap, CanvasWheelEvent,
 };
 use super::image::Image;
 #[cfg(feature = "video")]
@@ -843,6 +844,7 @@ pub struct BackdropBlurPrimitive {
 pub struct TextPrimitive {
     pub content: String,
     pub frame: Rect,
+    pub quad: Option<[Point; 4]>,
     pub color: Color,
     pub force_color: bool,
     pub font_family: Option<String>,
@@ -850,6 +852,9 @@ pub struct TextPrimitive {
     pub font_weight: FontWeight,
     pub line_height: f32,
     pub letter_spacing: f32,
+    pub wrap: CanvasTextWrap,
+    pub horizontal_align: CanvasTextHorizontalAlign,
+    pub vertical_align: CanvasTextVerticalAlign,
     pub clip_rect: Option<Rect>,
     pub clip_mask: Option<ClipMask>,
 }
@@ -858,9 +863,22 @@ pub struct TextPrimitive {
 pub struct TexturePrimitive {
     pub texture: Arc<TextureFrame>,
     pub frame: Rect,
+    pub quad: Option<[Point; 4]>,
     pub corner_radius: f32,
+    pub opacity: f32,
     pub clip_rect: Option<Rect>,
     pub clip_mask: Option<ClipMask>,
+}
+
+#[derive(Clone)]
+pub struct CanvasCompositePrimitive {
+    pub bounds: Rect,
+    pub opacity: f32,
+    pub blend_mode: CanvasBlendMode,
+    pub clip_rect: Option<Rect>,
+    pub clip_mask: Option<ClipMask>,
+    pub content_commands: Arc<[RenderCommand]>,
+    pub mask_commands: Option<Arc<[RenderCommand]>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -894,6 +912,7 @@ pub struct MeshPrimitive {
 pub(crate) enum RenderCommand {
     BackdropBlur(BackdropBlurPrimitive),
     Brush(BrushPrimitive),
+    CanvasComposite(CanvasCompositePrimitive),
     Shape(RenderPrimitive),
     Texture(TexturePrimitive),
     Text(TextPrimitive),
@@ -904,6 +923,7 @@ pub(crate) enum RenderCommand {
 pub struct ScenePrimitives {
     pub backdrop_blurs: Vec<BackdropBlurPrimitive>,
     pub brushes: Vec<BrushPrimitive>,
+    pub canvas_composites: Vec<CanvasCompositePrimitive>,
     pub shapes: Vec<RenderPrimitive>,
     pub meshes: Vec<MeshPrimitive>,
     pub textures: Vec<TexturePrimitive>,
@@ -918,6 +938,18 @@ pub struct ScenePrimitives {
 }
 
 impl ScenePrimitives {
+    pub(crate) fn push_render_command(&mut self, command: RenderCommand) {
+        match command {
+            RenderCommand::BackdropBlur(primitive) => self.push_backdrop_blur(primitive),
+            RenderCommand::Brush(primitive) => self.push_brush(primitive),
+            RenderCommand::CanvasComposite(primitive) => self.push_canvas_composite(primitive),
+            RenderCommand::Shape(primitive) => self.push_shape(primitive),
+            RenderCommand::Texture(primitive) => self.push_texture(primitive),
+            RenderCommand::Text(primitive) => self.push_text(primitive),
+            RenderCommand::Mesh(primitive) => self.push_mesh(primitive),
+        }
+    }
+
     pub(crate) fn push_backdrop_blur(&mut self, primitive: BackdropBlurPrimitive) {
         self.backdrop_blurs.push(primitive);
         self.commands.push(RenderCommand::BackdropBlur(primitive));
@@ -926,6 +958,12 @@ impl ScenePrimitives {
     pub(crate) fn push_brush(&mut self, primitive: BrushPrimitive) {
         self.brushes.push(primitive.clone());
         self.commands.push(RenderCommand::Brush(primitive));
+    }
+
+    pub(crate) fn push_canvas_composite(&mut self, primitive: CanvasCompositePrimitive) {
+        self.canvas_composites.push(primitive.clone());
+        self.commands
+            .push(RenderCommand::CanvasComposite(primitive));
     }
 
     pub(crate) fn push_shape(&mut self, primitive: RenderPrimitive) {
@@ -969,6 +1007,8 @@ impl ScenePrimitives {
         self.backdrop_blurs
             .extend(other.backdrop_blurs.iter().copied());
         self.brushes.extend(other.brushes.iter().cloned());
+        self.canvas_composites
+            .extend(other.canvas_composites.iter().cloned());
         self.shapes.extend(other.shapes.iter().copied());
         self.meshes.extend(other.meshes.iter().cloned());
         self.textures.extend(other.textures.iter().cloned());

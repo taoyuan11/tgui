@@ -34,6 +34,9 @@ impl Renderer {
             line_height_bits: line_height.to_bits(),
             letter_spacing_bits: letter_spacing.to_bits(),
             font_weight: text.font_weight.to_raw(),
+            wrap_mode: wrap_mode_key(text),
+            horizontal_align: horizontal_align_key(text),
+            vertical_align: vertical_align_key(text),
         })
     }
 
@@ -88,10 +91,12 @@ impl Renderer {
             Metrics::new(font_size, line_height),
         );
         buffer.set_size(Some(width as f32), Some(height as f32));
-        buffer.set_wrap(cosmic_text::Wrap::WordOrGlyph);
+        buffer.set_wrap(text_wrap(text));
         let attrs = attrs_for_text(text, font_size, letter_spacing);
         buffer.set_text(&text.content, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.text_system.font_system, false);
+
+        let (offset_x, offset_y) = text_offsets(text, &buffer, width as f32, height as f32);
 
         let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
         let requested_rgba = text.color.to_rgba8();
@@ -100,6 +105,8 @@ impl Renderer {
             &mut self.text_system.swash_cache,
             color_to_text(text.color),
             |x, y, w, h, color| {
+                let x = x + offset_x;
+                let y = y + offset_y;
                 let mut rgba = color.as_rgba();
                 if text.force_color {
                     rgba[0] = requested_rgba[0];
@@ -209,6 +216,67 @@ fn attrs_for_text(text: &TextPrimitive, font_size: f32, letter_spacing: f32) -> 
         .family(family)
         .weight(text_weight(text.font_weight))
         .letter_spacing(letter_spacing / font_size.max(1.0))
+}
+
+fn text_wrap(text: &TextPrimitive) -> cosmic_text::Wrap {
+    match text.wrap {
+        crate::ui::widget::CanvasTextWrap::Word => cosmic_text::Wrap::WordOrGlyph,
+        crate::ui::widget::CanvasTextWrap::Glyph => cosmic_text::Wrap::Glyph,
+        crate::ui::widget::CanvasTextWrap::None => cosmic_text::Wrap::None,
+    }
+}
+
+fn text_offsets(text: &TextPrimitive, buffer: &Buffer, width: f32, height: f32) -> (i32, i32) {
+    let mut content_width = 0.0f32;
+    let mut content_height = 0.0f32;
+    for run in buffer.layout_runs() {
+        content_width = content_width.max(run.line_w.max(0.0));
+        content_height = content_height.max(run.line_top + run.line_height);
+    }
+    if content_height <= 0.0 {
+        content_height = text.line_height;
+    }
+
+    let offset_x = match text.horizontal_align {
+        crate::ui::widget::CanvasTextHorizontalAlign::Start => 0.0,
+        crate::ui::widget::CanvasTextHorizontalAlign::Center => {
+            ((width - content_width).max(0.0)) * 0.5
+        }
+        crate::ui::widget::CanvasTextHorizontalAlign::End => (width - content_width).max(0.0),
+    };
+    let offset_y = match text.vertical_align {
+        crate::ui::widget::CanvasTextVerticalAlign::Start => 0.0,
+        crate::ui::widget::CanvasTextVerticalAlign::Center => {
+            ((height - content_height).max(0.0)) * 0.5
+        }
+        crate::ui::widget::CanvasTextVerticalAlign::End => (height - content_height).max(0.0),
+    };
+
+    (offset_x.round() as i32, offset_y.round() as i32)
+}
+
+fn wrap_mode_key(text: &TextPrimitive) -> u8 {
+    match text.wrap {
+        crate::ui::widget::CanvasTextWrap::Word => 0,
+        crate::ui::widget::CanvasTextWrap::Glyph => 1,
+        crate::ui::widget::CanvasTextWrap::None => 2,
+    }
+}
+
+fn horizontal_align_key(text: &TextPrimitive) -> u8 {
+    match text.horizontal_align {
+        crate::ui::widget::CanvasTextHorizontalAlign::Start => 0,
+        crate::ui::widget::CanvasTextHorizontalAlign::Center => 1,
+        crate::ui::widget::CanvasTextHorizontalAlign::End => 2,
+    }
+}
+
+fn vertical_align_key(text: &TextPrimitive) -> u8 {
+    match text.vertical_align {
+        crate::ui::widget::CanvasTextVerticalAlign::Start => 0,
+        crate::ui::widget::CanvasTextVerticalAlign::Center => 1,
+        crate::ui::widget::CanvasTextVerticalAlign::End => 2,
+    }
 }
 
 fn text_weight(weight: FontWeight) -> Weight {

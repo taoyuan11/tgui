@@ -2,7 +2,7 @@ use wgpu::util::DeviceExt;
 
 use crate::foundation::error::TguiError;
 use crate::ui::unit::Dp;
-use crate::ui::widget::{BrushPrimitiveData, Rect, RenderCommand};
+use crate::ui::widget::{BrushPrimitiveData, CanvasCompositePrimitive, Rect, RenderCommand};
 
 use super::{
     physical_mesh_clip_mask_data, BrushVertex, CompositeVertex, MeshVertex, RectVertex, Renderer,
@@ -41,10 +41,15 @@ pub(super) struct PreparedBackdropBlur {
     pub(super) composite_vertex_count: u32,
 }
 
+pub(super) struct PreparedCanvasComposite {
+    pub(super) primitive: CanvasCompositePrimitive,
+}
+
 pub(super) enum PreparedCommand {
     BackdropBlur(PreparedBackdropBlur),
     Rect(PreparedRect),
     Brush(PreparedBrush),
+    CanvasComposite(PreparedCanvasComposite),
     Mesh(PreparedMesh),
     Sprite(PreparedSprite),
 }
@@ -119,6 +124,14 @@ impl Renderer {
                         vertex_count: vertices.len() as u32,
                     }));
                 }
+                RenderCommand::CanvasComposite(primitive) => {
+                    if primitive.bounds.width <= Dp::ZERO || primitive.bounds.height <= Dp::ZERO {
+                        continue;
+                    }
+                    prepared.push(PreparedCommand::CanvasComposite(PreparedCanvasComposite {
+                        primitive: primitive.clone(),
+                    }));
+                }
                 RenderCommand::Shape(primitive) => {
                     if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
                         continue;
@@ -189,15 +202,31 @@ impl Renderer {
                 }
                 RenderCommand::Texture(texture) => {
                     if let Some(bind_group) = self.texture_bind_group_for(&texture.texture)? {
-                        let vertices = TextVertex::quad(
-                            texture.frame,
-                            logical_width,
-                            logical_height,
-                            texture.corner_radius,
-                            texture.clip_mask,
-                            physical_width,
-                            physical_height,
-                            scale_factor,
+                        let vertices = texture.quad.map_or_else(
+                            || {
+                                TextVertex::quad(
+                                    texture.frame,
+                                    logical_width,
+                                    logical_height,
+                                    texture.corner_radius,
+                                    texture.clip_mask,
+                                    physical_width,
+                                    physical_height,
+                                    scale_factor,
+                                )
+                            },
+                            |quad| {
+                                TextVertex::transformed(
+                                    texture.frame,
+                                    quad,
+                                    texture.corner_radius,
+                                    texture.clip_mask,
+                                    physical_width,
+                                    physical_height,
+                                    scale_factor,
+                                    texture.opacity,
+                                )
+                            },
                         );
                         let vertex_buffer =
                             self.device
@@ -217,15 +246,31 @@ impl Renderer {
                 RenderCommand::Text(text) => {
                     if let Some(bind_group) = self.text_bind_group_for(text)? {
                         let snapped_frame = self.snap_text_rect(text.frame);
-                        let vertices = TextVertex::quad(
-                            snapped_frame,
-                            logical_width,
-                            logical_height,
-                            0.0,
-                            text.clip_mask,
-                            physical_width,
-                            physical_height,
-                            scale_factor,
+                        let vertices = text.quad.map_or_else(
+                            || {
+                                TextVertex::quad(
+                                    snapped_frame,
+                                    logical_width,
+                                    logical_height,
+                                    0.0,
+                                    text.clip_mask,
+                                    physical_width,
+                                    physical_height,
+                                    scale_factor,
+                                )
+                            },
+                            |quad| {
+                                TextVertex::transformed(
+                                    snapped_frame,
+                                    quad,
+                                    0.0,
+                                    text.clip_mask,
+                                    physical_width,
+                                    physical_height,
+                                    scale_factor,
+                                    1.0,
+                                )
+                            },
                         );
                         let vertex_buffer =
                             self.device

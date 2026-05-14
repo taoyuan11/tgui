@@ -117,7 +117,7 @@ pub(super) fn create_multisample_target(
 
     Some(MultisampleTarget {
         _texture: texture,
-        view,
+        _view: view,
     })
 }
 

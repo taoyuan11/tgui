@@ -55,6 +55,40 @@ fn physical_clip_mask_data(
         })
 }
 
+fn physical_clip_mask_at_position(
+    clip_mask: Option<ClipMask>,
+    position_physical: [f32; 2],
+    scale_factor: f32,
+) -> ClipMaskVertexData {
+    clip_mask
+        .map(|clip_mask| {
+            let rect = clip_mask.rect;
+            let clip_origin = [rect.x.get() * scale_factor, rect.y.get() * scale_factor];
+            let clip_rect_size = [
+                rect.width.max(0.0).get() * scale_factor,
+                rect.height.max(0.0).get() * scale_factor,
+            ];
+            let clip_corner_radius = (clip_mask.corner_radius.max(0.0) * scale_factor)
+                .min(clip_rect_size[0] * 0.5)
+                .min(clip_rect_size[1] * 0.5);
+            ClipMaskVertexData {
+                clip_local_position: [
+                    position_physical[0] - clip_origin[0],
+                    position_physical[1] - clip_origin[1],
+                ],
+                clip_rect_size,
+                clip_corner_radius,
+                clip_enabled: 1.0,
+            }
+        })
+        .unwrap_or(ClipMaskVertexData {
+            clip_local_position: [0.0, 0.0],
+            clip_rect_size: [0.0, 0.0],
+            clip_corner_radius: 0.0,
+            clip_enabled: 0.0,
+        })
+}
+
 pub(super) fn physical_mesh_clip_mask_data(
     clip_mask: Option<ClipMask>,
     scale_factor: f32,
@@ -479,11 +513,12 @@ pub(super) struct TextVertex {
     clip_rect_size: [f32; 2],
     clip_corner_radius: f32,
     clip_enabled: f32,
+    opacity: f32,
 }
 
 impl TextVertex {
     pub(super) fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
-        const ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
+        const ATTRIBUTES: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
             0 => Float32x2,
             1 => Float32x2,
             2 => Float32x2,
@@ -492,7 +527,8 @@ impl TextVertex {
             5 => Float32x2,
             6 => Float32x2,
             7 => Float32,
-            8 => Float32
+            8 => Float32,
+            9 => Float32
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as u64,
@@ -503,22 +539,44 @@ impl TextVertex {
 
     pub(super) fn quad(
         rect: Rect,
-        width: f32,
-        height: f32,
+        _width: f32,
+        _height: f32,
         corner_radius: f32,
         clip_mask: Option<ClipMask>,
         _physical_width: f32,
         _physical_height: f32,
         scale_factor: f32,
     ) -> [Self; 6] {
-        let rect_x = rect.x.get();
-        let rect_y = rect.y.get();
+        let quad = [
+            crate::ui::widget::Point::new(rect.x, rect.y),
+            crate::ui::widget::Point::new(rect.right(), rect.y),
+            crate::ui::widget::Point::new(rect.right(), rect.bottom()),
+            crate::ui::widget::Point::new(rect.x, rect.bottom()),
+        ];
+        Self::transformed(
+            rect,
+            quad,
+            corner_radius,
+            clip_mask,
+            _physical_width,
+            _physical_height,
+            scale_factor,
+            1.0,
+        )
+    }
+
+    pub(super) fn transformed(
+        rect: Rect,
+        quad: [crate::ui::widget::Point; 4],
+        corner_radius: f32,
+        clip_mask: Option<ClipMask>,
+        physical_width: f32,
+        physical_height: f32,
+        scale_factor: f32,
+        opacity: f32,
+    ) -> [Self; 6] {
         let rect_width = rect.width.get();
         let rect_height = rect.height.get();
-        let x0 = rect_x / width * 2.0 - 1.0;
-        let x1 = (rect_x + rect_width) / width * 2.0 - 1.0;
-        let y0 = 1.0 - rect_y / height * 2.0;
-        let y1 = 1.0 - (rect_y + rect_height) / height * 2.0;
         let rect_width_physical = rect_width * scale_factor;
         let rect_height_physical = rect_height * scale_factor;
         let radius = (corner_radius.max(0.0) * scale_factor)
@@ -529,13 +587,17 @@ impl TextVertex {
         let local_tr = [rect_size[0], 0.0];
         let local_br = [rect_size[0], rect_size[1]];
         let local_bl = [0.0, rect_size[1]];
-        let rect_origin = [rect_x * scale_factor, rect_y * scale_factor];
 
-        let build = |position: [f32; 2], uv: [f32; 2], local_position: [f32; 2]| {
+        let build = |point: crate::ui::widget::Point, uv: [f32; 2], local_position: [f32; 2]| {
+            let point_x = point.x.get() * scale_factor;
+            let point_y = point.y.get() * scale_factor;
             let clip_mask =
-                physical_clip_mask_data(clip_mask, rect_origin, local_position, scale_factor);
+                physical_clip_mask_at_position(clip_mask, [point_x, point_y], scale_factor);
             Self {
-                position,
+                position: [
+                    point_x / physical_width * 2.0 - 1.0,
+                    1.0 - point_y / physical_height * 2.0,
+                ],
                 uv,
                 local_position,
                 rect_size,
@@ -544,16 +606,17 @@ impl TextVertex {
                 clip_rect_size: clip_mask.clip_rect_size,
                 clip_corner_radius: clip_mask.clip_corner_radius,
                 clip_enabled: clip_mask.clip_enabled,
+                opacity,
             }
         };
 
         [
-            build([x0, y0], [0.0, 0.0], local_tl),
-            build([x1, y0], [1.0, 0.0], local_tr),
-            build([x1, y1], [1.0, 1.0], local_br),
-            build([x0, y0], [0.0, 0.0], local_tl),
-            build([x1, y1], [1.0, 1.0], local_br),
-            build([x0, y1], [0.0, 1.0], local_bl),
+            build(quad[0], [0.0, 0.0], local_tl),
+            build(quad[1], [1.0, 0.0], local_tr),
+            build(quad[2], [1.0, 1.0], local_br),
+            build(quad[0], [0.0, 0.0], local_tl),
+            build(quad[2], [1.0, 1.0], local_br),
+            build(quad[3], [0.0, 1.0], local_bl),
         ]
     }
 }

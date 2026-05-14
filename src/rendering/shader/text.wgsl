@@ -8,6 +8,7 @@ struct VertexInput {
     @location(6) clip_rect_size: vec2<f32>,
     @location(7) clip_corner_radius: f32,
     @location(8) clip_enabled: f32,
+    @location(9) opacity: f32,
 };
 
 struct VertexOutput {
@@ -20,6 +21,7 @@ struct VertexOutput {
     @location(5) clip_rect_size: vec2<f32>,
     @location(6) clip_corner_radius: f32,
     @location(7) clip_enabled: f32,
+    @location(8) opacity: f32,
 };
 
 @group(0) @binding(0) var text_texture: texture_2d<f32>;
@@ -61,6 +63,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.clip_rect_size = input.clip_rect_size;
     output.clip_corner_radius = input.clip_corner_radius;
     output.clip_enabled = input.clip_enabled;
+    output.opacity = input.opacity;
     return output;
 }
 
@@ -84,5 +87,5 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if (combined_alpha <= 0.0) {
         discard;
     }
-    return vec4<f32>(sampled.rgb, sampled.a * combined_alpha);
+    return vec4<f32>(sampled.rgb, sampled.a * combined_alpha * input.opacity);
 }

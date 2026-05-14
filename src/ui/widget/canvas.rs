@@ -27,10 +27,13 @@ use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{Dp, Sp, UnitContext};
 
+use super::background::{
+    BackgroundBrush, BackgroundGradientStop, BackgroundLinearGradient, BackgroundRadialGradient,
+};
 use super::common::{
-    CanvasItemInteractionHandlers, ClipMask, CursorStyle, InteractionHandlers,
-    LifecycleEventHandlers, MediaEventHandlers, MeshPrimitive, MeshVertex, Point, Rect,
-    TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
+    CanvasCompositePrimitive, CanvasItemInteractionHandlers, ClipMask, CursorStyle,
+    InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, MeshPrimitive, MeshVertex,
+    Point, Rect, RenderCommand, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -489,24 +492,33 @@ enum PathCommand {
     Close,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PathShapeHint {
+    RoundedRect { rect: Rect, radius: Dp },
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PathBuilder {
     commands: Vec<PathCommand>,
+    shape_hint: Option<PathShapeHint>,
 }
 
 impl PathBuilder {
     pub fn new() -> Self {
         Self {
             commands: Vec::new(),
+            shape_hint: None,
         }
     }
 
     pub fn move_to(mut self, x: impl Into<Dp>, y: impl Into<Dp>) -> Self {
+        self.shape_hint = None;
         self.commands.push(PathCommand::MoveTo(Point::new(x, y)));
         self
     }
 
     pub fn line_to(mut self, x: impl Into<Dp>, y: impl Into<Dp>) -> Self {
+        self.shape_hint = None;
         self.commands.push(PathCommand::LineTo(Point::new(x, y)));
         self
     }
@@ -518,6 +530,7 @@ impl PathBuilder {
         x: impl Into<Dp>,
         y: impl Into<Dp>,
     ) -> Self {
+        self.shape_hint = None;
         self.commands.push(PathCommand::QuadTo {
             ctrl: Point::new(ctrl_x, ctrl_y),
             to: Point::new(x, y),
@@ -534,6 +547,7 @@ impl PathBuilder {
         x: impl Into<Dp>,
         y: impl Into<Dp>,
     ) -> Self {
+        self.shape_hint = None;
         self.commands.push(PathCommand::CubicTo {
             ctrl1: Point::new(ctrl1_x, ctrl1_y),
             ctrl2: Point::new(ctrl2_x, ctrl2_y),
@@ -543,26 +557,36 @@ impl PathBuilder {
     }
 
     pub fn close(mut self) -> Self {
+        self.shape_hint = None;
         self.commands.push(PathCommand::Close);
         self
     }
 
     pub fn rect(
-        self,
+        mut self,
         x: impl Into<Dp>,
         y: impl Into<Dp>,
         width: impl Into<Dp>,
         height: impl Into<Dp>,
     ) -> Self {
+        let started_empty = self.commands.is_empty();
         let x = x.into();
         let y = y.into();
         let width = width.into().max(Dp::ZERO);
         let height = height.into().max(Dp::ZERO);
-        self.move_to(x, y)
+        self = self
+            .move_to(x, y)
             .line_to(x + width, y)
             .line_to(x + width, y + height)
             .line_to(x, y + height)
-            .close()
+            .close();
+        if started_empty {
+            self.shape_hint = Some(PathShapeHint::RoundedRect {
+                rect: Rect::new(x, y, width, height),
+                radius: Dp::ZERO,
+            });
+        }
+        self
     }
 
     pub fn rounded_rect(
@@ -573,6 +597,7 @@ impl PathBuilder {
         height: impl Into<Dp>,
         radius: impl Into<Dp>,
     ) -> Self {
+        let started_empty = self.commands.is_empty();
         let x = x.into();
         let y = y.into();
         let width = width.into().max(Dp::ZERO);
@@ -622,7 +647,14 @@ impl PathBuilder {
             std::f32::consts::FRAC_PI_2,
             true,
         );
-        builder.close()
+        builder = builder.close();
+        if started_empty {
+            builder.shape_hint = Some(PathShapeHint::RoundedRect {
+                rect: Rect::new(x, y, width, height),
+                radius,
+            });
+        }
+        builder
     }
 
     pub fn circle(
@@ -671,8 +703,10 @@ impl PathBuilder {
     ) -> Self {
         let center = Point::new(center_x, center_y);
         let connect_with_line = !self.commands.is_empty();
+        let mut builder = self;
+        builder.shape_hint = None;
         append_arc_segments(
-            self,
+            builder,
             center,
             radius.into().max(Dp::ZERO).get(),
             start_angle,
@@ -689,17 +723,19 @@ impl PathBuilder {
         y: impl Into<Dp>,
         radius: impl Into<Dp>,
     ) -> Self {
+        let mut this = self;
+        this.shape_hint = None;
         let Some(PathCommand::MoveTo(from) | PathCommand::LineTo(from)) =
-            self.commands.last().copied()
+            this.commands.last().copied()
         else {
-            return self.move_to(ctrl_x, ctrl_y).line_to(x, y);
+            return this.move_to(ctrl_x, ctrl_y).line_to(x, y);
         };
 
         let ctrl = Point::new(ctrl_x, ctrl_y);
         let to = Point::new(x, y);
         let radius = radius.into().max(Dp::ZERO).get();
         if radius <= 0.0 {
-            return self.line_to(ctrl.x, ctrl.y).line_to(to.x, to.y);
+            return this.line_to(ctrl.x, ctrl.y).line_to(to.x, to.y);
         }
 
         let p0 = (from.x.get(), from.y.get());
@@ -710,7 +746,7 @@ impl PathBuilder {
         let dot = (v1.0 * v2.0 + v1.1 * v2.1).clamp(-1.0, 1.0);
         let angle = dot.acos();
         if angle <= 1e-3 || (std::f32::consts::PI - angle).abs() <= 1e-3 {
-            return self.line_to(ctrl.x, ctrl.y).line_to(to.x, to.y);
+            return this.line_to(ctrl.x, ctrl.y).line_to(to.x, to.y);
         }
 
         let tangent = radius / (angle * 0.5).tan();
@@ -731,7 +767,7 @@ impl PathBuilder {
         }
 
         append_arc_segments(
-            self.line_to(start.0, start.1),
+            this.line_to(start.0, start.1),
             Point::new(center.0, center.1),
             radius,
             start_angle,
@@ -741,6 +777,7 @@ impl PathBuilder {
     }
 
     pub fn svg_path(mut self, data: &str) -> Result<Self, CanvasSvgPathError> {
+        self.shape_hint = None;
         let mut current = (0.0_f32, 0.0_f32);
         let mut subpath_start = (0.0_f32, 0.0_f32);
         let mut last_cubic_ctrl: Option<(f32, f32)> = None;
@@ -885,6 +922,10 @@ impl PathBuilder {
 
     fn commands_internal(&self) -> &[PathCommand] {
         &self.commands
+    }
+
+    fn shape_hint(&self) -> Option<PathShapeHint> {
+        self.shape_hint
     }
 
     pub(crate) fn to_lyon_path(&self) -> Path {
@@ -1528,6 +1569,10 @@ impl CanvasItem {
             return CanvasRenderOutput::default();
         }
 
+        if item_requires_composite(self) {
+            return tessellate_composite_item(self, origin, opacity, clip_context, media, units);
+        }
+
         let mut output = match self {
             Self::Path(path) => tessellate_path(path, origin, opacity, clip_context, media, units),
             Self::Text(text) => tessellate_text(text, origin, opacity, clip_context),
@@ -1592,6 +1637,28 @@ impl CanvasItem {
             Self::Mask(mask) => &mask.style,
         }
     }
+}
+
+fn item_requires_composite(item: &CanvasItem) -> bool {
+    match item {
+        CanvasItem::Path(path) => path.style.blend_mode != CanvasBlendMode::Normal,
+        CanvasItem::Text(text) => text.style.blend_mode != CanvasBlendMode::Normal,
+        CanvasItem::Image(image) => image.style.blend_mode != CanvasBlendMode::Normal,
+        CanvasItem::Group(group) => {
+            group.style.opacity < 1.0 || group.style.blend_mode != CanvasBlendMode::Normal
+        }
+        CanvasItem::Clip(clip) => {
+            clip.style.opacity < 1.0
+                || clip.style.transform != CanvasTransform2D::IDENTITY
+                || !matches!(clip.clip, CanvasClipShape::Rect(_))
+        }
+        CanvasItem::Layer(_) => true,
+        CanvasItem::Mask(_) => true,
+    }
+}
+
+fn bounds_rect(bounds: RectBounds) -> Rect {
+    Rect::new(bounds.min_x, bounds.min_y, bounds.width(), bounds.height())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1739,10 +1806,135 @@ fn tessellate_items(
     let mut output = CanvasRenderOutput::default();
     for item in items {
         let rendered = item.tessellate(origin, opacity, clip, media, units);
+        output.commands.extend(rendered.commands);
         output.meshes.extend(rendered.meshes);
         output.textures.extend(rendered.textures);
         output.texts.extend(rendered.texts);
     }
+    output
+}
+
+fn output_to_commands(output: CanvasRenderOutput) -> Vec<RenderCommand> {
+    let mut commands = output.commands;
+    commands.extend(output.meshes.into_iter().map(RenderCommand::Mesh));
+    commands.extend(output.textures.into_iter().map(RenderCommand::Texture));
+    commands.extend(output.texts.into_iter().map(RenderCommand::Text));
+    commands
+}
+
+fn tessellate_composite_item(
+    item: &CanvasItem,
+    origin: Point,
+    opacity: f32,
+    clip: CanvasClipContext,
+    media: &MediaManager,
+    units: UnitContext,
+) -> CanvasRenderOutput {
+    let mut output = CanvasRenderOutput::default();
+    let Some(bounds) = item.layout_bounds() else {
+        return output;
+    };
+    let bounds_rect = offset_rect(bounds_rect(bounds), origin);
+    let style = item.style();
+
+    let (content_output, mask_commands, blend_mode) = match item {
+        CanvasItem::Path(path) => (
+            tessellate_path(path, origin, opacity * style.opacity, clip, media, units),
+            None,
+            style.blend_mode,
+        ),
+        CanvasItem::Text(text) => (
+            tessellate_text(text, origin, opacity * style.opacity, clip),
+            None,
+            style.blend_mode,
+        ),
+        CanvasItem::Image(image) => (
+            tessellate_image(image, origin, opacity * style.opacity, clip, media, units),
+            None,
+            style.blend_mode,
+        ),
+        CanvasItem::Group(group) => (
+            tessellate_items(&group.items, origin, opacity, clip, media, units),
+            None,
+            group.style.blend_mode,
+        ),
+        CanvasItem::Clip(clip_item) => {
+            let nested_output =
+                tessellate_items(&clip_item.items, origin, opacity, clip, media, units);
+            let mask_commands = match &clip_item.clip {
+                CanvasClipShape::Rect(_) => None,
+                CanvasClipShape::RoundedRect { rect, radius } => {
+                    let path = PathBuilder::new().rounded_rect(
+                        rect.x.get(),
+                        rect.y.get(),
+                        rect.width.get(),
+                        rect.height.get(),
+                        radius.get(),
+                    );
+                    let mask = tessellate_path(
+                        &CanvasPath::new(clip_item.style.id, path).fill(Color::WHITE),
+                        origin,
+                        1.0,
+                        CanvasClipContext::default(),
+                        media,
+                        units,
+                    );
+                    Some(output_to_commands(mask).into())
+                }
+                CanvasClipShape::Path(path) => {
+                    let mask = tessellate_path(
+                        &CanvasPath::new(clip_item.style.id, path.clone()).fill(Color::WHITE),
+                        origin,
+                        1.0,
+                        CanvasClipContext::default(),
+                        media,
+                        units,
+                    );
+                    Some(output_to_commands(mask).into())
+                }
+            };
+            (nested_output, mask_commands, CanvasBlendMode::Normal)
+        }
+        CanvasItem::Layer(layer) => (
+            tessellate_items(&layer.items, origin, opacity, clip, media, units),
+            None,
+            layer.style.blend_mode,
+        ),
+        CanvasItem::Mask(mask) => {
+            let content = tessellate_items(&mask.content, origin, opacity, clip, media, units);
+            let mask_output = tessellate_items(
+                &mask.mask,
+                origin,
+                1.0,
+                CanvasClipContext::default(),
+                media,
+                units,
+            );
+            (
+                content,
+                Some(output_to_commands(mask_output).into()),
+                mask.style.blend_mode,
+            )
+        }
+    };
+
+    let mut content_output = content_output;
+    if style.transform != CanvasTransform2D::IDENTITY {
+        apply_transform_to_output(&mut content_output, style.transform, origin);
+    }
+
+    let content_commands: Arc<[RenderCommand]> = output_to_commands(content_output).into();
+    output
+        .commands
+        .push(RenderCommand::CanvasComposite(CanvasCompositePrimitive {
+            bounds: bounds_rect,
+            opacity: 1.0,
+            blend_mode,
+            clip_rect: clip.clip_rect,
+            clip_mask: clip.clip_mask,
+            content_commands,
+            mask_commands,
+        }));
     output
 }
 
@@ -1761,6 +1953,7 @@ fn tessellate_text(
         texts: vec![TextPrimitive {
             content: text.content.clone(),
             frame,
+            quad: None,
             color: text
                 .text_style
                 .color
@@ -1771,6 +1964,9 @@ fn tessellate_text(
             font_weight: text.text_style.font_weight,
             line_height: line_height.get(),
             letter_spacing: text.text_style.letter_spacing.get(),
+            wrap: text.paragraph_style.wrap,
+            horizontal_align: text.paragraph_style.horizontal_align,
+            vertical_align: text.paragraph_style.vertical_align,
             clip_rect: clip.clip_rect,
             clip_mask: clip.clip_mask,
         }],
@@ -1781,7 +1977,7 @@ fn tessellate_text(
 fn tessellate_image(
     image: &CanvasImage,
     origin: Point,
-    _opacity: f32,
+    opacity: f32,
     clip: CanvasClipContext,
     media: &MediaManager,
     units: UnitContext,
@@ -1804,7 +2000,9 @@ fn tessellate_image(
         textures: vec![TexturePrimitive {
             texture,
             frame: target_frame,
+            quad: None,
             corner_radius: image.corner_radius.get(),
+            opacity: opacity * image.style.opacity,
             clip_rect: clip.clip_rect,
             clip_mask: clip.clip_mask,
         }],
@@ -1849,28 +2047,54 @@ fn apply_transform_to_output(
     }
 
     for texture in &mut output.textures {
-        if let Some(rect) = transform_axis_aligned_rect(texture.frame, transform) {
+        let quad = transform_rect_quad(texture.frame, transform, origin);
+        texture.quad = Some(quad);
+        if let Some(rect) = quad_bounds_rect(quad) {
             texture.frame = rect;
         }
     }
 
     for text in &mut output.texts {
-        if let Some(rect) = transform_axis_aligned_rect(text.frame, transform) {
+        let quad = transform_rect_quad(text.frame, transform, origin);
+        text.quad = Some(quad);
+        if let Some(rect) = quad_bounds_rect(quad) {
             text.frame = rect;
         }
     }
 }
 
-fn transform_axis_aligned_rect(rect: Rect, transform: CanvasTransform2D) -> Option<Rect> {
-    let [a, b, c, d, e, f] = transform.matrix;
-    if b.abs() > 1e-4 || c.abs() > 1e-4 {
+fn transform_rect_quad(rect: Rect, transform: CanvasTransform2D, origin: Point) -> [Point; 4] {
+    let corners = [
+        Point::new(rect.x - origin.x, rect.y - origin.y),
+        Point::new(rect.right() - origin.x, rect.y - origin.y),
+        Point::new(rect.right() - origin.x, rect.bottom() - origin.y),
+        Point::new(rect.x - origin.x, rect.bottom() - origin.y),
+    ];
+    corners.map(|corner| {
+        let transformed = transform.apply(corner);
+        Point::new(origin.x + transformed.x, origin.y + transformed.y)
+    })
+}
+
+fn quad_bounds_rect(quad: [Point; 4]) -> Option<Rect> {
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for point_value in quad {
+        min_x = min_x.min(point_value.x.get());
+        min_y = min_y.min(point_value.y.get());
+        max_x = max_x.max(point_value.x.get());
+        max_y = max_y.max(point_value.y.get());
+    }
+    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
         return None;
     }
     Some(Rect::new(
-        rect.x.get() * a + e,
-        rect.y.get() * d + f,
-        rect.width.get() * a.abs(),
-        rect.height.get() * d.abs(),
+        min_x,
+        min_y,
+        (max_x - min_x).max(0.0),
+        (max_y - min_y).max(0.0),
     ))
 }
 
@@ -2228,6 +2452,7 @@ pub(crate) struct CanvasRenderOutput {
     pub textures: Vec<TexturePrimitive>,
     pub meshes: Vec<MeshPrimitive>,
     pub texts: Vec<TextPrimitive>,
+    pub commands: Vec<RenderCommand>,
 }
 
 fn path_base_bounds(path: &CanvasPath) -> Option<RectBounds> {
@@ -2252,10 +2477,27 @@ fn tessellate_path(
     media: &MediaManager,
     units: UnitContext,
 ) -> CanvasRenderOutput {
-    let lyon_path = path.path.to_lyon_path();
     let fill = path.fill.as_ref().map(Value::resolve);
     let stroke = path.stroke.clone();
     let mut output = CanvasRenderOutput::default();
+    let effective_opacity = opacity * path.style.opacity;
+
+    if path.style.transform == CanvasTransform2D::IDENTITY {
+        if let Some(optimized) = tessellate_axis_aligned_rounded_rect(
+            path,
+            origin,
+            clip,
+            fill.as_ref(),
+            stroke.as_ref(),
+            effective_opacity,
+        ) {
+            output.commands.extend(optimized.commands);
+            output.textures.extend(optimized.textures);
+            return output;
+        }
+    }
+
+    let lyon_path = path.path.to_lyon_path();
 
     if let Some(shadow) = path.shadow.as_ref().map(Value::resolve) {
         if let Some(texture) = shadow_texture_for_path(
@@ -2264,7 +2506,7 @@ fn tessellate_path(
             fill.as_ref(),
             stroke.as_ref(),
             shadow,
-            opacity,
+            effective_opacity,
             origin,
             clip,
             media,
@@ -2279,7 +2521,7 @@ fn tessellate_path(
             &lyon_path,
             fill_brush,
             path.fill_rule,
-            opacity,
+            effective_opacity,
             origin,
             clip,
         ) {
@@ -2288,12 +2530,200 @@ fn tessellate_path(
     }
 
     if let Some(stroke) = stroke.as_ref() {
-        if let Some(mesh) = tessellate_stroke(&lyon_path, stroke, opacity, origin, clip) {
+        if let Some(mesh) = tessellate_stroke(&lyon_path, stroke, effective_opacity, origin, clip) {
             output.meshes.push(mesh);
         }
     }
 
     output
+}
+
+fn tessellate_axis_aligned_rounded_rect(
+    path: &CanvasPath,
+    origin: Point,
+    clip: CanvasClipContext,
+    fill: Option<&CanvasBrush>,
+    stroke: Option<&CanvasStroke>,
+    opacity: f32,
+) -> Option<CanvasRenderOutput> {
+    let PathShapeHint::RoundedRect { rect, radius } = path.path.shape_hint()?;
+    let frame = offset_rect(rect, origin);
+    if frame.is_empty() {
+        return Some(CanvasRenderOutput::default());
+    }
+
+    let mut output = CanvasRenderOutput::default();
+    let corner_radius = radius.get().max(0.0);
+
+    if let Some(fill_brush) = fill {
+        push_rounded_rect_fill_command(
+            &mut output,
+            frame,
+            corner_radius,
+            fill_brush,
+            opacity,
+            clip,
+        )?;
+    }
+
+    if let Some(stroke) = stroke {
+        push_rounded_rect_stroke_command(
+            &mut output,
+            frame,
+            corner_radius,
+            stroke,
+            opacity,
+            clip,
+        )?;
+    }
+
+    Some(output)
+}
+
+fn push_rounded_rect_fill_command(
+    output: &mut CanvasRenderOutput,
+    frame: Rect,
+    corner_radius: f32,
+    brush: &CanvasBrush,
+    opacity: f32,
+    clip: CanvasClipContext,
+) -> Option<()> {
+    match brush {
+        CanvasBrush::Solid(color) => {
+            output.commands.push(RenderCommand::Shape(
+                super::common::RenderPrimitive {
+                    rect: frame,
+                    color: color.with_alpha_factor(opacity),
+                    corner_radius,
+                    stroke_width: 0.0,
+                    clip_rect: clip.clip_rect,
+                    clip_mask: clip.clip_mask,
+                },
+            ));
+        }
+        _ => {
+            output.commands.push(RenderCommand::Brush(
+                super::common::BrushPrimitive {
+                    rect: frame,
+                    brush: background_brush_from_canvas(brush, opacity)?,
+                    corner_radius,
+                    clip_rect: clip.clip_rect,
+                    clip_mask: clip.clip_mask,
+                },
+            ));
+        }
+    }
+    Some(())
+}
+
+fn push_rounded_rect_stroke_command(
+    output: &mut CanvasRenderOutput,
+    frame: Rect,
+    corner_radius: f32,
+    stroke: &CanvasStroke,
+    opacity: f32,
+    clip: CanvasClipContext,
+) -> Option<()> {
+    if stroke.dash_pattern.is_some()
+        || stroke.line_cap != CanvasStrokeCap::Butt
+        || stroke.line_join != CanvasStrokeJoin::Miter
+    {
+        return None;
+    }
+
+    let width = stroke.width.get().max(0.0);
+    if width <= 0.0 {
+        return Some(());
+    }
+
+    let brush = stroke.brush.resolve();
+    match brush {
+        CanvasBrush::Solid(color) => {
+            let (rect, radius, stroke_width) =
+                rounded_rect_stroke_geometry(frame, corner_radius, width, stroke.alignment)?;
+            output.commands.push(RenderCommand::Shape(
+                super::common::RenderPrimitive {
+                    rect,
+                    color: color.with_alpha_factor(opacity),
+                    corner_radius: radius,
+                    stroke_width,
+                    clip_rect: clip.clip_rect,
+                    clip_mask: clip.clip_mask,
+                },
+            ));
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
+fn rounded_rect_stroke_geometry(
+    frame: Rect,
+    radius: f32,
+    width: f32,
+    alignment: CanvasStrokeAlignment,
+) -> Option<(Rect, f32, f32)> {
+    match alignment {
+        CanvasStrokeAlignment::Center => Some((frame, radius, width)),
+        CanvasStrokeAlignment::Inside => {
+            let inset = width * 0.5;
+            let rect = Rect::new(
+                frame.x + inset,
+                frame.y + inset,
+                (frame.width.get() - width).max(0.0),
+                (frame.height.get() - width).max(0.0),
+            );
+            Some((rect, (radius - inset).max(0.0), width))
+        }
+        CanvasStrokeAlignment::Outside => {
+            let expansion = width * 0.5;
+            let rect = Rect::new(
+                frame.x - expansion,
+                frame.y - expansion,
+                frame.width.get() + width,
+                frame.height.get() + width,
+            );
+            Some((rect, radius + expansion, width))
+        }
+    }
+}
+
+fn background_brush_from_canvas(brush: &CanvasBrush, opacity: f32) -> Option<BackgroundBrush> {
+    match brush {
+        CanvasBrush::Solid(color) => Some(BackgroundBrush::Solid(color.with_alpha_factor(opacity))),
+        CanvasBrush::LinearGradient(gradient) => Some(BackgroundBrush::LinearGradient(
+            BackgroundLinearGradient::new(
+                gradient.start,
+                gradient.end,
+                gradient
+                    .stops
+                    .iter()
+                    .map(|stop| {
+                        BackgroundGradientStop::new(
+                            stop.offset,
+                            stop.color.with_alpha_factor(opacity),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        )),
+        CanvasBrush::RadialGradient(gradient) => Some(BackgroundBrush::RadialGradient(
+            BackgroundRadialGradient::new(
+                gradient.center,
+                gradient.radius,
+                gradient
+                    .stops
+                    .iter()
+                    .map(|stop| {
+                        BackgroundGradientStop::new(
+                            stop.offset,
+                            stop.color.with_alpha_factor(opacity),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        )),
+    }
 }
 
 fn tessellate_fill(
@@ -2633,7 +3063,9 @@ fn shadow_texture_for_path(
     Some(TexturePrimitive {
         texture,
         frame,
+        quad: None,
         corner_radius: 0.0,
+        opacity: 1.0,
         clip_rect: clip.clip_rect,
         clip_mask: clip.clip_mask,
     })
@@ -3007,8 +3439,8 @@ impl StrokeVertexConstructor<[f32; 2]> for StrokeVertexCtor {
 #[cfg(test)]
 mod tests {
     use super::{
-        canvas_bounds, CanvasBooleanOp, CanvasBrush, CanvasGradientStop, CanvasItem, CanvasPath,
-        CanvasShadow, CanvasStroke, PathBuilder,
+        canvas_bounds, tessellate_axis_aligned_rounded_rect, CanvasBooleanOp, CanvasBrush,
+        CanvasGradientStop, CanvasItem, CanvasPath, CanvasShadow, CanvasStroke, PathBuilder,
     };
     use crate::foundation::color::Color;
     use crate::ui::unit::dp;
@@ -3158,5 +3590,26 @@ mod tests {
             super::CanvasClipContext::default()
         )
         .is_some());
+    }
+
+    #[test]
+    fn rounded_rect_fill_prefers_non_mesh_fast_path() {
+        let path = CanvasPath::new(1_u64, PathBuilder::new().rounded_rect(0.0, 0.0, 80.0, 40.0, 12.0))
+            .fill(Color::WHITE);
+        let fill = path.fill.as_ref().map(crate::ui::layout::Value::resolve);
+
+        let output = tessellate_axis_aligned_rounded_rect(
+            &path,
+            Point::ZERO,
+            super::CanvasClipContext::default(),
+            fill.as_ref(),
+            None,
+            1.0,
+        )
+        .expect("rounded rect should use fast path");
+
+        assert!(output.meshes.is_empty());
+        assert_eq!(output.commands.len(), 1);
+        assert!(matches!(output.commands[0], crate::ui::widget::RenderCommand::Shape(_)));
     }
 }
