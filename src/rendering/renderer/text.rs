@@ -344,7 +344,10 @@ fn overflow_content(
     font_system: &mut cosmic_text::FontSystem,
     attrs: &Attrs<'_>,
 ) -> String {
-    if !matches!(text.overflow, crate::ui::widget::CanvasTextOverflow::Ellipsis) {
+    if !matches!(
+        text.overflow,
+        crate::ui::widget::CanvasTextOverflow::Ellipsis
+    ) {
         return text.content.clone();
     }
 

@@ -323,7 +323,10 @@ fn adapter_power_preference() -> wgpu::PowerPreference {
     }
 }
 
-fn supported_msaa_sample_count(flags: wgpu::TextureFormatFeatureFlags, requested_mode: MsaaMode) -> u32 {
+fn supported_msaa_sample_count(
+    flags: wgpu::TextureFormatFeatureFlags,
+    requested_mode: MsaaMode,
+) -> u32 {
     let candidates: &[u32] = match requested_mode {
         MsaaMode::Off => &[1],
         MsaaMode::Auto => &[4, 2, 1],

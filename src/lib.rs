@@ -121,14 +121,17 @@ macro_rules! el {
 /// Canvas drawing widgets and drawing primitives.
 pub mod canvas {
     pub use crate::ui::widget::{
-        Canvas, CanvasBlendMode, CanvasBrush, CanvasDragEvent, CanvasFillRule,
-        CanvasGradientStop, CanvasImageOptions, CanvasItemId, CanvasLinearGradient,
-        CanvasMouseButton, CanvasMouseEvent, CanvasParagraphStyle, CanvasPathOpError,
-        CanvasPointerEvent, CanvasRadialGradient, CanvasRecorder, CanvasScene, CanvasShadow,
-        CanvasStroke, CanvasStrokeAlignment, CanvasStrokeCap, CanvasStrokeJoin,
-        CanvasSvgPathError, CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextStyle,
-        CanvasTextVerticalAlign, CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent,
-        PathBuilder,
+        Canvas, CanvasBlendMode, CanvasBrush, CanvasColorFilter, CanvasDragEvent, CanvasEffect,
+        CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasGroupMode, CanvasGroupShape,
+        CanvasImage, CanvasImageOptions, CanvasInnerShadow, CanvasItem, CanvasItemId,
+        CanvasItemKind, CanvasLinearGradient, CanvasMouseButton, CanvasMouseEvent,
+        CanvasParagraphStyle, CanvasPath, CanvasPathOpError, CanvasPointerEvent,
+        CanvasRadialGradient, CanvasRecorder, CanvasScene, CanvasSceneDebugInfo,
+        CanvasSceneDebugNode, CanvasSceneDebugStats, CanvasSceneHit, CanvasSceneQueryOptions,
+        CanvasSceneVisit, CanvasShadow, CanvasStroke, CanvasStrokeAlignment, CanvasStrokeCap,
+        CanvasStrokeJoin, CanvasSvgPathError, CanvasText, CanvasTextHit, CanvasTextHorizontalAlign,
+        CanvasTextOverflow, CanvasTextSpan, CanvasTextStyle, CanvasTextVerticalAlign,
+        CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent, PathBuilder,
     };
 }
 
@@ -172,16 +175,21 @@ pub mod prelude {
         AnimationSpec, AnimationStatus, Easing, FillMode, Keyframe, Keyframes, Playback,
         PlaybackDirection, Repeat, Transition,
     };
-    pub use crate::application::{Application, MsaaMode, WindowClosePolicy, WindowRole, WindowSpec};
+    pub use crate::application::{
+        Application, MsaaMode, WindowClosePolicy, WindowRole, WindowSpec,
+    };
     pub use crate::canvas::{
-        Canvas, CanvasBlendMode, CanvasBrush, CanvasDragEvent, CanvasFillRule,
-        CanvasGradientStop, CanvasImageOptions, CanvasItemId, CanvasLinearGradient,
-        CanvasMouseButton, CanvasMouseEvent, CanvasParagraphStyle, CanvasPathOpError,
-        CanvasPointerEvent, CanvasRadialGradient, CanvasRecorder, CanvasScene, CanvasShadow,
-        CanvasStroke, CanvasStrokeAlignment, CanvasStrokeCap, CanvasStrokeJoin,
-        CanvasSvgPathError, CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextStyle,
-        CanvasTextVerticalAlign, CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent,
-        PathBuilder,
+        Canvas, CanvasBlendMode, CanvasBrush, CanvasColorFilter, CanvasDragEvent, CanvasEffect,
+        CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasGroupMode, CanvasGroupShape,
+        CanvasImage, CanvasImageOptions, CanvasInnerShadow, CanvasItem, CanvasItemId,
+        CanvasItemKind, CanvasLinearGradient, CanvasMouseButton, CanvasMouseEvent,
+        CanvasParagraphStyle, CanvasPath, CanvasPathOpError, CanvasPointerEvent,
+        CanvasRadialGradient, CanvasRecorder, CanvasScene, CanvasSceneDebugInfo,
+        CanvasSceneDebugNode, CanvasSceneDebugStats, CanvasSceneHit, CanvasSceneQueryOptions,
+        CanvasSceneVisit, CanvasShadow, CanvasStroke, CanvasStrokeAlignment, CanvasStrokeCap,
+        CanvasStrokeJoin, CanvasSvgPathError, CanvasText, CanvasTextHit, CanvasTextHorizontalAlign,
+        CanvasTextOverflow, CanvasTextSpan, CanvasTextStyle, CanvasTextVerticalAlign,
+        CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent, PathBuilder,
     };
     pub use crate::core::{dp, sp, Color, Dp, InputTrigger, Point, Rect, Sp, TguiError, WidgetId};
     pub use crate::dialog::{

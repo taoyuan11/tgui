@@ -1,12 +1,13 @@
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use geo::{BooleanOps, Contains, Coord, LineString, MultiPolygon, Polygon};
-use lyon::geom::{Angle, ArcFlags, SvgArc};
 use image::{DynamicImage, RgbaImage};
 use lyon::algorithms::aabb::bounding_box;
 use lyon::algorithms::measure::{PathMeasurements, SampleType};
+use lyon::geom::{Angle, ArcFlags, SvgArc};
 use lyon::math::{point, vector};
 use lyon::path::iterator::PathIterator;
 use lyon::path::{Path, PathEvent};
@@ -24,7 +25,7 @@ use crate::media::{
     resolve_media_rect, ContentFit, IntrinsicSize, MediaManager, MediaSource, RasterRequest,
     TextureFrame,
 };
-use crate::text::font::{FontManager, FontWeight, TextFontRequest};
+use crate::text::font::{FontCatalog, FontManager, FontWeight, TextFontRequest};
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{Dp, Sp, UnitContext};
@@ -36,8 +37,8 @@ use super::background::{
 use super::common::{
     CanvasCompositePrimitive, CanvasItemInteractionHandlers, CanvasTextSpanPrimitive, ClipMask,
     CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, MeshPrimitive,
-    MeshVertex, Point, Rect, RenderCommand, TextPrimitive, TexturePrimitive, VisualStyle,
-    WidgetId, WidgetKind,
+    MeshVertex, Point, Rect, RenderCommand, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId,
+    WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -334,12 +335,7 @@ impl CanvasColorFilter {
         let base = 1.0 - amount;
         Self::linear(
             [base, base, base, 1.0],
-            [
-                rgba[0] * amount,
-                rgba[1] * amount,
-                rgba[2] * amount,
-                0.0,
-            ],
+            [rgba[0] * amount, rgba[1] * amount, rgba[2] * amount, 0.0],
         )
     }
 }
@@ -488,8 +484,9 @@ impl CanvasTransform2D {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct CanvasItemStyle {
+pub(crate) struct CanvasItemStyle {
     pub id: CanvasItemId,
+    pub name: Option<String>,
     pub transform: CanvasTransform2D,
     pub opacity: f32,
     pub blend_mode: CanvasBlendMode,
@@ -504,6 +501,7 @@ impl CanvasItemStyle {
     pub fn new(id: impl Into<CanvasItemId>) -> Self {
         Self {
             id: id.into(),
+            name: None,
             transform: CanvasTransform2D::IDENTITY,
             opacity: 1.0,
             blend_mode: CanvasBlendMode::Normal,
@@ -1223,13 +1221,13 @@ impl Default for PathBuilder {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct CanvasPath {
-    pub style: CanvasItemStyle,
-    pub path: PathBuilder,
-    pub fill_rule: CanvasFillRule,
-    pub fill: Option<Value<CanvasBrush>>,
-    pub stroke: Option<CanvasStroke>,
-    pub shadow: Option<Value<CanvasShadow>>,
+pub struct CanvasPath {
+    style: CanvasItemStyle,
+    path: PathBuilder,
+    fill_rule: CanvasFillRule,
+    fill: Option<Value<CanvasBrush>>,
+    stroke: Option<CanvasStroke>,
+    shadow: Option<Value<CanvasShadow>>,
 }
 
 impl CanvasPath {
@@ -1246,6 +1244,40 @@ impl CanvasPath {
 
     pub fn fill_rule(mut self, fill_rule: CanvasFillRule) -> Self {
         self.fill_rule = fill_rule;
+        self
+    }
+
+    pub fn id(&self) -> CanvasItemId {
+        self.style.id
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.style.name.as_deref()
+    }
+
+    pub fn path(&self) -> &PathBuilder {
+        &self.path
+    }
+
+    pub fn fill_brush(&self) -> Option<&Value<CanvasBrush>> {
+        self.fill.as_ref()
+    }
+
+    pub fn stroke_style(&self) -> Option<&CanvasStroke> {
+        self.stroke.as_ref()
+    }
+
+    pub fn shadow_style(&self) -> Option<&Value<CanvasShadow>> {
+        self.shadow.as_ref()
+    }
+
+    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
+        self.style.transform = transform;
+        self
+    }
+
+    pub fn name_item(mut self, name: impl Into<String>) -> Self {
+        self.style.name = Some(name.into());
         self
     }
 
@@ -1389,12 +1421,12 @@ impl CanvasTextContent {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct CanvasText {
-    pub style: CanvasItemStyle,
-    pub frame: Rect,
-    pub content: CanvasTextContent,
-    pub text_style: CanvasTextStyle,
-    pub paragraph_style: CanvasParagraphStyle,
+pub struct CanvasText {
+    style: CanvasItemStyle,
+    frame: Rect,
+    content: CanvasTextContent,
+    text_style: CanvasTextStyle,
+    paragraph_style: CanvasParagraphStyle,
 }
 
 impl CanvasText {
@@ -1424,6 +1456,27 @@ impl CanvasText {
 
     pub fn text_style(mut self, text_style: CanvasTextStyle) -> Self {
         self.text_style = text_style;
+        self
+    }
+
+    pub fn id(&self) -> CanvasItemId {
+        self.style.id
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.style.name.as_deref()
+    }
+
+    pub fn frame(&self) -> Rect {
+        self.frame
+    }
+
+    pub fn plain_text(&self) -> String {
+        self.content.plain_text()
+    }
+
+    pub fn name_item(mut self, name: impl Into<String>) -> Self {
+        self.style.name = Some(name.into());
         self
     }
 
@@ -1474,13 +1527,13 @@ impl CanvasText {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct CanvasImage {
-    pub style: CanvasItemStyle,
-    pub frame: Rect,
-    pub source: MediaSource,
-    pub fit: ContentFit,
-    pub corner_radius: Dp,
-    pub source_rect: Option<Rect>,
+pub struct CanvasImage {
+    style: CanvasItemStyle,
+    frame: Rect,
+    source: MediaSource,
+    fit: ContentFit,
+    corner_radius: Dp,
+    source_rect: Option<Rect>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1540,6 +1593,31 @@ impl CanvasImage {
         self
     }
 
+    pub fn id(&self) -> CanvasItemId {
+        self.style.id
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.style.name.as_deref()
+    }
+
+    pub fn frame(&self) -> Rect {
+        self.frame
+    }
+
+    pub fn source(&self) -> &MediaSource {
+        &self.source
+    }
+
+    pub fn fit_mode(&self) -> ContentFit {
+        self.fit
+    }
+
+    pub fn name_item(mut self, name: impl Into<String>) -> Self {
+        self.style.name = Some(name.into());
+        self
+    }
+
     pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
         self.style.transform = transform;
         self
@@ -1582,25 +1660,34 @@ impl CanvasImage {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum CanvasGroupShape {
+pub enum CanvasGroupShape {
     Path {
         path: PathBuilder,
         fill_rule: CanvasFillRule,
     },
 }
 
+impl CanvasGroupShape {
+    pub fn path(path: PathBuilder) -> Self {
+        Self::Path {
+            fill_rule: path.fill_rule,
+            path,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
-enum CanvasGroupMode {
+pub enum CanvasGroupMode {
     Clip,
     Mask,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct CanvasGroup {
-    pub style: CanvasItemStyle,
-    pub mode: CanvasGroupMode,
-    pub shape: CanvasGroupShape,
-    pub items: Vec<CanvasItem>,
+pub struct CanvasGroup {
+    style: CanvasItemStyle,
+    mode: CanvasGroupMode,
+    shape: CanvasGroupShape,
+    items: Vec<CanvasItem>,
 }
 
 impl CanvasGroup {
@@ -1617,10 +1704,79 @@ impl CanvasGroup {
             items: items.into(),
         }
     }
+
+    pub fn id(&self) -> CanvasItemId {
+        self.style.id
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.style.name.as_deref()
+    }
+
+    pub fn mode(&self) -> &CanvasGroupMode {
+        &self.mode
+    }
+
+    pub fn shape(&self) -> &CanvasGroupShape {
+        &self.shape
+    }
+
+    pub fn items(&self) -> &[CanvasItem] {
+        &self.items
+    }
+
+    pub fn items_mut(&mut self) -> &mut Vec<CanvasItem> {
+        &mut self.items
+    }
+
+    pub fn transform(mut self, transform: CanvasTransform2D) -> Self {
+        self.style.transform = transform;
+        self
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.style.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn blend_mode(mut self, blend_mode: CanvasBlendMode) -> Self {
+        self.style.blend_mode = blend_mode;
+        self
+    }
+
+    pub fn effects(mut self, effects: impl Into<Vec<CanvasEffect>>) -> Self {
+        self.style.effects = effects.into();
+        self
+    }
+
+    pub fn isolation(mut self, isolation: bool) -> Self {
+        self.style.isolation = isolation;
+        self
+    }
+
+    pub fn cursor(mut self, cursor: CursorStyle) -> Self {
+        self.style.cursor = Some(cursor);
+        self
+    }
+
+    pub fn visible(mut self, visible: bool) -> Self {
+        self.style.visible = visible;
+        self
+    }
+
+    pub fn hit_test(mut self, hit_test: bool) -> Self {
+        self.style.hit_test = hit_test;
+        self
+    }
+
+    pub fn name_item(mut self, name: impl Into<String>) -> Self {
+        self.style.name = Some(name.into());
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum CanvasItem {
+pub enum CanvasItem {
     Path(CanvasPath),
     Text(CanvasText),
     Image(CanvasImage),
@@ -1628,7 +1784,7 @@ enum CanvasItem {
 }
 
 impl CanvasItem {
-    pub(crate) fn id(&self) -> CanvasItemId {
+    pub fn id(&self) -> CanvasItemId {
         match self {
             Self::Path(path) => path.style.id,
             Self::Text(text) => text.style.id,
@@ -1637,37 +1793,39 @@ impl CanvasItem {
         }
     }
 
-    pub(crate) fn layout_bounds(&self) -> Option<RectBounds> {
-        let bounds = match self {
-            Self::Path(path) => {
-                let mut rect = path_base_bounds(path)?;
-                if let Some(shadow) = path.shadow.as_ref().map(Value::resolve) {
-                    rect = rect.expand_for_shadow(shadow);
-                }
-                Some(rect)
-            }
-            Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
-            Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
-            Self::Group(group) => {
-                group_shape_bounds(&group.shape).or_else(|| canvas_bounds(&group.items))
-            }
-        }?;
-        Some(transform_bounds(bounds, self.style().transform))
+    pub fn name(&self) -> Option<&str> {
+        self.style().name.as_deref()
     }
 
-    pub(crate) fn hit_bounds(&self) -> Option<RectBounds> {
-        if !self.style().hit_test || !self.style().visible {
-            return None;
+    pub fn kind(&self) -> CanvasItemKind {
+        match self {
+            Self::Path(_) => CanvasItemKind::Path,
+            Self::Text(_) => CanvasItemKind::Text,
+            Self::Image(_) => CanvasItemKind::Image,
+            Self::Group(_) => CanvasItemKind::Group,
         }
-        let bounds = match self {
-            Self::Path(path) => path_base_bounds(path),
-            Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
-            Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
-            Self::Group(group) => {
-                group_shape_bounds(&group.shape).or_else(|| canvas_bounds(&group.items))
-            }
-        }?;
-        Some(transform_bounds(bounds, self.style().transform))
+    }
+
+    pub fn children(&self) -> &[CanvasItem] {
+        match self {
+            Self::Group(group) => group.items(),
+            _ => &[],
+        }
+    }
+
+    pub fn children_mut(&mut self) -> Option<&mut Vec<CanvasItem>> {
+        match self {
+            Self::Group(group) => Some(group.items_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn bounds_rect(&self) -> Option<Rect> {
+        self.layout_bounds().map(rect_from_bounds)
+    }
+
+    pub fn hit_bounds_rect(&self) -> Option<Rect> {
+        self.hit_bounds().map(rect_from_bounds)
     }
 
     pub(crate) fn tessellate(
@@ -1726,6 +1884,71 @@ impl CanvasItem {
             Self::Group(group) => &group.style,
         }
     }
+
+    pub(crate) fn layout_bounds(&self) -> Option<RectBounds> {
+        let bounds = match self {
+            Self::Path(path) => {
+                let mut rect = path_base_bounds(path)?;
+                if let Some(shadow) = path.shadow.as_ref().map(Value::resolve) {
+                    rect = rect.expand_for_shadow(shadow);
+                }
+                Some(rect)
+            }
+            Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
+            Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
+            Self::Group(group) => {
+                group_shape_bounds(&group.shape).or_else(|| canvas_bounds(&group.items))
+            }
+        }?;
+        Some(transform_bounds(bounds, self.style().transform))
+    }
+
+    pub(crate) fn hit_bounds(&self) -> Option<RectBounds> {
+        if !self.style().hit_test || !self.style().visible {
+            return None;
+        }
+        let bounds = match self {
+            Self::Path(path) => path_base_bounds(path),
+            Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
+            Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
+            Self::Group(group) => {
+                group_shape_bounds(&group.shape).or_else(|| canvas_bounds(&group.items))
+            }
+        }?;
+        Some(transform_bounds(bounds, self.style().transform))
+    }
+}
+
+impl From<CanvasPath> for CanvasItem {
+    fn from(value: CanvasPath) -> Self {
+        Self::Path(value)
+    }
+}
+
+impl From<CanvasText> for CanvasItem {
+    fn from(value: CanvasText) -> Self {
+        Self::Text(value)
+    }
+}
+
+impl From<CanvasImage> for CanvasItem {
+    fn from(value: CanvasImage) -> Self {
+        Self::Image(value)
+    }
+}
+
+impl From<CanvasGroup> for CanvasItem {
+    fn from(value: CanvasGroup) -> Self {
+        Self::Group(value)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CanvasItemKind {
+    Path,
+    Text,
+    Image,
+    Group,
 }
 
 fn item_requires_composite(item: &CanvasItem) -> bool {
@@ -1751,6 +1974,10 @@ fn item_requires_composite(item: &CanvasItem) -> bool {
 
 fn bounds_rect(bounds: RectBounds) -> Rect {
     Rect::new(bounds.min_x, bounds.min_y, bounds.width(), bounds.height())
+}
+
+fn rect_from_bounds(bounds: RectBounds) -> Rect {
+    bounds_rect(bounds)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2012,6 +2239,15 @@ fn tessellate_composite_item(
             blend_mode,
             blur_radius: resolved_effects.blur_radius,
             color_filter: resolved_effects.color_filter,
+            inner_shadow_color: resolved_effects.inner_shadow.map(|shadow| shadow.color),
+            inner_shadow_offset: resolved_effects
+                .inner_shadow
+                .map(|shadow| shadow.offset)
+                .unwrap_or(Point::ZERO),
+            inner_shadow_blur_radius: resolved_effects
+                .inner_shadow
+                .map(|shadow| shadow.blur.get().max(0.0))
+                .unwrap_or(0.0),
             clip_rect: clip.clip_rect,
             clip_mask: clip.clip_mask,
             content_commands,
@@ -2041,7 +2277,10 @@ fn tessellate_text(
                 .map(|span| CanvasTextSpanPrimitive {
                     content: span.content,
                     font_family: span.style.font_family,
-                    color: span.style.color.with_alpha_factor(opacity * text.style.opacity),
+                    color: span
+                        .style
+                        .color
+                        .with_alpha_factor(opacity * text.style.opacity),
                     font_size: span.style.font_size.get(),
                     font_weight: span.style.font_weight,
                     line_height: span.style.line_height.map(|height| height.get()),
@@ -2226,16 +2465,1709 @@ pub struct CanvasScene {
 }
 
 impl CanvasScene {
+    pub const STABLE_JSON_FORMAT: &str = "tgui.canvas.scene";
+    pub const STABLE_JSON_VERSION: u32 = 1;
+
     pub fn empty() -> Self {
         Self::default()
     }
 
-    fn from_items(items: Vec<CanvasItem>) -> Self {
-        Self { items }
+    pub fn from_items(items: impl Into<Vec<CanvasItem>>) -> Self {
+        Self {
+            items: items.into(),
+        }
     }
 
-    fn items(&self) -> &[CanvasItem] {
+    pub fn items(&self) -> &[CanvasItem] {
         &self.items
+    }
+
+    pub fn items_mut(&mut self) -> &mut Vec<CanvasItem> {
+        &mut self.items
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn bounds(&self) -> Option<Rect> {
+        canvas_scene_bounds(self).map(rect_from_bounds)
+    }
+
+    pub fn push(&mut self, item: impl Into<CanvasItem>) {
+        self.items.push(item.into());
+    }
+
+    pub fn insert(&mut self, index: usize, item: impl Into<CanvasItem>) {
+        self.items.insert(index.min(self.items.len()), item.into());
+    }
+
+    pub fn clear(&mut self) {
+        self.items.clear();
+    }
+
+    pub fn remove(&mut self, id: CanvasItemId) -> Option<CanvasItem> {
+        remove_item_by_id(&mut self.items, id)
+    }
+
+    pub fn contains_id(&self, id: CanvasItemId) -> bool {
+        self.find(id).is_some()
+    }
+
+    pub fn contains_name(&self, name: &str) -> bool {
+        self.find_named(name).is_some()
+    }
+
+    pub fn find(&self, id: CanvasItemId) -> Option<&CanvasItem> {
+        find_item_by_id(&self.items, id)
+    }
+
+    pub fn find_mut(&mut self, id: CanvasItemId) -> Option<&mut CanvasItem> {
+        find_item_mut_by_id(&mut self.items, id)
+    }
+
+    pub fn find_named(&self, name: &str) -> Option<&CanvasItem> {
+        find_item_by_name(&self.items, name)
+    }
+
+    pub fn find_named_mut(&mut self, name: &str) -> Option<&mut CanvasItem> {
+        find_item_mut_by_name(&mut self.items, name)
+    }
+
+    pub fn visit(&self, mut visitor: impl FnMut(CanvasSceneVisit<'_>)) {
+        let mut index_path = Vec::new();
+        visit_scene_items(&self.items, 0, &mut index_path, &mut visitor);
+    }
+
+    pub fn debug_info(&self) -> CanvasSceneDebugInfo {
+        let mut stats = CanvasSceneDebugStats {
+            root_items: self.items.len(),
+            bounds: self.bounds(),
+            ..Default::default()
+        };
+        let nodes = self
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let mut path = vec![index];
+                build_debug_node(item, 0, &mut path, &mut stats)
+            })
+            .collect();
+        CanvasSceneDebugInfo { stats, nodes }
+    }
+
+    pub fn query_point(&self, scene_position: Point) -> Option<CanvasSceneHit> {
+        self.query_point_with(&CanvasSceneQueryOptions::default(), scene_position)
+    }
+
+    pub fn query_point_all(&self, scene_position: Point) -> Vec<CanvasSceneHit> {
+        self.query_point_all_with(&CanvasSceneQueryOptions::default(), scene_position)
+    }
+
+    pub fn query_point_with(
+        &self,
+        options: &CanvasSceneQueryOptions,
+        scene_position: Point,
+    ) -> Option<CanvasSceneHit> {
+        self.query_point_all_with(options, scene_position)
+            .into_iter()
+            .next()
+    }
+
+    pub fn query_point_all_with(
+        &self,
+        options: &CanvasSceneQueryOptions,
+        scene_position: Point,
+    ) -> Vec<CanvasSceneHit> {
+        let context = options.as_context();
+        query_canvas_scene_hits(self, &context.font_manager, context.units, scene_position)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn query_point_with_runtime_context(
+        &self,
+        font_manager: &FontManager,
+        units: UnitContext,
+        scene_position: Point,
+    ) -> Option<CanvasSceneHit> {
+        self.query_point_all_with_runtime_context(font_manager, units, scene_position)
+            .into_iter()
+            .next()
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn query_point_all_with_runtime_context(
+        &self,
+        font_manager: &FontManager,
+        units: UnitContext,
+        scene_position: Point,
+    ) -> Vec<CanvasSceneHit> {
+        query_canvas_scene_hits(self, font_manager, units, scene_position)
+    }
+
+    pub fn export_json(&self) -> String {
+        export_canvas_scene_json(self)
+    }
+
+    pub fn export_debug_text(&self) -> String {
+        self.debug_info().to_pretty_text()
+    }
+
+    pub fn export_debug_json(&self) -> String {
+        self.debug_info().to_pretty_json()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanvasSceneHit {
+    pub item_id: CanvasItemId,
+    pub name: Option<String>,
+    pub kind: CanvasItemKind,
+    pub depth: usize,
+    pub index_path: Vec<usize>,
+    pub scene_position: Point,
+    pub local_position: Point,
+    pub bounds: Option<Rect>,
+    pub text_hit: Option<CanvasTextHit>,
+}
+
+pub struct CanvasSceneQueryOptions {
+    font_catalog: FontCatalog,
+    scale_factor: f32,
+    font_scale: f32,
+}
+
+impl Default for CanvasSceneQueryOptions {
+    fn default() -> Self {
+        Self {
+            font_catalog: FontCatalog::default(),
+            scale_factor: 1.0,
+            font_scale: 1.0,
+        }
+    }
+}
+
+impl CanvasSceneQueryOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn scale_factor(mut self, scale_factor: f32) -> Self {
+        self.scale_factor = scale_factor;
+        self
+    }
+
+    pub fn font_scale(mut self, font_scale: f32) -> Self {
+        self.font_scale = font_scale;
+        self
+    }
+
+    pub fn font_bytes(mut self, name: impl Into<String>, bytes: &'static [u8]) -> Self {
+        self.font_catalog.register_font(name, bytes);
+        self
+    }
+
+    pub fn font_file(
+        mut self,
+        name: impl Into<String>,
+        path: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        self.font_catalog.register_font_file(name, path);
+        self
+    }
+
+    pub fn default_font(mut self, name: impl Into<String>) -> Self {
+        self.font_catalog.set_default_font(name);
+        self
+    }
+
+    fn as_context(&self) -> CanvasSceneQueryContext {
+        CanvasSceneQueryContext::new(
+            &self.font_catalog,
+            UnitContext::new(self.scale_factor, self.font_scale),
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct CanvasSceneVisit<'a> {
+    pub depth: usize,
+    pub index_path: Vec<usize>,
+    pub item: &'a CanvasItem,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CanvasSceneDebugStats {
+    pub root_items: usize,
+    pub total_items: usize,
+    pub named_items: usize,
+    pub visible_items: usize,
+    pub hit_testable_items: usize,
+    pub path_items: usize,
+    pub text_items: usize,
+    pub image_items: usize,
+    pub group_items: usize,
+    pub max_depth: usize,
+    pub bounds: Option<Rect>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanvasSceneDebugNode {
+    pub id: CanvasItemId,
+    pub name: Option<String>,
+    pub kind: CanvasItemKind,
+    pub depth: usize,
+    pub index_path: Vec<usize>,
+    pub visible: bool,
+    pub hit_test: bool,
+    pub opacity: f32,
+    pub blend_mode: CanvasBlendMode,
+    pub bounds: Option<Rect>,
+    pub child_count: usize,
+    pub summary: String,
+    pub children: Vec<CanvasSceneDebugNode>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanvasSceneDebugInfo {
+    pub stats: CanvasSceneDebugStats,
+    pub nodes: Vec<CanvasSceneDebugNode>,
+}
+
+impl CanvasSceneDebugInfo {
+    pub fn to_pretty_text(&self) -> String {
+        let mut out = String::new();
+        out.push_str("CanvasScene\n");
+        out.push_str(&format!(
+            "  root_items={} total_items={} named_items={} visible_items={} hit_testable_items={} max_depth={}\n",
+            self.stats.root_items,
+            self.stats.total_items,
+            self.stats.named_items,
+            self.stats.visible_items,
+            self.stats.hit_testable_items,
+            self.stats.max_depth,
+        ));
+        out.push_str(&format!(
+            "  kinds: path={} text={} image={} group={}\n",
+            self.stats.path_items,
+            self.stats.text_items,
+            self.stats.image_items,
+            self.stats.group_items,
+        ));
+        if let Some(bounds) = self.stats.bounds {
+            out.push_str(&format!(
+                "  bounds: x={:.1} y={:.1} width={:.1} height={:.1}\n",
+                bounds.x.get(),
+                bounds.y.get(),
+                bounds.width.get(),
+                bounds.height.get(),
+            ));
+        }
+        for node in &self.nodes {
+            write_debug_node_text(&mut out, node);
+        }
+        out
+    }
+
+    pub fn to_pretty_json(&self) -> String {
+        let mut out = String::new();
+        out.push_str("{\n");
+        out.push_str("  \"stats\": ");
+        write_debug_stats_json(&mut out, &self.stats, 1);
+        out.push_str(",\n  \"nodes\": [\n");
+        for (index, node) in self.nodes.iter().enumerate() {
+            write_debug_node_json(&mut out, node, 2);
+            if index + 1 != self.nodes.len() {
+                out.push(',');
+            }
+            out.push('\n');
+        }
+        out.push_str("  ]\n}");
+        out
+    }
+}
+
+fn visit_scene_items<'a>(
+    items: &'a [CanvasItem],
+    depth: usize,
+    index_path: &mut Vec<usize>,
+    visitor: &mut impl FnMut(CanvasSceneVisit<'a>),
+) {
+    for (index, item) in items.iter().enumerate() {
+        index_path.push(index);
+        visitor(CanvasSceneVisit {
+            depth,
+            index_path: index_path.clone(),
+            item,
+        });
+        if let CanvasItem::Group(group) = item {
+            visit_scene_items(&group.items, depth + 1, index_path, visitor);
+        }
+        index_path.pop();
+    }
+}
+
+fn find_item_by_id(items: &[CanvasItem], id: CanvasItemId) -> Option<&CanvasItem> {
+    for item in items {
+        if item.id() == id {
+            return Some(item);
+        }
+        if let CanvasItem::Group(group) = item {
+            if let Some(found) = find_item_by_id(&group.items, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn find_item_mut_by_id(items: &mut [CanvasItem], id: CanvasItemId) -> Option<&mut CanvasItem> {
+    for item in items.iter_mut() {
+        if item.id() == id {
+            return Some(item);
+        }
+        if let CanvasItem::Group(group) = item {
+            if let Some(found) = find_item_mut_by_id(&mut group.items, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn find_item_by_name<'a>(items: &'a [CanvasItem], name: &str) -> Option<&'a CanvasItem> {
+    for item in items {
+        if item.name() == Some(name) {
+            return Some(item);
+        }
+        if let CanvasItem::Group(group) = item {
+            if let Some(found) = find_item_by_name(&group.items, name) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn find_item_mut_by_name<'a>(
+    items: &'a mut [CanvasItem],
+    name: &str,
+) -> Option<&'a mut CanvasItem> {
+    for item in items.iter_mut() {
+        if item.name() == Some(name) {
+            return Some(item);
+        }
+        if let CanvasItem::Group(group) = item {
+            if let Some(found) = find_item_mut_by_name(&mut group.items, name) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn remove_item_by_id(items: &mut Vec<CanvasItem>, id: CanvasItemId) -> Option<CanvasItem> {
+    let mut index = 0;
+    while index < items.len() {
+        if items[index].id() == id {
+            return Some(items.remove(index));
+        }
+        if let CanvasItem::Group(group) = &mut items[index] {
+            if let Some(removed) = remove_item_by_id(&mut group.items, id) {
+                return Some(removed);
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
+fn build_debug_node(
+    item: &CanvasItem,
+    depth: usize,
+    index_path: &mut Vec<usize>,
+    stats: &mut CanvasSceneDebugStats,
+) -> CanvasSceneDebugNode {
+    stats.total_items += 1;
+    stats.max_depth = stats.max_depth.max(depth);
+    if item.name().is_some() {
+        stats.named_items += 1;
+    }
+    if item.style().visible {
+        stats.visible_items += 1;
+    }
+    if item.style().hit_test {
+        stats.hit_testable_items += 1;
+    }
+    match item.kind() {
+        CanvasItemKind::Path => stats.path_items += 1,
+        CanvasItemKind::Text => stats.text_items += 1,
+        CanvasItemKind::Image => stats.image_items += 1,
+        CanvasItemKind::Group => stats.group_items += 1,
+    }
+
+    let summary = match item {
+        CanvasItem::Path(path) => format!(
+            "path(fill={}, stroke={}, shadow={})",
+            path.fill.is_some(),
+            path.stroke.is_some(),
+            path.shadow.is_some()
+        ),
+        CanvasItem::Text(text) => format!("text(chars={})", text.plain_text().chars().count()),
+        CanvasItem::Image(image) => format!("image(fit={:?})", image.fit),
+        CanvasItem::Group(group) => {
+            format!("group(mode={:?}, items={})", group.mode, group.items.len())
+        }
+    };
+
+    let children = match item {
+        CanvasItem::Group(group) => group
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, child)| {
+                index_path.push(index);
+                let node = build_debug_node(child, depth + 1, index_path, stats);
+                index_path.pop();
+                node
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    CanvasSceneDebugNode {
+        id: item.id(),
+        name: item.name().map(ToOwned::to_owned),
+        kind: item.kind(),
+        depth,
+        index_path: index_path.clone(),
+        visible: item.style().visible,
+        hit_test: item.style().hit_test,
+        opacity: item.style().opacity,
+        blend_mode: item.style().blend_mode,
+        bounds: item.layout_bounds().map(rect_from_bounds),
+        child_count: item.children().len(),
+        summary,
+        children,
+    }
+}
+
+fn write_debug_node_text(out: &mut String, node: &CanvasSceneDebugNode) {
+    let indent = "  ".repeat(node.depth + 1);
+    out.push_str(&format!(
+        "{}- {:?} id={}{} visible={} hit_test={} opacity={:.2}",
+        indent,
+        node.kind,
+        node.id.get(),
+        node.name
+            .as_ref()
+            .map(|name| format!(" name=\"{}\"", name))
+            .unwrap_or_default(),
+        node.visible,
+        node.hit_test,
+        node.opacity,
+    ));
+    if let Some(bounds) = node.bounds {
+        out.push_str(&format!(
+            " bounds=({:.1}, {:.1}, {:.1}, {:.1})",
+            bounds.x.get(),
+            bounds.y.get(),
+            bounds.width.get(),
+            bounds.height.get(),
+        ));
+    }
+    out.push_str(&format!(" {}\n", node.summary));
+    for child in &node.children {
+        write_debug_node_text(out, child);
+    }
+}
+
+fn write_debug_stats_json(out: &mut String, stats: &CanvasSceneDebugStats, indent: usize) {
+    out.push_str("{\n");
+    let prefix = "  ".repeat(indent + 1);
+    out.push_str(&format!("{prefix}\"root_items\": {},\n", stats.root_items));
+    out.push_str(&format!(
+        "{prefix}\"total_items\": {},\n",
+        stats.total_items
+    ));
+    out.push_str(&format!(
+        "{prefix}\"named_items\": {},\n",
+        stats.named_items
+    ));
+    out.push_str(&format!(
+        "{prefix}\"visible_items\": {},\n",
+        stats.visible_items
+    ));
+    out.push_str(&format!(
+        "{prefix}\"hit_testable_items\": {},\n",
+        stats.hit_testable_items
+    ));
+    out.push_str(&format!("{prefix}\"path_items\": {},\n", stats.path_items));
+    out.push_str(&format!("{prefix}\"text_items\": {},\n", stats.text_items));
+    out.push_str(&format!(
+        "{prefix}\"image_items\": {},\n",
+        stats.image_items
+    ));
+    out.push_str(&format!(
+        "{prefix}\"group_items\": {},\n",
+        stats.group_items
+    ));
+    out.push_str(&format!("{prefix}\"max_depth\": {},\n", stats.max_depth));
+    out.push_str(&format!("{prefix}\"bounds\": "));
+    write_optional_rect_json(out, stats.bounds, indent + 1);
+    out.push_str(&format!("\n{}", "  ".repeat(indent)));
+    out.push('}');
+}
+
+fn write_debug_node_json(out: &mut String, node: &CanvasSceneDebugNode, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    out.push_str(&format!("{prefix}{{\n"));
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str(&format!("{field_prefix}\"id\": {},\n", node.id.get()));
+    out.push_str(&format!(
+        "{field_prefix}\"name\": {},\n",
+        node.name
+            .as_deref()
+            .map(json_string)
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    out.push_str(&format!("{field_prefix}\"kind\": \"{:?}\",\n", node.kind));
+    out.push_str(&format!("{field_prefix}\"depth\": {},\n", node.depth));
+    out.push_str(&format!(
+        "{field_prefix}\"index_path\": {},\n",
+        json_usize_array(&node.index_path)
+    ));
+    out.push_str(&format!("{field_prefix}\"visible\": {},\n", node.visible));
+    out.push_str(&format!("{field_prefix}\"hit_test\": {},\n", node.hit_test));
+    out.push_str(&format!("{field_prefix}\"opacity\": {},\n", node.opacity));
+    out.push_str(&format!(
+        "{field_prefix}\"blend_mode\": \"{:?}\",\n",
+        node.blend_mode
+    ));
+    out.push_str(&format!("{field_prefix}\"bounds\": "));
+    write_optional_rect_json(out, node.bounds, indent + 1);
+    out.push_str(",\n");
+    out.push_str(&format!(
+        "{field_prefix}\"child_count\": {},\n",
+        node.child_count
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"summary\": {},\n",
+        json_string(&node.summary)
+    ));
+    out.push_str(&format!("{field_prefix}\"children\": ["));
+    if node.children.is_empty() {
+        out.push_str("]\n");
+    } else {
+        out.push('\n');
+        for (index, child) in node.children.iter().enumerate() {
+            write_debug_node_json(out, child, indent + 2);
+            if index + 1 != node.children.len() {
+                out.push(',');
+            }
+            out.push('\n');
+        }
+        out.push_str(&format!("{field_prefix}]\n"));
+    }
+    out.push_str(&format!("{prefix}}}"));
+}
+
+fn write_optional_rect_json(out: &mut String, rect: Option<Rect>, indent: usize) {
+    match rect {
+        Some(rect) => {
+            let prefix = "  ".repeat(indent + 1);
+            out.push_str("{\n");
+            out.push_str(&format!("{prefix}\"x\": {},\n", rect.x.get()));
+            out.push_str(&format!("{prefix}\"y\": {},\n", rect.y.get()));
+            out.push_str(&format!("{prefix}\"width\": {},\n", rect.width.get()));
+            out.push_str(&format!("{prefix}\"height\": {}\n", rect.height.get()));
+            out.push_str(&format!("{}{}", "  ".repeat(indent), "}"));
+        }
+        None => out.push_str("null"),
+    }
+}
+
+fn json_usize_array(values: &[usize]) -> String {
+    let mut out = String::from("[");
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&value.to_string());
+    }
+    out.push(']');
+    out
+}
+
+fn json_string(value: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0C}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch <= '\u{1F}' => out.push_str(&format!("\\u{:04X}", ch as u32)),
+            _ => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn query_canvas_scene_hits(
+    scene: &CanvasScene,
+    font_manager: &FontManager,
+    units: UnitContext,
+    scene_position: Point,
+) -> Vec<CanvasSceneHit> {
+    let query_session = CanvasSceneQuerySession::new(font_manager, units);
+    let mut metadata = HashMap::new();
+    scene.visit(|entry| {
+        metadata.insert(
+            entry.item.id(),
+            (
+                entry.depth,
+                entry.index_path,
+                entry.item.kind(),
+                entry.item.name().map(ToOwned::to_owned),
+                entry.item.hit_bounds_rect(),
+            ),
+        );
+    });
+
+    let mut hits = Vec::new();
+    let mut index_path = Vec::new();
+    collect_query_hits_recursive(
+        scene.items(),
+        scene_position,
+        &mut index_path,
+        &query_session,
+        &metadata,
+        &mut hits,
+    );
+    hits
+}
+
+fn collect_query_hits_recursive(
+    items: &[CanvasItem],
+    scene_position: Point,
+    index_path: &mut Vec<usize>,
+    query_session: &CanvasSceneQuerySession<'_>,
+    metadata: &HashMap<
+        CanvasItemId,
+        (
+            usize,
+            Vec<usize>,
+            CanvasItemKind,
+            Option<String>,
+            Option<Rect>,
+        ),
+    >,
+    hits: &mut Vec<CanvasSceneHit>,
+) {
+    for index in (0..items.len()).rev() {
+        let item = &items[index];
+        index_path.push(index);
+        if !item.style().visible || !item.style().hit_test {
+            index_path.pop();
+            continue;
+        }
+
+        let contains = item_contains_scene_point(item, scene_position);
+        if let CanvasItem::Group(group) = item {
+            if contains {
+                collect_query_hits_recursive(
+                    &group.items,
+                    scene_position,
+                    index_path,
+                    query_session,
+                    metadata,
+                    hits,
+                );
+            }
+        }
+
+        if contains {
+            let local_position = item_event_local_position(item, scene_position);
+            let (depth, stored_path, kind, name, bounds) =
+                metadata.get(&item.id()).cloned().unwrap_or((
+                    index_path.len().saturating_sub(1),
+                    index_path.clone(),
+                    item.kind(),
+                    item.name().map(ToOwned::to_owned),
+                    item.hit_bounds_rect(),
+                ));
+            let text_hit = item_text_hit_at_point(item, scene_position, query_session);
+            hits.push(CanvasSceneHit {
+                item_id: item.id(),
+                name,
+                kind,
+                depth,
+                index_path: stored_path,
+                scene_position,
+                local_position,
+                bounds,
+                text_hit,
+            });
+        }
+
+        index_path.pop();
+    }
+}
+
+struct CanvasSceneQueryContext {
+    font_manager: FontManager,
+    units: UnitContext,
+}
+
+impl CanvasSceneQueryContext {
+    fn new(font_catalog: &FontCatalog, units: UnitContext) -> Self {
+        Self {
+            font_manager: FontManager::new(font_catalog),
+            units,
+        }
+    }
+}
+
+struct CanvasSceneQuerySession<'a> {
+    font_manager: &'a FontManager,
+    units: UnitContext,
+    text_hit_cache: RefCell<HashMap<u64, Arc<[CanvasTextHitEntry]>>>,
+}
+
+impl<'a> CanvasSceneQuerySession<'a> {
+    fn new(font_manager: &'a FontManager, units: UnitContext) -> Self {
+        Self {
+            font_manager,
+            units,
+            text_hit_cache: RefCell::new(HashMap::new()),
+        }
+    }
+
+    fn text_hits_for_item(&self, item: &CanvasItem) -> Arc<[CanvasTextHitEntry]> {
+        let cache_key = canvas_text_hit_cache_key(item, self.units);
+        if let Some(cached) = self.text_hit_cache.borrow().get(&cache_key).cloned() {
+            return cached;
+        }
+        let computed = item_text_hits(item, self.font_manager, Point::ZERO, self.units);
+        self.text_hit_cache
+            .borrow_mut()
+            .insert(cache_key, Arc::clone(&computed));
+        computed
+    }
+}
+
+fn item_contains_scene_point(item: &CanvasItem, scene_position: Point) -> bool {
+    let Some(bounds) = item.hit_bounds_rect() else {
+        return false;
+    };
+    if !bounds.contains(scene_position) {
+        return false;
+    }
+
+    match scene_hit_geometry_for_item(item) {
+        Some(geometry) => hit_geometry_contains(&geometry, scene_position),
+        None => true,
+    }
+}
+
+fn scene_hit_geometry_for_item(item: &CanvasItem) -> Option<CanvasHitGeometry> {
+    match item {
+        CanvasItem::Path(path) => path_scene_hit_geometry(path),
+        CanvasItem::Text(text) => Some(CanvasHitGeometry::Quad(
+            if text.style.transform == CanvasTransform2D::IDENTITY {
+                rect_to_quad(text.frame)
+            } else {
+                transform_rect_quad(text.frame, text.style.transform, Point::ZERO)
+            },
+        )),
+        CanvasItem::Image(image) => Some(CanvasHitGeometry::Quad(
+            if image.style.transform == CanvasTransform2D::IDENTITY {
+                rect_to_quad(image.frame)
+            } else {
+                transform_rect_quad(image.frame, image.style.transform, Point::ZERO)
+            },
+        )),
+        CanvasItem::Group(group) => group_scene_hit_geometry(group),
+    }
+}
+
+fn path_scene_hit_geometry(path: &CanvasPath) -> Option<CanvasHitGeometry> {
+    let mut triangles = Vec::new();
+    let lyon_path = path.path.to_lyon_path();
+    let clip = CanvasClipContext::default();
+
+    if path.fill.is_some() {
+        if let Some(mesh) = tessellate_fill(
+            &lyon_path,
+            path.fill_rule,
+            &CanvasBrush::Solid(Color::BLACK),
+            1.0,
+            Point::ZERO,
+            clip,
+        ) {
+            triangles.extend(mesh.triangles.iter().copied());
+        }
+    }
+
+    if let Some(stroke) = path.stroke.as_ref() {
+        if let Some(mesh) = tessellate_stroke(&lyon_path, stroke, 1.0, Point::ZERO, clip) {
+            triangles.extend(mesh.triangles.iter().copied());
+        }
+    }
+
+    if triangles.is_empty() {
+        return None;
+    }
+
+    let geometry = CanvasHitGeometry::Triangles(Arc::from(triangles));
+    Some(transform_hit_geometry(
+        &geometry,
+        path.style.transform,
+        Point::ZERO,
+    ))
+}
+
+fn group_scene_hit_geometry(group: &CanvasGroup) -> Option<CanvasHitGeometry> {
+    let CanvasGroupShape::Path { path, fill_rule } = &group.shape;
+    let lyon_path = path.to_lyon_path();
+    let mesh = tessellate_fill(
+        &lyon_path,
+        *fill_rule,
+        &CanvasBrush::Solid(Color::BLACK),
+        1.0,
+        Point::ZERO,
+        CanvasClipContext::default(),
+    )?;
+    let geometry = CanvasHitGeometry::Triangles(mesh.triangles);
+    Some(transform_hit_geometry(
+        &geometry,
+        group.style.transform,
+        Point::ZERO,
+    ))
+}
+
+fn transform_hit_geometry(
+    geometry: &CanvasHitGeometry,
+    transform: CanvasTransform2D,
+    origin: Point,
+) -> CanvasHitGeometry {
+    if transform == CanvasTransform2D::IDENTITY {
+        return geometry.clone();
+    }
+
+    match geometry {
+        CanvasHitGeometry::Quad(quad) => CanvasHitGeometry::Quad(quad.map(|point_value| {
+            transform.apply(Point::new(
+                point_value.x - origin.x,
+                point_value.y - origin.y,
+            ))
+        })),
+        CanvasHitGeometry::Triangles(triangles) => {
+            let transformed = triangles
+                .iter()
+                .map(|triangle| {
+                    triangle.map(|point_value| {
+                        let local = Point::new(point_value.x - origin.x, point_value.y - origin.y);
+                        transform.apply(local)
+                    })
+                })
+                .collect::<Vec<_>>();
+            CanvasHitGeometry::Triangles(Arc::from(transformed))
+        }
+    }
+}
+
+fn hit_geometry_contains(geometry: &CanvasHitGeometry, point: Point) -> bool {
+    match geometry {
+        CanvasHitGeometry::Quad(quad) => {
+            point_in_triangle(point, quad[0], quad[1], quad[2])
+                || point_in_triangle(point, quad[0], quad[2], quad[3])
+        }
+        CanvasHitGeometry::Triangles(triangles) => triangles
+            .iter()
+            .any(|triangle| point_in_triangle(point, triangle[0], triangle[1], triangle[2])),
+    }
+}
+
+fn point_in_triangle(point: Point, a: Point, b: Point, c: Point) -> bool {
+    let point_sign = |lhs: Point, rhs: Point, other: Point| {
+        (lhs.x.get() - other.x.get()) * (rhs.y.get() - other.y.get())
+            - (rhs.x.get() - other.x.get()) * (lhs.y.get() - other.y.get())
+    };
+
+    let d1 = point_sign(point, a, b);
+    let d2 = point_sign(point, b, c);
+    let d3 = point_sign(point, c, a);
+    let has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+    let has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+    !(has_neg && has_pos)
+}
+
+fn item_event_local_position(item: &CanvasItem, scene_position: Point) -> Point {
+    let item_origin = item_local_origin(item);
+    let local = Point::new(
+        scene_position.x - item_origin.x,
+        scene_position.y - item_origin.y,
+    );
+    let [a, b, c, d, e, f] = item
+        .style()
+        .transform
+        .inverse()
+        .unwrap_or(CanvasTransform2D::IDENTITY)
+        .matrix;
+    Point::new(
+        a * local.x.get() + c * local.y.get() + e,
+        b * local.x.get() + d * local.y.get() + f,
+    )
+}
+
+fn item_text_hit_at_point(
+    item: &CanvasItem,
+    scene_position: Point,
+    query_session: &CanvasSceneQuerySession<'_>,
+) -> Option<CanvasTextHit> {
+    let CanvasItem::Text(_) = item else {
+        return None;
+    };
+    let text_hits = query_session.text_hits_for_item(item);
+    text_hits
+        .iter()
+        .find(|entry| hit_geometry_contains(&CanvasHitGeometry::Quad(entry.quad), scene_position))
+        .map(|entry| entry.hit)
+}
+
+fn export_canvas_scene_json(scene: &CanvasScene) -> String {
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str(&format!(
+        "  \"format\": {},\n",
+        json_string(CanvasScene::STABLE_JSON_FORMAT)
+    ));
+    out.push_str(&format!(
+        "  \"version\": {},\n",
+        CanvasScene::STABLE_JSON_VERSION
+    ));
+    out.push_str("  \"bounds\": ");
+    write_optional_rect_json(&mut out, scene.bounds(), 1);
+    out.push_str(",\n  \"items\": [\n");
+    for (index, item) in scene.items.iter().enumerate() {
+        write_canvas_scene_item_json(&mut out, item, 2);
+        if index + 1 != scene.items.len() {
+            out.push(',');
+        }
+        out.push('\n');
+    }
+    out.push_str("  ]\n}");
+    out
+}
+
+fn write_canvas_scene_item_json(out: &mut String, item: &CanvasItem, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str(&format!("{prefix}{{\n"));
+    out.push_str(&format!("{field_prefix}\"id\": {},\n", item.id().get()));
+    out.push_str(&format!(
+        "{field_prefix}\"name\": {},\n",
+        item.name()
+            .map(json_string)
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"kind\": {},\n",
+        json_string(canvas_item_kind_name(item.kind()))
+    ));
+    write_canvas_item_style_json(out, item.style(), indent + 1);
+    out.push_str(",\n");
+
+    match item {
+        CanvasItem::Path(path) => write_canvas_path_payload_json(out, path, indent + 1),
+        CanvasItem::Text(text) => write_canvas_text_payload_json(out, text, indent + 1),
+        CanvasItem::Image(image) => write_canvas_image_payload_json(out, image, indent + 1),
+        CanvasItem::Group(group) => write_canvas_group_payload_json(out, group, indent + 1),
+    }
+
+    out.push('\n');
+    out.push_str(&format!("{prefix}}}"));
+}
+
+fn write_canvas_item_style_json(out: &mut String, style: &CanvasItemStyle, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    out.push_str(&format!("{prefix}\"style\": {{\n"));
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str(&format!(
+        "{field_prefix}\"transform\": {},\n",
+        json_f32_array(&style.transform.matrix)
+    ));
+    out.push_str(&format!("{field_prefix}\"opacity\": {},\n", style.opacity));
+    out.push_str(&format!(
+        "{field_prefix}\"blend_mode\": {},\n",
+        json_string(canvas_blend_mode_name(style.blend_mode))
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"isolation\": {},\n",
+        style.isolation
+    ));
+    out.push_str(&format!("{field_prefix}\"visible\": {},\n", style.visible));
+    out.push_str(&format!(
+        "{field_prefix}\"hit_test\": {},\n",
+        style.hit_test
+    ));
+    out.push_str(&format!("{field_prefix}\"effects\": "));
+    write_canvas_effects_json(out, &style.effects, indent + 1);
+    out.push_str(&format!("\n{prefix}}}"));
+}
+
+fn write_canvas_path_payload_json(out: &mut String, path: &CanvasPath, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str(&format!("{prefix}\"payload\": {{\n"));
+    out.push_str(&format!(
+        "{field_prefix}\"fill_rule\": {},\n",
+        json_string(canvas_fill_rule_name(path.fill_rule))
+    ));
+    out.push_str(&format!("{field_prefix}\"path\": "));
+    write_path_builder_json(out, &path.path, indent + 1);
+    out.push_str(",\n");
+    out.push_str(&format!("{field_prefix}\"fill\": "));
+    write_optional_brush_value_json(out, path.fill.as_ref(), indent + 1);
+    out.push_str(",\n");
+    out.push_str(&format!("{field_prefix}\"stroke\": "));
+    write_optional_stroke_json(out, path.stroke.as_ref(), indent + 1);
+    out.push_str(",\n");
+    out.push_str(&format!("{field_prefix}\"shadow\": "));
+    write_optional_shadow_value_json(out, path.shadow.as_ref(), indent + 1);
+    out.push_str(&format!("\n{prefix}}}"));
+}
+
+fn write_canvas_text_payload_json(out: &mut String, text: &CanvasText, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str(&format!("{prefix}\"payload\": {{\n"));
+    out.push_str(&format!("{field_prefix}\"frame\": "));
+    write_rect_json(out, text.frame, indent + 1);
+    out.push_str(",\n");
+    out.push_str(&format!("{field_prefix}\"content\": "));
+    write_text_content_json(out, &text.content, indent + 1);
+    out.push_str(",\n");
+    out.push_str(&format!("{field_prefix}\"text_style\": "));
+    write_text_style_json(out, &text.text_style, indent + 1);
+    out.push_str(",\n");
+    out.push_str(&format!("{field_prefix}\"paragraph_style\": "));
+    write_paragraph_style_json(out, &text.paragraph_style, indent + 1);
+    out.push_str(&format!("\n{prefix}}}"));
+}
+
+fn write_canvas_image_payload_json(out: &mut String, image: &CanvasImage, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str(&format!("{prefix}\"payload\": {{\n"));
+    out.push_str(&format!("{field_prefix}\"frame\": "));
+    write_rect_json(out, image.frame, indent + 1);
+    out.push_str(",\n");
+    out.push_str(&format!("{field_prefix}\"source\": "));
+    write_media_source_json(out, &image.source, indent + 1);
+    out.push_str(",\n");
+    out.push_str(&format!(
+        "{field_prefix}\"fit\": {},\n",
+        json_string(content_fit_name(image.fit))
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"corner_radius\": {},\n",
+        image.corner_radius.get()
+    ));
+    out.push_str(&format!("{field_prefix}\"source_rect\": "));
+    write_optional_rect_json(out, image.source_rect, indent + 1);
+    out.push_str(&format!("\n{prefix}}}"));
+}
+
+fn write_canvas_group_payload_json(out: &mut String, group: &CanvasGroup, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str(&format!("{prefix}\"payload\": {{\n"));
+    out.push_str(&format!(
+        "{field_prefix}\"mode\": {},\n",
+        json_string(canvas_group_mode_name(&group.mode))
+    ));
+    out.push_str(&format!("{field_prefix}\"shape\": "));
+    write_group_shape_json(out, &group.shape, indent + 1);
+    out.push_str(",\n");
+    out.push_str(&format!("{field_prefix}\"items\": [\n"));
+    for (index, child) in group.items.iter().enumerate() {
+        write_canvas_scene_item_json(out, child, indent + 2);
+        if index + 1 != group.items.len() {
+            out.push(',');
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!("{field_prefix}]\n{prefix}}}"));
+}
+
+fn write_group_shape_json(out: &mut String, shape: &CanvasGroupShape, indent: usize) {
+    match shape {
+        CanvasGroupShape::Path { path, fill_rule } => {
+            let prefix = "  ".repeat(indent);
+            let field_prefix = "  ".repeat(indent + 1);
+            out.push_str("{\n");
+            out.push_str(&format!("{field_prefix}\"kind\": \"path\",\n"));
+            out.push_str(&format!(
+                "{field_prefix}\"fill_rule\": {},\n",
+                json_string(canvas_fill_rule_name(*fill_rule))
+            ));
+            out.push_str(&format!("{field_prefix}\"path\": "));
+            write_path_builder_json(out, path, indent + 1);
+            out.push_str(&format!("\n{prefix}}}"));
+        }
+    }
+}
+
+fn write_path_builder_json(out: &mut String, path: &PathBuilder, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str("{\n");
+    out.push_str(&format!(
+        "{field_prefix}\"fill_rule\": {},\n",
+        json_string(canvas_fill_rule_name(path.fill_rule))
+    ));
+    out.push_str(&format!("{field_prefix}\"commands\": [\n"));
+    for (index, command) in path.commands.iter().enumerate() {
+        write_path_command_json(out, command, indent + 2);
+        if index + 1 != path.commands.len() {
+            out.push(',');
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!("{field_prefix}]\n{prefix}}}"));
+}
+
+fn write_path_command_json(out: &mut String, command: &PathCommand, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str(&format!("{prefix}{{\n"));
+    match command {
+        PathCommand::MoveTo(point_value) => {
+            out.push_str(&format!("{field_prefix}\"kind\": \"move_to\",\n"));
+            out.push_str(&format!("{field_prefix}\"point\": "));
+            write_point_json(out, *point_value, indent + 1);
+        }
+        PathCommand::LineTo(point_value) => {
+            out.push_str(&format!("{field_prefix}\"kind\": \"line_to\",\n"));
+            out.push_str(&format!("{field_prefix}\"point\": "));
+            write_point_json(out, *point_value, indent + 1);
+        }
+        PathCommand::QuadTo { ctrl, to } => {
+            out.push_str(&format!("{field_prefix}\"kind\": \"quad_to\",\n"));
+            out.push_str(&format!("{field_prefix}\"ctrl\": "));
+            write_point_json(out, *ctrl, indent + 1);
+            out.push_str(",\n");
+            out.push_str(&format!("{field_prefix}\"to\": "));
+            write_point_json(out, *to, indent + 1);
+        }
+        PathCommand::CubicTo { ctrl1, ctrl2, to } => {
+            out.push_str(&format!("{field_prefix}\"kind\": \"cubic_to\",\n"));
+            out.push_str(&format!("{field_prefix}\"ctrl1\": "));
+            write_point_json(out, *ctrl1, indent + 1);
+            out.push_str(",\n");
+            out.push_str(&format!("{field_prefix}\"ctrl2\": "));
+            write_point_json(out, *ctrl2, indent + 1);
+            out.push_str(",\n");
+            out.push_str(&format!("{field_prefix}\"to\": "));
+            write_point_json(out, *to, indent + 1);
+        }
+        PathCommand::Close => {
+            out.push_str(&format!("{field_prefix}\"kind\": \"close\"\n"));
+            out.push_str(&format!("{prefix}}}"));
+            return;
+        }
+    }
+    out.push_str(&format!("\n{prefix}}}"));
+}
+
+fn write_optional_brush_value_json(
+    out: &mut String,
+    brush: Option<&Value<CanvasBrush>>,
+    indent: usize,
+) {
+    match brush {
+        Some(Value::Static(brush)) => write_brush_json(out, brush, indent),
+        Some(Value::Signal(_)) => out.push_str("{\"kind\":\"dynamic\"}"),
+        None => out.push_str("null"),
+    }
+}
+
+fn write_brush_json(out: &mut String, brush: &CanvasBrush, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str("{\n");
+    match brush {
+        CanvasBrush::Solid(color) => {
+            out.push_str(&format!("{field_prefix}\"kind\": \"solid\",\n"));
+            out.push_str(&format!(
+                "{field_prefix}\"color\": {}",
+                json_string(&color_hex(*color))
+            ));
+        }
+        CanvasBrush::LinearGradient(gradient) => {
+            out.push_str(&format!("{field_prefix}\"kind\": \"linear_gradient\",\n"));
+            out.push_str(&format!("{field_prefix}\"start\": "));
+            write_point_json(out, gradient.start, indent + 1);
+            out.push_str(",\n");
+            out.push_str(&format!("{field_prefix}\"end\": "));
+            write_point_json(out, gradient.end, indent + 1);
+            out.push_str(",\n");
+            out.push_str(&format!("{field_prefix}\"stops\": "));
+            write_gradient_stops_json(out, &gradient.stops, indent + 1);
+        }
+        CanvasBrush::RadialGradient(gradient) => {
+            out.push_str(&format!("{field_prefix}\"kind\": \"radial_gradient\",\n"));
+            out.push_str(&format!("{field_prefix}\"center\": "));
+            write_point_json(out, gradient.center, indent + 1);
+            out.push_str(",\n");
+            out.push_str(&format!(
+                "{field_prefix}\"radius\": {},\n",
+                gradient.radius.get()
+            ));
+            out.push_str(&format!("{field_prefix}\"stops\": "));
+            write_gradient_stops_json(out, &gradient.stops, indent + 1);
+        }
+    }
+    out.push_str(&format!("\n{prefix}}}"));
+}
+
+fn write_gradient_stops_json(out: &mut String, stops: &[CanvasGradientStop], indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str("[\n");
+    for (index, stop) in stops.iter().enumerate() {
+        out.push_str(&format!("{field_prefix}{{\n"));
+        out.push_str(&format!("{field_prefix}  \"offset\": {},\n", stop.offset));
+        out.push_str(&format!(
+            "{field_prefix}  \"color\": {}\n",
+            json_string(&color_hex(stop.color))
+        ));
+        out.push_str(&format!("{field_prefix}}}"));
+        if index + 1 != stops.len() {
+            out.push(',');
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!("{prefix}]"));
+}
+
+fn write_optional_stroke_json(out: &mut String, stroke: Option<&CanvasStroke>, indent: usize) {
+    let Some(stroke) = stroke else {
+        out.push_str("null");
+        return;
+    };
+
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str("{\n");
+    out.push_str(&format!(
+        "{field_prefix}\"width\": {},\n",
+        stroke.width.get()
+    ));
+    out.push_str(&format!("{field_prefix}\"brush\": "));
+    match &stroke.brush {
+        Value::Static(brush) => write_brush_json(out, brush, indent + 1),
+        Value::Signal(_) => out.push_str("{\"kind\":\"dynamic\"}"),
+    }
+    out.push_str(",\n");
+    out.push_str(&format!(
+        "{field_prefix}\"dash_pattern\": {},\n",
+        stroke
+            .dash_pattern
+            .as_ref()
+            .map(|pattern| json_dp_array(pattern))
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"dash_offset\": {},\n",
+        stroke.dash_offset.get()
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"line_cap\": {},\n",
+        json_string(canvas_stroke_cap_name(stroke.line_cap))
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"line_join\": {},\n",
+        json_string(canvas_stroke_join_name(stroke.line_join))
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"miter_limit\": {},\n",
+        stroke.miter_limit
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"alignment\": {}\n",
+        json_string(canvas_stroke_alignment_name(stroke.alignment))
+    ));
+    out.push_str(&format!("{prefix}}}"));
+}
+
+fn write_optional_shadow_value_json(
+    out: &mut String,
+    shadow: Option<&Value<CanvasShadow>>,
+    indent: usize,
+) {
+    match shadow {
+        Some(Value::Static(shadow)) => {
+            let prefix = "  ".repeat(indent);
+            let field_prefix = "  ".repeat(indent + 1);
+            out.push_str("{\n");
+            out.push_str(&format!(
+                "{field_prefix}\"color\": {},\n",
+                json_string(&color_hex(shadow.color))
+            ));
+            out.push_str(&format!("{field_prefix}\"offset\": "));
+            write_point_json(out, shadow.offset, indent + 1);
+            out.push_str(",\n");
+            out.push_str(&format!("{field_prefix}\"blur\": {}\n", shadow.blur.get()));
+            out.push_str(&format!("{prefix}}}"));
+        }
+        Some(Value::Signal(_)) => out.push_str("{\"kind\":\"dynamic\"}"),
+        None => out.push_str("null"),
+    }
+}
+
+fn write_canvas_effects_json(out: &mut String, effects: &[CanvasEffect], indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str("[\n");
+    for (index, effect) in effects.iter().enumerate() {
+        out.push_str(&format!("{field_prefix}{{\n"));
+        match effect {
+            CanvasEffect::Blur(radius) => {
+                out.push_str(&format!("{field_prefix}  \"kind\": \"blur\",\n"));
+                out.push_str(&format!("{field_prefix}  \"radius\": {}\n", radius.get()));
+            }
+            CanvasEffect::ColorFilter(filter) => {
+                out.push_str(&format!("{field_prefix}  \"kind\": \"color_filter\",\n"));
+                out.push_str(&format!(
+                    "{field_prefix}  \"multiply\": {},\n",
+                    json_f32_array(&filter.multiply)
+                ));
+                out.push_str(&format!(
+                    "{field_prefix}  \"add\": {}\n",
+                    json_f32_array(&filter.add)
+                ));
+            }
+            CanvasEffect::InnerShadow(shadow) => {
+                out.push_str(&format!("{field_prefix}  \"kind\": \"inner_shadow\",\n"));
+                out.push_str(&format!(
+                    "{field_prefix}  \"color\": {},\n",
+                    json_string(&color_hex(shadow.color))
+                ));
+                out.push_str(&format!("{field_prefix}  \"offset\": "));
+                write_point_json(out, shadow.offset, indent + 2);
+                out.push_str(",\n");
+                out.push_str(&format!(
+                    "{field_prefix}  \"blur\": {}\n",
+                    shadow.blur.get()
+                ));
+            }
+        }
+        out.push_str(&format!("{field_prefix}}}"));
+        if index + 1 != effects.len() {
+            out.push(',');
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!("{prefix}]"));
+}
+
+fn write_text_content_json(out: &mut String, content: &CanvasTextContent, indent: usize) {
+    match content {
+        CanvasTextContent::Plain(text) => {
+            out.push_str("{\"kind\":\"plain\",\"text\":");
+            out.push_str(&json_string(text));
+            out.push('}');
+        }
+        CanvasTextContent::Rich(spans) => {
+            let prefix = "  ".repeat(indent);
+            let field_prefix = "  ".repeat(indent + 1);
+            out.push_str("{\n");
+            out.push_str(&format!("{field_prefix}\"kind\": \"rich\",\n"));
+            out.push_str(&format!("{field_prefix}\"spans\": [\n"));
+            for (index, span) in spans.iter().enumerate() {
+                out.push_str(&format!("{field_prefix}  {{\n"));
+                out.push_str(&format!(
+                    "{field_prefix}    \"content\": {},\n",
+                    json_string(&span.content)
+                ));
+                out.push_str(&format!("{field_prefix}    \"style\": "));
+                write_text_style_json(out, &span.style, indent + 2);
+                out.push_str(&format!("\n{field_prefix}  }}"));
+                if index + 1 != spans.len() {
+                    out.push(',');
+                }
+                out.push('\n');
+            }
+            out.push_str(&format!("{field_prefix}]\n{prefix}}}"));
+        }
+    }
+}
+
+fn write_text_style_json(out: &mut String, style: &CanvasTextStyle, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str("{\n");
+    out.push_str(&format!(
+        "{field_prefix}\"font_family\": {},\n",
+        style
+            .font_family
+            .as_deref()
+            .map(json_string)
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"color\": {},\n",
+        json_string(&color_hex(style.color))
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"font_size\": {},\n",
+        style.font_size.get()
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"font_weight\": {},\n",
+        style.font_weight.to_raw()
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"line_height\": {},\n",
+        style
+            .line_height
+            .map(|value| value.get().to_string())
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"letter_spacing\": {}\n",
+        style.letter_spacing.get()
+    ));
+    out.push_str(&format!("{prefix}}}"));
+}
+
+fn write_paragraph_style_json(out: &mut String, style: &CanvasParagraphStyle, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str("{\n");
+    out.push_str(&format!(
+        "{field_prefix}\"wrap\": {},\n",
+        json_string(canvas_text_wrap_name(style.wrap))
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"horizontal_align\": {},\n",
+        json_string(canvas_text_horizontal_align_name(style.horizontal_align))
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"vertical_align\": {},\n",
+        json_string(canvas_text_vertical_align_name(style.vertical_align))
+    ));
+    out.push_str(&format!(
+        "{field_prefix}\"overflow\": {}\n",
+        json_string(canvas_text_overflow_name(style.overflow))
+    ));
+    out.push_str(&format!("{prefix}}}"));
+}
+
+fn write_media_source_json(out: &mut String, source: &MediaSource, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str("{\n");
+    match source {
+        MediaSource::Path(path) => {
+            out.push_str(&format!("{field_prefix}\"kind\": \"path\",\n"));
+            out.push_str(&format!(
+                "{field_prefix}\"value\": {}\n",
+                json_string(&path.to_string_lossy())
+            ));
+        }
+        MediaSource::Url(url) => {
+            out.push_str(&format!("{field_prefix}\"kind\": \"url\",\n"));
+            out.push_str(&format!("{field_prefix}\"value\": {}\n", json_string(url)));
+        }
+        MediaSource::Bytes(bytes) => {
+            out.push_str(&format!("{field_prefix}\"kind\": \"bytes\",\n"));
+            out.push_str(&format!("{field_prefix}\"length\": {},\n", bytes.len()));
+            out.push_str(&format!(
+                "{field_prefix}\"hex\": {}\n",
+                json_string(&hex_bytes(bytes.as_slice()))
+            ));
+        }
+    }
+    out.push_str(&format!("{prefix}}}"));
+}
+
+fn write_rect_json(out: &mut String, rect: Rect, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str("{\n");
+    out.push_str(&format!("{field_prefix}\"x\": {},\n", rect.x.get()));
+    out.push_str(&format!("{field_prefix}\"y\": {},\n", rect.y.get()));
+    out.push_str(&format!("{field_prefix}\"width\": {},\n", rect.width.get()));
+    out.push_str(&format!(
+        "{field_prefix}\"height\": {}\n",
+        rect.height.get()
+    ));
+    out.push_str(&format!("{prefix}}}"));
+}
+
+fn write_point_json(out: &mut String, point_value: Point, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let field_prefix = "  ".repeat(indent + 1);
+    out.push_str("{\n");
+    out.push_str(&format!("{field_prefix}\"x\": {},\n", point_value.x.get()));
+    out.push_str(&format!("{field_prefix}\"y\": {}\n", point_value.y.get()));
+    out.push_str(&format!("{prefix}}}"));
+}
+
+fn json_f32_array(values: &[f32]) -> String {
+    let mut out = String::from("[");
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&value.to_string());
+    }
+    out.push(']');
+    out
+}
+
+fn json_dp_array(values: &[Dp]) -> String {
+    let mut out = String::from("[");
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&value.get().to_string());
+    }
+    out.push(']');
+    out
+}
+
+fn color_hex(color: Color) -> String {
+    format!(
+        "#{:02X}{:02X}{:02X}{:02X}",
+        color.r, color.g, color.b, color.a
+    )
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02X}"));
+    }
+    out
+}
+
+fn canvas_item_kind_name(kind: CanvasItemKind) -> &'static str {
+    match kind {
+        CanvasItemKind::Path => "path",
+        CanvasItemKind::Text => "text",
+        CanvasItemKind::Image => "image",
+        CanvasItemKind::Group => "group",
+    }
+}
+
+fn canvas_fill_rule_name(fill_rule: CanvasFillRule) -> &'static str {
+    match fill_rule {
+        CanvasFillRule::NonZero => "non_zero",
+        CanvasFillRule::EvenOdd => "even_odd",
+    }
+}
+
+fn canvas_blend_mode_name(mode: CanvasBlendMode) -> &'static str {
+    match mode {
+        CanvasBlendMode::Normal => "normal",
+        CanvasBlendMode::Multiply => "multiply",
+        CanvasBlendMode::Screen => "screen",
+        CanvasBlendMode::Overlay => "overlay",
+        CanvasBlendMode::Darken => "darken",
+        CanvasBlendMode::Lighten => "lighten",
+        CanvasBlendMode::ColorDodge => "color_dodge",
+        CanvasBlendMode::ColorBurn => "color_burn",
+        CanvasBlendMode::HardLight => "hard_light",
+        CanvasBlendMode::SoftLight => "soft_light",
+        CanvasBlendMode::Difference => "difference",
+        CanvasBlendMode::Exclusion => "exclusion",
+        CanvasBlendMode::Plus => "plus",
+    }
+}
+
+fn canvas_stroke_cap_name(cap: CanvasStrokeCap) -> &'static str {
+    match cap {
+        CanvasStrokeCap::Butt => "butt",
+        CanvasStrokeCap::Square => "square",
+        CanvasStrokeCap::Round => "round",
+    }
+}
+
+fn canvas_stroke_join_name(join: CanvasStrokeJoin) -> &'static str {
+    match join {
+        CanvasStrokeJoin::Miter => "miter",
+        CanvasStrokeJoin::Bevel => "bevel",
+        CanvasStrokeJoin::Round => "round",
+    }
+}
+
+fn canvas_stroke_alignment_name(alignment: CanvasStrokeAlignment) -> &'static str {
+    match alignment {
+        CanvasStrokeAlignment::Center => "center",
+        CanvasStrokeAlignment::Inside => "inside",
+        CanvasStrokeAlignment::Outside => "outside",
+    }
+}
+
+fn canvas_group_mode_name(mode: &CanvasGroupMode) -> &'static str {
+    match mode {
+        CanvasGroupMode::Clip => "clip",
+        CanvasGroupMode::Mask => "mask",
+    }
+}
+
+fn canvas_text_wrap_name(wrap: CanvasTextWrap) -> &'static str {
+    match wrap {
+        CanvasTextWrap::Word => "word",
+        CanvasTextWrap::Glyph => "glyph",
+        CanvasTextWrap::None => "none",
+    }
+}
+
+fn canvas_text_horizontal_align_name(align: CanvasTextHorizontalAlign) -> &'static str {
+    match align {
+        CanvasTextHorizontalAlign::Start => "start",
+        CanvasTextHorizontalAlign::Center => "center",
+        CanvasTextHorizontalAlign::End => "end",
+    }
+}
+
+fn canvas_text_vertical_align_name(align: CanvasTextVerticalAlign) -> &'static str {
+    match align {
+        CanvasTextVerticalAlign::Start => "start",
+        CanvasTextVerticalAlign::Center => "center",
+        CanvasTextVerticalAlign::End => "end",
+    }
+}
+
+fn canvas_text_overflow_name(overflow: CanvasTextOverflow) -> &'static str {
+    match overflow {
+        CanvasTextOverflow::Clip => "clip",
+        CanvasTextOverflow::Ellipsis => "ellipsis",
+    }
+}
+
+fn content_fit_name(fit: ContentFit) -> &'static str {
+    match fit {
+        ContentFit::Contain => "contain",
+        ContentFit::Cover => "cover",
+        ContentFit::Fill => "fill",
     }
 }
 
@@ -2308,6 +4240,7 @@ pub struct CanvasRecorder {
     current_path: PathBuilder,
     next_auto_id: u64,
     pending_item_id: Option<CanvasItemId>,
+    pending_item_name: Option<String>,
 }
 
 impl Default for CanvasRecorder {
@@ -2328,6 +4261,7 @@ impl CanvasRecorder {
             current_path: PathBuilder::new(),
             next_auto_id: start,
             pending_item_id: None,
+            pending_item_name: None,
         }
     }
 
@@ -2356,7 +4290,10 @@ impl CanvasRecorder {
             return self;
         }
 
-        let frame = self.frames.pop().expect("nested recorder frame should exist");
+        let frame = self
+            .frames
+            .pop()
+            .expect("nested recorder frame should exist");
         let items = self.finalize_frame(frame);
         for item in items {
             self.push_item(item);
@@ -2366,6 +4303,11 @@ impl CanvasRecorder {
 
     pub fn next_item_id(&mut self, id: impl Into<CanvasItemId>) -> &mut Self {
         self.pending_item_id = Some(id.into());
+        self
+    }
+
+    pub fn next_item_name(&mut self, name: impl Into<String>) -> &mut Self {
+        self.pending_item_name = Some(name.into());
         self
     }
 
@@ -2424,10 +4366,10 @@ impl CanvasRecorder {
         start_angle: f32,
         sweep_angle: f32,
     ) -> &mut Self {
-        self.current_path = self
-            .current_path
-            .clone()
-            .arc(center_x, center_y, radius, start_angle, sweep_angle);
+        self.current_path =
+            self.current_path
+                .clone()
+                .arc(center_x, center_y, radius, start_angle, sweep_angle);
         self
     }
 
@@ -2766,11 +4708,15 @@ impl CanvasRecorder {
     }
 
     fn draw_path_internal(&mut self, path: PathBuilder) -> &mut Self {
+        let pending_name = self.take_item_name();
         let mut item = CanvasPath::new(
             self.take_item_id(),
             transform_path_builder(&path, self.current_state().transform),
         )
         .fill_rule(path.fill_rule);
+        if let Some(name) = pending_name {
+            item = item.name_item(name);
+        }
         if let Some(fill) = self.current_state().fill.clone() {
             item = item.fill(fill);
         }
@@ -2789,6 +4735,7 @@ impl CanvasRecorder {
     }
 
     pub fn draw_text(&mut self, frame: Rect, content: impl Into<String>) -> &mut Self {
+        let pending_name = self.take_item_name();
         let mut text = CanvasText::new(self.take_item_id(), frame, content)
             .text_style(self.current_state().text_style.clone())
             .paragraph_style(self.current_state().paragraph_style.clone())
@@ -2799,6 +4746,9 @@ impl CanvasRecorder {
             .isolation(self.current_state().isolation)
             .visible(self.current_state().visible)
             .hit_test(self.current_state().hit_test);
+        if let Some(name) = pending_name {
+            text = text.name_item(name);
+        }
         if let Some(cursor) = self.current_state().cursor {
             text = text.cursor(cursor);
         }
@@ -2811,6 +4761,7 @@ impl CanvasRecorder {
         frame: Rect,
         spans: impl Into<Vec<CanvasTextSpan>>,
     ) -> &mut Self {
+        let pending_name = self.take_item_name();
         let mut text = CanvasText::rich(self.take_item_id(), frame, spans)
             .text_style(self.current_state().text_style.clone())
             .paragraph_style(self.current_state().paragraph_style.clone())
@@ -2821,6 +4772,9 @@ impl CanvasRecorder {
             .isolation(self.current_state().isolation)
             .visible(self.current_state().visible)
             .hit_test(self.current_state().hit_test);
+        if let Some(name) = pending_name {
+            text = text.name_item(name);
+        }
         if let Some(cursor) = self.current_state().cursor {
             text = text.cursor(cursor);
         }
@@ -2838,6 +4792,7 @@ impl CanvasRecorder {
         source: impl Into<MediaSource>,
         options: CanvasImageOptions,
     ) -> &mut Self {
+        let pending_name = self.take_item_name();
         let mut image = CanvasImage::new(self.take_item_id(), frame, source)
             .options(options)
             .transform(self.current_state().transform)
@@ -2847,6 +4802,9 @@ impl CanvasRecorder {
             .isolation(self.current_state().isolation)
             .visible(self.current_state().visible)
             .hit_test(self.current_state().hit_test);
+        if let Some(name) = pending_name {
+            image = image.name_item(name);
+        }
         if let Some(cursor) = self.current_state().cursor {
             image = image.cursor(cursor);
         }
@@ -2855,11 +4813,15 @@ impl CanvasRecorder {
     }
 
     fn draw_fill_shape(&mut self, path: PathBuilder) -> &mut Self {
+        let pending_name = self.take_item_name();
         let mut item = CanvasPath::new(
             self.take_item_id(),
             transform_path_builder(&path, self.current_state().transform),
         )
         .fill_rule(self.current_state().fill_rule);
+        if let Some(name) = pending_name {
+            item = item.name_item(name);
+        }
         if let Some(fill) = self.current_state().fill.clone() {
             item = item.fill(fill);
         }
@@ -2868,11 +4830,15 @@ impl CanvasRecorder {
     }
 
     fn draw_stroke_shape(&mut self, path: PathBuilder) -> &mut Self {
+        let pending_name = self.take_item_name();
         let mut item = CanvasPath::new(
             self.take_item_id(),
             transform_path_builder(&path, self.current_state().transform),
         )
         .fill_rule(self.current_state().fill_rule);
+        if let Some(name) = pending_name {
+            item = item.name_item(name);
+        }
         if let Some(stroke) = self.current_state().stroke.clone() {
             item = item.stroke(stroke);
         }
@@ -2926,7 +4892,9 @@ impl CanvasRecorder {
             (Some(CanvasGroupMode::Clip), Some(existing)) if mode == CanvasGroupMode::Clip => {
                 existing.intersect(&path).unwrap_or(path.clone())
             }
-            (Some(existing_mode), Some(existing)) if existing_mode == mode => existing.intersect(&path).unwrap_or(path.clone()),
+            (Some(existing_mode), Some(existing)) if existing_mode == mode => {
+                existing.intersect(&path).unwrap_or(path.clone())
+            }
             _ => path,
         };
         let frame = self.current_frame();
@@ -2954,7 +4922,13 @@ impl CanvasRecorder {
     }
 
     fn take_item_id(&mut self) -> CanvasItemId {
-        self.pending_item_id.take().unwrap_or_else(|| self.take_generated_id())
+        self.pending_item_id
+            .take()
+            .unwrap_or_else(|| self.take_generated_id())
+    }
+
+    fn take_item_name(&mut self) -> Option<String> {
+        self.pending_item_name.take()
     }
 
     fn take_generated_id(&mut self) -> CanvasItemId {
@@ -3431,18 +5405,19 @@ pub(crate) fn tessellate_canvas_scene_items(
         .iter()
         .map(|item| {
             let output = item.tessellate(origin, opacity, clip, media, units);
+            let text_hits = item_text_hits(item, font_manager, origin, units);
             CanvasSceneItemRender {
                 item_id: item.id(),
                 cursor: item.style().cursor,
                 hit_bounds: item.hit_bounds(),
-                hit_geometry: item_hit_geometry(item, &output, origin),
+                hit_geometry: item_hit_geometry(item, &output, origin, text_hits.as_ref()),
                 local_origin: item_local_origin(item),
                 inverse_transform: item
                     .style()
                     .transform
                     .inverse()
                     .unwrap_or(CanvasTransform2D::IDENTITY),
-                text_hits: item_text_hits(item, font_manager, origin, units),
+                text_hits,
                 output,
             }
         })
@@ -3561,14 +5536,7 @@ fn tessellate_axis_aligned_rounded_rect(
     }
 
     if let Some(stroke) = stroke {
-        push_rounded_rect_stroke_command(
-            &mut output,
-            frame,
-            corner_radius,
-            stroke,
-            opacity,
-            clip,
-        )?;
+        push_rounded_rect_stroke_command(&mut output, frame, corner_radius, stroke, opacity, clip)?;
     }
 
     Some(output)
@@ -3584,27 +5552,27 @@ fn push_rounded_rect_fill_command(
 ) -> Option<()> {
     match brush {
         CanvasBrush::Solid(color) => {
-            output.commands.push(RenderCommand::Shape(
-                super::common::RenderPrimitive {
+            output
+                .commands
+                .push(RenderCommand::Shape(super::common::RenderPrimitive {
                     rect: frame,
                     color: color.with_alpha_factor(opacity),
                     corner_radius,
                     stroke_width: 0.0,
                     clip_rect: clip.clip_rect,
                     clip_mask: clip.clip_mask,
-                },
-            ));
+                }));
         }
         _ => {
-            output.commands.push(RenderCommand::Brush(
-                super::common::BrushPrimitive {
+            output
+                .commands
+                .push(RenderCommand::Brush(super::common::BrushPrimitive {
                     rect: frame,
                     brush: background_brush_from_canvas(brush, opacity)?,
                     corner_radius,
                     clip_rect: clip.clip_rect,
                     clip_mask: clip.clip_mask,
-                },
-            ));
+                }));
         }
     }
     Some(())
@@ -3635,16 +5603,16 @@ fn push_rounded_rect_stroke_command(
         CanvasBrush::Solid(color) => {
             let (rect, radius, stroke_width) =
                 rounded_rect_stroke_geometry(frame, corner_radius, width, stroke.alignment)?;
-            output.commands.push(RenderCommand::Shape(
-                super::common::RenderPrimitive {
+            output
+                .commands
+                .push(RenderCommand::Shape(super::common::RenderPrimitive {
                     rect,
                     color: color.with_alpha_factor(opacity),
                     corner_radius: radius,
                     stroke_width,
                     clip_rect: clip.clip_rect,
                     clip_mask: clip.clip_mask,
-                },
-            ));
+                }));
         }
         _ => return None,
     }
@@ -4269,8 +6237,48 @@ fn hash_point(point_value: Point, hasher: &mut impl Hasher) {
     hash_f32(point_value.y.get(), hasher);
 }
 
+fn hash_rect(rect: Rect, hasher: &mut impl Hasher) {
+    hash_f32(rect.x.get(), hasher);
+    hash_f32(rect.y.get(), hasher);
+    hash_f32(rect.width.get(), hasher);
+    hash_f32(rect.height.get(), hasher);
+}
+
 fn hash_f32(value: f32, hasher: &mut impl Hasher) {
     value.to_bits().hash(hasher);
+}
+
+fn canvas_text_hit_cache_key(item: &CanvasItem, units: UnitContext) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    item.id().hash(&mut hasher);
+    hash_f32(units.scale_factor(), &mut hasher);
+    hash_f32(units.resolve_sp(Sp::new(1.0)), &mut hasher);
+
+    if let CanvasItem::Text(text) = item {
+        text.plain_text().hash(&mut hasher);
+        text.name().hash(&mut hasher);
+        hash_rect(text.frame, &mut hasher);
+        for value in text.style.transform.matrix {
+            hash_f32(value, &mut hasher);
+        }
+        text.text_style.font_family.hash(&mut hasher);
+        text.text_style.color.hash(&mut hasher);
+        hash_f32(text.text_style.font_size.get(), &mut hasher);
+        text.text_style.font_weight.hash(&mut hasher);
+        if let Some(line_height) = text.text_style.line_height {
+            1u8.hash(&mut hasher);
+            hash_f32(line_height.get(), &mut hasher);
+        } else {
+            0u8.hash(&mut hasher);
+        }
+        hash_f32(text.text_style.letter_spacing.get(), &mut hasher);
+        canvas_text_wrap_name(text.paragraph_style.wrap).hash(&mut hasher);
+        canvas_text_horizontal_align_name(text.paragraph_style.horizontal_align).hash(&mut hasher);
+        canvas_text_vertical_align_name(text.paragraph_style.vertical_align).hash(&mut hasher);
+        canvas_text_overflow_name(text.paragraph_style.overflow).hash(&mut hasher);
+    }
+
+    hasher.finish()
 }
 
 fn shadow_padding(blur: Dp) -> f32 {
@@ -4313,11 +6321,13 @@ fn sample_gradient_color(stops: &[(f32, [f32; 4])], offset: f32) -> [f32; 4] {
 struct ResolvedCanvasEffects {
     blur_radius: f32,
     color_filter: Option<CanvasColorFilter>,
+    inner_shadow: Option<CanvasInnerShadow>,
 }
 
 fn resolve_canvas_effects(effects: &[CanvasEffect]) -> ResolvedCanvasEffects {
     let mut blur_radius: f32 = 0.0;
     let mut color_filter = None;
+    let mut inner_shadow = None;
     for effect in effects {
         match effect {
             CanvasEffect::Blur(radius) => {
@@ -4326,12 +6336,15 @@ fn resolve_canvas_effects(effects: &[CanvasEffect]) -> ResolvedCanvasEffects {
             CanvasEffect::ColorFilter(filter) => {
                 color_filter = Some(*filter);
             }
-            CanvasEffect::InnerShadow(_) => {}
+            CanvasEffect::InnerShadow(shadow) => {
+                inner_shadow = Some(*shadow);
+            }
         }
     }
     ResolvedCanvasEffects {
         blur_radius,
         color_filter,
+        inner_shadow,
     }
 }
 
@@ -4354,6 +6367,7 @@ fn item_hit_geometry(
     item: &CanvasItem,
     output: &CanvasRenderOutput,
     origin: Point,
+    text_hits: &[CanvasTextHitEntry],
 ) -> Option<CanvasHitGeometry> {
     match item {
         CanvasItem::Path(_) | CanvasItem::Group(_) => {
@@ -4364,16 +6378,37 @@ fn item_hit_geometry(
                 .collect::<Vec<_>>();
             (!triangles.is_empty()).then(|| CanvasHitGeometry::Triangles(Arc::from(triangles)))
         }
-        CanvasItem::Text(text) => output
-            .texts
-            .first()
-            .map(|primitive| primitive.quad.unwrap_or_else(|| rect_to_quad(primitive.frame)))
-            .or_else(|| Some(rect_to_quad(offset_rect(text.frame, origin))))
-            .map(CanvasHitGeometry::Quad),
+        CanvasItem::Text(text) => {
+            if !text_hits.is_empty() {
+                let triangles = text_hits
+                    .iter()
+                    .flat_map(|entry| {
+                        let quad = entry.quad;
+                        [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]]
+                    })
+                    .collect::<Vec<_>>();
+                return Some(CanvasHitGeometry::Triangles(Arc::from(triangles)));
+            }
+
+            output
+                .texts
+                .first()
+                .map(|primitive| {
+                    primitive
+                        .quad
+                        .unwrap_or_else(|| rect_to_quad(primitive.frame))
+                })
+                .or_else(|| Some(rect_to_quad(offset_rect(text.frame, origin))))
+                .map(CanvasHitGeometry::Quad)
+        }
         CanvasItem::Image(image) => output
             .textures
             .first()
-            .map(|primitive| primitive.quad.unwrap_or_else(|| rect_to_quad(primitive.frame)))
+            .map(|primitive| {
+                primitive
+                    .quad
+                    .unwrap_or_else(|| rect_to_quad(primitive.frame))
+            })
             .or_else(|| Some(rect_to_quad(offset_rect(image.frame, origin))))
             .map(CanvasHitGeometry::Quad),
     }
@@ -4406,7 +6441,15 @@ fn item_text_hits(
         CanvasTextWrap::None => None,
         _ => Some(text.frame.width.get().max(0.0)),
     };
-    let layout = canvas_text_layout(font_manager, text, &content, request, line_height, max_width, units);
+    let layout = canvas_text_layout(
+        font_manager,
+        text,
+        &content,
+        request,
+        line_height,
+        max_width,
+        units,
+    );
     let content_frame = canvas_text_content_frame(text, &layout, origin);
     let mut hits = Vec::new();
 
@@ -4439,7 +6482,11 @@ fn item_text_hits(
                 width.max(1.0),
                 line_height_value,
             );
-            let quad = rect_to_quad(rect);
+            let quad = if text.style.transform == CanvasTransform2D::IDENTITY {
+                rect_to_quad(rect)
+            } else {
+                transform_rect_quad(rect, text.style.transform, origin)
+            };
             hits.push(CanvasTextHitEntry {
                 hit: CanvasTextHit {
                     utf8_start: start,
@@ -4624,15 +6671,16 @@ fn append_svg_arc_segments(
         ));
     });
     for (ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, to_x, to_y) in segments {
-        builder = builder.cubic_to(
-            ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, to_x, to_y,
-        );
+        builder = builder.cubic_to(ctrl1_x, ctrl1_y, ctrl2_x, ctrl2_y, to_x, to_y);
     }
 
     builder
 }
 
-fn normalized_source_rect(source_rect: Option<Rect>, intrinsic_size: IntrinsicSize) -> Option<Rect> {
+fn normalized_source_rect(
+    source_rect: Option<Rect>,
+    intrinsic_size: IntrinsicSize,
+) -> Option<Rect> {
     let mut rect = source_rect?;
     if intrinsic_size.width <= 0.0 || intrinsic_size.height <= 0.0 {
         return None;
@@ -4640,8 +6688,12 @@ fn normalized_source_rect(source_rect: Option<Rect>, intrinsic_size: IntrinsicSi
 
     let min_x = rect.x.get().clamp(0.0, intrinsic_size.width);
     let min_y = rect.y.get().clamp(0.0, intrinsic_size.height);
-    let max_x = (rect.x + rect.width).get().clamp(min_x, intrinsic_size.width);
-    let max_y = (rect.y + rect.height).get().clamp(min_y, intrinsic_size.height);
+    let max_x = (rect.x + rect.width)
+        .get()
+        .clamp(min_x, intrinsic_size.width);
+    let max_y = (rect.y + rect.height)
+        .get()
+        .clamp(min_y, intrinsic_size.height);
     rect.x = Dp::new(min_x);
     rect.y = Dp::new(min_y);
     rect.width = Dp::new((max_x - min_x).max(0.0));
@@ -4776,7 +6828,9 @@ fn rings_to_multi_polygon(
             .unwrap_or(Coord { x: 0.0, y: 0.0 });
         let test_point = geo::Point::new(point_value.x, point_value.y);
         ring_infos[index].parent = (0..ring_infos.len())
-            .filter(|candidate| *candidate != index && ring_infos[*candidate].abs_area > ring_infos[index].abs_area)
+            .filter(|candidate| {
+                *candidate != index && ring_infos[*candidate].abs_area > ring_infos[index].abs_area
+            })
             .filter(|candidate| ring_infos[*candidate].polygon.contains(&test_point))
             .min_by(|left, right| {
                 ring_infos[*left]
@@ -4795,7 +6849,9 @@ fn rings_to_multi_polygon(
     let mut polygons = Vec::<(LineString<f64>, Vec<LineString<f64>>)>::new();
     for index in order {
         let parent = ring_infos[index].parent;
-        let parent_filled = parent.map(|value| ring_infos[value].inside_filled).unwrap_or(false);
+        let parent_filled = parent
+            .map(|value| ring_infos[value].inside_filled)
+            .unwrap_or(false);
         let parent_winding = parent.map(|value| ring_infos[value].winding).unwrap_or(0);
         let active_shell_outside = parent.and_then(|value| ring_infos[value].active_shell);
         let current_winding = match fill_rule {
@@ -5026,7 +7082,10 @@ mod tests {
                 .set_fill(Color::WHITE)
                 .fill_round_rect(0.0, 0.0, 80.0, 40.0, 12.0);
         });
-        let item = scene.items().first().expect("rounded rect item should exist");
+        let item = scene
+            .items()
+            .first()
+            .expect("rounded rect item should exist");
         let super::CanvasItem::Path(path) = item else {
             panic!("rounded rect should record as a path");
         };
@@ -5044,7 +7103,10 @@ mod tests {
 
         assert!(output.meshes.is_empty());
         assert_eq!(output.commands.len(), 1);
-        assert!(matches!(output.commands[0], crate::ui::widget::RenderCommand::Shape(_)));
+        assert!(matches!(
+            output.commands[0],
+            crate::ui::widget::RenderCommand::Shape(_)
+        ));
     }
 
     #[test]
@@ -5215,6 +7277,35 @@ mod tests {
     }
 
     #[test]
+    fn inner_shadow_effect_flows_into_composite() {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas
+                .set_effects(vec![CanvasEffect::InnerShadow(
+                    super::CanvasInnerShadow::new(
+                        Color::hexa(0x111827AA),
+                        Point::new(3.0, 4.0),
+                        dp(8.0),
+                    ),
+                )])
+                .fill_rect(0.0, 0.0, 40.0, 40.0);
+        });
+        let rendered = rendered_items(&scene);
+        let composite = rendered[0]
+            .output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::CanvasComposite(primitive) => Some(primitive),
+                _ => None,
+            })
+            .expect("effect stack should force composite");
+
+        assert_eq!(composite.inner_shadow_color, Some(Color::hexa(0x111827AA)));
+        assert_eq!(composite.inner_shadow_offset, Point::new(3.0, 4.0));
+        assert_eq!(composite.inner_shadow_blur_radius, 8.0);
+    }
+
+    #[test]
     fn svg_elliptical_arc_generates_curve_segments() {
         let path = PathBuilder::new()
             .svg_path("M 10 10 A 30 20 0 0 1 60 40")
@@ -5288,5 +7379,240 @@ mod tests {
 
         assert_eq!(normalized, Rect::new(0.0, 10.0, 60.0, 90.0));
         assert_eq!(uv, Rect::new(0.0, 0.1, 0.3, 0.9));
+    }
+
+    #[test]
+    fn canvas_scene_can_query_named_and_nested_items() {
+        let scene = CanvasScene::from_items(vec![
+            super::CanvasPath::new(1_u64, PathBuilder::new().rect(0.0, 0.0, 10.0, 10.0))
+                .name_item("background")
+                .into(),
+            super::CanvasGroup::new(
+                2_u64,
+                super::CanvasGroupMode::Clip,
+                super::CanvasGroupShape::path(PathBuilder::new().rect(0.0, 0.0, 40.0, 40.0)),
+                vec![
+                    super::CanvasText::new(3_u64, Rect::new(4.0, 4.0, 20.0, 10.0), "hello")
+                        .name_item("label")
+                        .into(),
+                ],
+            )
+            .name_item("root-group")
+            .into(),
+        ]);
+
+        assert!(scene.contains_id(1_u64.into()));
+        assert!(scene.contains_name("label"));
+        assert_eq!(
+            scene.find_named("root-group").map(super::CanvasItem::id),
+            Some(2_u64.into())
+        );
+        assert_eq!(
+            scene.find(3_u64.into()).and_then(super::CanvasItem::name),
+            Some("label")
+        );
+    }
+
+    #[test]
+    fn canvas_scene_visit_reports_depth_and_paths() {
+        let scene = CanvasScene::from_items(vec![super::CanvasGroup::new(
+            1_u64,
+            super::CanvasGroupMode::Mask,
+            super::CanvasGroupShape::path(PathBuilder::new().circle(20.0, 20.0, 20.0)),
+            vec![
+                super::CanvasPath::new(2_u64, PathBuilder::new().rect(0.0, 0.0, 10.0, 10.0))
+                    .name_item("rect")
+                    .into(),
+            ],
+        )
+        .into()]);
+
+        let mut visited = Vec::new();
+        scene.visit(|entry| {
+            visited.push((entry.item.id().get(), entry.depth, entry.index_path));
+        });
+
+        assert_eq!(visited.len(), 2);
+        assert_eq!(visited[0], (1, 0, vec![0]));
+        assert_eq!(visited[1], (2, 1, vec![0, 0]));
+    }
+
+    #[test]
+    fn canvas_scene_remove_handles_nested_items() {
+        let mut scene = CanvasScene::from_items(vec![super::CanvasGroup::new(
+            1_u64,
+            super::CanvasGroupMode::Clip,
+            super::CanvasGroupShape::path(PathBuilder::new().rect(0.0, 0.0, 20.0, 20.0)),
+            vec![super::CanvasImage::new(
+                2_u64,
+                Rect::new(0.0, 0.0, 20.0, 20.0),
+                MediaSource::bytes(vec![1, 2, 3]),
+            )
+            .name_item("thumb")
+            .into()],
+        )
+        .into()]);
+
+        let removed = scene
+            .remove(2_u64.into())
+            .expect("nested item should be removed");
+        assert_eq!(removed.name(), Some("thumb"));
+        assert!(!scene.contains_id(2_u64.into()));
+    }
+
+    #[test]
+    fn canvas_recorder_item_names_are_recorded() {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_name("hero-card")
+                .fill_rect(0.0, 0.0, 40.0, 20.0)
+                .next_item_name("title")
+                .draw_text(Rect::new(0.0, 0.0, 30.0, 10.0), "Hi");
+        });
+
+        assert_eq!(
+            scene.find_named("hero-card").map(super::CanvasItem::id),
+            Some(1_u64.into())
+        );
+        assert_eq!(
+            scene.find_named("title").map(super::CanvasItem::id),
+            Some(2_u64.into())
+        );
+    }
+
+    #[test]
+    fn canvas_scene_debug_exports_include_stats_and_names() {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_name("surface")
+                .fill_round_rect(0.0, 0.0, 80.0, 40.0, 12.0)
+                .next_item_name("caption")
+                .draw_text(Rect::new(8.0, 8.0, 60.0, 18.0), "Canvas");
+        });
+
+        let debug = scene.debug_info();
+        let text = scene.export_debug_text();
+        let json = scene.export_debug_json();
+
+        assert_eq!(debug.stats.total_items, 2);
+        assert_eq!(debug.stats.named_items, 2);
+        assert!(text.contains("surface"));
+        assert!(text.contains("caption"));
+        assert!(json.contains("\"stats\""));
+        assert!(json.contains("\"name\": \"surface\""));
+    }
+
+    #[test]
+    fn canvas_scene_query_point_and_stable_export_work() {
+        let scene = CanvasScene::from_items(vec![super::CanvasGroup::new(
+            1_u64,
+            super::CanvasGroupMode::Clip,
+            super::CanvasGroupShape::path(PathBuilder::new().rect(0.0, 0.0, 100.0, 100.0)),
+            vec![
+                super::CanvasPath::new(2_u64, PathBuilder::new().rect(10.0, 10.0, 60.0, 40.0))
+                    .name_item("card")
+                    .fill(Color::WHITE)
+                    .into(),
+            ],
+        )
+        .name_item("root")
+        .into()]);
+
+        let hit = scene
+            .query_point(Point::new(20.0, 20.0))
+            .expect("point should hit nested item");
+        let all_hits = scene.query_point_all(Point::new(20.0, 20.0));
+        let stable = scene.export_json();
+
+        assert_eq!(hit.item_id, 2_u64.into());
+        assert_eq!(hit.name.as_deref(), Some("card"));
+        assert_eq!(all_hits[0].item_id, 2_u64.into());
+        assert!(all_hits.iter().any(|entry| entry.item_id == 1_u64.into()));
+        assert!(stable.contains("\"format\": \"tgui.canvas.scene\""));
+        assert!(stable.contains("\"version\": 1"));
+        assert!(stable.contains("\"kind\": \"group\""));
+        assert!(stable.contains("\"name\": \"card\""));
+    }
+
+    #[test]
+    fn canvas_scene_query_point_returns_text_hit_for_text_items() {
+        let scene = CanvasScene::from_items(vec![super::CanvasText::new(
+            1_u64,
+            Rect::new(0.0, 0.0, 120.0, 32.0),
+            "Hello",
+        )
+        .name_item("label")
+        .into()]);
+
+        let hit = scene
+            .query_point(Point::new(6.0, 10.0))
+            .expect("point should hit text");
+
+        assert_eq!(hit.item_id, 1_u64.into());
+        assert!(hit.text_hit.is_some());
+        let text_hit = hit.text_hit.expect("text hit should exist");
+        assert!(text_hit.utf8_end > text_hit.utf8_start);
+    }
+
+    #[test]
+    fn stable_export_escapes_control_characters() {
+        let scene = CanvasScene::from_items(vec![super::CanvasText::new(
+            1_u64,
+            Rect::new(0.0, 0.0, 120.0, 32.0),
+            "line\u{0001}\u{0008}\u{000C}end",
+        )
+        .name_item("bad\u{0002}name")
+        .into()]);
+
+        let json = scene.export_json();
+
+        assert!(json.contains("bad\\u0002name"));
+        assert!(json.contains("line\\u0001\\b\\fend"));
+    }
+
+    #[test]
+    fn canvas_scene_query_options_drive_explicit_query_context() {
+        let scene = CanvasScene::from_items(vec![super::CanvasText::new(
+            1_u64,
+            Rect::new(0.0, 0.0, 120.0, 32.0),
+            "Hello",
+        )
+        .name_item("label")
+        .into()]);
+        let options = super::CanvasSceneQueryOptions::new()
+            .scale_factor(1.5)
+            .font_scale(1.25);
+
+        let hit = scene
+            .query_point_with(&options, Point::new(6.0, 10.0))
+            .expect("point should hit text with explicit context");
+        let all_hits = scene.query_point_all_with(&options, Point::new(6.0, 10.0));
+
+        assert_eq!(hit.item_id, 1_u64.into());
+        assert!(hit.text_hit.is_some());
+        assert_eq!(all_hits.len(), 1);
+    }
+
+    #[test]
+    fn runtime_query_context_bridge_reuses_runtime_inputs() {
+        let scene = CanvasScene::from_items(vec![super::CanvasText::new(
+            1_u64,
+            Rect::new(0.0, 0.0, 120.0, 32.0),
+            "Hello",
+        )
+        .name_item("label")
+        .into()]);
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let units = UnitContext::new(1.5, 1.25);
+
+        let hit = scene
+            .query_point_with_runtime_context(&font_manager, units, Point::new(6.0, 10.0))
+            .expect("point should hit text with runtime context");
+        let all_hits =
+            scene.query_point_all_with_runtime_context(&font_manager, units, Point::new(6.0, 10.0));
+
+        assert_eq!(hit.item_id, 1_u64.into());
+        assert!(hit.text_hit.is_some());
+        assert_eq!(all_hits.len(), 1);
     }
 }

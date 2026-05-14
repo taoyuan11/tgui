@@ -2150,11 +2150,9 @@ impl<VM> ResolvedElement<VM> {
                                     Some(super::super::canvas::CanvasHitGeometry::Quad(quad)) => {
                                         HitGeometry::Quad(quad)
                                     }
-                                    Some(
-                                        super::super::canvas::CanvasHitGeometry::Triangles(
-                                            triangles,
-                                        ),
-                                    ) => HitGeometry::Triangles(triangles),
+                                    Some(super::super::canvas::CanvasHitGeometry::Triangles(
+                                        triangles,
+                                    )) => HitGeometry::Triangles(triangles),
                                     None => HitGeometry::Rect,
                                 };
                                 computed.hit_regions.push(HitRegion {
@@ -2181,9 +2179,11 @@ impl<VM> ResolvedElement<VM> {
                                             .text_hits
                                             .iter()
                                             .cloned()
-                                            .map(|entry| super::super::common::CanvasTextHitRegion {
-                                                hit: entry.hit,
-                                                quad: entry.quad,
+                                            .map(|entry| {
+                                                super::super::common::CanvasTextHitRegion {
+                                                    hit: entry.hit,
+                                                    quad: entry.quad,
+                                                }
                                             })
                                             .collect::<Vec<_>>()
                                             .into(),

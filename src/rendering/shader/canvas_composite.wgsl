@@ -27,6 +27,7 @@ struct CompositeParams {
     data1: vec4<f32>,
     data2: vec4<f32>,
     data3: vec4<f32>,
+    data4: vec4<f32>,
 };
 
 @group(0) @binding(0) var content_texture: texture_2d<f32>;
@@ -129,6 +130,43 @@ fn sample_box_blur(uv: vec2<f32>, radius: f32) -> vec4<f32> {
     return sum / max(count, 1.0);
 }
 
+fn sample_box_blur_alpha(uv: vec2<f32>, radius: f32, uv_offset: vec2<f32>) -> f32 {
+    if radius <= 0.5 {
+        return textureSample(content_texture, source_sampler, uv + uv_offset).a;
+    }
+
+    let size = vec2<f32>(textureDimensions(content_texture));
+    let texel = vec2<f32>(1.0) / max(size, vec2<f32>(1.0));
+    let r = i32(clamp(radius, 1.0, 8.0));
+    var sum = 0.0;
+    var count = 0.0;
+    for (var y = -r; y <= r; y = y + 1) {
+        for (var x = -r; x <= r; x = x + 1) {
+            let offset = uv_offset + vec2<f32>(f32(x), f32(y)) * texel;
+            sum = sum + textureSample(content_texture, source_sampler, uv + offset).a;
+            count = count + 1.0;
+        }
+    }
+    return sum / max(count, 1.0);
+}
+
+fn apply_inner_shadow(content: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+    let enabled = params.data4.w;
+    if enabled <= 0.5 {
+        return content;
+    }
+
+    let texture_size = vec2<f32>(textureDimensions(content_texture));
+    let uv_offset = vec2<f32>(
+        params.data4.x / max(texture_size.x, 1.0),
+        params.data4.y / max(texture_size.y, 1.0),
+    );
+    let shifted_alpha = sample_box_blur_alpha(uv, params.data4.z, uv_offset);
+    let shadow_alpha = clamp(content.a * (1.0 - shifted_alpha) * params.data3.a, 0.0, 1.0);
+    let shadow = vec4<f32>(params.data3.rgb, shadow_alpha);
+    return composite(shadow, content, 0);
+}
+
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
@@ -163,7 +201,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let blend_mode = i32(params.data0.y);
     let has_mask = params.data0.z;
     let blur_radius = params.data0.w;
-    let content = color_filter(sample_box_blur(input.uv, blur_radius));
+    let content = apply_inner_shadow(color_filter(sample_box_blur(input.uv, blur_radius)), input.uv);
     let scene = textureSample(scene_texture, source_sampler, input.uv);
     let mask_alpha = select(1.0, textureSample(mask_texture, source_sampler, input.uv).a, has_mask > 0.5);
     let src = vec4<f32>(content.rgb, content.a * opacity * mask_alpha * combined_alpha);

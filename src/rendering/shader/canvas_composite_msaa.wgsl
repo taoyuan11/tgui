@@ -27,6 +27,7 @@ struct CompositeParams {
     data1: vec4<f32>,
     data2: vec4<f32>,
     data3: vec4<f32>,
+    data4: vec4<f32>,
 };
 
 @group(0) @binding(0) var content_texture: texture_multisampled_2d<f32>;
@@ -117,6 +118,73 @@ fn load_msaa_average(texture: texture_multisampled_2d<f32>, pixel: vec2<i32>) ->
     return color / f32(max(samples, 1u));
 }
 
+fn sample_box_blur_msaa(uv: vec2<f32>, radius: f32) -> vec4<f32> {
+    let texture_size = vec2<f32>(textureDimensions(content_texture));
+    if radius <= 0.5 {
+        let pixel = vec2<i32>(clamp(uv * texture_size, vec2<f32>(0.0), texture_size - vec2<f32>(1.0)));
+        return load_msaa_average(content_texture, pixel);
+    }
+
+    let texel = vec2<f32>(1.0) / max(texture_size, vec2<f32>(1.0));
+    let r = i32(clamp(radius, 1.0, 8.0));
+    var sum = vec4<f32>(0.0);
+    var count = 0.0;
+    for (var y = -r; y <= r; y = y + 1) {
+        for (var x = -r; x <= r; x = x + 1) {
+            let sample_uv = uv + vec2<f32>(f32(x), f32(y)) * texel;
+            let pixel = vec2<i32>(
+                clamp(sample_uv * texture_size, vec2<f32>(0.0), texture_size - vec2<f32>(1.0))
+            );
+            sum = sum + load_msaa_average(content_texture, pixel);
+            count = count + 1.0;
+        }
+    }
+    return sum / max(count, 1.0);
+}
+
+fn sample_box_blur_alpha_msaa(uv: vec2<f32>, radius: f32, uv_offset: vec2<f32>) -> f32 {
+    let texture_size = vec2<f32>(textureDimensions(content_texture));
+    if radius <= 0.5 {
+        let pixel = vec2<i32>(
+            clamp((uv + uv_offset) * texture_size, vec2<f32>(0.0), texture_size - vec2<f32>(1.0))
+        );
+        return load_msaa_average(content_texture, pixel).a;
+    }
+
+    let texel = vec2<f32>(1.0) / max(texture_size, vec2<f32>(1.0));
+    let r = i32(clamp(radius, 1.0, 8.0));
+    var sum = 0.0;
+    var count = 0.0;
+    for (var y = -r; y <= r; y = y + 1) {
+        for (var x = -r; x <= r; x = x + 1) {
+            let sample_uv = uv + uv_offset + vec2<f32>(f32(x), f32(y)) * texel;
+            let pixel = vec2<i32>(
+                clamp(sample_uv * texture_size, vec2<f32>(0.0), texture_size - vec2<f32>(1.0))
+            );
+            sum = sum + load_msaa_average(content_texture, pixel).a;
+            count = count + 1.0;
+        }
+    }
+    return sum / max(count, 1.0);
+}
+
+fn apply_inner_shadow(content: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+    let enabled = params.data4.w;
+    if enabled <= 0.5 {
+        return content;
+    }
+
+    let texture_size = vec2<f32>(textureDimensions(content_texture));
+    let uv_offset = vec2<f32>(
+        params.data4.x / max(texture_size.x, 1.0),
+        params.data4.y / max(texture_size.y, 1.0),
+    );
+    let shifted_alpha = sample_box_blur_alpha_msaa(uv, params.data4.z, uv_offset);
+    let shadow_alpha = clamp(content.a * (1.0 - shifted_alpha) * params.data3.a, 0.0, 1.0);
+    let shadow = vec4<f32>(params.data3.rgb, shadow_alpha);
+    return composite(shadow, content, 0);
+}
+
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
@@ -152,7 +220,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let has_mask = params.data0.z;
     let texture_size = vec2<f32>(textureDimensions(content_texture));
     let pixel = vec2<i32>(clamp(input.uv * texture_size, vec2<f32>(0.0), texture_size - vec2<f32>(1.0)));
-    let content = color_filter(load_msaa_average(content_texture, pixel));
+    let blur_radius = params.data0.w;
+    let content = apply_inner_shadow(color_filter(sample_box_blur_msaa(input.uv, blur_radius)), input.uv);
     let scene = load_msaa_average(scene_texture, pixel);
     let mask_alpha = select(1.0, load_msaa_average(mask_texture, pixel).a, has_mask > 0.5);
     let src = vec4<f32>(content.rgb, content.a * opacity * mask_alpha * combined_alpha);

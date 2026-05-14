@@ -30,7 +30,9 @@ use crate::ui::unit::{dp, sp, Dp, Sp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface as PublicVideoSurface;
 
-use super::canvas::{canvas_scene_bounds, tessellate_canvas_scene_items, CanvasScene};
+use super::canvas::{
+    canvas_scene_bounds, tessellate_canvas_scene_items, CanvasScene, CanvasSceneHit,
+};
 #[cfg(test)]
 use super::common::RenderedWidgetScene;
 use super::common::{
@@ -685,6 +687,38 @@ impl<VM> ResolvedSceneLayout<VM> {
             }
             _ => false,
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn query_canvas_scene_at_widget(
+        &self,
+        widget_id: WidgetId,
+        font_manager: &FontManager,
+        units: UnitContext,
+        scene_position: Point,
+    ) -> Option<CanvasSceneHit> {
+        self.query_canvas_scene_all_at_widget(widget_id, font_manager, units, scene_position)
+            .into_iter()
+            .next()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn query_canvas_scene_all_at_widget(
+        &self,
+        widget_id: WidgetId,
+        font_manager: &FontManager,
+        units: UnitContext,
+        scene_position: Point,
+    ) -> Vec<CanvasSceneHit> {
+        let Some(node) = self.resolved_widget(widget_id) else {
+            return Vec::new();
+        };
+        let ResolvedWidgetKind::Canvas { scene, .. } = &node.kind else {
+            return Vec::new();
+        };
+        scene
+            .resolve()
+            .query_point_all_with_runtime_context(font_manager, units, scene_position)
     }
 
     pub(crate) fn rebuild_indexes(&mut self) {

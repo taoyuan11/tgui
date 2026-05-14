@@ -315,6 +315,8 @@ Button::new("发送通知").on_click(Command::new_with_context(|_, ctx| {
 `Canvas` 适合做自定义图形与交互式绘制，公开入口现在统一为记录式 API。常用能力包括：
 
 - `CanvasRecorder`
+- `CanvasScene`
+- `CanvasItem` / `CanvasPath` / `CanvasText` / `CanvasImage` / `CanvasGroup`
 - `CanvasStroke`
 - `CanvasTransform2D`
 - `CanvasLinearGradient`
@@ -323,6 +325,20 @@ Button::new("发送通知").on_click(Command::new_with_context(|_, ctx| {
 - `CanvasBlendMode`
 - `CanvasTextStyle` / `CanvasParagraphStyle`
 - `CanvasMouseEvent` / `CanvasWheelEvent` / `CanvasDragEvent`
+
+除了 recorder，`CanvasScene` 现在也可以作为 retained scene 使用，支持：
+
+- `items()` / `items_mut()`
+- `find(id)` / `find_named(name)`
+- `visit(...)`
+- `remove(id)`
+- `query_point(...)` / `query_point_all(...)`
+- `query_point_with(...)` / `query_point_all_with(...)`
+- `debug_info()`
+- `export_json()`
+- `export_debug_text()` / `export_debug_json()`
+
+这让 Canvas 不只适合声明式绘制，也开始适合作为编辑器、白板、流程图和设计器的基础场景层。
 
 示例：
 
@@ -340,6 +356,28 @@ Canvas::new(CanvasRecorder::build(|canvas| {
         .draw_text(Rect::new(36.0, 44.0, 140.0, 32.0), "Recorded items");
 }))
 ```
+
+也可以直接持有并查询 `CanvasScene`：
+
+```rust
+use tgui::canvas::*;
+
+let scene = CanvasRecorder::build(|canvas| {
+    canvas
+        .next_item_name("hero")
+        .fill_round_rect(0.0, 0.0, 120.0, 60.0, dp(16.0));
+});
+
+let item = scene.find_named("hero").expect("named item should exist");
+println!("item id={}", item.id().get());
+println!("{}", scene.export_debug_text());
+println!("{}", scene.export_json());
+if let Some(hit) = scene.query_point(Point::new(12.0, 12.0)) {
+    println!("hit item={}", hit.item_id.get());
+}
+```
+
+更完整的能力说明、限制和 retained scene 建议见 [docs/canvas.md](D:/Project/Rust/libs/tgui/docs/canvas.md)。
 
 ### 通用背景
 

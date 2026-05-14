@@ -1971,8 +1971,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn hover_path(&mut self, viewport: Rect) -> Vec<HoveredWidget<VM>> {
-        self.hit_path(viewport)
+        let hit_path = self.hit_path(viewport);
+        let topmost_canvas_item = hit_path
+            .iter()
+            .rposition(|interaction| matches!(interaction, HitInteraction::CanvasItem { .. }));
+
+        hit_path
             .into_iter()
+            .enumerate()
+            .filter(|(index, interaction)| {
+                !matches!(interaction, HitInteraction::CanvasItem { .. })
+                    || Some(*index) == topmost_canvas_item
+            })
+            .map(|(_, interaction)| interaction)
             .map(|interaction| match interaction {
                 HitInteraction::Disabled { id } => HoveredWidget {
                     target_id: HoverTargetId::Widget(id),
@@ -2077,12 +2088,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             item_id,
                         },
                         cursor_style,
-                        on_mouse_enter: item_interactions
-                            .on_mouse_enter
-                            .map(|command| HoverTransitionHandler::Canvas(command, context.clone())),
-                        on_mouse_leave: item_interactions
-                            .on_mouse_leave
-                            .map(|command| HoverTransitionHandler::Canvas(command, context.clone())),
+                        on_mouse_enter: item_interactions.on_mouse_enter.map(|command| {
+                            HoverTransitionHandler::Canvas(command, context.clone())
+                        }),
+                        on_mouse_leave: item_interactions.on_mouse_leave.map(|command| {
+                            HoverTransitionHandler::Canvas(command, context.clone())
+                        }),
                         on_mouse_move: item_interactions
                             .on_mouse_move
                             .map(|command| HoverMoveHandler::Canvas(command, context)),
@@ -3253,8 +3264,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if Self::should_dispatch_widget_event(&event) {
             let viewport = self.viewport_rect();
             let revision_before = self.invalidation.revision();
-            let mut needs_redraw =
-                !matches!(event, WindowEvent::PointerMoved { .. } | WindowEvent::PointerEntered { .. });
+            let mut needs_redraw = !matches!(
+                event,
+                WindowEvent::PointerMoved { .. } | WindowEvent::PointerEntered { .. }
+            );
 
             match &event {
                 WindowEvent::PointerMoved { .. } | WindowEvent::PointerEntered { .. } => {

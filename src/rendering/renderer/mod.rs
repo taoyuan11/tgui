@@ -9,7 +9,6 @@ mod vertex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::application::MsaaMode;
 use self::surface::{
     create_instance, create_surface, pipeline_multisample_state, request_adapter,
     required_device_limits, resolve_surface_msaa_sample_count, surface_alpha_mode,
@@ -19,6 +18,7 @@ use self::targets::RendererTargets;
 use self::vertex::{
     physical_mesh_clip_mask_data, BrushVertex, CompositeVertex, MeshVertex, RectVertex, TextVertex,
 };
+use crate::application::MsaaMode;
 use crate::foundation::color::Color as TguiColor;
 use crate::foundation::error::TguiError;
 use crate::platform::backend::window::Window;
@@ -128,6 +128,7 @@ struct CompositeUniform {
     data1: [f32; 4],
     data2: [f32; 4],
     data3: [f32; 4],
+    data4: [f32; 4],
 }
 
 impl Renderer {
@@ -627,11 +628,11 @@ impl Renderer {
                 },
             });
 
-        let present_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("tgui-present-bind-group-layout"),
-            entries: if has_msaa {
-                &[
-                    wgpu::BindGroupLayoutEntry {
+        let present_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("tgui-present-bind-group-layout"),
+                entries: if has_msaa {
+                    &[wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
@@ -640,29 +641,28 @@ impl Renderer {
                             sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         },
                         count: None,
-                    },
-                ]
-            } else {
-                &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    }]
+                } else {
+                    &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ]
-            },
-        });
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                    ]
+                },
+            });
 
         let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("tgui-text-pipeline-layout"),
@@ -706,11 +706,13 @@ impl Renderer {
 
         let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("tgui-text-pipeline"),
-            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("tgui-present-pipeline-layout"),
-                bind_group_layouts: &[Some(&present_bind_group_layout)],
-                immediate_size: 0,
-            })),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("tgui-present-pipeline-layout"),
+                    bind_group_layouts: &[Some(&present_bind_group_layout)],
+                    immediate_size: 0,
+                }),
+            ),
             vertex: wgpu::VertexState {
                 module: &present_shader,
                 entry_point: Some("vs_main"),

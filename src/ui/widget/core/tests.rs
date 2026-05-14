@@ -20,11 +20,10 @@ use crate::ui::widget::{
 };
 use crate::ui::widget::{
     ButtonStyle, Canvas, CanvasParagraphStyle, CanvasRecorder, CanvasStroke, CanvasStyle,
-    CanvasTextHorizontalAlign, CanvasTextVerticalAlign, CanvasTextWrap,
-    Checkbox, ClipMask, ContainerStyle, Element, Image, Input, InputStyle, Point,
-    Radio, RadioGroup, RadioOption, ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack,
-    Switch, SwitchStyle, Text, TextEditState, TextWidgetStyle, Textarea, TextareaStyle,
-    WidgetStateMap, WidgetTree,
+    CanvasTextHorizontalAlign, CanvasTextVerticalAlign, CanvasTextWrap, Checkbox, ClipMask,
+    ContainerStyle, Element, Image, Input, InputStyle, Point, Radio, RadioGroup, RadioOption,
+    ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack, Switch, SwitchStyle, Text,
+    TextEditState, TextWidgetStyle, Textarea, TextareaStyle, WidgetStateMap, WidgetTree,
 };
 #[cfg(feature = "video")]
 use crate::video::backend::{
@@ -821,9 +820,7 @@ fn canvas_border_radius_clips_item_meshes() {
         .iter()
         .all(|shape| shape.clip_mask == expected_clip);
 
-    assert!(
-        !rendered.primitives.meshes.is_empty() || !rendered.primitives.shapes.is_empty()
-    );
+    assert!(!rendered.primitives.meshes.is_empty() || !rendered.primitives.shapes.is_empty());
     assert!(mesh_matches);
     assert!(shape_matches);
 }

@@ -14,15 +14,24 @@ impl Renderer {
         self.msaa_sample_count > 1
     }
 
-    pub(super) fn offscreen_attachment_view<'a>(&self, target: &'a OffscreenTarget) -> &'a wgpu::TextureView {
+    pub(super) fn offscreen_attachment_view<'a>(
+        &self,
+        target: &'a OffscreenTarget,
+    ) -> &'a wgpu::TextureView {
         target.msaa_view.as_ref().unwrap_or(&target.single_view)
     }
 
-    pub(super) fn offscreen_single_view<'a>(&self, target: &'a OffscreenTarget) -> &'a wgpu::TextureView {
+    pub(super) fn offscreen_single_view<'a>(
+        &self,
+        target: &'a OffscreenTarget,
+    ) -> &'a wgpu::TextureView {
         &target.single_view
     }
 
-    pub(super) fn offscreen_msaa_view<'a>(&self, target: &'a OffscreenTarget) -> Option<&'a wgpu::TextureView> {
+    pub(super) fn offscreen_msaa_view<'a>(
+        &self,
+        target: &'a OffscreenTarget,
+    ) -> Option<&'a wgpu::TextureView> {
         target.msaa_view.as_ref()
     }
 
@@ -45,7 +54,10 @@ impl Renderer {
         target.ok_or_else(|| TguiError::TextRender(format!("{name} unavailable")))
     }
 
-    pub(super) fn offscreen_sampled_view<'a>(&self, target: &'a OffscreenTarget) -> &'a wgpu::TextureView {
+    pub(super) fn offscreen_sampled_view<'a>(
+        &self,
+        target: &'a OffscreenTarget,
+    ) -> &'a wgpu::TextureView {
         if self.has_msaa() {
             self.offscreen_msaa_view(target)
                 .unwrap_or_else(|| self.offscreen_single_view(target))
@@ -74,7 +86,12 @@ impl Renderer {
         let _ = &mut pass;
     }
 
-    fn snapshot_texture(&self, encoder: &mut wgpu::CommandEncoder, source: &OffscreenTarget, label: &str) -> wgpu::Texture {
+    fn snapshot_texture(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &OffscreenTarget,
+        label: &str,
+    ) -> wgpu::Texture {
         let snapshot = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d {
@@ -158,12 +175,7 @@ impl Renderer {
         while index < commands.len() {
             match &commands[index] {
                 PreparedCommand::BackdropBlur(blur) => {
-                    self.apply_backdrop_blur_to_target(
-                        encoder,
-                        blur,
-                        target,
-                        cleared_draw_target,
-                    )?;
+                    self.apply_backdrop_blur_to_target(encoder, blur, target, cleared_draw_target)?;
                     index += 1;
                     continue;
                 }
@@ -591,6 +603,11 @@ impl Renderer {
                 contents: bytemuck::cast_slice(&quad),
                 usage: wgpu::BufferUsages::VERTEX,
             });
+        let inner_shadow_rgba = composite
+            .primitive
+            .inner_shadow_color
+            .map(|color| color.to_linear_rgba_f32())
+            .unwrap_or([0.0; 4]);
         let uniform = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -616,7 +633,17 @@ impl Renderer {
                         .color_filter
                         .map(|filter| filter.add)
                         .unwrap_or([0.0; 4]),
-                    data3: [0.0; 4],
+                    data3: inner_shadow_rgba,
+                    data4: [
+                        composite.primitive.inner_shadow_offset.x.get(),
+                        composite.primitive.inner_shadow_offset.y.get(),
+                        composite.primitive.inner_shadow_blur_radius.max(0.0),
+                        if composite.primitive.inner_shadow_color.is_some() {
+                            1.0
+                        } else {
+                            0.0
+                        },
+                    ],
                 }),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
@@ -628,7 +655,8 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
-                        self.offscreen_msaa_view(&composite_target).unwrap_or(&content_view),
+                        self.offscreen_msaa_view(&composite_target)
+                            .unwrap_or(&content_view),
                     ),
                 },
                 wgpu::BindGroupEntry {
@@ -638,7 +666,8 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(
-                        self.offscreen_msaa_view(&composite_mask_target).unwrap_or(&mask_view),
+                        self.offscreen_msaa_view(&composite_mask_target)
+                            .unwrap_or(&mask_view),
                     ),
                 },
                 wgpu::BindGroupEntry {
@@ -652,7 +681,8 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
-                        self.offscreen_msaa_view(&composite_target).unwrap_or(&content_view),
+                        self.offscreen_msaa_view(&composite_target)
+                            .unwrap_or(&content_view),
                     ),
                 },
                 wgpu::BindGroupEntry {
@@ -662,7 +692,8 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(
-                        self.offscreen_msaa_view(&composite_mask_target).unwrap_or(&mask_view),
+                        self.offscreen_msaa_view(&composite_mask_target)
+                            .unwrap_or(&mask_view),
                     ),
                 },
                 wgpu::BindGroupEntry {

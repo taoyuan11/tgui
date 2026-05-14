@@ -3,11 +3,11 @@ use super::*;
 use crate::application::MsaaMode;
 use crate::foundation::color::Color as TguiColorAlias;
 use crate::text::font::FontWeight;
+use crate::ui::widget::Rect;
 use crate::ui::widget::{
     CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextVerticalAlign, CanvasTextWrap,
     TextPrimitive,
 };
-use crate::ui::widget::Rect;
 
 #[cfg(target_os = "windows")]
 #[test]

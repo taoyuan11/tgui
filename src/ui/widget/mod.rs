@@ -23,13 +23,15 @@ pub use background::{
 pub use button::Button;
 pub use canvas::{
     Canvas, CanvasBlendMode, CanvasBrush, CanvasColorFilter, CanvasDragEvent, CanvasEffect,
-    CanvasFillRule, CanvasGradientStop, CanvasImageOptions, CanvasInnerShadow, CanvasItemId,
-    CanvasLinearGradient, CanvasMouseButton, CanvasMouseEvent, CanvasParagraphStyle,
+    CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasGroupMode, CanvasGroupShape,
+    CanvasImage, CanvasImageOptions, CanvasInnerShadow, CanvasItem, CanvasItemId, CanvasItemKind,
+    CanvasLinearGradient, CanvasMouseButton, CanvasMouseEvent, CanvasParagraphStyle, CanvasPath,
     CanvasPathOpError, CanvasPointerEvent, CanvasRadialGradient, CanvasRecorder, CanvasScene,
-    CanvasShadow, CanvasStroke, CanvasStrokeAlignment, CanvasStrokeCap, CanvasStrokeJoin,
-    CanvasSvgPathError, CanvasTextHit, CanvasTextHorizontalAlign, CanvasTextOverflow,
-    CanvasTextSpan, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap,
-    CanvasTransform2D, CanvasWheelEvent, PathBuilder,
+    CanvasSceneDebugInfo, CanvasSceneDebugNode, CanvasSceneDebugStats, CanvasSceneHit,
+    CanvasSceneQueryOptions, CanvasSceneVisit, CanvasShadow, CanvasStroke, CanvasStrokeAlignment,
+    CanvasStrokeCap, CanvasStrokeJoin, CanvasSvgPathError, CanvasText, CanvasTextHit,
+    CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextSpan, CanvasTextStyle,
+    CanvasTextVerticalAlign, CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent, PathBuilder,
 };
 pub use checkbox::Checkbox;
 pub(crate) use common::{

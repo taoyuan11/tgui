@@ -55,10 +55,13 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 
 - `Canvas`
 - `CanvasRecorder`
+- `CanvasScene`
 - 线性渐变 / 径向渐变
 - 描边、阴影、混合模式、裁剪
 - 文本省略与图片绘制
 - 画布命中与点击事件
+
+如果你想看更正式的 Canvas 能力说明、retained scene 查询 API 和当前限制，请同时阅读 [docs/canvas.md](D:/Project/Rust/libs/tgui/docs/canvas.md)。
 
 适合做图形编辑、可视化、流程图或定制图表表面。
 

@@ -925,6 +925,49 @@ impl<VM> WidgetTree<VM> {
             .collect_lifecycle_event_states(&mut states);
         states
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn query_canvas_scene_at_widget(
+        &self,
+        widget_id: WidgetId,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        units: UnitContext,
+        animations: &mut AnimationEngine,
+        viewport: Rect,
+        scene_position: Point,
+    ) -> Option<super::CanvasSceneHit> {
+        self.query_canvas_scene_all_at_widget(
+            widget_id,
+            font_manager,
+            theme,
+            media,
+            units,
+            animations,
+            viewport,
+            scene_position,
+        )
+        .into_iter()
+        .next()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn query_canvas_scene_all_at_widget(
+        &self,
+        widget_id: WidgetId,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        units: UnitContext,
+        animations: &mut AnimationEngine,
+        viewport: Rect,
+        scene_position: Point,
+    ) -> Vec<super::CanvasSceneHit> {
+        let layout =
+            self.build_scene_layout(font_manager, theme, media, animations, units, viewport);
+        layout.query_canvas_scene_all_at_widget(widget_id, font_manager, units, scene_position)
+    }
 }
 
 #[cfg(test)]
