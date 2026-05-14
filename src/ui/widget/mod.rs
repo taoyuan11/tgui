@@ -22,22 +22,24 @@ pub use background::{
 };
 pub use button::Button;
 pub use canvas::{
-    Canvas, CanvasBlendMode, CanvasBrush, CanvasDragEvent, CanvasFillRule, CanvasGradientStop,
-    CanvasImageOptions, CanvasItemId, CanvasLinearGradient, CanvasMouseButton, CanvasMouseEvent,
-    CanvasParagraphStyle, CanvasPathOpError, CanvasPointerEvent, CanvasRadialGradient,
-    CanvasRecorder, CanvasScene, CanvasShadow, CanvasStroke, CanvasStrokeAlignment,
-    CanvasStrokeCap, CanvasStrokeJoin, CanvasSvgPathError, CanvasTextHorizontalAlign,
-    CanvasTextOverflow, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap,
+    Canvas, CanvasBlendMode, CanvasBrush, CanvasColorFilter, CanvasDragEvent, CanvasEffect,
+    CanvasFillRule, CanvasGradientStop, CanvasImageOptions, CanvasInnerShadow, CanvasItemId,
+    CanvasLinearGradient, CanvasMouseButton, CanvasMouseEvent, CanvasParagraphStyle,
+    CanvasPathOpError, CanvasPointerEvent, CanvasRadialGradient, CanvasRecorder, CanvasScene,
+    CanvasShadow, CanvasStroke, CanvasStrokeAlignment, CanvasStrokeCap, CanvasStrokeJoin,
+    CanvasSvgPathError, CanvasTextHit, CanvasTextHorizontalAlign, CanvasTextOverflow,
+    CanvasTextSpan, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap,
     CanvasTransform2D, CanvasWheelEvent, PathBuilder,
 };
 pub use checkbox::Checkbox;
 pub(crate) use common::{
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     BackdropBlurPrimitive, BrushPrimitiveData, CanvasCompositePrimitive,
-    CanvasItemInteractionHandlers, ClipMask, CompositionState, ComputedScene, HitInteraction,
-    InteractionHandlers, LifecycleEventHandlers, LifecycleEventState, MediaEventPhase,
-    MediaEventState, MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    TextEditState, TextInputContentGeometry, WidgetStateMap,
+    CanvasItemInteractionHandlers, CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask,
+    CompositionState, ComputedScene, HitGeometry, HitInteraction, InteractionHandlers,
+    LifecycleEventHandlers, LifecycleEventState, MediaEventPhase, MediaEventState, MeshVertex,
+    RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextEditState,
+    TextInputContentGeometry, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId, WidgetKey,

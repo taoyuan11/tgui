@@ -24,9 +24,9 @@ use crate::video::VideoSurface;
 
 use super::background::{BackgroundBrush, BackgroundGradientStop, BackgroundImage};
 use super::canvas::{
-    CanvasBlendMode, CanvasDragEvent, CanvasItemId, CanvasMouseEvent, CanvasScene,
-    CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextVerticalAlign, CanvasTextWrap,
-    CanvasWheelEvent,
+    CanvasBlendMode, CanvasColorFilter, CanvasDragEvent, CanvasItemId, CanvasMouseEvent,
+    CanvasScene, CanvasTextHit, CanvasTextHorizontalAlign, CanvasTextOverflow,
+    CanvasTextVerticalAlign, CanvasTextWrap, CanvasWheelEvent,
 };
 use super::image::Image;
 #[cfg(feature = "video")]
@@ -842,8 +842,20 @@ pub struct BackdropBlurPrimitive {
 }
 
 #[derive(Clone)]
+pub struct CanvasTextSpanPrimitive {
+    pub content: String,
+    pub font_family: Option<String>,
+    pub color: Color,
+    pub font_size: f32,
+    pub font_weight: FontWeight,
+    pub line_height: Option<f32>,
+    pub letter_spacing: f32,
+}
+
+#[derive(Clone)]
 pub struct TextPrimitive {
     pub content: String,
+    pub rich_spans: Option<Arc<[CanvasTextSpanPrimitive]>>,
     pub frame: Rect,
     pub quad: Option<[Point; 4]>,
     pub color: Color,
@@ -878,6 +890,8 @@ pub struct CanvasCompositePrimitive {
     pub bounds: Rect,
     pub opacity: f32,
     pub blend_mode: CanvasBlendMode,
+    pub blur_radius: f32,
+    pub color_filter: Option<CanvasColorFilter>,
     pub clip_rect: Option<Rect>,
     pub clip_mask: Option<ClipMask>,
     pub content_commands: Arc<[RenderCommand]>,
@@ -1632,6 +1646,8 @@ pub(crate) enum HitInteraction<VM> {
         cursor_style: Option<CursorStyle>,
         canvas_origin: Point,
         item_origin: Point,
+        inverse_transform: [f32; 6],
+        text_hits: Arc<[CanvasTextHitRegion]>,
     },
 }
 
@@ -1752,6 +1768,8 @@ impl<VM> Clone for HitInteraction<VM> {
                 cursor_style,
                 canvas_origin,
                 item_origin,
+                inverse_transform,
+                text_hits,
             } => Self::CanvasItem {
                 id: *id,
                 item_id: *item_id,
@@ -1759,9 +1777,17 @@ impl<VM> Clone for HitInteraction<VM> {
                 cursor_style: *cursor_style,
                 canvas_origin: *canvas_origin,
                 item_origin: *item_origin,
+                inverse_transform: *inverse_transform,
+                text_hits: Arc::clone(text_hits),
             },
         }
     }
+}
+
+#[derive(Clone)]
+pub struct CanvasTextHitRegion {
+    pub hit: CanvasTextHit,
+    pub quad: [Point; 4],
 }
 
 impl<VM> HitInteraction<VM> {
@@ -1805,6 +1831,7 @@ pub(crate) enum HitTargetId {
 #[derive(Clone)]
 pub(crate) enum HitGeometry {
     Rect,
+    Quad([Point; 4]),
     Triangles(Arc<[[Point; 3]]>),
 }
 
@@ -1812,6 +1839,10 @@ impl HitGeometry {
     pub(crate) fn contains(&self, point: Point) -> bool {
         match self {
             Self::Rect => true,
+            Self::Quad(quad) => {
+                point_in_triangle(point, quad[0], quad[1], quad[2])
+                    || point_in_triangle(point, quad[0], quad[2], quad[3])
+            }
             Self::Triangles(triangles) => triangles
                 .iter()
                 .any(|triangle| point_in_triangle(point, triangle[0], triangle[1], triangle[2])),

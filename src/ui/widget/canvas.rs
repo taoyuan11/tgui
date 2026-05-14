@@ -24,18 +24,20 @@ use crate::media::{
     resolve_media_rect, ContentFit, IntrinsicSize, MediaManager, MediaSource, RasterRequest,
     TextureFrame,
 };
-use crate::text::font::FontWeight;
+use crate::text::font::{FontManager, FontWeight, TextFontRequest};
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{Dp, Sp, UnitContext};
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::background::{
     BackgroundBrush, BackgroundGradientStop, BackgroundLinearGradient, BackgroundRadialGradient,
 };
 use super::common::{
-    CanvasCompositePrimitive, CanvasItemInteractionHandlers, ClipMask, CursorStyle,
-    InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, MeshPrimitive, MeshVertex,
-    Point, Rect, RenderCommand, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKind,
+    CanvasCompositePrimitive, CanvasItemInteractionHandlers, CanvasTextSpanPrimitive, ClipMask,
+    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, MeshPrimitive,
+    MeshVertex, Point, Rect, RenderCommand, TextPrimitive, TexturePrimitive, VisualStyle,
+    WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -93,6 +95,7 @@ pub struct CanvasMouseEvent {
     pub canvas_position: Point,
     pub scene_position: Point,
     pub local_position: Point,
+    pub text_hit: Option<CanvasTextHit>,
 }
 
 pub type CanvasPointerEvent = CanvasMouseEvent;
@@ -104,6 +107,7 @@ pub struct CanvasWheelEvent {
     pub canvas_position: Point,
     pub scene_position: Point,
     pub local_position: Point,
+    pub text_hit: Option<CanvasTextHit>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -113,10 +117,45 @@ pub struct CanvasDragEvent {
     pub start_canvas_position: Point,
     pub start_scene_position: Point,
     pub start_local_position: Point,
+    pub start_text_hit: Option<CanvasTextHit>,
     pub canvas_position: Point,
     pub scene_position: Point,
     pub local_position: Point,
+    pub text_hit: Option<CanvasTextHit>,
     pub delta: Point,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CanvasTextHit {
+    pub utf8_start: usize,
+    pub utf8_end: usize,
+    pub line_index: usize,
+    pub line_start: usize,
+    pub line_end: usize,
+    pub line_top: Dp,
+    pub line_height: Dp,
+    pub line_width: Dp,
+    pub cluster_bounds: Rect,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanvasTextSpan {
+    pub content: String,
+    pub style: CanvasTextStyle,
+}
+
+impl CanvasTextSpan {
+    pub fn new(content: impl Into<String>) -> Self {
+        Self {
+            content: content.into(),
+            style: CanvasTextStyle::default(),
+        }
+    }
+
+    pub fn style(mut self, style: CanvasTextStyle) -> Self {
+        self.style = style;
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -249,6 +288,67 @@ impl CanvasShadow {
             blur: blur.into(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CanvasInnerShadow {
+    pub color: Color,
+    pub offset: Point,
+    pub blur: Dp,
+}
+
+impl CanvasInnerShadow {
+    pub fn new(color: Color, offset: impl Into<Point>, blur: impl Into<Dp>) -> Self {
+        Self {
+            color,
+            offset: offset.into(),
+            blur: blur.into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CanvasColorFilter {
+    pub multiply: [f32; 4],
+    pub add: [f32; 4],
+}
+
+impl CanvasColorFilter {
+    pub const IDENTITY: Self = Self {
+        multiply: [1.0, 1.0, 1.0, 1.0],
+        add: [0.0, 0.0, 0.0, 0.0],
+    };
+
+    pub const fn linear(multiply: [f32; 4], add: [f32; 4]) -> Self {
+        Self { multiply, add }
+    }
+
+    pub fn multiply(color: Color) -> Self {
+        let rgba = color.to_linear_rgba_f32();
+        Self::linear(rgba, [0.0; 4])
+    }
+
+    pub fn tint(color: Color, amount: f32) -> Self {
+        let amount = amount.clamp(0.0, 1.0);
+        let rgba = color.to_linear_rgba_f32();
+        let base = 1.0 - amount;
+        Self::linear(
+            [base, base, base, 1.0],
+            [
+                rgba[0] * amount,
+                rgba[1] * amount,
+                rgba[2] * amount,
+                0.0,
+            ],
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CanvasEffect {
+    Blur(Dp),
+    ColorFilter(CanvasColorFilter),
+    InnerShadow(CanvasInnerShadow),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -393,6 +493,8 @@ struct CanvasItemStyle {
     pub transform: CanvasTransform2D,
     pub opacity: f32,
     pub blend_mode: CanvasBlendMode,
+    pub effects: Vec<CanvasEffect>,
+    pub isolation: bool,
     pub cursor: Option<CursorStyle>,
     pub visible: bool,
     pub hit_test: bool,
@@ -405,6 +507,8 @@ impl CanvasItemStyle {
             transform: CanvasTransform2D::IDENTITY,
             opacity: 1.0,
             blend_mode: CanvasBlendMode::Normal,
+            effects: Vec::new(),
+            isolation: false,
             cursor: None,
             visible: true,
             hit_test: true,
@@ -1170,6 +1274,16 @@ impl CanvasPath {
         self
     }
 
+    pub fn effects(mut self, effects: impl Into<Vec<CanvasEffect>>) -> Self {
+        self.style.effects = effects.into();
+        self
+    }
+
+    pub fn isolation(mut self, isolation: bool) -> Self {
+        self.style.isolation = isolation;
+        self
+    }
+
     pub fn cursor(mut self, cursor: CursorStyle) -> Self {
         self.style.cursor = Some(cursor);
         self
@@ -1260,10 +1374,25 @@ impl Default for CanvasParagraphStyle {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+enum CanvasTextContent {
+    Plain(String),
+    Rich(Vec<CanvasTextSpan>),
+}
+
+impl CanvasTextContent {
+    fn plain_text(&self) -> String {
+        match self {
+            Self::Plain(content) => content.clone(),
+            Self::Rich(spans) => spans.iter().map(|span| span.content.as_str()).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct CanvasText {
     pub style: CanvasItemStyle,
     pub frame: Rect,
-    pub content: String,
+    pub content: CanvasTextContent,
     pub text_style: CanvasTextStyle,
     pub paragraph_style: CanvasParagraphStyle,
 }
@@ -1273,7 +1402,21 @@ impl CanvasText {
         Self {
             style: CanvasItemStyle::new(id),
             frame,
-            content: content.into(),
+            content: CanvasTextContent::Plain(content.into()),
+            text_style: CanvasTextStyle::default(),
+            paragraph_style: CanvasParagraphStyle::default(),
+        }
+    }
+
+    pub fn rich(
+        id: impl Into<CanvasItemId>,
+        frame: Rect,
+        spans: impl Into<Vec<CanvasTextSpan>>,
+    ) -> Self {
+        Self {
+            style: CanvasItemStyle::new(id),
+            frame,
+            content: CanvasTextContent::Rich(spans.into()),
             text_style: CanvasTextStyle::default(),
             paragraph_style: CanvasParagraphStyle::default(),
         }
@@ -1301,6 +1444,16 @@ impl CanvasText {
 
     pub fn blend_mode(mut self, blend_mode: CanvasBlendMode) -> Self {
         self.style.blend_mode = blend_mode;
+        self
+    }
+
+    pub fn effects(mut self, effects: impl Into<Vec<CanvasEffect>>) -> Self {
+        self.style.effects = effects.into();
+        self
+    }
+
+    pub fn isolation(mut self, isolation: bool) -> Self {
+        self.style.isolation = isolation;
         self
     }
 
@@ -1402,6 +1555,16 @@ impl CanvasImage {
         self
     }
 
+    pub fn effects(mut self, effects: impl Into<Vec<CanvasEffect>>) -> Self {
+        self.style.effects = effects.into();
+        self
+    }
+
+    pub fn isolation(mut self, isolation: bool) -> Self {
+        self.style.isolation = isolation;
+        self
+    }
+
     pub fn cursor(mut self, cursor: CursorStyle) -> Self {
         self.style.cursor = Some(cursor);
         self
@@ -1419,7 +1582,7 @@ impl CanvasImage {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum CanvasClipShape {
+enum CanvasGroupShape {
     Path {
         path: PathBuilder,
         fill_rule: CanvasFillRule,
@@ -1427,25 +1590,33 @@ enum CanvasClipShape {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct CanvasClip {
+enum CanvasGroupMode {
+    Clip,
+    Mask,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CanvasGroup {
     pub style: CanvasItemStyle,
-    pub clip: CanvasClipShape,
+    pub mode: CanvasGroupMode,
+    pub shape: CanvasGroupShape,
     pub items: Vec<CanvasItem>,
 }
 
-impl CanvasClip {
+impl CanvasGroup {
     pub fn new(
         id: impl Into<CanvasItemId>,
-        clip: CanvasClipShape,
+        mode: CanvasGroupMode,
+        shape: CanvasGroupShape,
         items: impl Into<Vec<CanvasItem>>,
     ) -> Self {
         Self {
             style: CanvasItemStyle::new(id),
-            clip,
+            mode,
+            shape,
             items: items.into(),
         }
     }
-
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1453,7 +1624,7 @@ enum CanvasItem {
     Path(CanvasPath),
     Text(CanvasText),
     Image(CanvasImage),
-    Clip(CanvasClip),
+    Group(CanvasGroup),
 }
 
 impl CanvasItem {
@@ -1462,7 +1633,7 @@ impl CanvasItem {
             Self::Path(path) => path.style.id,
             Self::Text(text) => text.style.id,
             Self::Image(image) => image.style.id,
-            Self::Clip(clip) => clip.style.id,
+            Self::Group(group) => group.style.id,
         }
     }
 
@@ -1477,8 +1648,8 @@ impl CanvasItem {
             }
             Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
             Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
-            Self::Clip(clip) => {
-                clip_shape_bounds(&clip.clip).or_else(|| canvas_bounds(&clip.items))
+            Self::Group(group) => {
+                group_shape_bounds(&group.shape).or_else(|| canvas_bounds(&group.items))
             }
         }?;
         Some(transform_bounds(bounds, self.style().transform))
@@ -1492,8 +1663,8 @@ impl CanvasItem {
             Self::Path(path) => path_base_bounds(path),
             Self::Text(text) => Some(RectBounds::from_rect(text.frame)),
             Self::Image(image) => Some(RectBounds::from_rect(image.frame)),
-            Self::Clip(clip) => {
-                clip_shape_bounds(&clip.clip).or_else(|| canvas_bounds(&clip.items))
+            Self::Group(group) => {
+                group_shape_bounds(&group.shape).or_else(|| canvas_bounds(&group.items))
             }
         }?;
         Some(transform_bounds(bounds, self.style().transform))
@@ -1521,18 +1692,21 @@ impl CanvasItem {
             Self::Image(image) => {
                 tessellate_image(image, origin, opacity, clip_context, media, units)
             }
-            Self::Clip(clip) => {
+            Self::Group(group) => {
                 let nested_clip = CanvasClipContext {
                     clip_rect: compose_clip_rect(
                         clip_context.clip_rect,
-                        clip_shape_clip_rect(&clip.clip, origin),
+                        match group.mode {
+                            CanvasGroupMode::Clip => group_shape_clip_rect(&group.shape, origin),
+                            CanvasGroupMode::Mask => None,
+                        },
                     ),
                     clip_mask: clip_context.clip_mask,
                 };
                 tessellate_items(
-                    &clip.items,
+                    &group.items,
                     origin,
-                    opacity * clip.style.opacity,
+                    opacity * group.style.opacity,
                     nested_clip,
                     media,
                     units,
@@ -1549,17 +1723,29 @@ impl CanvasItem {
             Self::Path(path) => &path.style,
             Self::Text(text) => &text.style,
             Self::Image(image) => &image.style,
-            Self::Clip(clip) => &clip.style,
+            Self::Group(group) => &group.style,
         }
     }
 }
 
 fn item_requires_composite(item: &CanvasItem) -> bool {
     match item {
-        CanvasItem::Path(path) => path.style.blend_mode != CanvasBlendMode::Normal,
-        CanvasItem::Text(text) => text.style.blend_mode != CanvasBlendMode::Normal,
-        CanvasItem::Image(image) => image.style.blend_mode != CanvasBlendMode::Normal,
-        CanvasItem::Clip(_) => true,
+        CanvasItem::Path(path) => {
+            path.style.blend_mode != CanvasBlendMode::Normal
+                || path.style.isolation
+                || !path.style.effects.is_empty()
+        }
+        CanvasItem::Text(text) => {
+            text.style.blend_mode != CanvasBlendMode::Normal
+                || text.style.isolation
+                || !text.style.effects.is_empty()
+        }
+        CanvasItem::Image(image) => {
+            image.style.blend_mode != CanvasBlendMode::Normal
+                || image.style.isolation
+                || !image.style.effects.is_empty()
+        }
+        CanvasItem::Group(_) => true,
     }
 }
 
@@ -1652,9 +1838,9 @@ fn transform_bounds(bounds: RectBounds, transform: CanvasTransform2D) -> RectBou
     RectBounds::from_min_max(min_x, min_y, max_x, max_y)
 }
 
-fn clip_shape_bounds(shape: &CanvasClipShape) -> Option<RectBounds> {
+fn group_shape_bounds(shape: &CanvasGroupShape) -> Option<RectBounds> {
     match shape {
-        CanvasClipShape::Path { path, .. } => path.control_bounds().map(|bounds| {
+        CanvasGroupShape::Path { path, .. } => path.control_bounds().map(|bounds| {
             RectBounds::from_min_max(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y)
         }),
     }
@@ -1666,9 +1852,9 @@ pub(crate) struct CanvasClipContext {
     pub(crate) clip_mask: Option<ClipMask>,
 }
 
-fn clip_shape_clip_rect(shape: &CanvasClipShape, origin: Point) -> Option<Rect> {
+fn group_shape_clip_rect(shape: &CanvasGroupShape, origin: Point) -> Option<Rect> {
     match shape {
-        CanvasClipShape::Path { path, .. } => path.control_bounds().map(|bounds| {
+        CanvasGroupShape::Path { path, .. } => path.control_bounds().map(|bounds| {
             Rect::new(
                 origin.x + bounds.min.x,
                 origin.y + bounds.min.y,
@@ -1771,6 +1957,7 @@ fn tessellate_composite_item(
     };
     let bounds_rect = offset_rect(bounds_rect(bounds), origin);
     let style = item.style();
+    let resolved_effects = resolve_canvas_effects(&style.effects);
 
     let (content_output, mask_commands, blend_mode) = match item {
         CanvasItem::Path(path) => (
@@ -1788,12 +1975,12 @@ fn tessellate_composite_item(
             None,
             style.blend_mode,
         ),
-        CanvasItem::Clip(clip_item) => {
+        CanvasItem::Group(group_item) => {
             let nested_output =
-                tessellate_items(&clip_item.items, origin, opacity, clip, media, units);
-            let CanvasClipShape::Path { path, fill_rule } = &clip_item.clip;
+                tessellate_items(&group_item.items, origin, opacity, clip, media, units);
+            let CanvasGroupShape::Path { path, fill_rule } = &group_item.shape;
             let mask = tessellate_path(
-                &CanvasPath::new(clip_item.style.id, path.clone())
+                &CanvasPath::new(group_item.style.id, path.clone())
                     .fill_rule(*fill_rule)
                     .fill(Color::WHITE),
                 origin,
@@ -1802,8 +1989,12 @@ fn tessellate_composite_item(
                 media,
                 units,
             );
-            let mask_commands = Some(output_to_commands(mask).into());
-            (nested_output, mask_commands, CanvasBlendMode::Normal)
+            let mask_commands = match group_item.mode {
+                CanvasGroupMode::Clip | CanvasGroupMode::Mask => {
+                    Some(output_to_commands(mask).into())
+                }
+            };
+            (nested_output, mask_commands, style.blend_mode)
         }
     };
 
@@ -1819,6 +2010,8 @@ fn tessellate_composite_item(
             bounds: bounds_rect,
             opacity: 1.0,
             blend_mode,
+            blur_radius: resolved_effects.blur_radius,
+            color_filter: resolved_effects.color_filter,
             clip_rect: clip.clip_rect,
             clip_mask: clip.clip_mask,
             content_commands,
@@ -1838,9 +2031,29 @@ fn tessellate_text(
         .text_style
         .line_height
         .unwrap_or(Sp::new(text.text_style.font_size.get() * 1.2));
+    let content = text.content.plain_text();
+    let rich_spans = match &text.content {
+        CanvasTextContent::Plain(_) => None,
+        CanvasTextContent::Rich(spans) => Some(Arc::from(
+            spans
+                .iter()
+                .cloned()
+                .map(|span| CanvasTextSpanPrimitive {
+                    content: span.content,
+                    font_family: span.style.font_family,
+                    color: span.style.color.with_alpha_factor(opacity * text.style.opacity),
+                    font_size: span.style.font_size.get(),
+                    font_weight: span.style.font_weight,
+                    line_height: span.style.line_height.map(|height| height.get()),
+                    letter_spacing: span.style.letter_spacing.get(),
+                })
+                .collect::<Vec<_>>(),
+        )),
+    };
     CanvasRenderOutput {
         texts: vec![TextPrimitive {
-            content: text.content.clone(),
+            content,
+            rich_spans,
             frame,
             quad: None,
             color: text
@@ -2039,6 +2252,8 @@ struct CanvasRecorderState {
     shadow: Option<Value<CanvasShadow>>,
     opacity: f32,
     blend_mode: CanvasBlendMode,
+    effects: Vec<CanvasEffect>,
+    isolation: bool,
     cursor: Option<CursorStyle>,
     visible: bool,
     hit_test: bool,
@@ -2056,6 +2271,8 @@ impl Default for CanvasRecorderState {
             shadow: None,
             opacity: 1.0,
             blend_mode: CanvasBlendMode::Normal,
+            effects: Vec::new(),
+            isolation: false,
             cursor: None,
             visible: true,
             hit_test: true,
@@ -2069,8 +2286,9 @@ impl Default for CanvasRecorderState {
 struct CanvasRecorderFrame {
     state: CanvasRecorderState,
     items: Vec<CanvasItem>,
-    clip_path: Option<PathBuilder>,
-    clipped_items: Vec<CanvasItem>,
+    group_path: Option<PathBuilder>,
+    group_mode: Option<CanvasGroupMode>,
+    grouped_items: Vec<CanvasItem>,
 }
 
 impl CanvasRecorderFrame {
@@ -2078,8 +2296,9 @@ impl CanvasRecorderFrame {
         Self {
             state,
             items: Vec::new(),
-            clip_path: None,
-            clipped_items: Vec::new(),
+            group_path: None,
+            group_mode: None,
+            grouped_items: Vec::new(),
         }
     }
 }
@@ -2320,22 +2539,11 @@ impl CanvasRecorder {
     }
 
     pub fn clip(&mut self) -> &mut Self {
-        let path = self.transformed_current_path();
-        if path.commands_internal().is_empty() {
-            return self;
-        }
+        self.begin_group(CanvasGroupMode::Clip)
+    }
 
-        if self.current_frame().clip_path.is_some() && !self.current_frame().clipped_items.is_empty() {
-            let clip_item = self.take_pending_clip_group();
-            self.current_frame().items.push(clip_item);
-        }
-
-        let new_clip = match self.current_frame().clip_path.clone() {
-            Some(existing) => existing.intersect(&path).unwrap_or(path.clone()),
-            None => path,
-        };
-        self.current_frame().clip_path = Some(new_clip);
-        self
+    pub fn mask(&mut self) -> &mut Self {
+        self.begin_group(CanvasGroupMode::Mask)
     }
 
     pub fn translate(&mut self, x: impl Into<Dp>, y: impl Into<Dp>) -> &mut Self {
@@ -2410,6 +2618,26 @@ impl CanvasRecorder {
 
     pub fn set_blend_mode(&mut self, blend_mode: CanvasBlendMode) -> &mut Self {
         self.current_state_mut().blend_mode = blend_mode;
+        self
+    }
+
+    pub fn push_effect(&mut self, effect: CanvasEffect) -> &mut Self {
+        self.current_state_mut().effects.push(effect);
+        self
+    }
+
+    pub fn set_effects(&mut self, effects: impl Into<Vec<CanvasEffect>>) -> &mut Self {
+        self.current_state_mut().effects = effects.into();
+        self
+    }
+
+    pub fn clear_effects(&mut self) -> &mut Self {
+        self.current_state_mut().effects.clear();
+        self
+    }
+
+    pub fn set_isolation(&mut self, isolation: bool) -> &mut Self {
+        self.current_state_mut().isolation = isolation;
         self
     }
 
@@ -2567,6 +2795,30 @@ impl CanvasRecorder {
             .transform(self.current_state().transform)
             .opacity(self.current_state().opacity)
             .blend_mode(self.current_state().blend_mode)
+            .effects(self.current_state().effects.clone())
+            .isolation(self.current_state().isolation)
+            .visible(self.current_state().visible)
+            .hit_test(self.current_state().hit_test);
+        if let Some(cursor) = self.current_state().cursor {
+            text = text.cursor(cursor);
+        }
+        self.push_item(CanvasItem::Text(text));
+        self
+    }
+
+    pub fn draw_rich_text(
+        &mut self,
+        frame: Rect,
+        spans: impl Into<Vec<CanvasTextSpan>>,
+    ) -> &mut Self {
+        let mut text = CanvasText::rich(self.take_item_id(), frame, spans)
+            .text_style(self.current_state().text_style.clone())
+            .paragraph_style(self.current_state().paragraph_style.clone())
+            .transform(self.current_state().transform)
+            .opacity(self.current_state().opacity)
+            .blend_mode(self.current_state().blend_mode)
+            .effects(self.current_state().effects.clone())
+            .isolation(self.current_state().isolation)
             .visible(self.current_state().visible)
             .hit_test(self.current_state().hit_test);
         if let Some(cursor) = self.current_state().cursor {
@@ -2591,6 +2843,8 @@ impl CanvasRecorder {
             .transform(self.current_state().transform)
             .opacity(self.current_state().opacity)
             .blend_mode(self.current_state().blend_mode)
+            .effects(self.current_state().effects.clone())
+            .isolation(self.current_state().isolation)
             .visible(self.current_state().visible)
             .hit_test(self.current_state().hit_test);
         if let Some(cursor) = self.current_state().cursor {
@@ -2639,12 +2893,46 @@ impl CanvasRecorder {
         item = item
             .opacity(self.current_state().opacity)
             .blend_mode(self.current_state().blend_mode)
+            .effects(self.current_state().effects.clone())
+            .isolation(self.current_state().isolation)
             .visible(self.current_state().visible)
             .hit_test(self.current_state().hit_test);
         if let Some(cursor) = self.current_state().cursor {
             item = item.cursor(cursor);
         }
         CanvasItem::Path(item)
+    }
+
+    fn begin_group(&mut self, mode: CanvasGroupMode) -> &mut Self {
+        let path = self.transformed_current_path();
+        if path.commands_internal().is_empty() {
+            return self;
+        }
+
+        let should_flush = {
+            let frame = self.current_frame();
+            frame.group_path.is_some()
+                && !frame.grouped_items.is_empty()
+                && frame.group_mode != Some(mode.clone())
+        };
+        if should_flush {
+            let group_item = self.take_pending_group();
+            self.current_frame().items.push(group_item);
+        }
+
+        let current_mode = self.current_frame().group_mode.clone();
+        let current_path = self.current_frame().group_path.clone();
+        let new_group_path = match (current_mode, current_path) {
+            (Some(CanvasGroupMode::Clip), Some(existing)) if mode == CanvasGroupMode::Clip => {
+                existing.intersect(&path).unwrap_or(path.clone())
+            }
+            (Some(existing_mode), Some(existing)) if existing_mode == mode => existing.intersect(&path).unwrap_or(path.clone()),
+            _ => path,
+        };
+        let frame = self.current_frame();
+        frame.group_mode = Some(mode);
+        frame.group_path = Some(new_group_path);
+        self
     }
 
     fn current_frame(&mut self) -> &mut CanvasRecorderFrame {
@@ -2677,45 +2965,55 @@ impl CanvasRecorder {
 
     fn push_item(&mut self, item: CanvasItem) {
         let frame = self.current_frame();
-        if frame.clip_path.is_some() {
-            frame.clipped_items.push(item);
+        if frame.group_path.is_some() {
+            frame.grouped_items.push(item);
         } else {
             frame.items.push(item);
         }
     }
 
     fn finalize_frame(&mut self, mut frame: CanvasRecorderFrame) -> Vec<CanvasItem> {
-        if frame.clip_path.is_some() && !frame.clipped_items.is_empty() {
-            let clip_id = self.take_generated_id();
-            let clip_path = frame.clip_path.take().expect("clip path should exist");
-            let fill_rule = clip_path.fill_rule;
-            frame.items.push(CanvasItem::Clip(CanvasClip::new(
-                clip_id,
-                CanvasClipShape::Path {
-                    path: clip_path,
+        if frame.group_path.is_some() && !frame.grouped_items.is_empty() {
+            let group_id = self.take_generated_id();
+            let group_path = frame.group_path.take().expect("group path should exist");
+            let fill_rule = group_path.fill_rule;
+            let mode = frame
+                .group_mode
+                .take()
+                .expect("group mode should exist when group path exists");
+            frame.items.push(CanvasItem::Group(CanvasGroup::new(
+                group_id,
+                mode,
+                CanvasGroupShape::Path {
+                    path: group_path,
                     fill_rule,
                 },
-                frame.clipped_items,
+                frame.grouped_items,
             )));
         }
         frame.items
     }
 
-    fn take_pending_clip_group(&mut self) -> CanvasItem {
+    fn take_pending_group(&mut self) -> CanvasItem {
         let frame = self.current_frame();
-        let clip_path = frame
-            .clip_path
+        let group_path = frame
+            .group_path
             .clone()
-            .expect("clip path should exist before finalizing a clip group");
-        let clipped_items = std::mem::take(&mut frame.clipped_items);
-        let fill_rule = clip_path.fill_rule;
-        CanvasItem::Clip(CanvasClip::new(
+            .expect("group path should exist before finalizing a group");
+        let grouped_items = std::mem::take(&mut frame.grouped_items);
+        let mode = frame
+            .group_mode
+            .clone()
+            .expect("group mode should exist before finalizing a group");
+        let fill_rule = group_path.fill_rule;
+        CanvasItem::Group(CanvasGroup::new(
             self.take_generated_id(),
-            CanvasClipShape::Path {
-                path: clip_path,
+            mode,
+            CanvasGroupShape::Path {
+                path: group_path,
                 fill_rule,
             },
-            clipped_items,
+            grouped_items,
         ))
     }
 }
@@ -3091,10 +3389,26 @@ pub(crate) struct CanvasRenderOutput {
     pub commands: Vec<RenderCommand>,
 }
 
+#[derive(Clone)]
+pub(crate) enum CanvasHitGeometry {
+    Quad([Point; 4]),
+    Triangles(Arc<[[Point; 3]]>),
+}
+
+#[derive(Clone)]
+pub(crate) struct CanvasTextHitEntry {
+    pub hit: CanvasTextHit,
+    pub quad: [Point; 4],
+}
+
 pub(crate) struct CanvasSceneItemRender {
     pub item_id: CanvasItemId,
     pub cursor: Option<CursorStyle>,
     pub hit_bounds: Option<RectBounds>,
+    pub hit_geometry: Option<CanvasHitGeometry>,
+    pub local_origin: Point,
+    pub inverse_transform: CanvasTransform2D,
+    pub text_hits: Arc<[CanvasTextHitEntry]>,
     pub output: CanvasRenderOutput,
 }
 
@@ -3104,6 +3418,7 @@ pub(crate) fn tessellate_canvas_scene_items(
     opacity: f32,
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
+    font_manager: &FontManager,
     media: &MediaManager,
     units: UnitContext,
 ) -> Vec<CanvasSceneItemRender> {
@@ -3114,11 +3429,22 @@ pub(crate) fn tessellate_canvas_scene_items(
     scene
         .items()
         .iter()
-        .map(|item| CanvasSceneItemRender {
-            item_id: item.id(),
-            cursor: item.style().cursor,
-            hit_bounds: item.hit_bounds(),
-            output: item.tessellate(origin, opacity, clip, media, units),
+        .map(|item| {
+            let output = item.tessellate(origin, opacity, clip, media, units);
+            CanvasSceneItemRender {
+                item_id: item.id(),
+                cursor: item.style().cursor,
+                hit_bounds: item.hit_bounds(),
+                hit_geometry: item_hit_geometry(item, &output, origin),
+                local_origin: item_local_origin(item),
+                inverse_transform: item
+                    .style()
+                    .transform
+                    .inverse()
+                    .unwrap_or(CanvasTransform2D::IDENTITY),
+                text_hits: item_text_hits(item, font_manager, origin, units),
+                output,
+            }
         })
         .collect()
 }
@@ -3983,6 +4309,233 @@ fn sample_gradient_color(stops: &[(f32, [f32; 4])], offset: f32) -> [f32; 4] {
     stops[stops.len() - 1].1
 }
 
+#[derive(Clone, Copy)]
+struct ResolvedCanvasEffects {
+    blur_radius: f32,
+    color_filter: Option<CanvasColorFilter>,
+}
+
+fn resolve_canvas_effects(effects: &[CanvasEffect]) -> ResolvedCanvasEffects {
+    let mut blur_radius: f32 = 0.0;
+    let mut color_filter = None;
+    for effect in effects {
+        match effect {
+            CanvasEffect::Blur(radius) => {
+                blur_radius = blur_radius.max(radius.get().max(0.0));
+            }
+            CanvasEffect::ColorFilter(filter) => {
+                color_filter = Some(*filter);
+            }
+            CanvasEffect::InnerShadow(_) => {}
+        }
+    }
+    ResolvedCanvasEffects {
+        blur_radius,
+        color_filter,
+    }
+}
+
+fn item_local_origin(item: &CanvasItem) -> Point {
+    match item {
+        CanvasItem::Path(path) => path
+            .path
+            .control_bounds()
+            .map(|bounds| Point::new(bounds.min.x, bounds.min.y))
+            .unwrap_or(Point::ZERO),
+        CanvasItem::Text(text) => Point::new(text.frame.x, text.frame.y),
+        CanvasItem::Image(image) => Point::new(image.frame.x, image.frame.y),
+        CanvasItem::Group(group) => group_shape_bounds(&group.shape)
+            .map(|bounds| Point::new(bounds.min_x, bounds.min_y))
+            .unwrap_or(Point::ZERO),
+    }
+}
+
+fn item_hit_geometry(
+    item: &CanvasItem,
+    output: &CanvasRenderOutput,
+    origin: Point,
+) -> Option<CanvasHitGeometry> {
+    match item {
+        CanvasItem::Path(_) | CanvasItem::Group(_) => {
+            let triangles = output
+                .meshes
+                .iter()
+                .flat_map(|mesh| mesh.triangles.iter().copied())
+                .collect::<Vec<_>>();
+            (!triangles.is_empty()).then(|| CanvasHitGeometry::Triangles(Arc::from(triangles)))
+        }
+        CanvasItem::Text(text) => output
+            .texts
+            .first()
+            .map(|primitive| primitive.quad.unwrap_or_else(|| rect_to_quad(primitive.frame)))
+            .or_else(|| Some(rect_to_quad(offset_rect(text.frame, origin))))
+            .map(CanvasHitGeometry::Quad),
+        CanvasItem::Image(image) => output
+            .textures
+            .first()
+            .map(|primitive| primitive.quad.unwrap_or_else(|| rect_to_quad(primitive.frame)))
+            .or_else(|| Some(rect_to_quad(offset_rect(image.frame, origin))))
+            .map(CanvasHitGeometry::Quad),
+    }
+}
+
+fn item_text_hits(
+    item: &CanvasItem,
+    font_manager: &FontManager,
+    origin: Point,
+    units: UnitContext,
+) -> Arc<[CanvasTextHitEntry]> {
+    let CanvasItem::Text(text) = item else {
+        return Arc::from([]);
+    };
+    let content = text.content.plain_text();
+    if content.is_empty() {
+        return Arc::from([]);
+    }
+
+    let line_height = text
+        .text_style
+        .line_height
+        .unwrap_or(Sp::new(text.text_style.font_size.get() * 1.2))
+        .get();
+    let request = TextFontRequest {
+        preferred_font: text.text_style.font_family.as_deref(),
+        weight: text.text_style.font_weight,
+    };
+    let max_width = match text.paragraph_style.wrap {
+        CanvasTextWrap::None => None,
+        _ => Some(text.frame.width.get().max(0.0)),
+    };
+    let layout = canvas_text_layout(font_manager, text, &content, request, line_height, max_width, units);
+    let content_frame = canvas_text_content_frame(text, &layout, origin);
+    let mut hits = Vec::new();
+
+    for line_index in 0..layout.line_count() {
+        let line_start = layout.line_start(line_index).min(content.len());
+        let line_end = layout.line_end(line_index).min(content.len());
+        if line_start > line_end {
+            continue;
+        }
+        let line_top = content_frame.y + layout.line_top(line_index);
+        let line_height_value = Dp::new(layout.line_height(line_index).max(line_height));
+        let line_width = Dp::new(layout.line_width(line_index).max(0.0));
+
+        let mut boundaries = Vec::new();
+        let mut cursor = line_start;
+        boundaries.push((cursor, layout.x_for_index(cursor)));
+        while cursor < line_end {
+            let next = next_grapheme_boundary(&content, cursor, line_end);
+            boundaries.push((next, layout.x_for_index(next)));
+            cursor = next;
+        }
+
+        for pair in boundaries.windows(2) {
+            let (start, start_x) = pair[0];
+            let (end, end_x) = pair[1];
+            let width = (end_x - start_x).max(0.0);
+            let rect = Rect::new(
+                content_frame.x + start_x,
+                line_top,
+                width.max(1.0),
+                line_height_value,
+            );
+            let quad = rect_to_quad(rect);
+            hits.push(CanvasTextHitEntry {
+                hit: CanvasTextHit {
+                    utf8_start: start,
+                    utf8_end: end,
+                    line_index,
+                    line_start,
+                    line_end,
+                    line_top: Dp::new(layout.line_top(line_index)),
+                    line_height: line_height_value,
+                    line_width,
+                    cluster_bounds: Rect::new(
+                        start_x,
+                        layout.line_top(line_index),
+                        width.max(1.0),
+                        line_height_value,
+                    ),
+                },
+                quad,
+            });
+        }
+    }
+
+    Arc::from(hits)
+}
+
+fn canvas_text_layout(
+    font_manager: &FontManager,
+    text: &CanvasText,
+    content: &str,
+    request: TextFontRequest<'_>,
+    line_height: f32,
+    max_width: Option<f32>,
+    units: UnitContext,
+) -> crate::text::font::TextLayoutInfo {
+    let font_size = units.resolve_sp(text.text_style.font_size);
+    let letter_spacing = units.resolve_sp(text.text_style.letter_spacing);
+    match max_width {
+        Some(width) => font_manager.measure_text_layout_wrapped(
+            content,
+            request,
+            font_size,
+            line_height,
+            letter_spacing,
+            width,
+        ),
+        None => font_manager.measure_text_layout(
+            content,
+            request,
+            font_size,
+            line_height,
+            letter_spacing,
+        ),
+    }
+}
+
+fn canvas_text_content_frame(
+    text: &CanvasText,
+    layout: &crate::text::font::TextLayoutInfo,
+    origin: Point,
+) -> Rect {
+    let frame = offset_rect(text.frame, origin);
+    let width = layout.width.max(0.0).min(frame.width.get());
+    let height = layout.height.max(0.0).min(frame.height.get());
+    let offset_x = match text.paragraph_style.horizontal_align {
+        CanvasTextHorizontalAlign::Start => 0.0,
+        CanvasTextHorizontalAlign::Center => (frame.width.get() - width).max(0.0) * 0.5,
+        CanvasTextHorizontalAlign::End => (frame.width.get() - width).max(0.0),
+    };
+    let offset_y = match text.paragraph_style.vertical_align {
+        CanvasTextVerticalAlign::Start => 0.0,
+        CanvasTextVerticalAlign::Center => (frame.height.get() - height).max(0.0) * 0.5,
+        CanvasTextVerticalAlign::End => (frame.height.get() - height).max(0.0),
+    };
+    Rect::new(frame.x + offset_x, frame.y + offset_y, width, height)
+}
+
+fn rect_to_quad(rect: Rect) -> [Point; 4] {
+    [
+        Point::new(rect.x, rect.y),
+        Point::new(rect.right(), rect.y),
+        Point::new(rect.right(), rect.bottom()),
+        Point::new(rect.x, rect.bottom()),
+    ]
+}
+
+fn next_grapheme_boundary(text: &str, start: usize, limit: usize) -> usize {
+    if start >= limit {
+        return limit;
+    }
+    text[start..limit]
+        .grapheme_indices(true)
+        .nth(1)
+        .map(|(offset, _)| start + offset)
+        .unwrap_or(limit)
+}
+
 fn append_arc_segments(
     mut builder: PathBuilder,
     center: Point,
@@ -4357,12 +4910,14 @@ mod tests {
     use super::{
         canvas_scene_bounds, normalized_source_rect, source_rect_to_uv_rect,
         tessellate_axis_aligned_rounded_rect, tessellate_canvas_scene_items, CanvasBrush,
-        CanvasFillRule, CanvasGradientStop, CanvasImageOptions, CanvasRecorder, CanvasScene,
-        CanvasShadow, CanvasStroke, CanvasTextOverflow, PathBuilder, PathCommand,
+        CanvasColorFilter, CanvasEffect, CanvasFillRule, CanvasGradientStop, CanvasImageOptions,
+        CanvasRecorder, CanvasScene, CanvasShadow, CanvasStroke, CanvasTextOverflow,
+        CanvasTextSpan, CanvasTextStyle, PathBuilder, PathCommand,
     };
     use crate::foundation::binding::InvalidationSignal;
     use crate::foundation::color::Color;
     use crate::media::{ContentFit, IntrinsicSize, MediaManager, MediaSource};
+    use crate::text::font::{FontCatalog, FontManager, FontWeight};
     use crate::ui::layout::Value;
     use crate::ui::unit::dp;
     use crate::ui::unit::UnitContext;
@@ -4373,12 +4928,14 @@ mod tests {
     }
 
     fn rendered_items(scene: &CanvasScene) -> Vec<super::CanvasSceneItemRender> {
+        let font_manager = FontManager::new(&FontCatalog::default());
         tessellate_canvas_scene_items(
             scene,
             Point::ZERO,
             1.0,
             None,
             None,
+            &font_manager,
             &test_media(),
             UnitContext::default(),
         )
@@ -4573,6 +5130,88 @@ mod tests {
             .expect("text primitive should exist");
 
         assert_eq!(text.overflow, CanvasTextOverflow::Ellipsis);
+    }
+
+    #[test]
+    fn rich_text_records_span_payload() {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas.draw_rich_text(
+                Rect::new(0.0, 0.0, 120.0, 32.0),
+                vec![
+                    CanvasTextSpan::new("Hello ").style(CanvasTextStyle {
+                        color: Color::WHITE,
+                        ..Default::default()
+                    }),
+                    CanvasTextSpan::new("Canvas").style(CanvasTextStyle {
+                        color: Color::hexa(0x38BDF8FF),
+                        font_weight: FontWeight::Bold,
+                        ..Default::default()
+                    }),
+                ],
+            );
+        });
+        let rendered = rendered_items(&scene);
+        let text = rendered[0]
+            .output
+            .texts
+            .first()
+            .expect("text primitive should exist");
+
+        let spans = text.rich_spans.as_ref().expect("rich spans should exist");
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].content, "Hello ");
+        assert_eq!(spans[1].content, "Canvas");
+        assert_eq!(spans[1].font_weight, FontWeight::Bold);
+    }
+
+    #[test]
+    fn mask_records_composite_mask_commands() {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas.save();
+            canvas.circle(30.0, 30.0, 20.0).mask();
+            canvas.fill_rect(0.0, 0.0, 60.0, 60.0);
+            canvas.restore();
+        });
+        let rendered = rendered_items(&scene);
+        let composite = rendered[0]
+            .output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::CanvasComposite(primitive) => Some(primitive),
+                _ => None,
+            })
+            .expect("composite should exist");
+
+        assert!(composite.mask_commands.is_some());
+    }
+
+    #[test]
+    fn blur_and_color_filter_effects_flow_into_composite() {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas
+                .set_effects(vec![
+                    CanvasEffect::Blur(dp(6.0)),
+                    CanvasEffect::ColorFilter(CanvasColorFilter::tint(
+                        Color::hexa(0x22C55EFF),
+                        0.4,
+                    )),
+                ])
+                .fill_rect(0.0, 0.0, 40.0, 40.0);
+        });
+        let rendered = rendered_items(&scene);
+        let composite = rendered[0]
+            .output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::CanvasComposite(primitive) => Some(primitive),
+                _ => None,
+            })
+            .expect("effect stack should force composite");
+
+        assert!(composite.blur_radius > 0.0);
+        assert!(composite.color_filter.is_some());
     }
 
     #[test]

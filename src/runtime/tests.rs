@@ -18,11 +18,11 @@ use crate::platform::window::{ImeCapabilities, ImeEnableRequest, ImeHint, ImePur
 use crate::text::font::FontCatalog;
 use crate::ui::layout::{Axis, Overflow};
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
-use crate::ui::unit::{dp, Dp, UnitContext};
+use crate::ui::unit::{dp, sp, Dp, UnitContext};
 use crate::ui::widget::{
     Button, Canvas, CanvasMouseButton, CanvasPointerEvent, CanvasRecorder, CanvasShadow,
-    CanvasStroke, Checkbox, ContainerStyle, CursorStyle, Flex, HitInteraction, Input, Point,
-    Rect, Select, SelectOption, Text, TextEditState, Textarea, WidgetTree,
+    CanvasStroke, CanvasTextStyle, Checkbox, ContainerStyle, CursorStyle, Flex, HitInteraction,
+    Input, Point, Rect, Select, SelectOption, Text, TextEditState, Textarea, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -4767,6 +4767,41 @@ fn canvas_item_hover_dispatches_canvas_pointer_payload() {
         view_model.hover_events[0].local_position,
         Point::new(15.0, 10.0)
     );
+}
+
+#[test]
+fn canvas_item_hover_reports_text_hit_payload() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(9_u64)
+                .set_text_style(CanvasTextStyle {
+                    color: Color::WHITE,
+                    font_size: sp(16.0),
+                    ..Default::default()
+                })
+                .draw_text(Rect::new(10.0, 10.0, 80.0, 24.0), "hello");
+        }))
+        .size(dp(120.0), dp(80.0))
+        .on_item_mouse_move(ValueCommand::new(|vm: &mut CanvasEventVm, event| {
+            vm.hover_events.push(event);
+        })),
+    );
+    let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+    handler.cursor_position = Some(Point::new(dp(20.0), dp(20.0)));
+
+    handler.handle_hover(handler.viewport_rect());
+
+    let view_model = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    let text_hit = view_model.hover_events[0]
+        .text_hit
+        .expect("text hit should exist");
+    assert!(text_hit.utf8_start < "hello".len());
+    assert!(text_hit.utf8_end > text_hit.utf8_start);
 }
 
 #[test]

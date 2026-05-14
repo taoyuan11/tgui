@@ -620,15 +620,36 @@ enum HoverTargetId {
     },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct CanvasPointerContext {
     item_id: CanvasItemId,
     canvas_origin: Point,
     item_origin: Point,
+    inverse_transform: [f32; 6],
+    text_hits: Arc<[crate::ui::widget::CanvasTextHitRegion]>,
 }
 
 impl CanvasPointerContext {
-    fn mouse_event(self, position: Point, button: Option<CanvasMouseButton>) -> CanvasMouseEvent {
+    fn local_position(&self, position: Point) -> Point {
+        let local = Point::new(
+            position.x - self.item_origin.x,
+            position.y - self.item_origin.y,
+        );
+        let [a, b, c, d, e, f] = self.inverse_transform;
+        Point::new(
+            a * local.x.get() + c * local.y.get() + e,
+            b * local.x.get() + d * local.y.get() + f,
+        )
+    }
+
+    fn text_hit(&self, position: Point) -> Option<crate::ui::widget::CanvasTextHit> {
+        self.text_hits
+            .iter()
+            .find(|entry| crate::ui::widget::HitGeometry::Quad(entry.quad).contains(position))
+            .map(|entry| entry.hit)
+    }
+
+    fn mouse_event(&self, position: Point, button: Option<CanvasMouseButton>) -> CanvasMouseEvent {
         CanvasMouseEvent {
             item_id: self.item_id,
             button,
@@ -637,18 +658,16 @@ impl CanvasPointerContext {
                 position.y - self.canvas_origin.y,
             ),
             scene_position: position,
-            local_position: Point::new(
-                position.x - self.item_origin.x,
-                position.y - self.item_origin.y,
-            ),
+            local_position: self.local_position(position),
+            text_hit: self.text_hit(position),
         }
     }
 
-    fn pointer_event(self, position: Point) -> CanvasPointerEvent {
+    fn pointer_event(&self, position: Point) -> CanvasPointerEvent {
         self.mouse_event(position, None)
     }
 
-    fn wheel_event(self, position: Point, delta: Point) -> CanvasWheelEvent {
+    fn wheel_event(&self, position: Point, delta: Point) -> CanvasWheelEvent {
         let mouse = self.mouse_event(position, None);
         CanvasWheelEvent {
             item_id: mouse.item_id,
@@ -656,11 +675,12 @@ impl CanvasPointerContext {
             canvas_position: mouse.canvas_position,
             scene_position: mouse.scene_position,
             local_position: mouse.local_position,
+            text_hit: None,
         }
     }
 
     fn drag_event(
-        self,
+        &self,
         start_position: Point,
         position: Point,
         button: CanvasMouseButton,
@@ -673,9 +693,11 @@ impl CanvasPointerContext {
             start_canvas_position: start.canvas_position,
             start_scene_position: start.scene_position,
             start_local_position: start.local_position,
+            start_text_hit: start.text_hit,
             canvas_position: current.canvas_position,
             scene_position: current.scene_position,
             local_position: current.local_position,
+            text_hit: current.text_hit,
             delta: Point::new(
                 current.scene_position.x - start.scene_position.x,
                 current.scene_position.y - start.scene_position.y,

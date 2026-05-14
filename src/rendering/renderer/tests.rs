@@ -68,6 +68,7 @@ fn text_cache_key_tracks_overflow_mode() {
 fn text_primitive_can_represent_ellipsis_overflow() {
     let primitive = TextPrimitive {
         content: "very long text".to_string(),
+        rich_spans: None,
         frame: Rect::new(0.0, 0.0, 60.0, 20.0),
         quad: None,
         color: TguiColorAlias::WHITE,

@@ -2126,6 +2126,7 @@ impl<VM> ResolvedElement<VM> {
                         opacity,
                         canvas_clip,
                         canvas_clip_mask,
+                        context.font_manager,
                         context.media,
                         context.units,
                     ) {
@@ -2145,14 +2146,16 @@ impl<VM> ResolvedElement<VM> {
 
                         if item_interactions.has_any() {
                             if let Some(bounds) = rendered.hit_bounds {
-                                let triangles = meshes
-                                    .iter()
-                                    .flat_map(|mesh| mesh.triangles.iter().copied())
-                                    .collect::<Vec<_>>();
-                                let geometry = if triangles.is_empty() {
-                                    HitGeometry::Rect
-                                } else {
-                                    HitGeometry::Triangles(Arc::from(triangles))
+                                let geometry = match rendered.hit_geometry.clone() {
+                                    Some(super::super::canvas::CanvasHitGeometry::Quad(quad)) => {
+                                        HitGeometry::Quad(quad)
+                                    }
+                                    Some(
+                                        super::super::canvas::CanvasHitGeometry::Triangles(
+                                            triangles,
+                                        ),
+                                    ) => HitGeometry::Triangles(triangles),
+                                    None => HitGeometry::Rect,
                                 };
                                 computed.hit_regions.push(HitRegion {
                                     rect: Rect::new(
@@ -2170,9 +2173,20 @@ impl<VM> ResolvedElement<VM> {
                                         cursor_style: rendered.cursor,
                                         canvas_origin,
                                         item_origin: Point::new(
-                                            canvas_frame.x + bounds.min_x,
-                                            canvas_frame.y + bounds.min_y,
+                                            canvas_origin.x + rendered.local_origin.x,
+                                            canvas_origin.y + rendered.local_origin.y,
                                         ),
+                                        inverse_transform: rendered.inverse_transform.matrix,
+                                        text_hits: rendered
+                                            .text_hits
+                                            .iter()
+                                            .cloned()
+                                            .map(|entry| super::super::common::CanvasTextHitRegion {
+                                                hit: entry.hit,
+                                                quad: entry.quad,
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .into(),
                                     },
                                 });
                             }

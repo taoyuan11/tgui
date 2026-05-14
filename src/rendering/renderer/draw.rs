@@ -604,10 +604,18 @@ impl Renderer {
                         } else {
                             0.0
                         },
-                        0.0,
+                        composite.primitive.blur_radius.max(0.0),
                     ],
-                    data1: [0.0; 4],
-                    data2: [0.0; 4],
+                    data1: composite
+                        .primitive
+                        .color_filter
+                        .map(|filter| filter.multiply)
+                        .unwrap_or([1.0, 1.0, 1.0, 1.0]),
+                    data2: composite
+                        .primitive
+                        .color_filter
+                        .map(|filter| filter.add)
+                        .unwrap_or([0.0; 4]),
                     data3: [0.0; 4],
                 }),
                 usage: wgpu::BufferUsages::UNIFORM,

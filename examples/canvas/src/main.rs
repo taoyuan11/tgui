@@ -441,6 +441,7 @@ impl CanvasVm {
     }
 
     fn on_hover(&mut self, event: CanvasMouseEvent) {
+        println!("{:?}", event);
         self.hovered.set(format!(
             "hover item={} canvas=({:.0},{:.0}) scene=({:.0},{:.0}) local=({:.0},{:.0})",
             event.item_id.get(),

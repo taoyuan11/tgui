@@ -94,8 +94,23 @@ impl Renderer {
         buffer.set_size(Some(width as f32), Some(height as f32));
         buffer.set_wrap(text_wrap(text));
         let attrs = attrs_for_text(text, font_size, letter_spacing);
-        let content = overflow_content(text, &mut buffer, &mut self.text_system.font_system, &attrs);
-        buffer.set_text(&content, &attrs, Shaping::Advanced, None);
+        if let Some(rich_spans) = text.rich_spans.as_ref() {
+            buffer.set_rich_text(
+                rich_spans.iter().map(|span| {
+                    (
+                        span.content.as_str(),
+                        attrs_for_span(span, font_size, line_height, letter_spacing),
+                    )
+                }),
+                &attrs,
+                Shaping::Advanced,
+                None,
+            );
+        } else {
+            let content =
+                overflow_content(text, &mut buffer, &mut self.text_system.font_system, &attrs);
+            buffer.set_text(&content, &attrs, Shaping::Advanced, None);
+        }
         buffer.shape_until_scroll(&mut self.text_system.font_system, false);
 
         let (offset_x, offset_y) = text_offsets(text, &buffer, width as f32, height as f32);
@@ -218,6 +233,41 @@ fn attrs_for_text(text: &TextPrimitive, font_size: f32, letter_spacing: f32) -> 
         .family(family)
         .weight(text_weight(text.font_weight))
         .letter_spacing(letter_spacing / font_size.max(1.0))
+}
+
+fn attrs_for_span(
+    span: &crate::ui::widget::CanvasTextSpanPrimitive,
+    fallback_font_size: f32,
+    fallback_line_height: f32,
+    fallback_letter_spacing: f32,
+) -> Attrs<'_> {
+    let font_size = span.font_size.max(1.0);
+    let family = span
+        .font_family
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .map(Family::Name)
+        .unwrap_or(Family::SansSerif);
+
+    Attrs::new()
+        .family(family)
+        .color(color_to_text(span.color))
+        .weight(text_weight(span.font_weight))
+        .metrics(Metrics::new(
+            if span.font_size > 0.0 {
+                span.font_size
+            } else {
+                fallback_font_size
+            },
+            span.line_height.unwrap_or(fallback_line_height),
+        ))
+        .letter_spacing(
+            span.letter_spacing
+                / font_size
+                    .max(fallback_font_size)
+                    .max(fallback_letter_spacing.abs())
+                    .max(1.0),
+        )
 }
 
 fn text_wrap(text: &TextPrimitive) -> cosmic_text::Wrap {

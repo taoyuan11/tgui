@@ -3822,6 +3822,7 @@ fn scoped_value_commands_cover_switch_canvas_and_media() {
                     canvas_position: Point::ZERO,
                     scene_position: Point::ZERO,
                     local_position: Point::ZERO,
+                    text_hit: None,
                 },
             ),
         _ => panic!("canvas command should be scoped"),

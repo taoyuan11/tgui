@@ -103,6 +103,32 @@ fn composite(src: vec4<f32>, dst: vec4<f32>, mode: i32) -> vec4<f32> {
     return vec4<f32>(color, out_alpha);
 }
 
+fn color_filter(color: vec4<f32>) -> vec4<f32> {
+    let multiply = params.data1;
+    let add = params.data2;
+    return clamp(color * multiply + add, vec4<f32>(0.0), vec4<f32>(1.0));
+}
+
+fn sample_box_blur(uv: vec2<f32>, radius: f32) -> vec4<f32> {
+    if radius <= 0.5 {
+        return textureSample(content_texture, source_sampler, uv);
+    }
+
+    let size = vec2<f32>(textureDimensions(content_texture));
+    let texel = vec2<f32>(1.0) / max(size, vec2<f32>(1.0));
+    let r = i32(clamp(radius, 1.0, 8.0));
+    var sum = vec4<f32>(0.0);
+    var count = 0.0;
+    for (var y = -r; y <= r; y = y + 1) {
+        for (var x = -r; x <= r; x = x + 1) {
+            let offset = vec2<f32>(f32(x), f32(y)) * texel;
+            sum = sum + textureSample(content_texture, source_sampler, uv + offset);
+            count = count + 1.0;
+        }
+    }
+    return sum / max(count, 1.0);
+}
+
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
@@ -136,7 +162,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let opacity = params.data0.x;
     let blend_mode = i32(params.data0.y);
     let has_mask = params.data0.z;
-    let content = textureSample(content_texture, source_sampler, input.uv);
+    let blur_radius = params.data0.w;
+    let content = color_filter(sample_box_blur(input.uv, blur_radius));
     let scene = textureSample(scene_texture, source_sampler, input.uv);
     let mask_alpha = select(1.0, textureSample(mask_texture, source_sampler, input.uv).a, has_mask > 0.5);
     let src = vec4<f32>(content.rgb, content.a * opacity * mask_alpha * combined_alpha);

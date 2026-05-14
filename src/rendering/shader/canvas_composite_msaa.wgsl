@@ -102,6 +102,12 @@ fn composite(src: vec4<f32>, dst: vec4<f32>, mode: i32) -> vec4<f32> {
     return vec4<f32>(color, out_alpha);
 }
 
+fn color_filter(color: vec4<f32>) -> vec4<f32> {
+    let multiply = params.data1;
+    let add = params.data2;
+    return clamp(color * multiply + add, vec4<f32>(0.0), vec4<f32>(1.0));
+}
+
 fn load_msaa_average(texture: texture_multisampled_2d<f32>, pixel: vec2<i32>) -> vec4<f32> {
     var color = vec4<f32>(0.0);
     let samples = textureNumSamples(texture);
@@ -146,7 +152,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let has_mask = params.data0.z;
     let texture_size = vec2<f32>(textureDimensions(content_texture));
     let pixel = vec2<i32>(clamp(input.uv * texture_size, vec2<f32>(0.0), texture_size - vec2<f32>(1.0)));
-    let content = load_msaa_average(content_texture, pixel);
+    let content = color_filter(load_msaa_average(content_texture, pixel));
     let scene = load_msaa_average(scene_texture, pixel);
     let mask_alpha = select(1.0, load_msaa_average(mask_texture, pixel).a, has_mask > 0.5);
     let src = vec4<f32>(content.rgb, content.a * opacity * mask_alpha * combined_alpha);

@@ -322,6 +322,7 @@ pub(super) fn push_text_primitives(
 
     scene.push_text(TextPrimitive {
         content: content.clone(),
+        rich_spans: None,
         frame: content_frame,
         quad: None,
         color: color.with_alpha_factor(opacity),
@@ -629,6 +630,7 @@ pub(super) fn push_text_input_primitives(
 
             scene.push_text(TextPrimitive {
                 content: display_content[start..end].to_string(),
+                rich_spans: None,
                 frame: Rect::new(
                     content_frame.x,
                     line_top,
@@ -654,6 +656,7 @@ pub(super) fn push_text_input_primitives(
     } else {
         scene.push_text(TextPrimitive {
             content: display_content.as_ref().to_string(),
+            rich_spans: None,
             frame: content_frame,
             quad: None,
             color: text_color,
@@ -1027,6 +1030,7 @@ pub(super) fn push_select_text(
     let content_frame = centered_text_frame(inner, layout.width, layout.height, line_height, false);
     let primitive = TextPrimitive {
         content,
+        rich_spans: None,
         frame: content_frame,
         quad: None,
         color,
@@ -1089,6 +1093,7 @@ pub(super) fn push_select_icon(
 
     scene.push_text(TextPrimitive {
         content: SELECT_ARROW_ICON.to_string(),
+        rich_spans: None,
         frame: icon_frame,
         quad: None,
         color: select_style.arrow.with_alpha_factor(opacity),
@@ -1248,6 +1253,7 @@ pub(super) fn push_checkbox_checkmark_primitives(
 
     scene.push_text(TextPrimitive {
         content: CHECKBOX_CHECKMARK_ICON.to_string(),
+        rich_spans: None,
         frame: icon_frame,
         quad: None,
         color: checkbox_style.checkmark.with_alpha_factor(opacity),

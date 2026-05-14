@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::foundation::binding::{TextChange, TextChangeSet, TextController};
@@ -2060,11 +2061,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     cursor_style,
                     canvas_origin,
                     item_origin,
+                    inverse_transform,
+                    text_hits,
                 } => {
                     let context = CanvasPointerContext {
                         item_id,
                         canvas_origin,
                         item_origin,
+                        inverse_transform,
+                        text_hits,
                     };
                     HoveredWidget {
                         target_id: HoverTargetId::CanvasItem {
@@ -2074,10 +2079,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         cursor_style,
                         on_mouse_enter: item_interactions
                             .on_mouse_enter
-                            .map(|command| HoverTransitionHandler::Canvas(command, context)),
+                            .map(|command| HoverTransitionHandler::Canvas(command, context.clone())),
                         on_mouse_leave: item_interactions
                             .on_mouse_leave
-                            .map(|command| HoverTransitionHandler::Canvas(command, context)),
+                            .map(|command| HoverTransitionHandler::Canvas(command, context.clone())),
                         on_mouse_move: item_interactions
                             .on_mouse_move
                             .map(|command| HoverMoveHandler::Canvas(command, context)),
@@ -2161,6 +2166,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 ref item_interactions,
                 canvas_origin,
                 item_origin,
+                inverse_transform,
+                ref text_hits,
                 ..
             } = interaction
             {
@@ -2171,6 +2178,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             item_id,
                             canvas_origin,
                             item_origin,
+                            inverse_transform,
+                            text_hits: Arc::clone(text_hits),
                         },
                         cursor_position,
                         scroll_delta,
@@ -2459,7 +2468,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if let Some(command) = drag.on_drag_start.clone() {
                 self.execute_canvas_drag_command(
                     &command,
-                    drag.context,
+                    drag.context.clone(),
                     drag.start_position,
                     cursor_position,
                     drag.button,
@@ -2471,7 +2480,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if let Some(command) = drag.on_drag.clone() {
             self.execute_canvas_drag_command(
                 &command,
-                drag.context,
+                drag.context.clone(),
                 drag.start_position,
                 cursor_position,
                 drag.button,
@@ -2820,12 +2829,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         item_interactions,
                         canvas_origin,
                         item_origin,
+                        inverse_transform,
+                        text_hits,
                         ..
                     } => {
                         let context = CanvasPointerContext {
                             item_id,
                             canvas_origin,
                             item_origin,
+                            inverse_transform,
+                            text_hits,
                         };
                         if let (Some(position), Some(command)) = (
                             self.cursor_position,
@@ -2833,7 +2846,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         ) {
                             self.execute_canvas_mouse_command(
                                 &command,
-                                context,
+                                context.clone(),
                                 position,
                                 Some(button),
                             );
@@ -2846,7 +2859,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             if let Some(position) = self.cursor_position {
                                 self.active_canvas_drag = Some(super::ActiveCanvasDrag {
                                     button,
-                                    context,
+                                    context: context.clone(),
                                     start_position: position,
                                     started: false,
                                     on_mouse_up: item_interactions.on_mouse_up.clone(),
@@ -2862,7 +2875,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 item_id,
                             },
                             &item_interactions,
-                            context,
+                            context.clone(),
                             now,
                             button,
                         ) {
@@ -3175,7 +3188,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn handle_canvas_mouse_release(&mut self, button: CanvasMouseButton) {
         if let Some(position) = self.cursor_position {
             if let Some(drag) = self.active_canvas_drag.as_ref() {
-                let context = drag.context;
+                let context = drag.context.clone();
                 if let Some(command) = drag.on_mouse_up.clone() {
                     self.execute_canvas_mouse_command(&command, context, position, Some(button));
                 }
@@ -3186,6 +3199,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         item_interactions,
                         canvas_origin,
                         item_origin,
+                        inverse_transform,
+                        text_hits,
                         ..
                     } = interaction
                     {
@@ -3196,6 +3211,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     item_id,
                                     canvas_origin,
                                     item_origin,
+                                    inverse_transform,
+                                    text_hits,
                                 },
                                 position,
                                 Some(button),
