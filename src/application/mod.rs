@@ -48,9 +48,19 @@ impl ThemeSelection {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MsaaMode {
+    Off,
+    #[default]
+    Auto,
+    X2,
+    X4,
+    X8,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Application, WindowSpec};
+    use super::{Application, MsaaMode, WindowSpec};
 
     #[test]
     fn application_decorations_updates_config() {
@@ -75,6 +85,23 @@ mod tests {
         let window_config = WindowSpec::<()>::main("main").resolved_config(&app_config);
 
         assert!(!window_config.decorations);
+    }
+
+    #[test]
+    fn application_defaults_to_auto_msaa() {
+        let config = Application::new().config();
+
+        assert_eq!(config.msaa, MsaaMode::Auto);
+    }
+
+    #[test]
+    fn window_spec_msaa_overrides_application_default() {
+        let app_config = Application::new().msaa(MsaaMode::X4).config();
+        let window_config = WindowSpec::<()>::main("main")
+            .msaa(MsaaMode::Off)
+            .resolved_config(&app_config);
+
+        assert_eq!(window_config.msaa, MsaaMode::Off);
     }
 }
 
@@ -129,6 +156,7 @@ pub struct Application {
     clear_color_overridden: bool,
     close_children_with_main: bool,
     decorations: bool,
+    msaa: MsaaMode,
     fonts: FontCatalog,
     theme: ThemeSelection,
     theme_set: ThemeSet,
@@ -150,6 +178,7 @@ impl Application {
             clear_color_overridden: false,
             close_children_with_main: true,
             decorations: true,
+            msaa: MsaaMode::Auto,
             fonts: FontCatalog::default(),
             theme: ThemeSelection::System,
             theme_set: ThemeSet::default(),
@@ -214,6 +243,12 @@ impl Application {
     /// Defaults to `true`. Set this to `false` to draw a custom title bar.
     pub fn decorations(mut self, decorations: bool) -> Self {
         self.decorations = decorations;
+        self
+    }
+
+    /// Sets the multisample anti-aliasing mode used by the renderer.
+    pub fn msaa(mut self, mode: MsaaMode) -> Self {
+        self.msaa = mode;
         self
     }
 
@@ -297,6 +332,7 @@ impl Application {
             clear_color_overridden: self.clear_color_overridden,
             close_children_with_main: self.close_children_with_main,
             decorations: self.decorations,
+            msaa: self.msaa,
             fonts: self.fonts.clone(),
             theme: self.theme.clone(),
             theme_set: self.theme_set.clone(),
@@ -324,6 +360,7 @@ pub(crate) struct ApplicationConfig {
     pub(crate) clear_color_overridden: bool,
     pub(crate) close_children_with_main: bool,
     pub(crate) decorations: bool,
+    pub(crate) msaa: MsaaMode,
     pub(crate) fonts: FontCatalog,
     pub(crate) theme: ThemeSelection,
     pub(crate) theme_set: ThemeSet,
@@ -399,6 +436,7 @@ pub struct WindowSpec<VM> {
     pub(crate) min_size: Option<LogicalSize<f64>>,
     pub(crate) max_size: Option<LogicalSize<f64>>,
     pub(crate) decorations: Option<bool>,
+    pub(crate) msaa: Option<MsaaMode>,
     pub(crate) title_binding: Option<TitleBinding<VM>>,
     pub(crate) clear_color_binding: Option<ClearColorBinding<VM>>,
     pub(crate) theme_set_binding: Option<ThemeSetBinding<VM>>,
@@ -424,6 +462,7 @@ impl<VM> WindowSpec<VM> {
             min_size: None,
             max_size: None,
             decorations: None,
+            msaa: None,
             title_binding: None,
             clear_color_binding: None,
             theme_set_binding: None,
@@ -448,6 +487,7 @@ impl<VM> WindowSpec<VM> {
             min_size: None,
             max_size: None,
             decorations: None,
+            msaa: None,
             title_binding: None,
             clear_color_binding: None,
             theme_set_binding: None,
@@ -487,6 +527,12 @@ impl<VM> WindowSpec<VM> {
     /// If unset, the application-level setting is used.
     pub fn decorations(mut self, decorations: bool) -> Self {
         self.decorations = Some(decorations);
+        self
+    }
+
+    /// Sets the multisample anti-aliasing mode for this window.
+    pub fn msaa(mut self, mode: MsaaMode) -> Self {
+        self.msaa = Some(mode);
         self
     }
 
@@ -574,6 +620,9 @@ impl<VM> WindowSpec<VM> {
         }
         if let Some(decorations) = self.decorations {
             config.decorations = decorations;
+        }
+        if let Some(msaa) = self.msaa {
+            config.msaa = msaa;
         }
         config.normalize_size_constraints();
         config
@@ -845,6 +894,7 @@ where
                         min_size: main_config.min_size,
                         max_size: main_config.max_size,
                         decorations: Some(main_config.decorations),
+                        msaa: Some(main_config.msaa),
                         title_binding: title_binding.clone(),
                         clear_color_binding: clear_color_binding.clone(),
                         theme_set_binding: theme_set_binding.clone(),

@@ -3,11 +3,12 @@ use std::sync::Arc;
 #[cfg(all(target_env = "ohos", feature = "ohos"))]
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
+use crate::application::MsaaMode;
 use crate::foundation::color::Color as TguiColor;
 use crate::foundation::error::TguiError;
 use crate::platform::backend::window::Window;
 
-use super::{MultisampleTarget, OffscreenTarget};
+use super::OffscreenTarget;
 
 pub(super) fn create_instance(clear_color: TguiColor) -> wgpu::Instance {
     let descriptor = instance_descriptor(clear_color);
@@ -82,56 +83,27 @@ pub(super) fn required_device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
     }
 }
 
-pub(super) fn surface_msaa_sample_count(
+pub(super) fn resolve_surface_msaa_sample_count(
     adapter: &wgpu::Adapter,
     format: wgpu::TextureFormat,
+    requested_mode: MsaaMode,
 ) -> u32 {
     let features = adapter.get_texture_format_features(format);
-    supported_msaa_sample_count(features.flags)
-}
-
-pub(super) fn create_multisample_target(
-    device: &wgpu::Device,
-    config: &wgpu::SurfaceConfiguration,
-    sample_count: u32,
-) -> Option<MultisampleTarget> {
-    if sample_count <= 1 || config.width == 0 || config.height == 0 {
-        return None;
-    }
-
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("tgui-msaa-color-target"),
-        size: wgpu::Extent3d {
-            width: config.width,
-            height: config.height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count,
-        dimension: wgpu::TextureDimension::D2,
-        format: config.format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-    Some(MultisampleTarget {
-        _texture: texture,
-        _view: view,
-    })
+    supported_msaa_sample_count(features.flags, requested_mode)
 }
 
 pub(super) fn create_offscreen_target(
     device: &wgpu::Device,
     config: &wgpu::SurfaceConfiguration,
     label: &str,
+    sample_count: u32,
 ) -> Option<OffscreenTarget> {
     if config.width == 0 || config.height == 0 {
         return None;
     }
 
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
+    let resolved_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(&format!("{label}-resolved")),
         size: wgpu::Extent3d {
             width: config.width,
             height: config.height,
@@ -148,10 +120,40 @@ pub(super) fn create_offscreen_target(
         view_formats: &[],
     });
 
+    let (msaa_texture, msaa_view) = if sample_count > 1 {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(&format!("{label}-msaa")),
+            size: wgpu::Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count,
+            dimension: wgpu::TextureDimension::D2,
+            format: config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (Some(texture), Some(view))
+    } else {
+        (None, None)
+    };
+
     Some(OffscreenTarget {
-        view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
-        texture,
+        resolved_view: resolved_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+        resolved_texture,
+        _msaa_texture: msaa_texture,
+        msaa_view,
     })
+}
+
+pub(super) fn pipeline_multisample_state(sample_count: u32) -> wgpu::MultisampleState {
+    wgpu::MultisampleState {
+        count: sample_count.max(1),
+        ..Default::default()
+    }
 }
 
 pub(super) fn instance_backends(clear_color: TguiColor) -> wgpu::Backends {
@@ -319,10 +321,22 @@ fn adapter_power_preference() -> wgpu::PowerPreference {
     }
 }
 
-fn supported_msaa_sample_count(flags: wgpu::TextureFormatFeatureFlags) -> u32 {
-    [4, 2]
+fn supported_msaa_sample_count(flags: wgpu::TextureFormatFeatureFlags, requested_mode: MsaaMode) -> u32 {
+    let candidates: &[u32] = match requested_mode {
+        MsaaMode::Off => &[1],
+        MsaaMode::Auto => &[4, 2, 1],
+        MsaaMode::X2 => &[2, 1],
+        MsaaMode::X4 => &[4, 2, 1],
+        MsaaMode::X8 => &[8, 4, 2, 1],
+    };
+
+    candidates
         .into_iter()
+        .copied()
         .find(|count| {
+            if *count == 1 {
+                return true;
+            }
             flags.sample_count_supported(*count)
                 && flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE)
         })
@@ -355,4 +369,47 @@ fn transparent_surface_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::C
                 .find(|mode| *mode != wgpu::CompositeAlphaMode::Opaque)
         })
         .unwrap_or(wgpu::CompositeAlphaMode::Auto)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn multisample_flags_for(counts: &[u32]) -> wgpu::TextureFormatFeatureFlags {
+        let mut flags = wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE;
+        for count in counts {
+            flags |= match count {
+                2 => wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X2,
+                4 => wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4,
+                8 => wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X8,
+                16 => wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X16,
+                _ => wgpu::TextureFormatFeatureFlags::empty(),
+            };
+        }
+        flags
+    }
+
+    #[test]
+    fn auto_msaa_prefers_four_samples() {
+        let flags = multisample_flags_for(&[2, 4]);
+
+        assert_eq!(supported_msaa_sample_count(flags, MsaaMode::Auto), 4);
+    }
+
+    #[test]
+    fn auto_msaa_falls_back_to_two_samples() {
+        let flags = multisample_flags_for(&[2]);
+
+        assert_eq!(supported_msaa_sample_count(flags, MsaaMode::Auto), 2);
+    }
+
+    #[test]
+    fn explicit_msaa_modes_downgrade_in_order() {
+        let flags = multisample_flags_for(&[2, 4]);
+
+        assert_eq!(supported_msaa_sample_count(flags, MsaaMode::X8), 4);
+        assert_eq!(supported_msaa_sample_count(flags, MsaaMode::X4), 4);
+        assert_eq!(supported_msaa_sample_count(flags, MsaaMode::X2), 2);
+        assert_eq!(supported_msaa_sample_count(flags, MsaaMode::Off), 1);
+    }
 }

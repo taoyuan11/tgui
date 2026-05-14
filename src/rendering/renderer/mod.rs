@@ -9,9 +9,11 @@ mod vertex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::application::MsaaMode;
 use self::surface::{
-    create_instance, create_surface, request_adapter, required_device_limits, surface_alpha_mode,
-    surface_clear_color, surface_msaa_sample_count, surface_present_mode,
+    create_instance, create_surface, pipeline_multisample_state, request_adapter,
+    required_device_limits, resolve_surface_msaa_sample_count, surface_alpha_mode,
+    surface_clear_color, surface_present_mode,
 };
 use self::targets::RendererTargets;
 use self::vertex::{
@@ -57,7 +59,6 @@ pub struct Renderer {
     size: PhysicalSize<u32>,
     scale_factor: f32,
     msaa_sample_count: u32,
-    msaa_target: Option<MultisampleTarget>,
     scene_target: Option<OffscreenTarget>,
     blur_target: Option<OffscreenTarget>,
     blur_scratch_target: Option<OffscreenTarget>,
@@ -75,15 +76,11 @@ struct TextSystem {
 }
 
 #[derive(Clone)]
-struct MultisampleTarget {
-    _texture: wgpu::Texture,
-    _view: wgpu::TextureView,
-}
-
-#[derive(Clone)]
 struct OffscreenTarget {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
+    resolved_texture: wgpu::Texture,
+    resolved_view: wgpu::TextureView,
+    _msaa_texture: Option<wgpu::Texture>,
+    msaa_view: Option<wgpu::TextureView>,
 }
 
 struct TextCacheEntry {
@@ -135,14 +132,21 @@ impl Renderer {
     pub fn new(
         window: Arc<dyn Window>,
         clear_color: TguiColor,
+        requested_msaa_mode: MsaaMode,
         fonts: &FontCatalog,
     ) -> Result<Self, TguiError> {
-        pollster::block_on(Self::new_async(window, clear_color, fonts))
+        pollster::block_on(Self::new_async(
+            window,
+            clear_color,
+            requested_msaa_mode,
+            fonts,
+        ))
     }
 
     async fn new_async(
         window: Arc<dyn Window>,
         clear_color: TguiColor,
+        requested_msaa_mode: MsaaMode,
         fonts: &FontCatalog,
     ) -> Result<Self, TguiError> {
         let size = window.surface_size();
@@ -172,7 +176,8 @@ impl Renderer {
             .ok_or(TguiError::NoSurfaceFormat)?;
 
         let alpha_mode = surface_alpha_mode(&caps.alpha_modes, clear_color);
-        let msaa_sample_count = surface_msaa_sample_count(&adapter, format);
+        let msaa_sample_count =
+            resolve_surface_msaa_sample_count(&adapter, format, requested_msaa_mode);
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -243,7 +248,7 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: pipeline_multisample_state(msaa_sample_count),
             fragment: Some(wgpu::FragmentState {
                 module: &rect_shader,
                 entry_point: Some("fs_main"),
@@ -284,7 +289,7 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: pipeline_multisample_state(msaa_sample_count),
             fragment: Some(wgpu::FragmentState {
                 module: &brush_shader,
                 entry_point: Some("fs_main"),
@@ -339,7 +344,7 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: pipeline_multisample_state(msaa_sample_count),
             fragment: Some(wgpu::FragmentState {
                 module: &mesh_shader,
                 entry_point: Some("fs_main"),
@@ -520,7 +525,7 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: pipeline_multisample_state(msaa_sample_count),
             fragment: Some(wgpu::FragmentState {
                 module: &text_shader,
                 entry_point: Some("fs_main"),
@@ -595,7 +600,7 @@ impl Renderer {
                     conservative: false,
                 },
                 depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
+                multisample: pipeline_multisample_state(msaa_sample_count),
                 fragment: Some(wgpu::FragmentState {
                     module: &backdrop_blur_shader,
                     entry_point: Some("fs_main"),
@@ -636,7 +641,7 @@ impl Renderer {
                     conservative: false,
                 },
                 depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
+                multisample: pipeline_multisample_state(msaa_sample_count),
                 fragment: Some(wgpu::FragmentState {
                     module: &backdrop_composite_shader,
                     entry_point: Some("fs_main"),
@@ -676,7 +681,7 @@ impl Renderer {
                     conservative: false,
                 },
                 depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
+                multisample: pipeline_multisample_state(msaa_sample_count),
                 fragment: Some(wgpu::FragmentState {
                     module: &canvas_composite_shader,
                     entry_point: Some("fs_main"),
@@ -732,7 +737,6 @@ impl Renderer {
             size,
             scale_factor,
             msaa_sample_count,
-            msaa_target: targets.msaa_target,
             scene_target: targets.scene_target,
             blur_target: targets.blur_target,
             blur_scratch_target: targets.blur_scratch_target,
@@ -760,7 +764,6 @@ impl Renderer {
         self.config.width = new_size.width;
         self.config.height = new_size.height;
         self.surface.configure(&self.device, &self.config);
-        self.recreate_multisample_target();
         self.recreate_offscreen_targets();
     }
 
@@ -810,7 +813,7 @@ impl Renderer {
             self.scale_factor,
         )?;
         let color_attachment_view = view.clone();
-        let scene_view = self.scene_target_view()?;
+        let scene_view = self.scene_target_resolved_view()?;
 
         let mut encoder = self
             .device
@@ -841,7 +844,7 @@ impl Renderer {
         let mut cleared_draw_target = false;
         self.execute_prepared_commands(&mut encoder, &command_buffers.0, &mut cleared_draw_target)?;
         self.execute_prepared_commands(&mut encoder, &overlay_buffers.0, &mut cleared_draw_target)?;
-        let scene_view = self.scene_target_view()?;
+        let scene_view = self.scene_target_resolved_view()?;
         self.blit_scene_to_surface(&mut encoder, scene_view, &color_attachment_view, None);
 
         self.queue.submit(Some(encoder.finish()));
@@ -861,7 +864,6 @@ impl Renderer {
         }
 
         self.surface.configure(&self.device, &self.config);
-        self.recreate_multisample_target();
         self.recreate_offscreen_targets();
     }
 }

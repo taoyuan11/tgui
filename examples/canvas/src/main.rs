@@ -809,6 +809,7 @@ impl ViewModel for CanvasVm {
 
 fn main() -> Result<(), TguiError> {
     Application::new()
+        .msaa(MsaaMode::X4)
         .theme_mode(ThemeMode::Light)
         .title("tgui Canvas Gallery")
         .window_size(dp(1480.0), dp(1080.0))

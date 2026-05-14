@@ -3325,7 +3325,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.theme.colors.background
             };
 
-        match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
+        match Renderer::new(
+            window.clone(),
+            clear_color,
+            self.config.msaa,
+            &self.config.fonts,
+        ) {
             Ok(renderer) => {
                 self.renderer = Some(renderer);
                 self.last_synced_clear_color = Some(clear_color);
@@ -3594,7 +3599,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.theme.colors.background
             };
 
-        let renderer = match Renderer::new(window.clone(), clear_color, &self.config.fonts) {
+        let renderer = match Renderer::new(
+            window.clone(),
+            clear_color,
+            self.config.msaa,
+            &self.config.fonts,
+        ) {
             Ok(renderer) => renderer,
             Err(error) => {
                 self.fail(event_loop, error);

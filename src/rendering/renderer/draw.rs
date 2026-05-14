@@ -10,6 +10,17 @@ use super::{
 };
 
 impl Renderer {
+    fn offscreen_attachment_view<'a>(&self, target: &'a OffscreenTarget) -> &'a wgpu::TextureView {
+        target.msaa_view.as_ref().unwrap_or(&target.resolved_view)
+    }
+
+    fn offscreen_resolve_target<'a>(
+        &self,
+        target: &'a OffscreenTarget,
+    ) -> Option<&'a wgpu::TextureView> {
+        target.msaa_view.as_ref().map(|_| &target.resolved_view)
+    }
+
     fn offscreen_target<'a>(
         &self,
         target: Option<&'a OffscreenTarget>,
@@ -22,8 +33,8 @@ impl Renderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tgui-offscreen-clear-pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &target.view,
-                resolve_target: None,
+                view: self.offscreen_attachment_view(target),
+                resolve_target: self.offscreen_resolve_target(target),
                 depth_slice: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -41,7 +52,7 @@ impl Renderer {
     fn snapshot_texture(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        source: &wgpu::Texture,
+        source: &OffscreenTarget,
         label: &str,
     ) -> wgpu::Texture {
         let snapshot = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -60,7 +71,7 @@ impl Renderer {
         });
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: source,
+                texture: &source.resolved_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -94,8 +105,7 @@ impl Renderer {
         self.execute_prepared_commands_to_target(
             encoder,
             commands,
-            &scene_target.texture,
-            &scene_target.view,
+            &scene_target,
             cleared_draw_target,
         )
     }
@@ -104,8 +114,7 @@ impl Renderer {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         commands: &[PreparedCommand],
-        target_texture: &wgpu::Texture,
-        target_view: &wgpu::TextureView,
+        target: &OffscreenTarget,
         cleared_draw_target: &mut bool,
     ) -> Result<(), TguiError> {
         let mut index = 0;
@@ -115,8 +124,7 @@ impl Renderer {
                     self.apply_backdrop_blur_to_target(
                         encoder,
                         blur,
-                        target_texture,
-                        target_view,
+                        target,
                         cleared_draw_target,
                     )?;
                     index += 1;
@@ -126,8 +134,7 @@ impl Renderer {
                     self.apply_canvas_composite_to_target(
                         encoder,
                         composite,
-                        target_texture,
-                        target_view,
+                        target,
                         cleared_draw_target,
                     )?;
                     index += 1;
@@ -139,8 +146,8 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tgui-scene-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target_view,
-                    resolve_target: None,
+                    view: self.offscreen_attachment_view(target),
+                    resolve_target: self.offscreen_resolve_target(target),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: if *cleared_draw_target {
@@ -203,15 +210,14 @@ impl Renderer {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         blur: &PreparedBackdropBlur,
-        target_texture: &wgpu::Texture,
-        target_view: &wgpu::TextureView,
+        target: &OffscreenTarget,
         _cleared_draw_target: &mut bool,
     ) -> Result<(), TguiError> {
         let blur_target = self.offscreen_target(self.blur_target.as_ref(), "blur target")?;
         let blur_scratch_target =
             self.offscreen_target(self.blur_scratch_target.as_ref(), "blur scratch target")?;
 
-        let scene_snapshot = self.snapshot_texture(encoder, target_texture, "tgui-scene-snapshot");
+        let scene_snapshot = self.snapshot_texture(encoder, target, "tgui-scene-snapshot");
         let scene_snapshot_view =
             scene_snapshot.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -288,7 +294,7 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&blur_scratch_target.view),
+                    resource: wgpu::BindingResource::TextureView(&blur_scratch_target.resolved_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -305,8 +311,8 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tgui-backdrop-horizontal-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &blur_scratch_target.view,
-                    resolve_target: None,
+                    view: self.offscreen_attachment_view(blur_scratch_target),
+                    resolve_target: self.offscreen_resolve_target(blur_scratch_target),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -328,8 +334,8 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tgui-backdrop-vertical-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &blur_target.view,
-                    resolve_target: None,
+                    view: self.offscreen_attachment_view(blur_target),
+                    resolve_target: self.offscreen_resolve_target(blur_target),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -353,7 +359,7 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&blur_target.view),
+                    resource: wgpu::BindingResource::TextureView(&blur_target.resolved_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -370,8 +376,8 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tgui-backdrop-composite-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target_view,
-                    resolve_target: None,
+                    view: self.offscreen_attachment_view(target),
+                    resolve_target: self.offscreen_resolve_target(target),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -398,8 +404,7 @@ impl Renderer {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         composite: &PreparedCanvasComposite,
-        target_texture: &wgpu::Texture,
-        target_view: &wgpu::TextureView,
+        target: &OffscreenTarget,
         cleared_draw_target: &mut bool,
     ) -> Result<(), TguiError> {
         let composite_target = self
@@ -426,8 +431,7 @@ impl Renderer {
         self.execute_prepared_commands_to_target(
             encoder,
             &content_prepared.0,
-            &composite_target.texture,
-            &composite_target.view,
+            &composite_target,
             &mut composite_cleared,
         )?;
 
@@ -445,8 +449,7 @@ impl Renderer {
             self.execute_prepared_commands_to_target(
                 encoder,
                 &mask_prepared.0,
-                &composite_mask_target.texture,
-                &composite_mask_target.view,
+                &composite_mask_target,
                 &mut mask_cleared,
             )?;
         } else {
@@ -454,14 +457,14 @@ impl Renderer {
         }
 
         let scene_snapshot =
-            self.snapshot_texture(encoder, target_texture, "tgui-composite-scene-snapshot");
+            self.snapshot_texture(encoder, target, "tgui-composite-scene-snapshot");
         let scene_snapshot_view =
             scene_snapshot.create_view(&wgpu::TextureViewDescriptor::default());
         let content_view = composite_target
-            .texture
+            .resolved_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mask_view = composite_mask_target
-            .texture
+            .resolved_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let quad = CompositeVertex::quad(
@@ -529,8 +532,8 @@ impl Renderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tgui-canvas-composite-pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target_view,
-                resolve_target: None,
+                view: self.offscreen_attachment_view(target),
+                resolve_target: self.offscreen_resolve_target(target),
                 depth_slice: None,
                 ops: wgpu::Operations {
                     load: if *cleared_draw_target {

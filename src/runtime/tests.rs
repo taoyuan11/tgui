@@ -3,7 +3,7 @@ use super::{
     CachedScene, FocusedWidget, WindowBindings,
 };
 use crate::animation::AnimationCoordinator;
-use crate::application::{ApplicationConfig, ThemeSelection, WindowRole};
+use crate::application::{ApplicationConfig, MsaaMode, ThemeSelection, WindowRole};
 use crate::dialog::async_dialog_channel;
 use crate::foundation::binding::{DependencyGraph, ViewModelContext};
 use crate::foundation::binding::{InvalidationSignal, Signal, TextController};
@@ -70,6 +70,7 @@ fn test_config() -> ApplicationConfig {
         clear_color_overridden: true,
         close_children_with_main: true,
         decorations: true,
+        msaa: MsaaMode::Auto,
         fonts: FontCatalog::default(),
         theme: ThemeSelection::System,
         theme_set: ThemeSet::default(),
@@ -88,6 +89,7 @@ fn test_config_with_theme(theme: ThemeSelection, theme_set: ThemeSet) -> Applica
         clear_color_overridden: true,
         close_children_with_main: true,
         decorations: true,
+        msaa: MsaaMode::Auto,
         fonts: FontCatalog::default(),
         theme,
         theme_set,

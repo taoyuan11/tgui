@@ -172,7 +172,7 @@ pub mod prelude {
         AnimationSpec, AnimationStatus, Easing, FillMode, Keyframe, Keyframes, Playback,
         PlaybackDirection, Repeat, Transition,
     };
-    pub use crate::application::{Application, WindowClosePolicy, WindowRole, WindowSpec};
+    pub use crate::application::{Application, MsaaMode, WindowClosePolicy, WindowRole, WindowSpec};
     pub use crate::canvas::{
         Canvas, CanvasBlendMode, CanvasBooleanOp, CanvasBrush, CanvasClip, CanvasClipShape,
         CanvasDragEvent, CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasImage, CanvasItem,
