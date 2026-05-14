@@ -10,15 +10,31 @@ use super::{
 };
 
 impl Renderer {
-    fn offscreen_attachment_view<'a>(&self, target: &'a OffscreenTarget) -> &'a wgpu::TextureView {
-        target.msaa_view.as_ref().unwrap_or(&target.resolved_view)
+    pub(super) fn has_msaa(&self) -> bool {
+        self.msaa_sample_count > 1
     }
 
-    fn offscreen_resolve_target<'a>(
+    pub(super) fn offscreen_attachment_view<'a>(&self, target: &'a OffscreenTarget) -> &'a wgpu::TextureView {
+        target.msaa_view.as_ref().unwrap_or(&target.single_view)
+    }
+
+    pub(super) fn offscreen_single_view<'a>(&self, target: &'a OffscreenTarget) -> &'a wgpu::TextureView {
+        &target.single_view
+    }
+
+    pub(super) fn offscreen_msaa_view<'a>(&self, target: &'a OffscreenTarget) -> Option<&'a wgpu::TextureView> {
+        target.msaa_view.as_ref()
+    }
+
+    pub(super) fn offscreen_resolve_target_for_draw<'a>(
         &self,
         target: &'a OffscreenTarget,
     ) -> Option<&'a wgpu::TextureView> {
-        target.msaa_view.as_ref().map(|_| &target.resolved_view)
+        if self.has_msaa() {
+            None
+        } else {
+            target.msaa_view.as_ref().map(|_| &target.single_view)
+        }
     }
 
     fn offscreen_target<'a>(
@@ -29,12 +45,21 @@ impl Renderer {
         target.ok_or_else(|| TguiError::TextRender(format!("{name} unavailable")))
     }
 
+    pub(super) fn offscreen_sampled_view<'a>(&self, target: &'a OffscreenTarget) -> &'a wgpu::TextureView {
+        if self.has_msaa() {
+            self.offscreen_msaa_view(target)
+                .unwrap_or_else(|| self.offscreen_single_view(target))
+        } else {
+            self.offscreen_single_view(target)
+        }
+    }
+
     fn clear_offscreen_target(&self, encoder: &mut wgpu::CommandEncoder, target: &OffscreenTarget) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tgui-offscreen-clear-pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: self.offscreen_attachment_view(target),
-                resolve_target: self.offscreen_resolve_target(target),
+                resolve_target: self.offscreen_resolve_target_for_draw(target),
                 depth_slice: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -49,12 +74,7 @@ impl Renderer {
         let _ = &mut pass;
     }
 
-    fn snapshot_texture(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        source: &OffscreenTarget,
-        label: &str,
-    ) -> wgpu::Texture {
+    fn snapshot_texture(&self, encoder: &mut wgpu::CommandEncoder, source: &OffscreenTarget, label: &str) -> wgpu::Texture {
         let snapshot = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d {
@@ -63,15 +83,21 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count: self.msaa_sample_count,
             dimension: wgpu::TextureDimension::D2,
             format: self.config.format,
-            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &source.resolved_texture,
+                texture: source
+                    .msaa_view
+                    .as_ref()
+                    .map(|_| self.offscreen_attachment_texture(source))
+                    .unwrap_or(&source.single_texture),
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -89,6 +115,17 @@ impl Renderer {
             },
         );
         snapshot
+    }
+
+    fn offscreen_attachment_texture<'a>(&self, target: &'a OffscreenTarget) -> &'a wgpu::Texture {
+        if target.msaa_view.is_some() {
+            target
+                ._msaa_texture
+                .as_ref()
+                .expect("msaa texture should exist when msaa view exists")
+        } else {
+            &target.single_texture
+        }
     }
 
     pub(super) fn execute_prepared_commands(
@@ -147,7 +184,7 @@ impl Renderer {
                 label: Some("tgui-scene-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: self.offscreen_attachment_view(target),
-                    resolve_target: self.offscreen_resolve_target(target),
+                    resolve_target: self.offscreen_resolve_target_for_draw(target),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: if *cleared_draw_target {
@@ -270,10 +307,23 @@ impl Renderer {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
-        let horizontal_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tgui-backdrop-horizontal-bind-group"),
-            layout: &self.backdrop_blur_bind_group_layout,
-            entries: &[
+        let horizontal_bind_group_entries;
+        let horizontal_entries_msaa;
+        let horizontal_entries_single;
+        if self.has_msaa() {
+            horizontal_entries_msaa = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&scene_snapshot_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: horizontal_uniform.as_entire_binding(),
+                },
+            ];
+            horizontal_bind_group_entries = &horizontal_entries_msaa[..];
+        } else {
+            horizontal_entries_single = [
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(&scene_snapshot_view),
@@ -286,15 +336,41 @@ impl Renderer {
                     binding: 2,
                     resource: horizontal_uniform.as_entire_binding(),
                 },
-            ],
-        });
-        let vertical_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tgui-backdrop-vertical-bind-group"),
+            ];
+            horizontal_bind_group_entries = &horizontal_entries_single[..];
+        }
+
+        let horizontal_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui-backdrop-horizontal-bind-group"),
             layout: &self.backdrop_blur_bind_group_layout,
-            entries: &[
+            entries: horizontal_bind_group_entries,
+        });
+        let vertical_bind_group_entries;
+        let vertical_entries_msaa;
+        let vertical_entries_single;
+        if self.has_msaa() {
+            vertical_entries_msaa = [
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&blur_scratch_target.resolved_view),
+                    resource: wgpu::BindingResource::TextureView(
+                        self.offscreen_msaa_view(blur_scratch_target)
+                            .unwrap_or_else(|| self.offscreen_single_view(blur_scratch_target)),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: vertical_uniform.as_entire_binding(),
+                },
+            ];
+            vertical_bind_group_entries = &vertical_entries_msaa[..];
+        } else {
+            vertical_entries_single = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.offscreen_msaa_view(blur_scratch_target)
+                            .unwrap_or_else(|| self.offscreen_single_view(blur_scratch_target)),
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -304,7 +380,14 @@ impl Renderer {
                     binding: 2,
                     resource: vertical_uniform.as_entire_binding(),
                 },
-            ],
+            ];
+            vertical_bind_group_entries = &vertical_entries_single[..];
+        }
+
+        let vertical_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui-backdrop-vertical-bind-group"),
+            layout: &self.backdrop_blur_bind_group_layout,
+            entries: vertical_bind_group_entries,
         });
 
         {
@@ -312,7 +395,7 @@ impl Renderer {
                 label: Some("tgui-backdrop-horizontal-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: self.offscreen_attachment_view(blur_scratch_target),
-                    resolve_target: self.offscreen_resolve_target(blur_scratch_target),
+                    resolve_target: self.offscreen_resolve_target_for_draw(blur_scratch_target),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -335,7 +418,7 @@ impl Renderer {
                 label: Some("tgui-backdrop-vertical-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: self.offscreen_attachment_view(blur_target),
-                    resolve_target: self.offscreen_resolve_target(blur_target),
+                    resolve_target: self.offscreen_resolve_target_for_draw(blur_target),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -353,13 +436,32 @@ impl Renderer {
             pass.draw(0..full_screen.len() as u32, 0..1);
         }
 
-        let composite_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tgui-backdrop-composite-bind-group"),
-            layout: &self.backdrop_composite_bind_group_layout,
-            entries: &[
+        let composite_bind_group_entries;
+        let composite_entries_msaa;
+        let composite_entries_single;
+        if self.has_msaa() {
+            composite_entries_msaa = [
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&blur_target.resolved_view),
+                    resource: wgpu::BindingResource::TextureView(
+                        self.offscreen_msaa_view(blur_target)
+                            .unwrap_or_else(|| self.offscreen_single_view(blur_target)),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&scene_snapshot_view),
+                },
+            ];
+            composite_bind_group_entries = &composite_entries_msaa[..];
+        } else {
+            composite_entries_single = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.offscreen_msaa_view(blur_target)
+                            .unwrap_or_else(|| self.offscreen_single_view(blur_target)),
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -369,7 +471,14 @@ impl Renderer {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(&self.text_sampler),
                 },
-            ],
+            ];
+            composite_bind_group_entries = &composite_entries_single[..];
+        }
+
+        let composite_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui-backdrop-composite-bind-group"),
+            layout: &self.backdrop_composite_bind_group_layout,
+            entries: composite_bind_group_entries,
         });
 
         {
@@ -377,7 +486,7 @@ impl Renderer {
                 label: Some("tgui-backdrop-composite-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: self.offscreen_attachment_view(target),
-                    resolve_target: self.offscreen_resolve_target(target),
+                    resolve_target: self.offscreen_resolve_target_for_draw(target),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -461,10 +570,10 @@ impl Renderer {
         let scene_snapshot_view =
             scene_snapshot.create_view(&wgpu::TextureViewDescriptor::default());
         let content_view = composite_target
-            .resolved_texture
+            .single_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mask_view = composite_mask_target
-            .resolved_texture
+            .single_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let quad = CompositeVertex::quad(
@@ -502,13 +611,16 @@ impl Renderer {
                 }),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tgui-canvas-composite-bind-group"),
-            layout: &self.canvas_composite_bind_group_layout,
-            entries: &[
+        let composite_canvas_entries;
+        let composite_canvas_entries_msaa;
+        let composite_canvas_entries_single;
+        if self.has_msaa() {
+            composite_canvas_entries_msaa = [
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&content_view),
+                    resource: wgpu::BindingResource::TextureView(
+                        self.offscreen_msaa_view(&composite_target).unwrap_or(&content_view),
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -516,7 +628,33 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&mask_view),
+                    resource: wgpu::BindingResource::TextureView(
+                        self.offscreen_msaa_view(&composite_mask_target).unwrap_or(&mask_view),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: uniform.as_entire_binding(),
+                },
+            ];
+            composite_canvas_entries = &composite_canvas_entries_msaa[..];
+        } else {
+            composite_canvas_entries_single = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.offscreen_msaa_view(&composite_target).unwrap_or(&content_view),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&scene_snapshot_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.offscreen_msaa_view(&composite_mask_target).unwrap_or(&mask_view),
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -526,14 +664,21 @@ impl Renderer {
                     binding: 4,
                     resource: uniform.as_entire_binding(),
                 },
-            ],
+            ];
+            composite_canvas_entries = &composite_canvas_entries_single[..];
+        }
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui-canvas-composite-bind-group"),
+            layout: &self.canvas_composite_bind_group_layout,
+            entries: composite_canvas_entries,
         });
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tgui-canvas-composite-pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: self.offscreen_attachment_view(target),
-                resolve_target: self.offscreen_resolve_target(target),
+                resolve_target: self.offscreen_resolve_target_for_draw(target),
                 depth_slice: None,
                 ops: wgpu::Operations {
                     load: if *cleared_draw_target {
@@ -567,10 +712,17 @@ impl Renderer {
         color_attachment_view: &wgpu::TextureView,
         resolve_target: Option<&wgpu::TextureView>,
     ) {
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tgui-scene-present-bind-group"),
-            layout: &self.text_bind_group_layout,
-            entries: &[
+        let bind_group_entries;
+        let msaa_entries;
+        let single_entries;
+        if self.has_msaa() {
+            msaa_entries = [wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(scene_view),
+            }];
+            bind_group_entries = &msaa_entries[..];
+        } else {
+            single_entries = [
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(scene_view),
@@ -579,7 +731,14 @@ impl Renderer {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.text_sampler),
                 },
-            ],
+            ];
+            bind_group_entries = &single_entries[..];
+        }
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui-scene-present-bind-group"),
+            layout: &self.present_bind_group_layout,
+            entries: bind_group_entries,
         });
         let quad = TextVertex::quad(
             Rect::new(

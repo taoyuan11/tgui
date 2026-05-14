@@ -102,8 +102,8 @@ pub(super) fn create_offscreen_target(
         return None;
     }
 
-    let resolved_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(&format!("{label}-resolved")),
+    let single_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(&format!("{label}-single")),
         size: wgpu::Extent3d {
             width: config.width,
             height: config.height,
@@ -132,7 +132,9 @@ pub(super) fn create_offscreen_target(
             sample_count,
             dimension: wgpu::TextureDimension::D2,
             format: config.format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -142,8 +144,8 @@ pub(super) fn create_offscreen_target(
     };
 
     Some(OffscreenTarget {
-        resolved_view: resolved_texture.create_view(&wgpu::TextureViewDescriptor::default()),
-        resolved_texture,
+        single_view: single_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+        single_texture,
         _msaa_texture: msaa_texture,
         msaa_view,
     })

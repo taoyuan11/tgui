@@ -51,6 +51,7 @@ pub struct Renderer {
     backdrop_composite_pipeline: wgpu::RenderPipeline,
     canvas_composite_pipeline: wgpu::RenderPipeline,
     text_bind_group_layout: wgpu::BindGroupLayout,
+    present_bind_group_layout: wgpu::BindGroupLayout,
     mesh_clip_bind_group_layout: wgpu::BindGroupLayout,
     backdrop_blur_bind_group_layout: wgpu::BindGroupLayout,
     backdrop_composite_bind_group_layout: wgpu::BindGroupLayout,
@@ -77,8 +78,8 @@ struct TextSystem {
 
 #[derive(Clone)]
 struct OffscreenTarget {
-    resolved_texture: wgpu::Texture,
-    resolved_view: wgpu::TextureView,
+    single_texture: wgpu::Texture,
+    single_view: wgpu::TextureView,
     _msaa_texture: Option<wgpu::Texture>,
     msaa_view: Option<wgpu::TextureView>,
 }
@@ -206,20 +207,50 @@ impl Renderer {
             label: Some("tgui-brush-shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shader/brush.wgsl").into()),
         });
+        let has_msaa = msaa_sample_count > 1;
+
         let backdrop_blur_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tgui-backdrop-blur-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shader/backdrop_blur.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                if has_msaa {
+                    include_str!("../shader/backdrop_blur_msaa.wgsl")
+                } else {
+                    include_str!("../shader/backdrop_blur.wgsl")
+                }
+                .into(),
+            ),
         });
         let backdrop_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tgui-backdrop-composite-shader"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("../shader/backdrop_composite.wgsl").into(),
+                if has_msaa {
+                    include_str!("../shader/backdrop_composite_msaa.wgsl")
+                } else {
+                    include_str!("../shader/backdrop_composite.wgsl")
+                }
+                .into(),
             ),
         });
         let canvas_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tgui-canvas-composite-shader"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("../shader/canvas_composite.wgsl").into(),
+                if has_msaa {
+                    include_str!("../shader/canvas_composite_msaa.wgsl")
+                } else {
+                    include_str!("../shader/canvas_composite.wgsl")
+                }
+                .into(),
+            ),
+        });
+        let present_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tgui-present-shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                if has_msaa {
+                    include_str!("../shader/present_msaa.wgsl")
+                } else {
+                    include_str!("../shader/text.wgsl")
+                }
+                .into(),
             ),
         });
 
@@ -385,72 +416,233 @@ impl Renderer {
         let backdrop_blur_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("tgui-backdrop-blur-bind-group-layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                entries: if has_msaa {
+                    &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: true,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                ],
+                    ]
+                } else {
+                    &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ]
+                },
             });
 
         let backdrop_composite_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("tgui-backdrop-composite-bind-group-layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                entries: if has_msaa {
+                    &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: true,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: true,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
+                    ]
+                } else {
+                    &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                    ]
+                },
             });
         let canvas_composite_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("tgui-canvas-composite-bind-group-layout"),
-                entries: &[
+                entries: if has_msaa {
+                    &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: true,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: true,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: true,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ]
+                } else {
+                    &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ]
+                },
+            });
+
+        let present_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tgui-present-bind-group-layout"),
+            entries: if has_msaa {
+                &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: true,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        },
+                        count: None,
+                    },
+                ]
+            } else {
+                &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -464,41 +656,12 @@ impl Renderer {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
+                ]
+            },
+        });
 
         let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("tgui-text-pipeline-layout"),
@@ -542,9 +705,13 @@ impl Renderer {
 
         let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("tgui-text-pipeline"),
-            layout: Some(&text_pipeline_layout),
+            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("tgui-present-pipeline-layout"),
+                bind_group_layouts: &[Some(&present_bind_group_layout)],
+                immediate_size: 0,
+            })),
             vertex: wgpu::VertexState {
-                module: &text_shader,
+                module: &present_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[TextVertex::layout()],
@@ -561,7 +728,7 @@ impl Renderer {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
-                module: &text_shader,
+                module: &present_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -729,6 +896,7 @@ impl Renderer {
             backdrop_composite_pipeline,
             canvas_composite_pipeline,
             text_bind_group_layout,
+            present_bind_group_layout,
             mesh_clip_bind_group_layout,
             backdrop_blur_bind_group_layout,
             backdrop_composite_bind_group_layout,
@@ -813,7 +981,6 @@ impl Renderer {
             self.scale_factor,
         )?;
         let color_attachment_view = view.clone();
-        let scene_view = self.scene_target_resolved_view()?;
 
         let mut encoder = self
             .device
@@ -822,11 +989,16 @@ impl Renderer {
             });
 
         {
+            let scene_target = self
+                .scene_target
+                .as_ref()
+                .ok_or_else(|| TguiError::TextRender("scene target unavailable".into()))?;
+            let scene_clear_view = self.offscreen_attachment_view(scene_target);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tgui-scene-clear-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: scene_view,
-                    resolve_target: None,
+                    view: scene_clear_view,
+                    resolve_target: self.offscreen_resolve_target_for_draw(scene_target),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(surface_clear_color(self.clear_color)),
@@ -844,7 +1016,11 @@ impl Renderer {
         let mut cleared_draw_target = false;
         self.execute_prepared_commands(&mut encoder, &command_buffers.0, &mut cleared_draw_target)?;
         self.execute_prepared_commands(&mut encoder, &overlay_buffers.0, &mut cleared_draw_target)?;
-        let scene_view = self.scene_target_resolved_view()?;
+        let scene_target = self
+            .scene_target
+            .as_ref()
+            .ok_or_else(|| TguiError::TextRender("scene target unavailable".into()))?;
+        let scene_view = self.offscreen_sampled_view(scene_target);
         self.blit_scene_to_surface(&mut encoder, scene_view, &color_attachment_view, None);
 
         self.queue.submit(Some(encoder.finish()));

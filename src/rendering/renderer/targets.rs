@@ -1,5 +1,3 @@
-use crate::foundation::error::TguiError;
-
 use super::{surface, OffscreenTarget, Renderer};
 
 pub(super) struct RendererTargets {
@@ -83,12 +81,5 @@ impl Renderer {
             "tgui-composite-mask-target",
             self.msaa_sample_count,
         );
-    }
-
-    pub(super) fn scene_target_resolved_view(&self) -> Result<&wgpu::TextureView, TguiError> {
-        self.scene_target
-            .as_ref()
-            .map(|target| &target.resolved_view)
-            .ok_or_else(|| TguiError::TextRender("scene target unavailable".into()))
     }
 }
