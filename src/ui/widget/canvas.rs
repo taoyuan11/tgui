@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
 use geo::{BooleanOps, Contains, Coord, LineString, MultiPolygon, Polygon};
@@ -5942,7 +5943,11 @@ fn dashed_path(path: &Path, stroke: &CanvasStroke) -> Option<Path> {
         let segment_length = (normalized[phase] - local_offset).max(0.0);
         let end = (distance + segment_length).min(total_length);
         if phase % 2 == 0 && end > distance {
-            sampler.split_range(distance..end, &mut builder);
+            if catch_unwind(AssertUnwindSafe(|| sampler.split_range(distance..end, &mut builder)))
+                .is_err()
+            {
+                return None;
+            }
         }
         distance = end;
         phase = (phase + 1) % normalized.len();

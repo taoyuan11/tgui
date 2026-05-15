@@ -6,8 +6,6 @@ const CARD_CANVAS_WIDTH: f32 = 520.0;
 const CARD_CANVAS_HEIGHT: f32 = 260.0;
 const CARD_PANEL_HEIGHT: f32 = 386.0;
 const LAB_CANVAS_HEIGHT: f32 = 296.0;
-const GALLERY_GAP: f32 = 18.0;
-const STATIC_GRID_HEIGHT: f32 = CARD_PANEL_HEIGHT * 4.0 + GALLERY_GAP * 3.0;
 const RETAINED_CARD_HEIGHT: f32 = 612.0;
 const EVENT_CARD_HEIGHT: f32 = 448.0;
 
@@ -57,18 +55,6 @@ fn info_chip_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
     style.surface.background = Some(Color::hexa(0xE2E8F0FF).into());
     style.surface.border_radius = Some(dp(14.0).into());
     style.color = Color::hexa(0x0F172AFF).into();
-    style
-}
-
-fn gallery_scroll_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
-    style.scrollbar.thumb_color = Some(Color::hexa(0x94A3B8FF));
-    style.scrollbar.hover_thumb_color = Some(Color::hexa(0x64748BFF));
-    style.scrollbar.active_thumb_color = Some(Color::hexa(0x475569FF));
-    style.scrollbar.track_color = Some(Color::hexa(0xE2E8F0FF));
-    style.scrollbar.thickness = Some(dp(10.0));
-    style.scrollbar.radius = Some(dp(999.0));
-    style.scrollbar.insets = Some(Insets::symmetric(dp(2.0), dp(4.0)));
     style
 }
 
@@ -879,7 +865,7 @@ struct CanvasVm {
 }
 
 impl CanvasVm {
-    fn sample_canvas(&self, scene: CanvasScene) -> Canvas<Self> {
+    fn sample_canvas(scene: CanvasScene) -> Canvas<Self> {
         Canvas::new(scene)
             .size(dp(CARD_CANVAS_WIDTH), dp(CARD_CANVAS_HEIGHT))
             .style(canvas_frame_style)
@@ -921,7 +907,6 @@ impl CanvasVm {
     }
 
     fn showcase_card(
-        &self,
         title: &'static str,
         description: &'static str,
         height: f32,
@@ -939,21 +924,19 @@ impl CanvasVm {
             .into()
     }
 
-    fn static_scene_card(
-        &self,
-        title: &'static str,
-        description: &'static str,
-        scene: CanvasScene,
-    ) -> Element<Self> {
-        self.showcase_card(
+    fn static_scene_card(title: &'static str, description: &'static str, scene: CanvasScene) -> Element<Self> {
+        Self::showcase_card(
             title,
             description,
             CARD_PANEL_HEIGHT,
-            self.sample_canvas(scene).into(),
+            Self::sample_canvas(scene).into(),
         )
     }
 
-    fn retained_lab_card(&self) -> Flex<Self> {
+    fn retained_lab_card(
+        retained_scene: Signal<CanvasScene>,
+        retained_probe: Signal<String>,
+    ) -> Flex<Self> {
         Flex::new(Axis::Vertical)
             .height(dp(RETAINED_CARD_HEIGHT))
             .padding(Insets::all(dp(18.0)))
@@ -998,7 +981,7 @@ impl CanvasVm {
                         ),
                 )
                 .child(
-                    Canvas::new(self.retained_scene.signal())
+                    Canvas::new(retained_scene.clone())
                         .size(dp(CARD_CANVAS_WIDTH), dp(LAB_CANVAS_HEIGHT))
                         .style(canvas_frame_style)
                         .on_mouse_move(ValueCommand::new(Self::probe_retained_scene))
@@ -1007,19 +990,19 @@ impl CanvasVm {
                         .on_item_click(ValueCommand::new(Self::on_click)),
                 )
                 .child(
-                    Text::new(self.retained_probe.signal())
+                    Text::new(retained_probe)
                         .padding(Insets::all(dp(12.0)))
                         .style(info_chip_style),
                 )
                 .child(
-                    Text::new(self.retained_scene.signal().map(|scene| retained_scene_report(&scene)))
+                    Text::new(retained_scene.map(|scene| retained_scene_report(&scene)))
                         .padding(Insets::all(dp(12.0)))
                         .style(|mode| muted_text_style(mode, sp(13.0))),
                 )
             )
     }
 
-    fn event_lab_card(&self) -> Flex<Self> {
+    fn event_lab_card() -> Flex<Self> {
         Flex::new(Axis::Vertical)
             .height(dp(EVENT_CARD_HEIGHT))
             .padding(Insets::all(dp(18.0)))
@@ -1240,17 +1223,36 @@ impl ViewModel for CanvasVm {
                 "Move over the retained canvas to run query_point/query_point_all live."
                     .to_string(),
             ),
-            retained_scene: ctx.state(CanvasScene::empty()),
+            retained_scene: ctx.state(build_retained_scene()),
         }
     }
 
     fn view(&self) -> Element<Self> {
+        let selected_title = self.selected_demo.signal().map(|selected_demo| {
+            let (title, _) = Self::demo_meta(selected_demo);
+            title
+        });
+        let selected_description = self.selected_demo.signal().map(|selected_demo| {
+            let (_, description) = Self::demo_meta(selected_demo);
+            description
+        });
+        let selected_scene = self.selected_demo.signal().map({
+            let retained_scene = self.retained_scene.signal();
+            move |selected_demo| {
+                if selected_demo == 9 {
+                    retained_scene.get()
+                } else {
+                    Self::demo_scene(selected_demo)
+                }
+            }
+        });
+
         Flex::new(Axis::Vertical)
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
             .gap(dp(16.0))
             .overflow_x(Overflow::Hidden)
-            .overflow_y(Overflow::Hidden)
+            .overflow_y(Overflow::Scroll)
             .child(
                 Flex::new(Axis::Vertical)
                     .padding(Insets::all(dp(20.0)))
@@ -1279,59 +1281,70 @@ impl ViewModel for CanvasVm {
                     ),
             )
             .child(
-                Stack::new()
-                    .min_height(dp(0.0))
-                    .grow(1.0)
-                    .overflow_y(Overflow::Scroll)
-                    .overflow_x(Overflow::Hidden)
-                    .style(gallery_scroll_style)
+                Flex::new(Axis::Horizontal)
+                    .wrap(Wrap::Wrap)
+                    .padding(Insets::all(dp(12.0)))
+                    .gap(dp(10.0))
+                    .style(action_row_style)
+                    .child(el![
+                        Button::new("Primitives")
+                            .secondary()
+                            .on_click(Command::new(|vm: &mut Self| vm.selected_demo.set(0))),
+                        Button::new("Paths")
+                            .secondary()
+                            .on_click(Command::new(|vm: &mut Self| vm.selected_demo.set(1))),
+                        Button::new("Text")
+                            .secondary()
+                            .on_click(Command::new(|vm: &mut Self| vm.selected_demo.set(2))),
+                        Button::new("Transforms")
+                            .secondary()
+                            .on_click(Command::new(|vm: &mut Self| vm.selected_demo.set(3))),
+                        Button::new("Clip / Mask")
+                            .secondary()
+                            .on_click(Command::new(|vm: &mut Self| vm.selected_demo.set(4))),
+                        Button::new("Composite")
+                            .secondary()
+                            .on_click(Command::new(|vm: &mut Self| vm.selected_demo.set(5))),
+                        Button::new("Images")
+                            .secondary()
+                            .on_click(Command::new(|vm: &mut Self| vm.selected_demo.set(6))),
+                        Button::new("Recorder")
+                            .secondary()
+                            .on_click(Command::new(|vm: &mut Self| vm.selected_demo.set(7))),
+                        Button::new("Interaction")
+                            .secondary()
+                            .on_click(Command::new(|vm: &mut Self| vm.selected_demo.set(8))),
+                        Button::new("Retained")
+                            .secondary()
+                            .on_click(Command::new(|vm: &mut Self| vm.selected_demo.set(9))),
+                    ]),
+            )
+            .child(
+                Flex::new(Axis::Vertical)
+                    .height(dp(CARD_PANEL_HEIGHT))
+                    .padding(Insets::all(dp(18.0)))
+                    .gap(dp(12.0))
+                    .style(card_style)
+                    .child(Text::new(selected_title).style(|mode| text_style(mode, sp(22.0))))
                     .child(
-                        Grid::columns([fr(1.0), fr(1.0)])
-                            .width(pct(100.0))
-                            .height(dp(STATIC_GRID_HEIGHT))
-                            .gap(dp(GALLERY_GAP))
-                            .child(el![
-                                self.static_scene_card(
-                                    "Primitives",
-                                    "矩形、圆角矩形、圆、椭圆、描边对齐和 even-odd 填充规则。",
-                                    primitives_scene(),
-                                ),
-                                self.static_scene_card(
-                                    "Paths",
-                                    "quad/cubic/arc/arc_to、SVG path 和布尔路径运算。",
-                                    paths_scene(),
-                                ),
-                                self.static_scene_card(
-                                    "Text",
-                                    "普通文本、富文本 span、对齐、换行、ellipsis 和 text hit 语义。",
-                                    text_scene(),
-                                ),
-                                self.static_scene_card(
-                                    "Transforms",
-                                    "translate、scale、rotate、matrix transform 与 save/restore。",
-                                    transforms_scene(),
-                                ),
-                                self.static_scene_card(
-                                    "Clip / Mask",
-                                    "录制式 group 会把后续命令包装成 clip 或 mask 组。",
-                                    clip_mask_scene(),
-                                ),
-                                self.static_scene_card(
-                                    "Composite",
-                                    "opacity、blend mode、blur、color filter、inner shadow 和 isolation。",
-                                    composite_scene(),
-                                ),
-                                self.static_scene_card(
-                                    "Images",
-                                    "draw_image 与 draw_image_with_options 覆盖 contain / cover / fill、圆角与 source rect。",
-                                    images_scene(),
-                                ),
-                                self.static_scene_card(
-                                    "Recorder State",
-                                    "next_item_name、clear_* 和统一 recorder 状态机。",
-                                    recorder_state_scene(),
-                                ),
-                            ]),
+                        Text::new(selected_description)
+                            .style(|mode| muted_text_style(mode, sp(14.0))),
+                    )
+                    .child(
+                        Canvas::new(selected_scene)
+                            .size(dp(CARD_CANVAS_WIDTH), dp(CARD_CANVAS_HEIGHT))
+                            .style(canvas_frame_style)
+                            .on_item_mouse_enter(ValueCommand::new(Self::on_mouse_enter))
+                            .on_item_mouse_leave(ValueCommand::new(Self::on_mouse_leave))
+                            .on_item_mouse_down(ValueCommand::new(Self::on_mouse_down))
+                            .on_item_mouse_up(ValueCommand::new(Self::on_mouse_up))
+                            .on_item_mouse_move(ValueCommand::new(Self::on_hover))
+                            .on_item_click(ValueCommand::new(Self::on_click))
+                            .on_item_double_click(ValueCommand::new(Self::on_double_click))
+                            .on_item_wheel(ValueCommand::new(Self::on_wheel))
+                            .on_item_drag_start(ValueCommand::new(Self::on_drag_start))
+                            .on_item_drag(ValueCommand::new(Self::on_drag))
+                            .on_item_drag_end(ValueCommand::new(Self::on_drag_end)),
                     ),
             )
             .into()

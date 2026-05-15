@@ -39,7 +39,10 @@ static HTTP_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 static RUSTLS_PROVIDER: OnceLock<()> = OnceLock::new();
 const MAX_IMAGE_DIMENSION: u32 = 2048;
 const MAX_SVG_RASTER_CACHE_ENTRIES: usize = 4;
-const MAX_RASTER_CACHE_ENTRIES: usize = 4;
+// A single raster source can legitimately be displayed at several sizes at once
+// (for example in the Canvas showcase), so keep enough variants around to avoid
+// oscillating between eviction and background re-rasterization while scrolling.
+const MAX_RASTER_CACHE_ENTRIES: usize = 8;
 const MAX_CANVAS_SHADOW_CACHE_ENTRIES: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
