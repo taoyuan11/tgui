@@ -17,7 +17,7 @@ use crate::text::font::{FontWeight, TextLayoutInfo};
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, Length, Overflow, ScrollbarStyle, Track, Value, Wrap,
 };
-use crate::ui::theme::{Theme, WidgetState};
+use crate::ui::theme::{Shadow, Theme, WidgetState};
 use crate::ui::unit::{dp, Dp, UnitContext};
 #[cfg(feature = "video")]
 use crate::video::VideoSurface;
@@ -29,12 +29,13 @@ use super::canvas::{
     CanvasTextVerticalAlign, CanvasTextWrap, CanvasWheelEvent,
 };
 use super::image::Image;
+pub(crate) use super::slider_shared::SliderValueFormatter;
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle;
 use super::style::{
     infer_theme_mode, ButtonStyle as WidgetButtonStyle, CanvasStyle,
     CheckboxStyle as WidgetCheckboxStyle, ContainerStyle, SelectStyle as WidgetSelectStyle,
-    StyleResolver, SwitchStyle as WidgetSwitchStyle,
+    SliderStyle as WidgetSliderStyle, StyleResolver, SwitchStyle as WidgetSwitchStyle,
 };
 use super::style::{InputStyle as WidgetInputStyle, TextareaStyle as WidgetTextareaStyle};
 use super::text::Text;
@@ -194,6 +195,65 @@ impl Rect {
     }
 }
 
+pub(crate) fn slider_effective_step(min: f32, max: f32, step: f32) -> Option<f32> {
+    if !step.is_finite() || step <= 0.0 {
+        return None;
+    }
+    let range = (max - min).abs();
+    if !range.is_finite() || range <= f32::EPSILON {
+        return None;
+    }
+    Some(step.min(range))
+}
+
+pub(crate) fn slider_clamp_value(value: f32, min: f32, max: f32) -> f32 {
+    if !value.is_finite() {
+        min
+    } else {
+        value.clamp(min, max)
+    }
+}
+
+pub(crate) fn slider_quantize_value(value: f32, min: f32, max: f32, step: f32) -> f32 {
+    let clamped = slider_clamp_value(value, min, max);
+    let Some(step) = slider_effective_step(min, max, step) else {
+        return clamped;
+    };
+    let steps = ((clamped - min) / step).round();
+    slider_clamp_value(min + (steps * step), min, max)
+}
+
+pub(crate) fn slider_resolve_value(value: f32, min: f32, max: f32, step: f32) -> f32 {
+    slider_quantize_value(value, min, max, step)
+}
+
+pub(crate) fn slider_normalized_value(value: f32, min: f32, max: f32, step: f32) -> f32 {
+    let range = max - min;
+    if range.abs() <= f32::EPSILON {
+        return 0.0;
+    }
+    ((slider_resolve_value(value, min, max, step) - min) / range).clamp(0.0, 1.0)
+}
+
+pub(crate) fn slider_value_from_normalized(normalized: f32, min: f32, max: f32, step: f32) -> f32 {
+    let range = max - min;
+    if range.abs() <= f32::EPSILON {
+        return min;
+    }
+    slider_quantize_value(min + normalized.clamp(0.0, 1.0) * range, min, max, step)
+}
+
+pub(crate) fn slider_tick_count(min: f32, max: f32, step: f32, explicit: Option<usize>) -> usize {
+    if let Some(explicit) = explicit {
+        return explicit.max(2).min(101);
+    }
+    let Some(step) = slider_effective_step(min, max, step) else {
+        return 2;
+    };
+    let count = (((max - min).abs() / step).round() as usize).saturating_add(1);
+    count.max(2).min(101)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct TextInputContentGeometry {
     pub content_frame: Rect,
@@ -315,6 +375,7 @@ pub struct VisualStyle {
     pub background_brush: Option<Value<BackgroundBrush>>,
     pub background_image: Option<Value<BackgroundImage>>,
     pub background_blur: Value<Dp>,
+    pub shadow: Option<Value<Shadow>>,
     pub opacity: Value<f32>,
     pub offset: Value<Point>,
 }
@@ -328,6 +389,7 @@ impl Default for VisualStyle {
             background_brush: None,
             background_image: None,
             background_blur: Value::Static(Dp::ZERO),
+            shadow: None,
             opacity: Value::Static(1.0),
             offset: Value::Static(Point::ZERO),
         }
@@ -949,6 +1011,7 @@ pub struct ScenePrimitives {
     pub textures: Vec<TexturePrimitive>,
     pub texts: Vec<TextPrimitive>,
     pub overlay_shapes: Vec<RenderPrimitive>,
+    pub overlay_textures: Vec<TexturePrimitive>,
     #[allow(dead_code)]
     pub overlay_meshes: Vec<MeshPrimitive>,
     #[allow(dead_code)]
@@ -1012,6 +1075,13 @@ impl ScenePrimitives {
     }
 
     #[allow(dead_code)]
+    pub(crate) fn push_overlay_texture(&mut self, primitive: TexturePrimitive) {
+        self.overlay_textures.push(primitive.clone());
+        self.overlay_commands
+            .push(RenderCommand::Texture(primitive));
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn push_overlay_mesh(&mut self, primitive: MeshPrimitive) {
         self.overlay_meshes.push(primitive.clone());
         self.overlay_commands.push(RenderCommand::Mesh(primitive));
@@ -1035,6 +1105,8 @@ impl ScenePrimitives {
         self.texts.extend(other.texts.iter().cloned());
         self.overlay_shapes
             .extend(other.overlay_shapes.iter().copied());
+        self.overlay_textures
+            .extend(other.overlay_textures.iter().cloned());
         self.overlay_meshes
             .extend(other.overlay_meshes.iter().cloned());
         self.overlay_texts
@@ -1351,6 +1423,19 @@ pub(crate) enum WidgetKind<VM> {
         disabled: Value<bool>,
         style: Option<StyleResolver<WidgetSelectStyle>>,
     },
+    Slider {
+        value: Value<f32>,
+        min: f32,
+        max: f32,
+        step: f32,
+        show_ticks: bool,
+        show_value_label: bool,
+        tick_count: Option<usize>,
+        value_formatter: Option<SliderValueFormatter>,
+        on_change: Option<ValueCommand<VM, f32>>,
+        disabled: Value<bool>,
+        style: Option<StyleResolver<WidgetSliderStyle>>,
+    },
     TextEditor {
         controller: TextController,
         placeholder: Value<String>,
@@ -1494,6 +1579,31 @@ impl<VM> Clone for WidgetKind<VM> {
                 disabled: disabled.clone(),
                 style: style.clone(),
             },
+            Self::Slider {
+                value,
+                min,
+                max,
+                step,
+                show_ticks,
+                show_value_label,
+                tick_count,
+                value_formatter,
+                on_change,
+                disabled,
+                style,
+            } => Self::Slider {
+                value: value.clone(),
+                min: *min,
+                max: *max,
+                step: *step,
+                show_ticks: *show_ticks,
+                show_value_label: *show_value_label,
+                tick_count: *tick_count,
+                value_formatter: value_formatter.clone(),
+                on_change: on_change.clone(),
+                disabled: disabled.clone(),
+                style: style.clone(),
+            },
             Self::TextEditor {
                 controller,
                 placeholder,
@@ -1566,6 +1676,10 @@ pub(crate) enum MeasureContext {
         placeholder: Value<String>,
         style: crate::ui::widget::SelectStyle,
     },
+    Slider {
+        id: WidgetId,
+        style: crate::ui::widget::SliderStyle,
+    },
     TextEditor {
         id: WidgetId,
         controller: TextController,
@@ -1621,6 +1735,17 @@ pub(crate) enum HitInteraction<VM> {
         interactions: InteractionHandlers<VM>,
         on_open_change: Option<ValueCommand<VM, bool>>,
         is_open: bool,
+    },
+    Slider {
+        id: WidgetId,
+        interactions: InteractionHandlers<VM>,
+        on_change: Option<ValueCommand<VM, f32>>,
+        value: f32,
+        min: f32,
+        max: f32,
+        step: f32,
+        track_rect: Rect,
+        thumb_rect: Rect,
     },
     TextInput {
         id: WidgetId,
@@ -1726,6 +1851,27 @@ impl<VM> Clone for HitInteraction<VM> {
                 on_open_change: on_open_change.clone(),
                 is_open: *is_open,
             },
+            Self::Slider {
+                id,
+                interactions,
+                on_change,
+                value,
+                min,
+                max,
+                step,
+                track_rect,
+                thumb_rect,
+            } => Self::Slider {
+                id: *id,
+                interactions: interactions.clone(),
+                on_change: on_change.clone(),
+                value: *value,
+                min: *min,
+                max: *max,
+                step: *step,
+                track_rect: *track_rect,
+                thumb_rect: *thumb_rect,
+            },
             Self::TextInput {
                 id,
                 interactions,
@@ -1803,6 +1949,7 @@ impl<VM> HitInteraction<VM> {
             | Self::Checkbox { id, .. }
             | Self::Radio { id, .. }
             | Self::SelectTrigger { id, .. }
+            | Self::Slider { id, .. }
             | Self::TextInput { id, .. } => HitTargetId::Widget(*id),
             Self::SelectOption {
                 id, option_index, ..

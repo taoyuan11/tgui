@@ -1,7 +1,23 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+use image::{DynamicImage, RgbaImage};
+use resvg::tiny_skia;
+
 use super::*;
+use crate::foundation::error::TguiError;
+use crate::media::TextureFrame;
 
 pub(super) fn default_select_menu_transition() -> crate::animation::Transition {
     crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(160))
+}
+
+#[derive(Clone)]
+pub(super) struct RoundedRectShadowSpec {
+    pub(super) shadow: crate::theme::Shadow,
+    pub(super) opacity: f32,
+    pub(super) clip_rect: Option<Rect>,
+    pub(super) clip_mask: Option<ClipMask>,
 }
 
 pub(super) fn push_media_texture_or_placeholder<VM>(
@@ -93,6 +109,95 @@ pub(super) fn push_background_media_texture<VM>(
             clip_mask,
         });
     }
+}
+
+pub(super) fn rounded_rect_shadow_texture(
+    frame: Rect,
+    corner_radius: f32,
+    spec: RoundedRectShadowSpec,
+    media: &MediaManager,
+    units: UnitContext,
+) -> Option<TexturePrimitive> {
+    if frame.width <= Dp::ZERO || frame.height <= Dp::ZERO {
+        return None;
+    }
+
+    let spread = spec.shadow.spread.get();
+    let expanded = Rect::new(
+        frame.x - Dp::new(spread),
+        frame.y - Dp::new(spread),
+        (frame.width.get() + spread * 2.0).max(0.0),
+        (frame.height.get() + spread * 2.0).max(0.0),
+    );
+    if expanded.width <= Dp::ZERO || expanded.height <= Dp::ZERO {
+        return None;
+    }
+
+    let blur = spec.shadow.blur.get().max(0.0);
+    let padding = shadow_padding(blur);
+    let min_x = expanded.x.get() + spec.shadow.offset_x.get().min(0.0) - padding;
+    let min_y = expanded.y.get() + spec.shadow.offset_y.get().min(0.0) - padding;
+    let max_x = expanded.right().get() + spec.shadow.offset_x.get().max(0.0) + padding;
+    let max_y = expanded.bottom().get() + spec.shadow.offset_y.get().max(0.0) + padding;
+    let texture_frame = Rect::new(
+        min_x,
+        min_y,
+        (max_x - min_x).max(1.0),
+        (max_y - min_y).max(1.0),
+    );
+    let width = units
+        .logical_to_physical(texture_frame.width.get())
+        .ceil()
+        .max(1.0) as u32;
+    let height = units
+        .logical_to_physical(texture_frame.height.get())
+        .ceil()
+        .max(1.0) as u32;
+    let radius = (corner_radius + spread)
+        .max(0.0)
+        .min(expanded.width.min(expanded.height).get() * 0.5);
+    let effective_color = spec
+        .shadow
+        .color
+        .with_alpha_factor(spec.opacity.clamp(0.0, 1.0));
+    if effective_color.a == 0 {
+        return None;
+    }
+
+    let shadow = spec.shadow.clone();
+    let cache_key = rounded_rect_shadow_cache_key(
+        expanded,
+        radius,
+        shadow.clone(),
+        spec.opacity,
+        units.scale_factor(),
+    );
+    let texture = media
+        .widget_shadow_texture(cache_key, width, height, || {
+            rasterize_rounded_rect_shadow(
+                expanded,
+                radius,
+                shadow,
+                spec.opacity,
+                min_x,
+                min_y,
+                width,
+                height,
+                units.scale_factor(),
+            )
+        })
+        .ok()??;
+
+    Some(TexturePrimitive {
+        texture,
+        frame: texture_frame,
+        quad: None,
+        uv_rect: None,
+        corner_radius: 0.0,
+        opacity: 1.0,
+        clip_rect: spec.clip_rect,
+        clip_mask: spec.clip_mask,
+    })
 }
 
 #[cfg(feature = "video")]
@@ -1114,6 +1219,394 @@ pub(super) fn push_select_icon(
 
 pub(super) fn default_switch_transition() -> crate::animation::Transition {
     crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(180))
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct SliderGeometry {
+    pub(super) track_rect: Rect,
+    pub(super) thumb_rect: Rect,
+}
+
+pub(super) fn slider_geometry(
+    frame: Rect,
+    slider_style: &ResolvedSliderStyle,
+    show_value_label: bool,
+    units: UnitContext,
+) -> SliderGeometry {
+    let thumb_size = units.resolve_dp(slider_style.thumb_size).max(0.0);
+    let track_height = units
+        .resolve_dp(slider_style.track_height)
+        .min(frame.height.get())
+        .max(1.0);
+    let label_height = if show_value_label {
+        slider_style
+            .text_style
+            .line_height
+            .map(|value| units.resolve_sp(value))
+            .unwrap_or_else(|| units.resolve_sp(slider_style.text_style.size))
+    } else {
+        0.0
+    };
+    let label_gap = if show_value_label {
+        units.resolve_dp(slider_style.label_gap)
+    } else {
+        0.0
+    };
+    let track_available_top = frame.y + Dp::new(label_height + label_gap);
+    let track_available_height = (frame.bottom() - track_available_top).max(track_height);
+    let track_y = track_available_top + ((track_available_height - track_height).max(0.0) * 0.5);
+    let half_thumb = Dp::new(thumb_size * 0.5);
+    let track_x = frame.x + half_thumb.min(frame.width * 0.5);
+    let track_width = (frame.width - (half_thumb * 2.0)).max(0.0);
+    let track_rect = Rect::new(track_x, track_y, track_width, track_height);
+    let thumb_rect = Rect::new(
+        track_rect.x,
+        track_rect.y + (track_rect.height * 0.5) - half_thumb,
+        thumb_size,
+        thumb_size,
+    );
+
+    SliderGeometry {
+        track_rect,
+        thumb_rect,
+    }
+}
+
+pub(super) fn push_slider_primitives(
+    frame: Rect,
+    value: f32,
+    min: f32,
+    max: f32,
+    step: f32,
+    show_ticks: bool,
+    show_value_label: bool,
+    tick_count: usize,
+    value_label: Option<&str>,
+    slider_style: &ResolvedSliderStyle,
+    opacity: f32,
+    widget_id: WidgetId,
+    clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+    animations: &mut AnimationEngine,
+    now: std::time::Instant,
+    scene: &mut ScenePrimitives,
+    media: &MediaManager,
+) -> SliderGeometry {
+    let mut geometry = slider_geometry(frame, slider_style, show_value_label, units);
+    let track_radius = (geometry.track_rect.height.get() * 0.5)
+        .min(units.resolve_dp(slider_style.radius))
+        .max(0.0);
+    let thumb_radius = (geometry.thumb_rect.width.get() * 0.5)
+        .min(units.resolve_dp(slider_style.radius))
+        .max(0.0);
+    let normalized =
+        super::super::common::slider_normalized_value(value, min, max, step).clamp(0.0, 1.0);
+    // Slider values can update every pointer move while dragging. Animating the thumb/fill
+    // makes the visual position lag behind the cursor, so keep these updates immediate.
+    let thumb_offset = Dp::new(geometry.track_rect.width.get() * normalized);
+    let active_extent = Dp::new(geometry.track_rect.width.get() * normalized);
+
+    scene.push_shape(RenderPrimitive {
+        rect: geometry.track_rect,
+        color: slider_style.track.with_alpha_factor(opacity),
+        corner_radius: track_radius,
+        stroke_width: 0.0,
+        clip_rect,
+        clip_mask,
+    });
+
+    if active_extent > Dp::ZERO {
+        scene.push_shape(RenderPrimitive {
+            rect: Rect::new(
+                geometry.track_rect.x,
+                geometry.track_rect.y,
+                active_extent.min(geometry.track_rect.width),
+                geometry.track_rect.height,
+            ),
+            color: slider_style.active_track.with_alpha_factor(opacity),
+            corner_radius: track_radius,
+            stroke_width: 0.0,
+            clip_rect,
+            clip_mask,
+        });
+    }
+
+    geometry.thumb_rect.x =
+        (geometry.track_rect.x + thumb_offset - (geometry.thumb_rect.width * 0.5)).clamp(
+            frame.x,
+            (frame.right() - geometry.thumb_rect.width).max(frame.x),
+        );
+    let thumb_border_width = units
+        .resolve_dp(slider_style.border_width)
+        .max(0.0)
+        .min((geometry.thumb_rect.width.get() * 0.5).max(0.0));
+    if show_ticks && tick_count >= 2 {
+        let tick_height = units.resolve_dp(slider_style.tick_size).max(1.0);
+        let tick_width = (geometry.track_rect.height * 0.5).max(1.0);
+        for index in 0..tick_count {
+            let normalized = index as f32 / (tick_count.saturating_sub(1)) as f32;
+            let x = geometry.track_rect.x + Dp::new(geometry.track_rect.width.get() * normalized)
+                - (tick_width * 0.5);
+            let y =
+                geometry.track_rect.y + ((geometry.track_rect.height - tick_height).max(0.0) * 0.5);
+            scene.push_shape(RenderPrimitive {
+                rect: Rect::new(x, y, tick_width, tick_height),
+                color: slider_style.tick.with_alpha_factor(opacity),
+                corner_radius: (tick_width.min(tick_height).get() * 0.5).max(0.0),
+                stroke_width: 0.0,
+                clip_rect,
+                clip_mask,
+            });
+        }
+    }
+    if let Some(shadow) = slider_style.thumb_shadow.clone() {
+        if let Some(texture) = rounded_rect_shadow_texture(
+            geometry.thumb_rect,
+            thumb_radius,
+            RoundedRectShadowSpec {
+                shadow,
+                opacity,
+                clip_rect,
+                clip_mask,
+            },
+            media,
+            units,
+        ) {
+            scene.push_texture(texture);
+        }
+    }
+    scene.push_shape(RenderPrimitive {
+        rect: geometry.thumb_rect,
+        color: slider_style.thumb.with_alpha_factor(opacity),
+        corner_radius: thumb_radius,
+        stroke_width: 0.0,
+        clip_rect,
+        clip_mask,
+    });
+    if thumb_border_width > 0.0 {
+        scene.push_shape(RenderPrimitive {
+            rect: geometry.thumb_rect,
+            color: slider_style.track.with_alpha_factor(opacity),
+            corner_radius: thumb_radius,
+            stroke_width: thumb_border_width,
+            clip_rect,
+            clip_mask,
+        });
+    }
+
+    if show_value_label {
+        if let Some(value_label) = value_label {
+            let label = text_with_typography(value_label, &slider_style.text_style);
+            let (_, line_height, _) = resolved_text_metrics(&label, theme, units);
+            let label_frame = Rect::new(frame.x, frame.y, frame.width, Dp::new(line_height));
+            push_text_primitives(
+                &label,
+                label_frame,
+                font_manager,
+                theme,
+                units,
+                animations,
+                now,
+                scene,
+                false,
+                false,
+                Insets::ZERO,
+                None,
+                None,
+                slider_style.label,
+                opacity,
+                widget_id,
+                clip_rect,
+                clip_mask,
+            );
+        }
+    }
+
+    geometry
+}
+
+fn rounded_rect_shadow_cache_key(
+    frame: Rect,
+    corner_radius: f32,
+    shadow: crate::theme::Shadow,
+    opacity: f32,
+    scale_factor: f32,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hash_f32(frame.width.get(), &mut hasher);
+    hash_f32(frame.height.get(), &mut hasher);
+    hash_f32(corner_radius, &mut hasher);
+    hash_f32(shadow.offset_x.get(), &mut hasher);
+    hash_f32(shadow.offset_y.get(), &mut hasher);
+    hash_f32(shadow.blur.get(), &mut hasher);
+    hash_f32(shadow.spread.get(), &mut hasher);
+    shadow.color.hash(&mut hasher);
+    hash_f32(opacity, &mut hasher);
+    hash_f32(scale_factor, &mut hasher);
+    hasher.finish()
+}
+
+fn rasterize_rounded_rect_shadow(
+    frame: Rect,
+    corner_radius: f32,
+    shadow: crate::theme::Shadow,
+    opacity: f32,
+    min_x: f32,
+    min_y: f32,
+    width: u32,
+    height: u32,
+    scale_factor: f32,
+) -> Result<TextureFrame, TguiError> {
+    let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or_else(|| {
+        TguiError::Media(format!(
+            "failed to allocate widget shadow surface {}x{}",
+            width, height
+        ))
+    })?;
+
+    let mut paint = tiny_skia::Paint::default();
+    paint.set_color_rgba8(255, 255, 255, 255);
+    let path = build_rounded_rect_shadow_path(frame, corner_radius, min_x, min_y, scale_factor)
+        .ok_or_else(|| {
+            TguiError::Media("failed to build widget rounded shadow path".to_string())
+        })?;
+    pixmap.as_mut().fill_path(
+        &path,
+        &paint,
+        tiny_skia::FillRule::Winding,
+        tiny_skia::Transform::from_translate(
+            shadow.offset_x.get() * scale_factor,
+            shadow.offset_y.get() * scale_factor,
+        ),
+        None,
+    );
+
+    let blurred = DynamicImage::ImageRgba8(
+        RgbaImage::from_raw(width, height, pixmap.data().to_vec()).ok_or_else(|| {
+            TguiError::Media("failed to create widget shadow image buffer".to_string())
+        })?,
+    )
+    .fast_blur((shadow.blur.get() * scale_factor).max(0.0));
+
+    let mut pixels = blurred.to_rgba8().into_raw();
+    let shadow_color = shadow.color.with_alpha_factor(opacity);
+    for pixel in pixels.chunks_exact_mut(4) {
+        let alpha = pixel[3] as f32 / 255.0;
+        pixel[0] = ((shadow_color.r as f32) * alpha).round().clamp(0.0, 255.0) as u8;
+        pixel[1] = ((shadow_color.g as f32) * alpha).round().clamp(0.0, 255.0) as u8;
+        pixel[2] = ((shadow_color.b as f32) * alpha).round().clamp(0.0, 255.0) as u8;
+        pixel[3] = ((shadow_color.a as f32) * alpha).round().clamp(0.0, 255.0) as u8;
+    }
+
+    Ok(TextureFrame::new(width, height, pixels))
+}
+
+fn shadow_padding(blur: f32) -> f32 {
+    (blur * 2.0).ceil().max(1.0)
+}
+
+fn hash_f32(value: f32, hasher: &mut impl Hasher) {
+    value.to_bits().hash(hasher);
+}
+
+fn build_rounded_rect_shadow_path(
+    frame: Rect,
+    corner_radius: f32,
+    min_x: f32,
+    min_y: f32,
+    scale_factor: f32,
+) -> Option<tiny_skia::Path> {
+    let x = (frame.x.get() - min_x) * scale_factor;
+    let y = (frame.y.get() - min_y) * scale_factor;
+    let width = frame.width.get() * scale_factor;
+    let height = frame.height.get() * scale_factor;
+    let radius = (corner_radius * scale_factor)
+        .max(0.0)
+        .min(width * 0.5)
+        .min(height * 0.5);
+    let mut builder = tiny_skia::PathBuilder::new();
+
+    if radius <= 0.0 {
+        let rect = tiny_skia::Rect::from_xywh(x, y, width, height)?;
+        builder.push_rect(rect);
+        return builder.finish();
+    }
+
+    let right = x + width;
+    let bottom = y + height;
+    builder.move_to(x + radius, y);
+    append_tiny_skia_arc_segments(
+        &mut builder,
+        right - radius,
+        y + radius,
+        radius,
+        -std::f32::consts::FRAC_PI_2,
+        std::f32::consts::FRAC_PI_2,
+        true,
+    );
+    append_tiny_skia_arc_segments(
+        &mut builder,
+        right - radius,
+        bottom - radius,
+        radius,
+        0.0,
+        std::f32::consts::FRAC_PI_2,
+        true,
+    );
+    append_tiny_skia_arc_segments(
+        &mut builder,
+        x + radius,
+        bottom - radius,
+        radius,
+        std::f32::consts::FRAC_PI_2,
+        std::f32::consts::FRAC_PI_2,
+        true,
+    );
+    append_tiny_skia_arc_segments(
+        &mut builder,
+        x + radius,
+        y + radius,
+        radius,
+        std::f32::consts::PI,
+        std::f32::consts::FRAC_PI_2,
+        true,
+    );
+    builder.close();
+    builder.finish()
+}
+
+fn append_tiny_skia_arc_segments(
+    builder: &mut tiny_skia::PathBuilder,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    start_angle: f32,
+    sweep_angle: f32,
+    connect_with_line: bool,
+) {
+    if radius <= 0.0 || sweep_angle.abs() <= f32::EPSILON {
+        return;
+    }
+
+    let steps = ((sweep_angle.abs() / std::f32::consts::FRAC_PI_8).ceil() as usize).max(1);
+    for index in 0..=steps {
+        let t = index as f32 / steps as f32;
+        let angle = start_angle + sweep_angle * t;
+        let px = center_x + angle.cos() * radius;
+        let py = center_y + angle.sin() * radius;
+        if index == 0 {
+            if connect_with_line {
+                builder.line_to(px, py);
+            } else {
+                builder.move_to(px, py);
+            }
+        } else {
+            builder.line_to(px, py);
+        }
+    }
 }
 
 pub(super) fn push_checkbox_primitives(

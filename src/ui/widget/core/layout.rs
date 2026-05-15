@@ -586,6 +586,7 @@ pub(super) fn measure_node(
         | Some(MeasureContext::Radio { id, .. })
         | Some(MeasureContext::Switch { id, .. })
         | Some(MeasureContext::Select { id, .. })
+        | Some(MeasureContext::Slider { id, .. })
         | Some(MeasureContext::TextEditor { id, .. }) => {
             Some(id.dependency_owner(DependencyPhase::Layout))
         }
@@ -693,6 +694,13 @@ fn measure_node_tracked(
             theme,
             units,
         ),
+        Some(MeasureContext::Slider { style, .. }) => {
+            let style = resolve_slider_style(style, Default::default(), theme);
+            (
+                units.resolve_dp(style.min_width),
+                units.resolve_dp(style.min_height),
+            )
+        }
         Some(MeasureContext::TextEditor {
             controller,
             placeholder,
@@ -861,6 +869,7 @@ pub(super) fn default_layout_padding<VM>(element: &ResolvedElement<VM>, _theme: 
             Insets::symmetric(style.padding_x, style.padding_y)
         }
         ResolvedWidgetKind::Switch { style, .. } => style.padding,
+        ResolvedWidgetKind::Slider { .. } => Insets::ZERO,
         ResolvedWidgetKind::Checkbox { .. } => Insets::ZERO,
         ResolvedWidgetKind::Radio { .. } => Insets::ZERO,
         ResolvedWidgetKind::Text { .. } => Insets::ZERO,

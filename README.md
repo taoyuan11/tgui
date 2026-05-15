@@ -44,7 +44,7 @@
 ### 布局与组件
 
 - 布局：`Stack`、`Grid`、`Flex`
-- 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Image`
+- 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Image`
 - 画布：`Canvas`、`CanvasRecorder`、渐变/阴影/混合/裁剪/文字与图片绘制
 - 视频：`VideoSurface`、`VideoController`、`VideoSource`（需启用 `video` feature）
 
@@ -387,10 +387,29 @@ if let Some(hit) = scene.query_point(Point::new(12.0, 12.0)) {
 - `BackgroundLinearGradient`
 - `BackgroundRadialGradient`
 - `BackgroundGradientStop`
+- `Shadow`
 - `background_brush(...)`
 - `background_blur(...)`
 
 `background_blur(...)` 是应用窗口内容上的 backdrop blur，可用于玻璃卡片、磨砂面板和层叠浮层。
+
+常规控件也可以通过 style resolver 上的 `style.surface.shadow` 配置单层外阴影：
+
+```rust
+Stack::new().style(|mode| {
+    let mut style = tgui::widgets::ContainerStyle::default_for(mode);
+    style.surface.shadow = Some(tgui::theme::Shadow {
+        offset_x: dp(0.0),
+        offset_y: dp(8.0),
+        blur: dp(24.0),
+        spread: dp(-4.0),
+        color: Color::hexa(0x00000033),
+    }.into());
+    style
+})
+```
+
+`SliderStyle` 还支持 `thumb_shadow`，用于单独给圆形 thumb 添加阴影，而不会影响整个 slider 外框。
 
 ### 视频
 

@@ -386,7 +386,9 @@ impl Renderer {
         let composite_bind_group_entries = [
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(self.offscreen_sampled_view(blur_target)),
+                resource: wgpu::BindingResource::TextureView(
+                    self.offscreen_sampled_view(blur_target),
+                ),
             },
             wgpu::BindGroupEntry {
                 binding: 1,

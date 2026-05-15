@@ -1,5 +1,6 @@
 use super::{centered_text_frame, resolved_text_metrics, ResolvedWidgetKind, SELECT_ARROW_ICON};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::animation::{AnimationCoordinator, AnimationEngine};
@@ -11,7 +12,7 @@ use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 use crate::media::{MediaManager, MediaSource};
 use crate::text::font::{FontCatalog, FontManager, TextFontRequest};
 use crate::ui::layout::{Axis, Insets, Overflow};
-use crate::ui::theme::{Stateful, Theme};
+use crate::ui::theme::{Shadow, Stateful, Theme};
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
 use crate::ui::widget::common::{ContainerKind, Rect, WidgetKind};
 use crate::ui::widget::style::infer_theme_mode;
@@ -22,8 +23,9 @@ use crate::ui::widget::{
     ButtonStyle, Canvas, CanvasParagraphStyle, CanvasRecorder, CanvasStroke, CanvasStyle,
     CanvasTextHorizontalAlign, CanvasTextVerticalAlign, CanvasTextWrap, Checkbox, ClipMask,
     ContainerStyle, Element, Image, Input, InputStyle, Point, Radio, RadioGroup, RadioOption,
-    ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Stack, Switch, SwitchStyle, Text,
-    TextEditState, TextWidgetStyle, Textarea, TextareaStyle, WidgetStateMap, WidgetTree,
+    ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Slider, SliderStyle, Stack, Switch,
+    SwitchStyle, Text, TextEditState, TextWidgetStyle, Textarea, TextareaStyle, WidgetStateMap,
+    WidgetTree,
 };
 #[cfg(feature = "video")]
 use crate::video::backend::{
@@ -64,6 +66,7 @@ fn container_style(
     brush: Option<crate::ui::widget::BackgroundBrush>,
     image: Option<BackgroundImage>,
     blur: Option<Dp>,
+    shadow: Option<Shadow>,
     border: Option<(Dp, Color)>,
     radius: Option<Dp>,
     offset: Option<Point>,
@@ -74,6 +77,9 @@ fn container_style(
     style.surface.background_image = image.map(Into::into);
     if let Some(blur) = blur {
         style.surface.background_blur = blur.into();
+    }
+    if let Some(shadow) = shadow {
+        style.surface.shadow = Some(shadow.into());
     }
     if let Some((width, color)) = border {
         style.surface.border_width = Some(width.into());
@@ -92,6 +98,16 @@ fn canvas_style(mode: crate::theme::ResolvedThemeMode, radius: Dp) -> CanvasStyl
     let mut style = CanvasStyle::default_for(mode);
     style.surface.border_radius = Some(radius.into());
     style
+}
+
+fn test_shadow() -> Shadow {
+    Shadow {
+        offset_x: dp(3.0),
+        offset_y: dp(5.0),
+        blur: dp(12.0),
+        spread: Dp::ZERO,
+        color: Color::hexa(0x00000044),
+    }
 }
 
 fn button_style(
@@ -381,6 +397,7 @@ fn background_brush_generates_brush_primitive() {
                 None,
                 None,
                 None,
+                None,
                 Some(dp(12.0)),
                 None,
             )
@@ -436,6 +453,7 @@ fn background_brush_takes_priority_over_background_color() {
                 None,
                 None,
                 None,
+                None,
             )
         }));
 
@@ -480,6 +498,7 @@ fn background_blur_is_emitted_before_background_fill() {
                 None,
                 None,
                 None,
+                None,
             )
         }));
 
@@ -507,6 +526,297 @@ fn background_blur_is_emitted_before_background_fill() {
 }
 
 #[test]
+fn background_shadow_is_emitted_before_blur_and_fill() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> =
+        WidgetTree::new(Stack::new().size(dp(120.0), dp(80.0)).style(|mode| {
+            container_style(
+                mode,
+                Some(Color::hexa(0x112233AA)),
+                None,
+                None,
+                Some(dp(18.0)),
+                Some(test_shadow()),
+                None,
+                None,
+                None,
+            )
+        }));
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 120.0, 80.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(matches!(
+        rendered.primitives.commands.get(0),
+        Some(crate::ui::widget::RenderCommand::Texture(_))
+    ));
+    assert!(matches!(
+        rendered.primitives.commands.get(1),
+        Some(crate::ui::widget::RenderCommand::BackdropBlur(_))
+    ));
+    assert!(matches!(
+        rendered.primitives.commands.get(2),
+        Some(crate::ui::widget::RenderCommand::Shape(_))
+    ));
+}
+
+#[test]
+fn background_shadow_does_not_expand_hit_region() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let element: Element<()> = Stack::new()
+        .size(dp(120.0), dp(80.0))
+        .style(|mode| {
+            container_style(
+                mode,
+                Some(Color::hexa(0x112233AA)),
+                None,
+                None,
+                None,
+                Some(test_shadow()),
+                None,
+                None,
+                None,
+            )
+        })
+        .on_click(Command::new(|_: &mut ()| {}))
+        .into();
+    let widget_id = element.id;
+    let tree = WidgetTree::new(element);
+
+    let computed = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 120.0, 80.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let region = computed
+        .hit_regions
+        .iter()
+        .find(|region| matches!(region.interaction, super::HitInteraction::Widget { id, .. } if id == widget_id))
+        .expect("widget hit region should exist");
+    assert_eq!(region.rect, Rect::new(0.0, 0.0, 120.0, 80.0));
+}
+
+#[test]
+fn background_shadow_negative_spread_can_skip_render_without_panicking() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> =
+        WidgetTree::new(Stack::new().size(dp(40.0), dp(24.0)).style(|mode| {
+            let mut shadow = test_shadow();
+            shadow.spread = dp(-40.0);
+            container_style(
+                mode,
+                Some(Color::hexa(0x112233AA)),
+                None,
+                None,
+                None,
+                Some(shadow),
+                None,
+                None,
+                None,
+            )
+        }));
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 40.0, 24.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered
+        .primitives
+        .commands
+        .iter()
+        .all(|command| { !matches!(command, crate::ui::widget::RenderCommand::Texture(_)) }));
+}
+
+#[test]
+fn background_shadow_texture_size_matches_primitive_frame_with_positive_offset() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> =
+        WidgetTree::new(Stack::new().size(dp(100.0), dp(100.0)).style(|mode| {
+            container_style(
+                mode,
+                Some(Color::hexa(0xFFFFFFFF)),
+                None,
+                None,
+                None,
+                Some(Shadow {
+                    offset_x: Dp::ZERO,
+                    offset_y: dp(7.0),
+                    blur: dp(30.0),
+                    spread: Dp::ZERO,
+                    color: Color::hexa(0x64646F52),
+                }),
+                None,
+                Some(dp(50.0)),
+                None,
+            )
+        }));
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 100.0, 100.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let shadow_texture = rendered
+        .primitives
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            crate::ui::widget::RenderCommand::Texture(texture) => Some(texture),
+            _ => None,
+        })
+        .expect("shadow texture should be emitted");
+
+    let expected_width = shadow_texture.frame.width.get().ceil().max(1.0) as u32;
+    let expected_height = shadow_texture.frame.height.get().ceil().max(1.0) as u32;
+    assert_eq!(
+        shadow_texture.texture.size(),
+        (expected_width, expected_height)
+    );
+}
+
+#[test]
+fn background_shadow_reuses_cached_texture_when_widget_moves() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> =
+        WidgetTree::new(Stack::new().size(dp(100.0), dp(100.0)).style(|mode| {
+            container_style(
+                mode,
+                Some(Color::hexa(0xFFFFFFFF)),
+                None,
+                None,
+                None,
+                Some(Shadow {
+                    offset_x: Dp::ZERO,
+                    offset_y: dp(7.0),
+                    blur: dp(30.0),
+                    spread: Dp::ZERO,
+                    color: Color::hexa(0x64646F52),
+                }),
+                None,
+                Some(dp(50.0)),
+                None,
+            )
+        }));
+
+    let first = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 100.0, 100.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let second = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 120.0, 100.0, 100.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let first_texture = first
+        .primitives
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            crate::ui::widget::RenderCommand::Texture(texture) => Some(texture),
+            _ => None,
+        })
+        .expect("shadow texture should be emitted");
+    let second_texture = second
+        .primitives
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            crate::ui::widget::RenderCommand::Texture(texture) => Some(texture),
+            _ => None,
+        })
+        .expect("shadow texture should be emitted after moving");
+
+    assert!(Arc::ptr_eq(
+        &first_texture.texture,
+        &second_texture.texture
+    ));
+}
+
+#[test]
 fn background_image_produces_texture_primitive() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
@@ -519,6 +829,7 @@ fn background_image_produces_texture_primitive() {
                 None,
                 None,
                 Some(BackgroundImage::from_bytes(ONE_BY_ONE_GIF)),
+                None,
                 None,
                 None,
                 None,
@@ -556,6 +867,7 @@ fn background_image_loading_failure_keeps_base_background_without_placeholder_te
                 Some(BackgroundImage::new(MediaSource::bytes(
                     b"not-an-image".as_slice(),
                 ))),
+                None,
                 None,
                 None,
                 None,
@@ -605,6 +917,7 @@ fn background_image_renders_between_blur_and_brush_overlay() {
                 ),
                 Some(BackgroundImage::from_bytes(ONE_BY_ONE_GIF)),
                 Some(dp(10.0)),
+                None,
                 Some((dp(1.0), Color::WHITE)),
                 None,
                 None,
@@ -654,6 +967,7 @@ fn background_image_texture_uses_corner_radius() {
                 Some(BackgroundImage::from_bytes(ONE_BY_ONE_GIF)),
                 None,
                 None,
+                None,
                 Some(dp(18.0)),
                 None,
             )
@@ -697,6 +1011,7 @@ fn background_brush_keeps_clip_rect() {
                         )
                         .into(),
                     ),
+                    None,
                     None,
                     None,
                     None,
@@ -1688,6 +2003,7 @@ fn clipped_children_keep_clip_rect_and_do_not_hit_outside_parent() {
                         None,
                         None,
                         None,
+                        None,
                     )
                 })
                 .child(
@@ -1697,6 +2013,7 @@ fn clipped_children_keep_clip_rect_and_do_not_hit_outside_parent() {
                             container_style(
                                 mode,
                                 Some(Color::hexa(0x38BDF8FF)),
+                                None,
                                 None,
                                 None,
                                 None,
@@ -1765,13 +2082,43 @@ fn wrapped_flex_align_start_packs_lines_from_cross_axis_start() {
             .gap(dp(10.0))
             .child([
                 Stack::new().size(dp(60.0), dp(40.0)).style(move |mode| {
-                    container_style(mode, Some(child_color), None, None, None, None, None, None)
+                    container_style(
+                        mode,
+                        Some(child_color),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
                 }),
                 Stack::new().size(dp(60.0), dp(40.0)).style(move |mode| {
-                    container_style(mode, Some(child_color), None, None, None, None, None, None)
+                    container_style(
+                        mode,
+                        Some(child_color),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
                 }),
                 Stack::new().size(dp(60.0), dp(40.0)).style(move |mode| {
-                    container_style(mode, Some(child_color), None, None, None, None, None, None)
+                    container_style(
+                        mode,
+                        Some(child_color),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
                 }),
             ]),
     );
@@ -1821,6 +2168,7 @@ fn scroll_offsets_are_clamped_to_content_bounds() {
                 None,
                 None,
                 None,
+                None,
                 Some((dp(4.0), crate::foundation::color::Color::WHITE)),
                 None,
                 None,
@@ -1830,6 +2178,7 @@ fn scroll_offsets_are_clamped_to_content_bounds() {
             container_style(
                 mode,
                 Some(crate::foundation::color::Color::hexa(0x22C55EFF)),
+                None,
                 None,
                 None,
                 None,
@@ -1884,6 +2233,7 @@ fn scroll_content_bounds_include_container_bottom_padding() {
             container_style(
                 mode,
                 Some(crate::foundation::color::Color::hexa(0x22C55EFF)),
+                None,
                 None,
                 None,
                 None,
@@ -2000,6 +2350,7 @@ fn overflow_clips_children_to_inside_of_border() {
                     None,
                     None,
                     None,
+                    None,
                     Some((dp(4.0), crate::foundation::color::Color::WHITE)),
                     None,
                     None,
@@ -2009,6 +2360,7 @@ fn overflow_clips_children_to_inside_of_border() {
                 container_style(
                     mode,
                     Some(crate::foundation::color::Color::BLACK),
+                    None,
                     None,
                     None,
                     None,
@@ -2061,6 +2413,7 @@ fn rounded_overflow_clips_children_with_parent_corner_mask() {
                     None,
                     None,
                     None,
+                    None,
                     Some(dp(18.0)),
                     None,
                 )
@@ -2070,6 +2423,7 @@ fn rounded_overflow_clips_children_with_parent_corner_mask() {
                 container_style(
                     mode,
                     Some(crate::foundation::color::Color::BLACK),
+                    None,
                     None,
                     None,
                     None,
@@ -2134,6 +2488,7 @@ fn scroll_containers_render_scrollbar_track_and_thumb() {
             container_style(
                 mode,
                 Some(crate::foundation::color::Color::hexa(0x1D4ED8FF)),
+                None,
                 None,
                 None,
                 None,
@@ -2290,6 +2645,7 @@ fn hit_testing_tracks_currently_resolved_children() {
             container_style(
                 mode,
                 Some(crate::foundation::color::Color::WHITE),
+                None,
                 None,
                 None,
                 None,
@@ -3348,6 +3704,61 @@ fn select_dropdown_escapes_parent_overflow_clip() {
         _ => panic!("select option outside parent clip should be hit"),
     }
     assert_eq!(vm.selected_key, "email");
+}
+
+#[test]
+fn select_dropdown_stays_above_later_slider_decorations() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let select: Element<ScopeChildVm> = Select::new(
+        vec![
+            SelectOption::new("email".to_string(), "Email".to_string()),
+            SelectOption::new("sms".to_string(), "SMS".to_string()),
+        ],
+        None::<String>,
+    )
+    .open(true)
+    .size(dp(180.0), dp(40.0))
+    .into();
+    let slider: Element<ScopeChildVm> = Slider::new(50.0, 0.0, 100.0)
+        .size(dp(180.0), dp(40.0))
+        .show_ticks(true)
+        .into();
+    let tree = WidgetTree::new(
+        crate::ui::widget::Flex::new(Axis::Vertical)
+            .gap(dp(0.0))
+            .child([select, slider]),
+    );
+    let widget_states = WidgetStateMap::default();
+
+    let rendered = tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &widget_states,
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 180.0, 140.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(
+        !rendered.primitives.overlay_shapes.is_empty(),
+        "open select should render menu in overlay layer"
+    );
+    assert!(
+        rendered.primitives.overlay_textures.is_empty(),
+        "later slider decorations should not leak into overlay layer"
+    );
 }
 
 #[test]
@@ -4942,6 +5353,225 @@ fn switch_thumb_animates_between_positions() {
     assert_eq!(immediate_x, start_x);
     assert!(mid_x > start_x);
     assert!(mid_x < end_x);
+}
+
+#[test]
+fn slider_renders_track_fill_thumb_ticks_and_value_label() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Slider::new(50.0, 0.0, 100.0)
+            .width(dp(220.0))
+            .show_ticks(true)
+            .show_value_label(true),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 48.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered.primitives.shapes.len() >= 4);
+    assert!(rendered.primitives.overlay_shapes.is_empty());
+    assert!(!rendered.primitives.texts.is_empty());
+}
+
+#[test]
+fn slider_thumb_shadow_renders_before_thumb_fill_without_changing_hit_geometry() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let element: Element<()> = Slider::new(50.0, 0.0, 100.0)
+        .width(dp(220.0))
+        .style(|mode| {
+            let mut style = SliderStyle::default_for(mode);
+            style.thumb_shadow = Some(test_shadow());
+            style
+        })
+        .into();
+    let widget_id = element.id;
+    let tree = WidgetTree::new(element);
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 48.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let computed = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 48.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(!rendered.primitives.textures.is_empty());
+    let thumb_fill = rendered
+        .primitives
+        .shapes
+        .iter()
+        .find(|shape| (shape.rect.width.get() - shape.rect.height.get()).abs() <= 0.01)
+        .expect("slider thumb should render as a shape");
+    let slider_hit = computed
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            super::HitInteraction::Slider { id, thumb_rect, .. } if *id == widget_id => {
+                Some(*thumb_rect)
+            }
+            _ => None,
+        })
+        .expect("slider hit region should exist");
+    let texture_index = rendered
+        .primitives
+        .commands
+        .iter()
+        .position(|command| {
+            matches!(
+                command,
+                crate::ui::widget::RenderCommand::Texture(_)
+            )
+        })
+        .expect("slider thumb shadow should render as a texture command");
+    let thumb_fill_index = rendered
+        .primitives
+        .commands
+        .iter()
+        .position(|command| match command {
+            crate::ui::widget::RenderCommand::Shape(shape) => shape.rect == thumb_fill.rect,
+            _ => false,
+        })
+        .expect("slider thumb fill should render as a shape command");
+    assert!(texture_index < thumb_fill_index);
+    assert_eq!(thumb_fill.rect, slider_hit);
+}
+
+#[test]
+fn slider_default_thumb_renders_outline_for_light_theme_visibility() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(Slider::new(50.0, 0.0, 100.0).width(dp(220.0)));
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 48.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered
+        .primitives
+        .shapes
+        .iter()
+        .any(|shape| shape.stroke_width > 0.0));
+}
+
+#[test]
+fn slider_renders_custom_colors() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let track = Color::hexa(0x334155FF);
+    let active_track = Color::hexa(0x22C55EFF);
+    let thumb = Color::hexa(0xF97316FF);
+    let tick = Color::hexa(0x38BDF8FF);
+    let label = Color::hexa(0xEAB308FF);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Slider::new(75.0, 0.0, 100.0)
+            .width(dp(220.0))
+            .show_ticks(true)
+            .show_value_label(true)
+            .style(move |mode| {
+                let mut style = SliderStyle::default_for(mode);
+                style.track = stateful(track.into());
+                style.active_track = stateful(active_track.into());
+                style.thumb = stateful(thumb.into());
+                style.tick = stateful(tick.into());
+                style.label = stateful(label.into());
+                style
+            }),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 48.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered
+        .primitives
+        .shapes
+        .iter()
+        .any(|shape| shape.color == track));
+    assert!(rendered
+        .primitives
+        .shapes
+        .iter()
+        .any(|shape| shape.color == active_track));
+    assert!(rendered
+        .primitives
+        .shapes
+        .iter()
+        .any(|shape| shape.color == thumb || shape.color == tick));
+    assert!(rendered
+        .primitives
+        .texts
+        .iter()
+        .any(|text| text.color == label));
 }
 
 #[test]

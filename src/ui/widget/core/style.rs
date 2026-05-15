@@ -1,6 +1,6 @@
 use crate::foundation::color::Color;
 use crate::ui::layout::Value;
-use crate::ui::theme::{Theme, WidgetState};
+use crate::ui::theme::{Shadow, Theme, WidgetState};
 use crate::ui::unit::Dp;
 
 #[cfg(feature = "video")]
@@ -8,7 +8,8 @@ use super::super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::super::style::{
     infer_theme_mode, ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
     FocusRingOverride, InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
-    SelectStyle as WidgetSelectStyle, TextWidgetStyle, TextareaStyle as WidgetTextareaStyle,
+    SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle, TextWidgetStyle,
+    TextareaStyle as WidgetTextareaStyle,
 };
 use super::{Text, VisualStyle};
 
@@ -73,6 +74,26 @@ pub(super) struct ResolvedSelectStyle {
 }
 
 #[derive(Clone)]
+pub(super) struct ResolvedSliderStyle {
+    pub(super) track: Color,
+    pub(super) active_track: Color,
+    pub(super) thumb: Color,
+    pub(super) thumb_shadow: Option<Shadow>,
+    pub(super) tick: Color,
+    pub(super) label: Color,
+    pub(super) focus_ring: Option<crate::theme::FocusRingStyle>,
+    pub(super) track_height: Dp,
+    pub(super) thumb_size: Dp,
+    pub(super) radius: Dp,
+    pub(super) border_width: Dp,
+    pub(super) tick_size: Dp,
+    pub(super) label_gap: Dp,
+    pub(super) min_width: Dp,
+    pub(super) min_height: Dp,
+    pub(super) text_style: crate::ui::theme::TextStyle,
+}
+
+#[derive(Clone)]
 pub(super) struct ResolvedInputStyle {
     pub(super) background: Color,
     pub(super) text: Color,
@@ -131,6 +152,15 @@ pub(super) fn resolved_select_style(
     style
         .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
         .unwrap_or_else(|| WidgetSelectStyle::default_for(infer_theme_mode(theme)))
+}
+
+pub(super) fn resolved_slider_style(
+    style: Option<&super::super::style::StyleResolver<WidgetSliderStyle>>,
+    theme: &Theme,
+) -> WidgetSliderStyle {
+    style
+        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
+        .unwrap_or_else(|| WidgetSliderStyle::default_for(infer_theme_mode(theme)))
 }
 
 pub(super) fn resolved_input_style(
@@ -208,6 +238,7 @@ pub(super) fn apply_surface_style(
     visual.background_brush = surface.background_brush.clone();
     visual.background_image = surface.background_image.clone();
     visual.background_blur = surface.background_blur.clone();
+    visual.shadow = surface.shadow.clone();
     visual.border_color = surface.border_color.clone();
     visual.border_radius = surface.border_radius.clone();
     visual.border_width = surface.border_width.clone();
@@ -374,6 +405,32 @@ pub(super) fn resolve_input_style(
         radius: style.radius.resolve(),
         padding_x: style.padding_x,
         padding_y: style.padding_y,
+        text_style: style.text_style.clone(),
+    }
+}
+
+pub(super) fn resolve_slider_style(
+    style: &WidgetSliderStyle,
+    state: WidgetState,
+    theme: &Theme,
+) -> ResolvedSliderStyle {
+    let visual_state = base_interaction_state(state);
+    ResolvedSliderStyle {
+        track: resolve_stateful_widget_color(&style.track, visual_state),
+        active_track: resolve_stateful_widget_color(&style.active_track, visual_state),
+        thumb: resolve_stateful_widget_color(&style.thumb, visual_state),
+        thumb_shadow: style.thumb_shadow.clone(),
+        tick: resolve_stateful_widget_color(&style.tick, visual_state),
+        label: resolve_stateful_widget_color(&style.label, visual_state),
+        focus_ring: resolve_focus_ring(theme, style.focus_ring.as_ref(), state),
+        track_height: style.track_height,
+        thumb_size: style.thumb_size,
+        radius: style.radius.resolve(),
+        border_width: style.border_width.resolve(),
+        tick_size: style.tick_size,
+        label_gap: style.label_gap,
+        min_width: style.min_width,
+        min_height: style.min_height,
         text_style: style.text_style.clone(),
     }
 }

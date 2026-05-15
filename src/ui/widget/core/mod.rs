@@ -41,15 +41,17 @@ use super::common::{
     CursorStyle, HitGeometry, HitInteraction, HitRegion, InteractionHandlers, LayoutNode,
     LifecycleEventHandlers, LifecycleEventState, MeasureContext, MediaEventHandlers,
     MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive, ScenePrimitives, ScrollRegion,
-    ScrollbarAxis, ScrollbarHandle, SelectOptionState, TextEditState, TextInputContentGeometry,
-    TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKey, WidgetKind, WidgetStateMap,
+    ScrollbarAxis, ScrollbarHandle, SelectOptionState, SliderValueFormatter, TextEditState,
+    TextInputContentGeometry, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKey,
+    WidgetKind, WidgetStateMap,
 };
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::style::{
     ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
     InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
-    SelectStyle as WidgetSelectStyle, SwitchStyle as WidgetSwitchStyle,
+    SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle,
+    SwitchStyle as WidgetSwitchStyle,
 };
 use super::text::{IntoTextContent, Text};
 
@@ -195,6 +197,19 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         style: WidgetSelectStyle,
     },
+    Slider {
+        value: Value<f32>,
+        min: f32,
+        max: f32,
+        step: f32,
+        show_ticks: bool,
+        show_value_label: bool,
+        tick_count: Option<usize>,
+        value_formatter: Option<SliderValueFormatter>,
+        on_change: Option<ValueCommand<VM, f32>>,
+        disabled: Value<bool>,
+        style: WidgetSliderStyle,
+    },
     TextEditor {
         controller: TextController,
         placeholder: Value<String>,
@@ -260,6 +275,18 @@ pub(crate) enum LifecycleWidgetKind {
         open: Option<Value<bool>>,
         disabled: Value<bool>,
         style: WidgetSelectStyle,
+    },
+    Slider {
+        value: Value<f32>,
+        min: f32,
+        max: f32,
+        step: f32,
+        show_ticks: bool,
+        show_value_label: bool,
+        tick_count: Option<usize>,
+        value_formatter: Option<SliderValueFormatter>,
+        disabled: Value<bool>,
+        style: WidgetSliderStyle,
     },
     TextEditor {
         placeholder: Value<String>,
@@ -405,6 +432,31 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled: disabled.clone(),
                 style: style.clone(),
             },
+            Self::Slider {
+                value,
+                min,
+                max,
+                step,
+                show_ticks,
+                show_value_label,
+                tick_count,
+                value_formatter,
+                on_change,
+                disabled,
+                style,
+            } => Self::Slider {
+                value: value.clone(),
+                min: *min,
+                max: *max,
+                step: *step,
+                show_ticks: *show_ticks,
+                show_value_label: *show_value_label,
+                tick_count: *tick_count,
+                value_formatter: value_formatter.clone(),
+                on_change: on_change.clone(),
+                disabled: disabled.clone(),
+                style: style.clone(),
+            },
             Self::TextEditor {
                 controller,
                 placeholder,
@@ -512,6 +564,29 @@ impl Clone for LifecycleWidgetKind {
                 disabled: disabled.clone(),
                 style: style.clone(),
             },
+            Self::Slider {
+                value,
+                min,
+                max,
+                step,
+                show_ticks,
+                show_value_label,
+                tick_count,
+                value_formatter,
+                disabled,
+                style,
+            } => Self::Slider {
+                value: value.clone(),
+                min: *min,
+                max: *max,
+                step: *step,
+                show_ticks: *show_ticks,
+                show_value_label: *show_value_label,
+                tick_count: *tick_count,
+                value_formatter: value_formatter.clone(),
+                disabled: disabled.clone(),
+                style: style.clone(),
+            },
             Self::TextEditor {
                 placeholder,
                 disabled,
@@ -541,6 +616,7 @@ struct CollectContext<'a, 'b> {
     focused_text_value: Option<&'a str>,
     focused_text_layout: Option<&'a TextLayoutInfo>,
     text_layout_overrides: Option<&'a HashMap<WidgetId, TextInputLayoutOverride<'a>>>,
+    active_slider_value: Option<(WidgetId, f32)>,
     caret_visible: bool,
     selected_text: Option<WidgetId>,
     selected_text_state: Option<&'a TextEditState>,
@@ -682,6 +758,7 @@ impl<VM> ResolvedSceneLayout<VM> {
                     && node.visual.background_brush.is_none()
                     && node.visual.background_image.is_none()
                     && node.visual.background_blur.resolve() == Dp::ZERO
+                    && node.visual.shadow.is_none()
                     && node.visual.opacity.resolve() == 1.0
                     && node.visual.offset.resolve() == Point::ZERO
             }
@@ -799,6 +876,7 @@ impl<VM> ResolvedSceneLayout<VM> {
         focused_text_value: Option<&str>,
         focused_text_layout: Option<&TextLayoutInfo>,
         text_layout_overrides: Option<&HashMap<WidgetId, TextInputLayoutOverride<'_>>>,
+        active_slider_value: Option<(WidgetId, f32)>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
@@ -829,6 +907,7 @@ impl<VM> ResolvedSceneLayout<VM> {
                     focused_text_value,
                     focused_text_layout,
                     text_layout_overrides,
+                    active_slider_value,
                     caret_visible,
                     selected_text,
                     selected_text_state,

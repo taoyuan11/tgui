@@ -6,7 +6,8 @@ use crate::ui::widget::style::VideoSurfaceStyle;
 use crate::ui::widget::style::{
     ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
     InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
-    SelectStyle as WidgetSelectStyle, SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle,
+    SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle,
+    SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle,
 };
 use crate::ui::widget::{Image, Text};
 
@@ -33,6 +34,7 @@ fn freeze_widget_surface_style(style: &mut WidgetSurfaceStyle) {
     freeze_option_value(&mut style.background_brush);
     freeze_option_value(&mut style.background_image);
     freeze_value(&mut style.background_blur);
+    freeze_option_value(&mut style.shadow);
     freeze_option_value(&mut style.border_color);
     freeze_option_value(&mut style.border_radius);
     freeze_option_value(&mut style.border_width);
@@ -71,6 +73,7 @@ fn freeze_visual_style(style: &mut VisualStyle) {
     freeze_option_value(&mut style.background_brush);
     freeze_option_value(&mut style.background_image);
     freeze_value(&mut style.background_blur);
+    freeze_option_value(&mut style.shadow);
     freeze_value(&mut style.opacity);
     freeze_value(&mut style.offset);
 }
@@ -150,6 +153,20 @@ fn freeze_select_style(style: &mut WidgetSelectStyle) {
     freeze_value(&mut style.selected_option_background);
     freeze_value(&mut style.border_width);
     freeze_value(&mut style.radius);
+}
+
+fn freeze_slider_style(style: &mut WidgetSliderStyle) {
+    freeze_widget_surface_style(&mut style.surface);
+    freeze_stateful_value(&mut style.track);
+    freeze_stateful_value(&mut style.active_track);
+    freeze_stateful_value(&mut style.thumb);
+    freeze_stateful_value(&mut style.tick);
+    freeze_stateful_value(&mut style.label);
+    if let Some(shadow) = style.thumb_shadow.as_mut() {
+        *shadow = shadow.clone();
+    }
+    freeze_value(&mut style.radius);
+    freeze_value(&mut style.border_width);
 }
 
 fn freeze_input_style(style: &mut WidgetInputStyle) {
@@ -348,6 +365,38 @@ fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> LifecycleWidgetKi
                 placeholder,
                 options,
                 open,
+                disabled,
+                style,
+            }
+        }
+        ResolvedWidgetKind::Slider {
+            value,
+            min,
+            max,
+            step,
+            show_ticks,
+            show_value_label,
+            tick_count,
+            value_formatter,
+            disabled,
+            style,
+            ..
+        } => {
+            let mut value = value.clone();
+            let mut disabled = disabled.clone();
+            let mut style = style.clone();
+            freeze_value(&mut value);
+            freeze_value(&mut disabled);
+            freeze_slider_style(&mut style);
+            LifecycleWidgetKind::Slider {
+                value,
+                min: *min,
+                max: *max,
+                step: *step,
+                show_ticks: *show_ticks,
+                show_value_label: *show_value_label,
+                tick_count: *tick_count,
+                value_formatter: value_formatter.clone(),
                 disabled,
                 style,
             }
@@ -591,6 +640,45 @@ impl<VM> PartialEq for ResolvedWidgetKind<VM> {
                     )
             }
             (
+                Self::Slider {
+                    value: left_value,
+                    min: left_min,
+                    max: left_max,
+                    step: left_step,
+                    show_ticks: left_show_ticks,
+                    show_value_label: left_show_value_label,
+                    tick_count: left_tick_count,
+                    value_formatter: left_value_formatter,
+                    disabled: left_disabled,
+                    style: left_style,
+                    ..
+                },
+                Self::Slider {
+                    value: right_value,
+                    min: right_min,
+                    max: right_max,
+                    step: right_step,
+                    show_ticks: right_show_ticks,
+                    show_value_label: right_show_value_label,
+                    tick_count: right_tick_count,
+                    value_formatter: right_value_formatter,
+                    disabled: right_disabled,
+                    style: right_style,
+                    ..
+                },
+            ) => {
+                left_value == right_value
+                    && left_min == right_min
+                    && left_max == right_max
+                    && left_step == right_step
+                    && left_show_ticks == right_show_ticks
+                    && left_show_value_label == right_show_value_label
+                    && left_tick_count == right_tick_count
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+                    && left_value_formatter.is_some() == right_value_formatter.is_some()
+            }
+            (
                 Self::TextEditor {
                     controller: left_controller,
                     placeholder: left_placeholder,
@@ -788,6 +876,43 @@ impl PartialEq for LifecycleWidgetKind {
                     )
             }
             (
+                Self::Slider {
+                    value: left_value,
+                    min: left_min,
+                    max: left_max,
+                    step: left_step,
+                    show_ticks: left_show_ticks,
+                    show_value_label: left_show_value_label,
+                    tick_count: left_tick_count,
+                    value_formatter: left_value_formatter,
+                    disabled: left_disabled,
+                    style: left_style,
+                },
+                Self::Slider {
+                    value: right_value,
+                    min: right_min,
+                    max: right_max,
+                    step: right_step,
+                    show_ticks: right_show_ticks,
+                    show_value_label: right_show_value_label,
+                    tick_count: right_tick_count,
+                    value_formatter: right_value_formatter,
+                    disabled: right_disabled,
+                    style: right_style,
+                },
+            ) => {
+                left_value == right_value
+                    && left_min == right_min
+                    && left_max == right_max
+                    && left_step == right_step
+                    && left_show_ticks == right_show_ticks
+                    && left_show_value_label == right_show_value_label
+                    && left_tick_count == right_tick_count
+                    && left_disabled == right_disabled
+                    && left_style == right_style
+                    && left_value_formatter.is_some() == right_value_formatter.is_some()
+            }
+            (
                 Self::TextEditor {
                     placeholder: left_placeholder,
                     disabled: left_disabled,
@@ -866,6 +991,10 @@ impl<VM> ResolvedElement<VM> {
                 id: self.id,
                 selected_label: selected_label.clone(),
                 placeholder: placeholder.clone(),
+                style: style.clone(),
+            },
+            ResolvedWidgetKind::Slider { style, .. } => MeasureContext::Slider {
+                id: self.id,
                 style: style.clone(),
             },
             ResolvedWidgetKind::TextEditor {
@@ -976,6 +1105,9 @@ impl<VM> ResolvedElement<VM> {
         let default_min_width = match &self.kind {
             ResolvedWidgetKind::Select { .. } if self.layout.min_width.is_none() => {
                 Dimension::from_length(0.0)
+            }
+            ResolvedWidgetKind::Slider { style, .. } if self.layout.min_width.is_none() => {
+                Dimension::from_length(style.min_width.get())
             }
             _ => Dimension::AUTO,
         };
@@ -1293,6 +1425,7 @@ impl<VM> ResolvedElement<VM> {
             | ResolvedWidgetKind::Radio { disabled, .. }
             | ResolvedWidgetKind::Switch { disabled, .. }
             | ResolvedWidgetKind::Select { disabled, .. }
+            | ResolvedWidgetKind::Slider { disabled, .. }
             | ResolvedWidgetKind::TextEditor { disabled, .. } => disabled.resolve(),
             _ => false,
         };
@@ -1323,6 +1456,12 @@ impl<VM> ResolvedElement<VM> {
         let select_style = match &self.kind {
             ResolvedWidgetKind::Select { style, .. } => {
                 Some(resolve_select_style(style, widget_state, context.theme))
+            }
+            _ => None,
+        };
+        let slider_style = match &self.kind {
+            ResolvedWidgetKind::Slider { style, .. } => {
+                Some(resolve_slider_style(style, widget_state, context.theme))
             }
             _ => None,
         };
@@ -1465,6 +1604,27 @@ impl<VM> ResolvedElement<VM> {
                             .resolve_dp(switch_style.border_width.resolve())
                     })
             }
+            ResolvedWidgetKind::Slider { .. } => self
+                .visual
+                .border_width
+                .as_ref()
+                .map(|width| {
+                    width.resolve_widget_to_logical(
+                        context.animations,
+                        self.id,
+                        WidgetProperty::BorderWidth,
+                        context.now,
+                        context.units,
+                    )
+                })
+                .unwrap_or_else(|| {
+                    context.units.resolve_dp(
+                        slider_style
+                            .as_ref()
+                            .expect("slider style should be resolved for slider widgets")
+                            .border_width,
+                    )
+                }),
             _ => self
                 .visual
                 .border_width
@@ -1528,6 +1688,12 @@ impl<VM> ResolvedElement<VM> {
                 ResolvedWidgetKind::Switch { style, .. } => {
                     context.units.resolve_dp(style.radius.resolve())
                 }
+                ResolvedWidgetKind::Slider { .. } => context.units.resolve_dp(
+                    slider_style
+                        .as_ref()
+                        .expect("slider style should be resolved for slider widgets")
+                        .radius,
+                ),
                 _ => 0.0,
             })
             .max(0.0);
@@ -1633,6 +1799,19 @@ impl<VM> ResolvedElement<VM> {
                     })
                     .unwrap_or(switch_style)
             }
+            ResolvedWidgetKind::Slider { .. } => self
+                .visual
+                .border_color
+                .as_ref()
+                .map(|color| {
+                    color.resolve_widget(
+                        context.animations,
+                        self.id,
+                        WidgetProperty::BorderColor,
+                        context.now,
+                    )
+                })
+                .unwrap_or(Color::TRANSPARENT),
             _ => self
                 .visual
                 .border_color
@@ -1735,6 +1914,18 @@ impl<VM> ResolvedElement<VM> {
                 Some(default_switch_transition()),
                 context.now,
             ),
+            ResolvedWidgetKind::Slider { .. } => self
+                .background
+                .as_ref()
+                .map(|background| {
+                    background.resolve_widget(
+                        context.animations,
+                        self.id,
+                        WidgetProperty::Background,
+                        context.now,
+                    )
+                })
+                .unwrap_or(Color::TRANSPARENT),
             _ => self
                 .background
                 .as_ref()
@@ -1768,6 +1959,7 @@ impl<VM> ResolvedElement<VM> {
                 context.units,
             )
             .max(0.0);
+        let shadow = self.visual.shadow.as_ref().map(Value::resolve);
         let background_brush = self
             .visual
             .background_brush
@@ -1778,6 +1970,23 @@ impl<VM> ResolvedElement<VM> {
             .background_image
             .as_ref()
             .map(|image| image.resolve_widget());
+
+        if let Some(shadow) = shadow {
+            if let Some(texture) = rounded_rect_shadow_texture(
+                background_frame,
+                background_radius,
+                RoundedRectShadowSpec {
+                    shadow,
+                    opacity,
+                    clip_rect: primitive_clip,
+                    clip_mask: primitive_clip_mask,
+                },
+                context.media,
+                context.units,
+            ) {
+                computed.scene.push_texture(texture);
+            }
+        }
 
         if background_blur > 0.0
             && background_frame.width > Dp::ZERO
@@ -1850,6 +2059,9 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Select { .. } => select_style
                 .as_ref()
                 .and_then(|style| style.focus_ring.clone()),
+            ResolvedWidgetKind::Slider { .. } => slider_style
+                .as_ref()
+                .and_then(|style| style.focus_ring.clone()),
             ResolvedWidgetKind::TextEditor { .. } => None,
             ResolvedWidgetKind::Switch { style, .. } => {
                 resolve_focus_ring(context.theme, style.focus_ring.as_ref(), widget_state)
@@ -1889,6 +2101,7 @@ impl<VM> ResolvedElement<VM> {
                             | ResolvedWidgetKind::Radio { .. }
                             | ResolvedWidgetKind::Switch { .. }
                             | ResolvedWidgetKind::Select { .. }
+                            | ResolvedWidgetKind::Slider { .. }
                             | ResolvedWidgetKind::TextEditor { .. }
                     ),
                 },
@@ -2384,6 +2597,82 @@ impl<VM> ResolvedElement<VM> {
                             interactions: self.interactions.clone(),
                             on_change: on_change.clone(),
                             current: checked.resolve(),
+                        },
+                    });
+                }
+            }
+            ResolvedWidgetKind::Slider {
+                value,
+                min,
+                max,
+                step,
+                show_ticks,
+                show_value_label,
+                tick_count,
+                value_formatter,
+                on_change,
+                ..
+            } => {
+                let slider_style = slider_style
+                    .as_ref()
+                    .expect("slider style should be resolved for slider widgets");
+                let resolved_value =
+                    super::super::common::slider_resolve_value(value.resolve(), *min, *max, *step);
+                let display_value = context
+                    .active_slider_value
+                    .filter(|(widget_id, _)| *widget_id == self.id)
+                    .map(|(_, raw_value)| {
+                        super::super::common::slider_resolve_value(raw_value, *min, *max, *step)
+                    })
+                    .unwrap_or(resolved_value);
+                let value_label = if *show_value_label {
+                    Some(
+                        value_formatter
+                            .as_ref()
+                            .map(|formatter| formatter.format(display_value))
+                            .unwrap_or_else(|| format!("{display_value:.2}")),
+                    )
+                } else {
+                    None
+                };
+                let geometry = push_slider_primitives(
+                    frame,
+                    display_value,
+                    *min,
+                    *max,
+                    *step,
+                    *show_ticks,
+                    *show_value_label,
+                    super::super::common::slider_tick_count(*min, *max, *step, *tick_count),
+                    value_label.as_deref(),
+                    slider_style,
+                    opacity,
+                    self.id,
+                    primitive_clip,
+                    primitive_clip_mask,
+                    context.font_manager,
+                    context.theme,
+                    context.units,
+                    context.animations,
+                    context.now,
+                    &mut computed.scene,
+                    context.media,
+                );
+                if !disabled {
+                    computed.hit_regions.push(HitRegion {
+                        rect: frame,
+                        clip_rect: primitive_clip,
+                        geometry: HitGeometry::Rect,
+                        interaction: HitInteraction::Slider {
+                            id: self.id,
+                            interactions: self.interactions.clone(),
+                            on_change: on_change.clone(),
+                            value: display_value,
+                            min: *min,
+                            max: *max,
+                            step: *step,
+                            track_rect: geometry.track_rect,
+                            thumb_rect: geometry.thumb_rect,
                         },
                     });
                 }

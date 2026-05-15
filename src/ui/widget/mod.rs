@@ -9,6 +9,8 @@ mod image;
 mod input;
 mod radio;
 mod select;
+mod slider;
+mod slider_shared;
 mod style;
 mod switch;
 mod text;
@@ -35,6 +37,7 @@ pub use canvas::{
 };
 pub use checkbox::Checkbox;
 pub(crate) use common::{
+    slider_effective_step, slider_resolve_value, slider_value_from_normalized,
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     BackdropBlurPrimitive, BrushPrimitiveData, CanvasCompositePrimitive,
     CanvasItemInteractionHandlers, CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask,
@@ -57,9 +60,10 @@ pub use image::Image;
 pub use input::Input;
 pub use radio::{Radio, RadioGroup, RadioOption};
 pub use select::{Select, SelectOption};
+pub use slider::Slider;
 pub use style::{
     ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, FocusRingOverride, ImageStyle,
-    InputStyle, RadioStyle, SelectStyle, SwitchStyle, TextWidgetStyle, TextareaStyle,
+    InputStyle, RadioStyle, SelectStyle, SliderStyle, SwitchStyle, TextWidgetStyle, TextareaStyle,
     VideoSurfaceStyle, WidgetSurfaceStyle,
 };
 pub use switch::Switch;

@@ -396,6 +396,7 @@ impl<VM> WidgetTree<VM> {
             None,
             None,
             None,
+            None,
             selected_text,
             selected_text_state,
             caret_visible,
@@ -422,6 +423,7 @@ impl<VM> WidgetTree<VM> {
         focused_text_value: Option<&str>,
         focused_text_layout: Option<&TextLayoutInfo>,
         text_layout_overrides: Option<&HashMap<WidgetId, TextInputLayoutOverride<'_>>>,
+        active_slider_value: Option<(WidgetId, f32)>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
@@ -443,6 +445,7 @@ impl<VM> WidgetTree<VM> {
             focused_text_value,
             focused_text_layout,
             text_layout_overrides,
+            active_slider_value,
             selected_text,
             selected_text_state,
             caret_visible,
@@ -468,6 +471,7 @@ impl<VM> WidgetTree<VM> {
         focused_text_value: Option<&str>,
         focused_text_layout: Option<&TextLayoutInfo>,
         text_layout_overrides: Option<&HashMap<WidgetId, TextInputLayoutOverride<'_>>>,
+        active_slider_value: Option<(WidgetId, f32)>,
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
@@ -490,6 +494,7 @@ impl<VM> WidgetTree<VM> {
                         focused_text_value,
                         focused_text_layout,
                         text_layout_overrides,
+                        active_slider_value,
                         caret_visible,
                         selected_text,
                         selected_text_state,
@@ -580,6 +585,7 @@ impl<VM> WidgetTree<VM> {
             focused_text_value,
             focused_text_layout,
             text_layout_overrides,
+            None,
             selected_text,
             selected_text_state,
             caret_visible,
@@ -911,19 +917,23 @@ impl<VM> WidgetTree<VM> {
         media: &MediaManager,
         theme: &Theme,
     ) -> Vec<MediaEventState<VM>> {
-        let mut states = Vec::new();
-        self.root
-            .resolve(theme)
-            .collect_media_event_states(media, &mut states);
-        states
+        with_widget_stack(|| {
+            let mut states = Vec::new();
+            self.root
+                .resolve(theme)
+                .collect_media_event_states(media, &mut states);
+            states
+        })
     }
 
     pub(crate) fn lifecycle_event_states(&self, theme: &Theme) -> Vec<LifecycleEventState<VM>> {
-        let mut states = Vec::new();
-        self.root
-            .resolve(theme)
-            .collect_lifecycle_event_states(&mut states);
-        states
+        with_widget_stack(|| {
+            let mut states = Vec::new();
+            self.root
+                .resolve(theme)
+                .collect_lifecycle_event_states(&mut states);
+            states
+        })
     }
 
     #[allow(dead_code)]

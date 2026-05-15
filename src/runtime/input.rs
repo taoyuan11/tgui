@@ -34,7 +34,7 @@ use super::{
     canvas_mouse_button, cursor_icon, is_primary_shortcut_modifier, mouse_scroll_delta,
     text_cursor_index_at_point, BoundRuntimeHandler, CanvasPointerContext, ClickHandler,
     FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
-    PendingClick, ScrollbarDrag, SmoothScrollState, TextSelectionDrag,
+    PendingClick, ScrollbarDrag, SliderDrag, SmoothScrollState, TextSelectionDrag,
 };
 pub(super) const INPUT_CARET_WIDTH: f32 = 2.0;
 use crate::platform::backend::event_loop::ActiveEventLoop;
@@ -1601,6 +1601,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 | HitInteraction::Radio {
                     id, interactions, ..
                 }
+                | HitInteraction::Slider {
+                    id, interactions, ..
+                }
                 | HitInteraction::TextInput {
                     id, interactions, ..
                 }
@@ -1655,6 +1658,148 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
+    fn focused_slider_hit(&mut self) -> Option<HitInteraction<VM>> {
+        let widget_id = self.focused_widget_id()?;
+        let computed = self.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .find_map(|region| match &region.interaction {
+                HitInteraction::Slider { id, .. } if *id == widget_id => {
+                    Some(region.interaction.clone())
+                }
+                _ => None,
+            })
+    }
+
+    fn slider_value_for_position(
+        &self,
+        position: Point,
+        track_rect: Rect,
+        min: f32,
+        max: f32,
+        step: f32,
+    ) -> f32 {
+        if track_rect.width <= Dp::ZERO {
+            return min;
+        }
+        let normalized =
+            ((position.x - track_rect.x).get() / track_rect.width.get()).clamp(0.0, 1.0);
+        crate::ui::widget::slider_value_from_normalized(normalized, min, max, step)
+    }
+
+    fn apply_slider_value(
+        &mut self,
+        command: Option<&ValueCommand<VM, f32>>,
+        value: f32,
+        min: f32,
+        max: f32,
+        step: f32,
+        invalidate_scene: bool,
+    ) -> bool {
+        let value = crate::ui::widget::slider_resolve_value(value, min, max, step);
+        if let Some(command) = command {
+            if invalidate_scene {
+                self.execute_value_command(command, value);
+            } else {
+                self.execute_value_command_without_invalidation(command, value);
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    fn begin_slider_drag(
+        &mut self,
+        widget_id: WidgetId,
+        on_change: Option<ValueCommand<VM, f32>>,
+        min: f32,
+        max: f32,
+        step: f32,
+        track_rect: Rect,
+        current_value: f32,
+    ) -> bool {
+        self.active_slider_drag = Some(SliderDrag {
+            widget_id,
+            on_change,
+            min,
+            max,
+            step,
+            track_rect,
+            current_value,
+        });
+        true
+    }
+
+    fn handle_slider_drag(&mut self) -> bool {
+        let Some(drag) = self.active_slider_drag.as_ref() else {
+            return false;
+        };
+        let Some(position) = self.cursor_position else {
+            return false;
+        };
+        let track_rect = drag.track_rect;
+        let min = drag.min;
+        let max = drag.max;
+        let step = drag.step;
+        let current_value = drag.current_value;
+        let on_change = drag.on_change.clone();
+        let value = self.slider_value_for_position(position, track_rect, min, max, step);
+        if (value - current_value).abs() <= f32::EPSILON {
+            return false;
+        }
+        let changed = self.apply_slider_value(on_change.as_ref(), value, min, max, step, false);
+        if changed {
+            if let Some(active) = self.active_slider_drag.as_mut() {
+                active.current_value = value;
+            }
+            let _ = self.patch_active_slider_scene(Instant::now());
+            return true;
+        }
+        false
+    }
+
+    fn end_slider_drag(&mut self) -> bool {
+        if self.active_slider_drag.take().is_none() {
+            return false;
+        }
+        self.invalidate_scene_with_reason("end_slider_drag");
+        true
+    }
+
+    fn adjust_focused_slider(&mut self, direction: i32, set_to_edge: Option<bool>) -> bool {
+        let Some(HitInteraction::Slider {
+            on_change,
+            value,
+            min,
+            max,
+            step,
+            ..
+        }) = self.focused_slider_hit()
+        else {
+            return false;
+        };
+        let next_value = if let Some(max_edge) = set_to_edge {
+            if max_edge {
+                max
+            } else {
+                min
+            }
+        } else if let Some(step) = crate::ui::widget::slider_effective_step(min, max, step) {
+            value + (step * direction as f32)
+        } else {
+            let range = (max - min).abs();
+            if range <= f32::EPSILON {
+                min
+            } else {
+                value + ((range / 100.0).max(f32::EPSILON) * direction as f32)
+            }
+        };
+        self.apply_slider_value(on_change.as_ref(), next_value, min, max, step, true)
+    }
+
     pub(super) fn handle_keyboard_input(&mut self, event: &KeyEvent) -> bool {
         let started_at = text_profile_enabled().then_some(Instant::now());
         if event.state != ElementState::Pressed {
@@ -1685,52 +1830,66 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             PhysicalKey::Code(KeyCode::Backspace) => self.delete_backward_at_focused_input(),
             PhysicalKey::Code(KeyCode::Delete) => self.delete_forward_at_focused_input(),
             PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                let extend = self.modifiers.shift_key();
-                self.move_focused_input_cursor(
-                    |buffer: &RopeBuffer, state: &TextEditState| {
-                        if let Some((start, _)) = state.selection_range() {
-                            if extend {
-                                buffer.prev_char_boundary_byte(state.cursor)
+                if self.adjust_focused_slider(-1, None) {
+                    true
+                } else {
+                    let extend = self.modifiers.shift_key();
+                    self.move_focused_input_cursor(
+                        |buffer: &RopeBuffer, state: &TextEditState| {
+                            if let Some((start, _)) = state.selection_range() {
+                                if extend {
+                                    buffer.prev_char_boundary_byte(state.cursor)
+                                } else {
+                                    start
+                                }
                             } else {
-                                start
+                                buffer.prev_char_boundary_byte(state.cursor)
                             }
-                        } else {
-                            buffer.prev_char_boundary_byte(state.cursor)
-                        }
-                    },
-                    extend,
-                )
+                        },
+                        extend,
+                    )
+                }
             }
             PhysicalKey::Code(KeyCode::ArrowRight) => {
-                let extend = self.modifiers.shift_key();
-                self.move_focused_input_cursor(
-                    |buffer: &RopeBuffer, state: &TextEditState| {
-                        if let Some((_, end)) = state.selection_range() {
-                            if extend {
-                                buffer.next_char_boundary_byte(state.cursor)
+                if self.adjust_focused_slider(1, None) {
+                    true
+                } else {
+                    let extend = self.modifiers.shift_key();
+                    self.move_focused_input_cursor(
+                        |buffer: &RopeBuffer, state: &TextEditState| {
+                            if let Some((_, end)) = state.selection_range() {
+                                if extend {
+                                    buffer.next_char_boundary_byte(state.cursor)
+                                } else {
+                                    end
+                                }
                             } else {
-                                end
+                                buffer.next_char_boundary_byte(state.cursor)
                             }
-                        } else {
-                            buffer.next_char_boundary_byte(state.cursor)
-                        }
-                    },
-                    extend,
-                )
+                        },
+                        extend,
+                    )
+                }
             }
             PhysicalKey::Code(KeyCode::ArrowUp) => {
-                self.move_focused_input_cursor_vertically(-1, self.modifiers.shift_key())
+                self.adjust_focused_slider(1, None)
+                    || self.move_focused_input_cursor_vertically(-1, self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::ArrowDown) => {
-                self.move_focused_input_cursor_vertically(1, self.modifiers.shift_key())
+                self.adjust_focused_slider(-1, None)
+                    || self.move_focused_input_cursor_vertically(1, self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::Home) => {
-                self.move_focused_input_cursor(|_, _| 0, self.modifiers.shift_key())
+                self.adjust_focused_slider(0, Some(false))
+                    || self.move_focused_input_cursor(|_, _| 0, self.modifiers.shift_key())
             }
-            PhysicalKey::Code(KeyCode::End) => self.move_focused_input_cursor(
-                |buffer: &RopeBuffer, _state: &TextEditState| buffer.len_bytes(),
-                self.modifiers.shift_key(),
-            ),
+            PhysicalKey::Code(KeyCode::End) => {
+                self.adjust_focused_slider(0, Some(true))
+                    || self.move_focused_input_cursor(
+                        |buffer: &RopeBuffer, _state: &TextEditState| buffer.len_bytes(),
+                        self.modifiers.shift_key(),
+                    )
+            }
             PhysicalKey::Code(KeyCode::KeyA) if is_primary_shortcut_modifier(self.modifiers) => {
                 self.select_all_focused_input()
             }
@@ -1819,7 +1978,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 | KeyCode::ArrowDown
                 | KeyCode::Home
                 | KeyCode::End,
-            ) => self.focused_text_input_id().is_some(),
+            ) => self.focused_text_input_id().is_some() || self.focused_slider_hit().is_some(),
             _ if !is_primary_shortcut_modifier(self.modifiers)
                 && !self.modifiers.alt_key()
                 && self.focused_text_input_id().is_some() =>
@@ -2028,6 +2187,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     id, interactions, ..
                 }
                 | HitInteraction::Radio {
+                    id, interactions, ..
+                }
+                | HitInteraction::Slider {
                     id, interactions, ..
                 }
                 | HitInteraction::TextInput {
@@ -2920,6 +3082,34 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             click_handler,
             select_toggle,
             selectable_text,
+            slider_drag,
+        ): (
+            WidgetId,
+            InteractionHandlers<VM>,
+            Option<WidgetId>,
+            Option<Command<VM>>,
+            Option<ClickHandler<VM>>,
+            Option<(WidgetId, bool, Option<ValueCommand<VM, bool>>)>,
+            Option<(
+                WidgetId,
+                Rect,
+                crate::ui::layout::Insets,
+                Text,
+                String,
+                bool,
+                bool,
+                bool,
+                usize,
+            )>,
+            Option<(
+                WidgetId,
+                Option<ValueCommand<VM, f32>>,
+                f32,
+                f32,
+                f32,
+                Rect,
+                f32,
+            )>,
         ) = match hit {
             HitInteraction::Widget {
                 id,
@@ -2931,6 +3121,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 focusable.then_some(id),
                 focusable.then_some(interactions.on_focus.clone()).flatten(),
                 interactions.on_click.clone().map(ClickHandler::Command),
+                None,
                 None,
                 None,
             ),
@@ -2970,6 +3161,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             id, frame, padding, text_style, text, false, false, false, cursor,
                         )
                     }),
+                    None,
                 )
             }
             HitInteraction::Switch {
@@ -2986,6 +3178,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .clone()
                     .map(|command| ClickHandler::Toggle(command, !current))
                     .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
+                None,
                 None,
                 None,
             ),
@@ -3005,6 +3198,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
                 None,
                 None,
+                None,
             ),
             HitInteraction::Radio {
                 id,
@@ -3022,6 +3216,27 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
                 None,
                 None,
+                None,
+            ),
+            HitInteraction::Slider {
+                id,
+                interactions,
+                on_change,
+                value,
+                min,
+                max,
+                step,
+                track_rect,
+                ..
+            } => (
+                id,
+                interactions.clone(),
+                Some(id),
+                interactions.on_focus.clone(),
+                interactions.on_click.clone().map(ClickHandler::Command),
+                None,
+                None,
+                Some((id, on_change.clone(), min, max, step, track_rect, value)),
             ),
             HitInteraction::SelectTrigger {
                 id,
@@ -3037,6 +3252,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     interactions.on_focus.clone(),
                     interactions.on_click.clone().map(ClickHandler::Command),
                     Some((id, !is_open, on_open_change.clone())),
+                    None,
                     None,
                 )
             }
@@ -3085,6 +3301,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         cursor,
                     )
                 }),
+                None,
             ),
             HitInteraction::SelectOption {
                 id,
@@ -3103,6 +3320,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     on_open_change: on_open_change.clone(),
                 }),
                 Some((id, false, on_open_change.clone())),
+                None,
                 None,
             ),
             HitInteraction::Disabled { .. } => unreachable!("disabled hit handled above"),
@@ -3135,6 +3353,30 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let _ = self.set_select_open_state(select_id, next_open, on_open_change.as_ref());
         }
         self.pressed_widget = Some(widget_id);
+
+        if let Some((slider_id, on_change, min, max, step, track_rect, current_value)) = slider_drag
+        {
+            if let Some(position) = pointer_position {
+                self.begin_slider_drag(
+                    slider_id,
+                    on_change.clone(),
+                    min,
+                    max,
+                    step,
+                    track_rect,
+                    current_value,
+                );
+                let value = self.slider_value_for_position(position, track_rect, min, max, step);
+                if (value - current_value).abs() > f32::EPSILON
+                    && self.apply_slider_value(on_change.as_ref(), value, min, max, step, false)
+                {
+                    if let Some(active) = self.active_slider_drag.as_mut() {
+                        active.current_value = value;
+                    }
+                    let _ = self.patch_active_slider_scene(Instant::now());
+                }
+            }
+        }
 
         if let Some((
             widget_id,
@@ -3275,6 +3517,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         needs_redraw |= self.handle_scrollbar_drag();
                         needs_redraw |= self.sync_scrollbar_hover();
                         needs_redraw |= self.update_cursor_icon();
+                    } else if self.active_slider_drag.is_some() {
+                        needs_redraw |= self.handle_slider_drag();
+                        needs_redraw |= self.handle_hover(viewport);
+                        needs_redraw |= self.update_cursor_icon();
                     } else if self.active_canvas_drag.is_some() {
                         needs_redraw |= self.handle_canvas_drag();
                         needs_redraw |= self.handle_hover(viewport);
@@ -3344,6 +3590,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             WindowEvent::Focused(false) => {
                 self.end_scrollbar_drag();
+                self.end_slider_drag();
                 self.end_canvas_drag();
                 self.pressed_widget = None;
                 self.update_focus(None, None, false);
@@ -3387,6 +3634,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     self.handle_canvas_mouse_release(canvas_button);
                 }
                 self.end_scrollbar_drag();
+                self.end_slider_drag();
                 self.pressed_widget = None;
                 self.end_text_selection_drag();
                 self.handle_hover(self.viewport_rect());

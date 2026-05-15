@@ -44,6 +44,7 @@ const MAX_SVG_RASTER_CACHE_ENTRIES: usize = 4;
 // oscillating between eviction and background re-rasterization while scrolling.
 const MAX_RASTER_CACHE_ENTRIES: usize = 8;
 const MAX_CANVAS_SHADOW_CACHE_ENTRIES: usize = 16;
+const MAX_WIDGET_SHADOW_CACHE_ENTRIES: usize = 24;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MediaSource {
@@ -360,6 +361,7 @@ pub(crate) struct MediaManager {
     invalidation: InvalidationSignal,
     images: Mutex<HashMap<MediaSource, Arc<Mutex<ImageEntry>>>>,
     canvas_shadows: Mutex<Vec<CanvasShadowEntry>>,
+    widget_shadows: Mutex<Vec<WidgetShadowEntry>>,
 }
 
 impl MediaManager {
@@ -368,6 +370,7 @@ impl MediaManager {
             invalidation,
             images: Mutex::new(HashMap::new()),
             canvas_shadows: Mutex::new(Vec::new()),
+            widget_shadows: Mutex::new(Vec::new()),
         }
     }
 
@@ -464,9 +467,71 @@ impl MediaManager {
 
         Ok(Some(texture))
     }
+
+    pub(crate) fn widget_shadow_texture<F>(
+        &self,
+        cache_key: u64,
+        width: u32,
+        height: u32,
+        render: F,
+    ) -> Result<Option<Arc<TextureFrame>>, TguiError>
+    where
+        F: FnOnce() -> Result<TextureFrame, TguiError>,
+    {
+        if width == 0 || height == 0 {
+            return Ok(None);
+        }
+
+        let mut cache = self
+            .widget_shadows
+            .lock()
+            .expect("widget shadow cache lock poisoned");
+        if let Some(entry) = cache.iter_mut().find(|entry| {
+            entry.cache_key == cache_key && entry.width == width && entry.height == height
+        }) {
+            entry.last_used = entry.last_used.saturating_add(1);
+            return Ok(Some(entry.texture.clone()));
+        }
+
+        let texture = Arc::new(render()?);
+        let next_tick = cache
+            .iter()
+            .map(|entry| entry.last_used)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        cache.push(WidgetShadowEntry {
+            cache_key,
+            width,
+            height,
+            texture: texture.clone(),
+            last_used: next_tick,
+        });
+        while cache.len() > MAX_WIDGET_SHADOW_CACHE_ENTRIES {
+            if let Some((oldest_index, _)) = cache
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, entry)| entry.last_used)
+            {
+                cache.remove(oldest_index);
+            } else {
+                break;
+            }
+        }
+
+        Ok(Some(texture))
+    }
 }
 
 struct CanvasShadowEntry {
+    cache_key: u64,
+    width: u32,
+    height: u32,
+    texture: Arc<TextureFrame>,
+    last_used: u64,
+}
+
+struct WidgetShadowEntry {
     cache_key: u64,
     width: u32,
     height: u32,

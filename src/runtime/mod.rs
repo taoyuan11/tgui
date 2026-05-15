@@ -474,6 +474,7 @@ pub struct BoundRuntimeHandler<VM> {
     hovered_widgets: Vec<HoveredWidget<VM>>,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
+    active_slider_drag: Option<SliderDrag<VM>>,
     active_canvas_drag: Option<ActiveCanvasDrag<VM>>,
     active_key_repeat: Option<ActiveKeyRepeat>,
     pending_click: Option<PendingClick<VM>>,
@@ -743,6 +744,17 @@ struct ActiveCanvasDrag<VM> {
     on_drag_start: Option<ValueCommand<VM, CanvasDragEvent>>,
     on_drag: Option<ValueCommand<VM, CanvasDragEvent>>,
     on_drag_end: Option<ValueCommand<VM, CanvasDragEvent>>,
+}
+
+#[derive(Clone)]
+struct SliderDrag<VM> {
+    widget_id: WidgetId,
+    on_change: Option<ValueCommand<VM, f32>>,
+    min: f32,
+    max: f32,
+    step: f32,
+    track_rect: Rect,
+    current_value: f32,
 }
 
 struct FocusedWidget<VM> {
@@ -1050,6 +1062,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             hovered_widgets: Vec::new(),
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
+            active_slider_drag: None,
             active_canvas_drag: None,
             active_key_repeat: None,
             pending_click: None,
@@ -1719,6 +1732,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 return false;
             };
             let collect_root_started_at = text_profile_enabled().then_some(Instant::now());
+            let active_slider_value = self.active_slider_value_override();
             let Some(cache) = layout.collect_scene_cache_for_widget_with_focus_value(
                 *root,
                 &self.font_manager,
@@ -1737,6 +1751,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 focused_text_value,
                 focused_text_layout,
                 Some(&text_layout_overrides),
+                active_slider_value,
                 self.selected_text,
                 selected_text_state.as_ref(),
                 caret_visible,
@@ -1983,6 +1998,31 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         roots
     }
 
+    fn active_slider_value_override(&self) -> Option<(WidgetId, f32)> {
+        self.active_slider_drag
+            .as_ref()
+            .map(|drag| (drag.widget_id, drag.current_value))
+    }
+
+    fn patch_active_slider_scene(&mut self, now: Instant) -> bool {
+        let Some(drag) = self.active_slider_drag.as_ref() else {
+            return false;
+        };
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
+        };
+        let Some(layout) = cached.layout.as_ref() else {
+            return false;
+        };
+        let mut affected_ids = HashSet::new();
+        affected_ids.insert(drag.widget_id);
+        let roots = self.highest_layout_roots(layout, &affected_ids);
+        if roots.is_empty() {
+            return false;
+        }
+        self.patch_cached_scene_for_roots(&roots, now, true)
+    }
+
     fn prune_removed_widget_state(&mut self, removed_ids: &HashSet<WidgetId>) {
         if removed_ids.is_empty() {
             return;
@@ -2016,6 +2056,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or(false)
         {
             self.active_scrollbar_drag = None;
+        }
+        if self
+            .active_slider_drag
+            .as_ref()
+            .map(|drag| removed_ids.contains(&drag.widget_id))
+            .unwrap_or(false)
+        {
+            self.active_slider_drag = None;
         }
         if self
             .pressed_widget
@@ -2513,6 +2561,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             Self::stable_text_layout_overrides(&self.text_input_buffers);
                         let mut collected = {
                             let collect_started_at = Instant::now();
+                            let active_slider_value = self.active_slider_value_override();
                             let collected = tree.collect_scene_cache_from_layout_with_focus_value(
                                 &self.font_manager,
                                 layout,
@@ -2530,6 +2579,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 focused_text_value,
                                 focused_text_layout,
                                 Some(&text_layout_overrides),
+                                active_slider_value,
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 caret_visible,
@@ -2557,6 +2607,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 Self::stable_text_layout_overrides(&self.text_input_buffers);
                             collected = {
                                 let collect_started_at = Instant::now();
+                                let active_slider_value = self.active_slider_value_override();
                                 let collected = tree
                                     .collect_scene_cache_from_layout_with_focus_value(
                                         &self.font_manager,
@@ -2575,6 +2626,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                         actual_focused_text_value,
                                         actual_focused_text_layout,
                                         Some(&text_layout_overrides),
+                                        active_slider_value,
                                         self.selected_text,
                                         selected_text_state.as_ref(),
                                         actual_caret_visible,
@@ -2610,6 +2662,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             Self::stable_text_layout_overrides(&self.text_input_buffers);
                         let collected = {
                             let collect_started_at = Instant::now();
+                            let active_slider_value = self.active_slider_value_override();
                             let collected = tree.collect_scene_cache_from_layout_with_focus_value(
                                 &self.font_manager,
                                 &layout,
@@ -2627,6 +2680,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 focused_text_value,
                                 focused_text_layout,
                                 Some(&text_layout_overrides),
+                                active_slider_value,
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 caret_visible,
@@ -2653,6 +2707,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             let text_layout_overrides =
                                 Self::stable_text_layout_overrides(&self.text_input_buffers);
                             let collect_started_at = Instant::now();
+                            let active_slider_value = self.active_slider_value_override();
                             let collected = tree.collect_scene_cache_from_layout_with_focus_value(
                                 &self.font_manager,
                                 &layout,
@@ -2670,6 +2725,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 actual_focused_text_value,
                                 actual_focused_text_layout,
                                 Some(&text_layout_overrides),
+                                active_slider_value,
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 actual_caret_visible,

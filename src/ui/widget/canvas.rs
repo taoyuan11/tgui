@@ -5943,8 +5943,10 @@ fn dashed_path(path: &Path, stroke: &CanvasStroke) -> Option<Path> {
         let segment_length = (normalized[phase] - local_offset).max(0.0);
         let end = (distance + segment_length).min(total_length);
         if phase % 2 == 0 && end > distance {
-            if catch_unwind(AssertUnwindSafe(|| sampler.split_range(distance..end, &mut builder)))
-                .is_err()
+            if catch_unwind(AssertUnwindSafe(|| {
+                sampler.split_range(distance..end, &mut builder)
+            }))
+            .is_err()
             {
                 return None;
             }

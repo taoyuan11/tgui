@@ -41,11 +41,30 @@ fn canvas_style(mode: ResolvedThemeMode) -> CanvasStyle {
     style
 }
 
+fn shadow_showcase_style(mode: ResolvedThemeMode) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for(mode);
+    let _ = mode;
+    style.surface.background = Some(Color::hexa(0xFFFFFFFF).into());
+    style.surface.border_radius = Some(dp(50.0).into());
+    style.surface.shadow = Some(
+        Shadow {
+            offset_x: dp(0.0),
+            offset_y: dp(7.0),
+            blur: dp(30.0),
+            spread: dp(0.0),
+            color: Color::hex(0x64646F),
+        }
+        .into(),
+    );
+    style
+}
+
 struct App {
     theme: State<ThemeMode>,
     switch: State<bool>,
     checkbox: State<bool>,
     radio: State<bool>,
+    slider_value: State<f32>,
     contact_method: State<String>,
     select_action: State<Option<String>>,
     notification_status: State<String>,
@@ -62,6 +81,7 @@ impl ViewModel for App {
             switch: context.state(false),
             checkbox: context.state(false),
             radio: context.state(false),
+            slider_value: context.state(32.0),
             contact_method: context.state(String::from("system")),
             select_action: context.state(None),
             notification_status: context.state(String::from("尚未发送通知")),
@@ -163,6 +183,22 @@ impl ViewModel for App {
                     )),
                 ),
                 component_card(
+                    "Shadow",
+                    demo_shadow_card(),
+                ),
+                component_card(
+                    "Slider",
+                    Slider::new(self.slider_value.signal(), 0.0, 100.0)
+                        .width(dp(240.0))
+                        .step(5.0)
+                        .show_ticks(true)
+                        .show_value_label(true)
+                        .format_value(|value| format!("{value:.0}%"))
+                        .on_change(ValueCommand::new(|app: &mut App, value| {
+                            app.slider_value.set(value)
+                        })),
+                ),
+                component_card(
                     "Input",
                     Input::new(self.input_text.clone())
                         .width(dp(260.0))
@@ -259,6 +295,19 @@ fn demo_canvas() -> Element<App> {
     }))
         .size(dp(232.0), dp(212.0))
         .style(canvas_style)
+        .into()
+}
+
+fn demo_shadow_card() -> Element<App> {
+    Flex::vertical()
+        .gap(dp(12.0))
+        .size(dp(200.0), dp(200.0))
+        .center()
+        .child(
+            Stack::new()
+                .size(dp(100.0), dp(100.0))
+                .style(shadow_showcase_style)
+        )
         .into()
 }
 
