@@ -3,6 +3,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+mod geometry;
+mod slider;
+mod text_edit;
+
 use crate::animation::{AnimationEngine, AnimationKey, WidgetProperty};
 use crate::media::TextureFrame;
 use taffy::NodeId as TaffyNodeId;
@@ -41,6 +45,10 @@ use super::style::{
 };
 use super::style::{InputStyle as WidgetInputStyle, TextareaStyle as WidgetTextareaStyle};
 use super::text::Text;
+use geometry::point_in_triangle;
+pub(crate) use slider::*;
+pub(crate) use text_edit::*;
+pub use geometry::{Point, Rect};
 
 static NEXT_WIDGET_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -118,143 +126,6 @@ macro_rules! impl_widget_key_from_int {
 }
 
 impl_widget_key_from_int!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Point {
-    pub x: Dp,
-    pub y: Dp,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Rect {
-    pub x: Dp,
-    pub y: Dp,
-    pub width: Dp,
-    pub height: Dp,
-}
-
-impl Rect {
-    pub fn new(
-        x: impl Into<Dp>,
-        y: impl Into<Dp>,
-        width: impl Into<Dp>,
-        height: impl Into<Dp>,
-    ) -> Self {
-        Self {
-            x: x.into(),
-            y: y.into(),
-            width: width.into(),
-            height: height.into(),
-        }
-    }
-
-    pub fn contains(self, point: Point) -> bool {
-        point.x >= self.x
-            && point.x <= self.x + self.width
-            && point.y >= self.y
-            && point.y <= self.y + self.height
-    }
-
-    pub(crate) fn inset(self, insets: Insets) -> Self {
-        let width = (self.width - insets.left - insets.right).max(Dp::ZERO);
-        let height = (self.height - insets.top - insets.bottom).max(Dp::ZERO);
-        Self {
-            x: self.x + insets.left,
-            y: self.y + insets.top,
-            width,
-            height,
-        }
-    }
-
-    pub(crate) fn right(self) -> Dp {
-        self.x + self.width
-    }
-
-    pub(crate) fn bottom(self) -> Dp {
-        self.y + self.height
-    }
-
-    pub(crate) fn is_empty(self) -> bool {
-        self.width <= Dp::ZERO || self.height <= Dp::ZERO
-    }
-
-    pub(crate) fn intersect(self, other: Self) -> Option<Self> {
-        let x = self.x.max(other.x);
-        let y = self.y.max(other.y);
-        let right = self.right().min(other.right());
-        let bottom = self.bottom().min(other.bottom());
-        let width = right - x;
-        let height = bottom - y;
-        (width > Dp::ZERO && height > Dp::ZERO).then_some(Self::new(x, y, width, height))
-    }
-
-    pub(crate) fn union(self, other: Self) -> Self {
-        let x = self.x.min(other.x);
-        let y = self.y.min(other.y);
-        let right = self.right().max(other.right());
-        let bottom = self.bottom().max(other.bottom());
-        Self::new(x, y, right - x, bottom - y)
-    }
-}
-
-pub(crate) fn slider_effective_step(min: f32, max: f32, step: f32) -> Option<f32> {
-    if !step.is_finite() || step <= 0.0 {
-        return None;
-    }
-    let range = (max - min).abs();
-    if !range.is_finite() || range <= f32::EPSILON {
-        return None;
-    }
-    Some(step.min(range))
-}
-
-pub(crate) fn slider_clamp_value(value: f32, min: f32, max: f32) -> f32 {
-    if !value.is_finite() {
-        min
-    } else {
-        value.clamp(min, max)
-    }
-}
-
-pub(crate) fn slider_quantize_value(value: f32, min: f32, max: f32, step: f32) -> f32 {
-    let clamped = slider_clamp_value(value, min, max);
-    let Some(step) = slider_effective_step(min, max, step) else {
-        return clamped;
-    };
-    let steps = ((clamped - min) / step).round();
-    slider_clamp_value(min + (steps * step), min, max)
-}
-
-pub(crate) fn slider_resolve_value(value: f32, min: f32, max: f32, step: f32) -> f32 {
-    slider_quantize_value(value, min, max, step)
-}
-
-pub(crate) fn slider_normalized_value(value: f32, min: f32, max: f32, step: f32) -> f32 {
-    let range = max - min;
-    if range.abs() <= f32::EPSILON {
-        return 0.0;
-    }
-    ((slider_resolve_value(value, min, max, step) - min) / range).clamp(0.0, 1.0)
-}
-
-pub(crate) fn slider_value_from_normalized(normalized: f32, min: f32, max: f32, step: f32) -> f32 {
-    let range = max - min;
-    if range.abs() <= f32::EPSILON {
-        return min;
-    }
-    slider_quantize_value(min + normalized.clamp(0.0, 1.0) * range, min, max, step)
-}
-
-pub(crate) fn slider_tick_count(min: f32, max: f32, step: f32, explicit: Option<usize>) -> usize {
-    if let Some(explicit) = explicit {
-        return explicit.max(2).min(101);
-    }
-    let Some(step) = slider_effective_step(min, max, step) else {
-        return 2;
-    };
-    let count = (((max - min).abs() / step).round() as usize).saturating_add(1);
-    count.max(2).min(101)
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct TextInputContentGeometry {
@@ -2169,154 +2040,6 @@ impl<VM> ComputedScene<VM> {
             scroll_regions: self.scroll_regions.clone(),
             ime_cursor_area: self.ime_cursor_area,
         }
-    }
-}
-
-impl Point {
-    pub const ZERO: Self = Self {
-        x: Dp::ZERO,
-        y: Dp::ZERO,
-    };
-
-    pub fn new(x: impl Into<Dp>, y: impl Into<Dp>) -> Self {
-        Self {
-            x: x.into(),
-            y: y.into(),
-        }
-    }
-}
-
-fn point_in_triangle(point: Point, a: Point, b: Point, c: Point) -> bool {
-    let point = (point.x.get(), point.y.get());
-    let a = (a.x.get(), a.y.get());
-    let b = (b.x.get(), b.y.get());
-    let c = (c.x.get(), c.y.get());
-
-    let sign = |p1: (f32, f32), p2: (f32, f32), p3: (f32, f32)| {
-        (p1.0 - p3.0) * (p2.1 - p3.1) - (p2.0 - p3.0) * (p1.1 - p3.1)
-    };
-
-    let d1 = sign(point, a, b);
-    let d2 = sign(point, b, c);
-    let d3 = sign(point, c, a);
-    let has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
-    let has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
-    !(has_neg && has_pos)
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct TextEditState {
-    pub cursor: usize,
-    pub anchor: usize,
-    pub composition: Option<CompositionState>,
-    pub scroll_x: Dp,
-    pub scroll_y: Dp,
-    pub preferred_column_x: Option<f32>,
-}
-
-impl TextEditState {
-    pub(crate) fn caret_at(text: &str) -> Self {
-        let end = text.len();
-        Self {
-            cursor: end,
-            anchor: end,
-            composition: None,
-            scroll_x: Dp::ZERO,
-            scroll_y: Dp::ZERO,
-            preferred_column_x: None,
-        }
-    }
-
-    pub(crate) fn selection_range(&self) -> Option<(usize, usize)> {
-        (self.cursor != self.anchor)
-            .then_some((self.cursor.min(self.anchor), self.cursor.max(self.anchor)))
-    }
-
-    pub(crate) fn clamped_to(mut self, text: &str) -> Self {
-        self.cursor = clamp_to_char_boundary(text, self.cursor);
-        self.anchor = clamp_to_char_boundary(text, self.anchor);
-        if let Some(composition) = &mut self.composition {
-            composition.replace_range.0 = clamp_to_char_boundary(text, composition.replace_range.0);
-            composition.replace_range.1 = clamp_to_char_boundary(text, composition.replace_range.1);
-            if composition.replace_range.0 > composition.replace_range.1 {
-                composition.replace_range =
-                    (composition.replace_range.1, composition.replace_range.1);
-            }
-            if let Some((start, end)) = composition.cursor {
-                let start = clamp_to_char_boundary(&composition.text, start);
-                let end = clamp_to_char_boundary(&composition.text, end);
-                composition.cursor = Some(if start <= end {
-                    (start, end)
-                } else {
-                    (end, end)
-                });
-            }
-        }
-        self.scroll_x = self.scroll_x.max(Dp::ZERO);
-        self.scroll_y = self.scroll_y.max(Dp::ZERO);
-        if let Some(preferred_column_x) = self.preferred_column_x {
-            self.preferred_column_x = preferred_column_x
-                .is_finite()
-                .then_some(preferred_column_x.max(0.0));
-        }
-        self
-    }
-}
-
-fn clamp_to_char_boundary(text: &str, index: usize) -> usize {
-    let mut index = index.min(text.len());
-    while index > 0 && !text.is_char_boundary(index) {
-        index -= 1;
-    }
-    index
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CompositionState {
-    pub replace_range: (usize, usize),
-    pub text: String,
-    pub cursor: Option<(usize, usize)>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{CompositionState, TextEditState};
-    use crate::ui::unit::Dp;
-
-    #[test]
-    fn input_edit_state_clamps_to_utf8_char_boundaries() {
-        let text = "输入框示例输入框示例输入框示例";
-
-        let state = TextEditState {
-            cursor: 25,
-            anchor: 29,
-            composition: Some(CompositionState {
-                replace_range: (25, 29),
-                text: "提示".to_string(),
-                cursor: Some((1, 4)),
-            }),
-            scroll_x: Dp::ZERO,
-            scroll_y: Dp::ZERO,
-            preferred_column_x: None,
-        }
-        .clamped_to(text);
-
-        assert_eq!(state.cursor, 24);
-        assert_eq!(state.anchor, 27);
-        assert_eq!(
-            state
-                .composition
-                .as_ref()
-                .map(|composition| composition.replace_range),
-            Some((24, 27))
-        );
-        assert_eq!(
-            state
-                .composition
-                .as_ref()
-                .and_then(|composition| composition.cursor),
-            Some((0, 3))
-        );
     }
 }
 

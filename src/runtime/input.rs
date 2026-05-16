@@ -36,6 +36,7 @@ use super::{
     FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
     PendingClick, ScrollbarDrag, SliderDrag, SmoothScrollState, TextSelectionDrag,
 };
+use super::state::{SMOOTH_SCROLL_EPSILON, SMOOTH_SCROLL_LERP};
 pub(super) const INPUT_CARET_WIDTH: f32 = 2.0;
 use crate::platform::backend::event_loop::ActiveEventLoop;
 use crate::rendering::renderer::RenderStatus;
@@ -2778,8 +2779,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .unwrap_or(Point::ZERO);
             let dx = state.target.x - current.x;
             let dy = state.target.y - current.y;
-            if dx.abs().get() <= super::SMOOTH_SCROLL_EPSILON
-                && dy.abs().get() <= super::SMOOTH_SCROLL_EPSILON
+            if dx.abs().get() <= SMOOTH_SCROLL_EPSILON
+                && dy.abs().get() <= SMOOTH_SCROLL_EPSILON
             {
                 self.set_scroll_offset(widget_id, state.target);
                 finished.push(widget_id);
@@ -2788,8 +2789,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
 
             let next = Point::new(
-                current.x + dx * super::SMOOTH_SCROLL_LERP,
-                current.y + dy * super::SMOOTH_SCROLL_LERP,
+                current.x + dx * SMOOTH_SCROLL_LERP,
+                current.y + dy * SMOOTH_SCROLL_LERP,
             );
             self.set_scroll_offset(widget_id, next);
             changed = true;

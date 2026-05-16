@@ -1,0 +1,118 @@
+#[cfg(any(target_os = "android", target_env = "ohos"))]
+use std::borrow::Cow;
+
+use super::api::LogLevel;
+
+#[cfg(any(target_os = "android", target_env = "ohos"))]
+fn sanitize_c_string(input: &str) -> Cow<'_, str> {
+    if input.contains('\0') {
+        Cow::Owned(input.replace('\0', " "))
+    } else {
+        Cow::Borrowed(input)
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_env = "ohos")))]
+mod imp {
+    use std::io::{self, Write};
+
+    use super::LogLevel;
+
+    #[cfg(test)]
+    pub(super) fn format_line(level: LogLevel, tag: &str, message: &str) -> String {
+        let message = message.trim_end_matches('\n');
+        format!("[{level}] [{tag}] {message}")
+    }
+
+    pub(super) fn write(level: LogLevel, tag: &str, message: &str) {
+        #[cfg(test)]
+        let line = format_line(level, tag, message);
+        #[cfg(not(test))]
+        let line = {
+            let message = message.trim_end_matches('\n');
+            format!("[{level}] [{tag}] {message}")
+        };
+        let _ = writeln!(io::stderr().lock(), "{line}");
+    }
+}
+
+#[cfg(target_os = "android")]
+mod imp {
+    use std::ffi::CString;
+    use std::os::raw::{c_char, c_int};
+
+    use super::{sanitize_c_string, LogLevel};
+
+    #[link(name = "log")]
+    unsafe extern "C" {
+        fn __android_log_write(prio: c_int, tag: *const c_char, text: *const c_char) -> c_int;
+    }
+
+    pub(super) fn write(level: LogLevel, tag: &str, message: &str) {
+        let tag = CString::new(sanitize_c_string(tag).as_ref())
+            .expect("Android log tag should not contain interior nulls");
+        let message = CString::new(sanitize_c_string(message).as_ref())
+            .expect("Android log message should not contain interior nulls");
+        unsafe {
+            __android_log_write(priority(level), tag.as_ptr(), message.as_ptr());
+        }
+    }
+
+    fn priority(level: LogLevel) -> c_int {
+        match level {
+            LogLevel::Trace => 2,
+            LogLevel::Debug => 3,
+            LogLevel::Info => 4,
+            LogLevel::Warn => 5,
+            LogLevel::Error => 6,
+        }
+    }
+}
+
+#[cfg(target_env = "ohos")]
+mod imp {
+    use std::ffi::CString;
+
+    use hilog_sys::{LogLevel as OhosLogLevel, LogType as OhosLogType, OH_LOG_Print};
+
+    use super::{sanitize_c_string, LogLevel};
+
+    const OHOS_APP_DOMAIN: u32 = 0x0000;
+    const OHOS_PUBLIC_STRING_FMT: &[u8] = b"%{public}s\0";
+
+    pub(super) fn write(level: LogLevel, tag: &str, message: &str) {
+        let tag = CString::new(sanitize_c_string(tag).as_ref())
+            .expect("OHOS log tag should not contain interior nulls");
+        let message = CString::new(sanitize_c_string(message).as_ref())
+            .expect("OHOS log message should not contain interior nulls");
+        unsafe {
+            OH_LOG_Print(
+                OhosLogType::LOG_APP,
+                level_to_ohos(level),
+                OHOS_APP_DOMAIN,
+                tag.as_ptr(),
+                OHOS_PUBLIC_STRING_FMT.as_ptr() as *const _,
+                message.as_ptr(),
+            );
+        }
+    }
+
+    fn level_to_ohos(level: LogLevel) -> OhosLogLevel {
+        match level {
+            LogLevel::Trace | LogLevel::Debug => OhosLogLevel::LOG_DEBUG,
+            LogLevel::Info => OhosLogLevel::LOG_INFO,
+            LogLevel::Warn => OhosLogLevel::LOG_WARN,
+            LogLevel::Error => OhosLogLevel::LOG_ERROR,
+        }
+    }
+}
+
+pub(super) fn write(level: LogLevel, tag: &str, message: &str) {
+    imp::write(level, tag, message);
+}
+
+#[cfg(test)]
+#[cfg(not(any(target_os = "android", target_env = "ohos")))]
+pub(super) fn format_line(level: LogLevel, tag: &str, message: &str) -> String {
+    imp::format_line(level, tag, message)
+}

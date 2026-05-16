@@ -59,7 +59,9 @@ pub(crate) use core::{
     CollectedSceneCache, ResolvedSceneLayout, SceneChunkParts, TextInputLayoutOverride,
     VisualContextSnapshot,
 };
-pub(crate) use core::{LifecycleSnapshot, LifecycleWidgetKind};
+pub(crate) use core::LifecycleSnapshot;
+#[cfg(feature = "audio")]
+pub(crate) use core::LifecycleWidgetKind;
 pub use image::Image;
 pub use input::Input;
 pub use radio::{Radio, RadioGroup, RadioOption};

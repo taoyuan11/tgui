@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// 音频资源来源。
 pub enum AudioSource {
     File(PathBuf),
     Url {
@@ -11,6 +12,13 @@ pub enum AudioSource {
 }
 
 impl AudioSource {
+    /// 创建一个网络音频源。
+    ///
+    /// # 参数
+    /// - `url`：音频资源地址。
+    ///
+    /// # 返回值
+    /// 返回不带额外请求头的 URL 音频源。
     pub fn url(url: impl Into<String>) -> Self {
         Self::Url {
             url: url.into(),
@@ -18,6 +26,14 @@ impl AudioSource {
         }
     }
 
+    /// 为网络音频源追加一个请求头。
+    ///
+    /// # 参数
+    /// - `name`：请求头名称。
+    /// - `value`：请求头值。
+    ///
+    /// # 返回值
+    /// 返回更新后的音频源；文件音频源会保持原样。
     pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         if let Self::Url { headers, .. } = &mut self {
             headers.push((name.into(), value.into()));
@@ -25,6 +41,13 @@ impl AudioSource {
         self
     }
 
+    /// 为网络音频源批量追加请求头。
+    ///
+    /// # 参数
+    /// - `headers`：可迭代的请求头集合。
+    ///
+    /// # 返回值
+    /// 返回更新后的音频源；文件音频源会保持原样。
     pub fn with_headers<I, K, V>(mut self, headers: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -71,6 +94,7 @@ impl From<&str> for AudioSource {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
+/// 音频播放状态。
 pub enum PlaybackState {
     #[default]
     Idle,
@@ -84,6 +108,7 @@ pub enum PlaybackState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// 音频播放进度与缓冲指标。
 pub struct AudioMetrics {
     pub duration: Option<Duration>,
     pub position: Duration,

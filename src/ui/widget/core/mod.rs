@@ -61,6 +61,7 @@ mod element;
 mod layout;
 mod render;
 mod resolved;
+mod scene;
 mod style;
 #[cfg(test)]
 mod tests;
@@ -71,6 +72,10 @@ use self::layout::*;
 use self::render::*;
 use self::style::*;
 use self::tree::with_widget_stack;
+use self::scene::{CollectContext, VisualContext};
+pub(crate) use self::scene::{
+    CollectedSceneCache, SceneChunkParts, TextInputLayoutOverride, VisualContextSnapshot,
+};
 pub use self::tree::{rect, WidgetCommand, WidgetEventResult, WidgetTree};
 
 /// Caret width in logical pixels.
@@ -622,91 +627,6 @@ impl Clone for LifecycleWidgetKind {
             },
         }
     }
-}
-
-struct CollectContext<'a, 'b> {
-    taffy: &'a TaffyTree<MeasureContext>,
-    font_manager: &'a FontManager,
-    theme: &'a Theme,
-    media: &'a MediaManager,
-    focused_input: Option<WidgetId>,
-    focused_text_state: Option<&'a TextEditState>,
-    focused_text_value: Option<&'a str>,
-    focused_text_layout: Option<&'a TextLayoutInfo>,
-    text_layout_overrides: Option<&'a HashMap<WidgetId, TextInputLayoutOverride<'a>>>,
-    active_slider_value: Option<(WidgetId, f32)>,
-    caret_visible: bool,
-    selected_text: Option<WidgetId>,
-    selected_text_state: Option<&'a TextEditState>,
-    hovered_scrollbar: Option<ScrollbarHandle>,
-    active_scrollbar: Option<ScrollbarHandle>,
-    widget_states: &'a WidgetStateMap,
-    select_open_states: &'a HashMap<WidgetId, bool>,
-    scroll_offsets: &'a HashMap<WidgetId, Point>,
-    viewport: Rect,
-    units: UnitContext,
-    animations: &'b mut AnimationEngine,
-    now: std::time::Instant,
-}
-
-pub(crate) struct TextInputLayoutOverride<'a> {
-    pub(crate) revision: u64,
-    pub(crate) text: &'a str,
-    pub(crate) layout: &'a TextLayoutInfo,
-}
-
-#[derive(Clone, Copy)]
-struct VisualContext {
-    origin: Point,
-    opacity: f32,
-    clip_rect: Rect,
-    clip_mask: Option<ClipMask>,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct VisualContextSnapshot {
-    pub(crate) origin: Point,
-    pub(crate) opacity: f32,
-    pub(crate) clip_rect: Rect,
-    pub(crate) clip_mask: Option<ClipMask>,
-}
-
-impl From<VisualContext> for VisualContextSnapshot {
-    fn from(value: VisualContext) -> Self {
-        Self {
-            origin: value.origin,
-            opacity: value.opacity,
-            clip_rect: value.clip_rect,
-            clip_mask: value.clip_mask,
-        }
-    }
-}
-
-impl From<VisualContextSnapshot> for VisualContext {
-    fn from(value: VisualContextSnapshot) -> Self {
-        Self {
-            origin: value.origin,
-            opacity: value.opacity,
-            clip_rect: value.clip_rect,
-            clip_mask: value.clip_mask,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct CollectedSceneCache<VM> {
-    pub(crate) computed: ComputedScene<VM>,
-    pub(crate) lifecycle_states: HashMap<WidgetId, LifecycleEventState<VM>>,
-    pub(crate) chunks: HashMap<WidgetId, ComputedScene<VM>>,
-    pub(crate) chunk_parts: HashMap<WidgetId, SceneChunkParts<VM>>,
-    pub(crate) visual_contexts: HashMap<WidgetId, VisualContextSnapshot>,
-    pub(crate) dependencies: DependencyGraph,
-}
-
-#[derive(Clone)]
-pub(crate) struct SceneChunkParts<VM> {
-    pub(crate) before_children: ComputedScene<VM>,
-    pub(crate) after_children: ComputedScene<VM>,
 }
 
 #[derive(Clone)]

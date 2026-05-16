@@ -4,6 +4,7 @@ mod surface;
 mod targets;
 mod text;
 mod texture;
+mod types;
 mod vertex;
 
 use std::collections::{HashMap, HashSet};
@@ -15,6 +16,7 @@ use self::surface::{
     surface_clear_color, surface_present_mode,
 };
 use self::targets::RendererTargets;
+use self::types::*;
 use self::vertex::{
     physical_mesh_clip_mask_data, BrushVertex, CompositeVertex, MeshVertex, RectVertex, TextVertex,
 };
@@ -25,7 +27,6 @@ use crate::platform::backend::window::Window;
 use crate::platform::dpi::PhysicalSize;
 use crate::text::font::FontCatalog;
 use crate::ui::widget::ScenePrimitives;
-use bytemuck::{Pod, Zeroable};
 use cosmic_text::{FontSystem, SwashCache};
 #[cfg(all(target_env = "ohos", feature = "ohos"))]
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -69,66 +70,6 @@ pub struct Renderer {
     text_system: TextSystem,
     text_cache: HashMap<TextCacheKey, TextCacheEntry>,
     texture_cache: HashMap<(u64, u64), TextureCacheEntry>,
-}
-
-struct TextSystem {
-    font_system: FontSystem,
-    swash_cache: SwashCache,
-}
-
-#[derive(Clone)]
-struct OffscreenTarget {
-    single_texture: wgpu::Texture,
-    single_view: wgpu::TextureView,
-    _msaa_texture: Option<wgpu::Texture>,
-    msaa_view: Option<wgpu::TextureView>,
-}
-
-struct TextCacheEntry {
-    bind_group: wgpu::BindGroup,
-    _texture: wgpu::Texture,
-}
-
-struct TextureCacheEntry {
-    bind_group: wgpu::BindGroup,
-    _texture: wgpu::Texture,
-}
-
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct TextCacheKey {
-    content: String,
-    font_family: Option<String>,
-    width: u32,
-    height: u32,
-    color: [u8; 4],
-    force_color: bool,
-    font_size_bits: u32,
-    line_height_bits: u32,
-    letter_spacing_bits: u32,
-    font_weight: u16,
-    wrap_mode: u8,
-    overflow_mode: u8,
-    horizontal_align: u8,
-    vertical_align: u8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct BlurUniform {
-    direction: [f32; 2],
-    texel_size: [f32; 2],
-    radius: f32,
-    _pad: f32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct CompositeUniform {
-    data0: [f32; 4],
-    data1: [f32; 4],
-    data2: [f32; 4],
-    data3: [f32; 4],
-    data4: [f32; 4],
 }
 
 impl Renderer {
