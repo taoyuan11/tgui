@@ -45,6 +45,8 @@ impl<VM> Element<VM> {
                 style,
             },
             WidgetKind::Text { text } => WidgetKind::Text { text },
+            #[cfg(feature = "audio")]
+            WidgetKind::Audio { audio } => WidgetKind::Audio { audio },
             WidgetKind::Image { image } => WidgetKind::Image { image },
             WidgetKind::Canvas {
                 scene,
@@ -313,6 +315,10 @@ impl<VM> Element<VM> {
                 apply_text_widget_style(&mut text, &resolved_style);
                 ResolvedWidgetKind::Text { text }
             }
+            #[cfg(feature = "audio")]
+            WidgetKind::Audio { audio } => ResolvedWidgetKind::Audio {
+                audio: audio.clone(),
+            },
             WidgetKind::Image { image } => {
                 let mut image = image.clone();
                 let resolved_style = resolved_image_style(image.style.as_ref(), theme);

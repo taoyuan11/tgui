@@ -9,13 +9,13 @@
 - 轻量 MVVM 状态模型
 - 基于 `taffy` 的布局系统
 - 声明式组件树 + 可绑定窗口属性
-- 内置动画、图片/文本、系统通知、对话框、画布、自定义窗口 chrome 和可选视频能力
+- 内置动画、图片/文本、系统通知、对话框、画布、自定义窗口 chrome，以及可选音视频能力
 
 适合做桌面 GUI、工具型应用、可视化面板，以及需要较强自定义绘制能力的界面。
 
 ## 项目状态
 
-`tgui` 目前已经能够基本使用：应用启动、窗口管理、MVVM 状态绑定、常用布局、基础控件、主题、动画、图片、Canvas、自定义窗口 chrome、系统通知、对话框以及可选视频播放等核心链路已经打通，并配有多个可运行示例。
+`tgui` 目前已经能够基本使用：应用启动、窗口管理、MVVM 状态绑定、常用布局、基础控件、主题、动画、图片、Canvas、自定义窗口 chrome、系统通知、对话框以及可选音视频播放等核心链路已经打通，并配有多个可运行示例。
 
 当前版本仍处于 `0.x` 阶段，公共 API 还可能根据真实应用反馈继续调整。它已经适合用于原型、内部工具、小型桌面应用、可视化面板和自定义绘制界面的探索；如果用于长期维护的生产项目，建议固定 crate 版本，并在升级前阅读 README、示例和变更记录。
 
@@ -46,6 +46,7 @@
 - 布局：`Stack`、`Grid`、`Flex`
 - 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Image`
 - 画布：`Canvas`、`CanvasRecorder`、渐变/阴影/混合/裁剪/文字与图片绘制
+- 音频：`Audio`、`AudioController`、`AudioSource`（需启用 `audio` feature）
 - 视频：`VideoSurface`、`VideoController`、`VideoSource`（需启用 `video` feature）
 
 ### 样式与基础类型
@@ -78,6 +79,13 @@
 tgui = "0.1.8"
 ```
 
+如果需要音频能力：
+
+```toml
+[dependencies]
+tgui = { version = "0.1.8", features = ["audio"] }
+```
+
 如果需要视频能力：
 
 ```toml
@@ -87,8 +95,9 @@ tgui = { version = "0.1.8", features = ["video"] }
 
 可选 feature：
 
+- `audio`：启用 FFmpeg + CPAL 音频播放能力
 - `video`：启用 FFmpeg 视频播放能力
-- `video-static`：启用静态链接 FFmpeg 的视频能力
+- `video-static`：在 `video` 基础上启用静态链接 FFmpeg 的音视频能力
 - `android`：启用 Android 入口
 - `ohos`：启用 HarmonyOS / OpenHarmony 入口
 
@@ -103,7 +112,7 @@ tgui = { version = "0.1.8", features = ["video"] }
 - `theme`：主题、色板、排版、状态和设计 token
 - `core`：颜色、错误、输入触发器、基础单位和几何类型
 - `notification`：系统通知、权限与交互式 action
-- `media` / `dialog` / `logging` / `platform` / `video`：媒体、对话框、日志、平台和视频能力
+- `media` / `dialog` / `logging` / `platform` / `audio` / `video`：媒体、对话框、日志、平台和音视频能力
 
 示例代码可使用 `tgui::prelude::*` 引入常用 API；库代码建议优先从具体分类模块导入。
 
@@ -410,6 +419,65 @@ Stack::new().style(|mode| {
 ```
 
 `SliderStyle` 还支持 `thumb_shadow`，用于单独给圆形 thumb 添加阴影，而不会影响整个 slider 外框。
+
+### 音频
+
+启用 `audio` feature 后可使用：
+
+- `audio::Audio`
+- `audio::AudioController`
+- `audio::AudioSource`
+- `audio::PlaybackState`
+- `audio::AudioMetrics`
+
+`Audio` 是一个不渲染任何 UI 的隐形组件，只负责把音频播放生命周期挂进 widget tree；业务按钮、进度条、音量条由你自己用 `AudioController` 拼。
+
+```rust
+use std::time::Duration;
+use tgui::prelude::*;
+
+struct AudioVm {
+    audio: AudioController,
+}
+
+impl ViewModel for AudioVm {
+    fn new(ctx: &ViewModelContext) -> Self {
+        let audio = AudioController::new(ctx);
+        audio
+            .load(AudioSource::url("https://example.com/demo.mp3"))
+            .expect("failed to load audio source");
+        Self { audio }
+    }
+
+    fn view(&self) -> Element<Self> {
+        Stack::new()
+            .child(Audio::new(self.audio.clone()).autoplay(true).looping(false))
+            .child(Button::new("Play").on_click(Command::new(|vm: &mut Self| vm.audio.play())))
+            .child(Button::new("Pause").on_click(Command::new(|vm: &mut Self| vm.audio.pause())))
+            .child(
+                Button::new("Replay 10s")
+                    .on_click(Command::new(|vm: &mut Self| {
+                        let target = vm.audio.position().get().saturating_sub(Duration::from_secs(10));
+                        vm.audio.seek(target);
+                    })),
+            )
+            .into()
+    }
+}
+```
+
+网络音频如果需要自定义请求头，可以把 header 挂在 `AudioSource` 上，再通过 `AudioController::load(...)` 设置源：
+
+```rust
+let source = tgui::audio::AudioSource::url("https://example.com/demo.mp3")
+    .with_header("Authorization", "Bearer <token>")
+    .with_headers([
+        ("Referer", "https://example.com/player"),
+        ("Cookie", "session=abc123"),
+    ]);
+
+controller.load(source)?;
+```
 
 ### 视频
 

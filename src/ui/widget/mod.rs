@@ -1,3 +1,5 @@
+#[cfg(feature = "audio")]
+mod audio;
 mod background;
 mod button;
 mod canvas;
@@ -18,6 +20,8 @@ mod textarea;
 #[cfg(feature = "video")]
 mod video;
 
+#[cfg(feature = "audio")]
+pub use audio::Audio;
 pub use background::{
     BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
     BackgroundRadialGradient,
@@ -50,12 +54,12 @@ pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId, WidgetKey,
 };
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
-pub(crate) use core::LifecycleSnapshot;
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub(crate) use core::{
     CollectedSceneCache, ResolvedSceneLayout, SceneChunkParts, TextInputLayoutOverride,
     VisualContextSnapshot,
 };
+pub(crate) use core::{LifecycleSnapshot, LifecycleWidgetKind};
 pub use image::Image;
 pub use input::Input;
 pub use radio::{Radio, RadioGroup, RadioOption};

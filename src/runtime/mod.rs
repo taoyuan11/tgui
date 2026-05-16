@@ -55,10 +55,10 @@ use crate::ui::widget::TextInputLayoutOverride;
 use crate::ui::widget::{
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     CanvasDragEvent, CanvasItemId, CanvasMouseButton, CanvasMouseEvent, CanvasPointerEvent,
-    CanvasWheelEvent, CollectedSceneCache, ComputedScene, LifecycleEventState, MediaEventPhase,
-    MediaEventState, Point, Rect, ResolvedSceneLayout, SceneChunkParts, ScrollRegion,
-    ScrollbarHandle, Text, TextEditState, TextInputContentGeometry, VisualContextSnapshot,
-    WidgetId, WidgetStateMap, WidgetTree,
+    CanvasWheelEvent, CollectedSceneCache, ComputedScene, LifecycleEventState, LifecycleWidgetKind,
+    MediaEventPhase, MediaEventState, Point, Rect, ResolvedSceneLayout, SceneChunkParts,
+    ScrollRegion, ScrollbarHandle, Text, TextEditState, TextInputContentGeometry,
+    VisualContextSnapshot, WidgetId, WidgetStateMap, WidgetTree,
 };
 use cosmic_text::Editor;
 use image::GenericImageView;
@@ -830,6 +830,28 @@ struct DispatchedMediaState {
 struct DispatchedLifecycleState<VM> {
     snapshot: crate::ui::widget::LifecycleSnapshot,
     handlers: crate::ui::widget::LifecycleEventHandlers<VM>,
+}
+
+#[cfg(feature = "audio")]
+#[derive(Clone, PartialEq, Eq)]
+struct AudioLifecycleState {
+    controller: crate::audio::AudioController,
+    autoplay: bool,
+    looping: bool,
+}
+
+#[cfg(feature = "audio")]
+fn audio_lifecycle_state(
+    snapshot: &crate::ui::widget::LifecycleSnapshot,
+) -> Option<AudioLifecycleState> {
+    let LifecycleWidgetKind::Audio { audio } = &snapshot.kind else {
+        return None;
+    };
+    Some(AudioLifecycleState {
+        controller: audio.controller.clone(),
+        autoplay: audio.autoplay.resolve(),
+        looping: audio.looping.resolve(),
+    })
 }
 
 fn collect_pending_media_event<VM>(
@@ -2922,6 +2944,58 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
+    #[cfg(feature = "audio")]
+    fn sync_audio_widget_on_mount(&self, current: &AudioLifecycleState) {
+        current.controller.set_looping(current.looping);
+        if current.autoplay {
+            current.controller.play();
+        }
+    }
+
+    #[cfg(feature = "audio")]
+    fn sync_audio_widget_on_update(
+        &self,
+        current: &AudioLifecycleState,
+        previous: &AudioLifecycleState,
+    ) {
+        if current.controller != previous.controller {
+            previous.controller.stop();
+            self.sync_audio_widget_on_mount(current);
+            return;
+        }
+
+        if current.looping != previous.looping {
+            current.controller.set_looping(current.looping);
+        }
+    }
+
+    #[cfg(feature = "audio")]
+    fn sync_audio_widget_lifecycle(
+        &self,
+        state: &LifecycleEventState<VM>,
+        previous: Option<&DispatchedLifecycleState<VM>>,
+    ) {
+        let Some(current) = audio_lifecycle_state(&state.snapshot) else {
+            return;
+        };
+        let previous_audio =
+            previous.and_then(|previous| audio_lifecycle_state(&previous.snapshot));
+        match previous_audio.as_ref() {
+            None => self.sync_audio_widget_on_mount(&current),
+            Some(previous_audio) if current != *previous_audio => {
+                self.sync_audio_widget_on_update(&current, previous_audio);
+            }
+            Some(_) => {}
+        }
+    }
+
+    #[cfg(feature = "audio")]
+    fn teardown_audio_widget(&self, previous: &DispatchedLifecycleState<VM>) {
+        if let Some(audio) = audio_lifecycle_state(&previous.snapshot) {
+            audio.controller.stop();
+        }
+    }
+
     fn dispatch_lifecycle_events(&mut self) {
         if self.widget_tree.is_none() {
             if self.lifecycle_event_states.is_empty() {
@@ -2930,6 +3004,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
             let mut pending = Vec::new();
             for previous in self.lifecycle_event_states.values() {
+                #[cfg(feature = "audio")]
+                self.teardown_audio_widget(previous);
                 if let Some(command) = previous.handlers.on_unmount.clone() {
                     pending.push(PendingLifecycleEvent::Command(command));
                 }
@@ -2999,11 +3075,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let mut pending = Vec::new();
         for state in states.values() {
             let previous = self.lifecycle_event_states.get(&state.widget_id);
+            #[cfg(feature = "audio")]
+            self.sync_audio_widget_lifecycle(state, previous);
             collect_pending_lifecycle_events(state, previous, &mut pending);
         }
 
         for removed_id in removed_ids {
             if let Some(previous) = self.lifecycle_event_states.remove(&removed_id) {
+                #[cfg(feature = "audio")]
+                self.teardown_audio_widget(&previous);
                 if let Some(command) = previous.handlers.on_unmount {
                     pending.push(PendingLifecycleEvent::Command(command));
                 }

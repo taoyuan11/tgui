@@ -253,6 +253,7 @@ pub(crate) struct InvalidationSignal {
     revision: Arc<AtomicU64>,
     proxy: Arc<Mutex<Option<EventLoopProxy>>>,
     dirty_dependencies: Arc<Mutex<DirtyDependencyLog>>,
+    dependency_revisions: Arc<Mutex<HashMap<DependencyId, u64>>>,
 }
 
 impl InvalidationSignal {
@@ -261,6 +262,7 @@ impl InvalidationSignal {
             revision: Arc::new(AtomicU64::new(1)),
             proxy: Arc::new(Mutex::new(None)),
             dirty_dependencies: Arc::new(Mutex::new(DirtyDependencyLog::default())),
+            dependency_revisions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -274,6 +276,12 @@ impl InvalidationSignal {
 
     fn mark_dirty_dependency(&self, dependency: Option<DependencyId>) {
         let revision = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Some(dependency) = dependency {
+            self.dependency_revisions
+                .lock()
+                .expect("dependency revision map lock poisoned")
+                .insert(dependency, revision);
+        }
         self.dirty_dependencies
             .lock()
             .expect("dirty dependency log lock poisoned")
@@ -333,6 +341,14 @@ impl InvalidationSignal {
             .lock()
             .expect("dirty dependency log lock poisoned")
             .dirty_since(revision, current_revision)
+    }
+
+    pub(crate) fn dependency_revision(&self, dependency: DependencyId) -> Option<u64> {
+        self.dependency_revisions
+            .lock()
+            .expect("dependency revision map lock poisoned")
+            .get(&dependency)
+            .copied()
     }
 }
 
@@ -664,6 +680,7 @@ pub struct Signal<T> {
 
 struct SignalCache<T> {
     revision: u64,
+    dependency_revision: Option<u64>,
     value: Option<T>,
 }
 
@@ -685,6 +702,7 @@ impl<T> Signal<T> {
             invalidation,
             cache: Arc::new(Mutex::new(SignalCache {
                 revision: 0,
+                dependency_revision: None,
                 value: None,
             })),
             transition: None,
@@ -703,9 +721,16 @@ impl<T: Clone> Signal<T> {
     pub fn get(&self) -> T {
         record_dependency_read(self.dependency);
         let revision = self.invalidation.revision();
+        let dependency_revision = self
+            .dependency
+            .and_then(|dependency| self.invalidation.dependency_revision(dependency));
         {
             let cache = self.cache.lock().expect("signal cache lock poisoned");
-            if cache.revision == revision {
+            let cache_hit = match self.dependency {
+                Some(_) => cache.dependency_revision == dependency_revision,
+                None => cache.revision == revision,
+            };
+            if cache_hit {
                 if let Some(value) = cache.value.as_ref() {
                     return value.clone();
                 }
@@ -715,6 +740,9 @@ impl<T: Clone> Signal<T> {
         let value = (self.reader)();
         let mut cache = self.cache.lock().expect("signal cache lock poisoned");
         cache.revision = revision;
+        cache.dependency_revision = self
+            .dependency
+            .and_then(|dependency| self.invalidation.dependency_revision(dependency));
         cache.value = Some(value.clone());
         value
     }
@@ -909,6 +937,28 @@ mod tests {
 
         assert!(!graph.has_global_dependency());
         assert_eq!(graph.dependency_count(), 1);
+    }
+
+    #[test]
+    fn mapped_signal_does_not_recompute_for_unrelated_state_changes() {
+        let ctx = context();
+        let tracked = ctx.state(7);
+        let unrelated = ctx.state(3);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_signal = calls.clone();
+        let mapped = tracked.signal().map(move |value| {
+            calls_for_signal.fetch_add(1, Ordering::SeqCst);
+            value + 1
+        });
+
+        assert_eq!(mapped.get(), 8);
+        assert_eq!(mapped.get(), 8);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        unrelated.set(4);
+
+        assert_eq!(mapped.get(), 8);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]

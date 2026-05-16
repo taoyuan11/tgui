@@ -11,6 +11,8 @@ use taffy::prelude::{
 use taffy::Size as TaffySize;
 
 use crate::animation::{AnimationEngine, Transition, WidgetProperty};
+#[cfg(feature = "audio")]
+use crate::audio::Audio as PublicAudio;
 use crate::foundation::binding::{
     track_dependency_scope, with_dependency_collection, DependencyGraph, DependencyPhase,
     TextChangeSet, TextController,
@@ -147,6 +149,10 @@ pub(crate) enum ResolvedWidgetKind<VM> {
     Text {
         text: Text,
     },
+    #[cfg(feature = "audio")]
+    Audio {
+        audio: PublicAudio,
+    },
     Image {
         image: super::image::Image,
     },
@@ -230,6 +236,10 @@ pub(crate) enum LifecycleWidgetKind {
     },
     Text {
         text: Text,
+    },
+    #[cfg(feature = "audio")]
+    Audio {
+        audio: PublicAudio,
     },
     Image {
         image: super::image::Image,
@@ -346,6 +356,10 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 children: children.clone(),
             },
             Self::Text { text } => Self::Text { text: text.clone() },
+            #[cfg(feature = "audio")]
+            Self::Audio { audio } => Self::Audio {
+                audio: audio.clone(),
+            },
             Self::Image { image } => Self::Image {
                 image: image.clone(),
             },
@@ -490,6 +504,10 @@ impl Clone for LifecycleWidgetKind {
                 child_ids: child_ids.clone(),
             },
             Self::Text { text } => Self::Text { text: text.clone() },
+            #[cfg(feature = "audio")]
+            Self::Audio { audio } => Self::Audio {
+                audio: audio.clone(),
+            },
             Self::Image { image } => Self::Image {
                 image: image.clone(),
             },

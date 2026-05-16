@@ -1,67 +1,67 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use crate::foundation::binding::{Signal, ViewModelContext};
 use crate::foundation::error::TguiError;
 
 use super::backend::{
-    ffmpeg::FfmpegVideoBackend, BackendSharedState, VideoBackend,
-    DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
+    ffmpeg::FfmpegAudioBackend, AudioBackend, BackendSharedState,
+    DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES,
 };
-use super::types::{PlaybackState, VideoMetrics, VideoSize, VideoSource, VideoSurfaceSnapshot};
+use super::types::{AudioMetrics, AudioSnapshot, AudioSource, PlaybackState};
 
 #[derive(Clone)]
-pub struct VideoController {
-    inner: Arc<VideoControllerInner>,
+pub struct AudioController {
+    inner: Arc<AudioControllerInner>,
 }
 
-struct VideoControllerInner {
+struct AudioControllerInner {
     shared: BackendSharedState,
-    backend: Arc<dyn VideoBackend>,
+    backend: Arc<dyn AudioBackend>,
 }
 
-impl VideoController {
+impl AudioController {
     pub fn new(ctx: &ViewModelContext) -> Self {
         let shared = BackendSharedState {
             playback_state: ctx.state(PlaybackState::Idle),
-            metrics: ctx.state(VideoMetrics::default()),
+            metrics: ctx.state(AudioMetrics::default()),
             volume: ctx.state(1.0),
             muted: ctx.state(false),
-            buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
-            video_size: ctx.state(VideoSize::default()),
+            looping: ctx.state(false),
+            metrics_observed: Arc::new(AtomicBool::new(false)),
+            buffer_memory_limit_bytes: ctx.state(DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES),
             error: ctx.state(None),
-            surface: ctx.state(VideoSurfaceSnapshot::default()),
+            snapshot: ctx.state(AudioSnapshot::default()),
         };
-        let backend: Arc<dyn VideoBackend> = Arc::new(FfmpegVideoBackend::new(shared.clone()));
+        let backend: Arc<dyn AudioBackend> = Arc::new(FfmpegAudioBackend::new(shared.clone()));
         Self::from_parts(shared, backend)
     }
 
-    pub(crate) fn from_parts(shared: BackendSharedState, backend: Arc<dyn VideoBackend>) -> Self {
+    pub(crate) fn from_parts(shared: BackendSharedState, backend: Arc<dyn AudioBackend>) -> Self {
         Self {
-            inner: Arc::new(VideoControllerInner { shared, backend }),
+            inner: Arc::new(AudioControllerInner { shared, backend }),
         }
     }
 
-    pub fn load(&self, source: VideoSource) -> Result<(), TguiError> {
+    pub fn load(&self, source: AudioSource) -> Result<(), TguiError> {
         self.inner.shared.reset_for_load();
         self.inner.backend.load(source)
     }
 
     pub fn play(&self) {
         if self.inner.shared.playback_state.get() == PlaybackState::Ended {
-            self.replay();
-            return;
+            self.inner.backend.seek(Duration::ZERO);
         }
-        self.inner.backend.play();
-    }
-
-    pub fn replay(&self) {
-        self.inner.backend.seek(Duration::ZERO);
         self.inner.backend.play();
     }
 
     pub fn pause(&self) {
         self.inner.backend.pause();
+    }
+
+    pub fn stop(&self) {
+        self.inner.backend.stop();
     }
 
     pub fn seek(&self, position: Duration) {
@@ -79,6 +79,11 @@ impl VideoController {
         self.inner.backend.set_muted(muted);
     }
 
+    pub fn set_looping(&self, looping: bool) {
+        self.inner.shared.looping.set(looping);
+        self.inner.backend.set_looping(looping);
+    }
+
     pub fn set_buffer_memory_limit_bytes(&self, bytes: u64) {
         self.inner.shared.buffer_memory_limit_bytes.set(bytes);
         self.inner.backend.set_buffer_memory_limit_bytes(bytes);
@@ -89,6 +94,7 @@ impl VideoController {
     }
 
     pub fn position(&self) -> Signal<Duration> {
+        self.inner.shared.enable_metrics();
         self.inner
             .shared
             .metrics
@@ -97,6 +103,7 @@ impl VideoController {
     }
 
     pub fn duration(&self) -> Signal<Option<Duration>> {
+        self.inner.shared.enable_metrics();
         self.inner
             .shared
             .metrics
@@ -105,6 +112,7 @@ impl VideoController {
     }
 
     pub fn buffered_position(&self) -> Signal<Option<Duration>> {
+        self.inner.shared.enable_metrics();
         self.inner
             .shared
             .metrics
@@ -120,22 +128,26 @@ impl VideoController {
         self.inner.shared.muted.signal()
     }
 
-    pub fn video_size(&self) -> Signal<VideoSize> {
-        self.inner.shared.video_size.signal()
+    pub fn looping(&self) -> Signal<bool> {
+        self.inner.shared.looping.signal()
     }
 
     pub fn error(&self) -> Signal<Option<String>> {
         self.inner.shared.error.signal()
     }
 
-    pub(crate) fn surface_snapshot(&self) -> VideoSurfaceSnapshot {
-        let mut snapshot = self.inner.shared.surface.get();
-        if snapshot.texture.is_none() {
-            snapshot.texture = self.inner.backend.current_frame();
-        }
-        snapshot
+    pub(crate) fn snapshot(&self) -> AudioSnapshot {
+        self.inner.shared.snapshot.get()
     }
 }
+
+impl PartialEq for AudioController {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
+impl Eq for AudioController {}
 
 #[cfg(test)]
 mod tests {
@@ -144,38 +156,35 @@ mod tests {
 
     use crate::animation::AnimationCoordinator;
     use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
-    use crate::media::{IntrinsicSize, TextureFrame};
 
-    use super::super::backend::{BackendSharedState, VideoBackend};
+    use super::super::backend::{AudioBackend, BackendSharedState};
     use super::*;
 
     #[derive(Default)]
     struct RecordedCommands {
-        loads: Vec<VideoSource>,
+        loads: Vec<AudioSource>,
         commands: Vec<&'static str>,
-        pause_count: usize,
         seeks: Vec<Duration>,
         volumes: Vec<f32>,
         muteds: Vec<bool>,
+        loopings: Vec<bool>,
         buffer_memory_limits: Vec<u64>,
     }
 
     struct MockBackend {
         commands: Arc<Mutex<RecordedCommands>>,
-        frame: Arc<Mutex<Option<Arc<TextureFrame>>>>,
     }
 
     impl MockBackend {
         fn new() -> Self {
             Self {
                 commands: Arc::new(Mutex::new(RecordedCommands::default())),
-                frame: Arc::new(Mutex::new(None)),
             }
         }
     }
 
-    impl VideoBackend for MockBackend {
-        fn load(&self, source: VideoSource) -> Result<(), TguiError> {
+    impl AudioBackend for MockBackend {
+        fn load(&self, source: AudioSource) -> Result<(), TguiError> {
             self.commands
                 .lock()
                 .expect("commands lock poisoned")
@@ -185,14 +194,27 @@ mod tests {
         }
 
         fn play(&self) {
-            let mut commands = self.commands.lock().expect("commands lock poisoned");
-            commands.commands.push("play");
+            self.commands
+                .lock()
+                .expect("commands lock poisoned")
+                .commands
+                .push("play");
         }
 
         fn pause(&self) {
-            let mut commands = self.commands.lock().expect("commands lock poisoned");
-            commands.commands.push("pause");
-            commands.pause_count += 1;
+            self.commands
+                .lock()
+                .expect("commands lock poisoned")
+                .commands
+                .push("pause");
+        }
+
+        fn stop(&self) {
+            self.commands
+                .lock()
+                .expect("commands lock poisoned")
+                .commands
+                .push("stop");
         }
 
         fn seek(&self, position: Duration) {
@@ -217,16 +239,20 @@ mod tests {
                 .push(muted);
         }
 
+        fn set_looping(&self, looping: bool) {
+            self.commands
+                .lock()
+                .expect("commands lock poisoned")
+                .loopings
+                .push(looping);
+        }
+
         fn set_buffer_memory_limit_bytes(&self, bytes: u64) {
             self.commands
                 .lock()
                 .expect("commands lock poisoned")
                 .buffer_memory_limits
                 .push(bytes);
-        }
-
-        fn current_frame(&self) -> Option<Arc<TextureFrame>> {
-            self.frame.lock().expect("frame lock poisoned").clone()
         }
 
         fn shutdown(&self) {}
@@ -239,13 +265,14 @@ mod tests {
     fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
         BackendSharedState {
             playback_state: ctx.state(PlaybackState::Idle),
-            metrics: ctx.state(VideoMetrics::default()),
+            metrics: ctx.state(AudioMetrics::default()),
             volume: ctx.state(1.0),
             muted: ctx.state(false),
-            buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
-            video_size: ctx.state(VideoSize::default()),
+            looping: ctx.state(false),
+            metrics_observed: Arc::new(AtomicBool::new(false)),
+            buffer_memory_limit_bytes: ctx.state(DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES),
             error: ctx.state(None),
-            surface: ctx.state(VideoSurfaceSnapshot::default()),
+            snapshot: ctx.state(AudioSnapshot::default()),
         }
     }
 
@@ -255,55 +282,28 @@ mod tests {
         let shared = test_shared(&ctx);
         let backend = Arc::new(MockBackend::new());
         let commands = backend.commands.clone();
-        let controller = VideoController::from_parts(shared, backend);
+        let controller = AudioController::from_parts(shared, backend);
 
         controller
-            .load(VideoSource::File("demo.mp4".into()))
+            .load(AudioSource::File("demo.mp3".into()))
             .expect("mock load should succeed");
         controller.play();
         controller.pause();
+        controller.stop();
         controller.seek(Duration::from_secs(9));
         controller.set_volume(0.25);
         controller.set_muted(true);
+        controller.set_looping(true);
         controller.set_buffer_memory_limit_bytes(32 * 1024 * 1024);
 
         let commands = commands.lock().expect("commands lock poisoned");
-        assert_eq!(commands.loads, vec![VideoSource::File("demo.mp4".into())]);
-        assert_eq!(commands.commands, vec!["play", "pause", "seek"]);
-        assert_eq!(commands.pause_count, 1);
+        assert_eq!(commands.loads, vec![AudioSource::File("demo.mp3".into())]);
+        assert_eq!(commands.commands, vec!["play", "pause", "stop", "seek"]);
         assert_eq!(commands.seeks, vec![Duration::from_secs(9)]);
         assert_eq!(commands.volumes, vec![0.25]);
         assert_eq!(commands.muteds, vec![true]);
+        assert_eq!(commands.loopings, vec![true]);
         assert_eq!(commands.buffer_memory_limits, vec![32 * 1024 * 1024]);
-    }
-
-    #[test]
-    fn controller_forwards_url_sources_with_headers_to_backend() {
-        let ctx = test_context();
-        let shared = test_shared(&ctx);
-        let backend = Arc::new(MockBackend::new());
-        let commands = backend.commands.clone();
-        let controller = VideoController::from_parts(shared, backend);
-
-        controller
-            .load(
-                VideoSource::url("https://example.com/demo.mp4")
-                    .with_header("Authorization", "Bearer token")
-                    .with_header("Referer", "https://example.com/app"),
-            )
-            .expect("mock load should succeed");
-
-        let commands = commands.lock().expect("commands lock poisoned");
-        assert_eq!(
-            commands.loads,
-            vec![VideoSource::Url {
-                url: "https://example.com/demo.mp4".to_string(),
-                headers: vec![
-                    ("Authorization".to_string(), "Bearer token".to_string()),
-                    ("Referer".to_string(), "https://example.com/app".to_string()),
-                ],
-            }]
-        );
     }
 
     #[test]
@@ -311,29 +311,16 @@ mod tests {
         let ctx = test_context();
         let shared = test_shared(&ctx);
         let backend = Arc::new(MockBackend::new());
-        let frame = Arc::new(TextureFrame::new(8, 4, vec![255; 8 * 4 * 4]));
-        *backend.frame.lock().expect("frame lock poisoned") = Some(frame.clone());
-        let controller = VideoController::from_parts(shared.clone(), backend);
+        let controller = AudioController::from_parts(shared.clone(), backend);
 
         shared.playback_state.set(PlaybackState::Paused);
-        shared.metrics.set(VideoMetrics {
+        shared.metrics.set(AudioMetrics {
             duration: Some(Duration::from_secs(30)),
             position: Duration::from_secs(12),
             buffered: Some(Duration::from_secs(16)),
-            video_width: 8,
-            video_height: 4,
-        });
-        shared.video_size.set(VideoSize {
-            width: 8,
-            height: 4,
         });
         shared.error.set(Some("boom".to_string()));
-        shared.surface.set(VideoSurfaceSnapshot {
-            intrinsic_size: IntrinsicSize::from_pixels(8, 4),
-            texture: None,
-            loading: false,
-            error: None,
-        });
+        shared.looping.set(true);
 
         assert_eq!(controller.playback_state().get(), PlaybackState::Paused);
         assert_eq!(controller.position().get(), Duration::from_secs(12));
@@ -342,46 +329,31 @@ mod tests {
             controller.buffered_position().get(),
             Some(Duration::from_secs(16))
         );
-        assert_eq!(controller.video_size().get().width, 8);
         assert_eq!(controller.error().get(), Some("boom".to_string()));
-        assert_eq!(
-            controller
-                .surface_snapshot()
-                .texture
-                .expect("backend frame should backfill snapshot")
-                .size(),
-            (8, 4)
-        );
+        assert!(controller.looping().get());
     }
 
     #[test]
-    fn play_restarts_from_beginning_after_playback_ended() {
+    fn stop_state_reset_clears_progress_and_error() {
         let ctx = test_context();
         let shared = test_shared(&ctx);
-        shared.playback_state.set(PlaybackState::Ended);
-        let backend = Arc::new(MockBackend::new());
-        let commands = backend.commands.clone();
-        let controller = VideoController::from_parts(shared, backend);
+        shared.playback_state.set(PlaybackState::Playing);
+        shared.metrics.set(AudioMetrics {
+            duration: Some(Duration::from_secs(10)),
+            position: Duration::from_secs(4),
+            buffered: Some(Duration::from_secs(6)),
+        });
+        shared.error.set(Some("boom".to_string()));
+        shared.snapshot.set(AudioSnapshot {
+            loading: false,
+            error: Some("boom".to_string()),
+        });
 
-        controller.play();
+        shared.reset_for_stop();
 
-        let commands = commands.lock().expect("commands lock poisoned");
-        assert_eq!(commands.commands, vec!["seek", "play"]);
-        assert_eq!(commands.seeks, vec![Duration::ZERO]);
-    }
-
-    #[test]
-    fn replay_seeks_to_start_then_plays() {
-        let ctx = test_context();
-        let shared = test_shared(&ctx);
-        let backend = Arc::new(MockBackend::new());
-        let commands = backend.commands.clone();
-        let controller = VideoController::from_parts(shared, backend);
-
-        controller.replay();
-
-        let commands = commands.lock().expect("commands lock poisoned");
-        assert_eq!(commands.commands, vec!["seek", "play"]);
-        assert_eq!(commands.seeks, vec![Duration::ZERO]);
+        assert_eq!(shared.playback_state.get(), PlaybackState::Idle);
+        assert_eq!(shared.metrics.get(), AudioMetrics::default());
+        assert_eq!(shared.error.get(), None);
+        assert_eq!(shared.snapshot.get(), AudioSnapshot::default());
     }
 }

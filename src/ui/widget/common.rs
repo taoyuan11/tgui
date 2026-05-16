@@ -7,6 +7,8 @@ use crate::animation::{AnimationEngine, AnimationKey, WidgetProperty};
 use crate::media::TextureFrame;
 use taffy::NodeId as TaffyNodeId;
 
+#[cfg(feature = "audio")]
+use crate::audio::Audio;
 use crate::foundation::binding::{
     track_dependency_scope, DependencyGraph, DependencyOwner, DependencyPhase, TextChangeSet,
     TextController,
@@ -1371,6 +1373,10 @@ pub(crate) enum WidgetKind<VM> {
     Text {
         text: Text,
     },
+    #[cfg(feature = "audio")]
+    Audio {
+        audio: Audio,
+    },
     Image {
         image: Image,
     },
@@ -1489,6 +1495,10 @@ impl<VM> Clone for WidgetKind<VM> {
                 style: style.clone(),
             },
             Self::Text { text } => Self::Text { text: text.clone() },
+            #[cfg(feature = "audio")]
+            Self::Audio { audio } => Self::Audio {
+                audio: audio.clone(),
+            },
             Self::Image { image } => Self::Image {
                 image: image.clone(),
             },
@@ -1637,6 +1647,10 @@ pub(crate) enum MeasureContext {
     Text {
         id: WidgetId,
         text: Text,
+    },
+    #[cfg(feature = "audio")]
+    Audio {
+        id: WidgetId,
     },
     Image {
         id: WidgetId,

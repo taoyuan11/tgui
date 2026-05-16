@@ -590,6 +590,10 @@ pub(super) fn measure_node(
         | Some(MeasureContext::TextEditor { id, .. }) => {
             Some(id.dependency_owner(DependencyPhase::Layout))
         }
+        #[cfg(feature = "audio")]
+        Some(MeasureContext::Audio { id, .. }) => {
+            Some(id.dependency_owner(DependencyPhase::Layout))
+        }
         #[cfg(feature = "video")]
         Some(MeasureContext::VideoSurface { id, .. }) => {
             Some(id.dependency_owner(DependencyPhase::Layout))
@@ -632,6 +636,8 @@ fn measure_node_tracked(
         Some(MeasureContext::Text { text, .. }) => {
             measure_text_content(text, font_manager, theme, units)
         }
+        #[cfg(feature = "audio")]
+        Some(MeasureContext::Audio { .. }) => (0.0, 0.0),
         Some(MeasureContext::Image { image, .. }) => {
             let snapshot = media.image_snapshot(&image.source.resolve(), None);
             measure_media_content(
@@ -874,6 +880,8 @@ pub(super) fn default_layout_padding<VM>(element: &ResolvedElement<VM>, _theme: 
         ResolvedWidgetKind::Radio { .. } => Insets::ZERO,
         ResolvedWidgetKind::Text { .. } => Insets::ZERO,
         ResolvedWidgetKind::Container { .. } => Insets::ZERO,
+        #[cfg(feature = "audio")]
+        ResolvedWidgetKind::Audio { .. } => Insets::ZERO,
         ResolvedWidgetKind::Image { .. } => Insets::ZERO,
         ResolvedWidgetKind::Canvas { .. } => Insets::ZERO,
         #[cfg(feature = "video")]

@@ -62,6 +62,8 @@
 //! ```
 pub mod animation;
 pub mod application;
+#[cfg(feature = "audio")]
+pub mod audio;
 pub mod dialog;
 mod foundation;
 mod log;
@@ -178,6 +180,8 @@ pub mod prelude {
     pub use crate::application::{
         Application, MsaaMode, WindowClosePolicy, WindowRole, WindowSpec,
     };
+    #[cfg(feature = "audio")]
+    pub use crate::audio::{Audio, AudioController, AudioMetrics, AudioSource, PlaybackState};
     pub use crate::canvas::{
         Canvas, CanvasBlendMode, CanvasBrush, CanvasColorFilter, CanvasDragEvent, CanvasEffect,
         CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasGroupMode, CanvasGroupShape,
@@ -218,9 +222,7 @@ pub mod prelude {
         ThemeSet, ThemeStore, TypeScale, WidgetState,
     };
     #[cfg(feature = "video")]
-    pub use crate::video::{
-        PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
-    };
+    pub use crate::video::{VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface};
     pub use crate::widgets::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
@@ -243,6 +245,8 @@ pub mod theme {
 
 /// Built-in widgets and widget-tree infrastructure.
 pub mod widgets {
+    #[cfg(feature = "audio")]
+    pub use crate::audio::Audio;
     pub use crate::layout::{Flex, Grid, IntoLengthValue, Stack};
     pub use crate::mvvm::{TextChange, TextChangeSet, TextController, TextSnapshot};
     pub use crate::ui::widget::{

@@ -3,6 +3,9 @@ use std::time::Duration;
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 
+use crate::audio::backend::shared::AudioOutput;
+use crate::foundation::error::TguiError;
+
 use super::*;
 
 pub(super) fn decode_main(
@@ -310,9 +313,10 @@ impl DecodeSession {
                     ));
                 }
 
-                let audio_output = AudioOutput::new(volume, muted).map_err(|error| {
-                    TguiError::Media(format!("failed to create audio output: {error}"))
-                })?;
+                let audio_output =
+                    AudioOutput::new(volume, muted, "tgui-video").map_err(|error| {
+                        TguiError::Media(format!("failed to create audio output: {error}"))
+                    })?;
                 let audio_clock = audio_output.clock_handle();
                 let resampler = Resampler::get(
                     audio_decoder.format(),

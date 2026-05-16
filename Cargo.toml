@@ -23,7 +23,8 @@ exclude = [
 default = []
 android = []
 ohos = []
-video = ["dep:ffmpeg-next"]
+audio = ["dep:ffmpeg-next"]
+video = ["audio"]
 video-static = ["video", "ffmpeg-next/static"]
 
 [dependencies]

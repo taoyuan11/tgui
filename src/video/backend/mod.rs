@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::foundation::binding::State;
+use crate::foundation::error::TguiError;
 use crate::media::TextureFrame;
-use crate::TguiError;
 
 use super::types::{PlaybackState, VideoMetrics, VideoSize, VideoSource, VideoSurfaceSnapshot};
 

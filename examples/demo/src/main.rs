@@ -17,6 +17,20 @@ fn status_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
     text_style(mode, sp(14.0))
 }
 
+fn playback_status_text(state: PlaybackState) -> String {
+    tgui_log(LogLevel::Info, format!("播放状态: {:?}", state));
+    match state {
+        PlaybackState::Idle => "等待".to_string(),
+        PlaybackState::Loading => "加载中".to_string(),
+        PlaybackState::Ready => "准备".to_string(),
+        PlaybackState::Playing => "播放中".to_string(),
+        PlaybackState::Paused => "暂停中".to_string(),
+        PlaybackState::Buffering => "缓冲中".to_string(),
+        PlaybackState::Ended => "播放结束".to_string(),
+        PlaybackState::Error(error) => format!("播放出错: {error}"),
+    }
+}
+
 fn card_style(mode: ResolvedThemeMode) -> ContainerStyle {
     let mut style = ContainerStyle::default_for(mode);
     style.surface.background_blur = dp(12.0).into();
@@ -70,30 +84,33 @@ struct App {
     notification_status: State<String>,
     input_text: TextController,
     textarea_text: TextController,
-
-    test_text: State<String>
+    audio_controller: AudioController
 }
 
 impl ViewModel for App {
     fn new(context: &ViewModelContext) -> Self {
+        let audio = AudioController::new(context);
+        audio.set_volume(0.8);
         Self {
             theme: context.state(ThemeMode::System),
             switch: context.state(false),
             checkbox: context.state(false),
             radio: context.state(false),
-            slider_value: context.state(32.0),
+            slider_value: context.state(80.0),
             contact_method: context.state(String::from("system")),
             select_action: context.state(None),
             notification_status: context.state(String::from("尚未发送通知")),
-            input_text: context.text_controller("可编辑的单行输入框"),
+            input_text: context.text_controller("D:\\CloudMusic\\music\\James Blunt - You Are Beautiful.flac"),
             textarea_text: context.text_controller(
                 "这是一个受控 Textarea。\n你可以在这里输入多行内容，示例不会保存修改。",
             ),
-            test_text: context.state(String::from("这是一段测试文字"))
+            audio_controller: audio
         }
     }
 
     fn view(&self) -> Element<Self> {
+
+
         Flex::horizontal()
             .wrap(Wrap::Wrap)
             .padding(Insets::all(dp(20.0)))
@@ -195,19 +212,48 @@ impl ViewModel for App {
                         .show_value_label(true)
                         .format_value(|value| format!("{value:.0}%"))
                         .on_change(ValueCommand::new(|app: &mut App, value| {
-                            app.slider_value.set(value)
+                            app.slider_value.set(value);
+                            app.audio_controller.set_volume(value / 100.0)
                         })),
+                ),
+                component_card(
+                    "Audio",
+                    Flex::vertical()
+                    .child(el![
+                        self.build_audio_component(),
+                        Text::new(
+                            self.audio_controller
+                                .playback_state()
+                                .map(playback_status_text),
+                        ),
+                        Flex::horizontal()
+                        .gap(dp(10.0))
+                        .child(el![
+                            Button::new("加载")
+                                .on_click(Command::new(|app: &mut App| {
+                                    match app.audio_controller.load(AudioSource::File(PathBuf::from(app.input_text.text()))) {
+                                        Ok(()) => {}
+                                        Err(err) => {
+                                            tgui_log(LogLevel::Error, &err);
+                                        }
+                                    }
+                                })),
+                            Button::new("播放")
+                                .on_click(Command::new(|app: &mut App| {
+                                    app.audio_controller.play()
+                                })),
+                            Button::new("暂停")
+                                .on_click(Command::new(|app: &mut App| {
+                                    app.audio_controller.pause()
+                                }))
+                        ])
+                    ])
                 ),
                 component_card(
                     "Input",
                     Input::new(self.input_text.clone())
                         .width(dp(260.0))
-                        .placeholder("请输入内容")
-                        .on_change(Command::new(|app: &mut App| {
-                            app.test_text.update(|text| {
-                                *text = format!("{text}1")
-                            })
-                        })),
+                        .placeholder("请在此输入需要播放的音乐绝对路径")
                 ),
                 component_card(
                     "Textarea",
@@ -312,6 +358,11 @@ fn demo_shadow_card() -> Element<App> {
 }
 
 impl App {
+
+    fn build_audio_component(&self) -> Element<App> {
+        Audio::new(self.audio_controller.clone()).into()
+    }
+
     fn request_notification_permission(ctx: &CommandContext<Self>) {
         let _ =
             ctx.notifications()
@@ -326,7 +377,7 @@ impl App {
     fn send_plain_notification(&mut self, ctx: &CommandContext<Self>) {
         let result = ctx.notifications().send(
             NotificationOptions::new("TGUI Demo")
-                .body("这是一条来自 demo 示例的系统通知。")
+                .body("这是一条普通通知")
                 .app_name("TGUI Demo"),
         );
         self.notification_status.set(match result {

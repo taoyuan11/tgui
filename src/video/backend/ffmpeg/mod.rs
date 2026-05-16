@@ -14,17 +14,21 @@ use ffmpeg::util::format::pixel::Pixel;
 use ffmpeg::util::frame::{audio::Audio as AudioFrame, video::Video as VideoFrame};
 use ffmpeg_next as ffmpeg;
 
+#[cfg(test)]
+use crate::audio::backend::shared::ffmpeg_http_input_options;
+use crate::audio::backend::shared::{
+    open_ffmpeg_input, validate_ffmpeg_headers, AudioOutput, SharedAudioClock,
+};
+use crate::foundation::error::TguiError;
+use crate::log::Log;
 use crate::media::{IntrinsicSize, TextureFrame};
 use crate::video::{PlaybackState, VideoSize, VideoSource, VideoSurfaceSnapshot};
-use crate::TguiError;
 
 use super::{BackendSharedState, VideoBackend};
 
-mod audio;
 mod decode;
 mod present;
 
-use audio::{AudioOutput, SharedAudioClock};
 use decode::decode_main;
 use present::present_main;
 
@@ -93,7 +97,7 @@ static VIDEO_DEBUG_ENABLED: OnceLock<bool> = OnceLock::new();
 macro_rules! video_debug {
     ($($arg:tt)*) => {
         if crate::video::backend::ffmpeg::video_debug_enabled() {
-            crate::Log::with_tag("tgui-video").debug(format_args!($($arg)*));
+            Log::with_tag("tgui-video").debug(format_args!($($arg)*));
         }
     };
 }
@@ -545,73 +549,21 @@ fn validate_video_source(source: &VideoSource) -> Result<(), TguiError> {
         return Ok(());
     };
 
-    for (name, value) in headers {
-        if name.is_empty() {
-            return Err(TguiError::Media(
-                "video header name cannot be empty".to_string(),
-            ));
-        }
-        if name.contains(['\r', '\n']) {
-            return Err(TguiError::Media(format!(
-                "video header {name:?} contains an invalid line break"
-            )));
-        }
-        if value.contains(['\r', '\n']) {
-            return Err(TguiError::Media(format!(
-                "video header value for {name:?} contains an invalid line break"
-            )));
-        }
-    }
-
-    Ok(())
+    validate_ffmpeg_headers("video", headers)
 }
 
+#[cfg(test)]
 fn http_input_options(source: &VideoSource) -> Result<ffmpeg::Dictionary<'static>, TguiError> {
-    let mut options = ffmpeg::Dictionary::new();
-    validate_video_source(source)?;
-
-    let custom_headers = match source {
-        VideoSource::File(_) => None,
-        VideoSource::Url { headers, .. } => (!headers.is_empty()).then(|| {
-            headers
-                .iter()
-                .map(|(name, value)| format!("{name}: {value}\r\n"))
-                .collect::<String>()
-        }),
-    };
-
-    let has_custom_user_agent = match source {
-        VideoSource::File(_) => false,
-        VideoSource::Url { headers, .. } => headers
-            .iter()
-            .any(|(name, _)| name.trim().eq_ignore_ascii_case("user-agent")),
-    };
-
-    if !has_custom_user_agent {
-        options.set("user_agent", concat!("tgui/", env!("CARGO_PKG_VERSION")));
+    match source {
+        VideoSource::File(_) => Ok(ffmpeg::Dictionary::new()),
+        VideoSource::Url { headers, .. } => ffmpeg_http_input_options("video", headers),
     }
-    options.set("multiple_requests", "1");
-    options.set("short_seek_size", "65536");
-    options.set("reconnect", "1");
-    options.set("reconnect_streamed", "1");
-    options.set("reconnect_on_network_error", "1");
-    options.set("reconnect_on_http_error", "4xx,5xx");
-    options.set("reconnect_delay_max", "2");
-    options.set("rw_timeout", "15000000");
-    if let Some(headers) = custom_headers {
-        options.set("headers", &headers);
-    }
-    Ok(options)
 }
 
 fn open_input(source: &VideoSource, source_url: &str) -> Result<format::context::Input, TguiError> {
     match source {
-        VideoSource::File(_) => format::input(source_url)
-            .map_err(|error| TguiError::Media(format!("failed to open video source: {error}"))),
-        VideoSource::Url { .. } => {
-            format::input_with_dictionary(source_url, http_input_options(source)?)
-                .map_err(|error| TguiError::Media(format!("failed to open video source: {error}")))
-        }
+        VideoSource::File(_) => open_ffmpeg_input("video", source_url, None),
+        VideoSource::Url { headers, .. } => open_ffmpeg_input("video", source_url, Some(headers)),
     }
 }
 

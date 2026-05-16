@@ -96,6 +96,12 @@ fn freeze_image(image: &mut Image) {
     freeze_option_value(&mut image.cursor_style);
 }
 
+#[cfg(feature = "audio")]
+fn freeze_audio(audio: &mut crate::audio::Audio) {
+    freeze_value(&mut audio.autoplay);
+    freeze_value(&mut audio.looping);
+}
+
 fn freeze_button_style(style: &mut WidgetButtonStyle) {
     freeze_widget_surface_style(&mut style.surface);
     freeze_stateful_value(&mut style.background);
@@ -213,6 +219,12 @@ fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> LifecycleWidgetKi
             let mut text = text.clone();
             freeze_text(&mut text);
             LifecycleWidgetKind::Text { text }
+        }
+        #[cfg(feature = "audio")]
+        ResolvedWidgetKind::Audio { audio } => {
+            let mut audio = audio.clone();
+            freeze_audio(&mut audio);
+            LifecycleWidgetKind::Audio { audio }
         }
         ResolvedWidgetKind::Image { image } => {
             let mut image = image.clone();
@@ -487,6 +499,12 @@ impl<VM> PartialEq for ResolvedWidgetKind<VM> {
                     && left.cursor_style == right.cursor_style
                     && left.user_select == right.user_select
             }
+            #[cfg(feature = "audio")]
+            (Self::Audio { audio: left }, Self::Audio { audio: right }) => {
+                left.controller == right.controller
+                    && left.autoplay == right.autoplay
+                    && left.looping == right.looping
+            }
             (Self::Image { image: left }, Self::Image { image: right }) => {
                 left.source == right.source
                     && left.background == right.background
@@ -738,6 +756,12 @@ impl PartialEq for LifecycleWidgetKind {
                     && left.cursor_style == right.cursor_style
                     && left.user_select == right.user_select
             }
+            #[cfg(feature = "audio")]
+            (Self::Audio { audio: left }, Self::Audio { audio: right }) => {
+                left.controller == right.controller
+                    && left.autoplay == right.autoplay
+                    && left.looping == right.looping
+            }
             (Self::Image { image: left }, Self::Image { image: right }) => {
                 left.source == right.source
                     && left.background == right.background
@@ -943,6 +967,17 @@ impl PartialEq for LifecycleWidgetKind {
 }
 
 impl<VM> ResolvedElement<VM> {
+    fn requires_runtime_lifecycle(&self) -> bool {
+        #[cfg(feature = "audio")]
+        {
+            matches!(&self.kind, ResolvedWidgetKind::Audio { .. })
+        }
+        #[cfg(not(feature = "audio"))]
+        {
+            false
+        }
+    }
+
     pub(super) fn measure_context(&self) -> MeasureContext {
         match &self.kind {
             ResolvedWidgetKind::Container { .. } => MeasureContext::None,
@@ -950,6 +985,8 @@ impl<VM> ResolvedElement<VM> {
                 id: self.id,
                 text: text.clone(),
             },
+            #[cfg(feature = "audio")]
+            ResolvedWidgetKind::Audio { .. } => MeasureContext::Audio { id: self.id },
             ResolvedWidgetKind::Image { image } => MeasureContext::Image {
                 id: self.id,
                 image: image.clone(),
@@ -1386,7 +1423,7 @@ impl<VM> ResolvedElement<VM> {
         chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
         visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
     ) -> ComputedScene<VM> {
-        if self.lifecycle_events.has_any() {
+        if self.lifecycle_events.has_any() || self.requires_runtime_lifecycle() {
             lifecycle_states.insert(
                 self.id,
                 LifecycleEventState {
@@ -2264,6 +2301,8 @@ impl<VM> ResolvedElement<VM> {
                     });
                 }
             }
+            #[cfg(feature = "audio")]
+            ResolvedWidgetKind::Audio { .. } => {}
             ResolvedWidgetKind::Image { image } => {
                 let source = image.source.resolve();
                 let loading_background = image
@@ -2408,7 +2447,7 @@ impl<VM> ResolvedElement<VM> {
                 }
             }
             #[cfg(feature = "video")]
-            ResolvedWidgetKind::VideoSurface { video } => {
+            ResolvedWidgetKind::VideoSurface { video, .. } => {
                 let loading_background = video
                     .background
                     .as_ref()
@@ -2428,10 +2467,11 @@ impl<VM> ResolvedElement<VM> {
                     background_frame,
                     background_radius,
                     primitive_clip,
+                    None,
                     opacity,
                     loading_background,
                     context,
-                    computed,
+                    &mut computed,
                 );
             }
             ResolvedWidgetKind::Button { label, style, .. } => {
@@ -2956,6 +2996,21 @@ impl<VM> ResolvedElement<VM> {
                     child.collect_media_event_states(media, states);
                 }
             }
+            #[cfg(feature = "audio")]
+            ResolvedWidgetKind::Audio { audio } => {
+                if !self.media_events.has_any() {
+                    return;
+                }
+                let snapshot = audio.controller.snapshot();
+                if let Some(phase) = media_event_phase(snapshot.loading, snapshot.error.as_deref())
+                {
+                    states.push(MediaEventState {
+                        widget_id: self.id,
+                        media_phase: Some(phase),
+                        handlers: self.media_events.clone(),
+                    });
+                }
+            }
             ResolvedWidgetKind::Image { image } => {
                 if !self.media_events.has_any() {
                     return;
@@ -2972,7 +3027,7 @@ impl<VM> ResolvedElement<VM> {
                 }
             }
             #[cfg(feature = "video")]
-            ResolvedWidgetKind::VideoSurface { video } => {
+            ResolvedWidgetKind::VideoSurface { video, .. } => {
                 if !self.media_events.has_any() {
                     return;
                 }
@@ -2991,7 +3046,7 @@ impl<VM> ResolvedElement<VM> {
     }
 
     pub(super) fn collect_lifecycle_event_states(&self, states: &mut Vec<LifecycleEventState<VM>>) {
-        if self.lifecycle_events.has_any() {
+        if self.lifecycle_events.has_any() || self.requires_runtime_lifecycle() {
             states.push(LifecycleEventState {
                 widget_id: self.id,
                 snapshot: lifecycle_snapshot(self),

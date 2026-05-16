@@ -810,10 +810,7 @@ fn background_shadow_reuses_cached_texture_when_widget_moves() {
         })
         .expect("shadow texture should be emitted after moving");
 
-    assert!(Arc::ptr_eq(
-        &first_texture.texture,
-        &second_texture.texture
-    ));
+    assert!(Arc::ptr_eq(&first_texture.texture, &second_texture.texture));
 }
 
 #[test]
@@ -5458,12 +5455,7 @@ fn slider_thumb_shadow_renders_before_thumb_fill_without_changing_hit_geometry()
         .primitives
         .commands
         .iter()
-        .position(|command| {
-            matches!(
-                command,
-                crate::ui::widget::RenderCommand::Texture(_)
-            )
-        })
+        .position(|command| matches!(command, crate::ui::widget::RenderCommand::Texture(_)))
         .expect("slider thumb shadow should render as a texture command");
     let thumb_fill_index = rendered
         .primitives
