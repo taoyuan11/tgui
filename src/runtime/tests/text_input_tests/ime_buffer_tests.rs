@@ -369,4 +369,3 @@ fn textarea_large_text_edit_smoke_uses_rope_buffer() {
     assert_eq!(value.len(), initial.len() + "中".len());
     assert!(value.starts_with("中0123456789abcdef"));
 }
-

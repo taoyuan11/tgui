@@ -329,4 +329,3 @@ fn binding_driven_children_can_switch_component_types() {
     );
     assert!(!button_render.primitives.shapes.is_empty());
 }
-

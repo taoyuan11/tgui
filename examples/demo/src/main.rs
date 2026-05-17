@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use tgui::prelude::*;
+use tgui::prelude::VideoController;
 
 fn text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
     let mut style = TextWidgetStyle::default_for(mode);
@@ -73,6 +74,46 @@ fn shadow_showcase_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
+struct VideoPlayer {
+    video_controller: VideoController,
+    source: State<String>
+}
+
+impl VideoPlayer {
+    fn new(context: &ViewModelContext) -> Self {
+        let source = context.state(String::from("D:\\CloudMusic\\MV\\郭顶 - 凄美地.mp4"));
+        let controller = VideoController::new(context);
+        Self {
+            video_controller: controller,
+            source
+        }
+    }
+
+    fn play(&mut self) {
+        self.video_controller.play();
+    }
+
+    fn pause(&mut self) {
+        self.video_controller.pause();
+    }
+
+    fn change_source(&mut self, source: String) -> Result<(), TguiError> {
+        let video_source = if source.starts_with("http") {
+            VideoSource::Url {
+                url: source.clone(),
+                headers: vec![],
+            }
+        } else {
+            VideoSource::File(PathBuf::from(source.clone()))
+        };
+
+        self.video_controller.load(video_source)?;
+        self.source.set(source);
+        Ok(())
+    }
+
+}
+
 struct App {
     theme: State<ThemeMode>,
     switch: State<bool>,
@@ -84,7 +125,8 @@ struct App {
     notification_status: State<String>,
     input_text: TextController,
     textarea_text: TextController,
-    audio_controller: AudioController
+    audio_controller: AudioController,
+    video_player: VideoPlayer
 }
 
 impl ViewModel for App {
@@ -104,7 +146,8 @@ impl ViewModel for App {
             textarea_text: context.text_controller(
                 "这是一个受控 Textarea。\n你可以在这里输入多行内容，示例不会保存修改。",
             ),
-            audio_controller: audio
+            audio_controller: audio,
+            video_player: VideoPlayer::new(context)
         }
     }
 
@@ -218,36 +261,11 @@ impl ViewModel for App {
                 ),
                 component_card(
                     "Audio",
-                    Flex::vertical()
-                    .child(el![
-                        self.build_audio_component(),
-                        Text::new(
-                            self.audio_controller
-                                .playback_state()
-                                .map(playback_status_text),
-                        ),
-                        Flex::horizontal()
-                        .gap(dp(10.0))
-                        .child(el![
-                            Button::new("加载")
-                                .on_click(Command::new(|app: &mut App| {
-                                    match app.audio_controller.load(AudioSource::File(PathBuf::from(app.input_text.text()))) {
-                                        Ok(()) => {}
-                                        Err(err) => {
-                                            tgui_log(LogLevel::Error, &err);
-                                        }
-                                    }
-                                })),
-                            Button::new("播放")
-                                .on_click(Command::new(|app: &mut App| {
-                                    app.audio_controller.play()
-                                })),
-                            Button::new("暂停")
-                                .on_click(Command::new(|app: &mut App| {
-                                    app.audio_controller.pause()
-                                }))
-                        ])
-                    ])
+                    self.build_audio_component()
+                ),
+                component_card(
+                    "Video",
+                    self.build_video_component()
                 ),
                 component_card(
                     "Input",
@@ -359,8 +377,66 @@ fn demo_shadow_card() -> Element<App> {
 
 impl App {
 
-    fn build_audio_component(&self) -> Element<App> {
-        Audio::new(self.audio_controller.clone()).into()
+    fn build_video_component(&self) -> Element<Self> {
+        Flex::vertical()
+            .gap(dp(10.0))
+            .child(el![
+                Input::new(self.video_player.source.signal()).placeholder("在此输入视频地址"),
+                VideoSurface::new(self.video_player.video_controller.clone()).size(dp(300.0), dp(168.0)),
+                Flex::horizontal()
+                .gap(dp(10.0))
+                .child(el![
+                    Button::new("加载")
+                    .on_click(Command::new(|app: &mut App| {
+                        if let Err(err) = app.video_player.change_source(app.video_player.source.get()) {
+                            tgui_log(LogLevel::Error, format!("加载视频失败: {err}"))
+                        }
+                    })),
+                    Button::new("播放")
+                    .on_click(Command::new(|app: &mut App| {
+                        app.video_player.play()
+                    })),
+                    Button::new("暂停")
+                    .on_click(Command::new(|app: &mut App| {
+                        app.video_player.pause()
+                    }))
+                ])
+            ])
+            .into()
+    }
+
+    fn build_audio_component(&self) -> Element<Self> {
+        Flex::vertical()
+            .gap(dp(10.0))
+            .child(el![
+                Audio::new(self.audio_controller.clone()),
+                    Text::new(
+                        self.audio_controller
+                            .playback_state()
+                            .map(playback_status_text),
+                    ),
+                    Flex::horizontal()
+                    .gap(dp(10.0))
+                    .child(el![
+                        Button::new("加载")
+                            .on_click(Command::new(|app: &mut App| {
+                                match app.audio_controller.load(AudioSource::File(PathBuf::from(app.input_text.text()))) {
+                                    Ok(()) => {}
+                                    Err(err) => {
+                                        tgui_log(LogLevel::Error, &err);
+                                    }
+                                }
+                            })),
+                        Button::new("播放")
+                            .on_click(Command::new(|app: &mut App| {
+                                app.audio_controller.play()
+                            })),
+                        Button::new("暂停")
+                            .on_click(Command::new(|app: &mut App| {
+                                app.audio_controller.pause()
+                            }))
+                    ])
+                ]).into()
     }
 
     fn request_notification_permission(ctx: &CommandContext<Self>) {

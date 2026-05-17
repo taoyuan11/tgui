@@ -82,16 +82,16 @@ use self::element_path::resolve_subtree_from_source_path;
 use self::layout::*;
 use self::render::*;
 use self::scene::{CollectContext, VisualContext};
-use self::scene_layout::*;
-use self::style::*;
-use self::tree::with_widget_stack;
-use self::types::*;
 pub(crate) use self::scene::{
     CollectedSceneCache, SceneChunkParts, TextInputLayoutOverride, VisualContextSnapshot,
 };
 pub(crate) use self::scene_layout::ResolvedSceneLayout;
+use self::scene_layout::*;
+use self::style::*;
+use self::tree::with_widget_stack;
 pub use self::tree::{rect, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use self::types::Element;
+use self::types::*;
 pub(crate) use self::types::{LifecycleSnapshot, LifecycleWidgetKind};
 
 /// Caret width in logical pixels.

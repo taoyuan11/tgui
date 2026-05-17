@@ -384,4 +384,3 @@ fn switch_thumb_animates_between_positions() {
     assert!(mid_x > start_x);
     assert!(mid_x < end_x);
 }
-

@@ -311,8 +311,7 @@ pub(crate) fn push_select_text(
         line_height,
         letter_spacing,
     );
-    let content_frame =
-        centered_text_frame(inner, layout.width, layout.height, line_height, false);
+    let content_frame = centered_text_frame(inner, layout.width, layout.height, line_height, false);
     let primitive = TextPrimitive {
         content,
         rich_spans: None,

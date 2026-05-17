@@ -415,5 +415,4 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         true
     }
-
 }

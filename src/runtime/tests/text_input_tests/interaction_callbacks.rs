@@ -316,4 +316,3 @@ fn textarea_edit_keeps_cached_scene_shell_for_text_input_patch() {
     assert!(cached.computed_valid);
     assert_eq!(cached.text_input_epoch, handler.text_input_epoch);
 }
-

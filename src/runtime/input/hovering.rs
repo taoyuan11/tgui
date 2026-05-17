@@ -1,5 +1,5 @@
-use super::*;
 use super::select_state::HoverMoveOrTransition;
+use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn hit_path(&mut self, _viewport: Rect) -> Vec<HitInteraction<VM>> {

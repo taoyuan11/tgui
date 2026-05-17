@@ -319,4 +319,3 @@ fn textarea_auto_wrap_false_enables_horizontal_scroll_region() {
         .iter()
         .any(|region| region.overflow_x == Overflow::Scroll));
 }
-

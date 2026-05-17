@@ -23,11 +23,15 @@ fn canvas_scene_can_query_named_and_nested_items() {
     assert!(scene.contains_id(1_u64.into()));
     assert!(scene.contains_name("label"));
     assert_eq!(
-        scene.find_named("root-group").map(super::super::CanvasItem::id),
+        scene
+            .find_named("root-group")
+            .map(super::super::CanvasItem::id),
         Some(2_u64.into())
     );
     assert_eq!(
-        scene.find(3_u64.into()).and_then(super::super::CanvasItem::name),
+        scene
+            .find(3_u64.into())
+            .and_then(super::super::CanvasItem::name),
         Some("label")
     );
 }
@@ -62,15 +66,13 @@ fn canvas_scene_remove_handles_nested_items() {
         1_u64,
         super::super::CanvasGroupMode::Clip,
         super::super::CanvasGroupShape::path(PathBuilder::new().rect(0.0, 0.0, 20.0, 20.0)),
-        vec![
-            super::super::CanvasImage::new(
-                2_u64,
-                Rect::new(0.0, 0.0, 20.0, 20.0),
-                MediaSource::bytes(vec![1, 2, 3]),
-            )
-            .name_item("thumb")
-            .into(),
-        ],
+        vec![super::super::CanvasImage::new(
+            2_u64,
+            Rect::new(0.0, 0.0, 20.0, 20.0),
+            MediaSource::bytes(vec![1, 2, 3]),
+        )
+        .name_item("thumb")
+        .into()],
     )
     .into()]);
 
@@ -92,7 +94,9 @@ fn canvas_recorder_item_names_are_recorded() {
     });
 
     assert_eq!(
-        scene.find_named("hero-card").map(super::super::CanvasItem::id),
+        scene
+            .find_named("hero-card")
+            .map(super::super::CanvasItem::id),
         Some(1_u64.into())
     );
     assert_eq!(
@@ -157,11 +161,13 @@ fn canvas_scene_query_point_and_stable_export_work() {
 
 #[test]
 fn canvas_scene_query_point_returns_text_hit_for_text_items() {
-    let scene = CanvasScene::from_items(vec![
-        super::super::CanvasText::new(1_u64, Rect::new(0.0, 0.0, 120.0, 32.0), "Hello")
-            .name_item("label")
-            .into(),
-    ]);
+    let scene = CanvasScene::from_items(vec![super::super::CanvasText::new(
+        1_u64,
+        Rect::new(0.0, 0.0, 120.0, 32.0),
+        "Hello",
+    )
+    .name_item("label")
+    .into()]);
 
     let hit = scene
         .query_point(Point::new(6.0, 10.0))
@@ -175,15 +181,13 @@ fn canvas_scene_query_point_returns_text_hit_for_text_items() {
 
 #[test]
 fn stable_export_escapes_control_characters() {
-    let scene = CanvasScene::from_items(vec![
-        super::super::CanvasText::new(
-            1_u64,
-            Rect::new(0.0, 0.0, 120.0, 32.0),
-            "line\u{0001}\u{0008}\u{000C}end",
-        )
-        .name_item("bad\u{0002}name")
-        .into(),
-    ]);
+    let scene = CanvasScene::from_items(vec![super::super::CanvasText::new(
+        1_u64,
+        Rect::new(0.0, 0.0, 120.0, 32.0),
+        "line\u{0001}\u{0008}\u{000C}end",
+    )
+    .name_item("bad\u{0002}name")
+    .into()]);
 
     let json = scene.export_json();
 
@@ -193,11 +197,13 @@ fn stable_export_escapes_control_characters() {
 
 #[test]
 fn canvas_scene_query_options_drive_explicit_query_context() {
-    let scene = CanvasScene::from_items(vec![
-        super::super::CanvasText::new(1_u64, Rect::new(0.0, 0.0, 120.0, 32.0), "Hello")
-            .name_item("label")
-            .into(),
-    ]);
+    let scene = CanvasScene::from_items(vec![super::super::CanvasText::new(
+        1_u64,
+        Rect::new(0.0, 0.0, 120.0, 32.0),
+        "Hello",
+    )
+    .name_item("label")
+    .into()]);
     let options = super::super::CanvasSceneQueryOptions::new()
         .scale_factor(1.5)
         .font_scale(1.25);
@@ -214,11 +220,13 @@ fn canvas_scene_query_options_drive_explicit_query_context() {
 
 #[test]
 fn runtime_query_context_bridge_reuses_runtime_inputs() {
-    let scene = CanvasScene::from_items(vec![
-        super::super::CanvasText::new(1_u64, Rect::new(0.0, 0.0, 120.0, 32.0), "Hello")
-            .name_item("label")
-            .into(),
-    ]);
+    let scene = CanvasScene::from_items(vec![super::super::CanvasText::new(
+        1_u64,
+        Rect::new(0.0, 0.0, 120.0, 32.0),
+        "Hello",
+    )
+    .name_item("label")
+    .into()]);
     let font_manager = FontManager::new(&FontCatalog::default());
     let units = UnitContext::new(1.5, 1.25);
 

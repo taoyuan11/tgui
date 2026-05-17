@@ -81,4 +81,3 @@ fn larger_font_sizes_scale_default_line_height() {
     assert_eq!(font_size, 30.0);
     assert_eq!(line_height, 41.25);
 }
-

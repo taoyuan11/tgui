@@ -261,4 +261,3 @@ fn leaf_dependency_update_does_not_rebuild_unaffected_sibling_chunk() {
     assert!(cached.computed_valid);
     assert_eq!(sibling_reads.load(Ordering::SeqCst), 1);
 }
-

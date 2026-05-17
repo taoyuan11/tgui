@@ -351,4 +351,3 @@ fn disabled_checkbox_exposes_disabled_hit_for_cursor_only() {
 
     assert!(matches!(hit, Some(super::HitInteraction::Disabled { .. })));
 }
-

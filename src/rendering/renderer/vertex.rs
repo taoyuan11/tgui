@@ -7,9 +7,7 @@ use crate::ui::widget::{
 mod clip;
 
 pub(super) use self::clip::physical_mesh_clip_mask_data;
-use self::clip::{
-    logical_clip_mask_data, physical_clip_mask_at_position, physical_clip_mask_data,
-};
+use self::clip::{logical_clip_mask_data, physical_clip_mask_at_position, physical_clip_mask_data};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

@@ -168,4 +168,3 @@ fn focused_select_opens_upward_and_hits_enabled_and_disabled_options() {
         Some(super::HitInteraction::Disabled { .. })
     ));
 }
-

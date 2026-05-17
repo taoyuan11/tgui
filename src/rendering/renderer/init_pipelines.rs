@@ -1,5 +1,5 @@
-use super::*;
 use super::init_resources::create_renderer_pipeline_resources;
+use super::*;
 
 pub(super) struct RendererPipelines {
     pub(super) rect_pipeline: wgpu::RenderPipeline,

@@ -256,5 +256,4 @@ impl<VM> Element<VM> {
         self.media_events.on_error = Some(command);
         self
     }
-
 }

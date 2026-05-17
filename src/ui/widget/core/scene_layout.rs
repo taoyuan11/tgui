@@ -1,11 +1,11 @@
 mod patch;
 
-use super::*;
 pub(super) use self::patch::media_event_phase;
 use self::patch::{
     collect_indexes, collect_resolved_widget_ids, layout_at_path, patch_layout_at_path,
     patch_resolved_at_path, resolved_at_path,
 };
+use super::*;
 
 #[derive(Clone)]
 pub(crate) struct ResolvedSceneLayout<VM> {

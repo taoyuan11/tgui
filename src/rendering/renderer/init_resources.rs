@@ -41,9 +41,7 @@ pub(super) fn create_renderer_pipeline_resources(
     });
     let backdrop_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("tgui-backdrop-composite-shader"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!("../shader/backdrop_composite.wgsl").into(),
-        ),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/backdrop_composite.wgsl").into()),
     });
     let canvas_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("tgui-canvas-composite-shader"),
@@ -54,27 +52,28 @@ pub(super) fn create_renderer_pipeline_resources(
         source: wgpu::ShaderSource::Wgsl(include_str!("../shader/text.wgsl").into()),
     });
 
-    let text_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("tgui-text-bind-group-layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+    let text_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tgui-text-bind-group-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
                 },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ],
-    });
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
     let present_bind_group_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("tgui-present-bind-group-layout"),

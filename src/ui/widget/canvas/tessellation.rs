@@ -7,13 +7,13 @@ use lyon::path::Path;
 
 use crate::ui::widget::common;
 
-use super::*;
 pub(super) use self::effects::resolve_canvas_effects;
-pub(super) use self::mesh::{tessellate_fill, tessellate_stroke};
 #[cfg(test)]
 pub(super) use self::mesh::CanvasBrushData;
-pub(super) use self::shadow::{canvas_text_hit_cache_key, shadow_padding};
+pub(super) use self::mesh::{tessellate_fill, tessellate_stroke};
 use self::shadow::shadow_texture_for_path;
+pub(super) use self::shadow::{canvas_text_hit_cache_key, shadow_padding};
+use super::*;
 
 pub(super) fn path_base_bounds(path: &CanvasPath) -> Option<RectBounds> {
     let bounds = path.path.control_bounds()?;
@@ -279,7 +279,12 @@ fn background_brush_from_canvas(brush: &CanvasBrush, opacity: f32) -> Option<Bac
     }
 }
 
-pub(super) fn transformed_path_size(path: &Path, min_x: f32, min_y: f32, scale_factor: f32) -> (u32, u32) {
+pub(super) fn transformed_path_size(
+    path: &Path,
+    min_x: f32,
+    min_y: f32,
+    scale_factor: f32,
+) -> (u32, u32) {
     let bounds = bounding_box(path.iter());
     let width = ((bounds.max.x - min_x) * scale_factor).ceil().max(1.0) as u32;
     let height = ((bounds.max.y - min_y) * scale_factor).ceil().max(1.0) as u32;

@@ -51,8 +51,9 @@ use super::style::{
 };
 use super::style::{InputStyle as WidgetInputStyle, TextareaStyle as WidgetTextareaStyle};
 use super::text::Text;
-use geometry::point_in_triangle;
 pub(crate) use event_handlers::*;
+use geometry::point_in_triangle;
+pub use geometry::{Point, Rect};
 pub(crate) use hit_scene::*;
 pub(crate) use hit_scene_state::*;
 pub(crate) use hit_scene_support::*;
@@ -60,7 +61,6 @@ pub use scene_primitives::*;
 pub(crate) use slider::*;
 pub(crate) use text_edit::*;
 pub(crate) use widget_kind::*;
-pub use geometry::{Point, Rect};
 
 static NEXT_WIDGET_ID: AtomicU64 = AtomicU64::new(1);
 

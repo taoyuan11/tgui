@@ -406,5 +406,8 @@ pub(super) fn element_has_lifecycle_handlers<VM>(element: &Element<VM>) -> bool 
 
 #[cfg(test)]
 fn child_source_has_lifecycle_handlers<VM>(source: &ChildSource<VM>) -> bool {
-    source.resolve(None).iter().any(element_has_lifecycle_handlers)
+    source
+        .resolve(None)
+        .iter()
+        .any(element_has_lifecycle_handlers)
 }

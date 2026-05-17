@@ -9,14 +9,14 @@ use crate::ui::widget::{
 };
 use cosmic_text::{Editor, Metrics, Wrap};
 
+use super::super::{TextInputBufferState, CARET_BLINK_INTERVAL};
 use super::text_input::{
     refresh_session_buffer, text_edit_display_text, update_session_layout_snapshot,
 };
 use super::{
-    text_cursor_index_at_point, BoundRuntimeHandler, INPUT_CARET_WIDTH, TextInputFlushData,
-    TextInputRegionData,
+    text_cursor_index_at_point, BoundRuntimeHandler, TextInputFlushData, TextInputRegionData,
+    INPUT_CARET_WIDTH,
 };
-use super::super::{CARET_BLINK_INTERVAL, TextInputBufferState};
 
 mod runtime;
 

@@ -342,4 +342,3 @@ fn textarea_replaces_multibyte_selection_via_rope_buffer() {
     let value = handler.with_view_model(|vm| vm.value.clone());
     assert_eq!(value, "abXcd");
 }
-

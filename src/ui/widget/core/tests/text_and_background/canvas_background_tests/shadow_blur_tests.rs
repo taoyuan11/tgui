@@ -331,4 +331,3 @@ fn background_shadow_reuses_cached_texture_when_widget_moves() {
 
     assert!(Arc::ptr_eq(&first_texture.texture, &second_texture.texture));
 }
-

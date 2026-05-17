@@ -199,4 +199,3 @@ fn opaque_signal_dirty_update_falls_back_to_full_scene_invalidation() {
 
     assert!(handler.cached_scene.is_none());
 }
-

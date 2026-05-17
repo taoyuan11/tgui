@@ -393,8 +393,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.pressed_widget = Some(widget_id);
 
-        if let Some((slider_id, on_change, min, max, step, track_rect, current_value)) =
-            slider_drag
+        if let Some((slider_id, on_change, min, max, step, track_rect, current_value)) = slider_drag
         {
             if let Some(position) = pointer_position {
                 self.begin_slider_drag(

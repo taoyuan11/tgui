@@ -317,5 +317,4 @@ impl PathBuilder {
             true,
         )
     }
-
 }

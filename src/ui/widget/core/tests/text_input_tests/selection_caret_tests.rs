@@ -80,4 +80,3 @@ fn textarea_renders_multiline_caret_on_second_line() {
         .expect("caret should be rendered");
     assert!(caret.rect.y > dp(20.0));
 }
-

@@ -18,6 +18,12 @@ mod slider;
 mod text_input;
 mod window_events;
 
+use super::{
+    canvas_mouse_button, cursor_icon, is_primary_shortcut_modifier, mouse_scroll_delta,
+    text_cursor_index_at_point, BoundRuntimeHandler, CanvasPointerContext, ClickHandler,
+    FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
+    PendingClick, ScrollbarDrag, SliderDrag, SmoothScrollState, TextSelectionDrag,
+};
 use crate::foundation::binding::TextChange;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::log::{log_text_profile, text_profile_enabled};
@@ -34,23 +40,13 @@ use crate::ui::widget::{
     CanvasItemInteractionHandlers, CanvasMouseButton, HitInteraction, InteractionHandlers, Point,
     Rect, ScrollbarAxis, ScrollbarHandle, Text, TextEditState, WidgetId, WidgetTree,
 };
-use super::{
-    canvas_mouse_button, cursor_icon, is_primary_shortcut_modifier, mouse_scroll_delta,
-    text_cursor_index_at_point, BoundRuntimeHandler, CanvasPointerContext, ClickHandler,
-    FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
-    PendingClick, ScrollbarDrag, SliderDrag, SmoothScrollState, TextSelectionDrag,
-};
 pub(super) const INPUT_CARET_WIDTH: f32 = 2.0;
-use crate::platform::backend::event_loop::ActiveEventLoop;
-use crate::rendering::renderer::RenderStatus;
 use self::platform_keys::is_key_physically_pressed;
 use self::session::text_replacement_bounds;
-use self::text_input::{
-    refresh_session_buffer, text_edit_display_text,
-};
-pub(super) use self::text_input::{
-    TextInputFlushData, TextInputFlushOutcome, TextInputRegionData,
-};
+use self::text_input::{refresh_session_buffer, text_edit_display_text};
+pub(super) use self::text_input::{TextInputFlushData, TextInputFlushOutcome, TextInputRegionData};
+use crate::platform::backend::event_loop::ActiveEventLoop;
+use crate::rendering::renderer::RenderStatus;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn flush_text_input_session(&mut self, widget_id: WidgetId) -> TextInputFlushOutcome {
@@ -435,5 +431,4 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .as_ref()
             .map(|state| state.next_fire_at)
     }
-
 }

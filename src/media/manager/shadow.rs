@@ -33,7 +33,14 @@ pub(super) fn canvas_shadow_texture<F>(
 where
     F: FnOnce() -> Result<TextureFrame, TguiError>,
 {
-    shadow_texture(cache, MAX_CANVAS_SHADOW_CACHE_ENTRIES, cache_key, width, height, render)
+    shadow_texture(
+        cache,
+        MAX_CANVAS_SHADOW_CACHE_ENTRIES,
+        cache_key,
+        width,
+        height,
+        render,
+    )
 }
 
 pub(super) fn widget_shadow_texture<F>(
@@ -46,7 +53,14 @@ pub(super) fn widget_shadow_texture<F>(
 where
     F: FnOnce() -> Result<TextureFrame, TguiError>,
 {
-    shadow_texture(cache, MAX_WIDGET_SHADOW_CACHE_ENTRIES, cache_key, width, height, render)
+    shadow_texture(
+        cache,
+        MAX_WIDGET_SHADOW_CACHE_ENTRIES,
+        cache_key,
+        width,
+        height,
+        render,
+    )
 }
 
 trait ShadowCacheEntry {
@@ -56,30 +70,84 @@ trait ShadowCacheEntry {
     fn texture(&self) -> Arc<TextureFrame>;
     fn last_used(&self) -> u64;
     fn set_last_used(&mut self, value: u64);
-    fn new(cache_key: u64, width: u32, height: u32, texture: Arc<TextureFrame>, last_used: u64) -> Self;
+    fn new(
+        cache_key: u64,
+        width: u32,
+        height: u32,
+        texture: Arc<TextureFrame>,
+        last_used: u64,
+    ) -> Self;
 }
 
 impl ShadowCacheEntry for CanvasShadowEntry {
-    fn cache_key(&self) -> u64 { self.cache_key }
-    fn width(&self) -> u32 { self.width }
-    fn height(&self) -> u32 { self.height }
-    fn texture(&self) -> Arc<TextureFrame> { self.texture.clone() }
-    fn last_used(&self) -> u64 { self.last_used }
-    fn set_last_used(&mut self, value: u64) { self.last_used = value; }
-    fn new(cache_key: u64, width: u32, height: u32, texture: Arc<TextureFrame>, last_used: u64) -> Self {
-        Self { cache_key, width, height, texture, last_used }
+    fn cache_key(&self) -> u64 {
+        self.cache_key
+    }
+    fn width(&self) -> u32 {
+        self.width
+    }
+    fn height(&self) -> u32 {
+        self.height
+    }
+    fn texture(&self) -> Arc<TextureFrame> {
+        self.texture.clone()
+    }
+    fn last_used(&self) -> u64 {
+        self.last_used
+    }
+    fn set_last_used(&mut self, value: u64) {
+        self.last_used = value;
+    }
+    fn new(
+        cache_key: u64,
+        width: u32,
+        height: u32,
+        texture: Arc<TextureFrame>,
+        last_used: u64,
+    ) -> Self {
+        Self {
+            cache_key,
+            width,
+            height,
+            texture,
+            last_used,
+        }
     }
 }
 
 impl ShadowCacheEntry for WidgetShadowEntry {
-    fn cache_key(&self) -> u64 { self.cache_key }
-    fn width(&self) -> u32 { self.width }
-    fn height(&self) -> u32 { self.height }
-    fn texture(&self) -> Arc<TextureFrame> { self.texture.clone() }
-    fn last_used(&self) -> u64 { self.last_used }
-    fn set_last_used(&mut self, value: u64) { self.last_used = value; }
-    fn new(cache_key: u64, width: u32, height: u32, texture: Arc<TextureFrame>, last_used: u64) -> Self {
-        Self { cache_key, width, height, texture, last_used }
+    fn cache_key(&self) -> u64 {
+        self.cache_key
+    }
+    fn width(&self) -> u32 {
+        self.width
+    }
+    fn height(&self) -> u32 {
+        self.height
+    }
+    fn texture(&self) -> Arc<TextureFrame> {
+        self.texture.clone()
+    }
+    fn last_used(&self) -> u64 {
+        self.last_used
+    }
+    fn set_last_used(&mut self, value: u64) {
+        self.last_used = value;
+    }
+    fn new(
+        cache_key: u64,
+        width: u32,
+        height: u32,
+        texture: Arc<TextureFrame>,
+        last_used: u64,
+    ) -> Self {
+        Self {
+            cache_key,
+            width,
+            height,
+            texture,
+            last_used,
+        }
     }
 }
 

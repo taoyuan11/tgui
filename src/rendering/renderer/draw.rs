@@ -52,11 +52,7 @@ impl Renderer {
         self.offscreen_single_view(target)
     }
 
-    fn clear_offscreen_target(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &OffscreenTarget,
-    ) {
+    fn clear_offscreen_target(&self, encoder: &mut wgpu::CommandEncoder, target: &OffscreenTarget) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tgui-offscreen-clear-pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {

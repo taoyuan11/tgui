@@ -452,4 +452,3 @@ fn textarea_without_auto_wrap_keeps_keyboard_moved_caret_in_view() {
     assert!(caret.y >= inner.y);
     assert!(caret.bottom() <= inner.bottom() + dp(1.0));
 }
-

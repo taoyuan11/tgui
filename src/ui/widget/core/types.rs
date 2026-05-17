@@ -1,8 +1,8 @@
 mod lifecycle;
 
+pub(crate) use self::lifecycle::{LifecycleSelectOption, LifecycleSnapshot, LifecycleWidgetKind};
 use super::*;
 use crate::ui::widget::{common, image};
-pub(crate) use self::lifecycle::{LifecycleSelectOption, LifecycleSnapshot, LifecycleWidgetKind};
 
 pub struct Element<VM> {
     pub(crate) id: WidgetId,

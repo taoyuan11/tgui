@@ -8,8 +8,7 @@ use super::catalog::{
 };
 use super::layout::{measured_glyph_line_height, TextLayoutInfo};
 use super::platform::{
-    contains_cjk, contains_non_cjk_alphanumeric, desktop_cjk_sans_candidates,
-    first_matching_family,
+    contains_cjk, contains_non_cjk_alphanumeric, desktop_cjk_sans_candidates, first_matching_family,
 };
 
 mod keys;

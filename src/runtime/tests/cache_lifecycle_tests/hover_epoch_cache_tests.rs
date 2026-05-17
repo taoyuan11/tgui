@@ -170,4 +170,3 @@ fn animation_scene_invalidation_preserves_cached_layout() {
         units,
     ));
 }
-

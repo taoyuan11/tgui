@@ -37,9 +37,9 @@ pub(super) fn open_audio_input(
 
     if !start_position.is_zero() {
         let timestamp = start_position.as_micros().min(i64::MAX as u128) as i64;
-        input.seek(timestamp, ..timestamp).map_err(|error| {
-            TguiError::Media(format!("failed to seek audio source: {error}"))
-        })?;
+        input
+            .seek(timestamp, ..timestamp)
+            .map_err(|error| TguiError::Media(format!("failed to seek audio source: {error}")))?;
     }
 
     Ok(input)

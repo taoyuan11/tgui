@@ -38,12 +38,7 @@ pub(crate) fn slider_normalized_value(value: f32, min: f32, max: f32, step: f32)
     ((slider_resolve_value(value, min, max, step) - min) / range).clamp(0.0, 1.0)
 }
 
-pub(crate) fn slider_value_from_normalized(
-    normalized: f32,
-    min: f32,
-    max: f32,
-    step: f32,
-) -> f32 {
+pub(crate) fn slider_value_from_normalized(normalized: f32, min: f32, max: f32, step: f32) -> f32 {
     let range = max - min;
     if range.abs() <= f32::EPSILON {
         return min;

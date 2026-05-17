@@ -1,5 +1,5 @@
-use super::*;
 use super::super::state::{SMOOTH_SCROLL_EPSILON, SMOOTH_SCROLL_LERP};
+use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn effective_scroll_offset(&self, widget_id: WidgetId, fallback: Point) -> Point {
@@ -24,11 +24,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        let (_, _, line_height, _) = super::super::resolved_input_text_metrics(
-            &self.theme,
-            self.unit_context(),
-            text_style,
-        );
+        let (_, _, line_height, _) =
+            super::super::resolved_input_text_metrics(&self.theme, self.unit_context(), text_style);
         let layout = self
             .text_input_layout_snapshot(widget_id)
             .cloned()
@@ -45,8 +42,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 );
                 layout
             });
-        let max_scroll_y =
-            Dp::new((layout.height.max(line_height) - inner.height.get()).max(0.0));
+        let max_scroll_y = Dp::new((layout.height.max(line_height) - inner.height.get()).max(0.0));
         if max_scroll_y <= Dp::ZERO {
             return false;
         }
@@ -96,9 +92,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .unwrap_or(Point::ZERO);
             let dx = state.target.x - current.x;
             let dy = state.target.y - current.y;
-            if dx.abs().get() <= SMOOTH_SCROLL_EPSILON
-                && dy.abs().get() <= SMOOTH_SCROLL_EPSILON
-            {
+            if dx.abs().get() <= SMOOTH_SCROLL_EPSILON && dy.abs().get() <= SMOOTH_SCROLL_EPSILON {
                 self.set_scroll_offset(widget_id, state.target);
                 finished.push(widget_id);
                 changed = true;

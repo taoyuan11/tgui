@@ -5,8 +5,8 @@ use super::*;
 mod builder;
 mod item;
 
-pub(crate) use self::builder::{PathCommand, PathShapeHint};
 pub use self::builder::PathBuilder;
+pub(crate) use self::builder::{PathCommand, PathShapeHint};
 pub use self::item::CanvasPath;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

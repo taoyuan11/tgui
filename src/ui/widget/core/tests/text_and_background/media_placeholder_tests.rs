@@ -35,4 +35,3 @@ fn idle_media_placeholder_keeps_default_placeholder_color() {
         crate::media::media_placeholder_color(false, None)
     );
 }
-

@@ -333,4 +333,3 @@ fn select_dropdown_animates_open_and_close() {
     );
     assert!(settled_closed.scene.overlay_shapes.is_empty());
 }
-

@@ -239,8 +239,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     drag.start_scroll_offset
                 }
             });
-        if (previous.x - next_offset.x).abs() > 0.01 || (previous.y - next_offset.y).abs() > 0.01
-        {
+        if (previous.x - next_offset.x).abs() > 0.01 || (previous.y - next_offset.y).abs() > 0.01 {
             self.set_scroll_offset(drag.handle.id, next_offset);
             return true;
         }
@@ -370,5 +369,4 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.scroll_epoch = self.scroll_epoch.wrapping_add(1);
     }
-
 }

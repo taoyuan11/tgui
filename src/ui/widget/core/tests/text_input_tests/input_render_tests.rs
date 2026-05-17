@@ -199,4 +199,3 @@ fn single_line_input_scroll_clips_text_to_inner_content_rect() {
     assert!(text.frame.x < expected_clip.x);
     assert!(text.frame.width > expected_clip.width);
 }
-

@@ -105,4 +105,3 @@ fn textarea_arrow_up_reduces_vertical_scroll_in_long_text() {
     assert!(state.cursor < "line 0\n".len());
     assert!(scrolled_up < scrolled_down);
 }
-

@@ -1,7 +1,5 @@
 use super::super::*;
-use super::shadow::{
-    rasterize_rounded_rect_shadow, rounded_rect_shadow_cache_key, shadow_padding,
-};
+use super::shadow::{rasterize_rounded_rect_shadow, rounded_rect_shadow_cache_key, shadow_padding};
 
 pub(crate) fn push_media_texture_or_placeholder<VM>(
     widget_id: WidgetId,

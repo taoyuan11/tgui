@@ -347,5 +347,4 @@ impl DecodeSession {
     fn set_buffer_memory_limit_bytes(&mut self, bytes: u64) {
         self.buffer_memory_limit_bytes = bytes;
     }
-
 }

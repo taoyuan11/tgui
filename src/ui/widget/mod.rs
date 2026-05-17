@@ -54,14 +54,14 @@ pub use common::{
     CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId, WidgetKey,
 };
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
+pub(crate) use core::LifecycleSnapshot;
+#[cfg(feature = "audio")]
+pub(crate) use core::LifecycleWidgetKind;
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub(crate) use core::{
     CollectedSceneCache, ResolvedSceneLayout, SceneChunkParts, TextInputLayoutOverride,
     VisualContextSnapshot,
 };
-pub(crate) use core::LifecycleSnapshot;
-#[cfg(feature = "audio")]
-pub(crate) use core::LifecycleWidgetKind;
 pub use image::Image;
 pub use input::Input;
 pub use radio::{Radio, RadioGroup, RadioOption};

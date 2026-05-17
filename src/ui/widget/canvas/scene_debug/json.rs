@@ -2,11 +2,11 @@ use super::*;
 
 mod support;
 
-pub(crate) use self::support::{
-    canvas_text_horizontal_align_name, canvas_text_overflow_name,
-    canvas_text_vertical_align_name, canvas_text_wrap_name,
-};
 use self::support::*;
+pub(crate) use self::support::{
+    canvas_text_horizontal_align_name, canvas_text_overflow_name, canvas_text_vertical_align_name,
+    canvas_text_wrap_name,
+};
 
 pub(crate) fn export_canvas_scene_json(scene: &CanvasScene) -> String {
     let mut out = String::new();

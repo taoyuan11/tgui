@@ -198,4 +198,3 @@ fn select_dropdown_stays_above_later_media_placeholder() {
         "media placeholder should still render in the normal scene"
     );
 }
-

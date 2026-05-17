@@ -138,4 +138,3 @@ fn disabled_radio_exposes_disabled_hit_for_cursor_only() {
 
     assert!(matches!(hit, Some(super::HitInteraction::Disabled { .. })));
 }
-

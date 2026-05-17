@@ -43,13 +43,12 @@ pub(super) fn open_audio_pipeline(
     muted: bool,
 ) -> Result<OpenedAudioPipeline, TguiError> {
     let stream_index = audio_stream.index();
-    let audio_context =
-        codec::context::Context::from_parameters(audio_stream.parameters()).map_err(|error| {
-            TguiError::Media(format!("failed to open audio codec: {error}"))
-        })?;
-    let mut decoder = audio_context.decoder().audio().map_err(|error| {
-        TguiError::Media(format!("failed to create audio decoder: {error}"))
-    })?;
+    let audio_context = codec::context::Context::from_parameters(audio_stream.parameters())
+        .map_err(|error| TguiError::Media(format!("failed to open audio codec: {error}")))?;
+    let mut decoder = audio_context
+        .decoder()
+        .audio()
+        .map_err(|error| TguiError::Media(format!("failed to create audio decoder: {error}")))?;
     decoder
         .set_parameters(audio_stream.parameters())
         .map_err(|error| TguiError::Media(format!("failed to configure audio decoder: {error}")))?;

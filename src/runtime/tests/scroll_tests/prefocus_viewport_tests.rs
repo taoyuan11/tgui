@@ -310,4 +310,3 @@ fn textarea_without_auto_wrap_keeps_edited_caret_in_view() {
     assert!(scroll_region.max_offset().x > Dp::ZERO);
     assert!(scroll_region.max_offset().y > Dp::ZERO);
 }
-

@@ -1,5 +1,5 @@
-use super::*;
 use super::element_path::resolved_child_elements_with_previous;
+use super::*;
 
 impl<VM> Element<VM> {
     pub(super) fn resolve(&self, theme: &Theme) -> ResolvedElement<VM> {

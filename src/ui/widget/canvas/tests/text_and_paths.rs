@@ -80,10 +80,7 @@ fn blur_and_color_filter_effects_flow_into_composite() {
         canvas
             .set_effects(vec![
                 CanvasEffect::Blur(dp(6.0)),
-                CanvasEffect::ColorFilter(CanvasColorFilter::tint(
-                    Color::hexa(0x22C55EFF),
-                    0.4,
-                )),
+                CanvasEffect::ColorFilter(CanvasColorFilter::tint(Color::hexa(0x22C55EFF), 0.4)),
             ])
             .fill_rect(0.0, 0.0, 40.0, 40.0);
     });

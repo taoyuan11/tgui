@@ -169,4 +169,3 @@ fn background_image_texture_uses_corner_radius() {
     assert_eq!(rendered.primitives.textures.len(), 1);
     assert_eq!(rendered.primitives.textures[0].corner_radius, 18.0);
 }
-

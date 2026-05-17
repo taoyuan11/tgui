@@ -213,4 +213,3 @@ fn slider_renders_custom_colors() {
         .iter()
         .any(|text| text.color == label));
 }
-

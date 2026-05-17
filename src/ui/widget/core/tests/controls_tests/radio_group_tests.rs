@@ -196,4 +196,3 @@ fn radio_group_disabled_option_exposes_disabled_hit_for_cursor_only() {
         Some(super::HitInteraction::Radio { .. })
     ));
 }
-

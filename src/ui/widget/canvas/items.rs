@@ -4,11 +4,11 @@ mod image;
 mod text;
 
 pub use self::image::{CanvasImage, CanvasImageOptions};
+pub(crate) use self::text::CanvasTextContent;
 pub use self::text::{
     CanvasParagraphStyle, CanvasText, CanvasTextHorizontalAlign, CanvasTextOverflow,
     CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap,
 };
-pub(crate) use self::text::CanvasTextContent;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum CanvasGroupShape {

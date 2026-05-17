@@ -36,7 +36,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 continue;
             };
             for owner in owners {
-                if matches!(owner.phase, DependencyPhase::Structure | DependencyPhase::Layout) {
+                if matches!(
+                    owner.phase,
+                    DependencyPhase::Structure | DependencyPhase::Layout
+                ) {
                     affected_ids.insert(WidgetId::from_raw(owner.widget_id));
                 }
             }

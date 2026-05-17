@@ -214,4 +214,3 @@ fn background_brush_keeps_clip_rect() {
         Some(Rect::new(0.0, 0.0, 100.0, 100.0))
     );
 }
-

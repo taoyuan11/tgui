@@ -200,4 +200,3 @@ fn lifecycle_unmount_dispatches_when_component_is_removed() {
     assert_eq!(vm.unmounts, 1);
     assert_eq!(vm.updates, 0);
 }
-

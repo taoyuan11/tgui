@@ -1,7 +1,7 @@
 use super::super::*;
 use super::{
-    centered_text_frame, push_border_primitives, push_focus_ring_primitives,
-    push_text_primitives, rounded_rect_shadow_texture, RoundedRectShadowSpec,
+    centered_text_frame, push_border_primitives, push_focus_ring_primitives, push_text_primitives,
+    rounded_rect_shadow_texture, RoundedRectShadowSpec,
 };
 use crate::ui::widget::common;
 

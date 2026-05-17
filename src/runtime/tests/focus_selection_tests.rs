@@ -311,4 +311,3 @@ fn selectable_text_can_provide_selected_content_for_copy() {
 
     assert_eq!(handler.selected_text_for_copy().as_deref(), Some("world"));
 }
-

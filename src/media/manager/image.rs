@@ -6,7 +6,9 @@ use crate::foundation::binding::InvalidationSignal;
 use crate::foundation::error::TguiError;
 
 use super::super::svg::rasterize_svg_tree;
-use super::super::types::{clamp_raster_request, ImageSnapshot, IntrinsicSize, RasterRequest, TextureFrame};
+use super::super::types::{
+    clamp_raster_request, ImageSnapshot, IntrinsicSize, RasterRequest, TextureFrame,
+};
 use super::RasterDocument;
 
 pub(in crate::media) struct ImageEntry {

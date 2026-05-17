@@ -83,15 +83,11 @@ impl EventLoop {
             #[cfg(target_os = "macos")]
             Self::MacOS(event_loop) => event_loop.set_control_flow(control_flow),
             #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
-            Self::Wayland(event_loop) => {
-                event_loop.window_target().set_control_flow(control_flow)
-            }
+            Self::Wayland(event_loop) => event_loop.window_target().set_control_flow(control_flow),
             #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
             Self::X11(event_loop) => event_loop.window_target().set_control_flow(control_flow),
             #[cfg(all(target_os = "android", feature = "android"))]
-            Self::Android(event_loop) => {
-                event_loop.window_target().set_control_flow(control_flow)
-            }
+            Self::Android(event_loop) => event_loop.window_target().set_control_flow(control_flow),
             #[cfg(all(target_env = "ohos", feature = "ohos"))]
             Self::Ohos(event_loop) => event_loop.window_target().set_control_flow(control_flow),
         }

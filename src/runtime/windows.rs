@@ -1,6 +1,6 @@
 use super::{
     window_sync_priority, AnimationCoordinator, ApplicationConfig, BoundRuntimeHandler,
-    InvalidationSignal, Log, TguiError, WindowBindings, WindowCommand, WindowClosePolicy,
+    InvalidationSignal, Log, TguiError, WindowBindings, WindowClosePolicy, WindowCommand,
     WindowRole, WindowSetFactory,
 };
 use crate::dialog::{async_dialog_channel, AsyncDialogDispatcher, AsyncDialogReceiver};

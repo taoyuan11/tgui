@@ -1,17 +1,15 @@
 mod names;
 
-use super::super::*;
 pub(super) use self::names::{
-    canvas_blend_mode_name, canvas_fill_rule_name, canvas_group_mode_name,
-    canvas_item_kind_name, content_fit_name,
+    canvas_blend_mode_name, canvas_fill_rule_name, canvas_group_mode_name, canvas_item_kind_name,
+    content_fit_name,
 };
+use self::names::{canvas_stroke_alignment_name, canvas_stroke_cap_name, canvas_stroke_join_name};
 pub(crate) use self::names::{
-    canvas_text_horizontal_align_name, canvas_text_overflow_name,
-    canvas_text_vertical_align_name, canvas_text_wrap_name,
+    canvas_text_horizontal_align_name, canvas_text_overflow_name, canvas_text_vertical_align_name,
+    canvas_text_wrap_name,
 };
-use self::names::{
-    canvas_stroke_alignment_name, canvas_stroke_cap_name, canvas_stroke_join_name,
-};
+use super::super::*;
 
 pub(super) fn write_optional_brush_value_json(
     out: &mut String,
@@ -209,7 +207,11 @@ pub(super) fn write_canvas_effects_json(out: &mut String, effects: &[CanvasEffec
     out.push_str(&format!("{prefix}]"));
 }
 
-pub(super) fn write_text_content_json(out: &mut String, content: &CanvasTextContent, indent: usize) {
+pub(super) fn write_text_content_json(
+    out: &mut String,
+    content: &CanvasTextContent,
+    indent: usize,
+) {
     match content {
         CanvasTextContent::Plain(text) => {
             out.push_str("{\"kind\":\"plain\",\"text\":");

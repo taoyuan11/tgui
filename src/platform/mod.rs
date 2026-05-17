@@ -39,8 +39,8 @@ pub mod android {
 #[cfg(all(target_env = "ohos", feature = "ohos"))]
 pub mod ohos {
     pub use tgui_winit_ohos::{
-        ActiveEventLoopExtOhos, EventLoopBuilderExtOhos, OhosApp, WindowExtOhos,
-        export_ohos_winit_app,
+        export_ohos_winit_app, ActiveEventLoopExtOhos, EventLoopBuilderExtOhos, OhosApp,
+        WindowExtOhos,
     };
 }
 

@@ -249,4 +249,3 @@ fn pointer_entered_restores_mouse_wheel_scrolling_after_pointer_left() {
         "parent scroller should respond after pointer re-enters the window"
     );
 }
-

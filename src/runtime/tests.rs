@@ -421,10 +421,10 @@ impl crate::foundation::view_model::ViewModel for CanvasEventVm {
     }
 }
 
-mod window_theme_tests;
-mod cache_lifecycle_tests;
-mod focus_selection_tests;
-mod text_input_tests;
-mod scroll_tests;
 mod audio_video_tests;
+mod cache_lifecycle_tests;
 mod canvas_tests;
+mod focus_selection_tests;
+mod scroll_tests;
+mod text_input_tests;
+mod window_theme_tests;

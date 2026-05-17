@@ -9,8 +9,8 @@ use crate::media::{MediaManager, TextureFrame};
 use crate::ui::unit::{Dp, Sp, UnitContext};
 use crate::ui::widget::common;
 
-use super::mesh::{dashed_path, normalize_dash_pattern};
 use super::super::*;
+use super::mesh::{dashed_path, normalize_dash_pattern};
 
 pub(super) fn shadow_texture_for_path(
     path: &CanvasPath,

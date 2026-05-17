@@ -1,11 +1,11 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-mod image_utils;
 mod geometry;
-mod path_utils;
-mod path;
+mod image_utils;
 mod items;
+mod path;
+mod path_utils;
 mod recorder;
 mod scene;
 mod scene_debug;
@@ -43,19 +43,23 @@ use super::common::{
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
 use super::style::CanvasStyle;
-pub(crate) use image_utils::*;
 pub(crate) use geometry::*;
-pub use path::*; pub use items::*; pub use recorder::*;
-pub use scene::*; pub use scene_debug::*; pub use scene_query::*;
-pub(crate) use scene_render::*;
-pub(crate) use scene_text::*;
-pub use types::*;
-use tessellation::*;
-pub use widget::*;
+pub(crate) use image_utils::*;
+pub use items::*;
+pub use path::*;
+pub use recorder::*;
+pub use scene::*;
+pub use scene_debug::*;
 pub(crate) use scene_debug::{
     canvas_text_horizontal_align_name, canvas_text_overflow_name, canvas_text_vertical_align_name,
     canvas_text_wrap_name,
 };
+pub use scene_query::*;
+pub(crate) use scene_render::*;
+pub(crate) use scene_text::*;
+use tessellation::*;
+pub use types::*;
+pub use widget::*;
 
 const MAX_CANVAS_GRADIENT_STOPS: usize = 8;
 const CANVAS_FLATTEN_TOLERANCE: f32 = 0.1;

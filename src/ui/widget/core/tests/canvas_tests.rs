@@ -389,4 +389,3 @@ fn canvas_outside_clip_does_not_emit_composite_commands() {
         crate::ui::widget::RenderCommand::CanvasComposite(_)
     )));
 }
-

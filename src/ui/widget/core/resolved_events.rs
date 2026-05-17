@@ -62,10 +62,7 @@ impl<VM> ResolvedElement<VM> {
         }
     }
 
-    pub(super) fn collect_lifecycle_event_states(
-        &self,
-        states: &mut Vec<LifecycleEventState<VM>>,
-    ) {
+    pub(super) fn collect_lifecycle_event_states(&self, states: &mut Vec<LifecycleEventState<VM>>) {
         if self.lifecycle_events.has_any() || self.requires_runtime_lifecycle() {
             states.push(LifecycleEventState {
                 widget_id: self.id,

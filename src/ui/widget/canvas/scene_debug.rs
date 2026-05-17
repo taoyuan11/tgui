@@ -3,8 +3,8 @@ use super::*;
 mod json;
 
 pub(crate) use self::json::{
-    canvas_text_horizontal_align_name, canvas_text_overflow_name,
-    canvas_text_vertical_align_name, canvas_text_wrap_name, export_canvas_scene_json,
+    canvas_text_horizontal_align_name, canvas_text_overflow_name, canvas_text_vertical_align_name,
+    canvas_text_wrap_name, export_canvas_scene_json,
 };
 use self::json::{write_debug_node_json, write_debug_stats_json};
 

@@ -2,9 +2,14 @@ use crate::foundation::binding::{DependencyGraph, TextChange, TextChangeSet};
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::{FontWeight, TextLayoutInfo};
 use crate::ui::unit::{Dp, UnitContext};
-use crate::ui::widget::{CanvasDragEvent, CanvasItemId, CanvasMouseButton, CanvasMouseEvent, CanvasPointerEvent, CanvasWheelEvent, ComputedScene, LifecycleEventState, MediaEventPhase, MediaEventState, Point, Rect, ResolvedSceneLayout, SceneChunkParts, ScrollbarHandle, Text, VisualContextSnapshot, WidgetId};
 #[cfg(feature = "audio")]
 use crate::ui::widget::LifecycleWidgetKind;
+use crate::ui::widget::{
+    CanvasDragEvent, CanvasItemId, CanvasMouseButton, CanvasMouseEvent, CanvasPointerEvent,
+    CanvasWheelEvent, ComputedScene, LifecycleEventState, MediaEventPhase, MediaEventState, Point,
+    Rect, ResolvedSceneLayout, SceneChunkParts, ScrollbarHandle, Text, VisualContextSnapshot,
+    WidgetId,
+};
 use cosmic_text::Editor;
 use ropey::Rope;
 use std::collections::HashMap;

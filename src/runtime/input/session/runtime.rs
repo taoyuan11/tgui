@@ -25,7 +25,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         text_input_buffers: &'a HashMap<WidgetId, TextInputBufferState>,
         focused_input: Option<WidgetId>,
         focused_text_state: Option<&TextEditState>,
-    ) -> (Option<&'a str>, Option<&'a crate::text::font::TextLayoutInfo>) {
+    ) -> (
+        Option<&'a str>,
+        Option<&'a crate::text::font::TextLayoutInfo>,
+    ) {
         let Some(widget_id) = focused_input else {
             return (None, None);
         };

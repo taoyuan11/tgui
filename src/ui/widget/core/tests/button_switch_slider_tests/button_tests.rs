@@ -479,4 +479,3 @@ fn explicit_button_radius_overrides_theme_radius() {
         .iter()
         .any(|shape| shape.corner_radius == 12.0));
 }
-

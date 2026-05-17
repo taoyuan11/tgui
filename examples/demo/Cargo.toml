@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tgui = { path = "../..", features = ["audio"] }
+tgui = { path = "../..", features = ["audio", "video-static"] }
 
 [profile.release]
 lto = true

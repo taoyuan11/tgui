@@ -1,11 +1,11 @@
 mod application_handler;
-mod bootstrap;
 mod binding_sync;
+mod bootstrap;
 mod cache_support;
 mod commands;
 mod handler_meta;
-mod helpers;
 mod handler_support;
+mod helpers;
 mod ime_runtime;
 mod input;
 mod lifecycle;
@@ -21,25 +21,25 @@ mod theme;
 mod timing;
 mod windows;
 
+#[cfg(all(target_os = "android", feature = "android"))]
+use self::bootstrap::build_event_loop_with_android_app;
+#[cfg(all(target_env = "ohos", feature = "ohos"))]
+use self::bootstrap::build_event_loop_with_ohos_app;
+#[cfg(test)]
+pub(super) use self::bootstrap::centered_window_position_for_monitor;
+pub(super) use self::bootstrap::window_sync_priority;
 use self::bootstrap::{
     build_event_loop, configure_native_modal_window, default_window_position,
-    dirty_dependency_set_label,
-    prepare_notifications_for_runtime,
+    dirty_dependency_set_label, prepare_notifications_for_runtime,
 };
 use self::helpers::{
     canvas_mouse_button, cursor_icon, input_text_layout, is_primary_shortcut_modifier,
     mouse_scroll_delta, resolved_input_text_metrics, text_cursor_index_at_point,
     text_cursor_index_from_layout_at_point,
 };
-#[cfg(all(target_os = "android", feature = "android"))]
-use self::bootstrap::build_event_loop_with_android_app;
-#[cfg(all(target_env = "ohos", feature = "ohos"))]
-use self::bootstrap::build_event_loop_with_ohos_app;
-#[cfg(all(target_os = "android", feature = "android"))]
-use self::theme::{
-    android_font_scale, apply_android_system_bar_style, is_light_color, SystemBarStyle,
-};
-use self::theme::{resolve_theme, resolve_window_theme};
+#[cfg(feature = "audio")]
+use self::state::audio_lifecycle_state;
+use self::state::{collect_pending_lifecycle_events, collect_pending_media_event};
 use self::state::{
     ActiveCanvasDrag, ActiveKeyRepeat, CachedScene, CanvasPointerContext, ClickHandler,
     ClipboardService, DispatchedLifecycleState, DispatchedMediaState, FocusedWidget,
@@ -47,13 +47,12 @@ use self::state::{
     PendingLifecycleEvent, PendingMediaEvent, ScrollbarDrag, SliderDrag, SmoothScrollState,
     TextInputBufferState, TextInputSessionConfig, TextSelectionDrag,
 };
-#[cfg(feature = "audio")]
-use self::state::audio_lifecycle_state;
-use self::state::{collect_pending_lifecycle_events, collect_pending_media_event};
+#[cfg(all(target_os = "android", feature = "android"))]
+use self::theme::{
+    android_font_scale, apply_android_system_bar_style, is_light_color, SystemBarStyle,
+};
+use self::theme::{resolve_theme, resolve_window_theme};
 use self::windows::MultiWindowHandler;
-pub(super) use self::bootstrap::window_sync_priority;
-#[cfg(test)]
-pub(super) use self::bootstrap::centered_window_position_for_monitor;
 use crate::animation::{
     default_theme_transition, AnimationCoordinator, AnimationEngine, AnimationKey, Transition,
     WindowProperty,
@@ -92,22 +91,22 @@ use crate::platform::window::{
     Theme as WindowTheme, WindowAttributes, WindowId,
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
+#[cfg(feature = "audio")]
+use crate::runtime::state::AudioLifecycleState;
 use crate::text::font::FontManager;
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet, ThemeStore};
 use crate::ui::unit::{dp, UnitContext};
+#[cfg(feature = "audio")]
+use crate::ui::widget::LifecycleEventState;
 use crate::ui::widget::{
     CollectedSceneCache, ComputedScene, Point, Rect, ResolvedSceneLayout, ScrollRegion,
     ScrollbarHandle, TextEditState, WidgetId, WidgetStateMap, WidgetTree,
 };
-#[cfg(feature = "audio")]
-use crate::ui::widget::LifecycleEventState;
 use image::GenericImageView;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use winit_core::icon::{Icon, RgbaIcon};
-#[cfg(feature = "audio")]
-use crate::runtime::state::AudioLifecycleState;
 
 const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
@@ -490,7 +489,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             system_bar_style: None,
         }
     }
-
 }
 
 #[cfg(test)]

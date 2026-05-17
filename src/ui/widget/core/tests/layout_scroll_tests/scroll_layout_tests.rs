@@ -377,4 +377,3 @@ fn scroll_containers_render_scrollbar_track_and_thumb() {
         .iter()
         .any(|primitive| primitive.color == crate::foundation::color::Color::hexa(0x445566FF)));
 }
-

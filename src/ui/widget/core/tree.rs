@@ -434,7 +434,6 @@ impl<VM> WidgetTree<VM> {
         )
         .computed
     }
-
 }
 
 pub enum WidgetCommand<VM> {

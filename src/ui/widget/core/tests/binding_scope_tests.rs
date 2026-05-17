@@ -192,4 +192,3 @@ fn scoped_lifecycle_command_targets_child_view_model() {
     assert_eq!(vm.child.count, 1);
     assert_eq!(vm.root_count, 0);
 }
-

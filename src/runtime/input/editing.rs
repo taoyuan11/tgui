@@ -49,16 +49,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             )
         };
         let text_len_after = next_value.len();
-        let (
-            config,
-            preferred_font,
-            weight,
-            font_size,
-            line_height,
-            letter_spacing,
-            width,
-            height,
-        ) = self.text_input_session_config(&region);
+        let (config, preferred_font, weight, font_size, line_height, letter_spacing, width, height) =
+            self.text_input_session_config(&region);
         {
             let session = self
                 .text_input_buffers

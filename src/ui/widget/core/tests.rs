@@ -211,16 +211,15 @@ fn default_select_style(
     )
 }
 
-
-mod text_and_background;
+mod binding_scope_tests;
+mod button_switch_slider_tests;
 mod canvas_tests;
+mod command_video_tests;
+mod controls_tests;
 mod dependency_tests;
 mod layout_scroll_tests;
-mod binding_scope_tests;
-mod controls_tests;
 mod select_tests;
-mod command_video_tests;
-mod button_switch_slider_tests;
+mod text_and_background;
 mod text_input_tests;
 
 fn test_media() -> MediaManager {
@@ -278,16 +277,12 @@ fn test_context() -> ViewModelContext {
     ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
 }
 
-
 #[cfg(feature = "video")]
 fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoController {
     struct StaticVideoBackend;
 
     impl VideoBackend for StaticVideoBackend {
-        fn load(
-            &self,
-            _source: crate::video::VideoSource,
-        ) -> Result<(), crate::core::TguiError> {
+        fn load(&self, _source: crate::video::VideoSource) -> Result<(), crate::core::TguiError> {
             Ok(())
         }
 

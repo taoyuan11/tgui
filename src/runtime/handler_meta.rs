@@ -45,11 +45,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         )
     }
 
-    pub(in crate::runtime) fn fail(
-        &mut self,
-        event_loop: &dyn ActiveEventLoop,
-        error: TguiError,
-    ) {
+    pub(in crate::runtime) fn fail(&mut self, event_loop: &dyn ActiveEventLoop, error: TguiError) {
         Log::with_tag("tgui-runtime").error(format_args!("bound runtime failed: {error}"));
         self.error = Some(error);
         event_loop.exit();

@@ -1,5 +1,5 @@
-use super::*;
 use super::init_pipelines::create_renderer_pipelines;
+use super::*;
 
 impl Renderer {
     pub(super) async fn new_async(

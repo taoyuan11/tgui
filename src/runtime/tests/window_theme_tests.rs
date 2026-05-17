@@ -1,6 +1,5 @@
 use super::*;
 
-
 #[test]
 fn centered_window_position_uses_monitor_center() {
     let position = centered_window_position_for_monitor(

@@ -150,7 +150,6 @@ pub(super) fn compute_container_content_bounds<VM>(
         .unwrap_or(Rect::new(frame.x, frame.y, 0.0, 0.0))
 }
 
-
 pub(super) fn map_align_items(align: Align) -> Option<TaffyAlignItems> {
     Some(match align {
         Align::Start => TaffyAlignItems::Start,
