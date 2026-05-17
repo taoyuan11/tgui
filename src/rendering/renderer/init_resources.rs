@@ -1,0 +1,259 @@
+pub(super) struct RendererPipelineResources {
+    pub(super) rect_shader: wgpu::ShaderModule,
+    pub(super) mesh_shader: wgpu::ShaderModule,
+    pub(super) text_shader: wgpu::ShaderModule,
+    pub(super) brush_shader: wgpu::ShaderModule,
+    pub(super) backdrop_blur_shader: wgpu::ShaderModule,
+    pub(super) backdrop_composite_shader: wgpu::ShaderModule,
+    pub(super) canvas_composite_shader: wgpu::ShaderModule,
+    pub(super) present_shader: wgpu::ShaderModule,
+    pub(super) text_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) present_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) mesh_clip_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) backdrop_blur_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) backdrop_composite_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) canvas_composite_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) text_sampler: wgpu::Sampler,
+}
+
+pub(super) fn create_renderer_pipeline_resources(
+    device: &wgpu::Device,
+) -> RendererPipelineResources {
+    let rect_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("tgui-rect-shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/rect.wgsl").into()),
+    });
+    let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("tgui-mesh-shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/mesh.wgsl").into()),
+    });
+    let text_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("tgui-text-shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/text.wgsl").into()),
+    });
+    let brush_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("tgui-brush-shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/brush.wgsl").into()),
+    });
+    let backdrop_blur_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("tgui-backdrop-blur-shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/backdrop_blur.wgsl").into()),
+    });
+    let backdrop_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("tgui-backdrop-composite-shader"),
+        source: wgpu::ShaderSource::Wgsl(
+            include_str!("../shader/backdrop_composite.wgsl").into(),
+        ),
+    });
+    let canvas_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("tgui-canvas-composite-shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/canvas_composite.wgsl").into()),
+    });
+    let present_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("tgui-present-shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/text.wgsl").into()),
+    });
+
+    let text_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("tgui-text-bind-group-layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    });
+    let present_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tgui-present-bind-group-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+    let mesh_clip_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tgui-mesh-clip-bind-group-layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+    let backdrop_blur_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tgui-backdrop-blur-bind-group-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+    let backdrop_composite_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tgui-backdrop-composite-bind-group-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+    let canvas_composite_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tgui-canvas-composite-bind-group-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+    let text_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("tgui-text-sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        ..Default::default()
+    });
+
+    RendererPipelineResources {
+        rect_shader,
+        mesh_shader,
+        text_shader,
+        brush_shader,
+        backdrop_blur_shader,
+        backdrop_composite_shader,
+        canvas_composite_shader,
+        present_shader,
+        text_bind_group_layout,
+        present_bind_group_layout,
+        mesh_clip_bind_group_layout,
+        backdrop_blur_bind_group_layout,
+        backdrop_composite_bind_group_layout,
+        canvas_composite_bind_group_layout,
+        text_sampler,
+    }
+}

@@ -1,0 +1,148 @@
+use super::*;
+
+impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(in crate::runtime) fn scene_cache_matches(
+        &self,
+        cached: &CachedScene<VM>,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+    ) -> bool {
+        if !cached.computed_valid {
+            return false;
+        }
+        cached.viewport == viewport
+            && cached.units == units
+            && cached.focused_widget == self.focused_widget_id()
+            && cached.focus_visible == self.focus_visible
+            && cached.pressed_widget == self.pressed_widget
+            && cached.selected_text == self.selected_text
+            && cached.caret_visible == caret_visible
+            && cached.theme_epoch == self.theme_store.version()
+            && cached.animation_epoch == self.animation_epoch
+            && cached.scroll_epoch == self.scroll_epoch
+            && cached.hover_epoch == self.hover_epoch
+            && cached.text_input_epoch == self.text_input_epoch
+            && cached.hovered_scrollbar == self.hovered_scrollbar
+            && cached.active_scrollbar == active_scrollbar
+    }
+
+    pub(in crate::runtime) fn scene_layout_cache_matches(
+        &self,
+        cached: &CachedScene<VM>,
+        viewport: Rect,
+        units: UnitContext,
+    ) -> bool {
+        cached.viewport == viewport
+            && cached.units == units
+            && cached.theme_epoch == self.theme_store.version()
+            && cached.layout_animation_epoch == self.layout_animation_epoch
+    }
+
+    pub(in crate::runtime) fn scene_cache_mismatch_summary(
+        &self,
+        cached: &CachedScene<VM>,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+    ) -> String {
+        let mut reasons = Vec::new();
+        if !cached.computed_valid {
+            reasons.push("computed_valid");
+        }
+        if cached.viewport != viewport {
+            reasons.push("viewport");
+        }
+        if cached.units != units {
+            reasons.push("units");
+        }
+        if cached.focused_widget != self.focused_widget_id() {
+            reasons.push("focused_widget");
+        }
+        if cached.focus_visible != self.focus_visible {
+            reasons.push("focus_visible");
+        }
+        if cached.pressed_widget != self.pressed_widget {
+            reasons.push("pressed_widget");
+        }
+        if cached.selected_text != self.selected_text {
+            reasons.push("selected_text");
+        }
+        if cached.caret_visible != caret_visible {
+            reasons.push("caret_visible");
+        }
+        if cached.theme_epoch != self.theme_store.version() {
+            reasons.push("theme_epoch");
+        }
+        if cached.animation_epoch != self.animation_epoch {
+            reasons.push("animation_epoch");
+        }
+        if cached.scroll_epoch != self.scroll_epoch {
+            reasons.push("scroll_epoch");
+        }
+        if cached.hover_epoch != self.hover_epoch {
+            reasons.push("hover_epoch");
+        }
+        if cached.text_input_epoch != self.text_input_epoch {
+            reasons.push("text_input_epoch");
+        }
+        if cached.hovered_scrollbar != self.hovered_scrollbar {
+            reasons.push("hovered_scrollbar");
+        }
+        if cached.active_scrollbar != active_scrollbar {
+            reasons.push("active_scrollbar");
+        }
+        if reasons.is_empty() {
+            "none".to_string()
+        } else {
+            reasons.join("|")
+        }
+    }
+
+    pub(in crate::runtime) fn can_patch_text_input_scene(
+        &self,
+        cached: &CachedScene<VM>,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+    ) -> bool {
+        let focused_input = self.focused_text_input_id_cached(&cached.computed);
+        let stable_shell = focused_input.is_some()
+            && cached.computed_valid
+            && cached.layout.is_some()
+            && cached.viewport == viewport
+            && cached.units == units
+            && cached.focused_widget == self.focused_widget_id()
+            && cached.focus_visible == self.focus_visible
+            && cached.pressed_widget == self.pressed_widget
+            && cached.selected_text == self.selected_text
+            && cached.theme_epoch == self.theme_store.version()
+            && cached.animation_epoch == self.animation_epoch
+            && cached.layout_animation_epoch == self.layout_animation_epoch
+            && cached.hover_epoch == self.hover_epoch
+            && cached.hovered_scrollbar == self.hovered_scrollbar
+            && cached.active_scrollbar == active_scrollbar;
+        stable_shell
+            && (cached.text_input_epoch != self.text_input_epoch
+                || cached.caret_visible != caret_visible)
+    }
+
+    pub(in crate::runtime) fn visible_text_input_roots_from_computed(
+        computed: &ComputedScene<VM>,
+    ) -> Vec<WidgetId> {
+        let mut ids = HashSet::new();
+        for region in computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+        {
+            if let crate::ui::widget::HitInteraction::TextInput { id, .. } = &region.interaction {
+                ids.insert(*id);
+            }
+        }
+        ids.into_iter().collect()
+    }
+}
