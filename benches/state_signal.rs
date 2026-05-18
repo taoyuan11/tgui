@@ -7,7 +7,7 @@ fn bench_scalar_state_signal(c: &mut Criterion) {
     let mut group = c.benchmark_group("state_signal_scalar");
     let ctx = ViewModelContext::for_benchmarks();
     let state = ctx.state(0_u32);
-    let signal = state.signal().map(|value| value.wrapping_mul(2));
+    let signal = state.project(|value| value.wrapping_mul(2));
 
     group.bench_function("update_then_get", |b| {
         b.iter(|| {
@@ -28,7 +28,7 @@ fn bench_string_state_signal(c: &mut Criterion) {
     for (label, text) in [("short", short_text.to_string()), ("long", long_text)] {
         let ctx = ViewModelContext::for_benchmarks();
         let state = ctx.state(text.clone());
-        let signal = state.signal().map(|value| value.len());
+        let signal = state.project(|value| value.len());
         let replacement = text.clone();
 
         group.bench_with_input(BenchmarkId::new("set_then_get_len", label), &replacement, |b, input| {

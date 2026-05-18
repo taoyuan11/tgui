@@ -1,6 +1,7 @@
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, Justify, LayoutStyle, Overflow, Value};
+use crate::ui::unit::Dp;
 
 use super::super::common::{
     ContainerLayout, CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers,
@@ -182,6 +183,24 @@ impl<VM> Container<VM> {
     /// 返回更新后的容器实例。
     pub fn cursor(mut self, cursor: impl Into<Value<CursorStyle>>) -> Self {
         self.element.interactions.cursor_style = Some(cursor.into());
+        self
+    }
+
+    /// 设置容器整体透明度。
+    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
+        self.element.visual.opacity = opacity.into();
+        self
+    }
+
+    /// 设置容器视觉偏移。
+    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
+        self.element.visual.offset = offset.into();
+        self
+    }
+
+    /// 设置容器圆角。
+    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
+        self.element.visual.border_radius = Some(radius.into());
         self
     }
 

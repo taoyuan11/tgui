@@ -247,7 +247,7 @@ impl<VM> ResolvedSceneLayout<VM> {
         let mut composed = parts.before_children.clone();
         if let ResolvedWidgetKind::Container { children, .. } = &node.kind {
             for child in children {
-                let child_chunk = chunks.get(&child.id)?.clone();
+                let child_chunk = chunks.get(&child.id)?;
                 composed.extend(&child_chunk);
             }
         }
@@ -264,6 +264,7 @@ impl<VM> ResolvedSceneLayout<VM> {
         media: &MediaManager,
         animations: &mut AnimationEngine,
         viewport: Rect,
+        now: std::time::Instant,
     ) -> Result<HashSet<WidgetId>, taffy::TaffyError> {
         let units = self.units;
         let (result, dependencies) = with_dependency_collection(
@@ -309,6 +310,7 @@ impl<VM> ResolvedSceneLayout<VM> {
                         theme,
                         units,
                         viewport,
+                        now,
                         None,
                         true,
                     )?;

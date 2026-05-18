@@ -48,7 +48,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        let roots = self.highest_layout_roots(layout, &affected_ids);
+        let roots = self.highest_layout_roots_smallvec(layout, &affected_ids);
         if roots.is_empty() {
             return false;
         }
@@ -83,7 +83,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        let roots = self.highest_layout_roots(layout, &affected_ids);
+        let roots = self.highest_layout_roots_smallvec(layout, &affected_ids);
         if roots.is_empty() {
             return false;
         }

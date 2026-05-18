@@ -96,7 +96,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if animation_refresh.layout_changed {
                 self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
             }
-            self.invalidate_computed_scene();
+            let patched = if animation_refresh.layout_widget_ids.is_empty()
+                && !animation_refresh.scene_widget_ids.is_empty()
+            {
+                self.patch_animation_scene_widgets(&animation_refresh.scene_widget_ids, now)
+            } else {
+                false
+            };
+            if !patched {
+                self.invalidate_computed_scene();
+            }
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }

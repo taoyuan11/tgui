@@ -36,11 +36,13 @@ dpi = "0.1.2"
 image = { version = "0.25", default-features = true, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 geo = "0.33"
 lyon = "1.0"
+parking_lot = "0.12"
 pollster = "0.4"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider"] }
 resvg = "0.47"
 ropey = "1.6"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+smallvec = "1.15"
 taffy = "0.10"
 unicode-segmentation = "1.12"
 usvg-remote-resolvers = { version = "0.2", features = ["reqwest_blocking"] }

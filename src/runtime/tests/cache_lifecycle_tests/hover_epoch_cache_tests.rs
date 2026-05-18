@@ -170,3 +170,35 @@ fn animation_scene_invalidation_preserves_cached_layout() {
         units,
     ));
 }
+
+#[test]
+fn visual_only_animation_refresh_prefers_scene_patch() {
+    let invalidation = InvalidationSignal::new();
+    let ctx = ViewModelContext::for_benchmarks();
+    let opacity = ctx.state(0.0_f32);
+    let tree = WidgetTree::new(
+        Stack::<TestVm>::new()
+            .opacity(opacity.project(|value| 0.3 + value * 0.7))
+            .child(Text::new("animated visual only")),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    let before_root = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| cached.layout.as_ref())
+        .map(|layout| layout.root_id())
+        .expect("cached layout should exist");
+
+    opacity.set(1.0);
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    assert!(handler.patch_animation_scene_widgets(&[before_root.raw()], Instant::now()));
+    assert!(handler.cached_scene.is_some());
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| cached.layout.as_ref())
+        .map(|layout| layout.root_id())
+        == Some(before_root));
+}

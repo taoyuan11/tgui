@@ -136,6 +136,7 @@ fn keyed_dynamic_children_reuse_widget_ids_across_reorder_patch() {
             &media,
             &mut animations,
             viewport,
+            Instant::now(),
         )
         .expect("keyed reorder should patch successfully");
 

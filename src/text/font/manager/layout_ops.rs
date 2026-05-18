@@ -33,8 +33,8 @@ impl FontManager {
         }
 
         let cache_key = TextMeasureKey {
-            text: text.to_string(),
-            preferred_font: request.preferred_font.map(ToString::to_string),
+            text: Self::text_key(text),
+            preferred_font: Self::font_key(request.preferred_font),
             weight: request.weight,
             font_size_bits: font_size.to_bits(),
             line_height_bits: line_height.to_bits(),
@@ -201,8 +201,8 @@ impl FontManager {
         wrap_width: Option<f32>,
     ) -> TextLayoutInfo {
         let cache_key = TextLayoutKey {
-            text: text.to_string(),
-            preferred_font: request.preferred_font.map(ToString::to_string),
+            text: Self::text_key(text),
+            preferred_font: Self::font_key(request.preferred_font),
             weight: request.weight,
             font_size_bits: font_size.to_bits(),
             line_height_bits: line_height.to_bits(),

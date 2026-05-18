@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use cosmic_text::{Attrs, AttrsOwned, Buffer, Family, FontSystem, Metrics, Shaping, Weight, Wrap};
@@ -36,6 +37,14 @@ impl FontManager {
             measure_cache: RefCell::new(HashMap::new()),
             layout_cache: RefCell::new(HashMap::new()),
         }
+    }
+
+    pub(super) fn text_key(text: &str) -> Cow<'static, str> {
+        Cow::Owned(text.to_owned())
+    }
+
+    pub(super) fn font_key(font: Option<&str>) -> Option<Cow<'static, str>> {
+        font.map(|name| Cow::Owned(name.to_owned()))
     }
 
     pub(crate) fn resolve_text(&self, text: &str, request: TextFontRequest<'_>) -> ResolvedText {

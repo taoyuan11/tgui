@@ -5,6 +5,7 @@ use crate::foundation::color::Color;
 use crate::ui::layout::Insets;
 use crate::ui::unit::{Dp, Sp};
 use crate::ui::widget::Point;
+use smallvec::SmallVec;
 
 use super::controller::{sample_timeline, FRAME_INTERVAL};
 use super::spec::{Keyframes, Transition};
@@ -60,6 +61,10 @@ impl WidgetProperty {
             self,
             Self::Width | Self::Height | Self::Margin | Self::Padding | Self::Gap | Self::Grow
         )
+    }
+
+    pub(crate) const fn affects_scene(self) -> bool {
+        !self.affects_layout()
     }
 }
 
@@ -311,6 +316,13 @@ impl<T: Animatable> AnimationStore<T> {
                 refresh.changed = true;
                 if key.affects_layout() {
                     refresh.layout_changed = true;
+                    if let AnimationKey::Widget { id, .. } = key {
+                        refresh.push_layout_widget(*id);
+                    }
+                } else if let AnimationKey::Widget { id, property } = key {
+                    if property.affects_scene() {
+                        refresh.push_scene_widget(*id);
+                    }
                 }
             }
         }
@@ -322,10 +334,26 @@ impl<T: Animatable> AnimationStore<T> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct AnimationRefresh {
     pub(crate) changed: bool,
     pub(crate) layout_changed: bool,
+    pub(crate) layout_widget_ids: SmallVec<[u64; 16]>,
+    pub(crate) scene_widget_ids: SmallVec<[u64; 16]>,
+}
+
+impl AnimationRefresh {
+    fn push_layout_widget(&mut self, widget_id: u64) {
+        if !self.layout_widget_ids.contains(&widget_id) {
+            self.layout_widget_ids.push(widget_id);
+        }
+    }
+
+    fn push_scene_widget(&mut self, widget_id: u64) {
+        if !self.scene_widget_ids.contains(&widget_id) {
+            self.scene_widget_ids.push(widget_id);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -401,6 +429,12 @@ impl AnimationEngine {
             .fold(AnimationRefresh::default(), |mut acc, next| {
                 acc.changed |= next.changed;
                 acc.layout_changed |= next.layout_changed;
+                for widget_id in next.layout_widget_ids {
+                    acc.push_layout_widget(widget_id);
+                }
+                for widget_id in next.scene_widget_ids {
+                    acc.push_scene_widget(widget_id);
+                }
                 acc
             })
     }

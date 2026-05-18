@@ -1,4 +1,5 @@
 use super::*;
+use smallvec::SmallVec;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn invalidate_cached_scene_for_dependencies(
@@ -48,20 +49,20 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .iter()
             .copied()
             .filter(|widget_id| layout.can_patch_layout_dependency_as_scene(*widget_id))
-            .collect::<Vec<_>>();
+            .collect::<SmallVec<[WidgetId; 16]>>();
         for widget_id in scene_only_layout_ids {
             layout_affected_ids.remove(&widget_id);
             scene_affected_ids.insert(widget_id);
         }
 
         let action = if !layout_affected_ids.is_empty() {
-            let roots = self.highest_layout_roots(layout, &layout_affected_ids);
+            let roots = self.highest_layout_roots_smallvec(layout, &layout_affected_ids);
             if roots.is_empty() {
                 "unrelated"
             } else {
                 let mut scene_ids = layout_affected_ids.clone();
                 scene_ids.extend(scene_affected_ids.iter().copied());
-                let scene_roots = self.highest_layout_roots(layout, &scene_ids);
+                let scene_roots = self.highest_layout_roots_smallvec(layout, &scene_ids);
 
                 if self.patch_cached_layout_for_roots(&roots, now) {
                     if self.patch_cached_scene_for_roots(&scene_roots, now, false) {
@@ -80,7 +81,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .iter()
                 .all(|widget_id| Self::computed_scene_has_text_input(&cached.computed, *widget_id))
             {
-                let roots = self.highest_layout_roots(layout, &scene_affected_ids);
+                let roots = self.highest_layout_roots_smallvec(layout, &scene_affected_ids);
                 if roots.is_empty() {
                     "unrelated"
                 } else if self.patch_cached_scene_for_roots(&roots, now, true) {
@@ -90,7 +91,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     "text_input_scene_recollect"
                 }
             } else {
-                let roots = self.highest_layout_roots(layout, &scene_affected_ids);
+                let roots = self.highest_layout_roots_smallvec(layout, &scene_affected_ids);
                 if roots.is_empty() {
                     "unrelated"
                 } else if self.patch_cached_scene_for_roots(&roots, now, false) {

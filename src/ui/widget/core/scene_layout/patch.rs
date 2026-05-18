@@ -48,6 +48,7 @@ pub(super) fn patch_layout_at_path<VM>(
     theme: &Theme,
     units: UnitContext,
     viewport: Rect,
+    now: std::time::Instant,
     parent_kind: Option<ContainerKind>,
     is_root: bool,
 ) -> Result<(), taffy::TaffyError> {
@@ -62,6 +63,7 @@ pub(super) fn patch_layout_at_path<VM>(
             units,
             parent_kind,
             viewport,
+            now,
             is_root,
         )?;
         return Ok(());
@@ -81,6 +83,7 @@ pub(super) fn patch_layout_at_path<VM>(
         theme,
         units,
         viewport,
+        now,
         Some(layout.kind.clone()),
         false,
     )
@@ -96,11 +99,11 @@ fn patch_layout_tree<VM>(
     units: UnitContext,
     parent_kind: Option<ContainerKind>,
     viewport: Rect,
+    now: std::time::Instant,
     is_root: bool,
 ) -> Result<ResolvedElement<VM>, taffy::TaffyError> {
     let owner = next.id.dependency_owner(DependencyPhase::Layout);
     track_dependency_scope(owner, || {
-        let now = std::time::Instant::now();
         let next_parent_kind = match &next.kind {
             ResolvedWidgetKind::Container { layout, .. } => Some(layout.kind.clone()),
             _ => None,
@@ -148,6 +151,7 @@ fn patch_layout_tree<VM>(
                     units,
                     next_parent_kind.clone(),
                     viewport,
+                    now,
                     false,
                 )?;
                 patched_children.push(patched_child);

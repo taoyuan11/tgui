@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::animation::Transition;
 
@@ -11,7 +11,7 @@ use super::invalidation::InvalidationSignal;
 /// 派生出供 UI 使用的只读信号。
 #[derive(Clone)]
 pub struct State<T> {
-    value: Arc<Mutex<T>>,
+    value: Arc<parking_lot::Mutex<T>>,
     invalidation: InvalidationSignal,
     dependency: DependencyId,
 }
@@ -19,7 +19,7 @@ pub struct State<T> {
 impl<T> State<T> {
     pub(crate) fn new(value: T, invalidation: InvalidationSignal) -> Self {
         Self {
-            value: Arc::new(Mutex::new(value)),
+            value: Arc::new(parking_lot::Mutex::new(value)),
             invalidation,
             dependency: DependencyId::next(),
         }
@@ -33,8 +33,13 @@ impl<T> State<T> {
     /// 返回值: 闭包返回的结果。
     pub fn read<R>(&self, reader: impl FnOnce(&T) -> R) -> R {
         record_dependency_read(Some(self.dependency));
-        let value = self.value.lock().expect("state lock poisoned");
+        let value = self.value.lock();
         reader(&value)
+    }
+
+    /// 以借用方式访问当前状态值，避免额外克隆。
+    pub fn with_ref<R>(&self, reader: impl FnOnce(&T) -> R) -> R {
+        self.read(reader)
     }
 
     pub(crate) fn invalidation(&self) -> &InvalidationSignal {
@@ -48,9 +53,18 @@ impl<T> State<T> {
     where
         T: Clone + Send + Sync + 'static,
     {
+        Signal::from_state(self.clone(), self.invalidation.clone(), self.dependency)
+    }
+
+    /// 基于借用式读取创建派生信号，避免在 `map` 链路中提前克隆源值。
+    pub fn project<U>(&self, projector: impl Fn(&T) -> U + Send + Sync + 'static) -> Signal<U>
+    where
+        T: Clone + Send + Sync + 'static,
+        U: Clone + Send + Sync + 'static,
+    {
         let state = self.clone();
         Signal::new_tracked(
-            move || state.get(),
+            move || state.read(|value| projector(value)),
             self.invalidation.clone(),
             Some(self.dependency),
         )
@@ -63,7 +77,7 @@ impl<T: PartialEq> State<T> {
     /// 参数:
     /// - `value`: 新状态值。
     pub fn set(&self, value: T) {
-        let mut current = self.value.lock().expect("state lock poisoned");
+        let mut current = self.value.lock();
         if *current == value {
             return;
         }
@@ -79,7 +93,7 @@ impl<T: Clone> State<T> {
     /// 返回值: 当前状态值。
     pub fn get(&self) -> T {
         record_dependency_read(Some(self.dependency));
-        self.value.lock().expect("state lock poisoned").clone()
+        self.value.lock().clone()
     }
 }
 
@@ -91,7 +105,7 @@ impl<T: Clone + PartialEq> State<T> {
     ///
     /// 返回值: `updater` 的返回结果。
     pub fn update<R>(&self, updater: impl FnOnce(&mut T) -> R) -> R {
-        let mut value = self.value.lock().expect("state lock poisoned");
+        let mut value = self.value.lock();
         let previous = value.clone();
         let result = updater(&mut value);
         let changed = *value != previous;
@@ -111,7 +125,7 @@ impl<T> State<T> {
     ///
     /// 返回值: `updater` 的返回结果。
     pub fn mutate<R>(&self, updater: impl FnOnce(&mut T) -> R) -> R {
-        let mut value = self.value.lock().expect("state lock poisoned");
+        let mut value = self.value.lock();
         let result = updater(&mut value);
         drop(value);
         self.invalidation.mark_dependency_dirty(self.dependency);
@@ -122,11 +136,24 @@ impl<T> State<T> {
 /// 表示供部件和窗口绑定使用的惰性只读值。
 #[derive(Clone)]
 pub struct Signal<T> {
-    reader: Arc<dyn Fn() -> T + Send + Sync>,
+    reader: Arc<dyn SignalReader<T>>,
     invalidation: InvalidationSignal,
-    cache: Arc<Mutex<SignalCache<T>>>,
+    cache: Arc<parking_lot::Mutex<SignalCache<T>>>,
     transition: Option<Transition>,
     dependency: Option<DependencyId>,
+}
+
+trait SignalReader<T>: Send + Sync {
+    fn read(&self) -> T;
+}
+
+impl<T, F> SignalReader<T> for F
+where
+    F: Fn() -> T + Send + Sync,
+{
+    fn read(&self) -> T {
+        self()
+    }
 }
 
 struct SignalCache<T> {
@@ -151,7 +178,7 @@ impl<T> Signal<T> {
         Self {
             reader: Arc::new(reader),
             invalidation,
-            cache: Arc::new(Mutex::new(SignalCache {
+            cache: Arc::new(parking_lot::Mutex::new(SignalCache {
                 revision: 0,
                 dependency_revision: None,
                 value: None,
@@ -164,6 +191,17 @@ impl<T> Signal<T> {
     fn with_transition(mut self, transition: Option<Transition>) -> Self {
         self.transition = transition;
         self
+    }
+
+    pub(crate) fn from_state(
+        state: State<T>,
+        invalidation: InvalidationSignal,
+        dependency: DependencyId,
+    ) -> Self
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        Self::new_tracked(move || state.get(), invalidation, Some(dependency))
     }
 }
 
@@ -178,7 +216,7 @@ impl<T: Clone> Signal<T> {
             .dependency
             .and_then(|dependency| self.invalidation.dependency_revision(dependency));
         {
-            let cache = self.cache.lock().expect("signal cache lock poisoned");
+            let cache = self.cache.lock();
             let cache_hit = match self.dependency {
                 Some(_) => cache.dependency_revision == dependency_revision,
                 None => cache.revision == revision,
@@ -190,8 +228,8 @@ impl<T: Clone> Signal<T> {
             }
         }
 
-        let value = (self.reader)();
-        let mut cache = self.cache.lock().expect("signal cache lock poisoned");
+        let value = self.reader.read();
+        let mut cache = self.cache.lock();
         cache.revision = revision;
         cache.dependency_revision = self
             .dependency
@@ -229,6 +267,26 @@ impl<T: Clone> Signal<T> {
             self.dependency,
         )
         .with_transition(self.transition)
+    }
+
+    /// 以借用式投影派生新的信号，避免 `map` 先克隆源值。
+    pub fn project<U>(&self, projector: impl Fn(&T) -> U + Send + Sync + 'static) -> Signal<U>
+    where
+        T: Clone + Send + Sync + 'static,
+        U: Clone + Send + Sync + 'static,
+    {
+        let signal = self.clone();
+        Signal::new_tracked(
+            move || signal.read(|value| projector(value)),
+            self.invalidation.clone(),
+            self.dependency,
+        )
+        .with_transition(self.transition)
+    }
+
+    pub(crate) fn read<R>(&self, reader: impl FnOnce(&T) -> R) -> R {
+        let value = self.get();
+        reader(&value)
     }
 
     pub(crate) fn transition(&self) -> Option<Transition> {

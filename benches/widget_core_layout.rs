@@ -5,7 +5,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use tgui::animation::Transition;
 use tgui::core::dp;
 use tgui::layout::{Axis, Insets};
-use tgui::mvvm::ViewModelContext;
+use tgui::mvvm::{State, ViewModelContext};
 use tgui::widgets::{Element, Flex, Stack, Text, Textarea, WidgetBenchmarkContext, WidgetTree};
 
 fn repeated_line(index: usize) -> String {
@@ -63,7 +63,10 @@ fn build_text_heavy_tree(short_lines: usize, long_blocks: usize) -> WidgetTree<(
     WidgetTree::new(root)
 }
 
-fn build_animated_tree(card_count: usize, layout_affecting: bool) -> (WidgetTree<()>, Instant) {
+fn build_animated_tree(
+    card_count: usize,
+    layout_affecting: bool,
+) -> (WidgetTree<()>, State<f32>, Instant) {
     let ctx = ViewModelContext::for_benchmarks();
     let phase = ctx.state(0.0_f32);
     let start = Instant::now();
@@ -93,6 +96,7 @@ fn build_animated_tree(card_count: usize, layout_affecting: bool) -> (WidgetTree
             Stack::new()
                 .width(dp(320.0))
                 .padding(Insets::all(dp(8.0)))
+                .opacity(phase_signal.map(move |value| 0.35 + value * 0.65))
                 .child(Text::new(format!("Animated row {index}")))
                 .child(Text::new(repeated_line(index)))
                 .into()
@@ -101,8 +105,7 @@ fn build_animated_tree(card_count: usize, layout_affecting: bool) -> (WidgetTree
         root = root.child(content);
     }
 
-    phase.set(1.0);
-    (WidgetTree::new(root), start)
+    (WidgetTree::new(root), phase, start)
 }
 
 fn bench_many_widgets_layout(c: &mut Criterion) {
@@ -176,7 +179,7 @@ fn bench_animated_scene_recompute(c: &mut Criterion) {
         ("animated_visual_only", false),
         ("animated_layout_affecting", true),
     ] {
-        let (tree, start) = build_animated_tree(240, layout_affecting);
+        let (tree, phase, start) = build_animated_tree(240, layout_affecting);
         let sample_offsets = [
             Duration::from_millis(24),
             Duration::from_millis(96),
@@ -185,6 +188,9 @@ fn bench_animated_scene_recompute(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("layout_and_scene", label), &label, |b, _| {
             let mut bench = WidgetBenchmarkContext::default();
+            let _ = bench.run_layout_and_scene(&tree, start);
+            phase.set(1.0);
+            bench.invalidate_all();
             let mut tick = 0usize;
             b.iter(|| {
                 let offset = sample_offsets[tick % sample_offsets.len()];

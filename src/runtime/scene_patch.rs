@@ -30,6 +30,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             &self.media_manager,
             &mut self.animation_engine,
             viewport,
+            now,
         ) {
             Ok(removed_ids) => removed_ids,
             Err(_) => return false,

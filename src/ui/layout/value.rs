@@ -24,6 +24,13 @@ impl<T: Clone> Value<T> {
         }
     }
 
+    pub fn resolve_ref<R>(&self, reader: impl FnOnce(&T) -> R) -> R {
+        match self {
+            Self::Static(value) => reader(value),
+            Self::Signal(signal) => signal.read(reader),
+        }
+    }
+
     pub(crate) fn transition(&self) -> Option<Transition> {
         match self {
             Self::Static(_) => None,

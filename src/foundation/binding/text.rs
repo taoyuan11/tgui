@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use super::dependency::{record_dependency_read, DependencyId};
 use super::invalidation::InvalidationSignal;
@@ -51,7 +51,7 @@ pub struct TextChangeSet {
 /// 提供保留式文本读写能力的控制器。
 #[derive(Clone)]
 pub struct TextController {
-    state: Arc<Mutex<TextControllerState>>,
+    state: Arc<parking_lot::Mutex<TextControllerState>>,
     invalidation: InvalidationSignal,
     dependency: DependencyId,
 }
@@ -65,7 +65,7 @@ struct TextControllerState {
 impl TextController {
     pub(crate) fn new(initial_text: impl Into<String>, invalidation: InvalidationSignal) -> Self {
         Self {
-            state: Arc::new(Mutex::new(TextControllerState {
+            state: Arc::new(parking_lot::Mutex::new(TextControllerState {
                 text: initial_text.into(),
                 revision: 1,
             })),
@@ -83,11 +83,14 @@ impl TextController {
     /// 返回值: 当前文本内容的克隆副本。
     pub fn text(&self) -> String {
         record_dependency_read(Some(self.dependency));
-        self.state
-            .lock()
-            .expect("text controller lock poisoned")
-            .text
-            .clone()
+        self.state.lock().text.clone()
+    }
+
+    /// 以借用方式读取当前完整文本。
+    pub fn with_text<R>(&self, reader: impl FnOnce(&str) -> R) -> R {
+        record_dependency_read(Some(self.dependency));
+        let state = self.state.lock();
+        reader(&state.text)
     }
 
     /// 读取当前文本快照。
@@ -95,7 +98,7 @@ impl TextController {
     /// 返回值: 包含文本内容和修订号的快照。
     pub fn snapshot(&self) -> TextSnapshot {
         record_dependency_read(Some(self.dependency));
-        let state = self.state.lock().expect("text controller lock poisoned");
+        let state = self.state.lock();
         TextSnapshot {
             text: state.text.clone(),
             revision: state.revision,
@@ -107,10 +110,7 @@ impl TextController {
     /// 返回值: 当前修订号。
     pub fn revision(&self) -> u64 {
         record_dependency_read(Some(self.dependency));
-        self.state
-            .lock()
-            .expect("text controller lock poisoned")
-            .revision
+        self.state.lock().revision
     }
 
     /// 用新文本替换当前内容。
@@ -125,7 +125,7 @@ impl TextController {
 
     #[allow(dead_code)]
     pub(crate) fn set_text_assuming_changed(&self, text: impl Into<String>) -> u64 {
-        let mut state = self.state.lock().expect("text controller lock poisoned");
+        let mut state = self.state.lock();
         state.text = text.into();
         state.revision = state.revision.wrapping_add(1).max(1);
         self.invalidation.mark_dependency_dirty(self.dependency);
@@ -133,7 +133,7 @@ impl TextController {
     }
 
     pub(crate) fn set_text_local_assuming_changed(&self, text: impl Into<String>) -> u64 {
-        let mut state = self.state.lock().expect("text controller lock poisoned");
+        let mut state = self.state.lock();
         state.text = text.into();
         state.revision = state.revision.wrapping_add(1).max(1);
         state.revision
@@ -149,7 +149,7 @@ impl TextController {
 
     pub(crate) fn replace_text_silent(&self, text: impl Into<String>) -> u64 {
         let text = text.into();
-        let mut state = self.state.lock().expect("text controller lock poisoned");
+        let mut state = self.state.lock();
         if state.text != text {
             state.text = text;
             state.revision = state.revision.wrapping_add(1).max(1);

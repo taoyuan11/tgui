@@ -26,7 +26,7 @@ where
     T: Display + Clone + Send + Sync + 'static,
 {
     fn into_text_content(self) -> Value<String> {
-        Value::Signal(self.map(|value| value.to_string()))
+        Value::Signal(self.project(|value| value.to_string()))
     }
 }
 
@@ -37,7 +37,7 @@ where
     fn into_text_content(self) -> Value<String> {
         match self {
             Value::Static(value) => Value::Static(value.to_string()),
-            Value::Signal(signal) => Value::Signal(signal.map(|value| value.to_string())),
+            Value::Signal(signal) => Value::Signal(signal.project(|value| value.to_string())),
         }
     }
 }

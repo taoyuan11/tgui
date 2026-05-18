@@ -114,6 +114,16 @@ macro_rules! impl_container_properties {
                 Self(self.0.cursor(cursor))
             }
 
+            /// 设置容器整体透明度。
+            pub fn opacity(self, opacity: impl Into<Value<f32>>) -> Self {
+                Self(self.0.opacity(opacity))
+            }
+
+            /// 设置容器视觉偏移。
+            pub fn offset(self, offset: impl Into<Value<Point>>) -> Self {
+                Self(self.0.offset(offset))
+            }
+
             /// 追加一个子节点来源。
             ///
             /// # 参数

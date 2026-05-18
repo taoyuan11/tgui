@@ -195,3 +195,38 @@ fn opaque_signal_reads_fall_back_to_global_dependency() {
 
     assert!(graph.has_global_dependency());
 }
+
+#[test]
+fn state_project_reads_without_cloning_source_value() {
+    struct CloneTrackedText {
+        text: String,
+        clone_count: Arc<AtomicUsize>,
+    }
+
+    impl PartialEq for CloneTrackedText {
+        fn eq(&self, other: &Self) -> bool {
+            self.text == other.text
+        }
+    }
+
+    impl Clone for CloneTrackedText {
+        fn clone(&self) -> Self {
+            self.clone_count.fetch_add(1, Ordering::SeqCst);
+            Self {
+                text: self.text.clone(),
+                clone_count: self.clone_count.clone(),
+            }
+        }
+    }
+
+    let ctx = context();
+    let clone_count = Arc::new(AtomicUsize::new(0));
+    let state = ctx.state(CloneTrackedText {
+        text: "tracked text".to_string(),
+        clone_count: clone_count.clone(),
+    });
+    let projected = state.project(|value| value.text.len());
+
+    assert_eq!(projected.get(), "tracked text".len());
+    assert_eq!(clone_count.load(Ordering::SeqCst), 0);
+}
