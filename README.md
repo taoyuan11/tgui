@@ -19,6 +19,18 @@
 
 当前版本仍处于 `0.x` 阶段，公共 API 还可能根据真实应用反馈继续调整。它已经适合用于原型、内部工具、小型桌面应用、可视化面板和自定义绘制界面的探索；如果用于长期维护的生产项目，建议固定 crate 版本，并在升级前阅读 README、示例和变更记录。
 
+### 版本承诺与升级节奏
+
+- **0.x**：处于公开 API 调整窗口期，破坏性变更可能出现在任意 minor（`0.x.0`）版本；patch（`0.x.y`）只做兼容性修复。每次破坏性变更会在 [`CHANGELOG.md`](./CHANGELOG.md) 列出。
+- **1.0 之前**：会做一次系统的公开 API review（重点是 `src/lib.rs` 的 re-export、`Application` 链式 API、widget builder），冻结后用 `cargo public-api` 守门。
+- **1.0 之后**：严格遵循 SemVer，破坏性变更只在 major 版本出现。
+- **wgpu 升级策略**：当前依赖 `wgpu 29`，跟随主版本时只在 minor 升级，不在 patch 升级；每次升级在 CHANGELOG 中列出迁移点。
+- **winit 升级策略**：当前 `winit-* 0.31.0-beta.2`，会在 winit 0.31 stable 化时作为一次显式 minor 升级；详见 [`CHANGELOG.md`](./CHANGELOG.md)。
+
+### MSRV
+
+最低支持 Rust 版本（MSRV）为 **`1.85`**。MSRV 提升被视为 minor-level 变更并在 CHANGELOG 中显式标注。
+
 ## 当前能力概览
 
 ### 应用与窗口
@@ -604,4 +616,9 @@ cargo check --features ohos
 
 ## License
 
-MIT
+本项目采用双协议授权，可在以下两种协议中任选其一：
+
+- [MIT 协议](./LICENSE-MIT)
+- [Apache License, Version 2.0](./LICENSE-APACHE)
+
+除非你明确声明，否则你提交到本项目的任何贡献都将按 Apache-2.0 的定义同时以上述两个协议授权，无附加条款。详见 [`NOTICE`](./NOTICE)。
