@@ -231,10 +231,30 @@ impl PartialEq for TextureFrame {
 impl Eq for TextureFrame {}
 
 impl TextureFrame {
+    pub(crate) fn allocate_id() -> u64 {
+        NEXT_TEXTURE_ID.fetch_add(1, Ordering::Relaxed)
+    }
+
     pub(crate) fn new(width: u32, height: u32, pixels: Vec<u8>) -> Self {
         Self {
-            id: NEXT_TEXTURE_ID.fetch_add(1, Ordering::Relaxed),
+            id: Self::allocate_id(),
             revision: 1,
+            width,
+            height,
+            pixels: Arc::from(pixels),
+        }
+    }
+
+    pub(crate) fn with_id_and_revision(
+        id: u64,
+        revision: u64,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    ) -> Self {
+        Self {
+            id,
+            revision: revision.max(1),
             width,
             height,
             pixels: Arc::from(pixels),

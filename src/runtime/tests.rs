@@ -62,9 +62,6 @@ use crate::video::{
     PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
     VideoSurfaceSnapshot,
 };
-#[cfg(feature = "video")]
-use crate::ViewModelContext;
-
 #[derive(Default)]
 struct TestVm;
 

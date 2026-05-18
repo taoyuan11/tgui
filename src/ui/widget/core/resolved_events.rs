@@ -48,7 +48,7 @@ impl<VM> ResolvedElement<VM> {
                 if !self.media_events.has_any() {
                     return;
                 }
-                let snapshot = video.controller.surface_snapshot();
+                let snapshot = video.controller.surface_metadata();
                 if let Some(phase) = media_event_phase(snapshot.loading, snapshot.error.as_deref())
                 {
                     states.push(MediaEventState {

@@ -1,8 +1,9 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::foundation::binding::State;
 use crate::foundation::error::TguiError;
-use crate::media::TextureFrame;
+use crate::media::{RasterRequest, TextureFrame};
 
 use super::types::{PlaybackState, VideoMetrics, VideoSize, VideoSource, VideoSurfaceSnapshot};
 
@@ -16,6 +17,7 @@ pub(crate) struct BackendSharedState {
     pub metrics: State<VideoMetrics>,
     pub volume: State<f32>,
     pub muted: State<bool>,
+    pub metrics_observed: Arc<AtomicBool>,
     pub buffer_memory_limit_bytes: State<u64>,
     pub video_size: State<VideoSize>,
     pub error: State<Option<String>>,
@@ -23,6 +25,18 @@ pub(crate) struct BackendSharedState {
 }
 
 impl BackendSharedState {
+    pub fn enable_metrics(&self) {
+        self.metrics_observed.store(true, Ordering::SeqCst);
+    }
+
+    pub fn metrics_enabled(&self) -> bool {
+        self.metrics_observed.load(Ordering::SeqCst)
+    }
+
+    pub fn publish_frame(&self) {
+        self.surface.invalidation().request_redraw();
+    }
+
     pub fn reset_for_load(&self) {
         self.playback_state.set(PlaybackState::Loading);
         self.metrics.set(VideoMetrics::default());
@@ -58,6 +72,7 @@ pub(crate) trait VideoBackend: Send + Sync {
     fn set_volume(&self, volume: f32);
     fn set_muted(&self, muted: bool);
     fn set_buffer_memory_limit_bytes(&self, bytes: u64);
+    fn set_target_raster(&self, raster: Option<RasterRequest>);
     fn current_frame(&self) -> Option<Arc<TextureFrame>>;
     fn shutdown(&self);
 

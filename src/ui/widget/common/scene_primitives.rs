@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "video")]
+use crate::video::VideoController;
 
 #[derive(Clone, Copy)]
 pub struct RenderPrimitive {
@@ -72,6 +74,19 @@ pub struct TexturePrimitive {
     pub clip_mask: Option<ClipMask>,
 }
 
+#[cfg(feature = "video")]
+#[derive(Clone)]
+pub struct VideoTexturePrimitive {
+    pub controller: VideoController,
+    pub frame: Rect,
+    pub quad: Option<[Point; 4]>,
+    pub uv_rect: Option<Rect>,
+    pub corner_radius: f32,
+    pub opacity: f32,
+    pub clip_rect: Option<Rect>,
+    pub clip_mask: Option<ClipMask>,
+}
+
 #[derive(Clone)]
 pub struct CanvasCompositePrimitive {
     pub bounds: Rect,
@@ -122,6 +137,8 @@ pub(crate) enum RenderCommand {
     CanvasComposite(CanvasCompositePrimitive),
     Shape(RenderPrimitive),
     Texture(TexturePrimitive),
+    #[cfg(feature = "video")]
+    VideoTexture(VideoTexturePrimitive),
     Text(TextPrimitive),
     Mesh(MeshPrimitive),
 }
@@ -134,6 +151,8 @@ pub struct ScenePrimitives {
     pub shapes: Vec<RenderPrimitive>,
     pub meshes: Vec<MeshPrimitive>,
     pub textures: Vec<TexturePrimitive>,
+    #[cfg(feature = "video")]
+    pub video_textures: Vec<VideoTexturePrimitive>,
     pub texts: Vec<TextPrimitive>,
     pub overlay_shapes: Vec<RenderPrimitive>,
     pub overlay_textures: Vec<TexturePrimitive>,
@@ -153,6 +172,8 @@ impl ScenePrimitives {
             RenderCommand::CanvasComposite(primitive) => self.push_canvas_composite(primitive),
             RenderCommand::Shape(primitive) => self.push_shape(primitive),
             RenderCommand::Texture(primitive) => self.push_texture(primitive),
+            #[cfg(feature = "video")]
+            RenderCommand::VideoTexture(primitive) => self.push_video_texture(primitive),
             RenderCommand::Text(primitive) => self.push_text(primitive),
             RenderCommand::Mesh(primitive) => self.push_mesh(primitive),
         }
@@ -187,6 +208,12 @@ impl ScenePrimitives {
     pub(crate) fn push_texture(&mut self, primitive: TexturePrimitive) {
         self.textures.push(primitive.clone());
         self.commands.push(RenderCommand::Texture(primitive));
+    }
+
+    #[cfg(feature = "video")]
+    pub(crate) fn push_video_texture(&mut self, primitive: VideoTexturePrimitive) {
+        self.video_textures.push(primitive.clone());
+        self.commands.push(RenderCommand::VideoTexture(primitive));
     }
 
     pub(crate) fn push_text(&mut self, primitive: TextPrimitive) {
@@ -227,6 +254,9 @@ impl ScenePrimitives {
         self.shapes.extend(other.shapes.iter().copied());
         self.meshes.extend(other.meshes.iter().cloned());
         self.textures.extend(other.textures.iter().cloned());
+        #[cfg(feature = "video")]
+        self.video_textures
+            .extend(other.video_textures.iter().cloned());
         self.texts.extend(other.texts.iter().cloned());
         self.overlay_shapes
             .extend(other.overlay_shapes.iter().copied());

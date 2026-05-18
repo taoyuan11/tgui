@@ -150,7 +150,13 @@ impl DecodeSession {
                     continue;
                 }
 
-                let texture = Arc::new(video_frame_to_texture(&mut self.scaler, &decoded)?);
+                let revision = self.next_video_texture_revision();
+                let texture = Arc::new(video_frame_to_texture(
+                    &mut self.scaler,
+                    &decoded,
+                    self.video_texture_id,
+                    revision,
+                )?);
                 let frame = QueuedVideoFrame {
                     generation: self.generation,
                     position,
@@ -191,7 +197,13 @@ impl DecodeSession {
                     continue;
                 }
 
-                let texture = Arc::new(video_frame_to_texture(&mut self.scaler, &decoded)?);
+                let revision = self.next_video_texture_revision();
+                let texture = Arc::new(video_frame_to_texture(
+                    &mut self.scaler,
+                    &decoded,
+                    self.video_texture_id,
+                    revision,
+                )?);
                 flushed_frames.push(QueuedVideoFrame {
                     generation: self.generation,
                     position,

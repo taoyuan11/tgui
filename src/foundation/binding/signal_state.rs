@@ -37,6 +37,10 @@ impl<T> State<T> {
         reader(&value)
     }
 
+    pub(crate) fn invalidation(&self) -> &InvalidationSignal {
+        &self.invalidation
+    }
+
     /// 创建一个按需读取状态值的缓存信号。
     ///
     /// 返回值: 与当前状态关联的只读信号。

@@ -20,7 +20,7 @@ use crate::audio::backend::shared::{
     open_ffmpeg_input, validate_ffmpeg_headers, AudioOutput, SharedAudioClock,
 };
 use crate::foundation::error::TguiError;
-use crate::media::{IntrinsicSize, TextureFrame};
+use crate::media::{IntrinsicSize, RasterRequest, TextureFrame};
 use crate::video::{PlaybackState, VideoSize, VideoSource, VideoSurfaceSnapshot};
 
 use super::{BackendSharedState, VideoBackend};
@@ -201,6 +201,10 @@ impl VideoBackend for FfmpegVideoBackend {
             .send(BackendCommand::SetBufferMemoryLimitBytes(bytes));
     }
 
+    fn set_target_raster(&self, raster: Option<RasterRequest>) {
+        let _ = self.command_tx.send(BackendCommand::SetTargetRaster(raster));
+    }
+
     fn current_frame(&self) -> Option<Arc<TextureFrame>> {
         self.latest_frame
             .lock()
@@ -240,6 +244,7 @@ enum BackendCommand {
     SetVolume(f32),
     SetMuted(bool),
     SetBufferMemoryLimitBytes(u64),
+    SetTargetRaster(Option<RasterRequest>),
     Shutdown,
 }
 
@@ -261,6 +266,7 @@ enum DecodeCommand {
     SetVolume(f32),
     SetMuted(bool),
     SetBufferMemoryLimitBytes(u64),
+    SetTargetRaster(Option<RasterRequest>),
     Shutdown,
 }
 

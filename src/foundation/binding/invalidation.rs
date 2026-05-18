@@ -23,6 +23,7 @@ pub(crate) struct InvalidationSignal {
     proxy: Arc<Mutex<Option<EventLoopProxy>>>,
     dirty_dependencies: Arc<Mutex<DirtyDependencyLog>>,
     dependency_revisions: Arc<Mutex<HashMap<DependencyId, u64>>>,
+    redraw_requested: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl InvalidationSignal {
@@ -32,6 +33,7 @@ impl InvalidationSignal {
             proxy: Arc::new(Mutex::new(None)),
             dirty_dependencies: Arc::new(Mutex::new(DirtyDependencyLog::default())),
             dependency_revisions: Arc::new(Mutex::new(HashMap::new())),
+            redraw_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -41,6 +43,13 @@ impl InvalidationSignal {
 
     pub(crate) fn mark_dependency_dirty(&self, dependency: DependencyId) {
         self.mark_dirty_dependency(Some(dependency));
+    }
+
+    pub(crate) fn request_redraw(&self) {
+        self.redraw_requested.store(true, Ordering::SeqCst);
+        if self.should_wake_now() {
+            self.wake_proxy();
+        }
     }
 
     fn mark_dirty_dependency(&self, dependency: Option<DependencyId>) {
@@ -118,6 +127,10 @@ impl InvalidationSignal {
             .expect("dependency revision map lock poisoned")
             .get(&dependency)
             .copied()
+    }
+
+    pub(crate) fn take_redraw_request(&self) -> bool {
+        self.redraw_requested.swap(false, Ordering::SeqCst)
     }
 }
 

@@ -39,6 +39,9 @@ struct DecodeSession {
     audio_output: Option<AudioOutput>,
     shared_queue: Arc<SharedVideoQueue>,
     playback_clock: SharedPlaybackClock,
+    video_texture_id: u64,
+    next_video_texture_revision: u64,
+    target_raster: Option<RasterRequest>,
     pending_video_packets: VecDeque<QueuedVideoPacket>,
     buffering_profile: BufferingProfile,
     buffer_memory_limit_bytes: u64,
@@ -60,6 +63,7 @@ impl DecodeSession {
         volume: f32,
         muted: bool,
         buffer_memory_limit_bytes: u64,
+        target_raster: Option<RasterRequest>,
         shared_queue: Arc<SharedVideoQueue>,
         playback_clock: SharedPlaybackClock,
     ) -> Result<(Self, StreamOpenedEvent, Duration), TguiError> {
@@ -76,16 +80,7 @@ impl DecodeSession {
         let video_time_base = video_stream.time_base();
         let opened_video_decoder = open_video_decoder(&video_stream)?;
         let video_decoder = opened_video_decoder.decoder;
-        let scaler = Scaler::get(
-            video_decoder.format(),
-            video_decoder.width(),
-            video_decoder.height(),
-            Pixel::RGBA,
-            video_decoder.width(),
-            video_decoder.height(),
-            ScalingFlags::BILINEAR,
-        )
-        .map_err(|error| TguiError::Media(format!("failed to create video scaler: {error}")))?;
+        let scaler = create_video_scaler(&video_decoder, target_raster)?;
 
         let intrinsic_size =
             IntrinsicSize::from_pixels(video_decoder.width(), video_decoder.height());
@@ -126,6 +121,9 @@ impl DecodeSession {
             audio_output,
             shared_queue,
             playback_clock,
+            video_texture_id: TextureFrame::allocate_id(),
+            next_video_texture_revision: 1,
+            target_raster,
             pending_video_packets: VecDeque::new(),
             buffering_profile,
             buffer_memory_limit_bytes,
@@ -347,4 +345,39 @@ impl DecodeSession {
     fn set_buffer_memory_limit_bytes(&mut self, bytes: u64) {
         self.buffer_memory_limit_bytes = bytes;
     }
+
+    fn set_target_raster(&mut self, raster: Option<RasterRequest>) {
+        if self.target_raster == raster {
+            return;
+        }
+        self.target_raster = raster;
+        if let Ok(scaler) = create_video_scaler(&self.video_decoder, self.target_raster) {
+            self.scaler = scaler;
+        }
+    }
+
+    fn next_video_texture_revision(&mut self) -> u64 {
+        let revision = self.next_video_texture_revision.max(1);
+        self.next_video_texture_revision = revision.wrapping_add(1).max(1);
+        revision
+    }
+}
+
+fn create_video_scaler(
+    decoder: &ffmpeg::decoder::Video,
+    target_raster: Option<RasterRequest>,
+) -> Result<Scaler, TguiError> {
+    let output = target_raster.unwrap_or_else(|| {
+        RasterRequest::new_clamped(decoder.width().max(1), decoder.height().max(1))
+    });
+    Scaler::get(
+        decoder.format(),
+        decoder.width(),
+        decoder.height(),
+        Pixel::RGBA,
+        output.width(),
+        output.height(),
+        ScalingFlags::BILINEAR,
+    )
+    .map_err(|error| TguiError::Media(format!("failed to create video scaler: {error}")))
 }

@@ -72,7 +72,7 @@ pub struct Renderer {
     clear_color: TguiColor,
     text_system: TextSystem,
     text_cache: HashMap<TextCacheKey, TextCacheEntry>,
-    texture_cache: HashMap<(u64, u64), TextureCacheEntry>,
+    texture_cache: HashMap<u64, TextureCacheEntry>,
 }
 
 impl Renderer {
@@ -111,11 +111,18 @@ impl Renderer {
         }
         let (logical_width, logical_height) = self.logical_viewport_size();
 
-        let active_texture_keys: HashSet<_> = scene
+        let mut active_texture_keys: HashSet<_> = scene
             .textures
             .iter()
-            .map(|texture| (texture.texture.id(), texture.texture.revision()))
+            .map(|texture| texture.texture.id())
             .collect();
+        #[cfg(feature = "video")]
+        active_texture_keys.extend(
+            scene
+                .video_textures
+                .iter()
+                .filter_map(|texture| texture.controller.current_frame().map(|frame| frame.id())),
+        );
         self.texture_cache
             .retain(|key, _| active_texture_keys.contains(key));
 

@@ -310,6 +310,7 @@ fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoC
         }),
         volume: ctx.state(1.0),
         muted: ctx.state(false),
+        metrics_observed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
         video_size: ctx.state(VideoSize {
             width: snapshot.intrinsic_size.width as u32,

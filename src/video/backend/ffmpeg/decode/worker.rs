@@ -19,6 +19,7 @@ struct DecodeWorker {
     volume: f32,
     muted: bool,
     buffer_memory_limit_bytes: u64,
+    target_raster: Option<RasterRequest>,
     session: Option<DecodeSession>,
 }
 
@@ -37,6 +38,7 @@ impl DecodeWorker {
             volume: 1.0,
             muted: false,
             buffer_memory_limit_bytes: DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
+            target_raster: None,
             session: None,
         }
     }
@@ -143,6 +145,12 @@ impl DecodeWorker {
                     session.set_buffer_memory_limit_bytes(bytes);
                 }
             }
+            DecodeCommand::SetTargetRaster(raster) => {
+                self.target_raster = raster;
+                if let Some(session) = self.session.as_mut() {
+                    session.set_target_raster(raster);
+                }
+            }
             DecodeCommand::Shutdown => return false,
         }
 
@@ -166,6 +174,7 @@ impl DecodeWorker {
             self.volume,
             self.muted,
             self.buffer_memory_limit_bytes,
+            self.target_raster,
             self.shared_queue.clone(),
             self.playback_clock.clone(),
         ) {

@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "video")]
+use crate::media::RasterRequest;
 
 #[test]
 fn clicking_disabled_checkbox_does_not_dispatch_toggled_value() {
@@ -327,7 +329,7 @@ struct MockVideoBackend;
 
 #[cfg(feature = "video")]
 impl VideoBackend for MockVideoBackend {
-    fn load(&self, _source: VideoSource) -> Result<(), crate::TguiError> {
+    fn load(&self, _source: VideoSource) -> Result<(), crate::foundation::error::TguiError> {
         Ok(())
     }
 
@@ -342,6 +344,8 @@ impl VideoBackend for MockVideoBackend {
     fn set_muted(&self, _muted: bool) {}
 
     fn set_buffer_memory_limit_bytes(&self, _bytes: u64) {}
+
+    fn set_target_raster(&self, _raster: Option<RasterRequest>) {}
 
     fn current_frame(&self) -> Option<Arc<TextureFrame>> {
         None
@@ -361,6 +365,7 @@ fn hover_path_keeps_video_surface_hit_testing_when_scene_is_cached() {
         metrics: ctx.state(VideoMetrics::default()),
         volume: ctx.state(1.0),
         muted: ctx.state(false),
+        metrics_observed: Arc::new(AtomicBool::new(false)),
         buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
         video_size: ctx.state(VideoSize {
             width: 160,

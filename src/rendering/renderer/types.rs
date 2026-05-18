@@ -20,8 +20,11 @@ pub(super) struct TextCacheEntry {
 }
 
 pub(super) struct TextureCacheEntry {
+    pub(super) revision: u64,
+    pub(super) width: u32,
+    pub(super) height: u32,
     pub(super) bind_group: wgpu::BindGroup,
-    pub(super) _texture: wgpu::Texture,
+    pub(super) texture: wgpu::Texture,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]

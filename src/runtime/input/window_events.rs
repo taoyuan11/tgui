@@ -221,6 +221,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let theme_started_at = Instant::now();
         let theme_changed = self.refresh_platform_theme();
         let theme_duration = theme_started_at.elapsed();
+        if self.invalidation.take_redraw_request() {
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
         if theme_changed {
             self.sync_bindings(now);
             if let Some(window) = self.window.as_ref() {

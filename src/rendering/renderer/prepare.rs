@@ -245,6 +245,55 @@ impl Renderer {
                         }));
                     }
                 }
+                #[cfg(feature = "video")]
+                RenderCommand::VideoTexture(texture) => {
+                    let Some(frame_texture) = texture.controller.current_frame() else {
+                        continue;
+                    };
+                    if let Some(bind_group) = self.texture_bind_group_for(&frame_texture)? {
+                        let vertices = texture.quad.map_or_else(
+                            || {
+                                TextVertex::quad(
+                                    texture.frame,
+                                    logical_width,
+                                    logical_height,
+                                    texture.uv_rect,
+                                    texture.corner_radius,
+                                    texture.clip_mask,
+                                    physical_width,
+                                    physical_height,
+                                    scale_factor,
+                                )
+                            },
+                            |quad| {
+                                TextVertex::transformed(
+                                    texture.frame,
+                                    quad,
+                                    texture.uv_rect,
+                                    texture.corner_radius,
+                                    texture.clip_mask,
+                                    physical_width,
+                                    physical_height,
+                                    scale_factor,
+                                    texture.opacity,
+                                )
+                            },
+                        );
+                        let vertex_buffer =
+                            self.device
+                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some("tgui-video-sprite-vertices"),
+                                    contents: bytemuck::cast_slice(&vertices),
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                });
+                        prepared.push(PreparedCommand::Sprite(PreparedSprite {
+                            bind_group,
+                            clip_rect: texture.clip_rect,
+                            vertex_buffer,
+                            vertex_count: vertices.len() as u32,
+                        }));
+                    }
+                }
                 RenderCommand::Text(text) => {
                     if let Some(bind_group) = self.text_bind_group_for(text)? {
                         let snapped_frame = self.snap_text_rect(text.frame);

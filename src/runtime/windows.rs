@@ -331,6 +331,13 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
     fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.drain_dialog_completions();
         self.drain_notification_completions();
+        if self.invalidation.take_redraw_request() {
+            for window in self.windows_by_key.values() {
+                if let Some(native_window) = window.window.as_ref() {
+                    native_window.request_redraw();
+                }
+            }
+        }
     }
 
     fn window_event(

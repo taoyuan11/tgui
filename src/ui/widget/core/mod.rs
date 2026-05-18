@@ -37,6 +37,8 @@ use super::canvas::{
 };
 #[cfg(test)]
 use super::common::RenderedWidgetScene;
+#[cfg(feature = "video")]
+use super::common::VideoTexturePrimitive;
 use super::common::{
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     BackdropBlurPrimitive, BrushPrimitive, ClipMask, ComputedScene, ContainerKind, ContainerLayout,

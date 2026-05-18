@@ -260,6 +260,8 @@ fn audio_frame_to_f32_if_any(frame: &AudioFrame) -> Option<Vec<f32>> {
 pub(super) fn video_frame_to_texture(
     scaler: &mut Scaler,
     decoded: &VideoFrame,
+    texture_id: u64,
+    revision: u64,
 ) -> Result<TextureFrame, TguiError> {
     let mut rgba_frame = VideoFrame::empty();
     scaler
@@ -279,7 +281,9 @@ pub(super) fn video_frame_to_texture(
             .copy_from_slice(&data[src_offset..src_offset + row_len]);
     }
 
-    Ok(TextureFrame::new(width, height, pixels))
+    Ok(TextureFrame::with_id_and_revision(
+        texture_id, revision, width, height, pixels,
+    ))
 }
 
 pub(super) fn pts_to_duration(

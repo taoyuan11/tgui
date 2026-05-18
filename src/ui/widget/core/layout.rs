@@ -353,7 +353,7 @@ fn measure_node_tracked(
             .unwrap_or((0.0, 0.0)),
         #[cfg(feature = "video")]
         Some(MeasureContext::VideoSurface { video, .. }) => {
-            let snapshot = video.controller.surface_snapshot();
+            let snapshot = video.controller.surface_metadata();
             measure_media_content(
                 known_dimensions,
                 video.layout.aspect_ratio.as_ref().map(Value::resolve),

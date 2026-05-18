@@ -1,8 +1,10 @@
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::foundation::binding::{Signal, ViewModelContext};
 use crate::foundation::error::TguiError;
+use crate::media::RasterRequest;
 
 use super::backend::{
     ffmpeg::FfmpegVideoBackend, BackendSharedState, VideoBackend,
@@ -27,6 +29,7 @@ impl VideoController {
             metrics: ctx.state(VideoMetrics::default()),
             volume: ctx.state(1.0),
             muted: ctx.state(false),
+            metrics_observed: Arc::new(AtomicBool::new(false)),
             buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
             video_size: ctx.state(VideoSize::default()),
             error: ctx.state(None),
@@ -89,6 +92,7 @@ impl VideoController {
     }
 
     pub fn position(&self) -> Signal<Duration> {
+        self.inner.shared.enable_metrics();
         self.inner
             .shared
             .metrics
@@ -97,6 +101,7 @@ impl VideoController {
     }
 
     pub fn duration(&self) -> Signal<Option<Duration>> {
+        self.inner.shared.enable_metrics();
         self.inner
             .shared
             .metrics
@@ -105,6 +110,7 @@ impl VideoController {
     }
 
     pub fn buffered_position(&self) -> Signal<Option<Duration>> {
+        self.inner.shared.enable_metrics();
         self.inner
             .shared
             .metrics
@@ -128,12 +134,16 @@ impl VideoController {
         self.inner.shared.error.signal()
     }
 
-    pub(crate) fn surface_snapshot(&self) -> VideoSurfaceSnapshot {
-        let mut snapshot = self.inner.shared.surface.get();
-        if snapshot.texture.is_none() {
-            snapshot.texture = self.inner.backend.current_frame();
-        }
-        snapshot
+    pub(crate) fn set_target_raster(&self, raster: Option<RasterRequest>) {
+        self.inner.backend.set_target_raster(raster);
+    }
+
+    pub(crate) fn surface_metadata(&self) -> VideoSurfaceSnapshot {
+        self.inner.shared.surface.get()
+    }
+
+    pub(crate) fn current_frame(&self) -> Option<Arc<crate::media::TextureFrame>> {
+        self.inner.backend.current_frame()
     }
 }
 
@@ -225,6 +235,8 @@ mod tests {
                 .push(bytes);
         }
 
+        fn set_target_raster(&self, _raster: Option<RasterRequest>) {}
+
         fn current_frame(&self) -> Option<Arc<TextureFrame>> {
             self.frame.lock().expect("frame lock poisoned").clone()
         }
@@ -242,6 +254,7 @@ mod tests {
             metrics: ctx.state(VideoMetrics::default()),
             volume: ctx.state(1.0),
             muted: ctx.state(false),
+            metrics_observed: Arc::new(AtomicBool::new(false)),
             buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
             video_size: ctx.state(VideoSize::default()),
             error: ctx.state(None),
@@ -346,9 +359,8 @@ mod tests {
         assert_eq!(controller.error().get(), Some("boom".to_string()));
         assert_eq!(
             controller
-                .surface_snapshot()
-                .texture
-                .expect("backend frame should backfill snapshot")
+                .current_frame()
+                .expect("backend frame should be available")
                 .size(),
             (8, 4)
         );

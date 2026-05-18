@@ -203,14 +203,17 @@ pub(crate) fn push_video_texture_or_placeholder<VM>(
     context: &mut CollectContext<'_, '_>,
     computed: &mut ComputedScene<VM>,
 ) {
-    let snapshot = video.controller.surface_snapshot();
+    let snapshot = video.controller.surface_metadata();
     let target_frame = resolve_media_rect(content_frame, snapshot.intrinsic_size, video.fit);
+    let target_raster = RasterRequest::from_frame(target_frame, context.units.scale_factor());
+    video.controller.set_target_raster(target_raster);
+    let current_frame = video.controller.current_frame();
     let use_surface_background =
-        snapshot.loading || (snapshot.texture.is_none() && snapshot.error.is_none());
+        snapshot.loading || (current_frame.is_none() && snapshot.error.is_none());
 
-    if let Some(texture) = snapshot.texture.as_ref() {
-        computed.scene.push_texture(TexturePrimitive {
-            texture: Arc::clone(texture),
+    if current_frame.is_some() {
+        computed.scene.push_video_texture(VideoTexturePrimitive {
+            controller: video.controller.clone(),
             frame: target_frame,
             quad: None,
             uv_rect: None,

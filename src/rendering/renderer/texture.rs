@@ -8,14 +8,40 @@ impl Renderer {
         &mut self,
         texture_frame: &TextureFrame,
     ) -> Result<Option<wgpu::BindGroup>, TguiError> {
-        let key = (texture_frame.id(), texture_frame.revision());
-        if let Some(entry) = self.texture_cache.get(&key) {
-            return Ok(Some(entry.bind_group.clone()));
-        }
-
+        let key = texture_frame.id();
         let (width, height) = texture_frame.size();
         if width == 0 || height == 0 {
             return Ok(None);
+        }
+
+        if let Some(entry) = self.texture_cache.get_mut(&key) {
+            if entry.revision == texture_frame.revision() {
+                return Ok(Some(entry.bind_group.clone()));
+            }
+
+            if entry.width == width && entry.height == height {
+                self.queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &entry.texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    texture_frame.pixels(),
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(width * 4),
+                        rows_per_image: Some(height),
+                    },
+                    wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                entry.revision = texture_frame.revision();
+                return Ok(Some(entry.bind_group.clone()));
+            }
         }
 
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -72,8 +98,11 @@ impl Renderer {
         self.texture_cache.insert(
             key,
             TextureCacheEntry {
+                revision: texture_frame.revision(),
+                width,
+                height,
                 bind_group: bind_group.clone(),
-                _texture: texture,
+                texture,
             },
         );
 

@@ -71,12 +71,19 @@ impl PresentWorker {
         let position = frame.position;
         let texture = frame.texture;
         *self.latest_frame.lock().expect("video frame lock poisoned") = Some(texture.clone());
-        self.shared.surface.set(VideoSurfaceSnapshot {
-            intrinsic_size: self.current_intrinsic_size,
-            texture: Some(texture),
-            loading: false,
-            error: None,
-        });
+        let surface = self.shared.surface.get();
+        if surface.loading
+            || surface.error.is_some()
+            || surface.intrinsic_size != self.current_intrinsic_size
+        {
+            self.shared.surface.set(VideoSurfaceSnapshot {
+                intrinsic_size: self.current_intrinsic_size,
+                texture: None,
+                loading: false,
+                error: None,
+            });
+        }
+        self.shared.publish_frame();
 
         self.last_presented_position = position;
         if self.current_audio_clock.is_none() {
@@ -88,13 +95,15 @@ impl PresentWorker {
 
         self.playback_clock.set_position(position);
 
-        let mut metrics = self.shared.metrics.get();
-        metrics.duration = self.current_duration;
-        metrics.position = position;
-        metrics.buffered = self.buffered_position(position);
-        metrics.video_width = self.current_video_size.width;
-        metrics.video_height = self.current_video_size.height;
-        self.shared.metrics.set(metrics);
+        if self.shared.metrics_enabled() {
+            let mut metrics = self.shared.metrics.get();
+            metrics.duration = self.current_duration;
+            metrics.position = position;
+            metrics.buffered = self.buffered_position(position);
+            metrics.video_width = self.current_video_size.width;
+            metrics.video_height = self.current_video_size.height;
+            self.shared.metrics.set(metrics);
+        }
         Some(position)
     }
 

@@ -167,9 +167,11 @@ impl PresentWorker {
                 self.pause_software_clock(position);
                 self.set_decode_playing(false);
                 if self.stream_opened {
-                    let mut metrics = self.shared.metrics.get();
-                    metrics.position = position;
-                    self.shared.metrics.set(metrics);
+                    if self.shared.metrics_enabled() {
+                        let mut metrics = self.shared.metrics.get();
+                        metrics.position = position;
+                        self.shared.metrics.set(metrics);
+                    }
                     self.shared.playback_state.set(PlaybackState::Paused);
                 }
             }
@@ -193,14 +195,9 @@ impl PresentWorker {
                     .replace_generation(self.current_generation);
                 self.shared.playback_state.set(PlaybackState::Loading);
                 self.shared.error.set(None);
-                let current_texture = self
-                    .latest_frame
-                    .lock()
-                    .expect("video frame lock poisoned")
-                    .clone();
                 self.shared.surface.set(VideoSurfaceSnapshot {
                     intrinsic_size: self.current_intrinsic_size,
-                    texture: current_texture,
+                    texture: None,
                     loading: true,
                     error: None,
                 });
@@ -224,6 +221,9 @@ impl PresentWorker {
                 let _ = self
                     .decode_tx
                     .send(DecodeCommand::SetBufferMemoryLimitBytes(bytes));
+            }
+            BackendCommand::SetTargetRaster(raster) => {
+                let _ = self.decode_tx.send(DecodeCommand::SetTargetRaster(raster));
             }
             BackendCommand::Shutdown => return false,
         }
@@ -251,6 +251,12 @@ impl PresentWorker {
                 self.playback_clock.set_position(opened.start_position);
                 self.shared.video_size.set(opened.video_size);
                 self.shared.error.set(None);
+                self.shared.surface.set(VideoSurfaceSnapshot {
+                    intrinsic_size: opened.intrinsic_size,
+                    texture: None,
+                    loading: true,
+                    error: None,
+                });
             }
             DecodeEvent::FirstFrameReady { generation, .. } => {
                 if generation != self.current_generation {
@@ -285,9 +291,11 @@ impl PresentWorker {
                     self.playback_ended = true;
                     self.should_play = false;
                     self.startup_pending = false;
-                    let mut metrics = self.shared.metrics.get();
-                    metrics.position = position;
-                    self.shared.metrics.set(metrics);
+                    if self.shared.metrics_enabled() {
+                        let mut metrics = self.shared.metrics.get();
+                        metrics.position = position;
+                        self.shared.metrics.set(metrics);
+                    }
                     self.shared.playback_state.set(PlaybackState::Ended);
                 }
             }
@@ -305,6 +313,10 @@ impl PresentWorker {
     }
 
     fn sync_metrics(&mut self) {
+        if !self.shared.metrics_enabled() {
+            return;
+        }
+
         if !self.stream_opened {
             return;
         }
@@ -352,6 +364,7 @@ impl PresentWorker {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -374,6 +387,7 @@ mod tests {
             metrics: ctx.state(VideoMetrics::default()),
             volume: ctx.state(1.0),
             muted: ctx.state(false),
+            metrics_observed: Arc::new(AtomicBool::new(false)),
             buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
             video_size: ctx.state(VideoSize::default()),
             error: ctx.state(None),

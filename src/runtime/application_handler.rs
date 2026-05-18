@@ -8,6 +8,11 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
     fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.drain_dialog_completions();
         self.drain_notification_completions();
+        if self.invalidation.take_redraw_request() {
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
         if self.drain_window_requests() {
             event_loop.exit();
         }

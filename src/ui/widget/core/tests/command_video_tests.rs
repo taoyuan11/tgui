@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "video")]
+use crate::ui::widget::VideoSurfaceStyle;
 
 #[test]
 fn scoped_value_commands_cover_switch_canvas_and_media() {
