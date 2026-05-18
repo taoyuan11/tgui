@@ -1,0 +1,303 @@
+# tgui 主 CI 工作流
+#
+# 触发：push 到 master、所有 pull_request、手动 workflow_dispatch。
+#
+# Job 拓扑（全部并行，单个 job 失败不阻塞其他）：
+#   - fmt              :  cargo fmt --check  (Linux)
+#   - doc              :  cargo doc --all-features  (Linux)
+#   - clippy           :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
+#   - test             :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
+#   - bench-compile    :  cargo check --benches  (Linux, bench-support 编译可达性)
+#   - android-check    :  cargo check --target aarch64-linux-android  (Linux)
+#   - deny             :  cargo-deny licenses/advisories/bans/sources  (Linux)
+#   - coverage         :  Codecov 上传，需要 vars.ENABLE_COVERAGE=true 与 secrets.CODECOV_TOKEN
+#   - bench-publish    :  Bencher.dev 上报，需要 vars.ENABLE_BENCH=true 与 secrets.BENCHER_API_TOKEN
+
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # 钉一个 BtbN FFmpeg release tag，避免 latest 漂移导致 ffmpeg-next 8.0 ABI 不兼容。
+  FFMPEG_WIN_RELEASE: "n7.1-latest"
+  FFMPEG_WIN_FILE: "ffmpeg-n7.1-latest-win64-gpl-shared-7.1.zip"
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  doc:
+    name: doc (all-features)
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install FFmpeg dev libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libavcodec-dev libavformat-dev libavdevice-dev \
+            libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
+            pkg-config
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --no-deps --all-features
+
+  clippy:
+    name: clippy (${{ matrix.os }} / ${{ matrix.feature_set.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        feature_set:
+          - label: default
+            features: ""
+          - label: full
+            features: "audio video bench-support"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux' && matrix.feature_set.features != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libavcodec-dev libavformat-dev libavdevice-dev \
+            libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
+            pkg-config
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS' && matrix.feature_set.features != ''
+        run: |
+          brew update
+          brew install ffmpeg pkg-config
+      - name: Cache FFmpeg (Windows)
+        if: runner.os == 'Windows' && matrix.feature_set.features != ''
+        id: ffmpeg-cache-clippy
+        uses: actions/cache@v4
+        with:
+          path: C:\ffmpeg
+          key: ffmpeg-windows-${{ env.FFMPEG_WIN_RELEASE }}-${{ env.FFMPEG_WIN_FILE }}
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows' && matrix.feature_set.features != '' && steps.ffmpeg-cache-clippy.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/${env:FFMPEG_WIN_RELEASE}/${env:FFMPEG_WIN_FILE}"
+          $zip = "$env:RUNNER_TEMP/ffmpeg.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath C:\ffmpeg
+      - name: Configure FFmpeg env (Windows)
+        if: runner.os == 'Windows' && matrix.feature_set.features != ''
+        shell: pwsh
+        run: |
+          $root = (Get-ChildItem -Directory C:\ffmpeg | Select-Object -First 1).FullName
+          "FFMPEG_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$root\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.feature_set.label }}
+      - name: Run clippy
+        shell: bash
+        run: |
+          if [ -z "${{ matrix.feature_set.features }}" ]; then
+            cargo clippy --all-targets -- -D warnings
+          else
+            cargo clippy --all-targets --features "${{ matrix.feature_set.features }}" -- -D warnings
+          fi
+
+  test:
+    name: test (${{ matrix.os }} / ${{ matrix.feature_set.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        feature_set:
+          - label: default
+            features: ""
+          - label: full
+            features: "audio video bench-support"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux' && matrix.feature_set.features != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libavcodec-dev libavformat-dev libavdevice-dev \
+            libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
+            pkg-config
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS' && matrix.feature_set.features != ''
+        run: |
+          brew update
+          brew install ffmpeg pkg-config
+      - name: Cache FFmpeg (Windows)
+        if: runner.os == 'Windows' && matrix.feature_set.features != ''
+        id: ffmpeg-cache-test
+        uses: actions/cache@v4
+        with:
+          path: C:\ffmpeg
+          key: ffmpeg-windows-${{ env.FFMPEG_WIN_RELEASE }}-${{ env.FFMPEG_WIN_FILE }}
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows' && matrix.feature_set.features != '' && steps.ffmpeg-cache-test.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/${env:FFMPEG_WIN_RELEASE}/${env:FFMPEG_WIN_FILE}"
+          $zip = "$env:RUNNER_TEMP/ffmpeg.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath C:\ffmpeg
+      - name: Configure FFmpeg env (Windows)
+        if: runner.os == 'Windows' && matrix.feature_set.features != ''
+        shell: pwsh
+        run: |
+          $root = (Get-ChildItem -Directory C:\ffmpeg | Select-Object -First 1).FullName
+          "FFMPEG_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$root\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.feature_set.label }}
+      - name: Run tests
+        shell: bash
+        run: |
+          if [ -z "${{ matrix.feature_set.features }}" ]; then
+            cargo test --workspace
+          else
+            cargo test --workspace --features "${{ matrix.feature_set.features }}"
+          fi
+
+  bench-compile:
+    name: bench compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install FFmpeg dev libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libavcodec-dev libavformat-dev libavdevice-dev \
+            libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
+            pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bench
+      # Cargo.toml 中 audio_pipeline / video_pipeline / state_signal / widget_core_layout / animation_engine
+      # / text_controller 这几个 bench 依赖 bench-support，所以 --all-features 才能编译全部 bench。
+      - run: cargo check --benches --all-features
+
+  android-check:
+    name: android-check (aarch64-linux-android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+      # 此处只验证 cfg(target_os = "android") 的代码可解析，不需要 NDK 链接器（cargo check）。
+      # ohos target 需要 nightly + 自定义 target spec，暂不在 CI 矩阵；本地验证。
+      - run: cargo check --target aarch64-linux-android --features android
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 以下两个 job 默认跳过，需要仓库 owner 在 Settings → Secrets and variables
+  # 中配置后启用。这样即便没有外部 token，CI 也不会因 missing secret 失败。
+  # ─────────────────────────────────────────────────────────────────────
+
+  coverage:
+    name: coverage (codecov)
+    runs-on: ubuntu-latest
+    # TODO: 仓库 owner 在 repo Variables 设 ENABLE_COVERAGE=true，并在 Secrets 添加 CODECOV_TOKEN 后启用。
+    if: ${{ vars.ENABLE_COVERAGE == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Install FFmpeg dev libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libavcodec-dev libavformat-dev libavdevice-dev \
+            libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
+            pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate coverage
+        run: cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: lcov.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  bench-publish:
+    name: bench (bencher.dev)
+    runs-on: ubuntu-latest
+    # TODO: 仓库 owner 在 repo Variables 设 ENABLE_BENCH=true，并在 Secrets 添加 BENCHER_API_TOKEN 后启用。
+    # 同时需要在 Bencher.dev 创建项目并把项目 slug 填到下面的 --project 参数。
+    if: ${{ vars.ENABLE_BENCH == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install FFmpeg dev libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libavcodec-dev libavformat-dev libavdevice-dev \
+            libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
+            pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bench-publish
+      - uses: bencherdev/bencher@main
+      - name: Run benchmarks and upload
+        run: |
+          bencher run \
+            --project tgui \
+            --token "${{ secrets.BENCHER_API_TOKEN }}" \
+            --branch master \
+            --testbed ubuntu-latest \
+            --adapter rust_criterion \
+            --err \
+            "cargo bench --all-features"

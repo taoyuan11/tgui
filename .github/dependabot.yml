@@ -1,0 +1,33 @@
+# Dependabot 配置
+# 文档：https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+#
+# 设计意图：
+# - 周更新；patch 级别合并到一个 PR 减少噪音
+# - minor / major 单独 PR，需人工 review（特别是 winit beta 系列、wgpu 主版本）
+# - github-actions 同步保持工作流中 action 版本不过期
+
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      patch-updates:
+        update-types:
+          - "patch"
+    labels:
+      - "dependencies"
+      - "rust"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ci"
