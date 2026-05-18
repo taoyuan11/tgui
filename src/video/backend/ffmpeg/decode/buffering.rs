@@ -54,7 +54,6 @@ impl DecodeSession {
                     .shared_queue
                     .state
                     .lock()
-                    .expect("video queue lock poisoned")
                     .frames
                     .iter()
                     .filter(|frame| frame.generation == self.generation)

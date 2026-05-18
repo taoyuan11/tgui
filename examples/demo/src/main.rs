@@ -83,7 +83,7 @@ impl VideoPlayer {
     fn new(context: &ViewModelContext) -> Self {
         let source = context.state(String::from("D:\\CloudMusic\\MV\\郭顶 - 凄美地.mp4"));
         let controller = VideoController::new(context);
-        controller.set_volume(0.0);
+        // controller.set_volume(0.0);
         Self {
             video_controller: controller,
             source

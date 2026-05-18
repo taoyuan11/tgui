@@ -1,10 +1,11 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, Stream, SupportedStreamConfig};
+use parking_lot::Mutex;
 
 use crate::foundation::error::TguiError;
 use crate::log::Log;
@@ -18,23 +19,23 @@ pub(crate) struct SharedAudioClock {
 
 impl SharedAudioClock {
     pub(crate) fn position(&self) -> Duration {
-        let played_frames = self.shared.played_frames.load(Ordering::SeqCst);
+        let played_frames = self.shared.played_frames.load(Ordering::Relaxed);
         Duration::from_secs_f64(played_frames as f64 / self.sample_rate as f64)
     }
 
     pub(crate) fn buffered_duration(&self) -> Duration {
-        let buffered_samples = self.shared.queued_samples.load(Ordering::SeqCst) as usize;
+        let buffered_samples = self.shared.queued_samples.load(Ordering::Relaxed) as usize;
         let buffered_frames = buffered_samples / self.channels as usize;
         Duration::from_secs_f64(buffered_frames as f64 / self.sample_rate as f64)
     }
 
     pub(crate) fn buffered_memory_bytes(&self) -> u64 {
-        self.shared.queued_compressed_bytes.load(Ordering::SeqCst)
+        self.shared.queued_compressed_bytes.load(Ordering::Relaxed)
     }
 
     #[cfg(feature = "video")]
     pub(crate) fn has_started_clock(&self) -> bool {
-        self.shared.played_frames.load(Ordering::SeqCst) > 0
+        self.shared.played_frames.load(Ordering::Relaxed) > 0
     }
 }
 
@@ -45,7 +46,7 @@ pub(crate) struct AudioOutput {
     sample_rate: u32,
 }
 
-pub(super) struct SharedAudioOutput {
+pub(crate) struct SharedAudioOutput {
     pub(super) queue: Mutex<VecDeque<AudioSampleChunk>>,
     pub(super) queued_samples: AtomicU64,
     pub(super) queued_compressed_bytes: AtomicU64,
@@ -57,7 +58,7 @@ pub(super) struct SharedAudioOutput {
     pub(super) underflowing: AtomicBool,
 }
 
-pub(super) struct AudioSampleChunk {
+pub(crate) struct AudioSampleChunk {
     pub(super) samples: Vec<f32>,
     pub(super) offset: usize,
     pub(super) compressed_bytes: u64,
@@ -115,20 +116,20 @@ impl AudioOutput {
     }
 
     pub(crate) fn set_playing(&self, playing: bool) {
-        self.shared.playing.store(playing, Ordering::SeqCst);
+        self.shared.playing.store(playing, Ordering::Release);
         if !playing {
-            self.shared.underflowing.store(false, Ordering::SeqCst);
+            self.shared.underflowing.store(false, Ordering::Relaxed);
         }
     }
 
     pub(crate) fn set_volume(&self, volume: f32) {
         self.shared
             .volume_bits
-            .store(volume.clamp(0.0, 1.0).to_bits(), Ordering::SeqCst);
+            .store(volume.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 
     pub(crate) fn set_muted(&self, muted: bool) {
-        self.shared.muted.store(muted, Ordering::SeqCst);
+        self.shared.muted.store(muted, Ordering::Relaxed);
     }
 
     pub(crate) fn push_samples(&self, samples: Vec<f32>, compressed_bytes: u64) {
@@ -139,22 +140,21 @@ impl AudioOutput {
 
         self.shared
             .queued_samples
-            .fetch_add(sample_len as u64, Ordering::SeqCst);
+            .fetch_add(sample_len as u64, Ordering::Relaxed);
         self.shared
             .queued_compressed_bytes
-            .fetch_add(compressed_bytes, Ordering::SeqCst);
+            .fetch_add(compressed_bytes, Ordering::Relaxed);
 
         self.shared
             .queue
             .lock()
-            .expect("audio queue lock poisoned")
             .push_back(AudioSampleChunk {
                 samples,
                 offset: 0,
                 compressed_bytes,
             });
 
-        self.shared.underflowing.store(false, Ordering::SeqCst);
+        self.shared.underflowing.store(false, Ordering::Relaxed);
     }
 
     #[cfg(feature = "video")]
@@ -225,7 +225,7 @@ pub(super) fn write_audio_samples<T>(buffer: &mut [T], shared: &Arc<SharedAudioO
 where
     T: Sample + FromSample<f32>,
 {
-    let playing = shared.playing.load(Ordering::SeqCst);
+    let playing = shared.playing.load(Ordering::Acquire);
     if !playing {
         for sample in buffer.iter_mut() {
             *sample = T::from_sample(0.0);
@@ -233,86 +233,151 @@ where
         return;
     }
 
-    let muted = shared.muted.load(Ordering::SeqCst);
-    let volume = f32::from_bits(shared.volume_bits.load(Ordering::SeqCst));
-    let mut queue = shared.queue.lock().expect("audio queue lock poisoned");
+    let muted = shared.muted.load(Ordering::Relaxed);
+    let volume = f32::from_bits(shared.volume_bits.load(Ordering::Relaxed));
+    let mut queue = shared.queue.lock();
     let mut write_index = 0usize;
     let mut consumed_samples = 0usize;
     let mut consumed_compressed_bytes = 0u64;
 
     while write_index < buffer.len() {
-        let wrote = {
-            let Some(chunk) = queue.front_mut() else {
-                break;
-            };
-            let remaining_samples = chunk.samples.len().saturating_sub(chunk.offset);
-            if remaining_samples == 0 {
-                0usize
-            } else {
-                let write_count = remaining_samples.min(buffer.len() - write_index);
-                let start = chunk.offset;
-                let end = start + write_count;
-                for (out, sample) in buffer[write_index..write_index + write_count]
-                    .iter_mut()
-                    .zip(chunk.samples[start..end].iter().copied())
-                {
-                    let next = if muted { 0.0 } else { sample * volume };
-                    *out = T::from_sample(next);
-                }
-
-                let bytes = if write_count == remaining_samples {
-                    chunk.compressed_bytes
-                } else {
-                    ((chunk.compressed_bytes as u128 * write_count as u128)
-                        / remaining_samples as u128) as u64
-                };
-                chunk.compressed_bytes = chunk.compressed_bytes.saturating_sub(bytes);
-                chunk.offset = end;
-                consumed_compressed_bytes = consumed_compressed_bytes.saturating_add(bytes);
-                write_count
-            }
+        let Some(chunk) = queue.front_mut() else {
+            break;
         };
-
-        if queue
-            .front()
-            .is_some_and(|chunk| chunk.offset >= chunk.samples.len())
-        {
+        let remaining_samples = chunk.samples.len() - chunk.offset;
+        if remaining_samples == 0 {
             queue.pop_front();
-        }
-        if wrote == 0 {
             continue;
         }
-        write_index += wrote;
-        consumed_samples += wrote;
-    }
 
-    for sample in buffer[write_index..].iter_mut() {
-        *sample = T::from_sample(0.0);
-    }
-    if write_index < buffer.len() {
-        shared.underflowing.store(true, Ordering::SeqCst);
+        let write_count = remaining_samples.min(buffer.len() - write_index);
+        let start = chunk.offset;
+        let end = start + write_count;
+        let src = &chunk.samples[start..end];
+        let dst = &mut buffer[write_index..write_index + write_count];
+        if muted {
+            for out in dst.iter_mut() {
+                *out = T::from_sample(0.0);
+            }
+        } else if volume == 1.0 {
+            for (out, &sample) in dst.iter_mut().zip(src.iter()) {
+                *out = T::from_sample(sample);
+            }
+        } else {
+            for (out, &sample) in dst.iter_mut().zip(src.iter()) {
+                *out = T::from_sample(sample * volume);
+            }
+        }
+
+        let bytes = if write_count == remaining_samples {
+            chunk.compressed_bytes
+        } else {
+            ((chunk.compressed_bytes as u128 * write_count as u128)
+                / remaining_samples as u128) as u64
+        };
+        chunk.compressed_bytes = chunk.compressed_bytes.saturating_sub(bytes);
+        chunk.offset = end;
+        consumed_compressed_bytes = consumed_compressed_bytes.saturating_add(bytes);
+
+        write_index += write_count;
+        consumed_samples += write_count;
+
+        if chunk.offset >= chunk.samples.len() {
+            queue.pop_front();
+        }
     }
 
     drop(queue);
 
+    for sample in buffer[write_index..].iter_mut() {
+        *sample = T::from_sample(0.0);
+    }
+
     if consumed_samples > 0 {
         shared
             .queued_samples
-            .fetch_sub(consumed_samples as u64, Ordering::SeqCst);
+            .fetch_sub(consumed_samples as u64, Ordering::Relaxed);
+        let consumed_frames = (consumed_samples / shared.channels as usize) as u64;
+        shared
+            .played_frames
+            .fetch_add(consumed_frames, Ordering::Relaxed);
     }
     if consumed_compressed_bytes > 0 {
         shared
             .queued_compressed_bytes
-            .fetch_sub(consumed_compressed_bytes, Ordering::SeqCst);
+            .fetch_sub(consumed_compressed_bytes, Ordering::Relaxed);
     }
 
-    if playing && consumed_samples > 0 {
-        let consumed_frames = (consumed_samples / shared.channels as usize) as u64;
-        shared
-            .played_frames
-            .fetch_add(consumed_frames, Ordering::SeqCst);
-        if consumed_samples == buffer.len() {
-            shared.underflowing.store(false, Ordering::SeqCst);
+    if write_index < buffer.len() {
+        shared.underflowing.store(true, Ordering::Relaxed);
+    } else if consumed_samples > 0 {
+        shared.underflowing.store(false, Ordering::Relaxed);
+    }
+}
+
+#[cfg(feature = "bench-support")]
+pub(crate) mod bench_support {
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
+    use std::sync::Arc;
+
+    use parking_lot::Mutex;
+
+    use super::{write_audio_samples, AudioSampleChunk, SharedAudioOutput};
+
+    /// Opaque wrapper around `SharedAudioOutput` for external benches.
+    pub struct BenchAudioOutput {
+        pub(super) inner: Arc<SharedAudioOutput>,
+    }
+
+    pub fn make_output(channels: u16, volume: f32, muted: bool, playing: bool) -> BenchAudioOutput {
+        BenchAudioOutput {
+            inner: Arc::new(SharedAudioOutput {
+                queue: Mutex::new(VecDeque::new()),
+                queued_samples: AtomicU64::new(0),
+                queued_compressed_bytes: AtomicU64::new(0),
+                playing: AtomicBool::new(playing),
+                muted: AtomicBool::new(muted),
+                volume_bits: AtomicU32::new(volume.to_bits()),
+                played_frames: AtomicU64::new(0),
+                channels,
+                underflowing: AtomicBool::new(false),
+            }),
         }
+    }
+
+    pub fn enqueue_chunk(output: &BenchAudioOutput, samples: Vec<f32>, compressed_bytes: u64) {
+        if samples.is_empty() {
+            return;
+        }
+        let sample_len = samples.len() as u64;
+        output
+            .inner
+            .queued_samples
+            .fetch_add(sample_len, std::sync::atomic::Ordering::Relaxed);
+        output
+            .inner
+            .queued_compressed_bytes
+            .fetch_add(compressed_bytes, std::sync::atomic::Ordering::Relaxed);
+        output.inner.queue.lock().push_back(AudioSampleChunk {
+            samples,
+            offset: 0,
+            compressed_bytes,
+        });
+    }
+
+    pub fn write_f32(buffer: &mut [f32], output: &BenchAudioOutput) {
+        write_audio_samples(buffer, &output.inner)
+    }
+
+    pub fn write_i16(buffer: &mut [i16], output: &BenchAudioOutput) {
+        write_audio_samples(buffer, &output.inner)
+    }
+
+    pub fn played_frames(output: &BenchAudioOutput) -> u64 {
+        output
+            .inner
+            .played_frames
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 }

@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use super::*;
@@ -19,6 +20,7 @@ pub struct CanvasSceneQueryOptions {
     font_catalog: FontCatalog,
     scale_factor: f32,
     font_scale: f32,
+    cached_font_manager: OnceCell<FontManager>,
 }
 
 impl Default for CanvasSceneQueryOptions {
@@ -27,6 +29,7 @@ impl Default for CanvasSceneQueryOptions {
             font_catalog: FontCatalog::default(),
             scale_factor: 1.0,
             font_scale: 1.0,
+            cached_font_manager: OnceCell::new(),
         }
     }
 }
@@ -48,6 +51,7 @@ impl CanvasSceneQueryOptions {
 
     pub fn font_bytes(mut self, name: impl Into<String>, bytes: &'static [u8]) -> Self {
         self.font_catalog.register_font(name, bytes);
+        self.cached_font_manager = OnceCell::new();
         self
     }
 
@@ -57,33 +61,23 @@ impl CanvasSceneQueryOptions {
         path: impl Into<std::path::PathBuf>,
     ) -> Self {
         self.font_catalog.register_font_file(name, path);
+        self.cached_font_manager = OnceCell::new();
         self
     }
 
     pub fn default_font(mut self, name: impl Into<String>) -> Self {
         self.font_catalog.set_default_font(name);
+        self.cached_font_manager = OnceCell::new();
         self
     }
 
-    pub(crate) fn as_context(&self) -> CanvasSceneQueryContext {
-        CanvasSceneQueryContext::new(
-            &self.font_catalog,
-            UnitContext::new(self.scale_factor, self.font_scale),
-        )
+    pub(crate) fn font_manager(&self) -> &FontManager {
+        self.cached_font_manager
+            .get_or_init(|| FontManager::new(&self.font_catalog))
     }
-}
 
-pub(crate) struct CanvasSceneQueryContext {
-    pub(crate) font_manager: FontManager,
-    pub(crate) units: UnitContext,
-}
-
-impl CanvasSceneQueryContext {
-    fn new(font_catalog: &FontCatalog, units: UnitContext) -> Self {
-        Self {
-            font_manager: FontManager::new(font_catalog),
-            units,
-        }
+    pub(crate) fn units(&self) -> UnitContext {
+        UnitContext::new(self.scale_factor, self.font_scale)
     }
 }
 
@@ -94,20 +88,6 @@ pub(crate) fn query_canvas_scene_hits(
     scene_position: Point,
 ) -> Vec<CanvasSceneHit> {
     let query_session = CanvasSceneQuerySession::new(font_manager, units);
-    let mut metadata = HashMap::new();
-    scene.visit(|entry| {
-        metadata.insert(
-            entry.item.id(),
-            (
-                entry.depth,
-                entry.index_path,
-                entry.item.kind(),
-                entry.item.name().map(ToOwned::to_owned),
-                entry.item.hit_bounds_rect(),
-            ),
-        );
-    });
-
     let mut hits = Vec::new();
     let mut index_path = Vec::new();
     collect_query_hits_recursive(
@@ -115,7 +95,6 @@ pub(crate) fn query_canvas_scene_hits(
         scene_position,
         &mut index_path,
         &query_session,
-        &metadata,
         &mut hits,
     );
     hits
@@ -126,16 +105,6 @@ fn collect_query_hits_recursive(
     scene_position: Point,
     index_path: &mut Vec<usize>,
     query_session: &CanvasSceneQuerySession<'_>,
-    metadata: &HashMap<
-        CanvasItemId,
-        (
-            usize,
-            Vec<usize>,
-            CanvasItemKind,
-            Option<String>,
-            Option<Rect>,
-        ),
-    >,
     hits: &mut Vec<CanvasSceneHit>,
 ) {
     for index in (0..items.len()).rev() {
@@ -154,7 +123,6 @@ fn collect_query_hits_recursive(
                     scene_position,
                     index_path,
                     query_session,
-                    metadata,
                     hits,
                 );
             }
@@ -162,14 +130,11 @@ fn collect_query_hits_recursive(
 
         if contains {
             let local_position = item_event_local_position(item, scene_position);
-            let (depth, stored_path, kind, name, bounds) =
-                metadata.get(&item.id()).cloned().unwrap_or((
-                    index_path.len().saturating_sub(1),
-                    index_path.clone(),
-                    item.kind(),
-                    item.name().map(ToOwned::to_owned),
-                    item.hit_bounds_rect(),
-                ));
+            let depth = index_path.len().saturating_sub(1);
+            let stored_path = index_path.clone();
+            let kind = item.kind();
+            let name = item.name().map(ToOwned::to_owned);
+            let bounds = item.hit_bounds_rect();
             let text_hit = item_text_hit_at_point(item, scene_position, query_session);
             hits.push(CanvasSceneHit {
                 item_id: item.id(),

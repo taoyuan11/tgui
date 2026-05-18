@@ -106,3 +106,35 @@ required-features = ["bench-support"]
 name = "widget_core_layout"
 harness = false
 required-features = ["bench-support"]
+
+[[bench]]
+name = "animation_engine"
+harness = false
+required-features = ["bench-support"]
+
+[[bench]]
+name = "theme_resolution"
+harness = false
+
+[[bench]]
+name = "text_controller"
+harness = false
+required-features = ["bench-support"]
+
+[[bench]]
+name = "canvas_scene"
+harness = false
+
+[[bench]]
+name = "color_interpolation"
+harness = false
+
+[[bench]]
+name = "audio_pipeline"
+harness = false
+required-features = ["bench-support", "audio"]
+
+[[bench]]
+name = "video_pipeline"
+harness = false
+required-features = ["bench-support", "video"]

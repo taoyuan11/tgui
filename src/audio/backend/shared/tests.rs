@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use super::network::{ffmpeg_http_input_options, validate_ffmpeg_headers};
 use super::output::{write_audio_samples, AudioSampleChunk, SharedAudioOutput};

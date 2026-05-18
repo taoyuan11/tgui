@@ -292,6 +292,7 @@ fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoC
         fn set_volume(&self, _volume: f32) {}
         fn set_muted(&self, _muted: bool) {}
         fn set_buffer_memory_limit_bytes(&self, _bytes: u64) {}
+        fn set_target_raster(&self, _raster: Option<crate::media::RasterRequest>) {}
         fn current_frame(&self) -> Option<std::sync::Arc<crate::media::TextureFrame>> {
             None
         }

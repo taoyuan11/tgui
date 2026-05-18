@@ -365,8 +365,10 @@ impl PresentWorker {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::time::Duration;
+
+    use parking_lot::Mutex;
 
     use crossbeam_channel::unbounded;
 

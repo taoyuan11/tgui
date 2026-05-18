@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, Once, OnceLock};
+use std::sync::{Arc, Once, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -13,6 +13,7 @@ use ffmpeg::software::scaling::{context::Context as Scaler, flag::Flags as Scali
 use ffmpeg::util::format::pixel::Pixel;
 use ffmpeg::util::frame::{audio::Audio as AudioFrame, video::Video as VideoFrame};
 use ffmpeg_next as ffmpeg;
+use parking_lot::Mutex;
 
 #[cfg(test)]
 use crate::audio::backend::shared::ffmpeg_http_input_options;
@@ -29,6 +30,9 @@ mod decode;
 mod helpers;
 mod present;
 mod queue;
+
+#[cfg(feature = "bench-support")]
+pub(crate) mod bench_support;
 
 use decode::decode_main;
 use helpers::*;
@@ -208,7 +212,6 @@ impl VideoBackend for FfmpegVideoBackend {
     fn current_frame(&self) -> Option<Arc<TextureFrame>> {
         self.latest_frame
             .lock()
-            .expect("video frame lock poisoned")
             .clone()
     }
 
@@ -218,7 +221,6 @@ impl VideoBackend for FfmpegVideoBackend {
         if let Some(worker) = self
             .present_worker
             .lock()
-            .expect("present worker lock poisoned")
             .take()
         {
             let _ = worker.join();
@@ -227,7 +229,6 @@ impl VideoBackend for FfmpegVideoBackend {
         if let Some(worker) = self
             .decode_worker
             .lock()
-            .expect("decode worker lock poisoned")
             .take()
         {
             let _ = worker.join();

@@ -70,7 +70,7 @@ impl PresentWorker {
             .pop_front_matching(self.current_generation)?;
         let position = frame.position;
         let texture = frame.texture;
-        *self.latest_frame.lock().expect("video frame lock poisoned") = Some(texture.clone());
+        *self.latest_frame.lock() = Some(texture.clone());
         let surface = self.shared.surface.get();
         if surface.loading
             || surface.error.is_some()

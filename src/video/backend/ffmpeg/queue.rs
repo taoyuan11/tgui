@@ -12,12 +12,15 @@ pub(super) struct QueuedVideoFrame {
 #[derive(Default)]
 pub(super) struct VideoQueueState {
     pub(super) frames: VecDeque<QueuedVideoFrame>,
+    /// `frames` 中的总 compressed_bytes 之和，避免每次询问时再做线性扫描。
+    pub(super) total_compressed_bytes: u64,
+    /// `frames` 队尾帧的 end_position 缓存。frames 为空时为 `None`。
+    pub(super) tail_end_position: Option<Duration>,
 }
 
 pub(super) struct SharedVideoQueue {
     accepted_generation: AtomicU64,
     pub(super) state: Mutex<VideoQueueState>,
-    condvar: Condvar,
 }
 
 impl SharedVideoQueue {
@@ -25,26 +28,23 @@ impl SharedVideoQueue {
         Self {
             accepted_generation: AtomicU64::new(0),
             state: Mutex::new(VideoQueueState::default()),
-            condvar: Condvar::new(),
         }
     }
 
     pub(super) fn replace_generation(&self, generation: u64) {
-        self.accepted_generation.store(generation, Ordering::SeqCst);
+        self.accepted_generation.store(generation, Ordering::Release);
         self.clear_all();
     }
 
     pub(super) fn accepted_generation(&self) -> u64 {
-        self.accepted_generation.load(Ordering::SeqCst)
+        self.accepted_generation.load(Ordering::Acquire)
     }
 
     pub(super) fn clear_all(&self) {
-        self.state
-            .lock()
-            .expect("video queue lock poisoned")
-            .frames
-            .clear();
-        self.condvar.notify_all();
+        let mut state = self.state.lock();
+        state.frames.clear();
+        state.total_compressed_bytes = 0;
+        state.tail_end_position = None;
     }
 
     pub(super) fn push_frames(&self, mut frames: Vec<QueuedVideoFrame>) {
@@ -58,80 +58,93 @@ impl SharedVideoQueue {
             return;
         }
 
-        let mut state = self.state.lock().expect("video queue lock poisoned");
+        let mut state = self.state.lock();
         let accepted_generation = self.accepted_generation();
-        state.frames.extend(
-            frames
-                .into_iter()
-                .filter(|frame| frame.generation == accepted_generation),
-        );
-        drop(state);
-        self.condvar.notify_all();
+        for frame in frames {
+            if frame.generation != accepted_generation {
+                continue;
+            }
+            state.total_compressed_bytes = state
+                .total_compressed_bytes
+                .saturating_add(frame.compressed_bytes);
+            state.tail_end_position = Some(frame.end_position);
+            state.frames.push_back(frame);
+        }
     }
 
     pub(super) fn pop_front_matching(&self, generation: u64) -> Option<QueuedVideoFrame> {
-        let mut state = self.state.lock().expect("video queue lock poisoned");
+        let mut state = self.state.lock();
         match state.frames.front() {
-            Some(frame) if frame.generation == generation => state.frames.pop_front(),
+            Some(frame) if frame.generation == generation => {
+                let popped = state.frames.pop_front();
+                if let Some(frame) = popped.as_ref() {
+                    state.total_compressed_bytes = state
+                        .total_compressed_bytes
+                        .saturating_sub(frame.compressed_bytes);
+                    if state.frames.is_empty() {
+                        state.tail_end_position = None;
+                    }
+                }
+                popped
+            }
             _ => None,
         }
     }
 
     pub(super) fn front(&self, generation: u64) -> Option<QueuedVideoFrame> {
-        self.state
-            .lock()
-            .expect("video queue lock poisoned")
-            .frames
-            .iter()
-            .find(|frame| frame.generation == generation)
-            .cloned()
+        let state = self.state.lock();
+        match state.frames.front() {
+            Some(frame) if frame.generation == generation => Some(frame.clone()),
+            _ => None,
+        }
     }
 
     pub(super) fn has_frames(&self, generation: u64) -> bool {
-        self.front(generation).is_some()
+        if generation != self.accepted_generation() {
+            return false;
+        }
+        let state = self.state.lock();
+        state
+            .frames
+            .front()
+            .is_some_and(|frame| frame.generation == generation)
     }
 
     pub(super) fn ready_frame_count(&self, generation: u64) -> usize {
-        self.state
-            .lock()
-            .expect("video queue lock poisoned")
-            .frames
-            .iter()
-            .filter(|frame| frame.generation == generation)
-            .count()
+        if generation != self.accepted_generation() {
+            return 0;
+        }
+        let state = self.state.lock();
+        state.frames.len()
     }
 
     pub(super) fn ready_memory_bytes(&self, generation: u64) -> u64 {
-        self.state
-            .lock()
-            .expect("video queue lock poisoned")
-            .frames
-            .iter()
-            .filter(|frame| frame.generation == generation)
-            .map(|frame| frame.compressed_bytes)
-            .sum()
+        if generation != self.accepted_generation() {
+            return 0;
+        }
+        let state = self.state.lock();
+        state.total_compressed_bytes
     }
 
     pub(super) fn tail_end_position(&self, generation: u64) -> Option<Duration> {
-        self.state
-            .lock()
-            .expect("video queue lock poisoned")
-            .frames
-            .iter()
-            .rev()
-            .find(|frame| frame.generation == generation)
-            .map(|frame| frame.end_position)
+        if generation != self.accepted_generation() {
+            return None;
+        }
+        let state = self.state.lock();
+        state.tail_end_position
     }
 
     pub(super) fn head_frame_memory_bytes(&self, generation: u64) -> Option<u64> {
-        self.state
-            .lock()
-            .expect("video queue lock poisoned")
-            .frames
-            .iter()
-            .find(|frame| frame.generation == generation)
-            .map(|frame| frame.compressed_bytes)
-            .filter(|bytes| *bytes > 0)
+        if generation != self.accepted_generation() {
+            return None;
+        }
+        let state = self.state.lock();
+        let frame = state.frames.front()?;
+        if frame.generation != generation {
+            return None;
+        }
+        let bytes = frame.compressed_bytes;
+        (bytes > 0).then_some(bytes)
     }
 }
 
@@ -143,14 +156,14 @@ pub(super) struct SharedPlaybackClock {
 impl SharedPlaybackClock {
     pub(super) fn set_position(&self, position: Duration) {
         let nanos = position.as_nanos().min(u64::MAX as u128) as u64;
-        self.position_ns.store(nanos, Ordering::SeqCst);
+        self.position_ns.store(nanos, Ordering::Relaxed);
     }
 
     pub(super) fn position(&self) -> Duration {
-        Duration::from_nanos(self.position_ns.load(Ordering::SeqCst))
+        Duration::from_nanos(self.position_ns.load(Ordering::Relaxed))
     }
 }
 
 pub(super) fn clear_latest_frame(latest_frame: &Arc<Mutex<Option<Arc<TextureFrame>>>>) {
-    *latest_frame.lock().expect("video frame lock poisoned") = None;
+    *latest_frame.lock() = None;
 }
