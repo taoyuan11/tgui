@@ -58,6 +58,8 @@ pub(crate) use core::LifecycleSnapshot;
 #[cfg(feature = "audio")]
 pub(crate) use core::LifecycleWidgetKind;
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
+#[cfg(feature = "bench-support")]
+pub use core::bench_support::{default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats};
 pub(crate) use core::{
     CollectedSceneCache, ResolvedSceneLayout, SceneChunkParts, TextInputLayoutOverride,
     VisualContextSnapshot,

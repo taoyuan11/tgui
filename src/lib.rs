@@ -232,6 +232,10 @@ pub mod prelude {
         Textarea, TextareaStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
         WidgetSurfaceStyle, WidgetTree,
     };
+    #[cfg(feature = "bench-support")]
+    pub use crate::ui::widget::{
+        default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
+    };
 }
 
 /// Theme tokens, state resolution, and theme storage.
@@ -257,6 +261,10 @@ pub mod widgets {
         SelectOption, SelectStyle, Slider, SliderStyle, Switch, SwitchStyle, Text, TextWidgetStyle,
         Textarea, TextareaStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
         WidgetSurfaceStyle, WidgetTree,
+    };
+    #[cfg(feature = "bench-support")]
+    pub use crate::ui::widget::{
+        default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

@@ -73,6 +73,8 @@ mod resolved_layout;
 mod scene;
 mod scene_layout;
 mod style;
+#[cfg(feature = "bench-support")]
+pub mod bench_support;
 #[cfg(test)]
 mod tests;
 mod tree;

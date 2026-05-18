@@ -26,6 +26,7 @@ ohos = []
 audio = ["dep:ffmpeg-next"]
 video = ["audio"]
 video-static = ["video", "ffmpeg-next/static"]
+bench-support = []
 
 [dependencies]
 bytemuck = { version = "1.24", features = ["derive"] }
@@ -90,3 +91,16 @@ hilog-sys = "0.1.7"
 raw-window-handle = "0.6"
 tgui-winit-ohos = "0.4.11"
 #tgui-winit-ohos = { path = "../winit-ohos" }
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[[bench]]
+name = "state_signal"
+harness = false
+required-features = ["bench-support"]
+
+[[bench]]
+name = "widget_core_layout"
+harness = false
+required-features = ["bench-support"]

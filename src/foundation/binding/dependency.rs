@@ -41,7 +41,7 @@ impl DependencyGraph {
         !self.global_owners.is_empty()
     }
 
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn dependency_count(&self) -> usize {
         self.dependencies.len()
     }
