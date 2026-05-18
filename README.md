@@ -9,7 +9,7 @@
 - 轻量 MVVM 状态模型
 - 基于 `taffy` 的布局系统
 - 声明式组件树 + 可绑定窗口属性
-- 内置动画、图片/文本、系统通知、对话框、画布、自定义窗口 chrome，以及可选音视频能力
+- 内置动画、图片/文本、系统通知、对话框、画布、自定义窗口 chrome，以及可选音频/视频能力
 
 适合做桌面 GUI、工具型应用、可视化面板，以及需要较强自定义绘制能力的界面。
 
@@ -44,7 +44,7 @@
 ### 布局与组件
 
 - 布局：`Stack`、`Grid`、`Flex`
-- 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Image`
+- 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Switch`、`Image`
 - 画布：`Canvas`、`CanvasRecorder`、渐变/阴影/混合/裁剪/文字与图片绘制
 - 音频：`Audio`、`AudioController`、`AudioSource`（需启用 `audio` feature）
 - 视频：`VideoSurface`、`VideoController`、`VideoSource`（需启用 `video` feature）
@@ -52,6 +52,7 @@
 ### 样式与基础类型
 
 - 主题：`Theme`、`ThemeMode`、`ThemeSet`
+- 主题状态与存储：`ResolvedThemeMode`、`ThemeStore`
 - 颜色：`Color`
 - 单位：`dp()`、`sp()`、`Dp`、`Sp`
 - 排版：`FontWeight`
@@ -106,7 +107,7 @@ tgui = { version = "0.1.8", features = ["video"] }
 `tgui` 的公开类型按职责分类导出：
 
 - `application`：应用、窗口和运行入口
-- `mvvm`：`ViewModel`、`State`、`Signal`、`TextController`、`Command`、`CommandContext`、`WindowControl`
+- `mvvm`：`ViewModel`、`ViewModelContext`、`State`、`Signal`、`TextController`、`Command`、`ValueCommand`、`CommandContext`、`WindowControl`
 - `layout`：布局容器、尺寸、间距和滚动相关类型
 - `widgets` / `canvas`：基础控件、控件树和 Canvas 绘制 API
 - `theme`：主题、色板、排版、状态和设计 token
@@ -207,7 +208,7 @@ Notifications
 Stack / Grid / Flex
 Text / Button / Image / Canvas
 
-Theme / ThemeMode / ThemeSet / Color / FocusRingStyle
+Theme / ThemeMode / ThemeSet / ThemeStore / ResolvedThemeMode / Color / FocusRingStyle
 dp / sp / Dp / Sp
 
 Transition
@@ -558,11 +559,12 @@ Button::new("Close")
 
 - `src/lib.rs`：crate 导出总览
 - `src/application/mod.rs`：应用与窗口入口
-- `src/foundation/binding.rs`：`State` / `Signal`
-- `src/foundation/view_model.rs`：`Command` / `ValueCommand`
-- `src/notification.rs`：通知、权限与 action 回调
+- `src/foundation/binding/mod.rs`：`State` / `Signal` / `TextController`
+- `src/foundation/view_model/mod.rs`：`Command` / `ValueCommand`
+- `src/notification/mod.rs`：通知、权限与 action 回调
 - `src/foundation/window_control.rs`：`WindowControl` / `WindowResizeDirection`
-- `src/ui/widget/*`：组件与布局实现
+- `src/audio/`：音频控制器、隐形 `Audio` 组件和 FFmpeg/CPAL 播放管线
+- `src/ui/widget/`：组件与布局实现
 - `examples/frameless_window/src/main.rs`：无边框窗口和窗口控制参考
 - `examples/*`：最直接的上手参考
 
@@ -590,9 +592,10 @@ cargo check --features ohos
 
 - 公共 API 变更需要同步更新 README、示例和 `src/lib.rs` 中的 re-export。
 - 新增 widget 或样式能力时，优先复用现有 `Element`、布局、事件、主题和 `Value<T>` / `Signal<T>` 模式。
-- 文本输入或通知能力变更时，建议同时检查 `src/runtime.rs`、`src/notification.rs` 与相关示例。
-- 修改 `src/runtime.rs`、`src/ui/widget/core.rs`、渲染 primitive、文本输入、媒体加载或窗口控制时，建议补充针对性的单元测试。
+- 文本输入或通知能力变更时，建议同时检查 `src/runtime/`、`src/notification/` 与相关示例。
+- 修改 `src/runtime/`、`src/ui/widget/core/`、渲染 primitive、文本输入、媒体加载或窗口控制时，建议补充针对性的单元测试。
 - 新增示例时保持示例独立、可运行，并同步更新 README 中的示例列表。
+- 音频相关改动需要考虑 `audio` feature、本机 FFmpeg 解码链路以及桌面端 `cpal` 播放行为。
 - 视频相关改动需要考虑 `video` / `video-static` feature，以及本机 FFmpeg 链接环境差异。
 - Android / OHOS / 桌面平台相关改动请使用 `cfg` 明确隔离，避免影响其他平台构建。
 - 文档和示例同样重要；如果你发现某个 API 已经可用但缺少说明，欢迎直接补充。

@@ -2,7 +2,7 @@
 
 ## Identity
 
-`tgui` is a Rust 2021 crate for GPU-accelerated GUI applications. It combines `wgpu` rendering, `winit-core` platform backends, `taffy` layout, `cosmic-text`, a small MVVM layer, themes, animation, text input, media loading, native dialogs, custom window chrome/native window control, canvas drawing, and optional FFmpeg video.
+`tgui` is a Rust 2021 crate for GPU-accelerated GUI applications. It combines `wgpu` rendering, `winit-core` platform backends, `taffy` layout, `cosmic-text`, a small MVVM layer, themes, animation, text input, media loading, native dialogs, custom window chrome/native window control, canvas drawing, and optional FFmpeg-backed audio/video.
 
 Crate metadata: package `tgui`, current version `0.1.8`, edition `2021`, license MIT. Major dependencies include `wgpu`, `winit-core` plus platform backends, `taffy`, `cosmic-text`, `image`, `resvg`, `reqwest`, `lyon`, and optional `ffmpeg-next`.
 
@@ -11,20 +11,21 @@ Crate metadata: package `tgui`, current version `0.1.8`, edition `2021`, license
 - `Cargo.toml`: crate metadata, features, target-specific dependencies, publish excludes.
 - `src/lib.rs`: public API exports and `prelude`.
 - `src/application/mod.rs`: `Application`, `WindowSpec`, multi-window declarations, window decoration configuration, window bindings, platform run entry points.
-- `src/foundation/binding.rs`: `ViewModelContext`, `State`, `Signal`, `TextController`, dependency tracking, invalidation.
-- `src/foundation/view_model.rs`: `ViewModel`, `Command`, `ValueCommand`, `CommandContext`.
+- `src/foundation/binding/mod.rs`: `ViewModelContext`, `State`, `Signal`, `TextController`, dependency tracking, invalidation.
+- `src/foundation/view_model/mod.rs`: `ViewModel`, `Command`, `ValueCommand`, `CommandContext`.
 - `src/foundation/window_control.rs`: `WindowControl`, `WindowResizeDirection`, and queued native window requests for command handlers.
 - `src/runtime/`: event loop integration, window lifecycle, input, focus, scrolling, text editing, commands, window control request draining, dialog callbacks, theme binding, animation refresh, media state, render scheduling.
-- `src/ui/layout.rs`: layout value types such as `Length`, `Track`, `Insets`, `Align`, `Justify`, `Axis`, `Overflow`, `Value`.
+- `src/ui/layout/mod.rs`: layout value types such as `Length`, `Track`, `Insets`, `Align`, `Justify`, `Axis`, `Overflow`, `Value`.
 - `src/ui/widget/core/`: element tree resolution, Taffy layout, scene primitive collection, hit regions, scrolling, input/editing, selection. High-risk area.
-- `src/ui/widget/*.rs`: public widget builders such as button, text, input, textarea, image, checkbox, radio, select, switch, canvas, background, video.
+- `src/ui/widget/`: public widget builders such as button, text, input, textarea, image, checkbox, radio, select, switch, canvas, background, video.
+- `src/audio/`: `audio` feature API, invisible `Audio` widget, controller, metrics, and FFmpeg/CPAL backend.
 - `src/ui/theme/`: theme tokens, component themes, state resolution, light/dark/system mode.
 - `src/rendering/renderer.rs`: `wgpu` renderer and pipelines for rects, brushes, meshes, text, textures, transparent window surfaces, backdrop blur.
 - `src/rendering/shader/*.wgsl`: shader code.
 - `src/media/mod.rs`: raster image/SVG/network/memory loading, texture and shadow caches.
-- `src/dialog.rs`: native dialogs through `rfd` on desktop; unsupported stubs on Android/OHOS.
-- `src/notification.rs`: notifications, permissions, platform dispatch, and interactive action callbacks.
-- `src/platform.rs`: platform abstraction and selected winit backend.
+- `src/dialog/mod.rs`: native dialogs through `rfd` on desktop; unsupported stubs on Android/OHOS.
+- `src/notification/mod.rs`: notifications, permissions, platform dispatch, and interactive action callbacks.
+- `src/platform/mod.rs`: platform abstraction and selected winit backend.
 - `src/video/`: `video` feature API and FFmpeg backend.
 - `examples/`: independent Cargo examples.
 
@@ -33,7 +34,8 @@ Crate metadata: package `tgui`, current version `0.1.8`, edition `2021`, license
 - `default = []`
 - `android`: Android entry and `winit-android`.
 - `ohos`: HarmonyOS/OpenHarmony entry and `tgui-winit-ohos`.
-- `video`: enables `ffmpeg-next`.
+- `audio`: enables `ffmpeg-next` for audio decode/playback support.
+- `video`: enables video on top of `audio`.
 - `video-static`: enables `video` plus `ffmpeg-next/static`.
 
 Desktop targets use windowing, clipboard, dialog, raw-window-handle, logging, and audio dependencies. Android uses `jni` and `winit-android`. OHOS uses `hilog-sys` and `tgui-winit-ohos`. Windows video builds link extra system libraries in `build.rs`.
@@ -49,6 +51,7 @@ Desktop targets use windowing, clipboard, dialog, raw-window-handle, logging, an
 - `media`: `MediaSource`, `MediaBytes`, `ContentFit`.
 - `dialog`: file and message dialog types.
 - `notification`: `NotificationOptions`, `NotificationAction`, `NotificationActionEvent`, `NotificationPermission`, `Notifications`.
+- `audio`: exported only with the `audio` feature.
 - `video`: exported only with the `video` feature.
 - `prelude`: convenient import set for examples and small apps.
 
@@ -76,8 +79,15 @@ Use `Application::decorations(false)` or `WindowSpec::decorations(false)` to dis
 - Create reactive values with `ViewModelContext::state`.
 - Read state through `State::signal()` and derive UI-facing values with `Signal::map`.
 - Use `Signal::animated(Transition)` for declarative property transitions on supported types.
-- Use `TextController` for retained `Input` and `Textarea` content. Text-editing changes often cross `src/ui/widget/common.rs`, `src/ui/widget/core/`, and `src/runtime/input.rs`.
+- Use `TextController` for retained `Input` and `Textarea` content. Text-editing changes often cross `src/ui/widget/common.rs`, `src/ui/widget/core/`, and `src/runtime/input/`.
 - `TextChangeSet` and `TextSnapshot` are the main payload and inspection types for text editing callbacks and tests.
+
+## Audio and Video Flow
+
+- `AudioController` owns source loading, playback state, seek, volume, mute, and metrics queries.
+- `Audio` is the invisible widget-tree node that binds playback lifecycle into the runtime.
+- Audio decode/runtime code lives under `src/audio/backend/`; desktop playback uses `cpal`.
+- `VideoController` and `VideoSurface` build on the FFmpeg-backed media stack and remain gated behind `video`.
 
 ## Runtime Flow
 
@@ -91,7 +101,7 @@ Transparent windows are driven by clear color alpha. The renderer picks non-opaq
 
 ## Widget Change Checklist
 
-- Add or update the builder API in the relevant `src/ui/widget/*.rs` file.
+- Add or update the builder API in the relevant `src/ui/widget/` module.
 - Store layout/visual/interaction state using existing structs where possible.
 - Wire behavior into `WidgetKind`/core tree handling only where needed.
 - Include hit-testing, focus, pressed/hover state, scroll behavior, text selection, IME behavior, and change-set emission when the widget participates in those systems.
@@ -112,11 +122,12 @@ Transparent windows are driven by clear color alpha. The renderer picks non-opaq
 - Layout, primitive, input, selection, scroll, and widget state: `src/ui/widget/core/tests.rs`.
 - Runtime focus, text input editing, scrollbars, command dispatch, canvas/video hit behavior: `src/runtime/tests.rs`.
 - Window decoration config and command window control: `src/application/mod.rs` and `src/foundation/window_control.rs` tests.
-- Media, SVG, rasterization, external resources, caches: `src/media/mod.rs` tests.
-- Animation and timelines: `src/animation.rs` tests.
+- Media, SVG, rasterization, external resources, caches: `src/media/tests.rs`.
+- Animation and timelines: `src/animation/tests.rs`.
+- Audio controller/backends: `src/audio/controller/tests.rs`, `src/audio/backend/shared/tests.rs`, `src/audio/backend/ffmpeg/tests.rs`.
 - Theme state and tokens: `src/ui/theme/mod.rs` tests.
-- Font behavior: `src/text/font.rs` tests.
-- Canvas-specific behavior: `src/ui/widget/canvas.rs` tests.
+- Font behavior: `src/text/font/tests.rs`.
+- Canvas-specific behavior: `src/ui/widget/canvas/tests.rs`.
 - Video controller/backend: `src/video/**` tests with the appropriate feature and local FFmpeg environment.
 
 ## Actual Examples To Check
@@ -155,4 +166,5 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 - Add new platform behavior behind the existing `cfg` structure and platform abstraction.
 - Text changes must respect UTF-8 boundaries, IME composition, selection ranges, caret visibility, and horizontal scrolling.
 - Async media/dialog completions must trigger invalidation through the runtime.
+- Audio changes should validate `audio` feature gating, controller/runtime lifecycle, and desktop playback assumptions.
 - Do not delete, rename, or overwrite the untracked `Video.md` unless explicitly asked.

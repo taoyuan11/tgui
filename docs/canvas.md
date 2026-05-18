@@ -2,6 +2,12 @@
 
 本文聚焦 `tgui::canvas` 当前公开能力、查询与调试 API、retained scene 使用建议，以及当前不支持或暂未承诺稳定的部分。
 
+仓库内可配合阅读：
+
+- [README.md](D:/Project/Rust/libs/tgui/README.md)
+- [examples/README.md](D:/Project/Rust/libs/tgui/examples/README.md)
+- [examples/canvas/src/main.rs](D:/Project/Rust/libs/tgui/examples/canvas/src/main.rs)
+
 ## 定位
 
 当前 Canvas 有两层模型：

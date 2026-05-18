@@ -4,7 +4,7 @@
 
 ## 项目定位
 
-`tgui` 是一个 Rust GUI 框架 crate，目标是提供基于 `wgpu` 的 GPU 加速渲染、MVVM 状态模型、`taffy` 布局、声明式组件树、主题系统、动画、媒体加载、系统通知、对话框、自定义窗口 chrome / 原生窗口控制，以及可选视频播放能力。
+`tgui` 是一个 Rust GUI 框架 crate，目标是提供基于 `wgpu` 的 GPU 加速渲染、MVVM 状态模型、`taffy` 布局、声明式组件树、主题系统、动画、媒体加载、系统通知、对话框、自定义窗口 chrome / 原生窗口控制，以及可选音频/视频播放能力。
 
 crate 信息：
 
@@ -13,27 +13,28 @@ crate 信息：
 - Rust edition：`2021`
 - License：MIT
 - 主要依赖：`wgpu`、`winit-core` 及平台后端、`taffy`、`cosmic-text`、`image`、`resvg`、`reqwest`、`lyon`
-- 可选视频依赖：`ffmpeg-next`
+- 可选音视频依赖：`ffmpeg-next`
 
 ## 重要目录和文件
 
 - `Cargo.toml`：crate 元数据、features、平台依赖和发布排除规则。
 - `src/lib.rs`：公共 API 总出口，按 `application`、`mvvm`、`layout`、`widgets`、`canvas`、`theme`、`core`、`media`、`dialog`、`notification`、`logging`、`platform`、`video` 分组导出。
 - `src/application/mod.rs`：`Application`、`WindowSpec`、多窗口声明、窗口装饰开关、窗口绑定和运行入口。
-- `src/foundation/binding.rs`：`ViewModelContext`、`State`、`Signal`、`TextController`、依赖跟踪与 invalidation。
-- `src/foundation/view_model.rs`：`ViewModel`、`Command`、`ValueCommand`、`CommandContext`。
+- `src/foundation/binding/mod.rs`：`ViewModelContext`、`State`、`Signal`、`TextController`、依赖跟踪与 invalidation。
+- `src/foundation/view_model/mod.rs`：`ViewModel`、`Command`、`ValueCommand`、`CommandContext`。
 - `src/foundation/window_control.rs`：命令上下文中的运行时窗口控制，封装拖拽、拖拽调整大小、最小化、最大化、还原、关闭和最大化状态查询。
 - `src/runtime/`：运行时核心模块；`mod.rs` 管主流程，`input.rs` 处理文本输入状态，`commands.rs` / `theme.rs` 拆分部分行为，`tests.rs` 聚合运行时测试。
-- `src/ui/layout.rs`：布局基础类型，封装 `Length`、`Track`、`Insets`、`Align`、`Justify`、`Axis`、`Overflow`、`Value` 等。
-- `src/ui/widget/`：公开 widget builder 与基础样式；`input.rs` / `textarea.rs` 提供文本输入组件。
+- `src/ui/layout/mod.rs`：布局基础类型，封装 `Length`、`Track`、`Insets`、`Align`、`Justify`、`Axis`、`Overflow`、`Value` 等。
+- `src/ui/widget/`：公开 widget builder 与基础样式；`input/` / `textarea/` 提供文本输入组件。
 - `src/ui/widget/core/`：组件树解析、Taffy 布局、渲染 primitive 收集、命中区域、选择与文本输入基础设施等高风险核心模块。
 - `src/ui/theme/`：主题 token、组件主题、状态解析、light/dark/system 模式。
 - `src/rendering/renderer.rs`：`wgpu` 渲染器，包含矩形、渐变/brush、mesh、文字、纹理、透明窗口 surface、backdrop blur 等 pipeline。
 - `src/rendering/shader/`：WGSL shader。
 - `src/media/mod.rs`：图片、SVG、网络/本地/内存媒体加载，纹理缓存，SVG 栅格化，canvas shadow 缓存。
-- `src/dialog.rs`：同步和异步原生对话框封装；桌面用 `rfd`，Android/OHOS 返回 unsupported。
-- `src/notification.rs`：系统通知抽象，包含通知选项、权限状态、动作回调分发与平台后端实现。
-- `src/platform.rs`：平台抽象和不同 winit 后端的选择。
+- `src/audio/`：启用 `audio` feature 后的 `AudioController`、`Audio` 组件、播放状态与 FFmpeg/CPAL 后端。
+- `src/dialog/mod.rs`：同步和异步原生对话框封装；桌面用 `rfd`，Android/OHOS 返回 unsupported。
+- `src/notification/mod.rs`：系统通知抽象，包含通知选项、权限状态、动作回调分发与平台后端实现。
+- `src/platform/mod.rs`：平台抽象和不同 winit 后端的选择。
 - `src/video/`：启用 `video` feature 后的 `VideoController`、`VideoSurface`、FFmpeg 后端。
 - `examples/`：独立 Cargo 示例工程。
 - `docs/images/tgui_logo.png`：README 使用的 logo。
@@ -45,7 +46,8 @@ crate 信息：
 - `default = []`
 - `android`：启用 Android 入口和 `winit-android`。
 - `ohos`：启用 HarmonyOS / OpenHarmony 入口和 `tgui-winit-ohos`。
-- `video`：启用 `ffmpeg-next` 视频能力。
+- `audio`：启用 `ffmpeg-next` 音频解码能力。
+- `video`：在 `audio` 基础上启用视频能力。
 - `video-static`：在 `video` 基础上启用 `ffmpeg-next/static`。
 
 平台依赖按 target 区分：
@@ -64,12 +66,13 @@ Windows 下启用 `video` feature 时，`build.rs` 会额外链接 `strmiids` �
 - `application`：`Application`、`WindowSpec`、`WindowRole`、`WindowClosePolicy`。
 - `mvvm`：`ViewModel`、`ViewModelContext`、`State`、`Signal`、`TextController`、`TextChange`、`TextChangeSet`、`TextSnapshot`、`Command`、`ValueCommand`、`CommandContext`、`WindowControl`、`WindowResizeDirection`。
 - `layout`：`Flex`、`Grid`、`Stack` 以及布局尺寸和对齐类型。
-- `widgets`：`Button`、`Text`、`Input`、`Textarea`、`Image`、`Checkbox`、`Radio`、`Select`、`Switch`、`Element`、`WidgetTree` 等。
+- `widgets`：`Button`、`Text`、`Input`、`Textarea`、`Image`、`Checkbox`、`Radio`、`Select`、`Slider`、`Switch`、`Element`、`WidgetTree` 等。
 - `canvas`：`Canvas`、`PathBuilder`、路径、渐变、阴影、布尔运算、画布事件。
 - `theme`：`Theme`、`ThemeMode`、`ThemeSet`、组件主题和设计 token。
 - `media`：`MediaSource`、`MediaBytes`、`ContentFit`。
 - `dialog`：文件选择和消息框。
 - `notification`：`NotificationOptions`、`NotificationAction`、`NotificationActionEvent`、`NotificationPermission`、`Notifications`。
+- `audio`：仅在 `audio` feature 下导出 `Audio`、`AudioController`、`AudioSource`、`PlaybackState`、`AudioMetrics`。
 - `video`：仅在 `video` feature 下导出。
 
 ## 应用启动模型
@@ -133,7 +136,7 @@ Application::new()
 
 如果新增 widget，优先复用现有 `Element`、`WidgetKind`、`InteractionHandlers`、`MediaEventHandlers`、`VisualStyle`、`LayoutStyle` 模式，而不是另起一套事件或布局系统。
 
-当前仓库提供公开的 `Input` 和 `Textarea` 组件。处理文本输入相关逻辑时，优先沿着 `TextController`、`TextChangeSet`、`src/ui/widget/common.rs`、`src/ui/widget/core/` 和 `src/runtime/input.rs` 的共享基础设施追踪，而不是把输入、选择、IME、滚动、渲染当成彼此独立的局部功能。
+当前仓库提供公开的 `Input` 和 `Textarea` 组件。处理文本输入相关逻辑时，优先沿着 `TextController`、`TextChangeSet`、`src/ui/widget/common.rs`、`src/ui/widget/core/` 和 `src/runtime/input/` 的共享基础设施追踪，而不是把输入、选择、IME、滚动、渲染当成彼此独立的局部功能。
 
 ## 动画系统
 
@@ -161,7 +164,7 @@ Application::new()
 
 ## 通知系统
 
-通知能力位于 `src/notification.rs`，通过 `CommandContext::notifications()` 暴露给命令处理：
+通知能力位于 `src/notification/`，通过 `CommandContext::notifications()` 暴露给命令处理：
 
 - `Notifications::send`：发送普通系统通知。
 - `Notifications::send_with_actions`：发送最多两个 action 的交互式通知，并把结果回调到 ViewModel。
@@ -174,6 +177,16 @@ Application::new()
 - Linux：当前通过 `notify-rust` 发送通知并监听 action。
 - macOS：接口已公开，但当前仍依赖 UserNotifications bridge，调用时可能返回 backend error。
 - Android / OHOS：当前返回 unsupported。
+
+## 音频系统
+
+音频能力位于 `src/audio/`，需要 `audio` feature：
+
+- `AudioController` 管理加载、播放、暂停、seek、音量、静音和播放状态查询。
+- `Audio` 是挂接到 widget tree 的隐形播放组件，本身不渲染 UI。
+- FFmpeg 解码与桌面播放后端位于 `src/audio/backend/`，桌面输出依赖 `cpal`。
+
+涉及音频变更时建议至少运行相关模块测试，并在桌面环境补一次实际播放链路检查。
 
 ## 视频系统
 
@@ -251,11 +264,12 @@ cargo run --manifest-path examples/<example_name>/Cargo.toml
 - `src/ui/widget/core/tests.rs`：布局、渲染 primitive、输入、选择、滚动、组件状态。
 - `src/runtime/tests.rs`：事件、焦点、文本输入编辑、滚动条、命令派发、canvas/video 命中等运行时行为。
 - `src/application/mod.rs`、`src/foundation/window_control.rs`：窗口配置、装饰开关、命令上下文窗口控制。
-- `src/notification.rs`：通知选项校验、平台分发、异步 action completion 回调。
-- `src/media/mod.rs`：图片/SVG 加载、栅格化、缓存、外部资源解析。
-- `src/animation.rs`：属性动画和 timeline 行为。
+- `src/notification/tests.rs`：通知选项校验、平台分发、异步 action completion 回调。
+- `src/media/tests.rs`：图片/SVG 加载、栅格化、缓存、外部资源解析。
+- `src/animation/tests.rs`：属性动画和 timeline 行为。
+- `src/audio/controller/tests.rs`、`src/audio/backend/shared/tests.rs`、`src/audio/backend/ffmpeg/tests.rs`：音频控制器、共享播放后端与 FFmpeg 会话逻辑。
 - `src/video/backend/ffmpeg/*`：视频后端内部逻辑，需 feature/环境支持。
-- `src/ui/widget/canvas.rs`、`src/ui/widget/common.rs`、`src/ui/theme/mod.rs`、`src/text/font.rs` 等也有局部测试。
+- `src/ui/widget/canvas/tests.rs`、`src/ui/widget/common.rs`、`src/ui/theme/mod.rs`、`src/text/font/tests.rs` 等也有局部测试。
 
 修改共享行为时，不要只跑示例；至少跑相关模块测试。修改 `src/runtime/`、`src/ui/widget/core/` 或渲染 primitive 时，优先补充小型单元测试。文本选择、光标、IME、输入同步或滚动相关变更要优先覆盖 UTF-8 边界、选区、滚动和失效路径；通知变更优先覆盖 options 校验、平台约束和 completion 回调。
 
@@ -274,6 +288,7 @@ cargo run --manifest-path examples/<example_name>/Cargo.toml
 - 文本相关修改要注意 UTF-8 边界、IME composition、选择区间、caret 可见性和横向滚动。
 - 通知相关改动要同步检查 `Application::app_id`、`CommandContext::notifications()`、平台后端限制、action 数量约束以及异步回调回到 ViewModel 的路径。
 - 媒体和异步加载修改要确保完成后调用 invalidation，避免 UI 不刷新。
+- 音频相关改动要同步检查 `audio` feature、桌面 `cpal` 输出、FFmpeg 解码错误路径以及 `Audio` 隐形组件的生命周期。
 - 对话框异步回调通过 runtime dispatcher 回到 ViewModel；不要在线程里直接持有或修改 ViewModel。
 - 当前工作区存在未跟踪的 `Video.md`，不要在无明确需求时删除、重命名或覆盖它。
 
@@ -285,10 +300,10 @@ cargo run --manifest-path examples/<example_name>/Cargo.toml
 2. `src/lib.rs`
 3. `examples/mvvm_counter/src/main.rs`
 4. `src/application/mod.rs`
-5. `src/foundation/binding.rs`
-6. `src/foundation/view_model.rs`
-7. 涉及文本选择、光标、IME、`Input` 或 `Textarea` 时读 `src/ui/widget/input.rs`、`src/ui/widget/textarea.rs`、`src/ui/widget/common.rs`、`src/ui/widget/core/` 和 `src/runtime/input.rs`
-8. 涉及通知时读 `src/notification.rs`、`src/foundation/view_model.rs` 中的 `CommandContext`，以及 `examples/demo/src/main.rs`
+5. `src/foundation/binding/mod.rs`
+6. `src/foundation/view_model/mod.rs`
+7. 涉及文本选择、光标、IME、`Input` 或 `Textarea` 时读 `src/ui/widget/input/mod.rs`、`src/ui/widget/textarea/mod.rs`、`src/ui/widget/common.rs`、`src/ui/widget/core/` 和 `src/runtime/input/`
+8. 涉及通知时读 `src/notification/mod.rs`、`src/foundation/view_model/mod.rs` 中的 `CommandContext`，以及 `examples/demo/src/main.rs`
 9. 涉及窗口控制时读 `src/foundation/window_control.rs` 和 `examples/frameless_window/src/main.rs`
 10. `src/ui/widget/core/` 中的 `element.rs`、`layout.rs`、`render.rs`、`tree.rs` 等布局和渲染输出相关部分
 11. `src/runtime/mod.rs`、`src/runtime/commands.rs`、`src/runtime/theme.rs` 的事件处理部分
