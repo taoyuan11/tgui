@@ -60,6 +60,10 @@ pub(super) fn configure_native_modal_window(
         return attributes;
     };
 
+    // SAFETY: `parent.window` 来自 `NativeModalParent::from_window`，里面调用
+    // `window_handle()` 拿到的 `RawWindowHandle::AppKit` 与 `parent` 同生命周期；
+    // 这里仅作为父窗口属性传给 macOS NSWindow，不会持有跨线程的原始指针，由
+    // `winit-appkit` 在主线程立即使用，因此满足 `with_parent_window` 的安全契约。
     unsafe { attributes.with_parent_window(Some(parent.window)) }
 }
 

@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use tgui::animation::{
-    AnimatedValue, AnimationCurve, AnimationSpec, FillMode, Keyframes, Playback,
-    PlaybackDirection, Transition,
+    AnimatedValue, AnimationCurve, AnimationSpec, FillMode, Keyframes, Playback, PlaybackDirection,
+    Transition,
 };
 use tgui::core::{dp, Color};
 use tgui::layout::Insets;

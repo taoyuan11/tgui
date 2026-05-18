@@ -19,6 +19,9 @@ pub(super) fn is_key_physically_pressed(physical_key: PhysicalKey) -> bool {
     let Some(virtual_key) = physical_key_to_windows_virtual_key(physical_key) else {
         return true;
     };
+    // SAFETY: `GetAsyncKeyState` 是无副作用的 Win32 调用，可以从任意线程查询全局
+    // 键盘异步状态；`virtual_key` 已经被映射成合法的 `VK_*` 常量，转 i32 后落在
+    // Win32 文档允许的取值区间，因此调用是安全的。
     unsafe { (GetAsyncKeyState(i32::from(virtual_key)) as u16 & 0x8000) != 0 }
 }
 

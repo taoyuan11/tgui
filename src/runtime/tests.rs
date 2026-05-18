@@ -67,14 +67,14 @@ struct TestVm;
 
 impl crate::foundation::view_model::ViewModel for TestVm {
     fn new(_context: &ViewModelContext) -> Self {
-        todo!()
+        Self
     }
 
     fn view(&self) -> Element<Self>
     where
         Self: Sized,
     {
-        todo!()
+        Stack::new().into()
     }
 }
 

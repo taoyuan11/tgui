@@ -57,6 +57,12 @@ pub(super) fn create_surface(
         })?;
 
         return Ok(unsafe {
+            // SAFETY: OHOS 后端要求显式按 raw handle 创建 surface，因为
+            // `wgpu::Instance::create_surface(window)` 在 ohos 上拿不到合适的
+            // 实现。`raw_display_handle` / `raw_window_handle` 来自 `window`，
+            // 与 `Arc<dyn Window>` 同生命周期；后者会作为 `'static` 句柄被
+            // surface 长期持有，但 surface 本身在窗口关闭前不会脱离持有者，
+            // 因此符合 wgpu 的要求。
             instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
                 raw_display_handle: Some(raw_display_handle.as_raw()),
                 raw_window_handle: raw_window_handle.as_raw(),

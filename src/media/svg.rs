@@ -155,7 +155,17 @@ fn fetch_remote_image_kind(
     options: &usvg::Options<'_>,
     errors: &ExternalErrorSlot,
 ) -> Option<usvg::ImageKind> {
-    let response = match http_client().get(url.clone()).send() {
+    let client = match http_client() {
+        Ok(client) => client,
+        Err(error) => {
+            record_external_error(
+                errors,
+                format!("failed to fetch SVG image reference {url}: {error}"),
+            );
+            return None;
+        }
+    };
+    let response = match client.get(url.clone()).send() {
         Ok(response) => response,
         Err(error) => {
             record_external_error(

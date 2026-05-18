@@ -7,9 +7,7 @@ use crate::media::MediaManager;
 use crate::text::font::{FontCatalog, FontManager};
 use crate::ui::theme::Theme;
 use crate::ui::unit::UnitContext;
-use crate::ui::widget::{
-    ComputedScene, Rect, VisualContextSnapshot, WidgetId, WidgetStateMap,
-};
+use crate::ui::widget::{ComputedScene, Rect, VisualContextSnapshot, WidgetId, WidgetStateMap};
 use smallvec::SmallVec;
 
 use super::{CollectedSceneCache, ResolvedSceneLayout, SceneChunkParts, WidgetTree};
@@ -83,11 +81,7 @@ impl WidgetBenchmarkContext {
     }
 
     #[allow(dead_code)]
-    pub fn run_layout(
-        &mut self,
-        tree: &WidgetTree<()>,
-        now: Instant,
-    ) -> WidgetBenchmarkStats {
+    pub fn run_layout(&mut self, tree: &WidgetTree<()>, now: Instant) -> WidgetBenchmarkStats {
         self.sync_cache(tree, now, false);
         let layout = self
             .cached_layout
@@ -367,7 +361,8 @@ impl WidgetBenchmarkContext {
             }
             self.cached_scene_chunks.extend(patch.cache.chunks);
             self.cached_chunk_parts.extend(patch.cache.chunk_parts);
-            self.cached_visual_contexts.extend(patch.cache.visual_contexts);
+            self.cached_visual_contexts
+                .extend(patch.cache.visual_contexts);
         }
 
         let Some(layout) = self.cached_layout.as_ref() else {

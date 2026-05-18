@@ -32,8 +32,7 @@ fn bench_write_audio_samples(c: &mut Criterion) {
                     let output = audio_bench::make_output(channels, volume, muted, playing);
                     let buffer_samples = frames * channels as usize;
                     if playing {
-                        let big_chunk =
-                            make_pcm(buffer_samples * 4096, channels);
+                        let big_chunk = make_pcm(buffer_samples * 4096, channels);
                         audio_bench::enqueue_chunk(&output, big_chunk, 0);
                     }
                     let mut buffer = vec![0.0_f32; buffer_samples];
@@ -105,7 +104,12 @@ fn bench_http_options(c: &mut Criterion) {
         ("Cookie".to_string(), "a=1; b=2".to_string()),
     ];
     let many_headers: Vec<(String, String)> = (0..8)
-        .map(|index| (format!("X-Header-{index}"), format!("value-{index}-payload")))
+        .map(|index| {
+            (
+                format!("X-Header-{index}"),
+                format!("value-{index}-payload"),
+            )
+        })
         .collect();
 
     for (label, headers) in [

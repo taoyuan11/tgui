@@ -13,7 +13,11 @@ fn bench_color_interpolate(c: &mut Criterion) {
     let mut group = c.benchmark_group("color_interpolate");
 
     let cases = [
-        ("opaque_to_opaque", Color::rgb(20, 50, 80), Color::rgb(220, 130, 60)),
+        (
+            "opaque_to_opaque",
+            Color::rgb(20, 50, 80),
+            Color::rgb(220, 130, 60),
+        ),
         (
             "transparent_to_opaque",
             Color::rgba(0, 0, 0, 0),
@@ -81,7 +85,12 @@ fn bench_dp_and_point_interpolate(c: &mut Criterion) {
         b.iter(|| {
             let mut acc = dp(0.0);
             for progress in PROGRESS_SAMPLES {
-                acc = acc + tgui::animation::Animatable::interpolate(&from_dp, &to_dp, black_box(progress));
+                acc = acc
+                    + tgui::animation::Animatable::interpolate(
+                        &from_dp,
+                        &to_dp,
+                        black_box(progress),
+                    );
             }
             black_box(acc)
         });

@@ -66,19 +66,23 @@ fn bench_shared_queue_round_trip(c: &mut Criterion) {
 
     for &frames in &[16_usize, 128] {
         group.throughput(Throughput::Elements(frames as u64));
-        group.bench_with_input(BenchmarkId::new("push_then_pop", frames), &frames, |b, &frames| {
-            let queue = video_bench::BenchVideoQueue::new();
-            queue.replace_generation(1);
-            let positions: Vec<u64> = (0..frames as u64)
-                .map(|index| index.saturating_mul(33))
-                .collect();
-            b.iter(|| {
-                queue.push_frames(1, black_box(&positions), 4096);
-                while queue.has_frames(1) {
-                    queue.pop_front_matching(1);
-                }
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("push_then_pop", frames),
+            &frames,
+            |b, &frames| {
+                let queue = video_bench::BenchVideoQueue::new();
+                queue.replace_generation(1);
+                let positions: Vec<u64> = (0..frames as u64)
+                    .map(|index| index.saturating_mul(33))
+                    .collect();
+                b.iter(|| {
+                    queue.push_frames(1, black_box(&positions), 4096);
+                    while queue.has_frames(1) {
+                        queue.pop_front_matching(1);
+                    }
+                });
+            },
+        );
     }
 
     group.finish();

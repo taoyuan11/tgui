@@ -186,6 +186,9 @@ fn allocate_resampled_audio_frame(resampler: &Resampler, decoded: &AudioFrame) -
         .saturating_add(32)
         .max(1);
     let mut frame = AudioFrame::empty();
+    // SAFETY: `AudioFrame::alloc` 调用 `av_frame_get_buffer`；`frame` 是新建空帧，
+    // `format` / `samples` / `channel_layout` 都来自 resampler 输出描述，组合
+    // 经过 ffmpeg 内部校验是合法的。
     unsafe {
         frame.alloc(
             resampler.output().format,
@@ -204,6 +207,7 @@ fn allocate_flush_audio_frame(resampler: &Resampler) -> AudioFrame {
         .saturating_add(32)
         .max(1);
     let mut frame = AudioFrame::empty();
+    // SAFETY: 同 `allocate_resampled_audio_frame`，参数全部来自 resampler 输出。
     unsafe {
         frame.alloc(
             resampler.output().format,
@@ -250,6 +254,9 @@ fn audio_frame_to_f32_if_any(frame: &AudioFrame) -> Option<Vec<f32>> {
         return None;
     }
 
+    // SAFETY: 仅在 packed 布局下进入这里——所有声道交错存放在 `data[0]` 中；
+    // ffmpeg 在 packed FLT 输出下保证 `data[0]` 指向 `samples * channels` 个
+    // 连续 f32。slice 仅在拷贝期间存活。
     unsafe {
         let len = frame.samples() * frame.channels() as usize;
         let slice = std::slice::from_raw_parts((*frame.as_ptr()).data[0] as *const f32, len);

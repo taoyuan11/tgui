@@ -45,6 +45,10 @@ mod imp {
 
     #[link(name = "log")]
     unsafe extern "C" {
+        // SAFETY: 由 Android NDK liblog 提供的稳定 C 接口；签名按 ndk
+        // `<android/log.h>` 中的 `__android_log_write` 复刻，调用方需保证 `tag`
+        // 和 `text` 指向以 NUL 结尾的合法 UTF-8 字符串（在 `write` 中通过
+        // `CString` 满足）。
         fn __android_log_write(prio: c_int, tag: *const c_char, text: *const c_char) -> c_int;
     }
 
@@ -53,6 +57,9 @@ mod imp {
             .expect("Android log tag should not contain interior nulls");
         let message = CString::new(sanitize_c_string(message).as_ref())
             .expect("Android log message should not contain interior nulls");
+        // SAFETY: `tag.as_ptr()` 和 `message.as_ptr()` 指向上面 `CString` 拥有的
+        // 以 NUL 结尾的 UTF-8 缓冲区，并在调用期间保持有效；`priority(level)`
+        // 取值为 ndk liblog 文档允许的 ANDROID_LOG_* 常量。
         unsafe {
             __android_log_write(priority(level), tag.as_ptr(), message.as_ptr());
         }
@@ -85,6 +92,10 @@ mod imp {
             .expect("OHOS log tag should not contain interior nulls");
         let message = CString::new(sanitize_c_string(message).as_ref())
             .expect("OHOS log message should not contain interior nulls");
+        // SAFETY: `tag.as_ptr()` 和 `message.as_ptr()` 在调用期间持有 `CString`
+        // 拥有的、以 NUL 结尾的 UTF-8 缓冲区；`OHOS_PUBLIC_STRING_FMT` 是常量
+        // `&[u8]`，本身就是 `'static` 的，转 `*const c_char` 后地址仍然有效。
+        // `OH_LOG_Print` 是 OHOS hilog 提供的可重入 C API，调用线程任意。
         unsafe {
             OH_LOG_Print(
                 OhosLogType::LOG_APP,

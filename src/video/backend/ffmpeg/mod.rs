@@ -206,31 +206,23 @@ impl VideoBackend for FfmpegVideoBackend {
     }
 
     fn set_target_raster(&self, raster: Option<RasterRequest>) {
-        let _ = self.command_tx.send(BackendCommand::SetTargetRaster(raster));
+        let _ = self
+            .command_tx
+            .send(BackendCommand::SetTargetRaster(raster));
     }
 
     fn current_frame(&self) -> Option<Arc<TextureFrame>> {
-        self.latest_frame
-            .lock()
-            .clone()
+        self.latest_frame.lock().clone()
     }
 
     fn shutdown(&self) {
         let _ = self.command_tx.send(BackendCommand::Shutdown);
 
-        if let Some(worker) = self
-            .present_worker
-            .lock()
-            .take()
-        {
+        if let Some(worker) = self.present_worker.lock().take() {
             let _ = worker.join();
         }
 
-        if let Some(worker) = self
-            .decode_worker
-            .lock()
-            .take()
-        {
+        if let Some(worker) = self.decode_worker.lock().take() {
             let _ = worker.join();
         }
     }

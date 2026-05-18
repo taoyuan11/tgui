@@ -119,7 +119,7 @@ fn load_media_source(source: &MediaSource) -> Result<LoadedSource<'_>, TguiError
         MediaSource::Url(url) => {
             let parsed_url = Url::parse(url)
                 .map_err(|error| TguiError::Media(format!("invalid image url {url}: {error}")))?;
-            let bytes = http_client()
+            let bytes = http_client()?
                 .get(parsed_url.clone())
                 .send()
                 .and_then(|response| response.error_for_status())
@@ -174,19 +174,24 @@ fn source_path_looks_like_svg(source: &MediaSource) -> bool {
     }
 }
 
-pub(super) fn http_client() -> &'static reqwest::blocking::Client {
-    HTTP_CLIENT.get_or_init(|| {
-        let _ = RUSTLS_PROVIDER.get_or_init(|| {
-            let _ = rustls::crypto::ring::default_provider().install_default();
-        });
-        reqwest::blocking::Client::builder()
-            .pool_max_idle_per_host(8)
-            .tcp_keepalive(Some(Duration::from_secs(30)))
-            .connect_timeout(Duration::from_secs(8))
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("http client should build")
-    })
+pub(super) fn http_client() -> Result<&'static reqwest::blocking::Client, TguiError> {
+    if let Some(client) = HTTP_CLIENT.get() {
+        return Ok(client);
+    }
+
+    let _ = RUSTLS_PROVIDER.get_or_init(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+    let client = reqwest::blocking::Client::builder()
+        .pool_max_idle_per_host(8)
+        .tcp_keepalive(Some(Duration::from_secs(30)))
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| {
+            TguiError::Media(format!("failed to build HTTP client for media: {error}"))
+        })?;
+    Ok(HTTP_CLIENT.get_or_init(|| client))
 }
 
 pub(crate) fn media_placeholder_color(loading: bool, error: Option<&str>) -> Color {

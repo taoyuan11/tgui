@@ -32,7 +32,8 @@ impl SharedVideoQueue {
     }
 
     pub(super) fn replace_generation(&self, generation: u64) {
-        self.accepted_generation.store(generation, Ordering::Release);
+        self.accepted_generation
+            .store(generation, Ordering::Release);
         self.clear_all();
     }
 

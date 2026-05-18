@@ -31,16 +31,24 @@ fn bench_string_state_signal(c: &mut Criterion) {
         let signal = state.project(|value| value.len());
         let replacement = text.clone();
 
-        group.bench_with_input(BenchmarkId::new("set_then_get_len", label), &replacement, |b, input| {
-            b.iter(|| {
-                state.set(black_box(input.clone()));
-                black_box(signal.get())
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("set_then_get_len", label),
+            &replacement,
+            |b, input| {
+                b.iter(|| {
+                    state.set(black_box(input.clone()));
+                    black_box(signal.get())
+                });
+            },
+        );
     }
 
     group.finish();
 }
 
-criterion_group!(state_signal_benches, bench_scalar_state_signal, bench_string_state_signal);
+criterion_group!(
+    state_signal_benches,
+    bench_scalar_state_signal,
+    bench_string_state_signal
+);
 criterion_main!(state_signal_benches);

@@ -63,6 +63,10 @@ fn allocate_resampled_audio_frame(resampler: &Resampler, decoded: &AudioFrame) -
         .saturating_add(32)
         .max(1);
     let mut frame = AudioFrame::empty();
+    // SAFETY: `AudioFrame::alloc` 是 ffmpeg-next 暴露在 `Audio` 上的 FFI 包装，
+    // 它在内部调用 `av_frame_get_buffer`。`frame` 由 `AudioFrame::empty()` 创建，
+    // 是合法的零初始化 frame；`format` / `samples` / `channel_layout` 都来自
+    // resampler 自己声明的输出参数，组合保证 ffmpeg 能成功分配。
     unsafe {
         frame.alloc(
             resampler.output().format,
@@ -81,6 +85,8 @@ fn allocate_flush_audio_frame(resampler: &Resampler) -> AudioFrame {
         .saturating_add(32)
         .max(1);
     let mut frame = AudioFrame::empty();
+    // SAFETY: 同 `allocate_resampled_audio_frame`：参数都来自 resampler 自身的
+    // 输出描述，`frame` 是新创建的空 frame。
     unsafe {
         frame.alloc(
             resampler.output().format,
@@ -122,6 +128,10 @@ fn audio_frame_to_f32_if_any(frame: &AudioFrame) -> Option<Vec<f32>> {
         return None;
     }
 
+    // SAFETY: 进入这里之前已确认 frame 是 packed（即所有声道交错存放在
+    // `data[0]` 中），`samples * channels` 即采样总数，且 ffmpeg-next 在
+    // packed FLT 输出下保证 `data[0]` 指向 `len * sizeof(f32)` 的连续缓冲。
+    // 切片只在调用期间存在，立即拷贝出 `Vec`，不会越过 frame 的生命周期。
     unsafe {
         let len = frame.samples() * frame.channels() as usize;
         let slice = std::slice::from_raw_parts((*frame.as_ptr()).data[0] as *const f32, len);

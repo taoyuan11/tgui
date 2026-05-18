@@ -567,6 +567,27 @@ Button::new("Close")
 - `MessageDialogButtons`
 - `MessageDialogResult`
 
+## 线程模型与 Send / Sync
+
+`tgui` 的事件循环、widget 树解析、布局、渲染都在主线程上同步执行；ViewModel 也只在主线程被读写。因此公共 API 中绝大多数类型并不要求 `Sync`：能跨线程的边界主要发生在 ViewModel 持有的回调（按钮 `Command`、命令上下文里的异步完成回调等）以及命令通道里。下面的表格只列出对调用方有约束的位置，方便排查 `not Send` / `not Sync` 编译错误。
+
+| 位置 | 约束 | 说明 |
+|------|------|------|
+| `ViewModel` 实现 | `Send + 'static` | ViewModel 由 runtime 通过 `Arc<Mutex<VM>>` 持有，命令派发时短暂跨线程移动；不要求 `Sync`，但任何字段如果想在 `Command` 闭包之外按引用共享，需要自己包成 `Arc<Mutex<...>>` 或类似容器。 |
+| `Command::new` / `ValueCommand::new` 闭包 | `Fn(&mut VM[, V]) + Send + Sync + 'static` | 命令对象可能被 runtime 缓存并从命令通道线程读取，因此闭包要 `Send + Sync`。闭包**只在主线程**被调用，但类型系统层面仍需要 `Sync`。 |
+| `Command::new_with_context` / `ValueCommand::new_with_context` 闭包 | 同上，签名追加 `&CommandContext<VM>` | `CommandContext` 不可跨线程持有，只在闭包调用期间有效。 |
+| `WindowSpec::root_view` / `Application::root_view` | `Fn(&VM) -> Element<VM> + Send + Sync + 'static` | runtime 在主线程调用，但与 `Command` 一样需要 `Send + Sync` 才能放进命令通道。 |
+| `ctx.signal(reader)` | `Fn() -> T + Send + Sync + 'static`，`T: Clone + Send + Sync + 'static` | `Signal` 的求值会随渲染管线在主线程发生，但绑定层为了跨依赖图共享会要求 `Send + Sync`。 |
+| `NotificationActionEvent` 回调 | `FnOnce(NotificationActionEvent) + Send + 'static` | 通知 action 由系统在 worker 线程触发，回调通过 `async_notification_channel` 队列回到主线程；闭包必须 `Send`。 |
+| `Dialogs::*` 完成回调 | `FnOnce(...) + Send + 'static` | 文件 / 消息对话框在 worker 线程运行，结果走命令通道回主线程。 |
+| `State<T>` / `Signal<T>` / `TextController` | 不要求 `Sync` | 仅在主线程访问；不要把它们克隆到工作线程使用。 |
+
+`Application::run` 不消费 `'static` 之外的引用：所有传入的工厂、命令、绑定都需要满足上面的 `'static` 约束。如果你需要从 worker 线程把数据送回 ViewModel，常见的做法是：
+
+1. 在 `with_view_model` / `view` 中保存一个 `State<T>` 或 `TextController`。
+2. 在工作线程拿到 `Command<VM>` 的克隆，把消息打包送到自定义的 `mpsc::channel`。
+3. 在 `bind_*` 或 `on_input` 触发的命令中 drain 通道并 `state.set(...)`，由 runtime 自动唤醒事件循环重绘。
+
 ## 适合先看哪些文件
 
 - `src/lib.rs`：crate 导出总览

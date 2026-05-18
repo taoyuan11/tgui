@@ -23,10 +23,10 @@ impl ViewModelContext {
 
     /// 为 benchmark 创建一份独立上下文。
     ///
-    /// 该入口仅在启用 `bench-support` feature 时可用，用于在
-    /// `criterion` benchmark 中构造 `State` / `Signal` / `TextController`
-    /// 等响应式对象，而无需依赖应用运行时。
-    #[cfg(feature = "bench-support")]
+    /// 该入口仅在启用 `bench-support` feature 或 `cfg(test)` 时可用，用于在
+    /// `criterion` benchmark 与单元测试中构造 `State` / `Signal` /
+    /// `TextController` 等响应式对象，而无需依赖应用运行时。
+    #[cfg(any(feature = "bench-support", test))]
     pub fn for_benchmarks() -> Self {
         Self::new(InvalidationSignal::new(), AnimationCoordinator::default())
     }

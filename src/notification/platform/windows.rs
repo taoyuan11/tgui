@@ -103,6 +103,9 @@ fn ensure_windows_notification_identity(
 
     // Windows Toast 依赖 AppUserModelID 和开始菜单快捷方式之间的绑定。
     // 这里在真正发送通知前确保当前进程和快捷方式身份一致，避免通知被系统静默丢弃。
+    // SAFETY: `SetCurrentProcessExplicitAppUserModelID` 接受 `&HSTRING`，参数
+    // 在调用期间始终有效；它只修改当前进程级状态，无线程约束，可在初始化阶段
+    // 调用任意次。
     unsafe {
         SetCurrentProcessExplicitAppUserModelID(&windows::core::HSTRING::from(app_id))
             .map_err(windows_error)?;
@@ -129,6 +132,9 @@ fn ensure_windows_notification_shortcut(
     impl Drop for ComGuard {
         fn drop(&mut self) {
             if self.0 {
+                // SAFETY: 仅当下面的 `CoInitializeEx` 返回成功并把守卫设为 true
+                // 时才会调用，恰好抵消我们自己加的引用，不影响其它模块的 COM
+                // 初始化。
                 unsafe {
                     CoUninitialize();
                 }
@@ -136,6 +142,9 @@ fn ensure_windows_notification_shortcut(
         }
     }
 
+    // SAFETY: `CoInitializeEx` 可由任意线程调用以加入 STA。返回 `S_OK` 表示我们
+    // 第一次为该线程初始化 COM，需要在结束时撤销；`RPC_E_CHANGED_MODE` 表示线程
+    // 已经在 MTA 中，我们不会撤销它。
     let com_guard = match unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() } {
         Ok(_) => ComGuard(true),
         Err(error) if error.code() == windows::Win32::Foundation::RPC_E_CHANGED_MODE => {
@@ -170,6 +179,10 @@ fn ensure_windows_notification_shortcut(
     let shortcut_string = shortcut_path.to_string_lossy().into_owned();
     let description = format!("{display_name} notifications");
 
+    // SAFETY: 上面的 `com_guard` 已经把当前线程加入了 STA，下方所有 `IShellLinkW`
+    // / `IPropertyStore` / `IPersistFile` 调用都在该线程内同步完成；所有 HSTRING
+    // 都是栈上构造、调用期间持有；`PROPVARIANT::from(&str)` 由 windows-rs 负责
+    // 资源管理；`shell_link.cast()` 在失败时会返回 Err 而不会留下悬垂指针。
     unsafe {
         let shell_link: IShellLinkW =
             CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(windows_error)?;
@@ -210,15 +223,22 @@ fn windows_notification_shortcut_path(shortcut_name: &str) -> Result<PathBuf, No
     use windows::Win32::System::Com::CoTaskMemFree;
     use windows::Win32::UI::Shell::{FOLDERID_Programs, SHGetKnownFolderPath, KNOWN_FOLDER_FLAG};
 
+    // SAFETY: `FOLDERID_Programs` 是常量 GUID，`KNOWN_FOLDER_FLAG(0)` 是合法默认值，
+    // `hToken` 传 None 表示当前用户。返回的 `PWSTR` 由 COM 分配，需在下方
+    // `CoTaskMemFree` 释放。
     let programs_dir = unsafe {
         SHGetKnownFolderPath(&FOLDERID_Programs, KNOWN_FOLDER_FLAG(0), None)
             .map_err(windows_error)?
     };
+    // SAFETY: `programs_dir` 是上一步成功返回的非空、以 NUL 结尾的 UTF-16 串；
+    // `to_string` 仅读取该缓冲区直到第一个 NUL，不会越界。
     let programs_path = unsafe { programs_dir.to_string() }.map_err(|error| {
         NotificationError::Backend(format!(
             "failed to resolve Start Menu programs directory: {error}"
         ))
     })?;
+    // SAFETY: `programs_dir.0` 由 `SHGetKnownFolderPath` 通过 CoTaskMemAlloc 分配，
+    // 必须用 `CoTaskMemFree` 释放，且只能释放一次；在此之后不再使用该指针。
     unsafe {
         CoTaskMemFree(Some(programs_dir.0 as _));
     }

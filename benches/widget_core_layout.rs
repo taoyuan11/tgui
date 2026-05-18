@@ -47,10 +47,7 @@ fn build_text_heavy_tree(short_lines: usize, long_blocks: usize) -> WidgetTree<(
         root = root.child(Text::new(repeated_line(index)));
     }
 
-    let paragraph = (0..48)
-        .map(repeated_line)
-        .collect::<Vec<_>>()
-        .join("\n");
+    let paragraph = (0..48).map(repeated_line).collect::<Vec<_>>().join("\n");
 
     for _ in 0..long_blocks {
         root = root.child(
@@ -114,13 +111,17 @@ fn bench_many_widgets_layout(c: &mut Criterion) {
     for node_count in [200_usize, 1000_usize] {
         let tree = build_many_widgets_tree(node_count);
 
-        group.bench_with_input(BenchmarkId::new("layout_only", node_count), &node_count, |b, _| {
-            let mut bench = WidgetBenchmarkContext::default();
-            b.iter(|| {
-                let stats = bench.run_layout(&tree, Instant::now());
-                black_box(stats.dependency_count)
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("layout_only", node_count),
+            &node_count,
+            |b, _| {
+                let mut bench = WidgetBenchmarkContext::default();
+                b.iter(|| {
+                    let stats = bench.run_layout(&tree, Instant::now());
+                    black_box(stats.dependency_count)
+                });
+            },
+        );
 
         group.bench_with_input(
             BenchmarkId::new("layout_and_scene", node_count),
@@ -160,13 +161,21 @@ fn bench_text_heavy_layout(c: &mut Criterion) {
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("layout_and_scene", label), &label, |b, _| {
-            let mut bench = WidgetBenchmarkContext::default();
-            b.iter(|| {
-                let stats = bench.run_layout_and_scene(&tree, Instant::now());
-                black_box((stats.text_count, stats.scroll_region_count, stats.hit_region_count))
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("layout_and_scene", label),
+            &label,
+            |b, _| {
+                let mut bench = WidgetBenchmarkContext::default();
+                b.iter(|| {
+                    let stats = bench.run_layout_and_scene(&tree, Instant::now());
+                    black_box((
+                        stats.text_count,
+                        stats.scroll_region_count,
+                        stats.hit_region_count,
+                    ))
+                });
+            },
+        );
     }
 
     group.finish();
@@ -186,24 +195,28 @@ fn bench_animated_scene_recompute(c: &mut Criterion) {
             Duration::from_millis(168),
         ];
 
-        group.bench_with_input(BenchmarkId::new("layout_and_scene", label), &label, |b, _| {
-            let mut bench = WidgetBenchmarkContext::default();
-            let _ = bench.run_layout_and_scene(&tree, start);
-            phase.set(1.0);
-            bench.invalidate_all();
-            let mut tick = 0usize;
-            b.iter(|| {
-                let offset = sample_offsets[tick % sample_offsets.len()];
-                tick = tick.wrapping_add(1);
-                let stats = bench.run_layout_and_scene(&tree, start + offset);
-                black_box((
-                    stats.shape_count,
-                    stats.text_count,
-                    stats.overlay_shape_count,
-                    stats.hit_region_count,
-                ))
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("layout_and_scene", label),
+            &label,
+            |b, _| {
+                let mut bench = WidgetBenchmarkContext::default();
+                let _ = bench.run_layout_and_scene(&tree, start);
+                phase.set(1.0);
+                bench.invalidate_all();
+                let mut tick = 0usize;
+                b.iter(|| {
+                    let offset = sample_offsets[tick % sample_offsets.len()];
+                    tick = tick.wrapping_add(1);
+                    let stats = bench.run_layout_and_scene(&tree, start + offset);
+                    black_box((
+                        stats.shape_count,
+                        stats.text_count,
+                        stats.overlay_shape_count,
+                        stats.hit_region_count,
+                    ))
+                });
+            },
+        );
     }
 
     group.finish();

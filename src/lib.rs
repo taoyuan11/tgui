@@ -144,6 +144,20 @@ pub mod core {
     pub use crate::foundation::event::InputTrigger;
     pub use crate::ui::unit::{dp, sp, Dp, Sp};
     pub use crate::ui::widget::{Point, Rect, WidgetId};
+
+    /// Crate-wide alias for the canonical [`TguiError`] type.
+    ///
+    /// Prefer this name in user code so that any future move of the concrete
+    /// error type stays a non-breaking change. The alias is part of the public
+    /// API contract and will not be removed.
+    pub type Error = TguiError;
+
+    /// Crate-wide [`Result`] alias bound to [`TguiError`].
+    ///
+    /// Mirrors the pattern used by `std::io::Result`. The default error type
+    /// is fixed so call sites can write `tgui::core::Result<T>` without
+    /// repeating the error parameter.
+    pub type Result<T, E = TguiError> = ::core::result::Result<T, E>;
 }
 
 /// Layout primitives, sizing helpers, and container widgets.
@@ -195,7 +209,9 @@ pub mod prelude {
         CanvasTextOverflow, CanvasTextSpan, CanvasTextStyle, CanvasTextVerticalAlign,
         CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent, PathBuilder,
     };
-    pub use crate::core::{dp, sp, Color, Dp, InputTrigger, Point, Rect, Sp, TguiError, WidgetId};
+    pub use crate::core::{
+        dp, sp, Color, Dp, Error, InputTrigger, Point, Rect, Result, Sp, TguiError, WidgetId,
+    };
     pub use crate::dialog::{
         DialogError, Dialogs, FileDialogOptions, MessageDialogButtons, MessageDialogLevel,
         MessageDialogOptions, MessageDialogResult,
@@ -221,6 +237,10 @@ pub mod prelude {
         RadiusScale, ResolvedThemeMode, Shadow, SpaceScale, Stateful, TextStyle, Theme, ThemeMode,
         ThemeSet, ThemeStore, TypeScale, WidgetState,
     };
+    #[cfg(feature = "bench-support")]
+    pub use crate::ui::widget::{
+        default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
+    };
     #[cfg(feature = "video")]
     pub use crate::video::{VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface};
     pub use crate::widgets::{
@@ -231,10 +251,6 @@ pub mod prelude {
         SelectOption, SelectStyle, Slider, SliderStyle, Switch, SwitchStyle, Text, TextWidgetStyle,
         Textarea, TextareaStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
         WidgetSurfaceStyle, WidgetTree,
-    };
-    #[cfg(feature = "bench-support")]
-    pub use crate::ui::widget::{
-        default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
     };
 }
 
@@ -253,6 +269,10 @@ pub mod widgets {
     pub use crate::audio::Audio;
     pub use crate::layout::{Flex, Grid, IntoLengthValue, Stack};
     pub use crate::mvvm::{TextChange, TextChangeSet, TextController, TextSnapshot};
+    #[cfg(feature = "bench-support")]
+    pub use crate::ui::widget::{
+        default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
+    };
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
@@ -261,10 +281,6 @@ pub mod widgets {
         SelectOption, SelectStyle, Slider, SliderStyle, Switch, SwitchStyle, Text, TextWidgetStyle,
         Textarea, TextareaStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
         WidgetSurfaceStyle, WidgetTree,
-    };
-    #[cfg(feature = "bench-support")]
-    pub use crate::ui::widget::{
-        default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

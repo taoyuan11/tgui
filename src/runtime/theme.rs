@@ -71,10 +71,16 @@ pub(super) fn resolve_android_window_theme(app: &AndroidApp) -> Option<WindowThe
 
 #[cfg(all(target_os = "android", feature = "android"))]
 pub(super) fn resolve_android_window_theme_from_java(app: &AndroidApp) -> Option<WindowTheme> {
+    // SAFETY: `AndroidApp::vm_as_ptr` 返回 Android 进程内全局唯一的
+    // `JavaVM` 指针，整个进程生命周期都有效；`JavaVM::from_raw` 仅包装该指针，
+    // 不会接管所有权。`activity_as_ptr` 同理：进程级单例，跨调用始终有效。
     let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) };
     let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
 
     vm.attach_current_thread(|env| -> jni::errors::Result<Option<WindowTheme>> {
+        // SAFETY: `activity_raw` 是 `AndroidApp::activity_as_ptr` 返回的
+        // 长期有效的 jobject 引用；`as_cast_raw` 会在当前线程内绑定一个借用的
+        // `JObject<'_>`，调用范围内不会跨线程移动。
         let activity = unsafe { env.as_cast_raw::<JObject>(&activity_raw)? };
         let ui_mode_service = env
             .get_static_field(
@@ -178,10 +184,15 @@ pub(super) fn resolve_android_window_theme_from_java(app: &AndroidApp) -> Option
 #[cfg(all(target_os = "android", feature = "android"))]
 pub(super) fn android_font_scale(android_app: Option<&AndroidApp>) -> Option<f32> {
     let app = android_app?;
+    // SAFETY: 同 `resolve_android_window_theme_from_java`：`vm_as_ptr` 给出的
+    // 是进程级单例 `JavaVM`，`activity_as_ptr` 给出的 jobject 在进程生命周期内
+    // 始终有效。
     let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) };
     let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
 
     vm.attach_current_thread(|env| -> jni::errors::Result<Option<f32>> {
+        // SAFETY: `activity_raw` 由 ndk 层提供且长期有效；`as_cast_raw` 仅在
+        // 当前 attach 的线程范围内借用为 `JObject`。
         let activity = unsafe { env.as_cast_raw::<JObject>(&activity_raw)? };
         let resources = env
             .call_method(
@@ -231,10 +242,14 @@ fn apply_android_system_bar_style_on_main_thread(
     app: &AndroidApp,
     style: SystemBarStyle,
 ) -> Result<(), String> {
+    // SAFETY: 与上面两处 `JavaVM::from_raw` 相同——`AndroidApp` 暴露的指针是
+    // 进程级单例，构造 `JavaVM` 包装器不会重复释放。
     let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) };
     let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
 
     vm.attach_current_thread(|env| -> jni::errors::Result<()> {
+        // SAFETY: `activity_raw` 是 ndk 提供的进程级 jobject；`as_cast_raw` 把
+        // 它在当前 attach 线程上借用为 `JObject<'_>`，不会逃逸出闭包。
         let activity = unsafe { env.as_cast_raw::<JObject>(&activity_raw)? };
         let window = env
             .call_method(

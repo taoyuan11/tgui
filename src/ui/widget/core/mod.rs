@@ -59,6 +59,8 @@ use super::style::{
 };
 use super::text::{IntoTextContent, Text};
 
+#[cfg(feature = "bench-support")]
+pub mod bench_support;
 mod element;
 mod element_path;
 mod element_resolve;
@@ -73,8 +75,6 @@ mod resolved_layout;
 mod scene;
 mod scene_layout;
 mod style;
-#[cfg(feature = "bench-support")]
-pub mod bench_support;
 #[cfg(test)]
 mod tests;
 mod tree;

@@ -195,10 +195,12 @@ fn visual_only_animation_refresh_prefers_scene_patch() {
     handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
     assert!(handler.patch_animation_scene_widgets(&[before_root.raw()], Instant::now()));
     assert!(handler.cached_scene.is_some());
-    assert!(handler
-        .cached_scene
-        .as_ref()
-        .and_then(|cached| cached.layout.as_ref())
-        .map(|layout| layout.root_id())
-        == Some(before_root));
+    assert!(
+        handler
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .map(|layout| layout.root_id())
+            == Some(before_root)
+    );
 }

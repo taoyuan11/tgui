@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::foundation::binding::ViewModelContext;
 use crate::foundation::view_model::{CommandContext, ValueCommand, ViewModel};
-use crate::ui::widget::Element;
+use crate::ui::widget::{Element, Stack};
 
 use super::platform::sanitize_windows_shortcut_file_name;
 use super::runtime::{async_notification_channel, PendingNotificationCompletion};
@@ -64,7 +64,7 @@ impl ViewModel for TestVm {
     }
 
     fn view(&self) -> Element<Self> {
-        unimplemented!()
+        Stack::new().into()
     }
 }
 

@@ -145,14 +145,11 @@ impl AudioOutput {
             .queued_compressed_bytes
             .fetch_add(compressed_bytes, Ordering::Relaxed);
 
-        self.shared
-            .queue
-            .lock()
-            .push_back(AudioSampleChunk {
-                samples,
-                offset: 0,
-                compressed_bytes,
-            });
+        self.shared.queue.lock().push_back(AudioSampleChunk {
+            samples,
+            offset: 0,
+            compressed_bytes,
+        });
 
         self.shared.underflowing.store(false, Ordering::Relaxed);
     }
@@ -272,8 +269,8 @@ where
         let bytes = if write_count == remaining_samples {
             chunk.compressed_bytes
         } else {
-            ((chunk.compressed_bytes as u128 * write_count as u128)
-                / remaining_samples as u128) as u64
+            ((chunk.compressed_bytes as u128 * write_count as u128) / remaining_samples as u128)
+                as u64
         };
         chunk.compressed_bytes = chunk.compressed_bytes.saturating_sub(bytes);
         chunk.offset = end;

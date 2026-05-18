@@ -124,7 +124,12 @@ impl CanvasScene {
         options: &CanvasSceneQueryOptions,
         scene_position: Point,
     ) -> Vec<CanvasSceneHit> {
-        query_canvas_scene_hits(self, options.font_manager(), options.units(), scene_position)
+        query_canvas_scene_hits(
+            self,
+            options.font_manager(),
+            options.units(),
+            scene_position,
+        )
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
