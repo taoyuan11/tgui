@@ -138,6 +138,11 @@ impl MediaBytes {
         self.as_slice().len()
     }
 
+    /// 返回底层字节是否为空。
+    pub fn is_empty(&self) -> bool {
+        self.as_slice().is_empty()
+    }
+
     fn key(&self) -> MediaBytesKey {
         match &self.storage {
             MediaBytesStorage::Static(bytes) => MediaBytesKey::Static {

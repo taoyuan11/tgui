@@ -10,6 +10,7 @@ pub use types::{
     NotificationPermission,
 };
 
+#[cfg(target_os = "windows")]
 pub(crate) use platform::prepare_platform_notifications;
 pub(crate) use runtime::{
     async_notification_channel, AsyncNotificationDispatcher, AsyncNotificationReceiver,

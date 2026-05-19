@@ -164,10 +164,10 @@ pub(super) fn pipeline_multisample_state(sample_count: u32) -> wgpu::Multisample
     }
 }
 
-pub(super) fn instance_backends(clear_color: TguiColor) -> wgpu::Backends {
+pub(super) fn instance_backends(_clear_color: TguiColor) -> wgpu::Backends {
     #[cfg(target_os = "windows")]
     {
-        if clear_color.a < 255 {
+        if _clear_color.a < 255 {
             return wgpu::Backends::DX12;
         }
     }
@@ -342,7 +342,7 @@ fn supported_msaa_sample_count(
     };
 
     candidates
-        .into_iter()
+        .iter()
         .copied()
         .find(|count| {
             if *count == 1 {

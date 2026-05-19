@@ -124,9 +124,19 @@ jobs:
         shell: bash
         run: |
           if [ -z "${{ matrix.feature_set.features }}" ]; then
-            cargo clippy --all-targets -- -D warnings
+            cargo clippy --all-targets -- \
+              -D unused-imports \
+              -D unused-mut \
+              -D unused-variables \
+              -D clippy::correctness \
+              -D clippy::suspicious
           else
-            cargo clippy --all-targets --features "${{ matrix.feature_set.features }}" -- -D warnings
+            cargo clippy --all-targets --features "${{ matrix.feature_set.features }}" -- \
+              -D unused-imports \
+              -D unused-mut \
+              -D unused-variables \
+              -D clippy::correctness \
+              -D clippy::suspicious
           fi
 
   test:

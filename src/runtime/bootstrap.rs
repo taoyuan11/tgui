@@ -1,6 +1,7 @@
 use crate::application::{ApplicationConfig, WindowRole};
 use crate::foundation::binding::DirtyDependencySet;
 use crate::foundation::error::TguiError;
+#[cfg(target_os = "windows")]
 use crate::log::Log;
 #[cfg(target_os = "windows")]
 use crate::notification::prepare_platform_notifications;
@@ -136,11 +137,11 @@ pub(super) fn default_window_position(
     )
 }
 
-pub(super) fn prepare_notifications_for_runtime(config: &ApplicationConfig) {
+pub(super) fn prepare_notifications_for_runtime(_config: &ApplicationConfig) {
     #[cfg(target_os = "windows")]
     {
-        if let Some(app_id) = config.app_id.as_deref() {
-            if let Err(error) = prepare_platform_notifications(Some(app_id), &config.title) {
+        if let Some(app_id) = _config.app_id.as_deref() {
+            if let Err(error) = prepare_platform_notifications(Some(app_id), &_config.title) {
                 Log::with_tag("tgui-runtime").warn(format_args!(
                     "failed to prepare Windows notifications: {error}"
                 ));
