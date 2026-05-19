@@ -32,7 +32,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 android = []
 ohos = []
-audio = ["dep:ffmpeg-next"]
+audio = ["dep:ffmpeg-next", "dep:cpal"]
 video = ["audio"]
 video-static = ["video", "ffmpeg-next/static"]
 bench-support = []
@@ -62,7 +62,7 @@ ffmpeg-next = { version = "8.0.0", optional = true, default-features = false, fe
 
 [target.'cfg(target_os = "windows")'.dependencies]
 arboard = "3.6"
-cpal = "0.17.1"
+cpal = { version = "0.17.1", optional = true }
 log = "0.4.29"
 raw-window-handle = "0.6"
 rfd = "0.17"
@@ -73,7 +73,7 @@ winit-win32 = "0.31.0-beta.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 arboard = "3.6"
 block2 = "0.6.2"
-cpal = "0.17.1"
+cpal = { version = "0.17.1", optional = true }
 log = "0.4.29"
 objc2 = "0.6"
 objc2-foundation = "0.3"
@@ -85,7 +85,7 @@ winit-appkit = "0.31.0-beta.2"
 
 [target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 arboard = "3.6"
-cpal = "0.17.1"
+cpal = { version = "0.17.1", optional = true }
 log = "0.4.29"
 notify-rust = "4"
 raw-window-handle = "0.6"

@@ -56,6 +56,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
             libavcodec-dev libavformat-dev libavdevice-dev \
             libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
             pkg-config
@@ -84,6 +85,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
             libavcodec-dev libavformat-dev libavdevice-dev \
             libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
             pkg-config
@@ -147,6 +149,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
             libavcodec-dev libavformat-dev libavdevice-dev \
             libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
             pkg-config
@@ -200,6 +203,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
             libavcodec-dev libavformat-dev libavdevice-dev \
             libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
             pkg-config
@@ -254,6 +258,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
             libavcodec-dev libavformat-dev libavdevice-dev \
             libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
             pkg-config
