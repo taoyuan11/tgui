@@ -5,15 +5,14 @@ use block2::{DynBlock, RcBlock};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, DefinedClass};
-use objc2_foundation::{NSArray, NSSet, NSString, NSObject, NSObjectProtocol};
+use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSSet, NSString};
 use objc2_user_notifications::{
-    UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent,
-    UNNotification, UNNotificationAction, UNNotificationActionOptionForeground,
-    UNNotificationCategory, UNNotificationCategoryOptionNone,
-    UNNotificationDefaultActionIdentifier, UNNotificationDismissActionIdentifier,
-    UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse,
-    UNNotificationSettings, UNNotificationSound, UNUserNotificationCenter,
-    UNUserNotificationCenterDelegate,
+    UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent, UNNotification,
+    UNNotificationAction, UNNotificationActionOptionForeground, UNNotificationCategory,
+    UNNotificationCategoryOptionNone, UNNotificationDefaultActionIdentifier,
+    UNNotificationDismissActionIdentifier, UNNotificationPresentationOptions,
+    UNNotificationRequest, UNNotificationResponse, UNNotificationSettings, UNNotificationSound,
+    UNUserNotificationCenter, UNUserNotificationCenterDelegate,
 };
 
 use super::{NotificationActionHandler, PermissionCallback};
@@ -38,11 +37,9 @@ define_class!(
             _notification: &UNNotification,
             completion_handler: &DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
         ) {
-            completion_handler.call((
-                UNNotificationPresentationOptions::Banner
-                    | UNNotificationPresentationOptions::List
-                    | UNNotificationPresentationOptions::Sound,
-            ));
+            completion_handler.call((UNNotificationPresentationOptions::Banner
+                | UNNotificationPresentationOptions::List
+                | UNNotificationPresentationOptions::Sound,));
         }
 
         #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
@@ -53,11 +50,7 @@ define_class!(
             completion_handler: &DynBlock<dyn Fn()>,
         ) {
             let action_identifier = response.actionIdentifier().to_string();
-            let notification_id = response
-                .notification()
-                .request()
-                .identifier()
-                .to_string();
+            let notification_id = response.notification().request().identifier().to_string();
 
             if let Some(callback) = take_action_handler(&notification_id) {
                 if action_identifier != UNNotificationDefaultActionIdentifier.to_string()
@@ -85,7 +78,8 @@ fn action_handlers() -> &'static Mutex<HashMap<String, NotificationActionHandler
     ACTION_HANDLERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn notification_delegate() -> &'static Retained<ProtocolObject<dyn UNUserNotificationCenterDelegate>> {
+fn notification_delegate() -> &'static Retained<ProtocolObject<dyn UNUserNotificationCenterDelegate>>
+{
     static DELEGATE: OnceLock<Retained<ProtocolObject<dyn UNUserNotificationCenterDelegate>>> =
         OnceLock::new();
     DELEGATE.get_or_init(|| ProtocolObject::from_retained(MacNotificationDelegate::new()))
@@ -121,7 +115,9 @@ fn take_action_handler(notification_id: &str) -> Option<NotificationActionHandle
         .remove(notification_id)
 }
 
-fn build_notification_content(options: &NotificationOptions) -> Retained<UNMutableNotificationContent> {
+fn build_notification_content(
+    options: &NotificationOptions,
+) -> Retained<UNMutableNotificationContent> {
     let content = UNMutableNotificationContent::new();
     content.setTitle(&NSString::from_str(options.title()));
     if let Some(subtitle) = options.subtitle_text() {
@@ -256,28 +252,32 @@ pub(crate) fn platform_request_permission(
     let center = current_notification_center();
     let callback = std::sync::Arc::new(Mutex::new(Some(callback)));
     let callback_for_block = callback.clone();
-    let completion = RcBlock::new(move |granted: bool, error: *mut objc2_foundation::NSError| {
-        let result = if !error.is_null() {
-            let description = unsafe { (&*error).localizedDescription().to_string() };
-            Err(NotificationError::Backend(format!(
-                "failed to request macOS notification permission: {description}"
-            )))
-        } else if granted {
-            Ok(NotificationPermission::Granted)
-        } else {
-            Ok(NotificationPermission::Denied)
-        };
+    let completion = RcBlock::new(
+        move |granted: bool, error: *mut objc2_foundation::NSError| {
+            let result = if !error.is_null() {
+                let description = unsafe { (&*error).localizedDescription().to_string() };
+                Err(NotificationError::Backend(format!(
+                    "failed to request macOS notification permission: {description}"
+                )))
+            } else if granted {
+                Ok(NotificationPermission::Granted)
+            } else {
+                Ok(NotificationPermission::Denied)
+            };
 
-        if let Some(callback) = callback_for_block
-            .lock()
-            .expect("macOS permission callback lock poisoned")
-            .take()
-        {
-            callback(result);
-        }
-    });
+            if let Some(callback) = callback_for_block
+                .lock()
+                .expect("macOS permission callback lock poisoned")
+                .take()
+            {
+                callback(result);
+            }
+        },
+    );
     center.requestAuthorizationWithOptions_completionHandler(
-        UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound | UNAuthorizationOptions::Badge,
+        UNAuthorizationOptions::Alert
+            | UNAuthorizationOptions::Sound
+            | UNAuthorizationOptions::Badge,
         &completion,
     );
     Ok(())
