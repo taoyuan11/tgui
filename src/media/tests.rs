@@ -7,6 +7,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::application::ResourceBudget;
 use crate::foundation::binding::InvalidationSignal;
 use crate::ui::widget::Rect;
 
@@ -26,6 +27,7 @@ fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
     let mut document =
         load_media_document(&MediaSource::bytes(SIMPLE_SVG)).expect("embedded SVG should decode");
     let invalidation = InvalidationSignal::new();
+    let budget = ResourceBudget::DEFAULT;
 
     let first = document
         .texture_for(
@@ -34,6 +36,7 @@ fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
                 height: 40,
             },
             &invalidation,
+            &budget,
         )
         .expect("SVG rasterization should work")
         .expect("SVG should produce a texture");
@@ -44,6 +47,7 @@ fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
                 height: 40,
             },
             &invalidation,
+            &budget,
         )
         .expect("SVG rasterization should work")
         .expect("SVG should produce a texture");
@@ -54,6 +58,7 @@ fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
                 height: 80,
             },
             &invalidation,
+            &budget,
         )
         .expect("SVG rasterization should work")
         .expect("SVG should produce a texture");
@@ -79,6 +84,7 @@ fn svg_raster_request_is_clamped_to_max_dimension() {
                 height: 2048,
             },
             &invalidation,
+            &ResourceBudget::DEFAULT,
         )
         .expect("SVG rasterization should work")
         .expect("SVG should produce a texture");

@@ -3,7 +3,7 @@ use super::{
     BoundRuntimeHandler, CachedScene, FocusedWidget, WindowBindings,
 };
 use crate::animation::AnimationCoordinator;
-use crate::application::{ApplicationConfig, MsaaMode, ThemeSelection, WindowRole};
+use crate::application::{ApplicationConfig, MsaaMode, ResourceBudget, ThemeSelection, WindowRole};
 use crate::dialog::async_dialog_channel;
 use crate::foundation::binding::{DependencyGraph, ViewModelContext};
 use crate::foundation::binding::{InvalidationSignal, Signal, TextController};
@@ -94,6 +94,7 @@ fn test_config() -> ApplicationConfig {
         theme: ThemeSelection::System,
         theme_set: ThemeSet::default(),
         window_icon: None,
+        resource_budget: ResourceBudget::DEFAULT,
     }
 }
 
@@ -113,6 +114,7 @@ fn test_config_with_theme(theme: ThemeSelection, theme_set: ThemeSet) -> Applica
         theme,
         theme_set,
         window_icon: None,
+        resource_budget: ResourceBudget::DEFAULT,
     }
 }
 

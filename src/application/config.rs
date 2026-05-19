@@ -52,6 +52,48 @@ pub enum MsaaMode {
     X8,
 }
 
+/// 描述 GPU / 内存敏感缓存的容量上限。
+///
+/// 各字段为 LRU 缓存的最大条目数；默认值适用于桌面应用。需要在嵌入式或
+/// 内存吃紧的场景调小，或在富媒体应用里调大。条目数为 `0` 时表示禁用对应缓存。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResourceBudget {
+    /// `Canvas` 阴影离屏纹理缓存的最大条目数。默认 `16`。
+    pub canvas_shadow_cache_entries: usize,
+    /// 普通 widget 阴影离屏纹理缓存的最大条目数。默认 `24`。
+    pub widget_shadow_cache_entries: usize,
+    /// 单个位图文档保留的多分辨率纹理缓存最大条目数。默认 `8`。
+    pub image_raster_cache_entries: usize,
+    /// 单个 SVG 文档保留的多分辨率纹理缓存最大条目数。默认 `4`。
+    pub svg_raster_cache_entries: usize,
+}
+
+impl ResourceBudget {
+    /// 默认资源预算。等价于 [`ResourceBudget::default`]，常量上下文也可用。
+    pub const DEFAULT: Self = Self {
+        canvas_shadow_cache_entries: 16,
+        widget_shadow_cache_entries: 24,
+        image_raster_cache_entries: 8,
+        svg_raster_cache_entries: 4,
+    };
+
+    /// 构造适合内存受限设备（移动端、嵌入式）的紧凑预算。
+    pub const fn compact() -> Self {
+        Self {
+            canvas_shadow_cache_entries: 4,
+            widget_shadow_cache_entries: 6,
+            image_raster_cache_entries: 2,
+            svg_raster_cache_entries: 2,
+        }
+    }
+}
+
+impl Default for ResourceBudget {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
 /// 表示一个 `tgui` 应用的全局启动配置。
 #[derive(Debug, Clone)]
 pub struct Application {
@@ -70,6 +112,7 @@ pub struct Application {
     theme: ThemeSelection,
     theme_set: ThemeSet,
     window_icon: Option<&'static [u8]>,
+    resource_budget: ResourceBudget,
 }
 
 impl Application {
@@ -93,6 +136,7 @@ impl Application {
             theme: ThemeSelection::System,
             theme_set: ThemeSet::default(),
             window_icon: None,
+            resource_budget: ResourceBudget::DEFAULT,
         }
     }
 
@@ -282,6 +326,17 @@ impl Application {
         self
     }
 
+    /// 设置媒体与缓存的资源预算上限。
+    ///
+    /// 参数:
+    /// - `budget`: 各 LRU 缓存的最大条目数。
+    ///
+    /// 返回值: 更新后的应用配置对象。
+    pub fn resource_budget(mut self, budget: ResourceBudget) -> Self {
+        self.resource_budget = budget;
+        self
+    }
+
     /// 进入基于 ViewModel 的应用构建流程。
     ///
     /// 参数:
@@ -312,6 +367,7 @@ impl Application {
             theme: self.theme.clone(),
             theme_set: self.theme_set.clone(),
             window_icon: self.window_icon,
+            resource_budget: self.resource_budget,
         };
         config.normalize_size_constraints();
         config
@@ -340,6 +396,7 @@ pub(crate) struct ApplicationConfig {
     pub(crate) theme: ThemeSelection,
     pub(crate) theme_set: ThemeSet,
     pub(crate) window_icon: Option<&'static [u8]>,
+    pub(crate) resource_budget: ResourceBudget,
 }
 
 impl ApplicationConfig {

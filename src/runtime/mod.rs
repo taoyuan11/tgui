@@ -69,7 +69,7 @@ use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::{Command, ViewModel};
 use crate::foundation::window_control::WindowRequestQueue;
-use crate::log::{log_text_profile, text_profile_enabled, Log};
+use crate::log::{log_startup_phase, log_text_profile, text_profile_enabled, Log};
 use crate::media::MediaManager;
 use crate::notification::{
     async_notification_channel, AsyncNotificationDispatcher, AsyncNotificationReceiver,
@@ -382,6 +382,8 @@ pub struct BoundRuntimeHandler<VM> {
     media_event_states: HashMap<WidgetId, DispatchedMediaState>,
     lifecycle_event_states: HashMap<WidgetId, DispatchedLifecycleState<VM>>,
     media_manager: MediaManager,
+    startup_started_at: Instant,
+    first_frame_logged: bool,
     window_requests: WindowRequestQueue,
     window: Option<Arc<dyn Window>>,
     renderer: Option<Renderer>,
@@ -422,6 +424,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             ThemeSelection::System => config.theme_set.resolve_window_theme(None).as_ref().clone(),
         };
         let theme_store = ThemeStore::new(config.theme_set.clone(), ThemeMode::System, None);
+        let resource_budget = config.resource_budget;
         Self {
             window_key,
             window_instance_id,
@@ -472,7 +475,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             text_input_epoch: 0,
             media_event_states: HashMap::new(),
             lifecycle_event_states: HashMap::new(),
-            media_manager: MediaManager::new(invalidation.clone()),
+            media_manager: MediaManager::with_budget(invalidation.clone(), resource_budget),
+            startup_started_at: Instant::now(),
+            first_frame_logged: false,
             window_requests: WindowRequestQueue::default(),
             window: None,
             renderer: None,

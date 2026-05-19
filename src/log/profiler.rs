@@ -6,6 +6,7 @@ use super::api::Log;
 
 const TEXT_PROFILE_ENV: &str = "TGUI_TEXT_PROFILE";
 const TEXT_PROFILE_MIN_MS_ENV: &str = "TGUI_TEXT_PROFILE_MIN_MS";
+const STARTUP_PROFILE_ENV: &str = "TGUI_PROFILE_STARTUP";
 const TEXT_PROFILE_LABELS: &[&str] = &[
     "textarea_about_to_wait",
     "textarea_animation",
@@ -69,6 +70,32 @@ pub(crate) fn log_text_profile(label: &str, duration: Duration, message: impl Di
     }
 
     Log::with_tag("tgui-text-prof").debug(format_args!(
+        "{label} took {:.3}ms {message}",
+        duration.as_secs_f64() * 1000.0
+    ));
+}
+
+/// 是否启用启动耗时记录。仅在设置环境变量 `TGUI_PROFILE_STARTUP=1` 时生效。
+pub(crate) fn startup_profile_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var(STARTUP_PROFILE_ENV)
+            .map(|value| {
+                let value = value.trim();
+                matches!(value, "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON")
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// 输出一条以 `tgui-startup` 为 tag 的 INFO 日志，描述某个启动阶段的耗时。
+///
+/// 仅在 [`startup_profile_enabled`] 返回 `true` 时输出。
+pub(crate) fn log_startup_phase(label: &str, duration: Duration, message: impl Display) {
+    if !startup_profile_enabled() {
+        return;
+    }
+    Log::with_tag("tgui-startup").info(format_args!(
         "{label} took {:.3}ms {message}",
         duration.as_secs_f64() * 1000.0
     ));

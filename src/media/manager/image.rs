@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use resvg::usvg;
 
+use crate::application::ResourceBudget;
 use crate::foundation::binding::InvalidationSignal;
 use crate::foundation::error::TguiError;
 
@@ -46,6 +47,7 @@ impl ImageEntry {
         &mut self,
         raster_request: Option<RasterRequest>,
         invalidation: &InvalidationSignal,
+        budget: &ResourceBudget,
     ) -> ImageSnapshot {
         let intrinsic_size = self
             .document
@@ -57,7 +59,7 @@ impl ImageEntry {
         let texture = if self.loading || self.error.is_some() {
             None
         } else if let (Some(document), Some(request)) = (self.document.as_mut(), raster_request) {
-            match document.texture_for(request, invalidation) {
+            match document.texture_for(request, invalidation, budget) {
                 Ok(texture) => {
                     loading |= document.is_loading(request);
                     texture
@@ -91,11 +93,14 @@ impl DocumentEntry {
         &mut self,
         raster_request: RasterRequest,
         invalidation: &InvalidationSignal,
+        budget: &ResourceBudget,
     ) -> Result<Option<Arc<TextureFrame>>, TguiError> {
         let raster_request = clamp_raster_request(raster_request.width, raster_request.height);
         match &mut self.content {
-            DocumentContent::Raster(raster) => raster.texture_for(raster_request, invalidation),
-            DocumentContent::Svg(svg) => svg.texture_for(raster_request),
+            DocumentContent::Raster(raster) => {
+                raster.texture_for(raster_request, invalidation, budget)
+            }
+            DocumentContent::Svg(svg) => svg.texture_for(raster_request, budget),
         }
     }
 
@@ -130,7 +135,9 @@ impl SvgDocument {
     fn texture_for(
         &mut self,
         raster_request: RasterRequest,
+        budget: &ResourceBudget,
     ) -> Result<Option<Arc<TextureFrame>>, TguiError> {
+        let max_entries = budget.svg_raster_cache_entries;
         let tick = self.bump_access_tick();
         if let Some(entry) = self
             .raster_cache
@@ -142,12 +149,15 @@ impl SvgDocument {
         }
 
         let texture = Arc::new(rasterize_svg_tree(&self.tree, raster_request)?);
+        if max_entries == 0 {
+            return Ok(Some(texture));
+        }
         self.raster_cache.push(SvgRasterEntry {
             request: raster_request,
             texture: texture.clone(),
             last_used: tick,
         });
-        self.evict_if_needed();
+        self.evict_if_needed(max_entries);
         Ok(Some(texture))
     }
 
@@ -157,10 +167,8 @@ impl SvgDocument {
         tick
     }
 
-    fn evict_if_needed(&mut self) {
-        const MAX_SVG_RASTER_CACHE_ENTRIES: usize = 4;
-
-        while self.raster_cache.len() > MAX_SVG_RASTER_CACHE_ENTRIES {
+    fn evict_if_needed(&mut self, max_entries: usize) {
+        while self.raster_cache.len() > max_entries {
             if let Some((oldest_index, _)) = self
                 .raster_cache
                 .iter()

@@ -4,9 +4,6 @@ use crate::foundation::error::TguiError;
 
 use super::super::types::TextureFrame;
 
-const MAX_CANVAS_SHADOW_CACHE_ENTRIES: usize = 16;
-const MAX_WIDGET_SHADOW_CACHE_ENTRIES: usize = 24;
-
 pub(super) struct CanvasShadowEntry {
     pub(super) cache_key: u64,
     pub(super) width: u32,
@@ -25,6 +22,7 @@ pub(super) struct WidgetShadowEntry {
 
 pub(super) fn canvas_shadow_texture<F>(
     cache: &Mutex<Vec<CanvasShadowEntry>>,
+    max_entries: usize,
     cache_key: u64,
     width: u32,
     height: u32,
@@ -33,18 +31,12 @@ pub(super) fn canvas_shadow_texture<F>(
 where
     F: FnOnce() -> Result<TextureFrame, TguiError>,
 {
-    shadow_texture(
-        cache,
-        MAX_CANVAS_SHADOW_CACHE_ENTRIES,
-        cache_key,
-        width,
-        height,
-        render,
-    )
+    shadow_texture(cache, max_entries, cache_key, width, height, render)
 }
 
 pub(super) fn widget_shadow_texture<F>(
     cache: &Mutex<Vec<WidgetShadowEntry>>,
+    max_entries: usize,
     cache_key: u64,
     width: u32,
     height: u32,
@@ -53,14 +45,7 @@ pub(super) fn widget_shadow_texture<F>(
 where
     F: FnOnce() -> Result<TextureFrame, TguiError>,
 {
-    shadow_texture(
-        cache,
-        MAX_WIDGET_SHADOW_CACHE_ENTRIES,
-        cache_key,
-        width,
-        height,
-        render,
-    )
+    shadow_texture(cache, max_entries, cache_key, width, height, render)
 }
 
 trait ShadowCacheEntry {
@@ -165,6 +150,11 @@ where
 {
     if width == 0 || height == 0 {
         return Ok(None);
+    }
+
+    if max_entries == 0 {
+        let texture = Arc::new(render()?);
+        return Ok(Some(texture));
     }
 
     let mut cache = cache.lock().expect("shadow cache lock poisoned");

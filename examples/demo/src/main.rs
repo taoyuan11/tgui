@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::path::PathBuf;
 use tgui::prelude::*;
 use tgui::prelude::VideoController;
@@ -494,9 +495,6 @@ impl App {
 
     fn run() -> Result<(), TguiError> {
         Application::new()
-            .window_icon(include_bytes!(
-                "../../background_effects/assets/juequling_shushu.jpg"
-            ))
             .app_id("com.tgui.demo")
             .with_view_model(App::new)
             .root_view(App::view)

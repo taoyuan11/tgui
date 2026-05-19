@@ -1,12 +1,11 @@
 use std::sync::{Arc, Mutex};
 
+use crate::application::ResourceBudget;
 use crate::foundation::binding::InvalidationSignal;
 use crate::foundation::error::TguiError;
 
 use super::super::loader::spawn_raster_texture_loader;
 use super::super::types::{MediaBytes, RasterRequest, TextureFrame};
-
-const MAX_RASTER_CACHE_ENTRIES: usize = 8;
 
 pub(in crate::media) struct RasterDocument {
     bytes: MediaBytes,
@@ -29,8 +28,9 @@ impl RasterDocument {
         &mut self,
         raster_request: RasterRequest,
         invalidation: &InvalidationSignal,
+        budget: &ResourceBudget,
     ) -> Result<Option<Arc<TextureFrame>>, TguiError> {
-        self.collect_finished_rasters()?;
+        self.collect_finished_rasters(budget)?;
 
         let tick = self.bump_access_tick();
         if let Some(entry) = self
@@ -70,7 +70,7 @@ impl RasterDocument {
             .any(|entry| entry.request == raster_request)
     }
 
-    fn collect_finished_rasters(&mut self) -> Result<(), TguiError> {
+    fn collect_finished_rasters(&mut self, budget: &ResourceBudget) -> Result<(), TguiError> {
         let mut completed = Vec::new();
         for (index, entry) in self.pending_rasters.iter().enumerate() {
             let Some(result) = entry
@@ -94,7 +94,7 @@ impl RasterDocument {
                         texture,
                         last_used: tick,
                     });
-                    self.evict_if_needed();
+                    self.evict_if_needed(budget.image_raster_cache_entries);
                 }
                 Err(error) => return Err(TguiError::Media(error)),
             }
@@ -109,8 +109,8 @@ impl RasterDocument {
         tick
     }
 
-    fn evict_if_needed(&mut self) {
-        while self.raster_cache.len() > MAX_RASTER_CACHE_ENTRIES {
+    fn evict_if_needed(&mut self, max_entries: usize) {
+        while self.raster_cache.len() > max_entries {
             if let Some((oldest_index, _)) = self
                 .raster_cache
                 .iter()

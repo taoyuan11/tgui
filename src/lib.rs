@@ -192,7 +192,7 @@ pub mod prelude {
         PlaybackDirection, Repeat, Transition,
     };
     pub use crate::application::{
-        Application, MsaaMode, WindowClosePolicy, WindowRole, WindowSpec,
+        Application, MsaaMode, ResourceBudget, WindowClosePolicy, WindowRole, WindowSpec,
     };
     #[cfg(feature = "audio")]
     pub use crate::audio::{Audio, AudioController, AudioMetrics, AudioSource, PlaybackState};

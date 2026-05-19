@@ -117,6 +117,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             status
         };
         self.renderer = Some(renderer);
+        if !self.first_frame_logged {
+            if matches!(&status, Ok(RenderStatus::Rendered)) {
+                self.first_frame_logged = true;
+                log_startup_phase(
+                    "first_frame",
+                    self.startup_started_at.elapsed(),
+                    format_args!("window_key={}", self.window_key),
+                );
+            }
+        }
         status
     }
 

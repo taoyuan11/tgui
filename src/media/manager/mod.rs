@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::application::ResourceBudget;
 use crate::foundation::binding::InvalidationSignal;
 use crate::foundation::error::TguiError;
 
@@ -17,19 +18,26 @@ use shadow::{canvas_shadow_texture, widget_shadow_texture, CanvasShadowEntry, Wi
 
 pub(crate) struct MediaManager {
     invalidation: InvalidationSignal,
+    budget: ResourceBudget,
     images: Mutex<HashMap<MediaSource, Arc<Mutex<ImageEntry>>>>,
     canvas_shadows: Mutex<Vec<CanvasShadowEntry>>,
     widget_shadows: Mutex<Vec<WidgetShadowEntry>>,
 }
 
 impl MediaManager {
-    pub(crate) fn new(invalidation: InvalidationSignal) -> Self {
+    pub(crate) fn with_budget(invalidation: InvalidationSignal, budget: ResourceBudget) -> Self {
         Self {
             invalidation,
+            budget,
             images: Mutex::new(HashMap::new()),
             canvas_shadows: Mutex::new(Vec::new()),
             widget_shadows: Mutex::new(Vec::new()),
         }
+    }
+
+    #[cfg(any(test, feature = "bench-support"))]
+    pub(crate) fn new(invalidation: InvalidationSignal) -> Self {
+        Self::with_budget(invalidation, ResourceBudget::DEFAULT)
     }
 
     pub(crate) fn image_snapshot(
@@ -38,10 +46,11 @@ impl MediaManager {
         raster_request: Option<RasterRequest>,
     ) -> ImageSnapshot {
         let entry = self.image_entry(source);
-        let snapshot = entry
-            .lock()
-            .expect("image entry lock poisoned")
-            .snapshot(raster_request, &self.invalidation);
+        let snapshot = entry.lock().expect("image entry lock poisoned").snapshot(
+            raster_request,
+            &self.invalidation,
+            &self.budget,
+        );
         snapshot
     }
 
@@ -82,7 +91,14 @@ impl MediaManager {
     where
         F: FnOnce() -> Result<TextureFrame, TguiError>,
     {
-        canvas_shadow_texture(&self.canvas_shadows, cache_key, width, height, render)
+        canvas_shadow_texture(
+            &self.canvas_shadows,
+            self.budget.canvas_shadow_cache_entries,
+            cache_key,
+            width,
+            height,
+            render,
+        )
     }
 
     pub(crate) fn widget_shadow_texture<F>(
@@ -95,6 +111,13 @@ impl MediaManager {
     where
         F: FnOnce() -> Result<TextureFrame, TguiError>,
     {
-        widget_shadow_texture(&self.widget_shadows, cache_key, width, height, render)
+        widget_shadow_texture(
+            &self.widget_shadows,
+            self.budget.widget_shadow_cache_entries,
+            cache_key,
+            width,
+            height,
+            render,
+        )
     }
 }
