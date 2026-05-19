@@ -4114,6 +4114,7 @@ name = "tgui"
 version = "0.1.8"
 dependencies = [
  "arboard",
+ "block2",
  "bytemuck",
  "cosmic-text",
  "cpal",

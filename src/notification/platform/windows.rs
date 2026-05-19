@@ -264,7 +264,7 @@ fn windows_toast_xml(options: &NotificationOptions) -> String {
         .map(|id| format!(" launch=\"notification_id={}\"", esc(id)))
         .unwrap_or_default();
     let mut xml = format!(
-        "<toast{launch}><visual><Signal template=\"ToastGeneric\"><text>{}</text>",
+        "<toast{launch}><visual><binding template=\"ToastGeneric\"><text>{}</text>",
         esc(options.title())
     );
     if let Some(subtitle) = options.subtitle_text() {
@@ -273,7 +273,7 @@ fn windows_toast_xml(options: &NotificationOptions) -> String {
     if let Some(body) = options.body_text() {
         xml.push_str(&format!("<text>{}</text>", esc(body)));
     }
-    xml.push_str("</Signal></visual>");
+    xml.push_str("</binding></visual>");
     if !options.action_items().is_empty() {
         xml.push_str("<actions>");
         for action in options.action_items() {
