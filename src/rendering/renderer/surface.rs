@@ -94,6 +94,11 @@ pub(super) fn resolve_surface_msaa_sample_count(
     format: wgpu::TextureFormat,
     requested_mode: MsaaMode,
 ) -> u32 {
+    #[cfg(all(target_os = "android", feature = "android"))]
+    if adapter.get_info().backend == wgpu::Backend::Gl {
+        return 1;
+    }
+
     let features = adapter.get_texture_format_features(format);
     supported_msaa_sample_count(features.flags, requested_mode)
 }

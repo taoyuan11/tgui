@@ -35,7 +35,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
             match &event {
                 WindowEvent::PointerMoved { .. } | WindowEvent::PointerEntered { .. } => {
-                    if self.active_scrollbar_drag.is_some() {
+                    if self.active_touch_scroll.is_some() {
+                        needs_redraw |= self.handle_touch_scroll_drag();
+                    } else if self.active_scrollbar_drag.is_some() {
                         needs_redraw |= self.handle_scrollbar_drag();
                         needs_redraw |= self.sync_scrollbar_hover();
                         needs_redraw |= self.update_cursor_icon();
@@ -63,6 +65,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     ..
                 } => {
                     self.set_pointer_position(*position);
+                    let is_touch = matches!(button, ButtonSource::Touch { .. });
                     let canvas_button = canvas_mouse_button(button.clone().mouse_button());
                     if button.clone().mouse_button() == Some(MouseButton::Left)
                         && self.begin_scrollbar_drag()
@@ -71,6 +74,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         needs_redraw |= self.update_cursor_icon();
                     } else if let Some(canvas_button) = canvas_button {
                         self.handle_mouse_press(viewport, Instant::now(), canvas_button);
+                        if is_touch {
+                            needs_redraw |= self.begin_touch_scroll_drag(viewport);
+                        }
                     }
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
@@ -112,6 +118,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             WindowEvent::Focused(false) => {
                 self.end_scrollbar_drag();
+                self.end_touch_scroll_drag();
                 self.end_slider_drag();
                 self.end_canvas_drag();
                 self.pressed_widget = None;
@@ -156,6 +163,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     self.handle_canvas_mouse_release(canvas_button);
                 }
                 self.end_scrollbar_drag();
+                self.end_touch_scroll_drag();
                 self.end_slider_drag();
                 self.pressed_widget = None;
                 self.end_text_selection_drag();
@@ -179,6 +187,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
+            }
+            WindowEvent::PointerLeft { .. } => {
+                self.end_touch_scroll_drag();
             }
             WindowEvent::RedrawRequested => match self.render_current_frame() {
                 Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}

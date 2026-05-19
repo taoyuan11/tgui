@@ -39,7 +39,7 @@ impl Renderer {
             None,
             self.config.width as f32,
             self.config.height as f32,
-            1.0,
+            self.scale_factor,
         );
         let full_screen_buffer =
             self.device
@@ -441,7 +441,7 @@ impl Renderer {
             None,
             self.config.width as f32,
             self.config.height as f32,
-            1.0,
+            self.scale_factor,
         );
         let vertex_buffer = self
             .device

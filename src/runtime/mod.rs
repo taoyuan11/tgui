@@ -45,7 +45,7 @@ use self::state::{
     ClipboardService, DispatchedLifecycleState, DispatchedMediaState, FocusedWidget,
     HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget, PendingClick,
     PendingLifecycleEvent, PendingMediaEvent, ScrollbarDrag, SliderDrag, SmoothScrollState,
-    TextInputBufferState, TextInputSessionConfig, TextSelectionDrag,
+    TextInputBufferState, TextInputSessionConfig, TextSelectionDrag, TouchScrollDrag,
 };
 #[cfg(all(target_os = "android", feature = "android"))]
 use self::theme::{
@@ -112,6 +112,7 @@ const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const KEY_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(300);
 const KEY_REPEAT_INTERVAL: Duration = Duration::from_millis(33);
+const TOUCH_SCROLL_ACTIVATION_THRESHOLD: f32 = 8.0;
 #[cfg(all(target_os = "android", feature = "android"))]
 const ANDROID_SYSTEM_THEME_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -357,6 +358,7 @@ pub struct BoundRuntimeHandler<VM> {
     hovered_widgets: Vec<HoveredWidget<VM>>,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
+    active_touch_scroll: Option<TouchScrollDrag>,
     active_slider_drag: Option<SliderDrag<VM>>,
     active_canvas_drag: Option<ActiveCanvasDrag<VM>>,
     active_key_repeat: Option<ActiveKeyRepeat>,
@@ -425,6 +427,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         };
         let theme_store = ThemeStore::new(config.theme_set.clone(), ThemeMode::System, None);
         let resource_budget = config.resource_budget;
+
+        #[cfg(all(target_os = "android", feature = "android"))]
+        if let Some(app) = android_app.as_ref() {
+            // 装载 dialog JNI 桥接（幂等）；失败时 Android dialog 调度返回 Backend 错误。
+            let _ = crate::dialog::install_android_app(app);
+        }
+
         Self {
             window_key,
             window_instance_id,
@@ -451,6 +460,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             hovered_widgets: Vec::new(),
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
+            active_touch_scroll: None,
             active_slider_drag: None,
             active_canvas_drag: None,
             active_key_repeat: None,

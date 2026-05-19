@@ -2,6 +2,132 @@ use super::super::state::{SMOOTH_SCROLL_EPSILON, SMOOTH_SCROLL_LERP};
 use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(super) fn begin_touch_scroll_drag(&mut self, viewport: Rect) -> bool {
+        if self.active_touch_scroll.is_some()
+            || self.active_scrollbar_drag.is_some()
+            || self.active_slider_drag.is_some()
+            || self.active_canvas_drag.is_some()
+            || self.active_text_selection.is_some()
+        {
+            return false;
+        }
+
+        let Some(cursor_position) = self.cursor_position else {
+            return false;
+        };
+        let hit_path = self.hit_path(viewport);
+        let Some(top_hit) = hit_path.last() else {
+            return false;
+        };
+        if Self::touch_hit_claims_drag(top_hit) {
+            return false;
+        }
+
+        let Some(region) = self
+            .scroll_regions()
+            .into_iter()
+            .rev()
+            .find(|region| {
+                !region.visible_frame.is_empty()
+                    && region.visible_frame.contains(cursor_position)
+                    && (region.can_scroll_x() || region.can_scroll_y())
+            })
+        else {
+            return false;
+        };
+
+        self.smooth_scroll_states.remove(&region.id);
+        self.active_touch_scroll = Some(TouchScrollDrag {
+            widget_id: region.id,
+            start_cursor: cursor_position,
+            start_scroll_offset: self.effective_scroll_offset(region.id, region.scroll_offset),
+            max_offset: region.max_offset(),
+            can_scroll_x: region.can_scroll_x(),
+            can_scroll_y: region.can_scroll_y(),
+            activated: false,
+        });
+        false
+    }
+
+    pub(super) fn handle_touch_scroll_drag(&mut self) -> bool {
+        let Some(mut drag) = self.active_touch_scroll else {
+            return false;
+        };
+        let Some(cursor_position) = self.cursor_position else {
+            return false;
+        };
+
+        let delta = Point::new(
+            cursor_position.x - drag.start_cursor.x,
+            cursor_position.y - drag.start_cursor.y,
+        );
+        let activate_x = drag.can_scroll_x
+            && delta.x.abs().get() >= super::super::TOUCH_SCROLL_ACTIVATION_THRESHOLD;
+        let activate_y = drag.can_scroll_y
+            && delta.y.abs().get() >= super::super::TOUCH_SCROLL_ACTIVATION_THRESHOLD;
+        if !drag.activated && !activate_x && !activate_y {
+            return false;
+        }
+
+        drag.activated = true;
+        self.pending_click = None;
+        self.active_touch_scroll = Some(drag);
+
+        let next_offset = Point::new(
+            if drag.can_scroll_x {
+                (drag.start_scroll_offset.x - delta.x).clamp(0.0, drag.max_offset.x)
+            } else {
+                drag.start_scroll_offset.x
+            },
+            if drag.can_scroll_y {
+                (drag.start_scroll_offset.y - delta.y).clamp(0.0, drag.max_offset.y)
+            } else {
+                drag.start_scroll_offset.y
+            },
+        );
+        let previous = self
+            .scroll_states
+            .get(&drag.widget_id)
+            .copied()
+            .unwrap_or(drag.start_scroll_offset);
+        if (previous.x - next_offset.x).abs() > 0.01 || (previous.y - next_offset.y).abs() > 0.01
+        {
+            self.set_scroll_offset(drag.widget_id, next_offset);
+            return true;
+        }
+
+        false
+    }
+
+    pub(super) fn end_touch_scroll_drag(&mut self) -> bool {
+        self.active_touch_scroll.take().is_some()
+    }
+
+    fn touch_hit_claims_drag(interaction: &HitInteraction<VM>) -> bool {
+        match interaction {
+            HitInteraction::Disabled { .. } => false,
+            HitInteraction::Widget {
+                interactions,
+                focusable,
+                ..
+            } => {
+                *focusable
+                    || interactions.on_click.is_some()
+                    || interactions.on_double_click.is_some()
+                    || interactions.on_mouse_move.is_some()
+            }
+            HitInteraction::SelectableText { .. }
+            | HitInteraction::Switch { .. }
+            | HitInteraction::Checkbox { .. }
+            | HitInteraction::Radio { .. }
+            | HitInteraction::SelectTrigger { .. }
+            | HitInteraction::Slider { .. }
+            | HitInteraction::TextInput { .. }
+            | HitInteraction::SelectOption { .. }
+            | HitInteraction::CanvasItem { .. } => true,
+        }
+    }
+
     pub(super) fn effective_scroll_offset(&self, widget_id: WidgetId, fallback: Point) -> Point {
         self.smooth_scroll_states
             .get(&widget_id)

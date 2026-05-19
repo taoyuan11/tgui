@@ -32,7 +32,7 @@ crate 信息：
 - `src/rendering/shader/`：WGSL shader。
 - `src/media/mod.rs`：图片、SVG、网络/本地/内存媒体加载，纹理缓存，SVG 栅格化，canvas shadow 缓存。
 - `src/audio/`：启用 `audio` feature 后的 `AudioController`、`Audio` 组件、播放状态与 FFmpeg/CPAL 后端。
-- `src/dialog/mod.rs`：同步和异步原生对话框封装；桌面用 `rfd`，Android/OHOS 返回 unsupported。
+- `src/dialog/mod.rs`：同步和异步原生对话框封装；桌面用 `rfd`，Android 通过 `src/dialog/platform/android_bridge`（库内附带 `bridge.dex` + JNI `InMemoryDexClassLoader`）支持异步消息和文件对话框，OHOS 仍返回 unsupported。
 - `src/notification/mod.rs`：系统通知抽象，包含通知选项、权限状态、动作回调分发与平台后端实现。
 - `src/platform/mod.rs`：平台抽象和不同 winit 后端的选择。
 - `src/video/`：启用 `video` feature 后的 `VideoController`、`VideoSurface`、FFmpeg 后端。

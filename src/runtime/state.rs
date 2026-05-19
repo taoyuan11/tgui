@@ -301,6 +301,17 @@ pub(super) struct ScrollbarDrag {
 }
 
 #[derive(Clone, Copy)]
+pub(super) struct TouchScrollDrag {
+    pub(super) widget_id: WidgetId,
+    pub(super) start_cursor: Point,
+    pub(super) start_scroll_offset: Point,
+    pub(super) max_offset: Point,
+    pub(super) can_scroll_x: bool,
+    pub(super) can_scroll_y: bool,
+    pub(super) activated: bool,
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct SmoothScrollState {
     pub(super) target: Point,
 }

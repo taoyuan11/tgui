@@ -1,6 +1,6 @@
-use crate::platform::keyboard::PhysicalKey;
 #[cfg(target_os = "windows")]
 use crate::platform::keyboard::KeyCode;
+use crate::platform::keyboard::PhysicalKey;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{

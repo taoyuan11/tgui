@@ -22,6 +22,13 @@ impl Display for DialogError {
 
 impl Error for DialogError {}
 
+#[cfg(target_os = "android")]
+impl From<jni::errors::Error> for DialogError {
+    fn from(err: jni::errors::Error) -> Self {
+        DialogError::Backend(format!("jni error: {err}"))
+    }
+}
+
 /// 描述文件对话框的显示配置。
 #[derive(Debug, Clone, Default)]
 pub struct FileDialogOptions {

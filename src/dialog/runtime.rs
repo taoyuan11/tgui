@@ -5,10 +5,17 @@ use crate::foundation::view_model::{CommandContext, ValueCommand};
 use crate::platform::backend::event_loop::EventLoopProxy;
 use crate::platform::backend::window::Window;
 
+#[cfg(target_os = "android")]
 use super::platform::{
-    run_file_dialog_path, run_file_dialog_paths, run_message_dialog, DialogParentHandles,
-    FileDialogRequest,
+    dispatch_file_async_path, dispatch_file_async_paths, dispatch_message_async,
 };
+#[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    all(target_os = "linux", not(target_env = "ohos"))
+))]
+use super::platform::{run_file_dialog_path, run_file_dialog_paths, run_message_dialog};
+use super::platform::{DialogParentHandles, FileDialogRequest};
 use super::types::{DialogError, FileDialogOptions, MessageDialogOptions, MessageDialogResult};
 
 type AsyncDialogCallback<VM> = Box<dyn FnOnce(&mut VM, &CommandContext<VM>) + Send>;
@@ -302,10 +309,26 @@ impl<VM: 'static> Dialogs<VM> {
     ) -> Result<(), DialogError> {
         let runtime = self.runtime_context()?.clone();
 
-        #[cfg(any(target_os = "android", all(target_env = "ohos", feature = "ohos")))]
+        #[cfg(target_os = "android")]
+        {
+            let dispatcher = runtime.dispatcher.clone();
+            let window_key = runtime.window_key.clone();
+            let window_instance_id = runtime.window_instance_id;
+            return dispatch_message_async(options, move |result| {
+                let _ = dispatcher(PendingDialogCompletion {
+                    window_key,
+                    window_instance_id,
+                    callback: Box::new(move |view_model, context| {
+                        callback.execute_with_context(view_model, result, context);
+                    }),
+                });
+            });
+        }
+
+        #[cfg(all(target_env = "ohos", feature = "ohos"))]
         {
             let _ = options;
-            return runtime.dispatcher.dispatch(PendingDialogCompletion {
+            return (runtime.dispatcher)(PendingDialogCompletion {
                 window_key: runtime.window_key,
                 window_instance_id: runtime.window_instance_id,
                 callback: Box::new(move |view_model, context| {
@@ -400,10 +423,26 @@ impl<VM: 'static> Dialogs<VM> {
     ) -> Result<(), DialogError> {
         let runtime = self.runtime_context()?.clone();
 
-        #[cfg(any(target_os = "android", all(target_env = "ohos", feature = "ohos")))]
+        #[cfg(target_os = "android")]
+        {
+            let dispatcher = runtime.dispatcher.clone();
+            let window_key = runtime.window_key.clone();
+            let window_instance_id = runtime.window_instance_id;
+            return dispatch_file_async_path(request, options, move |result| {
+                let _ = dispatcher(PendingDialogCompletion {
+                    window_key,
+                    window_instance_id,
+                    callback: Box::new(move |view_model, context| {
+                        callback.execute_with_context(view_model, result, context);
+                    }),
+                });
+            });
+        }
+
+        #[cfg(all(target_env = "ohos", feature = "ohos"))]
         {
             let _ = (request, options);
-            return runtime.dispatcher.dispatch(PendingDialogCompletion {
+            return (runtime.dispatcher)(PendingDialogCompletion {
                 window_key: runtime.window_key,
                 window_instance_id: runtime.window_instance_id,
                 callback: Box::new(move |view_model, context| {
@@ -448,10 +487,26 @@ impl<VM: 'static> Dialogs<VM> {
     ) -> Result<(), DialogError> {
         let runtime = self.runtime_context()?.clone();
 
-        #[cfg(any(target_os = "android", all(target_env = "ohos", feature = "ohos")))]
+        #[cfg(target_os = "android")]
+        {
+            let dispatcher = runtime.dispatcher.clone();
+            let window_key = runtime.window_key.clone();
+            let window_instance_id = runtime.window_instance_id;
+            return dispatch_file_async_paths(request, options, move |result| {
+                let _ = dispatcher(PendingDialogCompletion {
+                    window_key,
+                    window_instance_id,
+                    callback: Box::new(move |view_model, context| {
+                        callback.execute_with_context(view_model, result, context);
+                    }),
+                });
+            });
+        }
+
+        #[cfg(all(target_env = "ohos", feature = "ohos"))]
         {
             let _ = (request, options);
-            return runtime.dispatcher.dispatch(PendingDialogCompletion {
+            return (runtime.dispatcher)(PendingDialogCompletion {
                 window_key: runtime.window_key,
                 window_instance_id: runtime.window_instance_id,
                 callback: Box::new(move |view_model, context| {

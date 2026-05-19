@@ -493,3 +493,43 @@ impl TextVertex {
         ]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TextVertex;
+    use crate::ui::widget::Rect;
+
+    #[test]
+    fn fullscreen_quad_uses_scale_factor_for_clip_space() {
+        let physical_width = 1280.0;
+        let physical_height = 2856.0;
+        let scale_factor = 3.5;
+        let logical_width = physical_width / scale_factor;
+        let logical_height = physical_height / scale_factor;
+        let quad = TextVertex::quad(
+            Rect::new(0.0, 0.0, logical_width, logical_height),
+            logical_width,
+            logical_height,
+            None,
+            0.0,
+            None,
+            physical_width,
+            physical_height,
+            scale_factor,
+        );
+
+        let expected = [
+            (-1.0_f32, 1.0_f32),
+            (1.0_f32, 1.0_f32),
+            (1.0_f32, -1.0_f32),
+            (-1.0_f32, 1.0_f32),
+            (1.0_f32, -1.0_f32),
+            (-1.0_f32, -1.0_f32),
+        ];
+
+        for (vertex, (x, y)) in quad.iter().zip(expected) {
+            assert!((vertex.position[0] - x).abs() < 1e-5);
+            assert!((vertex.position[1] - y).abs() < 1e-5);
+        }
+    }
+}

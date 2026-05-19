@@ -23,6 +23,7 @@ use super::{
     text_cursor_index_at_point, BoundRuntimeHandler, CanvasPointerContext, ClickHandler,
     FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
     PendingClick, ScrollbarDrag, SliderDrag, SmoothScrollState, TextSelectionDrag,
+    TouchScrollDrag,
 };
 use crate::foundation::binding::TextChange;
 use crate::foundation::view_model::{Command, ValueCommand};
@@ -30,7 +31,7 @@ use crate::log::{log_text_profile, text_profile_enabled};
 use crate::platform::cursor::{Cursor, CursorIcon};
 use crate::platform::dpi::{PhysicalPosition, PhysicalSize};
 use crate::platform::event::{
-    ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
+    ButtonSource, ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
 use crate::platform::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 use crate::platform::window::ImeRequestData;

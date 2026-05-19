@@ -1,10 +1,14 @@
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(target_os = "android")]
+mod android_bridge;
 #[cfg(any(
     target_os = "windows",
     target_os = "macos",
     all(target_os = "linux", not(target_env = "ohos"))
 ))]
 mod desktop;
-#[cfg(any(target_os = "android", target_env = "ohos"))]
+#[cfg(target_env = "ohos")]
 mod unsupported;
 
 #[cfg(any(
@@ -107,17 +111,22 @@ impl HasDisplayHandle for DialogParentHandles {
 ))]
 impl HasWindowHandle for DialogParentHandles {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
-        // SAFETY: 同 `display_handle`：`self.window` 是从父 `Window` 拿到的
+        // SAFETY: 同 `display_handle`:`self.window` 是从父 `Window` 拿到的
         // 原始句柄，只要父窗口还在事件循环里活着，借用 `'_` 就是有效的。
         Ok(unsafe { WindowHandle::borrow_raw(self.window) })
     }
 }
 
+#[cfg(target_os = "android")]
+pub(crate) use android::{
+    dispatch_file_async_path, dispatch_file_async_paths, dispatch_message_async,
+    install_android_app,
+};
 #[cfg(any(
     target_os = "windows",
     target_os = "macos",
     all(target_os = "linux", not(target_env = "ohos"))
 ))]
 pub(crate) use desktop::{run_file_dialog_path, run_file_dialog_paths, run_message_dialog};
-#[cfg(any(target_os = "android", target_env = "ohos"))]
+#[cfg(target_env = "ohos")]
 pub(crate) use unsupported::{run_file_dialog_path, run_file_dialog_paths, run_message_dialog};

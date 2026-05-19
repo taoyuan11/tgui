@@ -2,7 +2,7 @@ use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     #[cfg(all(target_os = "android", feature = "android"))]
-    fn sync_system_bar_style(&mut self, theme: &Theme) {
+    pub(super) fn sync_system_bar_style(&mut self, theme: &Theme) {
         let Some(app) = self.android_app.as_ref() else {
             return;
         };
