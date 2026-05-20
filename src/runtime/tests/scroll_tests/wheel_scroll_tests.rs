@@ -249,3 +249,153 @@ fn pointer_entered_restores_mouse_wheel_scrolling_after_pointer_left() {
         "parent scroller should respond after pointer re-enters the window"
     );
 }
+
+#[derive(Default)]
+struct TouchScrollVm {
+    clicks: usize,
+}
+
+impl ViewModel for TouchScrollVm {
+    fn new(_: &ViewModelContext) -> Self {
+        Self::default()
+    }
+
+    fn view(&self) -> Element<Self> {
+        Stack::new().into()
+    }
+}
+
+impl TouchScrollVm {
+    fn click(&mut self) {
+        self.clicks += 1;
+    }
+}
+
+#[test]
+fn touch_drag_scrolls_clickable_content_without_firing_tap() {
+    let invalidation = InvalidationSignal::new();
+    let button: Element<TouchScrollVm> = Button::new("drag me")
+        .height(dp(80.0))
+        .on_click(Command::new(TouchScrollVm::click))
+        .into();
+    let scroller: Element<TouchScrollVm> = Stack::new()
+        .size(dp(320.0), dp(240.0))
+        .overflow_y(Overflow::Scroll)
+        .child(
+            Flex::vertical()
+                .height(dp(860.0))
+                .gap(dp(12.0))
+                .child([button, Stack::new().height(dp(760.0)).into()]),
+        )
+        .into();
+    let scroller_id = scroller.id;
+    let mut handler = test_handler_with_vm(
+        TouchScrollVm::default(),
+        Some(WidgetTree::new(scroller)),
+        invalidation,
+    );
+    let event_loop = TestEventLoop;
+
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerButton {
+            device_id: None,
+            position: PhysicalPosition::new(24.0, 40.0),
+            state: ElementState::Pressed,
+            button: ButtonSource::Touch {
+                finger_id: FingerId::from_raw(1),
+                force: None,
+            },
+            primary: true,
+        },
+    );
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerMoved {
+            device_id: None,
+            position: PhysicalPosition::new(24.0, 16.0),
+            primary: true,
+            source: PointerSource::Touch {
+                finger_id: FingerId::from_raw(1),
+                force: None,
+            },
+        },
+    );
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerButton {
+            device_id: None,
+            position: PhysicalPosition::new(24.0, 16.0),
+            state: ElementState::Released,
+            button: ButtonSource::Touch {
+                finger_id: FingerId::from_raw(1),
+                force: None,
+            },
+            primary: true,
+        },
+    );
+
+    assert!(
+        handler
+            .scroll_states
+            .get(&scroller_id)
+            .map(|offset| offset.y > Dp::ZERO)
+            .unwrap_or(false),
+        "touch drag should scroll the parent scroller"
+    );
+    assert_eq!(handler.view_model.lock().unwrap().clicks, 0);
+}
+
+#[test]
+fn touch_tap_on_clickable_content_still_fires_click() {
+    let invalidation = InvalidationSignal::new();
+    let button: Element<TouchScrollVm> = Button::new("tap me")
+        .height(dp(80.0))
+        .on_click(Command::new(TouchScrollVm::click))
+        .into();
+    let scroller: Element<TouchScrollVm> = Stack::new()
+        .size(dp(320.0), dp(240.0))
+        .overflow_y(Overflow::Scroll)
+        .child(
+            Flex::vertical()
+                .height(dp(860.0))
+                .gap(dp(12.0))
+                .child([button, Stack::new().height(dp(760.0)).into()]),
+        )
+        .into();
+    let mut handler = test_handler_with_vm(
+        TouchScrollVm::default(),
+        Some(WidgetTree::new(scroller)),
+        invalidation,
+    );
+    let event_loop = TestEventLoop;
+
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerButton {
+            device_id: None,
+            position: PhysicalPosition::new(24.0, 40.0),
+            state: ElementState::Pressed,
+            button: ButtonSource::Touch {
+                finger_id: FingerId::from_raw(1),
+                force: None,
+            },
+            primary: true,
+        },
+    );
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerButton {
+            device_id: None,
+            position: PhysicalPosition::new(24.0, 40.0),
+            state: ElementState::Released,
+            button: ButtonSource::Touch {
+                finger_id: FingerId::from_raw(1),
+                force: None,
+            },
+            primary: true,
+        },
+    );
+
+    assert_eq!(handler.view_model.lock().unwrap().clicks, 1);
+}

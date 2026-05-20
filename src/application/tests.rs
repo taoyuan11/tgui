@@ -1,4 +1,6 @@
 use super::{Application, MsaaMode, WindowSpec};
+use crate::ui::layout::Insets;
+use crate::ui::unit::dp;
 
 #[test]
 fn application_decorations_updates_config() {
@@ -40,4 +42,23 @@ fn window_spec_msaa_overrides_application_default() {
         .resolved_config(&app_config);
 
     assert_eq!(window_config.msaa, MsaaMode::Off);
+}
+
+#[test]
+fn application_viewport_insets_default_to_zero() {
+    let config = Application::new().config();
+
+    assert_eq!(config.viewport_insets, Insets::ZERO);
+}
+
+#[test]
+fn window_spec_viewport_insets_override_application_default() {
+    let app_config = Application::new()
+        .viewport_insets(Insets::top(dp(24.0)))
+        .config();
+    let window_config = WindowSpec::<()>::main("main")
+        .viewport_insets(Insets::bottom(dp(12.0)))
+        .resolved_config(&app_config);
+
+    assert_eq!(window_config.viewport_insets, Insets::bottom(dp(12.0)));
 }

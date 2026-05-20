@@ -3,6 +3,7 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::ViewModel;
 use crate::platform::dpi::LogicalSize;
 use crate::text::font::FontCatalog;
+use crate::ui::layout::Insets;
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::Dp;
 
@@ -107,6 +108,7 @@ pub struct Application {
     clear_color_overridden: bool,
     close_children_with_main: bool,
     decorations: bool,
+    viewport_insets: Insets,
     msaa: MsaaMode,
     fonts: FontCatalog,
     theme: ThemeSelection,
@@ -131,6 +133,7 @@ impl Application {
             clear_color_overridden: false,
             close_children_with_main: true,
             decorations: true,
+            viewport_insets: Insets::ZERO,
             msaa: MsaaMode::Auto,
             fonts: FontCatalog::default(),
             theme: ThemeSelection::System,
@@ -230,6 +233,17 @@ impl Application {
     /// 返回值: 更新后的应用配置对象。
     pub fn decorations(mut self, decorations: bool) -> Self {
         self.decorations = decorations;
+        self
+    }
+
+    /// 设置运行时布局视口的显式内边距。
+    ///
+    /// 参数:
+    /// - `insets`: 从窗口表面四边预留给系统栏、自定义 chrome 等区域的逻辑距离。
+    ///
+    /// 返回值: 更新后的应用配置对象。默认值为 [`Insets::ZERO`]，不会自动套用平台安全区域。
+    pub fn viewport_insets(mut self, insets: Insets) -> Self {
+        self.viewport_insets = insets;
         self
     }
 
@@ -362,6 +376,7 @@ impl Application {
             clear_color_overridden: self.clear_color_overridden,
             close_children_with_main: self.close_children_with_main,
             decorations: self.decorations,
+            viewport_insets: self.viewport_insets,
             msaa: self.msaa,
             fonts: self.fonts.clone(),
             theme: self.theme.clone(),
@@ -391,6 +406,7 @@ pub(crate) struct ApplicationConfig {
     pub(crate) clear_color_overridden: bool,
     pub(crate) close_children_with_main: bool,
     pub(crate) decorations: bool,
+    pub(crate) viewport_insets: Insets,
     pub(crate) msaa: MsaaMode,
     pub(crate) fonts: FontCatalog,
     pub(crate) theme: ThemeSelection,

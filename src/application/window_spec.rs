@@ -6,6 +6,7 @@ use crate::foundation::event::InputTrigger;
 use crate::foundation::view_model::Command;
 use crate::platform::dpi::LogicalSize;
 use crate::runtime::{WindowBindings, WindowCommand};
+use crate::ui::layout::Insets;
 use crate::ui::theme::{ThemeMode, ThemeSet};
 use crate::ui::unit::Dp;
 use crate::ui::widget::{Element, WidgetTree};
@@ -69,6 +70,7 @@ pub struct WindowSpec<VM> {
     pub(crate) min_size: Option<LogicalSize<f64>>,
     pub(crate) max_size: Option<LogicalSize<f64>>,
     pub(crate) decorations: Option<bool>,
+    pub(crate) viewport_insets: Option<Insets>,
     pub(crate) msaa: Option<MsaaMode>,
     pub(crate) title_binding: Option<TitleBinding<VM>>,
     pub(crate) clear_color_binding: Option<ClearColorBinding<VM>>,
@@ -105,6 +107,7 @@ impl<VM> WindowSpec<VM> {
             min_size: None,
             max_size: None,
             decorations: None,
+            viewport_insets: None,
             msaa: None,
             title_binding: None,
             clear_color_binding: None,
@@ -133,6 +136,7 @@ impl<VM> WindowSpec<VM> {
             min_size: None,
             max_size: None,
             decorations: None,
+            viewport_insets: None,
             msaa: None,
             title_binding: None,
             clear_color_binding: None,
@@ -171,6 +175,17 @@ impl<VM> WindowSpec<VM> {
     /// 设置是否启用系统窗口装饰。
     pub fn decorations(mut self, decorations: bool) -> Self {
         self.decorations = Some(decorations);
+        self
+    }
+
+    /// 设置当前窗口布局视口的显式内边距。
+    ///
+    /// 参数:
+    /// - `insets`: 从窗口表面四边预留给系统栏或自定义 chrome 的逻辑距离。
+    ///
+    /// 返回值: 更新后的窗口规格对象。默认不预留任何安全区。
+    pub fn viewport_insets(mut self, insets: Insets) -> Self {
+        self.viewport_insets = Some(insets);
         self
     }
 
@@ -262,6 +277,9 @@ impl<VM> WindowSpec<VM> {
         }
         if let Some(decorations) = self.decorations {
             config.decorations = decorations;
+        }
+        if let Some(viewport_insets) = self.viewport_insets {
+            config.viewport_insets = viewport_insets;
         }
         if let Some(msaa) = self.msaa {
             config.msaa = msaa;

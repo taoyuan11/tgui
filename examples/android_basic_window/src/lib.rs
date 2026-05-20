@@ -532,6 +532,7 @@ fn themed_app() -> Application {
 #[cfg(target_os = "android")]
 fn run_android_entry(app: AndroidApp) -> Result<(), TguiError> {
     themed_app()
+        .viewport_insets(Insets::top(dp(36.0)))
         .with_view_model(AndroidShowcaseVm::new)
         .root_view(AndroidShowcaseVm::view)
         .bind_theme_mode(AndroidShowcaseVm::theme_signal)

@@ -120,6 +120,11 @@ impl ViewModel for App {
 
         Flex::new(Axis::Vertical)
             .size(pct(100.0), pct(100.0))
+            .style(|theme_mode: ResolvedThemeMode| {
+                let mut style = ContainerStyle::default_for(theme_mode);
+                style.surface.background = Some(Value::Static(Color::TRANSPARENT));
+                style
+            })
             .child(el![
                 open_sync,
                 open_async,
@@ -136,6 +141,7 @@ impl ViewModel for App {
 
 fn main() -> Result<(), TguiError> {
     Application::new()
+        .clear_color(Color::TRANSPARENT)
         .with_view_model(App::new)
         .root_view(App::view)
         .run()

@@ -8,7 +8,7 @@ use crate::dialog::async_dialog_channel;
 use crate::foundation::binding::{DependencyGraph, ViewModelContext};
 use crate::foundation::binding::{InvalidationSignal, Signal, TextController};
 use crate::foundation::color::Color;
-use crate::foundation::view_model::{Command, ValueCommand};
+use crate::foundation::view_model::{Command, ValueCommand, ViewModel};
 use crate::platform::backend::event_loop::{
     ActiveEventLoop, ControlFlow, DeviceEvents, EventLoopProxy, OwnedDisplayHandle,
 };
@@ -16,13 +16,14 @@ use crate::platform::cursor::{CustomCursor, CustomCursorSource};
 use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use crate::platform::error::RequestError;
 use crate::platform::event::{
-    ElementState, Ime, KeyEvent, MouseScrollDelta, PointerKind, TouchPhase, WindowEvent,
+    ButtonSource, ElementState, FingerId, Ime, KeyEvent, MouseScrollDelta, PointerKind,
+    PointerSource, TouchPhase, WindowEvent,
 };
 use crate::platform::keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey};
 use crate::platform::window::{ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose};
 use crate::platform::window::{Theme as WindowTheme, Window, WindowAttributes};
 use crate::text::font::FontCatalog;
-use crate::ui::layout::{Axis, Overflow};
+use crate::ui::layout::{Axis, Insets, Overflow};
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
 use crate::ui::widget::{
@@ -89,6 +90,7 @@ fn test_config() -> ApplicationConfig {
         clear_color_overridden: true,
         close_children_with_main: true,
         decorations: true,
+        viewport_insets: Insets::ZERO,
         msaa: MsaaMode::Auto,
         fonts: FontCatalog::default(),
         theme: ThemeSelection::System,
@@ -109,6 +111,7 @@ fn test_config_with_theme(theme: ThemeSelection, theme_set: ThemeSet) -> Applica
         clear_color_overridden: true,
         close_children_with_main: true,
         decorations: true,
+        viewport_insets: Insets::ZERO,
         msaa: MsaaMode::Auto,
         fonts: FontCatalog::default(),
         theme,

@@ -16,23 +16,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
         let hit_path = self.hit_path(viewport);
-        let Some(top_hit) = hit_path.last() else {
-            return false;
-        };
-        if Self::touch_hit_claims_drag(top_hit) {
+        if hit_path
+            .last()
+            .map(Self::touch_hit_claims_drag)
+            .unwrap_or(false)
+        {
             return false;
         }
 
-        let Some(region) = self
-            .scroll_regions()
-            .into_iter()
-            .rev()
-            .find(|region| {
-                !region.visible_frame.is_empty()
-                    && region.visible_frame.contains(cursor_position)
-                    && (region.can_scroll_x() || region.can_scroll_y())
-            })
-        else {
+        let Some(region) = self.scroll_regions().into_iter().rev().find(|region| {
+            !region.visible_frame.is_empty()
+                && region.visible_frame.contains(cursor_position)
+                && (region.can_scroll_x() || region.can_scroll_y())
+        }) else {
             return false;
         };
 
@@ -42,11 +38,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             start_cursor: cursor_position,
             start_scroll_offset: self.effective_scroll_offset(region.id, region.scroll_offset),
             max_offset: region.max_offset(),
+            visible_frame: region.visible_frame,
             can_scroll_x: region.can_scroll_x(),
             can_scroll_y: region.can_scroll_y(),
             activated: false,
         });
-        false
+        true
     }
 
     pub(super) fn handle_touch_scroll_drag(&mut self) -> bool {
@@ -73,7 +70,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.pending_click = None;
         self.active_touch_scroll = Some(drag);
 
-        let next_offset = Point::new(
+        let mut next_offset = Point::new(
             if drag.can_scroll_x {
                 (drag.start_scroll_offset.x - delta.x).clamp(0.0, drag.max_offset.x)
             } else {
@@ -85,13 +82,27 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 drag.start_scroll_offset.y
             },
         );
+
+        if !drag.visible_frame.contains(cursor_position) {
+            next_offset = Point::new(
+                if drag.can_scroll_x {
+                    next_offset.x.clamp(Dp::ZERO, drag.max_offset.x)
+                } else {
+                    next_offset.x
+                },
+                if drag.can_scroll_y {
+                    next_offset.y.clamp(Dp::ZERO, drag.max_offset.y)
+                } else {
+                    next_offset.y
+                },
+            );
+        }
         let previous = self
             .scroll_states
             .get(&drag.widget_id)
             .copied()
             .unwrap_or(drag.start_scroll_offset);
-        if (previous.x - next_offset.x).abs() > 0.01 || (previous.y - next_offset.y).abs() > 0.01
-        {
+        if (previous.x - next_offset.x).abs() > 0.01 || (previous.y - next_offset.y).abs() > 0.01 {
             self.set_scroll_offset(drag.widget_id, next_offset);
             return true;
         }
@@ -106,25 +117,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn touch_hit_claims_drag(interaction: &HitInteraction<VM>) -> bool {
         match interaction {
             HitInteraction::Disabled { .. } => false,
-            HitInteraction::Widget {
-                interactions,
-                focusable,
-                ..
-            } => {
-                *focusable
-                    || interactions.on_click.is_some()
-                    || interactions.on_double_click.is_some()
-                    || interactions.on_mouse_move.is_some()
-            }
+            HitInteraction::Widget { interactions, .. } => interactions.on_mouse_move.is_some(),
             HitInteraction::SelectableText { .. }
-            | HitInteraction::Switch { .. }
+            | HitInteraction::Slider { .. }
+            | HitInteraction::TextInput { .. }
+            | HitInteraction::CanvasItem { .. } => true,
+            HitInteraction::Switch { .. }
             | HitInteraction::Checkbox { .. }
             | HitInteraction::Radio { .. }
             | HitInteraction::SelectTrigger { .. }
-            | HitInteraction::Slider { .. }
-            | HitInteraction::TextInput { .. }
-            | HitInteraction::SelectOption { .. }
-            | HitInteraction::CanvasItem { .. } => true,
+            | HitInteraction::SelectOption { .. } => false,
         }
     }
 

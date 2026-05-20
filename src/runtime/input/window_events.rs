@@ -73,9 +73,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         needs_redraw = true;
                         needs_redraw |= self.update_cursor_icon();
                     } else if let Some(canvas_button) = canvas_button {
-                        self.handle_mouse_press(viewport, Instant::now(), canvas_button);
                         if is_touch {
-                            needs_redraw |= self.begin_touch_scroll_drag(viewport);
+                            if !self.begin_touch_scroll_drag(viewport) {
+                                self.handle_mouse_press(viewport, Instant::now(), canvas_button);
+                            }
+                        } else {
+                            self.handle_mouse_press(viewport, Instant::now(), canvas_button);
                         }
                     }
                 }
@@ -159,8 +162,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 ..
             } => {
                 self.set_pointer_position(position);
+                let touch_scroll_was_active = self.active_touch_scroll.is_some();
+                let is_touch = matches!(button, ButtonSource::Touch { .. });
+                if is_touch && touch_scroll_was_active {
+                    let _ = self.handle_touch_scroll_drag();
+                }
+                let touch_scroll_activated = self
+                    .active_touch_scroll
+                    .as_ref()
+                    .map(|drag| drag.activated)
+                    .unwrap_or(false);
                 if let Some(canvas_button) = canvas_mouse_button(button.clone().mouse_button()) {
-                    self.handle_canvas_mouse_release(canvas_button);
+                    if is_touch && touch_scroll_was_active && !touch_scroll_activated {
+                        self.handle_mouse_press(
+                            self.viewport_rect(),
+                            Instant::now(),
+                            canvas_button,
+                        );
+                    } else if !touch_scroll_was_active {
+                        self.handle_canvas_mouse_release(canvas_button);
+                    }
                 }
                 self.end_scrollbar_drag();
                 self.end_touch_scroll_drag();

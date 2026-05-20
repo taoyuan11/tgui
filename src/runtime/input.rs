@@ -22,8 +22,7 @@ use super::{
     canvas_mouse_button, cursor_icon, is_primary_shortcut_modifier, mouse_scroll_delta,
     text_cursor_index_at_point, BoundRuntimeHandler, CanvasPointerContext, ClickHandler,
     FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
-    PendingClick, ScrollbarDrag, SliderDrag, SmoothScrollState, TextSelectionDrag,
-    TouchScrollDrag,
+    PendingClick, ScrollbarDrag, SliderDrag, SmoothScrollState, TextSelectionDrag, TouchScrollDrag,
 };
 use crate::foundation::binding::TextChange;
 use crate::foundation::view_model::{Command, ValueCommand};

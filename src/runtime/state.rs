@@ -306,6 +306,7 @@ pub(super) struct TouchScrollDrag {
     pub(super) start_cursor: Point,
     pub(super) start_scroll_offset: Point,
     pub(super) max_offset: Point,
+    pub(super) visible_frame: Rect,
     pub(super) can_scroll_x: bool,
     pub(super) can_scroll_y: bool,
     pub(super) activated: bool,

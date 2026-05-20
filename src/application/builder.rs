@@ -262,6 +262,7 @@ where
                         min_size: main_config.min_size,
                         max_size: main_config.max_size,
                         decorations: Some(main_config.decorations),
+                        viewport_insets: Some(main_config.viewport_insets),
                         msaa: Some(main_config.msaa),
                         title_binding: title_binding.clone(),
                         clear_color_binding: clear_color_binding.clone(),

@@ -7,6 +7,13 @@ publish = false
 [dependencies]
 tgui = { path = "../..", features = ["android"] }
 
+[profile.release]
+lto = true
+codegen-units = 1
+panic = 'abort'
+debug = false
+opt-level = 3
+
 [package.metadata.android]
 strip = "strip"
 

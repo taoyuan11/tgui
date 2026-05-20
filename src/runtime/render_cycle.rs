@@ -2,30 +2,13 @@ use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn viewport_rect(&self) -> Rect {
-        #[cfg(all(target_os = "android", feature = "android"))]
-        if let (Some(app), Some(window)) = (self.android_app.as_ref(), self.window.as_ref()) {
-            let scale_factor = window.scale_factor();
-            let content_rect = app.content_rect();
-            let width = (content_rect.right - content_rect.left).max(0) as f32 / scale_factor as f32;
-            let height =
-                (content_rect.bottom - content_rect.top).max(0) as f32 / scale_factor as f32;
-            if width > 0.0 && height > 0.0 {
-                return Rect::new(
-                    content_rect.left as f32 / scale_factor as f32,
-                    content_rect.top as f32 / scale_factor as f32,
-                    width,
-                    height,
-                );
-            }
-        }
-
         if let Some(window) = self.window.as_ref() {
             let scale_factor = window.scale_factor();
             let size = window.surface_size().to_logical::<f32>(scale_factor);
-            let safe_area = window.safe_area().to_logical::<f32>(scale_factor);
-            let width = (size.width - safe_area.left - safe_area.right).max(0.0);
-            let height = (size.height - safe_area.top - safe_area.bottom).max(0.0);
-            return Rect::new(safe_area.left, safe_area.top, width, height);
+            let insets = self.config.viewport_insets;
+            let width = (size.width - insets.left.get() - insets.right.get()).max(0.0);
+            let height = (size.height - insets.top.get() - insets.bottom.get()).max(0.0);
+            return Rect::new(insets.left.get(), insets.top.get(), width, height);
         }
 
         Rect::new(
