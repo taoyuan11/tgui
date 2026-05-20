@@ -66,13 +66,13 @@ pub(crate) fn platform_permission_status() -> Result<NotificationPermission, Not
 
 fn send_via_notify_send(
     options: NotificationOptions,
-    app_name: &str,
+    app_name: String,
     on_action: Option<NotificationActionHandler>,
     primary_error: String,
 ) -> Result<(), NotificationError> {
     if let Some(on_action) = on_action {
         std::thread::spawn(move || {
-            if let Ok(output) = build_notify_send_command(&options, app_name).output() {
+            if let Ok(output) = build_notify_send_command(&options, &app_name).output() {
                 if output.status.success() {
                     let action = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     if !action.is_empty() {
@@ -84,7 +84,7 @@ fn send_via_notify_send(
         return Ok(());
     }
 
-    let output = build_notify_send_command(&options, app_name).output().map_err(|error| {
+    let output = build_notify_send_command(&options, &app_name).output().map_err(|error| {
         NotificationError::Backend(format!(
             "failed to deliver Linux notification via notify-rust ({primary_error}); notify-send fallback failed to start: {error}"
         ))
