@@ -45,6 +45,7 @@ impl InvalidationSignal {
         self.mark_dirty_dependency(Some(dependency));
     }
 
+    #[cfg(feature = "video")]
     pub(crate) fn request_redraw(&self) {
         self.redraw_requested.store(true, Ordering::SeqCst);
         if self.should_wake_now() {

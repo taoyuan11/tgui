@@ -42,6 +42,7 @@ impl<T> State<T> {
         self.read(reader)
     }
 
+    #[cfg(feature = "video")]
     pub(crate) fn invalidation(&self) -> &InvalidationSignal {
         &self.invalidation
     }

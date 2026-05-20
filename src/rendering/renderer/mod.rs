@@ -113,24 +113,27 @@ impl Renderer {
 
 
         #[cfg(feature = "video")]
-        let mut active_texture_keys: HashSet<_>;
+        let active_texture_keys: HashSet<_> = {
+            let mut keys: HashSet<_> = scene
+                .textures
+                .iter()
+                .map(|texture| texture.texture.id())
+                .collect();
+            keys.extend(
+                scene
+                    .video_textures
+                    .iter()
+                    .filter_map(|texture| texture.controller.current_frame().map(|frame| frame.id())),
+            );
+            keys
+        };
 
         #[cfg(not(feature = "video"))]
-        let active_texture_keys: HashSet<_>;
-
-        active_texture_keys = scene
+        let active_texture_keys: HashSet<_> = scene
             .textures
             .iter()
             .map(|texture| texture.texture.id())
             .collect();
-
-        #[cfg(feature = "video")]
-        active_texture_keys.extend(
-            scene
-                .video_textures
-                .iter()
-                .filter_map(|texture| texture.controller.current_frame().map(|frame| frame.id())),
-        );
         self.texture_cache
             .retain(|key, _| active_texture_keys.contains(key));
 

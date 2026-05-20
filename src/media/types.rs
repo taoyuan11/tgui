@@ -250,6 +250,7 @@ impl TextureFrame {
         }
     }
 
+    #[cfg(feature = "video")]
     pub(crate) fn with_id_and_revision(
         id: u64,
         revision: u64,
