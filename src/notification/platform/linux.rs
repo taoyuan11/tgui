@@ -11,9 +11,13 @@ pub(crate) fn platform_send(
     on_action: Option<NotificationActionHandler>,
 ) -> Result<(), NotificationError> {
     let fallback_options = options.clone();
+    let app_name = options
+        .app_name_text()
+        .or(app_id)
+        .unwrap_or("tgui")
+        .to_string();
     let mut notification = notify_rust::Notification::new();
-    let app_name = options.app_name_text().or(app_id).unwrap_or("tgui");
-    notification.appname(app_name).summary(options.title());
+    notification.appname(&app_name).summary(options.title());
     if let Some(body) = options.body_text() {
         notification.body(body);
     }
