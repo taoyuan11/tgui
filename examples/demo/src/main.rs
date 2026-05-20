@@ -76,12 +76,12 @@ fn shadow_showcase_style(mode: ResolvedThemeMode) -> ContainerStyle {
 
 struct VideoPlayer {
     video_controller: VideoController,
-    source: State<String>
+    source: TextController
 }
 
 impl VideoPlayer {
     fn new(context: &ViewModelContext) -> Self {
-        let source = context.state(String::from("D:\\CloudMusic\\MV\\郭顶 - 凄美地.mp4"));
+        let source = context.text_controller(String::from("D:\\CloudMusic\\MV\\郭顶 - 凄美地.mp4"));
         let controller = VideoController::new(context);
 
         controller.playback_state().map(|state| {
@@ -119,7 +119,6 @@ impl VideoPlayer {
         };
 
         self.video_controller.load(video_source)?;
-        self.source.set(source);
         Ok(())
     }
 
@@ -392,14 +391,14 @@ impl App {
         Flex::vertical()
             .gap(dp(10.0))
             .child(el![
-                Input::new(self.video_player.source.signal()).placeholder("在此输入视频地址"),
+                Input::new(self.video_player.source.clone()).placeholder("在此输入视频地址"),
                 VideoSurface::new(self.video_player.video_controller.clone()).size(dp(300.0), dp(168.0)),
                 Flex::horizontal()
                 .gap(dp(10.0))
                 .child(el![
                     Button::new("加载")
                     .on_click(Command::new(|app: &mut App| {
-                        if let Err(err) = app.video_player.change_source(app.video_player.source.get()) {
+                        if let Err(err) = app.video_player.change_source(app.video_player.source.text()) {
                             tgui_log(LogLevel::Error, format!("加载视频失败: {err}"))
                         }
                     })),
