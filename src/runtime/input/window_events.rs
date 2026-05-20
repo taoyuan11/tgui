@@ -244,6 +244,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 window.request_redraw();
             }
         }
+        #[cfg(all(target_os = "android", feature = "android"))]
+        let android_text_changed = self.drain_android_text_input_snapshot();
+        #[cfg(not(all(target_os = "android", feature = "android")))]
+        let android_text_changed = false;
         let flush_started_at = Instant::now();
         let flush_outcome = self.flush_pending_text_input_changes();
         let flush_duration = flush_started_at.elapsed();
@@ -292,8 +296,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 "textarea_about_to_wait",
                 started_at.elapsed(),
                 format!(
-                    "repeated_key_handled={} flushed_text_changes={} flush_ms={:.3} lifecycle_ms={:.3} theme_changed={} theme_ms={:.3} redraw_ms={:.3} animation_ms={:.3} close_requested={}",
+                    "repeated_key_handled={} android_text_changed={} flushed_text_changes={} flush_ms={:.3} lifecycle_ms={:.3} theme_changed={} theme_ms={:.3} redraw_ms={:.3} animation_ms={:.3} close_requested={}",
                     repeated_key_handled,
+                    android_text_changed,
                     flush_outcome.changed,
                     flush_duration.as_secs_f64() * 1000.0,
                     lifecycle_duration.as_secs_f64() * 1000.0,

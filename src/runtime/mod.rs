@@ -1,4 +1,6 @@
 mod application_handler;
+#[cfg(all(target_os = "android", feature = "android"))]
+mod android_text_input;
 mod binding_sync;
 mod bootstrap;
 mod cache_support;
@@ -432,6 +434,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if let Some(app) = android_app.as_ref() {
             // 装载 dialog JNI 桥接（幂等）；失败时 Android dialog 调度返回 Backend 错误。
             let _ = crate::dialog::install_android_app(app);
+            let _ = self::android_text_input::install_android_text_input_bridge(app, &invalidation);
         }
 
         Self {

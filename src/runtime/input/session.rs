@@ -241,7 +241,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         Some((hasher.finish(), height))
     }
 
-    pub(super) fn text_input_current_value(
+    pub(crate) fn text_input_current_value(
         &self,
         widget_id: WidgetId,
         controller: &TextController,
@@ -252,7 +252,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or_else(|| controller.text())
     }
 
-    pub(super) fn refresh_text_input_session_display(
+    pub(crate) fn refresh_text_input_session_display(
         &mut self,
         widget_id: WidgetId,
         region: &TextInputRegionData<VM>,

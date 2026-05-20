@@ -302,5 +302,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         self.invalidate_text_input_scene();
+        self.sync_ime_state();
     }
 }
