@@ -460,7 +460,11 @@ impl App {
         );
         self.notification_status.set(match result {
             Ok(id) => format!("已发送普通通知: {id}"),
-            Err(error) => format!("发送普通通知失败: {error}"),
+            Err(error) => {
+                let string = format!("发送普通通知失败: {error}");
+                tgui_log(LogLevel::Error, &string);
+                string
+            },
         });
     }
 
@@ -478,14 +482,22 @@ impl App {
                             "通知动作: notification_id={}, action_id={}",
                             event.notification_id, event.action_id
                         ),
-                        Err(error) => format!("通知动作失败: {error}"),
+                        Err(error) => {
+                            let string = format!("通知动作失败: {error}");
+                            tgui_log(LogLevel::Error, &string);
+                            string
+                        },
                     });
                 },
             ),
         );
         self.notification_status.set(match result {
             Ok(id) => format!("已发送动作通知: {id}"),
-            Err(error) => format!("发送动作通知失败: {error}"),
+            Err(error) => {
+                let string = format!("发送动作通知失败: {error}");
+                tgui_log(LogLevel::Error, &string);
+                string
+            },
         });
     }
 
