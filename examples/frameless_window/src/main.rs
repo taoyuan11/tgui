@@ -420,12 +420,14 @@ impl AppVm {
             return Vec::new();
         }
 
-        let mut windows = vec![WindowSpec::main("main")
+        let mut windows = vec![
+            WindowSpec::main("main")
             .title("tgui frameless window")
             .window_size(dp(900.0), dp(620.0))
             .min_window_size(dp(760.0), dp(520.0))
             .bind_title(Self::main_title)
-            .root_view(Self::main_view)];
+            .root_view(Self::main_view)
+        ];
 
         if self.confirm_exit_open.get() {
             windows.push(

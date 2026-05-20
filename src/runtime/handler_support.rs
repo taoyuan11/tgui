@@ -93,22 +93,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let mut attributes = WindowAttributes::default()
+            .with_transparent(!cfg!(all(target_env = "ohos", feature = "ohos")))
             .with_decorations(self.config.decorations)
             .with_title(self.config.title.clone())
             .with_surface_size(self.config.size)
             .with_visible(false);
-
-        #[cfg(target_os = "windows")]
-        if self.config.clear_color.a < 255 {
-            let platform_attrs = winit_win32::WindowAttributesWindows::default()
-                .with_no_redirection_bitmap(true);
-            attributes = attributes.with_platform_attributes(Box::new(platform_attrs));
-        }
-
-        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
-        {
-            attributes = attributes.with_transparent(true);
-        }
 
         if let Some(min_size) = self.config.min_size {
             attributes = attributes.with_min_surface_size(min_size);

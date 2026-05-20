@@ -122,7 +122,7 @@ impl ViewModel for App {
             .size(pct(100.0), pct(100.0))
             .style(|theme_mode: ResolvedThemeMode| {
                 let mut style = ContainerStyle::default_for(theme_mode);
-                style.surface.background = Some(Value::Static(Color::TRANSPARENT));
+                style.surface.background = Some(Color::rgba(0, 0, 0, 0)).map(Into::into);
                 style
             })
             .child(el![
