@@ -49,7 +49,7 @@ use crate::audio::backend::{
 };
 #[cfg(feature = "audio")]
 use crate::audio::{
-    Audio, AudioController, AudioMetrics, AudioSource, PlaybackState as AudioPlaybackState,
+    Audio, AudioController, AudioMetrics, AudioSource, AudioPlaybackState,
 };
 #[cfg(feature = "video")]
 use crate::media::TextureFrame;
@@ -60,7 +60,7 @@ use crate::video::backend::{
 };
 #[cfg(feature = "video")]
 use crate::video::{
-    PlaybackState, VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface,
+    VideoController, VideoMetrics, VideoPlaybackState, VideoSize, VideoSource, VideoSurface,
     VideoSurfaceSnapshot,
 };
 #[derive(Default)]

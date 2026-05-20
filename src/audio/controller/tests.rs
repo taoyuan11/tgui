@@ -112,7 +112,7 @@ fn test_context() -> ViewModelContext {
 
 fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
     BackendSharedState {
-        playback_state: ctx.state(PlaybackState::Idle),
+        playback_state: ctx.state(AudioPlaybackState::Idle),
         metrics: ctx.state(AudioMetrics::default()),
         volume: ctx.state(1.0),
         muted: ctx.state(false),
@@ -161,7 +161,7 @@ fn controller_bindings_reflect_shared_state() {
     let backend = Arc::new(MockBackend::new());
     let controller = AudioController::from_parts(shared.clone(), backend);
 
-    shared.playback_state.set(PlaybackState::Paused);
+    shared.playback_state.set(AudioPlaybackState::Paused);
     shared.metrics.set(AudioMetrics {
         duration: Some(Duration::from_secs(30)),
         position: Duration::from_secs(12),
@@ -170,7 +170,7 @@ fn controller_bindings_reflect_shared_state() {
     shared.error.set(Some("boom".to_string()));
     shared.looping.set(true);
 
-    assert_eq!(controller.playback_state().get(), PlaybackState::Paused);
+    assert_eq!(controller.playback_state().get(), AudioPlaybackState::Paused);
     assert_eq!(controller.position().get(), Duration::from_secs(12));
     assert_eq!(controller.duration().get(), Some(Duration::from_secs(30)));
     assert_eq!(
@@ -185,7 +185,7 @@ fn controller_bindings_reflect_shared_state() {
 fn stop_state_reset_clears_progress_and_error() {
     let ctx = test_context();
     let shared = test_shared(&ctx);
-    shared.playback_state.set(PlaybackState::Playing);
+    shared.playback_state.set(AudioPlaybackState::Playing);
     shared.metrics.set(AudioMetrics {
         duration: Some(Duration::from_secs(10)),
         position: Duration::from_secs(4),
@@ -199,7 +199,7 @@ fn stop_state_reset_clears_progress_and_error() {
 
     shared.reset_for_stop();
 
-    assert_eq!(shared.playback_state.get(), PlaybackState::Idle);
+    assert_eq!(shared.playback_state.get(), AudioPlaybackState::Idle);
     assert_eq!(shared.metrics.get(), AudioMetrics::default());
     assert_eq!(shared.error.get(), None);
     assert_eq!(shared.snapshot.get(), AudioSnapshot::default());

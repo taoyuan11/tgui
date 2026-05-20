@@ -361,7 +361,7 @@ fn hover_path_keeps_video_surface_hit_testing_when_scene_is_cached() {
     let animations = AnimationCoordinator::default();
     let ctx = ViewModelContext::new(invalidation.clone(), animations.clone());
     let shared = BackendSharedState {
-        playback_state: ctx.state(PlaybackState::Ready),
+        playback_state: ctx.state(VideoPlaybackState::Ready),
         metrics: ctx.state(VideoMetrics::default()),
         volume: ctx.state(1.0),
         muted: ctx.state(false),

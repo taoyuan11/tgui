@@ -155,7 +155,7 @@ impl PresentWorker {
             }
             BackendCommand::Play => {
                 if self.playback_ended {
-                    self.shared.playback_state.set(PlaybackState::Ended);
+                    self.shared.playback_state.set(VideoPlaybackState::Ended);
                     return true;
                 }
                 self.should_play = true;
@@ -172,7 +172,7 @@ impl PresentWorker {
                         metrics.position = position;
                         self.shared.metrics.set(metrics);
                     }
-                    self.shared.playback_state.set(PlaybackState::Paused);
+                    self.shared.playback_state.set(VideoPlaybackState::Paused);
                 }
             }
             BackendCommand::Seek(position) => {
@@ -193,7 +193,7 @@ impl PresentWorker {
                 self.playback_clock.set_position(position);
                 self.shared_queue
                     .replace_generation(self.current_generation);
-                self.shared.playback_state.set(PlaybackState::Loading);
+                self.shared.playback_state.set(VideoPlaybackState::Loading);
                 self.shared.error.set(None);
                 self.shared.surface.set(VideoSurfaceSnapshot {
                     intrinsic_size: self.current_intrinsic_size,
@@ -267,8 +267,8 @@ impl PresentWorker {
                     self.evaluate_playback_state();
                 } else {
                     match self.pending_open_reason.take().unwrap_or(OpenReason::Load) {
-                        OpenReason::Load => self.shared.playback_state.set(PlaybackState::Ready),
-                        OpenReason::Seek => self.shared.playback_state.set(PlaybackState::Paused),
+                        OpenReason::Load => self.shared.playback_state.set(VideoPlaybackState::Ready),
+                        OpenReason::Seek => self.shared.playback_state.set(VideoPlaybackState::Paused),
                     }
                 }
             }
@@ -296,7 +296,7 @@ impl PresentWorker {
                         metrics.position = position;
                         self.shared.metrics.set(metrics);
                     }
-                    self.shared.playback_state.set(PlaybackState::Ended);
+                    self.shared.playback_state.set(VideoPlaybackState::Ended);
                 }
             }
             DecodeEvent::FatalError {
@@ -385,7 +385,7 @@ mod tests {
 
     fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
         BackendSharedState {
-            playback_state: ctx.state(PlaybackState::Idle),
+            playback_state: ctx.state(VideoPlaybackState::Idle),
             metrics: ctx.state(VideoMetrics::default()),
             volume: ctx.state(1.0),
             muted: ctx.state(false),

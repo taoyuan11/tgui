@@ -74,7 +74,7 @@ impl From<&str> for VideoSource {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub enum PlaybackState {
+pub enum VideoPlaybackState {
     #[default]
     Idle,
     Loading,

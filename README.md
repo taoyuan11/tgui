@@ -440,7 +440,7 @@ Stack::new().style(|mode| {
 - `audio::Audio`
 - `audio::AudioController`
 - `audio::AudioSource`
-- `audio::PlaybackState`
+- `audio::AudioPlaybackState`
 - `audio::AudioMetrics`
 
 `Audio` 是一个不渲染任何 UI 的隐形组件，只负责把音频播放生命周期挂进 widget tree；业务按钮、进度条、音量条由你自己用 `AudioController` 拼。
@@ -499,7 +499,7 @@ controller.load(source)?;
 - `video::VideoController`
 - `video::VideoSurface`
 - `video::VideoSource`
-- `video::PlaybackState`
+- `video::VideoPlaybackState`
 - `video::VideoMetrics`
 
 网络视频如果需要自定义请求头，可以把 header 直接挂在 `VideoSource` 上：

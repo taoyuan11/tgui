@@ -8,7 +8,7 @@ use super::super::{BackendSharedState, DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES};
 use super::worker::AudioWorker;
 use super::BackendCommand;
 use crate::animation::AnimationCoordinator;
-use crate::audio::{AudioMetrics, AudioSource, PlaybackState};
+use crate::audio::{AudioMetrics, AudioPlaybackState, AudioSource};
 use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
 
 fn test_context() -> ViewModelContext {
@@ -17,7 +17,7 @@ fn test_context() -> ViewModelContext {
 
 fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
     BackendSharedState {
-        playback_state: ctx.state(PlaybackState::Idle),
+        playback_state: ctx.state(AudioPlaybackState::Idle),
         metrics: ctx.state(AudioMetrics::default()),
         volume: ctx.state(1.0),
         muted: ctx.state(false),
@@ -36,7 +36,7 @@ fn play_after_ended_reopens_from_start_when_looping_disabled() {
     let (_tx, rx) = unbounded();
     let mut worker = AudioWorker::new(rx, shared.clone());
     worker.current_source = Some(AudioSource::File("demo.mp3".into()));
-    worker.shared.playback_state.set(PlaybackState::Ended);
+    worker.shared.playback_state.set(AudioPlaybackState::Ended);
 
     assert!(worker.handle_command(BackendCommand::Play));
 
@@ -52,11 +52,11 @@ fn stop_clears_session_and_resets_shared_state() {
     worker.current_source = Some(AudioSource::File("demo.mp3".into()));
     worker.current_duration = Some(Duration::from_secs(30));
     worker.should_play = true;
-    worker.shared.playback_state.set(PlaybackState::Playing);
+    worker.shared.playback_state.set(AudioPlaybackState::Playing);
 
     assert!(worker.handle_command(BackendCommand::Stop));
 
     assert!(worker.session.is_none());
-    assert_eq!(worker.shared.playback_state.get(), PlaybackState::Idle);
+    assert_eq!(worker.shared.playback_state.get(), AudioPlaybackState::Idle);
     assert_eq!(worker.shared.metrics.get(), AudioMetrics::default());
 }

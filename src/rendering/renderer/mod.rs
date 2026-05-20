@@ -111,11 +111,19 @@ impl Renderer {
         }
         let (logical_width, logical_height) = self.logical_viewport_size();
 
-        let mut active_texture_keys: HashSet<_> = scene
+
+        #[cfg(feature = "video")]
+        let mut active_texture_keys: HashSet<_>;
+
+        #[cfg(not(feature = "video"))]
+        let active_texture_keys: HashSet<_>;
+
+        active_texture_keys = scene
             .textures
             .iter()
             .map(|texture| texture.texture.id())
             .collect();
+
         #[cfg(feature = "video")]
         active_texture_keys.extend(
             scene

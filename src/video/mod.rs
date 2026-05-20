@@ -6,7 +6,7 @@ pub(crate) mod backend;
 pub use crate::ui::widget::VideoSurface;
 pub use controller::VideoController;
 pub(crate) use types::VideoSurfaceSnapshot;
-pub use types::{PlaybackState, VideoMetrics, VideoSize, VideoSource};
+pub use types::{VideoMetrics, VideoPlaybackState, VideoSize, VideoSource};
 
 #[cfg(feature = "bench-support")]
 pub mod bench_support {

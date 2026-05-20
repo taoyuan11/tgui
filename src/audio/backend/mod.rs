@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::foundation::binding::State;
 use crate::foundation::error::TguiError;
 
-use super::types::{AudioMetrics, AudioSnapshot, AudioSource, PlaybackState};
+use super::types::{AudioMetrics, AudioPlaybackState, AudioSnapshot, AudioSource};
 
 pub(crate) mod ffmpeg;
 pub(crate) mod shared;
@@ -13,7 +13,7 @@ pub(crate) const DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES: u64 = 100 * 1024 * 102
 
 #[derive(Clone)]
 pub(crate) struct BackendSharedState {
-    pub playback_state: State<PlaybackState>,
+    pub playback_state: State<AudioPlaybackState>,
     pub metrics: State<AudioMetrics>,
     pub volume: State<f32>,
     pub muted: State<bool>,
@@ -34,7 +34,7 @@ impl BackendSharedState {
     }
 
     pub fn reset_for_load(&self) {
-        self.playback_state.set(PlaybackState::Loading);
+        self.playback_state.set(AudioPlaybackState::Loading);
         self.metrics.set(AudioMetrics::default());
         self.error.set(None);
         self.snapshot.set(AudioSnapshot {
@@ -44,7 +44,7 @@ impl BackendSharedState {
     }
 
     pub fn reset_for_stop(&self) {
-        self.playback_state.set(PlaybackState::Idle);
+        self.playback_state.set(AudioPlaybackState::Idle);
         self.metrics.set(AudioMetrics::default());
         self.error.set(None);
         self.snapshot.set(AudioSnapshot::default());
@@ -56,12 +56,12 @@ impl BackendSharedState {
             error: None,
         });
         self.error.set(None);
-        self.playback_state.set(PlaybackState::Ready);
+        self.playback_state.set(AudioPlaybackState::Ready);
     }
 
     pub fn set_error(&self, message: String) {
         self.playback_state
-            .set(PlaybackState::Error(message.clone()));
+            .set(AudioPlaybackState::Error(message.clone()));
         self.error.set(Some(message.clone()));
         self.snapshot.set(AudioSnapshot {
             loading: false,

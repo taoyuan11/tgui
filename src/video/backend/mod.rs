@@ -5,7 +5,7 @@ use crate::foundation::binding::State;
 use crate::foundation::error::TguiError;
 use crate::media::{RasterRequest, TextureFrame};
 
-use super::types::{PlaybackState, VideoMetrics, VideoSize, VideoSource, VideoSurfaceSnapshot};
+use super::types::{VideoMetrics, VideoPlaybackState, VideoSize, VideoSource, VideoSurfaceSnapshot};
 
 pub(crate) mod ffmpeg;
 
@@ -13,7 +13,7 @@ pub(crate) const DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES: u64 = 100 * 1024 * 102
 
 #[derive(Clone)]
 pub(crate) struct BackendSharedState {
-    pub playback_state: State<PlaybackState>,
+    pub playback_state: State<VideoPlaybackState>,
     pub metrics: State<VideoMetrics>,
     pub volume: State<f32>,
     pub muted: State<bool>,
@@ -38,7 +38,7 @@ impl BackendSharedState {
     }
 
     pub fn reset_for_load(&self) {
-        self.playback_state.set(PlaybackState::Loading);
+        self.playback_state.set(VideoPlaybackState::Loading);
         self.metrics.set(VideoMetrics::default());
         self.video_size.set(VideoSize::default());
         self.error.set(None);
@@ -52,7 +52,7 @@ impl BackendSharedState {
 
     pub fn set_error(&self, message: String) {
         self.playback_state
-            .set(PlaybackState::Error(message.clone()));
+            .set(VideoPlaybackState::Error(message.clone()));
         self.error.set(Some(message.clone()));
         self.surface.set(VideoSurfaceSnapshot {
             intrinsic_size: self.video_size.get().intrinsic_size(),

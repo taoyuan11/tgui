@@ -130,7 +130,7 @@ impl PresentWorker {
 
         if self.playback_ended {
             self.set_decode_playing(false);
-            self.shared.playback_state.set(PlaybackState::Ended);
+            self.shared.playback_state.set(VideoPlaybackState::Ended);
             return;
         }
 
@@ -140,7 +140,7 @@ impl PresentWorker {
 
         if self.should_buffer() && !self.should_keep_draining_eof() {
             self.set_decode_playing(false);
-            self.shared.playback_state.set(PlaybackState::Buffering);
+            self.shared.playback_state.set(VideoPlaybackState::Buffering);
             return;
         }
 
@@ -153,10 +153,10 @@ impl PresentWorker {
             self.startup_pending = false;
             self.pending_open_reason = None;
             self.set_decode_playing(true);
-            self.shared.playback_state.set(PlaybackState::Playing);
+            self.shared.playback_state.set(VideoPlaybackState::Playing);
         } else {
             self.set_decode_playing(false);
-            self.shared.playback_state.set(PlaybackState::Buffering);
+            self.shared.playback_state.set(VideoPlaybackState::Buffering);
         }
     }
 

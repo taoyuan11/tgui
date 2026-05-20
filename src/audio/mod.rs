@@ -6,7 +6,7 @@ pub(crate) mod backend;
 pub use crate::ui::widget::Audio;
 pub use controller::AudioController;
 pub(crate) use types::AudioSnapshot;
-pub use types::{AudioMetrics, AudioSource, PlaybackState};
+pub use types::{AudioMetrics, AudioPlaybackState, AudioSource};
 
 #[cfg(feature = "bench-support")]
 pub mod bench_support {

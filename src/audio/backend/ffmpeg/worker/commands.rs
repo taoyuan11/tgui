@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::audio::{AudioSnapshot, AudioSource, PlaybackState};
+use crate::audio::{AudioPlaybackState, AudioSnapshot, AudioSource};
 
 use super::AudioWorker;
 use crate::audio::backend::ffmpeg::session::AudioSession;
@@ -18,7 +18,7 @@ impl AudioWorker {
                 self.reopen_source(source, Duration::ZERO, false);
             }
             BackendCommand::Play => {
-                if self.shared.playback_state.get() == PlaybackState::Ended {
+                if self.shared.playback_state.get() == AudioPlaybackState::Ended {
                     self.reopen_current_source(Duration::ZERO, true);
                     return true;
                 }
@@ -28,7 +28,7 @@ impl AudioWorker {
                 }
                 if self.session.is_some() {
                     self.sync_metrics(true);
-                    self.shared.playback_state.set(PlaybackState::Playing);
+                    self.shared.playback_state.set(AudioPlaybackState::Playing);
                 }
             }
             BackendCommand::Pause => {
@@ -36,7 +36,7 @@ impl AudioWorker {
                 if let Some(session) = self.session.as_ref() {
                     session.set_playing(false);
                     self.sync_metrics(true);
-                    self.shared.playback_state.set(PlaybackState::Paused);
+                    self.shared.playback_state.set(AudioPlaybackState::Paused);
                 }
             }
             BackendCommand::Stop => {
@@ -93,11 +93,11 @@ impl AudioWorker {
                 self.current_duration = session.duration();
                 self.session = Some(session);
                 if should_play {
-                    self.shared.playback_state.set(PlaybackState::Playing);
+                    self.shared.playback_state.set(AudioPlaybackState::Playing);
                 } else if position.is_zero() {
                     self.shared.set_ready();
                 } else {
-                    self.shared.playback_state.set(PlaybackState::Paused);
+                    self.shared.playback_state.set(AudioPlaybackState::Paused);
                     self.shared.snapshot.set(AudioSnapshot {
                         loading: false,
                         error: None,

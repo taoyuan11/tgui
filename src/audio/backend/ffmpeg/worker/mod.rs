@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::{after, select, Receiver};
 
-use crate::audio::{AudioMetrics, AudioSource, PlaybackState};
+use crate::audio::{AudioMetrics, AudioPlaybackState, AudioSource};
 
 use super::super::{BackendSharedState, DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES};
 use super::session::{AudioSession, SessionStep};
@@ -90,7 +90,7 @@ impl AudioWorker {
                     } else {
                         self.should_play = false;
                         self.sync_metrics(true);
-                        self.shared.playback_state.set(PlaybackState::Ended);
+                        self.shared.playback_state.set(AudioPlaybackState::Ended);
                     }
                 }
                 Err(error) => {

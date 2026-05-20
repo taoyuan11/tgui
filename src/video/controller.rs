@@ -10,7 +10,7 @@ use super::backend::{
     ffmpeg::FfmpegVideoBackend, BackendSharedState, VideoBackend,
     DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
 };
-use super::types::{PlaybackState, VideoMetrics, VideoSize, VideoSource, VideoSurfaceSnapshot};
+use super::types::{VideoMetrics, VideoPlaybackState, VideoSize, VideoSource, VideoSurfaceSnapshot};
 
 #[derive(Clone)]
 pub struct VideoController {
@@ -25,7 +25,7 @@ struct VideoControllerInner {
 impl VideoController {
     pub fn new(ctx: &ViewModelContext) -> Self {
         let shared = BackendSharedState {
-            playback_state: ctx.state(PlaybackState::Idle),
+            playback_state: ctx.state(VideoPlaybackState::Idle),
             metrics: ctx.state(VideoMetrics::default()),
             volume: ctx.state(1.0),
             muted: ctx.state(false),
@@ -51,7 +51,7 @@ impl VideoController {
     }
 
     pub fn play(&self) {
-        if self.inner.shared.playback_state.get() == PlaybackState::Ended {
+        if self.inner.shared.playback_state.get() == VideoPlaybackState::Ended {
             self.replay();
             return;
         }
@@ -87,7 +87,7 @@ impl VideoController {
         self.inner.backend.set_buffer_memory_limit_bytes(bytes);
     }
 
-    pub fn playback_state(&self) -> Signal<PlaybackState> {
+    pub fn playback_state(&self) -> Signal<VideoPlaybackState> {
         self.inner.shared.playback_state.signal()
     }
 
@@ -250,7 +250,7 @@ mod tests {
 
     fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
         BackendSharedState {
-            playback_state: ctx.state(PlaybackState::Idle),
+            playback_state: ctx.state(VideoPlaybackState::Idle),
             metrics: ctx.state(VideoMetrics::default()),
             volume: ctx.state(1.0),
             muted: ctx.state(false),
@@ -328,7 +328,7 @@ mod tests {
         *backend.frame.lock().expect("frame lock poisoned") = Some(frame.clone());
         let controller = VideoController::from_parts(shared.clone(), backend);
 
-        shared.playback_state.set(PlaybackState::Paused);
+        shared.playback_state.set(VideoPlaybackState::Paused);
         shared.metrics.set(VideoMetrics {
             duration: Some(Duration::from_secs(30)),
             position: Duration::from_secs(12),
@@ -348,7 +348,7 @@ mod tests {
             error: None,
         });
 
-        assert_eq!(controller.playback_state().get(), PlaybackState::Paused);
+        assert_eq!(controller.playback_state().get(), VideoPlaybackState::Paused);
         assert_eq!(controller.position().get(), Duration::from_secs(12));
         assert_eq!(controller.duration().get(), Some(Duration::from_secs(30)));
         assert_eq!(
@@ -370,7 +370,7 @@ mod tests {
     fn play_restarts_from_beginning_after_playback_ended() {
         let ctx = test_context();
         let shared = test_shared(&ctx);
-        shared.playback_state.set(PlaybackState::Ended);
+        shared.playback_state.set(VideoPlaybackState::Ended);
         let backend = Arc::new(MockBackend::new());
         let commands = backend.commands.clone();
         let controller = VideoController::from_parts(shared, backend);

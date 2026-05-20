@@ -9,7 +9,7 @@ use super::backend::{
     ffmpeg::FfmpegAudioBackend, AudioBackend, BackendSharedState,
     DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES,
 };
-use super::types::{AudioMetrics, AudioSnapshot, AudioSource, PlaybackState};
+use super::types::{AudioMetrics, AudioPlaybackState, AudioSnapshot, AudioSource};
 
 #[cfg(test)]
 mod tests;
@@ -37,7 +37,7 @@ impl AudioController {
     /// 返回绑定到当前上下文的音频控制器。
     pub fn new(ctx: &ViewModelContext) -> Self {
         let shared = BackendSharedState {
-            playback_state: ctx.state(PlaybackState::Idle),
+            playback_state: ctx.state(AudioPlaybackState::Idle),
             metrics: ctx.state(AudioMetrics::default()),
             volume: ctx.state(1.0),
             muted: ctx.state(false),
@@ -71,7 +71,7 @@ impl AudioController {
 
     /// 开始或继续播放当前音频。
     pub fn play(&self) {
-        if self.inner.shared.playback_state.get() == PlaybackState::Ended {
+        if self.inner.shared.playback_state.get() == AudioPlaybackState::Ended {
             self.inner.backend.seek(Duration::ZERO);
         }
         self.inner.backend.play();
@@ -136,7 +136,7 @@ impl AudioController {
     ///
     /// # 返回值
     /// 返回当前音频播放状态的响应式信号。
-    pub fn playback_state(&self) -> Signal<PlaybackState> {
+    pub fn playback_state(&self) -> Signal<AudioPlaybackState> {
         self.inner.shared.playback_state.signal()
     }
 

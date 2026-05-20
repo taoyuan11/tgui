@@ -95,7 +95,7 @@ impl From<&str> for AudioSource {
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 /// 音频播放状态。
-pub enum PlaybackState {
+pub enum AudioPlaybackState {
     #[default]
     Idle,
     Loading,

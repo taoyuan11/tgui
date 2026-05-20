@@ -18,17 +18,17 @@ fn status_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
     text_style(mode, sp(14.0))
 }
 
-fn playback_status_text(state: PlaybackState) -> String {
+fn playback_status_text(state: AudioPlaybackState) -> String {
     tgui_log(LogLevel::Info, format!("播放状态: {:?}", state));
     match state {
-        PlaybackState::Idle => "等待".to_string(),
-        PlaybackState::Loading => "加载中".to_string(),
-        PlaybackState::Ready => "准备".to_string(),
-        PlaybackState::Playing => "播放中".to_string(),
-        PlaybackState::Paused => "暂停中".to_string(),
-        PlaybackState::Buffering => "缓冲中".to_string(),
-        PlaybackState::Ended => "播放结束".to_string(),
-        PlaybackState::Error(error) => format!("播放出错: {error}"),
+        AudioPlaybackState::Idle => "等待".to_string(),
+        AudioPlaybackState::Loading => "加载中".to_string(),
+        AudioPlaybackState::Ready => "准备".to_string(),
+        AudioPlaybackState::Playing => "播放中".to_string(),
+        AudioPlaybackState::Paused => "暂停中".to_string(),
+        AudioPlaybackState::Buffering => "缓冲中".to_string(),
+        AudioPlaybackState::Ended => "播放结束".to_string(),
+        AudioPlaybackState::Error(error) => format!("播放出错: {error}"),
     }
 }
 
@@ -86,7 +86,7 @@ impl VideoPlayer {
 
         controller.playback_state().map(|state| {
             match state {
-                tgui::video::PlaybackState::Error(err) => {
+                VideoPlaybackState::Error(err) => {
                     tgui_log(LogLevel::Error, format!("播放出错: {err}"));
                 }
                 _ => {}

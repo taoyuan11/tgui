@@ -22,7 +22,7 @@ use crate::audio::backend::shared::{
 };
 use crate::foundation::error::TguiError;
 use crate::media::{IntrinsicSize, RasterRequest, TextureFrame};
-use crate::video::{PlaybackState, VideoSize, VideoSource, VideoSurfaceSnapshot};
+use crate::video::{VideoPlaybackState, VideoSize, VideoSource, VideoSurfaceSnapshot};
 
 use super::{BackendSharedState, VideoBackend};
 

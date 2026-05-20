@@ -195,7 +195,7 @@ pub mod prelude {
         Application, MsaaMode, ResourceBudget, WindowClosePolicy, WindowRole, WindowSpec,
     };
     #[cfg(feature = "audio")]
-    pub use crate::audio::{Audio, AudioController, AudioMetrics, AudioSource, PlaybackState};
+    pub use crate::audio::{Audio, AudioController, AudioMetrics, AudioPlaybackState, AudioSource};
     pub use crate::canvas::{
         Canvas, CanvasBlendMode, CanvasBrush, CanvasColorFilter, CanvasDragEvent, CanvasEffect,
         CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasGroupMode, CanvasGroupShape,
@@ -242,7 +242,9 @@ pub mod prelude {
         default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
     };
     #[cfg(feature = "video")]
-    pub use crate::video::{VideoController, VideoMetrics, VideoSize, VideoSource, VideoSurface};
+    pub use crate::video::{
+        VideoController, VideoMetrics, VideoPlaybackState, VideoSize, VideoSource, VideoSurface,
+    };
     pub use crate::widgets::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
