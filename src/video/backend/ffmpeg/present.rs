@@ -267,8 +267,12 @@ impl PresentWorker {
                     self.evaluate_playback_state();
                 } else {
                     match self.pending_open_reason.take().unwrap_or(OpenReason::Load) {
-                        OpenReason::Load => self.shared.playback_state.set(VideoPlaybackState::Ready),
-                        OpenReason::Seek => self.shared.playback_state.set(VideoPlaybackState::Paused),
+                        OpenReason::Load => {
+                            self.shared.playback_state.set(VideoPlaybackState::Ready)
+                        }
+                        OpenReason::Seek => {
+                            self.shared.playback_state.set(VideoPlaybackState::Paused)
+                        }
                     }
                 }
             }

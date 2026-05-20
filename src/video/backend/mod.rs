@@ -5,7 +5,9 @@ use crate::foundation::binding::State;
 use crate::foundation::error::TguiError;
 use crate::media::{RasterRequest, TextureFrame};
 
-use super::types::{VideoMetrics, VideoPlaybackState, VideoSize, VideoSource, VideoSurfaceSnapshot};
+use super::types::{
+    VideoMetrics, VideoPlaybackState, VideoSize, VideoSource, VideoSurfaceSnapshot,
+};
 
 pub(crate) mod ffmpeg;
 

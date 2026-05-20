@@ -140,7 +140,9 @@ impl PresentWorker {
 
         if self.should_buffer() && !self.should_keep_draining_eof() {
             self.set_decode_playing(false);
-            self.shared.playback_state.set(VideoPlaybackState::Buffering);
+            self.shared
+                .playback_state
+                .set(VideoPlaybackState::Buffering);
             return;
         }
 
@@ -156,7 +158,9 @@ impl PresentWorker {
             self.shared.playback_state.set(VideoPlaybackState::Playing);
         } else {
             self.set_decode_playing(false);
-            self.shared.playback_state.set(VideoPlaybackState::Buffering);
+            self.shared
+                .playback_state
+                .set(VideoPlaybackState::Buffering);
         }
     }
 

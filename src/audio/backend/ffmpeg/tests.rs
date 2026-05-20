@@ -52,7 +52,10 @@ fn stop_clears_session_and_resets_shared_state() {
     worker.current_source = Some(AudioSource::File("demo.mp3".into()));
     worker.current_duration = Some(Duration::from_secs(30));
     worker.should_play = true;
-    worker.shared.playback_state.set(AudioPlaybackState::Playing);
+    worker
+        .shared
+        .playback_state
+        .set(AudioPlaybackState::Playing);
 
     assert!(worker.handle_command(BackendCommand::Stop));
 

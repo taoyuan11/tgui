@@ -101,8 +101,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         #[cfg(target_os = "windows")]
         if self.config.clear_color.a < 255 {
-            let platform_attrs = winit_win32::WindowAttributesWindows::default()
-                .with_no_redirection_bitmap(true);
+            let platform_attrs =
+                winit_win32::WindowAttributesWindows::default().with_no_redirection_bitmap(true);
             attributes = attributes.with_platform_attributes(Box::new(platform_attrs));
         }
 

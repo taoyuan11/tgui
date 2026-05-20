@@ -10,7 +10,9 @@ use super::backend::{
     ffmpeg::FfmpegVideoBackend, BackendSharedState, VideoBackend,
     DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
 };
-use super::types::{VideoMetrics, VideoPlaybackState, VideoSize, VideoSource, VideoSurfaceSnapshot};
+use super::types::{
+    VideoMetrics, VideoPlaybackState, VideoSize, VideoSource, VideoSurfaceSnapshot,
+};
 
 #[derive(Clone)]
 pub struct VideoController {
@@ -348,7 +350,10 @@ mod tests {
             error: None,
         });
 
-        assert_eq!(controller.playback_state().get(), VideoPlaybackState::Paused);
+        assert_eq!(
+            controller.playback_state().get(),
+            VideoPlaybackState::Paused
+        );
         assert_eq!(controller.position().get(), Duration::from_secs(12));
         assert_eq!(controller.duration().get(), Some(Duration::from_secs(30)));
         assert_eq!(

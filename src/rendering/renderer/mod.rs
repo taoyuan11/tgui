@@ -111,22 +111,19 @@ impl Renderer {
         }
         let (logical_width, logical_height) = self.logical_viewport_size();
 
-
         #[cfg(feature = "video")]
-        let active_texture_keys: HashSet<_> = {
-            let mut keys: HashSet<_> = scene
-                .textures
-                .iter()
-                .map(|texture| texture.texture.id())
-                .collect();
-            keys.extend(
-                scene
-                    .video_textures
+        let active_texture_keys: HashSet<_> =
+            {
+                let mut keys: HashSet<_> = scene
+                    .textures
                     .iter()
-                    .filter_map(|texture| texture.controller.current_frame().map(|frame| frame.id())),
-            );
-            keys
-        };
+                    .map(|texture| texture.texture.id())
+                    .collect();
+                keys.extend(scene.video_textures.iter().filter_map(|texture| {
+                    texture.controller.current_frame().map(|frame| frame.id())
+                }));
+                keys
+            };
 
         #[cfg(not(feature = "video"))]
         let active_texture_keys: HashSet<_> = scene

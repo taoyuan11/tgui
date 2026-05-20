@@ -48,9 +48,7 @@ use crate::audio::backend::{
     DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES,
 };
 #[cfg(feature = "audio")]
-use crate::audio::{
-    Audio, AudioController, AudioMetrics, AudioSource, AudioPlaybackState,
-};
+use crate::audio::{Audio, AudioController, AudioMetrics, AudioPlaybackState, AudioSource};
 #[cfg(feature = "video")]
 use crate::media::TextureFrame;
 use crate::notification::async_notification_channel;

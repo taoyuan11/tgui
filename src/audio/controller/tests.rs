@@ -170,7 +170,10 @@ fn controller_bindings_reflect_shared_state() {
     shared.error.set(Some("boom".to_string()));
     shared.looping.set(true);
 
-    assert_eq!(controller.playback_state().get(), AudioPlaybackState::Paused);
+    assert_eq!(
+        controller.playback_state().get(),
+        AudioPlaybackState::Paused
+    );
     assert_eq!(controller.position().get(), Duration::from_secs(12));
     assert_eq!(controller.duration().get(), Some(Duration::from_secs(30)));
     assert_eq!(
