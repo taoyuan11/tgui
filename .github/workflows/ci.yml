@@ -37,7 +37,7 @@ jobs:
     name: fmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install rustfmt
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -50,7 +50,7 @@ jobs:
     env:
       RUSTDOCFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Install FFmpeg dev libraries
         run: |
@@ -76,7 +76,7 @@ jobs:
           - label: full
             features: "audio video bench-support"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -152,7 +152,7 @@ jobs:
           - label: full
             features: "audio video bench-support"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Install FFmpeg (Linux)
         if: runner.os == 'Linux' && matrix.feature_set.features != ''
@@ -207,7 +207,7 @@ jobs:
     name: bench compile
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Install FFmpeg dev libraries
         run: |
@@ -228,7 +228,7 @@ jobs:
     name: android-check (aarch64-linux-android)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
@@ -243,7 +243,7 @@ jobs:
     name: cargo-deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
@@ -260,7 +260,7 @@ jobs:
     # TODO: 仓库 owner 在 repo Variables 设 ENABLE_COVERAGE=true，并在 Secrets 添加 CODECOV_TOKEN 后启用。
     if: ${{ vars.ENABLE_COVERAGE == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
@@ -293,7 +293,7 @@ jobs:
     # 同时需要在 Bencher.dev 创建项目并把项目 slug 填到下面的 --project 参数。
     if: ${{ vars.ENABLE_BENCH == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Install FFmpeg dev libraries
         run: |
