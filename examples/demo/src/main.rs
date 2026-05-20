@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::path::PathBuf;
 use tgui::prelude::*;
-use tgui::prelude::VideoController;
 
 fn text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
     let mut style = TextWidgetStyle::default_for(mode);
@@ -84,6 +83,16 @@ impl VideoPlayer {
     fn new(context: &ViewModelContext) -> Self {
         let source = context.state(String::from("D:\\CloudMusic\\MV\\郭顶 - 凄美地.mp4"));
         let controller = VideoController::new(context);
+
+        controller.playback_state().map(|state| {
+            match state {
+                tgui::video::PlaybackState::Error(err) => {
+                    tgui_log(LogLevel::Error, format!("播放出错: {err}"));
+                }
+                _ => {}
+            }
+        });
+
         // controller.set_volume(0.0);
         Self {
             video_controller: controller,
