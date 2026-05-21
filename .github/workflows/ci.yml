@@ -229,13 +229,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: android-actions/setup-android@v4
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27d
+          add-to-path: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
         with:
           key: android
-      # 此处只验证 cfg(target_os = "android") 的代码可解析，不需要 NDK 链接器（cargo check）。
+      - name: Configure Android NDK toolchain
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android34-clang" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$TOOLCHAIN/llvm-ar" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/aarch64-linux-android34-clang" >> "$GITHUB_ENV"
+      # ring 的构建脚本会为 Android target 编译 C 代码，因此这里需要可用的 NDK clang/ar。
       # ohos target 需要 nightly + 自定义 target spec，暂不在 CI 矩阵；本地验证。
       - run: cargo check --target aarch64-linux-android --features android
 

@@ -279,7 +279,9 @@ fn test_context() -> ViewModelContext {
 
 #[cfg(feature = "video")]
 fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoController {
-    struct StaticVideoBackend;
+    struct StaticVideoBackend {
+        frame: Option<std::sync::Arc<crate::media::TextureFrame>>,
+    }
 
     impl VideoBackend for StaticVideoBackend {
         fn load(&self, _source: crate::video::VideoSource) -> Result<(), crate::core::TguiError> {
@@ -294,11 +296,12 @@ fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoC
         fn set_buffer_memory_limit_bytes(&self, _bytes: u64) {}
         fn set_target_raster(&self, _raster: Option<crate::media::RasterRequest>) {}
         fn current_frame(&self) -> Option<std::sync::Arc<crate::media::TextureFrame>> {
-            None
+            self.frame.clone()
         }
         fn shutdown(&self) {}
     }
 
+    let frame = snapshot.texture.clone();
     let ctx = test_context();
     let shared = BackendSharedState {
         playback_state: ctx.state(VideoPlaybackState::Ready),
@@ -320,7 +323,7 @@ fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoC
         error: ctx.state(snapshot.error.clone()),
         surface: ctx.state(snapshot),
     };
-    VideoController::from_parts(shared, std::sync::Arc::new(StaticVideoBackend))
+    VideoController::from_parts(shared, std::sync::Arc::new(StaticVideoBackend { frame }))
 }
 
 #[derive(Default)]

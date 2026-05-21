@@ -81,7 +81,7 @@ impl EventLoop {
             #[cfg(target_os = "windows")]
             Self::Windows(event_loop) => event_loop.window_target().set_control_flow(control_flow),
             #[cfg(target_os = "macos")]
-            Self::MacOS(event_loop) => event_loop.set_control_flow(control_flow),
+            Self::MacOS(event_loop) => event_loop.window_target().set_control_flow(control_flow),
             #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
             Self::Wayland(event_loop) => event_loop.window_target().set_control_flow(control_flow),
             #[cfg(all(target_os = "linux", not(target_env = "ohos")))]

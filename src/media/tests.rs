@@ -379,9 +379,15 @@ impl TestServer {
                         .lines()
                         .next()
                         .and_then(|line| line.split_whitespace().nth(1))
-                        .unwrap_or("/");
+                        .map(|target| {
+                            reqwest::Url::parse(target)
+                                .ok()
+                                .map(|url| url.path().to_string())
+                                .unwrap_or_else(|| target.to_string())
+                        })
+                        .unwrap_or_else(|| "/".to_string());
 
-                    let response = routes.get(path);
+                    let response = routes.get(&path);
                     let (status_line, content_type, body) = if let Some(response) = response {
                         (
                             response.status_line,

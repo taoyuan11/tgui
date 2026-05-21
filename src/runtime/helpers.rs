@@ -16,7 +16,7 @@ use super::input;
 pub(super) fn is_primary_shortcut_modifier(modifiers: ModifiersState) -> bool {
     #[cfg(target_os = "macos")]
     {
-        modifiers.super_key()
+        modifiers.meta_key()
     }
 
     #[cfg(not(target_os = "macos"))]

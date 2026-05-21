@@ -273,9 +273,9 @@ fn video_surface_renders_texture_when_frame_exists() {
         false,
     );
 
-    assert_eq!(rendered.primitives.textures.len(), 1);
-    assert_eq!(rendered.primitives.textures[0].frame.width, 160.0);
-    assert_eq!(rendered.primitives.textures[0].frame.height, 90.0);
+    assert_eq!(rendered.primitives.video_textures.len(), 1);
+    assert_eq!(rendered.primitives.video_textures[0].frame.width, 160.0);
+    assert_eq!(rendered.primitives.video_textures[0].frame.height, 90.0);
 }
 
 #[test]
