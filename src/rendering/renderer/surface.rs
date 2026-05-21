@@ -18,11 +18,11 @@ pub(super) fn create_instance(clear_color: TguiColor) -> wgpu::Instance {
 pub(super) async fn request_adapter(
     instance: &wgpu::Instance,
     surface: &wgpu::Surface<'_>,
-    clear_color: TguiColor,
+    _clear_color: TguiColor,
 ) -> Result<wgpu::Adapter, TguiError> {
     #[cfg(target_os = "windows")]
     {
-        if clear_color.a < 255 {
+        if _clear_color.a < 255 {
             if let Some(adapter) = instance
                 .enumerate_adapters(wgpu::Backends::DX12)
                 .await

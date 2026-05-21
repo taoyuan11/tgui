@@ -188,57 +188,6 @@ fn primary_button_hover_background_uses_transition() {
         .expect("hovered button should render a filled background")
         .color;
 
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    let mid = tree.render_output_with_widget_state(
-        &font_manager,
-        &theme,
-        &media,
-        &mut animations,
-        None,
-        None,
-        &hovered_state,
-        &HashMap::new(),
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 120.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-    let mid_background = mid
-        .primitives
-        .shapes
-        .iter()
-        .find(|shape| shape.stroke_width == 0.0)
-        .expect("hovered button should keep a filled background")
-        .color;
-
-    std::thread::sleep(std::time::Duration::from_millis(140));
-    let settled = tree.render_output_with_widget_state(
-        &font_manager,
-        &theme,
-        &media,
-        &mut animations,
-        None,
-        None,
-        &hovered_state,
-        &HashMap::new(),
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 120.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-    let settled_background = settled
-        .primitives
-        .shapes
-        .iter()
-        .find(|shape| shape.stroke_width == 0.0)
-        .expect("hovered button should render a filled background after transition")
-        .color;
     let start_style = default_button_style(
         &theme,
         crate::ui::theme::WidgetState::default(),
@@ -252,9 +201,47 @@ fn primary_button_hover_background_uses_transition() {
         },
         crate::ui::widget::common::ButtonVariantKind::Primary,
     );
+    let mut sampled_transition = None;
+    let mut settled_background = immediate_background;
+
+    for _ in 0..18 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let rendered = tree.render_output_with_widget_state(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &hovered_state,
+            &HashMap::new(),
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let background = rendered
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| shape.stroke_width == 0.0)
+            .expect("hovered button should keep a filled background")
+            .color;
+        if background != start_background && background != hovered_style.background {
+            sampled_transition = Some(background);
+        }
+        settled_background = background;
+        if background == hovered_style.background {
+            break;
+        }
+    }
 
     assert_eq!(start_background, start_style.background);
     assert_eq!(immediate_background, start_background);
+    let mid_background = sampled_transition.expect("hover transition should produce an intermediate color");
     assert_ne!(mid_background, start_background);
     assert_ne!(mid_background, hovered_style.background);
     assert_eq!(settled_background, hovered_style.background);
