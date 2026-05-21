@@ -1,6 +1,6 @@
-mod application_handler;
 #[cfg(all(target_os = "android", feature = "android"))]
 mod android_text_input;
+mod application_handler;
 mod binding_sync;
 mod bootstrap;
 mod cache_support;

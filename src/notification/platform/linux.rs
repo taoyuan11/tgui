@@ -48,6 +48,13 @@ pub(crate) fn platform_send(
                 }
             });
         });
+    } else {
+        std::thread::spawn(move || {
+            // Keep the DBus notification handle alive until the server closes it.
+            // Some Linux desktops drop the notification entirely if the client
+            // connection disappears immediately after `show()`.
+            handle.on_close(|_| {});
+        });
     }
 
     Ok(())

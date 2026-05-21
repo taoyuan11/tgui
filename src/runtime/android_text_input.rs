@@ -15,9 +15,9 @@ use jni::{jni_sig, jni_str, Env, EnvUnowned, JavaVM, NativeMethod};
 use winit_android::activity::{AndroidApp, AndroidAppWaker};
 
 #[cfg(all(target_os = "android", feature = "android"))]
-use crate::foundation::binding::TextChange;
-#[cfg(all(target_os = "android", feature = "android"))]
 use crate::foundation::binding::InvalidationSignal;
+#[cfg(all(target_os = "android", feature = "android"))]
+use crate::foundation::binding::TextChange;
 #[cfg(all(target_os = "android", feature = "android"))]
 use crate::log::Log;
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -94,24 +94,23 @@ pub(crate) fn install_android_text_input_bridge(
     let vm = unsafe { JavaVM::from_raw(vm_raw) };
     let state = vm
         .attach_current_thread(|env| -> Result<BridgeState, JniError> {
-        let activity_borrowed = unsafe { JObject::from_raw(env, activity_raw) };
-        let activity = env.new_global_ref(&activity_borrowed)?;
-        let bridge_class = load_bridge_class(&mut *env, &activity_borrowed)?;
-        register_natives(&mut *env, &bridge_class)?;
-        env.call_static_method(
-            &bridge_class,
-            jni_str!("install"),
-            jni_sig!("(Landroid/app/Activity;)V"),
-            &[JValue::Object(&activity_borrowed)],
-        )
-        ?;
-        Ok(BridgeState {
-            vm: vm.clone(),
-            activity,
-            bridge_class,
-            waker: app.create_waker(),
+            let activity_borrowed = unsafe { JObject::from_raw(env, activity_raw) };
+            let activity = env.new_global_ref(&activity_borrowed)?;
+            let bridge_class = load_bridge_class(&mut *env, &activity_borrowed)?;
+            register_natives(&mut *env, &bridge_class)?;
+            env.call_static_method(
+                &bridge_class,
+                jni_str!("install"),
+                jni_sig!("(Landroid/app/Activity;)V"),
+                &[JValue::Object(&activity_borrowed)],
+            )?;
+            Ok(BridgeState {
+                vm: vm.clone(),
+                activity,
+                bridge_class,
+                waker: app.create_waker(),
+            })
         })
-    })
         .map_err(jni_to_string)?;
 
     let _ = BRIDGE_STATE.set(state);
@@ -137,18 +136,17 @@ pub(crate) fn set_soft_input_active(active: bool) {
         state
             .vm
             .attach_current_thread(|env| -> Result<(), JniError> {
-            env.call_static_method(
-                &state.bridge_class,
-                jni_str!("setInputEnabled"),
-                jni_sig!("(Landroid/app/Activity;Z)V"),
-                &[
-                    JValue::Object(state.activity.as_ref()),
-                    JValue::Bool(active),
-                ],
-            )
-            ?;
-            Ok(())
-        })
+                env.call_static_method(
+                    &state.bridge_class,
+                    jni_str!("setInputEnabled"),
+                    jni_sig!("(Landroid/app/Activity;Z)V"),
+                    &[
+                        JValue::Object(state.activity.as_ref()),
+                        JValue::Bool(active),
+                    ],
+                )?;
+                Ok(())
+            })
             .map_err(jni_to_string)
     });
     if let Err(error) = result {
@@ -173,32 +171,37 @@ pub(crate) fn sync_soft_input_state(snapshot: &AndroidTextInputSnapshot) {
             .vm
             .attach_current_thread(|env| -> Result<(), JniError> {
                 let text = env.new_string(&snapshot.text)?;
-            env.call_static_method(
-                &state.bridge_class,
-                jni_str!("syncState"),
-                jni_sig!("(Landroid/app/Activity;Ljava/lang/String;IIII)V"),
-                &[
-                    JValue::Object(state.activity.as_ref()),
-                    JValue::Object(&text),
-                    JValue::Int(byte_index_to_utf16_index(&snapshot.text, snapshot.selection_start)),
-                    JValue::Int(byte_index_to_utf16_index(&snapshot.text, snapshot.selection_end)),
-                    JValue::Int(
-                        snapshot
-                            .composing_start
-                            .map(|value| byte_index_to_utf16_index(&snapshot.text, value))
-                            .unwrap_or(-1),
-                    ),
-                    JValue::Int(
-                        snapshot
-                            .composing_end
-                            .map(|value| byte_index_to_utf16_index(&snapshot.text, value))
-                            .unwrap_or(-1),
-                    ),
-                ],
-            )
-            ?;
-            Ok(())
-        })
+                env.call_static_method(
+                    &state.bridge_class,
+                    jni_str!("syncState"),
+                    jni_sig!("(Landroid/app/Activity;Ljava/lang/String;IIII)V"),
+                    &[
+                        JValue::Object(state.activity.as_ref()),
+                        JValue::Object(&text),
+                        JValue::Int(byte_index_to_utf16_index(
+                            &snapshot.text,
+                            snapshot.selection_start,
+                        )),
+                        JValue::Int(byte_index_to_utf16_index(
+                            &snapshot.text,
+                            snapshot.selection_end,
+                        )),
+                        JValue::Int(
+                            snapshot
+                                .composing_start
+                                .map(|value| byte_index_to_utf16_index(&snapshot.text, value))
+                                .unwrap_or(-1),
+                        ),
+                        JValue::Int(
+                            snapshot
+                                .composing_end
+                                .map(|value| byte_index_to_utf16_index(&snapshot.text, value))
+                                .unwrap_or(-1),
+                        ),
+                    ],
+                )?;
+                Ok(())
+            })
             .map_err(jni_to_string)
     });
     if let Err(error) = result {
@@ -207,9 +210,7 @@ pub(crate) fn sync_soft_input_state(snapshot: &AndroidTextInputSnapshot) {
 }
 
 #[cfg(all(target_os = "android", feature = "android"))]
-fn with_bridge_state<T>(
-    f: impl FnOnce(&BridgeState) -> Result<T, String>,
-) -> Result<T, String> {
+fn with_bridge_state<T>(f: impl FnOnce(&BridgeState) -> Result<T, String>) -> Result<T, String> {
     let Some(state) = BRIDGE_STATE.get() else {
         return Err("android text input bridge not initialized".to_string());
     };
@@ -233,13 +234,11 @@ fn load_bridge_class<'local>(
         )
         .and_then(|v| v.l())?;
 
-    let dex_loader = env
-        .new_object(
-            jni_str!("dalvik.system.InMemoryDexClassLoader"),
-            jni_sig!("(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V"),
-            &[JValue::Object(&buffer), JValue::Object(&parent_loader)],
-        )
-        ?;
+    let dex_loader = env.new_object(
+        jni_str!("dalvik.system.InMemoryDexClassLoader"),
+        jni_sig!("(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V"),
+        &[JValue::Object(&buffer), JValue::Object(&parent_loader)],
+    )?;
 
     let class_name = env.new_string(BRIDGE_CLASS_NAME)?;
     let bridge_class_obj = env
@@ -331,10 +330,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         sync_soft_input_state(&runtime_snapshot(&current_value, &state));
     }
 
-    fn apply_android_text_input_snapshot(
-        &mut self,
-        snapshot: AndroidTextInputSnapshot,
-    ) -> bool {
+    fn apply_android_text_input_snapshot(&mut self, snapshot: AndroidTextInputSnapshot) -> bool {
         let Some(widget_id) = self.focused_text_input_id() else {
             return false;
         };
@@ -476,7 +472,10 @@ fn snapshot_to_runtime_state(
     let replace_start = clamp_char_boundary(current_text, replace_range.0);
     let replace_end = clamp_char_boundary(current_text, replace_range.1.max(replace_start));
     let cursor = if selection_start >= compose_start && selection_end <= compose_end {
-        Some((selection_start - compose_start, selection_end - compose_start))
+        Some((
+            selection_start - compose_start,
+            selection_end - compose_start,
+        ))
     } else {
         let compose_len = compose_end - compose_start;
         Some((compose_len, compose_len))
