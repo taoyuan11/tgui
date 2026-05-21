@@ -67,6 +67,7 @@ struct AndroidShowcaseVm {
     // 对话框状态回显
     message_status: State<String>,
     file_status: State<String>,
+    notification_status: State<String>,
 
     // 动画演示
     expanded: State<bool>,
@@ -130,6 +131,56 @@ impl AndroidShowcaseVm {
             FileDialogOptions::new().title("选择目录"),
             ValueCommand::new(Self::apply_file_result),
         );
+    }
+
+    fn request_notification_permission(ctx: &CommandContext<Self>) {
+        let _ =
+            ctx.notifications()
+                .request_permission(ValueCommand::new(|vm: &mut Self, result| {
+                    let text = match result {
+                        Ok(permission) => format!("通知权限: {permission:?}"),
+                        Err(error) => format!("通知权限请求失败: {error}"),
+                    };
+                    vm.notification_status.set(text);
+                }));
+    }
+
+    fn send_plain_notification(&mut self, ctx: &CommandContext<Self>) {
+        let result = ctx.notifications().send(
+            NotificationOptions::new("tgui Android Showcase")
+                .body("这是一条来自 android_basic_window 的普通通知。")
+                .app_name("tgui Android Showcase"),
+        );
+        self.notification_status.set(match result {
+            Ok(id) => format!("已发送普通通知: {id}"),
+            Err(error) => format!("发送普通通知失败: {error}"),
+        });
+    }
+
+    fn send_action_notification(&mut self, ctx: &CommandContext<Self>) {
+        let result = ctx.notifications().send_with_actions(
+            NotificationOptions::new("tgui Android Showcase")
+                .body("请选择一个动作，结果会回到 ViewModel。")
+                .app_name("tgui Android Showcase")
+                .action(NotificationAction::new("accept", "接受"))
+                .action(NotificationAction::new("dismiss", "忽略")),
+            ValueCommand::new(
+                |vm: &mut Self, result: Result<NotificationActionEvent, NotificationError>| {
+                    let text = match result {
+                        Ok(event) => format!(
+                            "通知动作: notification_id={}, action_id={}",
+                            event.notification_id, event.action_id
+                        ),
+                        Err(error) => format!("通知动作失败: {error}"),
+                    };
+                    vm.notification_status.set(text);
+                },
+            ),
+        );
+        self.notification_status.set(match result {
+            Ok(id) => format!("已发送动作通知: {id}"),
+            Err(error) => format!("发送动作通知失败: {error}"),
+        });
     }
 
     fn apply_message_result(&mut self, result: Result<MessageDialogResult, DialogError>) {
@@ -207,6 +258,7 @@ impl ViewModel for AndroidShowcaseVm {
             ),
             message_status: context.state("尚未触发消息对话框".to_string()),
             file_status: context.state("尚未选择文件 / 目录".to_string()),
+            notification_status: context.state("尚未请求或发送通知".to_string()),
             expanded: context.state(false),
             counter: context.state(0),
         }
@@ -232,6 +284,7 @@ impl ViewModel for AndroidShowcaseVm {
                         self.slider_section(),
                         self.input_section(),
                         self.canvas_section(),
+                        self.notification_section(),
                         self.dialog_section(),
                         self.animation_section(),
                     ]),
@@ -471,6 +524,31 @@ impl AndroidShowcaseVm {
                     )),
                 ]),
                 Text::new(self.file_status.signal()).style(body_style),
+            ]),
+        )
+    }
+
+    fn notification_section(&self) -> Element<Self> {
+        section(
+            "Notification (Android)",
+            Flex::vertical().gap(dp(8.0)).child(el![
+                Text::new("Android 13+ 请先请求通知权限，再发送通知。").style(body_style),
+                Flex::horizontal().gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
+                    Button::new("请求通知权限")
+                        .primary()
+                        .on_click(Command::new_with_context(
+                            |_: &mut Self, ctx| Self::request_notification_permission(ctx)
+                        )),
+                    Button::new("发送普通通知")
+                        .on_click(Command::new_with_context(
+                            |vm: &mut Self, ctx| vm.send_plain_notification(ctx)
+                        )),
+                    Button::new("发送动作通知")
+                        .on_click(Command::new_with_context(
+                            |vm: &mut Self, ctx| vm.send_action_notification(ctx)
+                        )),
+                ]),
+                Text::new(self.notification_status.signal()).style(body_style),
             ]),
         )
     }

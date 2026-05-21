@@ -10,6 +10,8 @@ pub use types::{
     NotificationPermission,
 };
 
+#[cfg(target_os = "android")]
+pub(crate) use platform::install_android_app;
 #[cfg(target_os = "windows")]
 pub(crate) use platform::prepare_platform_notifications;
 pub(crate) use runtime::{

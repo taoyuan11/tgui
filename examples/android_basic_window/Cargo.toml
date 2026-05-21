@@ -24,5 +24,8 @@ target_sdk_version = 34
 [package.metadata.android.application.activity]
 config_changes = "orientation|keyboardHidden|screenSize|screenLayout|uiMode"
 
+[[package.metadata.android.uses_permission]]
+name = "android.permission.POST_NOTIFICATIONS"
+
 [lib]
 crate-type = ["cdylib"]

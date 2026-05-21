@@ -1,8 +1,12 @@
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(target_os = "android")]
+mod android_bridge;
 #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(any(target_os = "android", target_env = "ohos"))]
+#[cfg(target_env = "ohos")]
 mod unsupported;
 #[cfg(target_os = "windows")]
 mod windows;
@@ -13,11 +17,15 @@ pub(crate) type NotificationActionHandler = Box<dyn FnOnce(String) + Send>;
 pub(crate) type PermissionCallback =
     Box<dyn FnOnce(Result<NotificationPermission, NotificationError>) + Send>;
 
+#[cfg(target_os = "android")]
+pub(crate) use android::{
+    install_android_app, platform_permission_status, platform_request_permission, platform_send,
+};
 #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub(crate) use linux::{platform_permission_status, platform_request_permission, platform_send};
 #[cfg(target_os = "macos")]
 pub(crate) use macos::{platform_permission_status, platform_request_permission, platform_send};
-#[cfg(any(target_os = "android", target_env = "ohos"))]
+#[cfg(target_env = "ohos")]
 pub(crate) use unsupported::{
     platform_permission_status, platform_request_permission, platform_send,
 };

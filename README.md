@@ -312,7 +312,8 @@ Button::new("发送通知").on_click(Command::new_with_context(|_, ctx| {
 - Windows：建议始终设置 `Application::app_id(...)`，这是通知身份的前置条件。
 - Linux：当前通过 `notify-rust` 发送通知，并支持 action 回调。
 - macOS：公开 API 已提供，但当前后端仍依赖额外 bridge，调用时可能返回错误。
-- Android / OHOS：当前返回 unsupported。
+- Android：宿主 manifest 需要声明 `android.permission.POST_NOTIFICATIONS`；Android 13+ 需要先请求权限；action 回调只保证在应用进程仍然存活时有效。
+- OHOS：当前返回 unsupported。
 
 ## 图片、画布与视频
 
