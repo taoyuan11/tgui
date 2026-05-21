@@ -358,6 +358,13 @@ pub struct BoundRuntimeHandler<VM> {
     cursor_position: Option<Point>,
     modifiers: ModifiersState,
     hovered_widgets: Vec<HoveredWidget<VM>>,
+    /// Widget 进入 hover 的时间戳（按 `WidgetId` 索引）。
+    /// `handle_hover` 维护：路径中新出现的 widget 写入 `Instant::now()`；离开 hover 链时删除。
+    /// collect 阶段读取它来判断 Tooltip 是否已等够 `delay`。
+    tooltip_hover_started_at: HashMap<WidgetId, Instant>,
+    /// 最近一次 collect 上报的 tooltip 唤醒时刻（hover_start + delay）。
+    /// 由 `next_deadline` 汇入 winit ControlFlow，到点后 `drive_animations` 触发 invalidate。
+    next_tooltip_wakeup_deadline: Option<Instant>,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
     active_touch_scroll: Option<TouchScrollDrag>,
@@ -462,6 +469,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             cursor_position: None,
             modifiers: ModifiersState::default(),
             hovered_widgets: Vec::new(),
+            tooltip_hover_started_at: HashMap::new(),
+            next_tooltip_wakeup_deadline: None,
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
             active_touch_scroll: None,

@@ -167,6 +167,9 @@ impl<VM> ResolvedSceneLayout<VM> {
         caret_visible: bool,
     ) -> Option<CollectedSceneCache<VM>> {
         let path = self.path_for(widget_id)?;
+        let tooltip_hover_started_at: HashMap<WidgetId, std::time::Instant> = HashMap::new();
+        let next_tooltip_wakeup: std::cell::Cell<Option<std::time::Instant>> =
+            std::cell::Cell::new(None);
         let ((mut computed, lifecycle_states, chunks, chunk_parts, visual_contexts), dependencies): (
             (
                 ComputedScene<VM>,
@@ -205,6 +208,8 @@ impl<VM> ResolvedSceneLayout<VM> {
                     units: self.units,
                     animations,
                     now: std::time::Instant::now(),
+                    tooltip_hover_started_at: &tooltip_hover_started_at,
+                    next_tooltip_wakeup: &next_tooltip_wakeup,
                 };
                 let computed = self.resolved_at_path(path).collect_subtree_cache(
                     self.layout_at_path(path),
@@ -232,6 +237,7 @@ impl<VM> ResolvedSceneLayout<VM> {
             chunk_parts,
             visual_contexts,
             dependencies,
+            next_tooltip_wakeup: next_tooltip_wakeup.get(),
         })
     }
 

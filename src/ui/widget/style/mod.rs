@@ -4,7 +4,7 @@ mod shared;
 
 pub use controls::{
     ButtonStyle, CheckboxStyle, InputStyle, RadioStyle, SelectStyle, SliderStyle, SwitchStyle,
-    TextareaStyle,
+    TextareaStyle, TooltipStyle,
 };
 pub use shared::{
     CanvasStyle, ContainerStyle, FocusRingOverride, ImageStyle, TextWidgetStyle, VideoSurfaceStyle,

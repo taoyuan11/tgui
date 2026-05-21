@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::time::Instant;
 
 use taffy::prelude::TaffyTree;
 
@@ -36,7 +38,12 @@ pub(crate) struct CollectContext<'a, 'b> {
     pub(crate) viewport: Rect,
     pub(crate) units: UnitContext,
     pub(crate) animations: &'b mut AnimationEngine,
-    pub(crate) now: std::time::Instant,
+    pub(crate) now: Instant,
+    /// runtime 维护：widget 进入 hover 的时间戳。emit_tooltip 据此判断 hover 是否已持续到 `delay`。
+    pub(crate) tooltip_hover_started_at: &'a HashMap<WidgetId, Instant>,
+    /// emit_tooltip 写入：尚未达到 delay 时记录下次该唤醒事件循环的时刻，
+    /// runtime 会聚合到 `next_deadline` 并在到点后 invalidate scene 触发重 collect。
+    pub(crate) next_tooltip_wakeup: &'a Cell<Option<Instant>>,
 }
 
 pub(crate) struct TextInputLayoutOverride<'a> {
@@ -91,6 +98,9 @@ pub(crate) struct CollectedSceneCache<VM> {
     pub(crate) chunk_parts: HashMap<WidgetId, SceneChunkParts<VM>>,
     pub(crate) visual_contexts: HashMap<WidgetId, VisualContextSnapshot>,
     pub(crate) dependencies: DependencyGraph,
+    /// 最近的 tooltip 唤醒时刻；runtime 据此把事件循环 WaitUntil 至此时间，
+    /// 到点后 invalidate scene 再次 collect。若无 tooltip 在等待期内则为 `None`。
+    pub(crate) next_tooltip_wakeup: Option<Instant>,
 }
 
 #[derive(Clone)]

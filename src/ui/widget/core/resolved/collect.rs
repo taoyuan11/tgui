@@ -4,6 +4,7 @@ use super::*;
 mod chrome;
 mod controls;
 mod layout_media;
+mod tooltip;
 
 struct CollectResolvedStyles {
     button_style: Option<ResolvedButtonStyle>,
@@ -98,6 +99,8 @@ impl<VM> ResolvedElement<VM> {
                 "unhandled widget kind in collect_subtree_cache_tracked"
             );
         }
+
+        self.emit_tooltip_if_visible(context, &mut computed, &visual);
 
         caches
             .chunk_parts

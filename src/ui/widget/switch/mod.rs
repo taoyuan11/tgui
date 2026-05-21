@@ -194,6 +194,7 @@ impl<VM> Switch<VM> {
                 lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
+                tooltip: None,
                 kind: WidgetKind::Switch {
                     checked: checked.into(),
                     on_change: None,

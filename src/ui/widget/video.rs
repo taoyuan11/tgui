@@ -282,6 +282,7 @@ impl VideoSurface {
             lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background: self.background.clone(),
+            tooltip: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -305,6 +306,7 @@ impl VideoSurface {
             lifecycle_events,
             media_events: MediaEventHandlers::default(),
             background: self.background.clone(),
+            tooltip: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -328,6 +330,7 @@ impl VideoSurface {
             lifecycle_events: LifecycleEventHandlers::default(),
             media_events,
             background: self.background.clone(),
+            tooltip: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -350,6 +353,7 @@ impl<VM> From<VideoSurface> for Element<VM> {
             lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background: value.background.clone(),
+            tooltip: None,
             kind: WidgetKind::VideoSurface {
                 style: value.style.clone(),
                 video: value,

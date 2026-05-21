@@ -197,6 +197,7 @@ impl<VM> Slider<VM> {
                 lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
+                tooltip: None,
                 kind: WidgetKind::Slider {
                     value: value.into(),
                     min,

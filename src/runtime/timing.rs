@@ -71,6 +71,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let mut frame_advanced = false;
         let mut smooth_scroll_advanced = false;
+        // tooltip 唤醒到点：invalidate scene 让下一帧 collect 看到 elapsed >= delay。
+        if let Some(deadline) = self.next_tooltip_wakeup_deadline {
+            if deadline <= now {
+                self.next_tooltip_wakeup_deadline = None;
+                self.invalidate_computed_scene();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                frame_advanced = true;
+            }
+        }
         if self.advance_smooth_scroll() {
             frame_advanced = true;
             smooth_scroll_advanced = true;

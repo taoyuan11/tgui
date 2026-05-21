@@ -249,9 +249,10 @@ pub mod prelude {
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
         ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Input,
-        InputStyle, IntoTextContent, Radio, RadioGroup, RadioOption, RadioStyle, Select,
-        SelectOption, SelectStyle, Slider, SliderStyle, Switch, SwitchStyle, Text, TextWidgetStyle,
-        Textarea, TextareaStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
+        InputStyle, IntoTextContent, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
+        OverlaySide, Radio, RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle,
+        Slider, SliderStyle, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
+        Tooltip, TooltipStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
         WidgetSurfaceStyle, WidgetTree,
     };
 }
@@ -279,9 +280,10 @@ pub mod widgets {
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
         ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Input,
-        InputStyle, IntoTextContent, Radio, RadioGroup, RadioOption, RadioStyle, Select,
-        SelectOption, SelectStyle, Slider, SliderStyle, Switch, SwitchStyle, Text, TextWidgetStyle,
-        Textarea, TextareaStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
+        InputStyle, IntoTextContent, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
+        OverlaySide, Radio, RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle,
+        Slider, SliderStyle, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
+        Tooltip, TooltipStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
         WidgetSurfaceStyle, WidgetTree,
     };
     #[cfg(feature = "video")]

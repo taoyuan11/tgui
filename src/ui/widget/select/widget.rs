@@ -393,6 +393,7 @@ where
             lifecycle_events: select.lifecycle_events,
             media_events: select.media_events,
             background: select.background,
+            tooltip: None,
             kind: WidgetKind::Select {
                 selected_label,
                 placeholder: select.placeholder,

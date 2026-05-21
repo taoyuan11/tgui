@@ -118,6 +118,7 @@ impl Audio {
             lifecycle_events,
             media_events: MediaEventHandlers::default(),
             background: None,
+            tooltip: None,
             kind: WidgetKind::Audio { audio: self },
         }
     }
@@ -135,6 +136,7 @@ impl Audio {
             lifecycle_events: LifecycleEventHandlers::default(),
             media_events,
             background: None,
+            tooltip: None,
             kind: WidgetKind::Audio { audio: self },
         }
     }
@@ -151,6 +153,7 @@ impl<VM> From<Audio> for Element<VM> {
             lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background: None,
+            tooltip: None,
             kind: WidgetKind::Audio { audio: value },
         }
     }

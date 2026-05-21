@@ -13,6 +13,7 @@ pub struct Element<VM> {
     pub(crate) lifecycle_events: LifecycleEventHandlers<VM>,
     pub(crate) media_events: MediaEventHandlers<VM>,
     pub(crate) background: Option<Value<Color>>,
+    pub(crate) tooltip: Option<crate::ui::widget::tooltip::Tooltip>,
     pub(crate) kind: WidgetKind<VM>,
 }
 
@@ -27,6 +28,7 @@ impl<VM> Clone for Element<VM> {
             lifecycle_events: self.lifecycle_events.clone(),
             media_events: self.media_events.clone(),
             background: self.background.clone(),
+            tooltip: self.tooltip.clone(),
             kind: self.kind.clone(),
         }
     }
@@ -41,6 +43,7 @@ pub(crate) struct ResolvedElement<VM> {
     pub(crate) lifecycle_events: LifecycleEventHandlers<VM>,
     pub(crate) media_events: MediaEventHandlers<VM>,
     pub(crate) background: Option<Value<Color>>,
+    pub(crate) tooltip: Option<crate::ui::widget::tooltip::Tooltip>,
     pub(crate) child_source_spans: Vec<usize>,
     pub(crate) kind: ResolvedWidgetKind<VM>,
 }
@@ -144,6 +147,7 @@ impl<VM> Clone for ResolvedElement<VM> {
             lifecycle_events: self.lifecycle_events.clone(),
             media_events: self.media_events.clone(),
             background: self.background.clone(),
+            tooltip: self.tooltip.clone(),
             child_source_spans: self.child_source_spans.clone(),
             kind: self.kind.clone(),
         }

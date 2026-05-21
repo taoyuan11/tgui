@@ -198,12 +198,20 @@ impl<VM> Element<VM> {
             lifecycle_events: self.lifecycle_events.scope(selector.clone()),
             media_events: self.media_events.scope(selector),
             background: self.background,
+            tooltip: self.tooltip,
             kind,
         }
     }
 
     pub fn on_click(mut self, command: Command<VM>) -> Self {
         self.interactions.on_click = Some(command);
+        self
+    }
+
+    /// 给 Element 挂上 Tooltip。任何 widget 通过 `.into()` 转 Element 后都可以链式调用。
+    /// 各 widget 的 builder 通常也会暴露同名 `.tooltip()` 方法，调用本方法的简写形式。
+    pub fn with_tooltip(mut self, tooltip: crate::ui::widget::Tooltip) -> Self {
+        self.tooltip = Some(tooltip);
         self
     }
 

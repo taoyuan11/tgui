@@ -242,6 +242,7 @@ impl<VM> Element<VM> {
             lifecycle_events: source.lifecycle_events.clone(),
             media_events: source.media_events.clone(),
             background,
+            tooltip: source.tooltip.clone(),
             child_source_spans,
             kind,
         }

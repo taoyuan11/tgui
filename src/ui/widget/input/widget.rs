@@ -198,6 +198,7 @@ impl<VM> Input<VM> {
                 lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
+                tooltip: None,
                 kind: WidgetKind::TextEditor {
                     controller,
                     placeholder: Value::Static(String::new()),

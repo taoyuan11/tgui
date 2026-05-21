@@ -8,6 +8,7 @@ mod hovering;
 mod interaction;
 mod key_repeat;
 mod navigation;
+mod overlay_close;
 mod platform_keys;
 mod pointer_click;
 mod pointer_press;
@@ -243,6 +244,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let handled = match event.physical_key {
+            PhysicalKey::Code(KeyCode::Escape) => {
+                self.consume_topmost_overlay_close_handler_escape()
+            }
             PhysicalKey::Code(KeyCode::Tab)
                 if !is_primary_shortcut_modifier(self.modifiers) && !self.modifiers.alt_key() =>
             {

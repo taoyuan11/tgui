@@ -243,6 +243,7 @@ impl<VM> WidgetTree<VM> {
             selected_text_state,
             caret_visible,
             now,
+            &HashMap::new(),
         )
         .computed
     }
@@ -269,6 +270,7 @@ impl<VM> WidgetTree<VM> {
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
+        tooltip_hover_started_at: &HashMap<WidgetId, Instant>,
     ) -> CollectedSceneCache<VM> {
         self.collect_scene_cache_from_layout_with_focus_value_at(
             font_manager,
@@ -292,6 +294,7 @@ impl<VM> WidgetTree<VM> {
             selected_text_state,
             caret_visible,
             Instant::now(),
+            tooltip_hover_started_at,
         )
     }
 
@@ -318,7 +321,9 @@ impl<VM> WidgetTree<VM> {
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
         now: Instant,
+        tooltip_hover_started_at: &HashMap<WidgetId, Instant>,
     ) -> CollectedSceneCache<VM> {
+        let next_tooltip_wakeup: std::cell::Cell<Option<Instant>> = std::cell::Cell::new(None);
         let ((mut computed, lifecycle_states, chunks, chunk_parts, visual_contexts), dependencies) =
             with_widget_stack(|| {
                 with_dependency_collection(|| {
@@ -349,6 +354,8 @@ impl<VM> WidgetTree<VM> {
                         units: layout.units,
                         animations,
                         now,
+                        tooltip_hover_started_at,
+                        next_tooltip_wakeup: &next_tooltip_wakeup,
                     };
                     let computed = layout.resolved_root.collect_subtree_cache(
                         &layout.layout_root,
@@ -376,6 +383,7 @@ impl<VM> WidgetTree<VM> {
                     )
                 })
             });
+        computed.finalize_overlay_layers();
         computed.dependencies = dependencies.clone();
         CollectedSceneCache {
             computed,
@@ -384,6 +392,7 @@ impl<VM> WidgetTree<VM> {
             chunk_parts,
             visual_contexts,
             dependencies,
+            next_tooltip_wakeup: next_tooltip_wakeup.get(),
         }
     }
 
@@ -431,6 +440,7 @@ impl<VM> WidgetTree<VM> {
             selected_text,
             selected_text_state,
             caret_visible,
+            &HashMap::new(),
         )
         .computed
     }

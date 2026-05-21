@@ -196,6 +196,7 @@ impl<VM> Radio<VM> {
                 lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
+                tooltip: None,
                 kind: WidgetKind::Radio {
                     checked: checked.into(),
                     label: None,

@@ -1,0 +1,306 @@
+//! `emit_overlay` collect 阶段集成测试。
+//!
+//! 验证：
+//! - 浮层 primitive 写到 overlay scene 而非主 scene；
+//! - 局部坐标被正确平移到窗口坐标；
+//! - clip_rect 被强制覆盖为 solver 算出的 clip 范围；
+//! - close handler 被注册到 `ComputedScene::overlay_close_handlers`；
+//! - `FlipPolicy::Hide` 在两侧都放不下时跳过所有 push；
+//! - 多浮层按 `OverlayLayer` 顺序进入平面列表（finalize 后 Tooltip < Popover < Menu < Modal）。
+//!
+//! emit_overlay 现在先写入 `overlay_layers` 暂存桶，所以平面列表断言之前需要先调
+//! `ComputedScene::finalize_overlay_layers()`。
+
+use crate::foundation::color::Color;
+use crate::ui::unit::{dp, Dp};
+use crate::ui::widget::common::{ComputedScene, RenderPrimitive, Rect};
+use crate::ui::widget::overlay::{
+    collect::emit_overlay,
+    Anchor, FlipPolicy, OverlayContent, OverlayId, OverlayLayer, OverlayPrimitive, Placement,
+};
+use crate::ui::widget::overlay::overlay::Overlay;
+
+fn viewport() -> Rect {
+    Rect::new(dp(0.0), dp(0.0), dp(800.0), dp(600.0))
+}
+
+fn shape(rect_local: Rect, color: Color) -> OverlayPrimitive {
+    OverlayPrimitive::Shape(RenderPrimitive {
+        rect: rect_local,
+        color,
+        corner_radius: 0.0,
+        stroke_width: 0.0,
+        clip_rect: None,
+        clip_mask: None,
+    })
+}
+
+#[test]
+fn emit_overlay_writes_to_overlay_scene_not_main() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Rect(anchor))
+        .placement(Placement::bottom())
+        .offset(dp(8.0));
+
+    let prims = vec![shape(
+        Rect::new(dp(0.0), dp(0.0), dp(80.0), dp(40.0)),
+        Color::rgba(255, 0, 0, 255),
+    )];
+
+    let solved = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(80.0), dp(40.0)),
+        OverlayContent::Primitives(prims),
+    );
+    scene.finalize_overlay_layers();
+
+    assert!(!solved.was_hidden);
+    // 主 scene 不接收 overlay primitive
+    assert_eq!(scene.scene.shapes.len(), 0);
+    // overlay scene 收到 1 个 shape
+    assert_eq!(scene.scene.overlay_shapes.len(), 1);
+}
+
+#[test]
+fn emit_overlay_translates_primitive_to_window_coords() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Rect(anchor))
+        .placement(Placement::bottom())
+        .offset(dp(8.0));
+
+    // 局部 (10, 5, 60, 30) → 求解后浮层左上角 = (anchor.center_x - 40, anchor.bottom + 8) = (80, 148)
+    // → 平移后 (90, 153, 60, 30)
+    let prims = vec![shape(
+        Rect::new(dp(10.0), dp(5.0), dp(60.0), dp(30.0)),
+        Color::rgba(0, 255, 0, 255),
+    )];
+
+    let _ = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(80.0), dp(40.0)),
+        OverlayContent::Primitives(prims),
+    );
+    scene.finalize_overlay_layers();
+
+    let translated = &scene.scene.overlay_shapes[0];
+    let close = |a: Dp, b: f32| (a.get() - b).abs() < 0.001;
+    assert!(close(translated.rect.x, 90.0));
+    assert!(close(translated.rect.y, 153.0));
+    assert!(close(translated.rect.width, 60.0));
+    assert!(close(translated.rect.height, 30.0));
+}
+
+#[test]
+fn emit_overlay_sets_clip_rect_from_solver() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Rect(anchor));
+
+    let prims = vec![shape(
+        Rect::new(dp(0.0), dp(0.0), dp(80.0), dp(40.0)),
+        Color::rgba(0, 0, 255, 255),
+    )];
+
+    let solved = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(80.0), dp(40.0)),
+        OverlayContent::Primitives(prims),
+    );
+    scene.finalize_overlay_layers();
+
+    let shape = &scene.scene.overlay_shapes[0];
+    assert_eq!(shape.clip_rect, Some(solved.clip_rect));
+}
+
+#[test]
+fn was_hidden_skips_all_emit() {
+    let mut scene = ComputedScene::<()>::default();
+    let small_viewport = Rect::new(dp(0.0), dp(0.0), dp(100.0), dp(100.0));
+    let anchor = Rect::new(dp(50.0), dp(50.0), dp(10.0), dp(10.0));
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Rect(anchor))
+        .placement(Placement::bottom())
+        .flip_policy(FlipPolicy::Hide)
+        .close_on_outside_click(true);
+
+    let prims = vec![shape(
+        Rect::new(dp(0.0), dp(0.0), dp(300.0), dp(300.0)),
+        Color::rgba(0, 0, 0, 255),
+    )];
+
+    let solved = emit_overlay(
+        &mut scene,
+        small_viewport,
+        overlay,
+        (dp(300.0), dp(300.0)),
+        OverlayContent::Primitives(prims),
+    );
+    scene.finalize_overlay_layers();
+
+    assert!(solved.was_hidden);
+    assert_eq!(scene.scene.overlay_shapes.len(), 0);
+    assert_eq!(scene.overlay_close_handlers.len(), 0);
+}
+
+#[test]
+fn close_handle_registered_when_any_close_hook_set() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let overlay = Overlay::<()>::new(OverlayId::new(42), Anchor::Rect(anchor))
+        .layer(OverlayLayer::Menu)
+        .close_on_outside_click(true)
+        .close_on_escape(true);
+
+    let _ = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(80.0), dp(40.0)),
+        OverlayContent::Primitives(vec![]),
+    );
+    scene.finalize_overlay_layers();
+
+    assert_eq!(scene.overlay_close_handlers.len(), 1);
+    let h = &scene.overlay_close_handlers[0];
+    assert_eq!(h.overlay_id, OverlayId::new(42));
+    assert_eq!(h.layer, OverlayLayer::Menu);
+    assert!(h.close_on_outside_click);
+    assert!(h.close_on_escape);
+}
+
+#[test]
+fn close_handle_not_registered_when_no_close_hooks() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Rect(anchor));
+
+    let _ = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(80.0), dp(40.0)),
+        OverlayContent::Primitives(vec![]),
+    );
+    scene.finalize_overlay_layers();
+
+    assert_eq!(scene.overlay_close_handlers.len(), 0);
+}
+
+#[test]
+fn close_handle_rect_matches_solved_rect() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Rect(anchor))
+        .placement(Placement::bottom())
+        .close_on_outside_click(true);
+
+    let solved = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(80.0), dp(40.0)),
+        OverlayContent::Primitives(vec![]),
+    );
+    scene.finalize_overlay_layers();
+
+    assert_eq!(scene.overlay_close_handlers[0].rect, solved.rect);
+}
+
+#[test]
+fn finalize_orders_overlays_by_layer_z_order() {
+    // 先 emit Modal，再 emit Tooltip，再 emit Menu，再 emit Popover。
+    // finalize 后应为 Tooltip(底) → Popover → Menu → Modal(顶)。
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+
+    let make = |id, layer, color| {
+        let overlay = Overlay::<()>::new(OverlayId::new(id), Anchor::Rect(anchor))
+            .placement(Placement::bottom())
+            .layer(layer)
+            .close_on_outside_click(true);
+        let prims = vec![shape(
+            Rect::new(dp(0.0), dp(0.0), dp(10.0), dp(10.0)),
+            color,
+        )];
+        (overlay, prims)
+    };
+
+    // 颜色用来在 finalize 后识别顺序。
+    let red = Color::rgba(255, 0, 0, 255);
+    let green = Color::rgba(0, 255, 0, 255);
+    let blue = Color::rgba(0, 0, 255, 255);
+    let yellow = Color::rgba(255, 255, 0, 255);
+
+    for (overlay, prims) in [
+        make(1, OverlayLayer::Modal, red),
+        make(2, OverlayLayer::Tooltip, green),
+        make(3, OverlayLayer::Menu, blue),
+        make(4, OverlayLayer::Popover, yellow),
+    ] {
+        let _ = emit_overlay(
+            &mut scene,
+            viewport(),
+            overlay,
+            (dp(10.0), dp(10.0)),
+            OverlayContent::Primitives(prims),
+        );
+    }
+    scene.finalize_overlay_layers();
+
+    // Shape order: Tooltip → Popover → Menu → Modal
+    let colors: Vec<_> = scene.scene.overlay_shapes.iter().map(|s| s.color).collect();
+    assert_eq!(colors, vec![green, yellow, blue, red]);
+
+    // Close handler order matches; iter().rev() consumes Modal first.
+    let layers: Vec<_> = scene
+        .overlay_close_handlers
+        .iter()
+        .map(|h| h.layer)
+        .collect();
+    assert_eq!(
+        layers,
+        vec![
+            OverlayLayer::Tooltip,
+            OverlayLayer::Popover,
+            OverlayLayer::Menu,
+            OverlayLayer::Modal,
+        ]
+    );
+}
+
+#[test]
+fn finalize_keeps_within_layer_emit_order() {
+    // 同层多浮层应保持 emit 顺序：先 emit 的位于平面列表的前面（被同层后续浮层覆盖）。
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+
+    let red = Color::rgba(255, 0, 0, 255);
+    let blue = Color::rgba(0, 0, 255, 255);
+
+    for (id, color) in [(1u64, red), (2, blue)] {
+        let overlay = Overlay::<()>::new(OverlayId::new(id), Anchor::Rect(anchor))
+            .placement(Placement::bottom())
+            .layer(OverlayLayer::Menu);
+        let _ = emit_overlay(
+            &mut scene,
+            viewport(),
+            overlay,
+            (dp(10.0), dp(10.0)),
+            OverlayContent::Primitives(vec![shape(
+                Rect::new(dp(0.0), dp(0.0), dp(10.0), dp(10.0)),
+                color,
+            )]),
+        );
+    }
+    scene.finalize_overlay_layers();
+
+    let colors: Vec<_> = scene.scene.overlay_shapes.iter().map(|s| s.color).collect();
+    assert_eq!(colors, vec![red, blue]);
+}

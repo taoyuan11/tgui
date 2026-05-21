@@ -17,6 +17,8 @@ mod style;
 mod switch;
 mod text;
 mod textarea;
+mod overlay;
+mod tooltip;
 #[cfg(feature = "video")]
 mod video;
 
@@ -68,16 +70,23 @@ pub(crate) use core::{
 };
 pub use image::Image;
 pub use input::Input;
+pub use overlay::{
+    Alignment as OverlayAlignment, Anchor as OverlayAnchor, FlipPolicy as OverlayFlipPolicy,
+    OverlayId, OverlayLayer, Placement as OverlayPlacement,
+    PlacementOptions as OverlayPlacementOptions, Side as OverlaySide,
+    SolvedPlacement as OverlaySolvedPlacement,
+};
 pub use radio::{Radio, RadioGroup, RadioOption};
 pub use select::{Select, SelectOption};
 pub use slider::Slider;
 pub use style::{
     ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, FocusRingOverride, ImageStyle,
     InputStyle, RadioStyle, SelectStyle, SliderStyle, SwitchStyle, TextWidgetStyle, TextareaStyle,
-    VideoSurfaceStyle, WidgetSurfaceStyle,
+    TooltipStyle, VideoSurfaceStyle, WidgetSurfaceStyle,
 };
 pub use switch::Switch;
 pub use text::{IntoTextContent, Text};
 pub use textarea::Textarea;
+pub use tooltip::Tooltip;
 #[cfg(feature = "video")]
 pub use video::VideoSurface;

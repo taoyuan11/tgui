@@ -193,6 +193,7 @@ impl<VM> Button<VM> {
                 lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
+                tooltip: None,
                 kind: WidgetKind::Button {
                     label: label.into(),
                     disabled: Value::Static(false),
@@ -240,6 +241,12 @@ impl<VM> Button<VM> {
     /// 设置组件 key。
     pub fn key(mut self, key: impl Into<super::WidgetKey>) -> Self {
         self.element.key = Some(key.into());
+        self
+    }
+
+    /// 给按钮挂上 Tooltip：hover 时显示说明文本。
+    pub fn tooltip(mut self, tooltip: super::Tooltip) -> Self {
+        self.element.tooltip = Some(tooltip);
         self
     }
 

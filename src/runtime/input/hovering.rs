@@ -171,6 +171,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
+        // 退出 hover 的 widget：从 tooltip_hover_started_at 移除。
+        for previous in previous_hovered[prefix_len..].iter() {
+            if let HoverTargetId::Widget(id) = previous.target_id {
+                self.tooltip_hover_started_at.remove(&id);
+            }
+        }
+
+        // 新进入 hover 的 widget：记录起始时间，用于 Tooltip delay 计算。
+        let now = Instant::now();
+        for hovered in next_hovered[prefix_len..].iter() {
+            if let HoverTargetId::Widget(id) = hovered.target_id {
+                self.tooltip_hover_started_at.entry(id).or_insert(now);
+            }
+        }
+
         for hovered in next_hovered[prefix_len..].iter().rev() {
             if let Some(command) = hovered.on_mouse_enter.as_ref() {
                 self.execute_hover_transition_handler(command, cursor_position);

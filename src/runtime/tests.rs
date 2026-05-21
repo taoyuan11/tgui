@@ -30,7 +30,7 @@ use crate::ui::widget::{
     Button, Canvas, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent, CanvasRecorder,
     CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Checkbox,
     ContainerStyle, CursorStyle, Flex, HitInteraction, Input, Point, Rect, Select, SelectOption,
-    Text, TextEditState, Textarea, WidgetTree,
+    Text, TextEditState, Textarea, Tooltip, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle};
@@ -427,4 +427,5 @@ mod canvas_tests;
 mod focus_selection_tests;
 mod scroll_tests;
 mod text_input_tests;
+mod tooltip_tests;
 mod window_theme_tests;

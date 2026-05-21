@@ -40,6 +40,7 @@ impl<VM> Container<VM> {
                 lifecycle_events: LifecycleEventHandlers::default(),
                 media_events: MediaEventHandlers::default(),
                 background: None,
+                tooltip: None,
                 kind: WidgetKind::Container {
                     layout,
                     children: Vec::new(),

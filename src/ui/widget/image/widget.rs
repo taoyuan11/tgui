@@ -346,6 +346,7 @@ impl Image {
             lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background: self.background.clone(),
+            tooltip: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -366,6 +367,7 @@ impl Image {
             lifecycle_events,
             media_events: MediaEventHandlers::default(),
             background: self.background.clone(),
+            tooltip: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -386,6 +388,7 @@ impl Image {
             lifecycle_events: LifecycleEventHandlers::default(),
             media_events,
             background: self.background.clone(),
+            tooltip: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -405,6 +408,7 @@ impl<VM> From<Image> for Element<VM> {
             lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background: value.background.clone(),
+            tooltip: None,
             kind: WidgetKind::Image { image: value },
         }
     }

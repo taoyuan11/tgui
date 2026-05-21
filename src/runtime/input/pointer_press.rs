@@ -9,6 +9,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) {
         self.flush_pending_click_if_due(now);
 
+        if let Some(point) = self.cursor_position {
+            self.consume_overlay_close_handlers_outside_click(point);
+        }
+
         let hit_path = self.hit_path(viewport);
         let Some(hit) = hit_path.last().cloned() else {
             self.close_all_open_selects_except(None);

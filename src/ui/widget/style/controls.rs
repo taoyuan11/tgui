@@ -429,3 +429,40 @@ impl SelectStyle {
         }
     }
 }
+
+/// Tooltip widget 的样式定义。
+#[derive(Clone, Debug, PartialEq)]
+pub struct TooltipStyle {
+    pub background: Color,
+    pub foreground: Color,
+    pub border: Color,
+    pub border_width: Dp,
+    pub radius: Dp,
+    pub padding: Insets,
+    pub max_width: Dp,
+    pub offset: Dp,
+    pub text_style: TextStyle,
+}
+
+impl TooltipStyle {
+    /// 按解析后的主题模式创建默认 tooltip 样式。
+    pub fn default_for(mode: ResolvedThemeMode) -> Self {
+        let palette = palette(mode);
+        // Tooltip 习惯上是"反色"——浅色主题用深色背景，深色主题用浅色背景。
+        let (background, foreground) = match mode {
+            ResolvedThemeMode::Light => (palette.on_surface, palette.surface),
+            ResolvedThemeMode::Dark => (palette.surface_high, palette.on_surface),
+        };
+        Self {
+            background,
+            foreground,
+            border: Color::TRANSPARENT,
+            border_width: dp(0.0),
+            radius: dp(6.0),
+            padding: Insets::symmetric(dp(8.0), dp(4.0)),
+            max_width: dp(240.0),
+            offset: dp(8.0),
+            text_style: label_text_style(),
+        }
+    }
+}

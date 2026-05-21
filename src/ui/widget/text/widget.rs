@@ -335,6 +335,7 @@ impl Text {
             lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background,
+            tooltip: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -358,6 +359,7 @@ impl Text {
             lifecycle_events,
             media_events: MediaEventHandlers::default(),
             background,
+            tooltip: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -380,6 +382,7 @@ impl<VM> From<Text> for Element<VM> {
             lifecycle_events: LifecycleEventHandlers::default(),
             media_events: MediaEventHandlers::default(),
             background,
+            tooltip: None,
             kind: WidgetKind::Text { text: value },
         }
     }

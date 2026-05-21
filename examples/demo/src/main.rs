@@ -41,6 +41,14 @@ fn card_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
+fn accent_tooltip_style(mode: ResolvedThemeMode) -> TooltipStyle {
+    let mut style = TooltipStyle::default_for(mode);
+    style.background = Color::hexa(0x4F9CF9FF);
+    style.foreground = Color::hexa(0x0B1220FF);
+    style.radius = dp(8.0);
+    style
+}
+
 fn image_style(mode: ResolvedThemeMode) -> ImageStyle {
     let mut style = ImageStyle::default_for(mode);
     style.surface.border_radius = Some(dp(12.0).into());
@@ -187,6 +195,36 @@ impl ViewModel for App {
                         Button::new("幽灵按钮").ghost(),
                         Button::new("危险按钮").danger(),
                         Button::new("禁用按钮").disable(true),
+                    ]),
+                ),
+                component_card(
+                    "Tooltip",
+                    Flex::new(Axis::Vertical).gap(dp(10.0)).child(el![
+                        Text::new("把鼠标悬停在按钮上看 Tooltip：四个方向 + 自动换行 + 自定义样式")
+                            .style(status_style),
+                        Flex::new(Axis::Horizontal).gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
+                            Button::new("上方")
+                                .tooltip(Tooltip::new("默认 Placement::top()")),
+                            Button::new("下方").tooltip(
+                                Tooltip::new("浮层贴在按钮下边缘")
+                                    .placement(OverlayPlacement::bottom()),
+                            ),
+                            Button::new("左侧").tooltip(
+                                Tooltip::new("Placement::left()")
+                                    .placement(OverlayPlacement::left()),
+                            ),
+                            Button::new("右侧").tooltip(
+                                Tooltip::new("Placement::right()")
+                                    .placement(OverlayPlacement::right()),
+                            ),
+                            Button::new("长文本").tooltip(Tooltip::new(
+                                "Tooltip 会在超过 max_width 时自动换行，方便给较长的说明文字使用。",
+                            )),
+                            Button::new("强调样式").tooltip(
+                                Tooltip::new("自定义 background / radius 即可换风格")
+                                    .style(accent_tooltip_style(ResolvedThemeMode::Dark)),
+                            ),
+                        ]),
                     ]),
                 ),
                 component_card(

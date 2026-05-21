@@ -140,6 +140,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 caret_visible,
+                                &self.tooltip_hover_started_at,
                             );
                             collect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
@@ -187,6 +188,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                         self.selected_text,
                                         selected_text_state.as_ref(),
                                         actual_caret_visible,
+                                        &self.tooltip_hover_started_at,
                                     );
                                 recollect_duration += collect_started_at.elapsed();
                                 collect_passes += 1;
@@ -241,6 +243,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 caret_visible,
+                                &self.tooltip_hover_started_at,
                             );
                             collect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
@@ -286,6 +289,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 self.selected_text,
                                 selected_text_state.as_ref(),
                                 actual_caret_visible,
+                                &self.tooltip_hover_started_at,
                             );
                             recollect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
@@ -305,10 +309,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         chunk_parts: HashMap::new(),
                         visual_contexts: HashMap::new(),
                         dependencies: DependencyGraph::default(),
+                        next_tooltip_wakeup: None,
                     },
                 ),
             };
             let computed = collected.computed.clone();
+            self.next_tooltip_wakeup_deadline = collected.next_tooltip_wakeup;
             let focused_input = self.focused_text_input_id_cached(&computed);
             let caret_visible = self.caret_visible_at(now, focused_input);
             self.prune_text_input_buffers(&computed);
