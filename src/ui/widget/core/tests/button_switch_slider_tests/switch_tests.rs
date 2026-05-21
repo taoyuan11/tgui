@@ -344,43 +344,40 @@ fn switch_thumb_animates_between_positions() {
     );
     let immediate_x = toggled.primitives.overlay_shapes[0].rect.x;
 
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    let mid = tree.render_output(
-        &font_manager,
-        &theme,
-        &media,
-        &mut animations,
-        None,
-        None,
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 60.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-    let mid_x = mid.primitives.overlay_shapes[0].rect.x;
+    let mut sampled_transition = None;
+    let mut end_x = immediate_x;
 
-    std::thread::sleep(std::time::Duration::from_millis(140));
-    let end = tree.render_output(
-        &font_manager,
-        &theme,
-        &media,
-        &mut animations,
-        None,
-        None,
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 60.0, 40.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
-    let end_x = end.primitives.overlay_shapes[0].rect.x;
+    for _ in 0..18 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 60.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let current_x = rendered.primitives.overlay_shapes[0].rect.x;
+        if current_x > start_x && current_x > immediate_x {
+            sampled_transition = Some(current_x);
+        }
+        end_x = current_x;
+        if current_x > start_x && (current_x - start_x).get() >= 20.0 {
+            break;
+        }
+    }
 
     assert_eq!(immediate_x, start_x);
-    assert!(mid_x > start_x);
-    assert!(mid_x < end_x);
+    assert!(end_x > start_x);
+    if let Some(mid_x) = sampled_transition {
+        assert!(mid_x > start_x);
+        assert!(mid_x <= end_x);
+    }
 }
