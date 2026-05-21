@@ -273,6 +273,11 @@ impl ViewModel for AndroidShowcaseVm {
                     .padding(Insets::all(dp(16.0)))
                     .gap(dp(14.0))
                     .overflow_y(Overflow::Scroll)
+                    .style(|theme_mode| {
+                        let mut style = ContainerStyle::default_for(theme_mode);
+                        style.scrollbar.thickness = Some(dp(0.0));
+                        style
+                    })
                     .child(el![
                         Text::new("tgui Android Showcase").style(title_style),
                         Text::new("展示 Android 平台上可用的所有 tgui 组件与能力").style(body_style),
