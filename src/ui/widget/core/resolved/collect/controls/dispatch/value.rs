@@ -2,6 +2,10 @@ use std::borrow::Cow;
 
 use super::*;
 use crate::ui::widget::common;
+use crate::ui::widget::overlay::{
+    collect::emit_overlay, Anchor, AnchorKey, Overlay, OverlayId, OverlayLayer,
+};
+use crate::ui::widget::FocusScopeState;
 
 impl<VM> ResolvedElement<VM> {
     pub(super) fn collect_slider_control(
@@ -71,10 +75,18 @@ impl<VM> ResolvedElement<VM> {
             context.media,
         );
         if !visual.disabled {
+            let focus = context.build_focus_meta(
+                self.id,
+                &self.focus,
+                &self.interactions,
+                true,
+            );
             computed.hit_regions.push(HitRegion {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                scope_path: context.focus_scope_path(),
+                focus,
                 interaction: HitInteraction::Slider {
                     id: self.id,
                     interactions: self.interactions.clone(),
@@ -147,7 +159,8 @@ impl<VM> ResolvedElement<VM> {
             visual.primitive_clip_mask,
         );
         if menu_progress > f32::EPSILON && !visual.disabled {
-            push_select_menu_primitives(
+            computed.register_widget_overlay_anchor(self.id, visual.frame);
+            if let Some((content, content_size)) = build_select_menu_overlay(
                 self.id,
                 visual.frame,
                 context.viewport,
@@ -155,16 +168,56 @@ impl<VM> ResolvedElement<VM> {
                 on_open_change.as_ref(),
                 select_style,
                 context,
-                computed,
                 visual.opacity,
                 menu_progress,
-            );
+            ) {
+                let overlay = Overlay::<VM>::new(
+                    OverlayId::new(self.id.raw()),
+                    Anchor::Key(AnchorKey::widget(self.id)),
+                )
+                .placement(crate::ui::widget::OverlayPlacement::bottom())
+                .offset(select_style.menu_gap)
+                .match_anchor_width(true)
+                .layer(OverlayLayer::Menu)
+                .focus_scope(FocusScopeState {
+                    scope_id: self.id,
+                    path: {
+                        let mut path = context.focus_scope_path();
+                        path.push(self.id);
+                        path
+                    },
+                    options: crate::ui::widget::FocusScopeOptions::new().trap(true),
+                })
+                .return_focus_to(self.id)
+                .close_on_outside_click(true)
+                .close_on_escape(true);
+                let overlay = if let Some(command) = on_open_change.as_ref().cloned() {
+                    overlay.on_close(command)
+                } else {
+                    overlay
+                };
+                let _ = emit_overlay(
+                    computed,
+                    context.viewport,
+                    overlay,
+                    content_size,
+                    content,
+                );
+            }
         }
         if !visual.disabled {
+            let focus = context.build_focus_meta(
+                self.id,
+                &self.focus,
+                &self.interactions,
+                true,
+            );
             computed.hit_regions.push(HitRegion {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                scope_path: context.focus_scope_path(),
+                focus,
                 interaction: HitInteraction::SelectTrigger {
                     id: self.id,
                     interactions: self.interactions.clone(),
@@ -349,12 +402,23 @@ impl<VM> ResolvedElement<VM> {
         }
         if context.focused_input == Some(self.id) {
             computed.ime_cursor_area = text_render.ime_cursor_area;
+            if let Some(caret_rect) = text_render.ime_cursor_area {
+                computed.register_caret_overlay_anchor(self.id, caret_rect);
+            }
         }
         if !visual.disabled {
+            let focus = context.build_focus_meta(
+                self.id,
+                &self.focus,
+                &self.interactions,
+                true,
+            );
             computed.hit_regions.push(HitRegion {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                scope_path: context.focus_scope_path(),
+                focus,
                 interaction: HitInteraction::TextInput {
                     id: self.id,
                     interactions: self.interactions.clone(),

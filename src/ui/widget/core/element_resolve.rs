@@ -237,6 +237,7 @@ impl<VM> Element<VM> {
             id: source.id,
             key: source.key.clone(),
             layout,
+            focus: source.focus.clone(),
             visual,
             interactions: source.interactions.clone(),
             lifecycle_events: source.lifecycle_events.clone(),

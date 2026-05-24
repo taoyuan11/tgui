@@ -193,6 +193,7 @@ impl<VM> Element<VM> {
             id: self.id,
             key: self.key,
             layout: self.layout,
+            focus: self.focus,
             visual: self.visual,
             interactions: self.interactions.scope(selector.clone()),
             lifecycle_events: self.lifecycle_events.scope(selector.clone()),
@@ -205,6 +206,24 @@ impl<VM> Element<VM> {
 
     pub fn on_click(mut self, command: Command<VM>) -> Self {
         self.interactions.on_click = Some(command);
+        self
+    }
+
+    pub fn focusable(mut self, focusable: bool) -> Self {
+        self.focus.focusable = Some(focusable);
+        self
+    }
+
+    pub fn tab_index(mut self, tab_index: i32) -> Self {
+        self.focus.tab_index = Some(tab_index);
+        self
+    }
+
+    pub fn focus_scope(
+        mut self,
+        options: crate::ui::widget::FocusScopeOptions,
+    ) -> Self {
+        self.focus.scope = Some(options);
         self
     }
 

@@ -84,10 +84,18 @@ impl<VM> ResolvedElement<VM> {
             &mut computed.scene,
         );
         if !visual.disabled {
+            let focus = context.build_focus_meta(
+                self.id,
+                &self.focus,
+                &self.interactions,
+                true,
+            );
             computed.hit_regions.push(HitRegion {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                scope_path: context.focus_scope_path(),
+                focus,
                 interaction: HitInteraction::Checkbox {
                     id: self.id,
                     interactions: self.interactions.clone(),
@@ -137,10 +145,18 @@ impl<VM> ResolvedElement<VM> {
             &mut computed.scene,
         );
         if !visual.disabled {
+            let focus = context.build_focus_meta(
+                self.id,
+                &self.focus,
+                &self.interactions,
+                true,
+            );
             computed.hit_regions.push(HitRegion {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                scope_path: context.focus_scope_path(),
+                focus,
                 interaction: HitInteraction::Radio {
                     id: self.id,
                     interactions: self.interactions.clone(),
@@ -203,10 +219,18 @@ impl<VM> ResolvedElement<VM> {
             context.now,
         );
         if !visual.disabled {
+            let focus = context.build_focus_meta(
+                self.id,
+                &self.focus,
+                &self.interactions,
+                true,
+            );
             computed.hit_regions.push(HitRegion {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                scope_path: context.focus_scope_path(),
+                focus,
                 interaction: HitInteraction::Switch {
                     id: self.id,
                     interactions: self.interactions.clone(),

@@ -149,6 +149,7 @@ impl<VM> Canvas<VM> {
                 id: WidgetId::next(),
                 key: None,
                 layout: LayoutStyle::default(),
+                focus: Default::default(),
                 visual: VisualStyle::default(),
                 interactions: InteractionHandlers::default(),
                 lifecycle_events: LifecycleEventHandlers::default(),

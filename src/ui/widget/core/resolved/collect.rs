@@ -1,5 +1,6 @@
 use super::resolved_freeze::lifecycle_snapshot;
 use super::*;
+use crate::ui::widget::FocusScopeState;
 
 mod chrome;
 mod controls;
@@ -73,6 +74,12 @@ impl<VM> ResolvedElement<VM> {
         chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
         visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
     ) -> ComputedScene<VM> {
+        let previous_scope_path = context.focus.scope_path.clone();
+        if self.focus.scope.is_some() {
+            let mut path = previous_scope_path.clone();
+            path.push(self.id);
+            context.focus.scope_path = path;
+        }
         let mut caches = CollectCaches {
             lifecycle_states,
             chunks,
@@ -82,6 +89,13 @@ impl<VM> ResolvedElement<VM> {
         self.collect_runtime_lifecycle_state(caches.lifecycle_states);
 
         let mut computed = ComputedScene::default();
+        if let Some(scope) = self.focus.scope {
+            computed.register_focus_scope(FocusScopeState {
+                scope_id: self.id,
+                path: context.focus.scope_path.clone(),
+                options: scope,
+            });
+        }
         let visual = self.resolve_collect_visual_state(layout_node, visual_context, context);
         self.push_surface_primitives_and_base_hit_regions(&mut computed, context, &visual);
 
@@ -113,6 +127,7 @@ impl<VM> ResolvedElement<VM> {
             .visual_contexts
             .insert(self.id, visual_context.into());
         caches.chunks.insert(self.id, computed.clone());
+        context.focus.scope_path = previous_scope_path;
         computed
     }
 

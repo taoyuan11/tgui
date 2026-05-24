@@ -354,6 +354,7 @@ impl<VM> WidgetTree<VM> {
                         units: layout.units,
                         animations,
                         now,
+                        focus: super::scene::FocusCollectState::default(),
                         tooltip_hover_started_at,
                         next_tooltip_wakeup: &next_tooltip_wakeup,
                     };

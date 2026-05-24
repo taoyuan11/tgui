@@ -1,6 +1,160 @@
 use super::*;
 
+#[derive(Clone)]
+struct FocusCandidate<VM> {
+    widget_id: WidgetId,
+    tab_index: Option<i32>,
+    order: usize,
+    scope_path: Vec<WidgetId>,
+    on_focus: Option<Command<VM>>,
+    on_blur: Option<Command<VM>>,
+}
+
+fn scope_path_within(path: &[WidgetId], scope: &[WidgetId]) -> bool {
+    path.starts_with(scope)
+}
+
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(super) fn active_focus_trap_scope(&mut self) -> Option<Vec<WidgetId>> {
+        self.computed_scene()
+            .focus_scopes
+            .iter()
+            .rev()
+            .find(|scope| scope.options.is_trap())
+            .map(|scope| scope.path.clone())
+    }
+
+    fn focus_candidates(&mut self) -> Vec<FocusCandidate<VM>> {
+        let active_trap = self.active_focus_trap_scope();
+        let mut candidates = Vec::new();
+        let mut seen = HashSet::new();
+        let computed = self.computed_scene();
+        for region in computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+        {
+            let Some(focus) = region.focus.as_ref() else {
+                continue;
+            };
+            if focus.tab_index.unwrap_or(0) < 0 {
+                continue;
+            }
+            if let Some(trap) = active_trap.as_ref() {
+                if !scope_path_within(&focus.scope_path, trap) {
+                    continue;
+                }
+            }
+            if !seen.insert(focus.widget_id) {
+                continue;
+            }
+            candidates.push(FocusCandidate {
+                widget_id: focus.widget_id,
+                tab_index: focus.tab_index,
+                order: focus.order,
+                scope_path: focus.scope_path.clone(),
+                on_focus: focus.on_focus.clone(),
+                on_blur: focus.on_blur.clone(),
+            });
+        }
+        candidates.sort_by(|left, right| {
+            let left_bucket = left.tab_index.unwrap_or(0);
+            let right_bucket = right.tab_index.unwrap_or(0);
+            match (left_bucket > 0, right_bucket > 0) {
+                (true, true) => left_bucket
+                    .cmp(&right_bucket)
+                    .then_with(|| left.order.cmp(&right.order)),
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                (false, false) => left.order.cmp(&right.order),
+            }
+        });
+        candidates
+    }
+
+    pub(super) fn activate_focused_widget(&mut self, enter: bool, space: bool) -> bool {
+        let Some(focused_id) = self.focused_widget_id() else {
+            return false;
+        };
+        let computed = self.computed_scene().clone();
+        for region in computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+        {
+            let handles_key = match &region.interaction {
+                HitInteraction::Widget {
+                    id,
+                    interactions,
+                    default_activation,
+                    ..
+                } if *id == focused_id => {
+                    if (enter && default_activation.handles_enter())
+                        || (space && default_activation.handles_space())
+                    {
+                        if let Some(command) = interactions.on_click.as_ref() {
+                            self.execute_command(command);
+                            return true;
+                        }
+                    }
+                    false
+                }
+                HitInteraction::Checkbox {
+                    id,
+                    on_change,
+                    current,
+                    ..
+                } if *id == focused_id && space => {
+                    if let Some(command) = on_change.as_ref() {
+                        self.execute_value_command(command, !current);
+                        return true;
+                    }
+                    false
+                }
+                HitInteraction::Radio {
+                    id,
+                    on_change,
+                    current,
+                    ..
+                } if *id == focused_id && space => {
+                    if let Some(command) = on_change.as_ref() {
+                        self.execute_value_command(command, !current);
+                        return true;
+                    }
+                    false
+                }
+                HitInteraction::Switch {
+                    id,
+                    on_change,
+                    current,
+                    ..
+                } if *id == focused_id && space => {
+                    if let Some(command) = on_change.as_ref() {
+                        self.execute_value_command(command, !current);
+                        return true;
+                    }
+                    false
+                }
+                HitInteraction::SelectTrigger {
+                    id,
+                    on_open_change,
+                    is_open,
+                    ..
+                } if *id == focused_id && enter => {
+                    let next_open = !is_open;
+                    self.close_all_open_selects_except(next_open.then_some(*id));
+                    let _ = self.set_select_open_state(*id, next_open, on_open_change.as_ref());
+                    true
+                }
+                _ => false,
+            };
+            if handles_key {
+                return true;
+            }
+        }
+        false
+    }
+
     pub(super) fn selected_text_content(&mut self, widget_id: WidgetId) -> Option<String> {
         self.computed_scene()
             .hit_regions
@@ -169,55 +323,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn focusable_widgets_in_tab_order(&mut self) -> Vec<FocusedWidget<VM>> {
-        let mut focusable = Vec::new();
-        let mut seen = HashSet::new();
-
-        for region in &self.computed_scene().hit_regions {
-            let candidate = match &region.interaction {
-                HitInteraction::Widget {
-                    id,
-                    interactions,
-                    focusable: true,
-                } => Some(FocusedWidget {
-                    widget_id: *id,
-                    on_blur: interactions.on_blur.clone(),
-                }),
-                HitInteraction::Switch {
-                    id, interactions, ..
-                }
-                | HitInteraction::Checkbox {
-                    id, interactions, ..
-                }
-                | HitInteraction::Radio {
-                    id, interactions, ..
-                }
-                | HitInteraction::Slider {
-                    id, interactions, ..
-                }
-                | HitInteraction::TextInput {
-                    id, interactions, ..
-                }
-                | HitInteraction::SelectTrigger {
-                    id, interactions, ..
-                } => Some(FocusedWidget {
-                    widget_id: *id,
-                    on_blur: interactions.on_blur.clone(),
-                }),
-                _ => None,
-            };
-
-            if let Some(candidate) = candidate {
-                if seen.insert(candidate.widget_id) {
-                    focusable.push(candidate);
-                }
-            }
-        }
-
-        focusable
+        self.focus_candidates()
+            .into_iter()
+            .map(|candidate| FocusedWidget {
+                widget_id: candidate.widget_id,
+                scope_path: candidate.scope_path,
+                on_blur: candidate.on_blur,
+            })
+            .collect()
     }
 
     pub(super) fn advance_focus(&mut self, reverse: bool) -> bool {
-        let focusable = self.focusable_widgets_in_tab_order();
+        let focusable = self.focus_candidates();
         if focusable.is_empty() {
             return false;
         }
@@ -244,7 +361,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .into_iter()
             .nth(next_index)
             .expect("focus target index should be in bounds");
-        self.update_focus(Some(next), None, true);
+        self.update_focus(
+            Some(FocusedWidget {
+                widget_id: next.widget_id,
+                scope_path: next.scope_path,
+                on_blur: next.on_blur,
+            }),
+            next.on_focus,
+            true,
+        );
         true
     }
 

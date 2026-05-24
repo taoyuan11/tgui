@@ -1,5 +1,72 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct FocusScopeOptions {
+    pub(crate) trap: bool,
+}
+
+impl FocusScopeOptions {
+    pub const fn new() -> Self {
+        Self { trap: false }
+    }
+
+    pub const fn trap(mut self, trap: bool) -> Self {
+        self.trap = trap;
+        self
+    }
+
+    pub const fn is_trap(self) -> bool {
+        self.trap
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DefaultActivation {
+    None,
+    Enter,
+    Space,
+    EnterAndSpace,
+}
+
+impl DefaultActivation {
+    pub(crate) fn handles_enter(self) -> bool {
+        matches!(self, Self::Enter | Self::EnterAndSpace)
+    }
+
+    pub(crate) fn handles_space(self) -> bool {
+        matches!(self, Self::Space | Self::EnterAndSpace)
+    }
+}
+
+pub(crate) struct FocusTargetMeta<VM> {
+    pub(crate) widget_id: WidgetId,
+    pub(crate) tab_index: Option<i32>,
+    pub(crate) order: usize,
+    pub(crate) scope_path: Vec<WidgetId>,
+    pub(crate) on_focus: Option<Command<VM>>,
+    pub(crate) on_blur: Option<Command<VM>>,
+}
+
+impl<VM> Clone for FocusTargetMeta<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            widget_id: self.widget_id,
+            tab_index: self.tab_index,
+            order: self.order,
+            scope_path: self.scope_path.clone(),
+            on_focus: self.on_focus.clone(),
+            on_blur: self.on_blur.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FocusScopeState {
+    pub(crate) scope_id: WidgetId,
+    pub(crate) path: Vec<WidgetId>,
+    pub(crate) options: FocusScopeOptions,
+}
+
 #[derive(Clone)]
 pub(crate) enum MeasureContext {
     None,
@@ -76,6 +143,7 @@ pub(crate) enum HitInteraction<VM> {
         id: WidgetId,
         interactions: InteractionHandlers<VM>,
         focusable: bool,
+        default_activation: DefaultActivation,
     },
     SelectableText {
         id: WidgetId,
@@ -160,10 +228,12 @@ impl<VM> Clone for HitInteraction<VM> {
                 id,
                 interactions,
                 focusable,
+                default_activation,
             } => Self::Widget {
                 id: *id,
                 interactions: interactions.clone(),
                 focusable: *focusable,
+                default_activation: *default_activation,
             },
             Self::SelectableText {
                 id,
@@ -371,6 +441,8 @@ pub(crate) struct HitRegion<VM> {
     pub rect: Rect,
     pub clip_rect: Option<Rect>,
     pub geometry: HitGeometry,
+    pub scope_path: Vec<WidgetId>,
+    pub focus: Option<FocusTargetMeta<VM>>,
     pub interaction: HitInteraction<VM>,
 }
 
@@ -380,6 +452,8 @@ impl<VM> Clone for HitRegion<VM> {
             rect: self.rect,
             clip_rect: self.clip_rect,
             geometry: self.geometry.clone(),
+            scope_path: self.scope_path.clone(),
+            focus: self.focus.clone(),
             interaction: self.interaction.clone(),
         }
     }

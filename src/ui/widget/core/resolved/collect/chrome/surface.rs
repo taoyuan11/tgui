@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widget::DefaultActivation;
 
 impl<VM> ResolvedElement<VM> {
     pub(in super::super) fn push_surface_primitives_and_base_hit_regions(
@@ -149,29 +150,44 @@ impl<VM> ResolvedElement<VM> {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                scope_path: context.focus_scope_path(),
+                focus: None,
                 interaction: HitInteraction::Disabled { id: self.id },
             });
         } else if self.interactions.has_any()
             && !matches!(&self.kind, ResolvedWidgetKind::Text { text } if text.user_select)
             && !matches!(&self.kind, ResolvedWidgetKind::Select { .. })
         {
+            let fallback_focusable = matches!(
+                self.kind,
+                ResolvedWidgetKind::Button { .. }
+                    | ResolvedWidgetKind::Checkbox { .. }
+                    | ResolvedWidgetKind::Radio { .. }
+                    | ResolvedWidgetKind::Switch { .. }
+                    | ResolvedWidgetKind::Select { .. }
+                    | ResolvedWidgetKind::Slider { .. }
+                    | ResolvedWidgetKind::TextEditor { .. }
+            );
+            let focus = context.build_focus_meta(
+                self.id,
+                &self.focus,
+                &self.interactions,
+                fallback_focusable,
+            );
             computed.hit_regions.push(HitRegion {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                scope_path: context.focus_scope_path(),
+                focus,
                 interaction: HitInteraction::Widget {
                     id: self.id,
                     interactions: self.interactions.clone(),
-                    focusable: matches!(
-                        self.kind,
-                        ResolvedWidgetKind::Button { .. }
-                            | ResolvedWidgetKind::Checkbox { .. }
-                            | ResolvedWidgetKind::Radio { .. }
-                            | ResolvedWidgetKind::Switch { .. }
-                            | ResolvedWidgetKind::Select { .. }
-                            | ResolvedWidgetKind::Slider { .. }
-                            | ResolvedWidgetKind::TextEditor { .. }
-                    ),
+                    focusable: fallback_focusable,
+                    default_activation: match self.kind {
+                        ResolvedWidgetKind::Button { .. } => DefaultActivation::EnterAndSpace,
+                        _ => DefaultActivation::None,
+                    },
                 },
             });
         }

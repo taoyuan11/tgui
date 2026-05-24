@@ -50,15 +50,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         {
             self.pressed_widget = None;
         }
-        if self
-            .focused_widget
-            .as_ref()
-            .map(|focused| removed_ids.contains(&focused.widget_id))
-            .unwrap_or(false)
-        {
-            self.focused_widget = None;
-            self.focus_visible = false;
-            self.active_key_repeat = None;
+        if let Some(focused) = self.focused_widget.take() {
+            if removed_ids.contains(&focused.widget_id) {
+                self.focus_visible = false;
+                self.active_key_repeat = None;
+                self.restore_focus_after_target_removal(&focused, removed_ids);
+            } else {
+                self.focused_widget = Some(focused);
+            }
         }
         if self
             .selected_text
@@ -104,5 +103,46 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .retain(|widget_id, _| !removed_ids.contains(widget_id));
         self.media_event_states
             .retain(|widget_id, _| !removed_ids.contains(widget_id));
+    }
+
+    fn restore_focus_after_target_removal(
+        &mut self,
+        previous: &FocusedWidget<VM>,
+        removed_ids: &HashSet<WidgetId>,
+    ) {
+        let candidates = self.focusable_widgets_in_tab_order();
+        if let Some(next) = candidates
+            .iter()
+            .find(|candidate| {
+                candidate.scope_path == previous.scope_path
+                    && !removed_ids.contains(&candidate.widget_id)
+            })
+            .map(|candidate| FocusedWidget {
+                widget_id: candidate.widget_id,
+                scope_path: candidate.scope_path.clone(),
+                on_blur: candidate.on_blur.clone(),
+            })
+        {
+            self.update_focus(Some(next), None, true);
+            return;
+        }
+
+        let restore_target = self
+            .computed_scene()
+            .overlay_close_handlers
+            .iter()
+            .rev()
+            .find_map(|handle| {
+                handle
+                    .return_focus_to
+                    .filter(|widget_id| !removed_ids.contains(widget_id))
+            });
+        if let Some(widget_id) = restore_target {
+            if self.restore_overlay_focus_if_needed(widget_id) {
+                return;
+            }
+        }
+
+        self.update_focus(None, None, false);
     }
 }

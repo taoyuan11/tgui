@@ -97,6 +97,7 @@ pub(crate) fn emit_overlay<VM>(
             rect: solved.rect,
             layer: overlay.layer,
             on_close: overlay.on_close,
+            close_value: false,
             return_focus_to: overlay.return_focus_to,
             close_on_outside_click: overlay.close_on_outside_click,
             close_on_escape: overlay.close_on_escape,

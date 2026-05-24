@@ -29,8 +29,8 @@ use crate::ui::unit::{dp, sp, Dp, UnitContext};
 use crate::ui::widget::{
     Button, Canvas, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent, CanvasRecorder,
     CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Checkbox,
-    ContainerStyle, CursorStyle, Flex, HitInteraction, Input, Point, Rect, Select, SelectOption,
-    Text, TextEditState, Textarea, Tooltip, WidgetTree,
+    ContainerStyle, CursorStyle, Flex, FocusScopeOptions, HitInteraction, Input, Point, Rect,
+    Select, SelectOption, Switch, Text, TextEditState, Textarea, Tooltip, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle};

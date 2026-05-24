@@ -9,24 +9,40 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) {
         self.flush_pending_click_if_due(now);
 
-        if let Some(point) = self.cursor_position {
-            self.consume_overlay_close_handlers_outside_click(point);
-        }
-
         let hit_path = self.hit_path(viewport);
+        let active_trap = self.active_focus_trap_scope();
+        let focus_restore = self
+            .cursor_position
+            .and_then(|point| self.consume_overlay_close_handlers_outside_click(point));
         let Some(hit) = hit_path.last().cloned() else {
+            if active_trap.is_some() && focus_restore.is_none() {
+                self.pending_click = None;
+                self.pressed_widget = None;
+                return;
+            }
             self.close_all_open_selects_except(None);
             self.clear_selected_text();
             self.update_focus(None, None, false);
+            if let Some(widget_id) = focus_restore {
+                let _ = self.restore_overlay_focus_if_needed(widget_id);
+            }
             self.pending_click = None;
             self.pressed_widget = None;
             return;
         };
 
         if matches!(hit, HitInteraction::Disabled { .. }) {
+            if active_trap.is_some() && focus_restore.is_none() {
+                self.pending_click = None;
+                self.pressed_widget = None;
+                return;
+            }
             self.close_all_open_selects_except(None);
             self.clear_selected_text();
             self.update_focus(None, None, false);
+            if let Some(widget_id) = focus_restore {
+                let _ = self.restore_overlay_focus_if_needed(widget_id);
+            }
             self.pending_click = None;
             self.pressed_widget = None;
             return;
@@ -116,6 +132,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             &hit,
             HitInteraction::SelectTrigger { .. } | HitInteraction::SelectOption { .. }
         );
+        let hit_target_id = hit.target_id();
         let text_input_hit = matches!(&hit, HitInteraction::TextInput { .. });
         let (
             widget_id,
@@ -158,6 +175,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 id,
                 interactions,
                 focusable,
+                ..
             } => (
                 id,
                 interactions.clone(),
@@ -374,6 +392,25 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.clear_selected_text();
         }
 
+        let hit_scope_path = {
+            let computed = self.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .chain(computed.overlay_hit_regions.iter())
+                .find(|region| region.interaction.target_id() == hit_target_id)
+                .map(|region| region.scope_path.clone())
+                .unwrap_or_default()
+        };
+
+        if let Some(trap) = active_trap.as_ref() {
+            if !hit_scope_path.starts_with(trap) && focus_restore.is_none() {
+                self.pending_click = None;
+                self.pressed_widget = None;
+                return;
+            }
+        }
+
         if !clicked_select {
             self.close_all_open_selects_except(None);
         }
@@ -381,11 +418,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.update_focus(
             focus_target.map(|id| FocusedWidget {
                 widget_id: id,
+                scope_path: hit_scope_path.clone(),
                 on_blur: interactions.on_blur.clone(),
             }),
             focus_command,
             false,
         );
+        if focus_target.is_none() {
+            if let Some(widget_id) = focus_restore {
+                let _ = self.restore_overlay_focus_if_needed(widget_id);
+            }
+        }
         if text_input_hit {
             self.focus_visible = true;
             self.reset_caret_blink();

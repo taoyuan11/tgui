@@ -11,9 +11,15 @@ use crate::text::font::{FontManager, TextLayoutInfo};
 use crate::ui::theme::Theme;
 use crate::ui::unit::UnitContext;
 use crate::ui::widget::common::{
-    ClipMask, ComputedScene, LifecycleEventState, MeasureContext, Point, Rect, ScrollbarHandle,
-    TextEditState, WidgetId, WidgetStateMap,
+    ClipMask, ComputedScene, FocusScopeState, FocusTargetMeta, LifecycleEventState,
+    MeasureContext, Point, Rect, ScrollbarHandle, TextEditState, WidgetId, WidgetStateMap,
 };
+
+#[derive(Clone, Default)]
+pub(crate) struct FocusCollectState {
+    pub(crate) scope_path: Vec<WidgetId>,
+    pub(crate) next_order: usize,
+}
 
 pub(crate) struct CollectContext<'a, 'b> {
     pub(crate) taffy: &'a TaffyTree<MeasureContext>,
@@ -39,11 +45,61 @@ pub(crate) struct CollectContext<'a, 'b> {
     pub(crate) units: UnitContext,
     pub(crate) animations: &'b mut AnimationEngine,
     pub(crate) now: Instant,
+    pub(crate) focus: FocusCollectState,
     /// runtime 维护：widget 进入 hover 的时间戳。emit_tooltip 据此判断 hover 是否已持续到 `delay`。
     pub(crate) tooltip_hover_started_at: &'a HashMap<WidgetId, Instant>,
     /// emit_tooltip 写入：尚未达到 delay 时记录下次该唤醒事件循环的时刻，
     /// runtime 会聚合到 `next_deadline` 并在到点后 invalidate scene 触发重 collect。
     pub(crate) next_tooltip_wakeup: &'a Cell<Option<Instant>>,
+}
+
+impl<'a, 'b> CollectContext<'a, 'b> {
+    pub(crate) fn focus_scope_path(&self) -> Vec<WidgetId> {
+        self.focus.scope_path.clone()
+    }
+
+    pub(crate) fn register_focus_scope(
+        &mut self,
+        computed: &mut ComputedScene<impl Sized>,
+        scope_id: WidgetId,
+        options: crate::ui::widget::FocusScopeOptions,
+    ) -> Vec<WidgetId> {
+        let mut path = self.focus.scope_path.clone();
+        path.push(scope_id);
+        computed.register_focus_scope(FocusScopeState {
+            scope_id,
+            path: path.clone(),
+            options,
+        });
+        path
+    }
+
+    pub(crate) fn next_focus_order(&mut self) -> usize {
+        let order = self.focus.next_order;
+        self.focus.next_order += 1;
+        order
+    }
+
+    pub(crate) fn build_focus_meta<VM>(
+        &mut self,
+        widget_id: WidgetId,
+        focus_state: &super::FocusState,
+        interactions: &crate::ui::widget::InteractionHandlers<VM>,
+        fallback_focusable: bool,
+    ) -> Option<FocusTargetMeta<VM>> {
+        let focusable = focus_state.focusable.unwrap_or(fallback_focusable);
+        if !focusable {
+            return None;
+        }
+        Some(FocusTargetMeta {
+            widget_id,
+            tab_index: focus_state.tab_index,
+            order: self.next_focus_order(),
+            scope_path: self.focus.scope_path.clone(),
+            on_focus: interactions.on_focus.clone(),
+            on_blur: interactions.on_blur.clone(),
+        })
+    }
 }
 
 pub(crate) struct TextInputLayoutOverride<'a> {

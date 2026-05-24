@@ -208,6 +208,7 @@ impl<VM> ResolvedSceneLayout<VM> {
                     units: self.units,
                     animations,
                     now: std::time::Instant::now(),
+                    focus: super::scene::FocusCollectState::default(),
                     tooltip_hover_started_at: &tooltip_hover_started_at,
                     next_tooltip_wakeup: &next_tooltip_wakeup,
                 };

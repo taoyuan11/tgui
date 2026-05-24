@@ -341,6 +341,7 @@ impl Image {
             id: WidgetId::next(),
             key: self.key.clone(),
             layout: self.layout.clone(),
+            focus: Default::default(),
             visual: self.visual.clone(),
             interactions,
             lifecycle_events: LifecycleEventHandlers::default(),
@@ -359,6 +360,7 @@ impl Image {
             id: WidgetId::next(),
             key: self.key.clone(),
             layout: self.layout.clone(),
+            focus: Default::default(),
             visual: self.visual.clone(),
             interactions: InteractionHandlers {
                 cursor_style: self.cursor_style.clone(),
@@ -380,6 +382,7 @@ impl Image {
             id: WidgetId::next(),
             key: self.key.clone(),
             layout: self.layout.clone(),
+            focus: Default::default(),
             visual: self.visual.clone(),
             interactions: InteractionHandlers {
                 cursor_style: self.cursor_style.clone(),
@@ -400,6 +403,7 @@ impl<VM> From<Image> for Element<VM> {
             id: WidgetId::next(),
             key: value.key.clone(),
             layout: value.layout.clone(),
+            focus: Default::default(),
             visual: value.visual.clone(),
             interactions: InteractionHandlers {
                 cursor_style: value.cursor_style.clone(),

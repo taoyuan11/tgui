@@ -164,6 +164,8 @@ impl<VM> ResolvedElement<VM> {
                         rect: visual.frame,
                         clip_rect: visual.primitive_clip,
                         geometry: HitGeometry::Rect,
+                        scope_path: context.focus_scope_path(),
+                        focus: None,
                         interaction: HitInteraction::SelectableText {
                             id: self.id,
                             frame: visual.frame,
@@ -292,6 +294,8 @@ impl<VM> ResolvedElement<VM> {
                                     ),
                                     clip_rect: canvas_clip,
                                     geometry,
+                                    scope_path: context.focus_scope_path(),
+                                    focus: None,
                                     interaction: HitInteraction::CanvasItem {
                                         id: self.id,
                                         item_id: rendered.item_id,

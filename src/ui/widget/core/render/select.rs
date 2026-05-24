@@ -126,7 +126,7 @@ pub(crate) fn push_select_primitives(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn push_select_menu_primitives<VM>(
+pub(crate) fn build_select_menu_overlay<VM>(
     widget_id: WidgetId,
     trigger_frame: Rect,
     viewport: Rect,
@@ -134,74 +134,55 @@ pub(crate) fn push_select_menu_primitives<VM>(
     on_open_change: Option<&ValueCommand<VM, bool>>,
     select_style: &ResolvedSelectStyle,
     context: &mut CollectContext<'_, '_>,
-    computed: &mut ComputedScene<VM>,
     opacity: f32,
     open_progress: f32,
-) {
+) -> Option<(
+    crate::ui::widget::overlay::OverlayContent<VM>,
+    (Dp, Dp),
+)> {
     if options.is_empty() || open_progress <= f32::EPSILON {
-        return;
+        return None;
     }
 
-    let option_height = context
-        .units
-        .resolve_dp(select_style.option_height)
-        .max(1.0);
+    let option_height = Dp::new(context.units.resolve_dp(select_style.option_height));
     let menu_height = option_height * options.len() as f32;
     let menu_gap = context.units.resolve_dp(select_style.menu_gap);
-    let below_space = (viewport.bottom().get() - trigger_frame.bottom().get() - menu_gap).max(0.0);
-    let above_space = (trigger_frame.y.get() - viewport.y.get() - menu_gap).max(0.0);
+    let below_space =
+        Dp::new((viewport.bottom().get() - trigger_frame.bottom().get() - menu_gap).max(0.0));
+    let above_space = Dp::new((trigger_frame.y.get() - viewport.y.get() - menu_gap).max(0.0));
     let open_down = below_space >= menu_height || below_space >= above_space;
     let available_height = if open_down { below_space } else { above_space };
-    let target_visible_height = menu_height.min(available_height).max(0.0);
-    let visible_height = (target_visible_height * open_progress).max(0.0);
-    if visible_height <= 0.0 {
-        return;
+    let full_height = menu_height.min(available_height).max(Dp::ZERO);
+    let visible_height = (full_height * open_progress).max(Dp::ZERO);
+    if full_height <= Dp::ZERO {
+        return None;
     }
 
-    let menu_y = if open_down {
-        trigger_frame.bottom().get() + menu_gap
-    } else {
-        trigger_frame.y.get() - menu_gap - visible_height
-    };
-    let menu_frame = Rect::new(trigger_frame.x, menu_y, trigger_frame.width, visible_height);
-    let Some(menu_clip) = viewport.intersect(menu_frame) else {
-        return;
-    };
-    let menu_clip = Some(menu_clip);
+    let menu_width = trigger_frame.width;
     let menu_corner_radius = context.units.resolve_dp(select_style.radius);
-    let menu_clip_mask = Some(ClipMask {
-        rect: menu_frame,
-        corner_radius: menu_corner_radius,
-    });
-
-    computed.scene.push_overlay_shape(RenderPrimitive {
-        rect: menu_frame,
-        color: select_style.menu_background.with_alpha_factor(opacity),
-        corner_radius: menu_corner_radius,
-        stroke_width: 0.0,
-        clip_rect: menu_clip,
-        clip_mask: None,
-    });
-
+    let menu_clip_rect = if open_down {
+        Some(Rect::new(0.0, 0.0, menu_width, visible_height))
+    } else {
+        Some(Rect::new(0.0, full_height - visible_height, menu_width, visible_height))
+    };
     let option_padding = Insets::symmetric(select_style.padding_x, Dp::ZERO);
     let disabled_text = default_select_disabled_text_color(context.theme);
     let mut option_interactions = InteractionHandlers::default();
     option_interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+    let mut primitives = vec![crate::ui::widget::overlay::OverlayPrimitive::Shape(
+        RenderPrimitive {
+            rect: Rect::new(0.0, 0.0, menu_width, full_height),
+            color: select_style.menu_background.with_alpha_factor(opacity),
+            corner_radius: menu_corner_radius,
+            stroke_width: 0.0,
+            clip_rect: None,
+            clip_mask: None,
+        },
+    )];
+    let mut hits = Vec::new();
 
     for (index, option) in options.iter().enumerate() {
-        let full_option_frame = Rect::new(
-            menu_frame.x,
-            if open_down {
-                trigger_frame.bottom().get() + menu_gap + option_height * index as f32
-            } else {
-                menu_y + option_height * index as f32
-            },
-            menu_frame.width,
-            option_height,
-        );
-        let Some(option_frame) = full_option_frame.intersect(menu_frame) else {
-            continue;
-        };
+        let option_frame = Rect::new(0.0, option_height * index as f32, menu_width, option_height);
         let selected = option.selected.resolve();
         let option_disabled = option.disabled.resolve();
         let mut option_state = context.widget_states.get_select_option(widget_id, index);
@@ -215,43 +196,47 @@ pub(crate) fn push_select_menu_primitives<VM>(
             hovered_option_color
         };
         if selected || option_color.a > 0 {
-            computed.scene.push_overlay_shape(RenderPrimitive {
-                rect: option_frame,
-                color: option_color.with_alpha_factor(opacity),
-                corner_radius: 0.0,
-                stroke_width: 0.0,
-                clip_rect: menu_clip,
-                clip_mask: menu_clip_mask,
-            });
+            primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Shape(
+                RenderPrimitive {
+                    rect: option_frame,
+                    color: option_color.with_alpha_factor(opacity),
+                    corner_radius: 0.0,
+                    stroke_width: 0.0,
+                    clip_rect: None,
+                    clip_mask: None,
+                },
+            ));
         }
 
-        push_select_text(
-            &select_display_text(text_from_content(option.label.clone()), select_style),
-            option_frame,
-            context.font_manager,
-            context.theme,
-            context.units,
-            context.animations,
-            context.now,
-            &mut computed.scene,
-            option_padding,
-            if option_disabled {
-                disabled_text
-            } else {
-                select_style.text
-            },
-            opacity,
-            widget_id,
-            menu_clip,
-            None,
-            true,
-        );
+        primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Text(
+            build_select_text_primitive(
+                &select_display_text(text_from_content(option.label.clone()), select_style),
+                option_frame,
+                context.font_manager,
+                context.theme,
+                context.units,
+                context.animations,
+                context.now,
+                option_padding,
+                if option_disabled {
+                    disabled_text
+                } else {
+                    select_style.text
+                },
+                opacity,
+                widget_id,
+                None,
+                None,
+            ),
+        ));
 
         if open_progress >= 1.0 - f32::EPSILON {
-            computed.overlay_hit_regions.push(HitRegion {
+            hits.push(HitRegion {
                 rect: option_frame,
-                clip_rect: menu_clip,
+                clip_rect: menu_clip_rect,
                 geometry: HitGeometry::Rect,
+                scope_path: context.focus_scope_path(),
+                focus: None,
                 interaction: if option_disabled {
                     HitInteraction::Disabled { id: widget_id }
                 } else {
@@ -266,10 +251,19 @@ pub(crate) fn push_select_menu_primitives<VM>(
             });
         }
     }
+
+    Some((
+        crate::ui::widget::overlay::OverlayContent::Batch {
+            primitives,
+            hits,
+            clip_rect: menu_clip_rect,
+        },
+        (menu_width, full_height),
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn push_select_text(
+pub(crate) fn build_select_text_primitive(
     text: &Text,
     frame: Rect,
     font_manager: &FontManager,
@@ -277,15 +271,13 @@ pub(crate) fn push_select_text(
     units: UnitContext,
     animations: &mut AnimationEngine,
     now: std::time::Instant,
-    scene: &mut ScenePrimitives,
     padding: Insets,
     fallback_color: Color,
     opacity: f32,
     widget_id: WidgetId,
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
-    overlay: bool,
-) {
+) -> TextPrimitive {
     let content = text.content.resolve();
     let default_style = &theme.typography.body;
     let text_request = TextFontRequest {
@@ -312,7 +304,7 @@ pub(crate) fn push_select_text(
         letter_spacing,
     );
     let content_frame = centered_text_frame(inner, layout.width, layout.height, line_height, false);
-    let primitive = TextPrimitive {
+    TextPrimitive {
         content,
         rich_spans: None,
         frame: content_frame,
@@ -330,7 +322,42 @@ pub(crate) fn push_select_text(
         vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Start,
         clip_rect,
         clip_mask,
-    };
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn push_select_text(
+    text: &Text,
+    frame: Rect,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+    animations: &mut AnimationEngine,
+    now: std::time::Instant,
+    scene: &mut ScenePrimitives,
+    padding: Insets,
+    fallback_color: Color,
+    opacity: f32,
+    widget_id: WidgetId,
+    clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
+    overlay: bool,
+) {
+    let primitive = build_select_text_primitive(
+        text,
+        frame,
+        font_manager,
+        theme,
+        units,
+        animations,
+        now,
+        padding,
+        fallback_color,
+        opacity,
+        widget_id,
+        clip_rect,
+        clip_mask,
+    );
     if overlay {
         scene.push_overlay_text(primitive);
     } else {

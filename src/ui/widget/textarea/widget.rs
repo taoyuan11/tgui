@@ -193,6 +193,7 @@ impl<VM> Textarea<VM> {
                 id: WidgetId::next(),
                 key: None,
                 layout: LayoutStyle::default(),
+                focus: Default::default(),
                 visual: VisualStyle::default(),
                 interactions,
                 lifecycle_events: LifecycleEventHandlers::default(),

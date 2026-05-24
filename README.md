@@ -57,6 +57,7 @@
 
 - 布局：`Stack`、`Grid`、`Flex`
 - 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Switch`、`Image`
+- 浮层基础设施：统一的 runtime overlay anchoring 引擎，当前已为 `Tooltip` 与 `Select` 提供锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力
 - 画布：`Canvas`、`CanvasRecorder`、渐变/阴影/混合/裁剪/文字与图片绘制
 - 音频：`Audio`、`AudioController`、`AudioSource`（需启用 `audio` feature）
 - 视频：`VideoSurface`、`VideoController`、`VideoSource`（需启用 `video` feature）

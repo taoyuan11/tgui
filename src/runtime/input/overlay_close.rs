@@ -1,8 +1,50 @@
 use crate::ui::widget::Point;
 
 use super::BoundRuntimeHandler;
+use crate::runtime::state::FocusedWidget;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    fn close_overlay_handle(
+        &mut self,
+        handle: &crate::runtime::overlay::OverlayCloseHandle<VM>,
+    ) {
+        if let Some(command) = &handle.on_close {
+            self.execute_value_command(command, handle.close_value);
+            return;
+        }
+
+        let _ = self.set_select_open_state(
+            crate::ui::widget::WidgetId::from_raw(handle.overlay_id.0),
+            false,
+            None,
+        );
+    }
+
+    pub(in crate::runtime) fn restore_overlay_focus_if_needed(
+        &mut self,
+        widget_id: crate::ui::widget::WidgetId,
+    ) -> bool {
+        let computed = self.computed_scene().clone();
+        let target = computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .find_map(|region| {
+                let focus = region.focus.as_ref()?;
+                (focus.widget_id == widget_id).then(|| FocusedWidget {
+                    widget_id: focus.widget_id,
+                    scope_path: focus.scope_path.clone(),
+                    on_blur: focus.on_blur.clone(),
+                })
+            });
+        if let Some(target) = target {
+            self.update_focus(Some(target), None, true);
+            true
+        } else {
+            false
+        }
+    }
+
     /// 在指针按下时调用：所有 `close_on_outside_click=true` 的浮层，若 click_point 不在
     /// 浮层 rect 内，则触发其 `on_close`。
     ///
@@ -11,7 +53,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn consume_overlay_close_handlers_outside_click(
         &mut self,
         click_point: Point,
-    ) {
+    ) -> Option<crate::ui::widget::WidgetId> {
         let handlers: Vec<_> = self
             .computed_scene()
             .overlay_close_handlers
@@ -20,13 +62,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .cloned()
             .collect();
 
+        let mut focus_restore = None;
         for handle in handlers.iter().rev() {
-            if !handle.rect.contains(click_point) {
-                if let Some(command) = &handle.on_close {
-                    self.execute_command(command);
-                }
+            if handle.rect.contains(click_point) {
+                break;
+            }
+            self.close_overlay_handle(handle);
+            if focus_restore.is_none() {
+                focus_restore = handle.return_focus_to;
             }
         }
+        focus_restore
     }
 
     /// Esc 按键时调用：消费栈顶的 `close_on_escape=true` 浮层并触发其 `on_close`。
@@ -41,8 +87,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .cloned();
 
         if let Some(handle) = topmost {
-            if let Some(command) = &handle.on_close {
-                self.execute_command(command);
+            self.close_overlay_handle(&handle);
+            if let Some(widget_id) = handle.return_focus_to {
+                let _ = self.restore_overlay_focus_if_needed(widget_id);
             }
             true
         } else {

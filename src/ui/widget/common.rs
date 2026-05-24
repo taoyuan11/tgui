@@ -54,6 +54,7 @@ use super::text::Text;
 pub(crate) use event_handlers::*;
 use geometry::point_in_triangle;
 pub use geometry::{Point, Rect};
+pub use hit_scene::FocusScopeOptions;
 pub(crate) use hit_scene::*;
 pub(crate) use hit_scene_state::*;
 pub(crate) use hit_scene_support::*;

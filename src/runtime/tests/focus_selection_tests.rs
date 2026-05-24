@@ -1,6 +1,173 @@
 use super::*;
 
 #[test]
+fn tab_index_positive_priority_and_negative_values_are_respected() {
+    let invalidation = InvalidationSignal::new();
+    let default_first: Element<TestVm> = Button::new("Default First")
+        .size(dp(80.0), dp(30.0))
+        .into();
+    let default_first_id = default_first.id;
+    let default_first = default_first.tab_index(0);
+    let positive_second: Element<TestVm> = Button::new("Positive Second")
+        .size(dp(80.0), dp(30.0))
+        .into();
+    let positive_second_id = positive_second.id;
+    let positive_second = positive_second.tab_index(2);
+    let positive_first: Element<TestVm> = Button::new("Positive First")
+        .size(dp(80.0), dp(30.0))
+        .into();
+    let positive_first_id = positive_first.id;
+    let positive_first = positive_first.tab_index(1);
+    let skipped: Element<TestVm> = Button::new("Skipped")
+        .size(dp(80.0), dp(30.0))
+        .into();
+    let skipped = skipped.tab_index(-1);
+    let default_second: Element<TestVm> = Button::new("Default Second")
+        .size(dp(80.0), dp(30.0))
+        .into();
+    let default_second_id = default_second.id;
+    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child([
+        default_first,
+        positive_second,
+        positive_first,
+        skipped,
+        default_second,
+    ]));
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(positive_first_id));
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(positive_second_id));
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(default_first_id));
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(default_second_id));
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(positive_first_id));
+}
+
+#[test]
+fn focus_trap_loops_tab_order_and_blocks_pointer_focus_escape() {
+    let invalidation = InvalidationSignal::new();
+    let inner_first: Element<TestVm> = Button::new("Inner First")
+        .size(dp(80.0), dp(30.0))
+        .into();
+    let inner_first_id = inner_first.id;
+    let inner_second: Element<TestVm> = Button::new("Inner Second")
+        .size(dp(80.0), dp(30.0))
+        .into();
+    let inner_second_id = inner_second.id;
+    let outside: Element<TestVm> = Button::new("Outside")
+        .size(dp(80.0), dp(30.0))
+        .position_absolute()
+        .top(dp(90.0))
+        .into();
+    let tree = WidgetTree::new(Stack::new().child([
+        Flex::new(Axis::Vertical)
+            .focus_scope(FocusScopeOptions::new().trap(true))
+            .child([inner_first, inner_second])
+            .into(),
+        outside,
+    ]));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(inner_first_id));
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(inner_second_id));
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(inner_first_id));
+
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(100.0)));
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert_eq!(handler.focused_widget_id(), Some(inner_first_id));
+}
+
+#[test]
+fn enter_space_and_escape_drive_default_focus_actions() {
+    let invalidation = InvalidationSignal::new();
+    let button_clicks = Arc::new(AtomicUsize::new(0));
+    let checkbox_value = Arc::new(Mutex::new(false));
+    let switch_value = Arc::new(Mutex::new(false));
+
+    let button_clicks_ref = Arc::clone(&button_clicks);
+    let button: Element<TestVm> = Button::new("Button")
+        .size(dp(80.0), dp(30.0))
+        .on_click(Command::new(move |_vm: &mut TestVm| {
+            button_clicks_ref.fetch_add(1, Ordering::SeqCst);
+        }))
+        .into();
+    let button_id = button.id;
+
+    let checkbox_value_ref = Arc::clone(&checkbox_value);
+    let checkbox: Element<TestVm> = Checkbox::new(false)
+        .size(dp(80.0), dp(30.0))
+        .on_change(ValueCommand::new(move |_vm: &mut TestVm, value| {
+            *checkbox_value_ref.lock().expect("checkbox state lock should succeed") = value;
+        }))
+        .into();
+    let checkbox_id = checkbox.id;
+
+    let switch_value_ref = Arc::clone(&switch_value);
+    let switch: Element<TestVm> = Switch::new(false)
+        .size(dp(80.0), dp(30.0))
+        .on_change(ValueCommand::new(move |_vm: &mut TestVm, value| {
+            *switch_value_ref.lock().expect("switch state lock should succeed") = value;
+        }))
+        .into();
+    let switch_id = switch.id;
+
+    let select: Element<TestVm> = Select::new(
+        vec![SelectOption::new("email".to_string(), "Email".to_string())],
+        None::<String>,
+    )
+    .size(dp(160.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+
+    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child([button, checkbox, switch, select]));
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(button_id));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    assert_eq!(button_clicks.load(Ordering::SeqCst), 1);
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(checkbox_id));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Space))));
+    assert!(*checkbox_value.lock().expect("checkbox state lock should succeed"));
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(switch_id));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Space))));
+    assert!(*switch_value.lock().expect("switch state lock should succeed"));
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    assert_eq!(handler.focused_widget_id(), Some(select_id));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(true));
+
+    let event_loop = TestEventLoop;
+    let _ = handler.computed_scene();
+    handler.drive_animations(&event_loop, Instant::now() + Duration::from_millis(40));
+    assert!(!handler.computed_scene().overlay_close_handlers.is_empty());
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape)))
+    );
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(false));
+    assert_eq!(handler.focused_widget_id(), Some(select_id));
+}
+
+#[test]
 fn scene_cache_invalidates_when_pressed_widget_changes() {
     let invalidation = InvalidationSignal::new();
     let mut handler = test_handler(None, invalidation);
@@ -27,6 +194,7 @@ fn scene_cache_invalidates_when_focused_widget_changes() {
 
     handler.focused_widget = Some(super::FocusedWidget {
         widget_id: WidgetId::next(),
+        scope_path: Vec::new(),
         on_blur: None,
     });
 
@@ -147,6 +315,7 @@ fn tab_advances_to_next_focusable_widget() {
     let mut handler = test_handler(Some(tree), invalidation);
     handler.focused_widget = Some(super::FocusedWidget {
         widget_id: first_id,
+        scope_path: Vec::new(),
         on_blur: None,
     });
 
@@ -168,6 +337,7 @@ fn shift_tab_moves_focus_backward() {
     let mut handler = test_handler(Some(tree), invalidation);
     handler.focused_widget = Some(super::FocusedWidget {
         widget_id: second_id,
+        scope_path: Vec::new(),
         on_blur: None,
     });
     handler.modifiers = ModifiersState::SHIFT;

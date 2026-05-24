@@ -12,7 +12,7 @@ use crate::ui::layout::Insets;
 use crate::ui::unit::Dp;
 use crate::ui::widget::common::{ComputedScene, RenderPrimitive, Rect, TextPrimitive};
 use crate::ui::widget::overlay::{
-    collect::emit_overlay, Anchor, Overlay, OverlayContent, OverlayId, OverlayLayer,
+    collect::emit_overlay, Anchor, AnchorKey, Overlay, OverlayContent, OverlayId, OverlayLayer,
     OverlayPrimitive,
 };
 
@@ -134,7 +134,11 @@ impl<VM> ResolvedElement<VM> {
             clip_mask: None,
         };
 
-        let overlay = Overlay::<VM>::new(OverlayId::new(self.id.raw()), Anchor::Rect(visual.frame))
+        computed.register_widget_overlay_anchor(self.id, visual.frame);
+        let overlay = Overlay::<VM>::new(
+            OverlayId::new(self.id.raw()),
+            Anchor::Key(AnchorKey::widget(self.id)),
+        )
             .placement(tooltip.placement)
             .offset(style.offset)
             .flip_policy(tooltip.flip_policy)

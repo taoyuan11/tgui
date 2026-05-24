@@ -35,6 +35,7 @@ impl<VM> Container<VM> {
                 id: WidgetId::next(),
                 key: None,
                 layout: LayoutStyle::default(),
+                focus: Default::default(),
                 visual: VisualStyle::default(),
                 interactions: InteractionHandlers::default(),
                 lifecycle_events: LifecycleEventHandlers::default(),
@@ -88,6 +89,24 @@ impl<VM> Container<VM> {
     /// 返回更新后的容器实例。
     pub fn on_click(mut self, command: Command<VM>) -> Self {
         self.element.interactions.on_click = Some(command);
+        self
+    }
+
+    pub fn focusable(mut self, focusable: bool) -> Self {
+        self.element.focus.focusable = Some(focusable);
+        self
+    }
+
+    pub fn tab_index(mut self, tab_index: i32) -> Self {
+        self.element.focus.tab_index = Some(tab_index);
+        self
+    }
+
+    pub fn focus_scope(
+        mut self,
+        options: super::super::FocusScopeOptions,
+    ) -> Self {
+        self.element.focus.scope = Some(options);
         self
     }
 

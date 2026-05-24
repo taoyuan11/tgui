@@ -252,6 +252,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             {
                 self.advance_focus(self.modifiers.shift_key())
             }
+            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
+                if self.focused_text_input_id().is_none() =>
+            {
+                self.activate_focused_widget(true, false)
+            }
+            PhysicalKey::Code(KeyCode::Space) if self.focused_text_input_id().is_none() => {
+                self.activate_focused_widget(false, true)
+            }
             PhysicalKey::Code(KeyCode::Backspace) => self.delete_backward_at_focused_input(),
             PhysicalKey::Code(KeyCode::Delete) => self.delete_forward_at_focused_input(),
             PhysicalKey::Code(KeyCode::ArrowLeft) => {

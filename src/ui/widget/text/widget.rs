@@ -330,6 +330,7 @@ impl Text {
             id: WidgetId::next(),
             key: self.key.clone(),
             layout,
+            focus: Default::default(),
             visual,
             interactions,
             lifecycle_events: LifecycleEventHandlers::default(),
@@ -351,6 +352,7 @@ impl Text {
             id: WidgetId::next(),
             key: self.key.clone(),
             layout,
+            focus: Default::default(),
             visual,
             interactions: InteractionHandlers {
                 cursor_style: self.resolved_cursor_style(),
@@ -374,6 +376,7 @@ impl<VM> From<Text> for Element<VM> {
             id: WidgetId::next(),
             key: value.key.clone(),
             layout,
+            focus: Default::default(),
             visual,
             interactions: InteractionHandlers {
                 cursor_style: value.resolved_cursor_style(),

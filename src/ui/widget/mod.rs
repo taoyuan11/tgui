@@ -47,13 +47,15 @@ pub(crate) use common::{
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     BackdropBlurPrimitive, BrushPrimitiveData, CanvasCompositePrimitive,
     CanvasItemInteractionHandlers, CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask,
-    CompositionState, ComputedScene, HitGeometry, HitInteraction, InteractionHandlers,
+    CompositionState, ComputedScene, DefaultActivation, FocusScopeState, FocusTargetMeta,
+    HitGeometry, HitInteraction, InteractionHandlers,
     LifecycleEventHandlers, LifecycleEventState, MediaEventPhase, MediaEventState, MeshVertex,
-    RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextEditState,
-    TextInputContentGeometry, WidgetStateMap,
+    HitRegion, MeshPrimitive, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
+    TextEditState, TextInputContentGeometry, TexturePrimitive, WidgetStateMap,
 };
 pub use common::{
-    CursorStyle, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive, WidgetId, WidgetKey,
+    CursorStyle, FocusScopeOptions, Point, Rect, RenderPrimitive, ScenePrimitives,
+    TextPrimitive, WidgetId, WidgetKey,
 };
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
 #[cfg(feature = "bench-support")]
@@ -72,7 +74,8 @@ pub use image::Image;
 pub use input::Input;
 pub use overlay::{
     Alignment as OverlayAlignment, Anchor as OverlayAnchor, FlipPolicy as OverlayFlipPolicy,
-    OverlayId, OverlayLayer, Placement as OverlayPlacement,
+    AnchorKey as OverlayAnchorKey, AnchorSource as OverlayAnchorSource, OverlayId, OverlayLayer,
+    Placement as OverlayPlacement,
     PlacementOptions as OverlayPlacementOptions, Side as OverlaySide,
     SolvedPlacement as OverlaySolvedPlacement,
 };

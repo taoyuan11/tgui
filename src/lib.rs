@@ -248,7 +248,8 @@ pub mod prelude {
     pub use crate::widgets::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
-        ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Input,
+        ContainerStyle, CursorStyle, Element, FocusRingOverride, FocusScopeOptions, Image,
+        ImageStyle, Input,
         InputStyle, IntoTextContent, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
         OverlaySide, Radio, RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle,
         Slider, SliderStyle, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
@@ -279,7 +280,8 @@ pub mod widgets {
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
-        ContainerStyle, CursorStyle, Element, FocusRingOverride, Image, ImageStyle, Input,
+        ContainerStyle, CursorStyle, Element, FocusRingOverride, FocusScopeOptions, Image,
+        ImageStyle, Input,
         InputStyle, IntoTextContent, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
         OverlaySide, Radio, RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle,
         Slider, SliderStyle, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,

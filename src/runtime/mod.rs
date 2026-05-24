@@ -11,6 +11,7 @@ mod helpers;
 mod ime_runtime;
 mod input;
 mod lifecycle;
+pub(crate) mod overlay;
 mod render_cycle;
 mod scene_patch;
 mod scene_patch_cleanup;

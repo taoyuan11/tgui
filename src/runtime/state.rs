@@ -265,8 +265,10 @@ pub(super) struct SliderDrag<VM> {
     pub(super) current_value: f32,
 }
 
+#[derive(Clone)]
 pub(super) struct FocusedWidget<VM> {
     pub(super) widget_id: WidgetId,
+    pub(super) scope_path: Vec<WidgetId>,
     pub(super) on_blur: Option<Command<VM>>,
 }
 

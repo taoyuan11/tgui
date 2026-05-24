@@ -111,6 +111,7 @@ fn non_text_focus_does_not_schedule_caret_blink_deadline() {
     handler.update_focus(
         Some(FocusedWidget {
             widget_id: WidgetId::from_raw(999),
+            scope_path: Vec::new(),
             on_blur: None,
         }),
         None,

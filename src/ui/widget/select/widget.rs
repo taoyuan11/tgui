@@ -388,6 +388,7 @@ where
             id: WidgetId::next(),
             key: select.key,
             layout: select.layout,
+            focus: Default::default(),
             visual: select.visual,
             interactions: select.interactions,
             lifecycle_events: select.lifecycle_events,

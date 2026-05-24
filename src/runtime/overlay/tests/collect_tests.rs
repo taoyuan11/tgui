@@ -7,18 +7,18 @@
 //! - close handler 被注册到 `ComputedScene::overlay_close_handlers`；
 //! - `FlipPolicy::Hide` 在两侧都放不下时跳过所有 push；
 //! - 多浮层按 `OverlayLayer` 顺序进入平面列表（finalize 后 Tooltip < Popover < Menu < Modal）。
-//!
-//! emit_overlay 现在先写入 `overlay_layers` 暂存桶，所以平面列表断言之前需要先调
-//! `ComputedScene::finalize_overlay_layers()`。
 
 use crate::foundation::color::Color;
-use crate::ui::unit::{dp, Dp};
-use crate::ui::widget::common::{ComputedScene, RenderPrimitive, Rect};
-use crate::ui::widget::overlay::{
-    collect::emit_overlay,
-    Anchor, FlipPolicy, OverlayContent, OverlayId, OverlayLayer, OverlayPrimitive, Placement,
+use crate::runtime::overlay::collect::emit_overlay;
+use crate::runtime::overlay::{
+    Anchor, FlipPolicy, Overlay, OverlayContent, OverlayId, OverlayLayer, OverlayPrimitive,
+    Placement,
 };
-use crate::ui::widget::overlay::overlay::Overlay;
+use crate::ui::unit::{dp, Dp};
+use crate::ui::widget::{
+    ComputedScene, FocusScopeOptions, FocusScopeState, FocusTargetMeta, HitGeometry,
+    HitInteraction, HitRegion, Rect, RenderPrimitive, WidgetId,
+};
 
 fn viewport() -> Rect {
     Rect::new(dp(0.0), dp(0.0), dp(800.0), dp(600.0))
@@ -58,9 +58,7 @@ fn emit_overlay_writes_to_overlay_scene_not_main() {
     scene.finalize_overlay_layers();
 
     assert!(!solved.was_hidden);
-    // 主 scene 不接收 overlay primitive
     assert_eq!(scene.scene.shapes.len(), 0);
-    // overlay scene 收到 1 个 shape
     assert_eq!(scene.scene.overlay_shapes.len(), 1);
 }
 
@@ -72,8 +70,6 @@ fn emit_overlay_translates_primitive_to_window_coords() {
         .placement(Placement::bottom())
         .offset(dp(8.0));
 
-    // 局部 (10, 5, 60, 30) → 求解后浮层左上角 = (anchor.center_x - 40, anchor.bottom + 8) = (80, 148)
-    // → 平移后 (90, 153, 60, 30)
     let prims = vec![shape(
         Rect::new(dp(10.0), dp(5.0), dp(60.0), dp(30.0)),
         Color::rgba(0, 255, 0, 255),
@@ -168,11 +164,12 @@ fn close_handle_registered_when_any_close_hook_set() {
     scene.finalize_overlay_layers();
 
     assert_eq!(scene.overlay_close_handlers.len(), 1);
-    let h = &scene.overlay_close_handlers[0];
-    assert_eq!(h.overlay_id, OverlayId::new(42));
-    assert_eq!(h.layer, OverlayLayer::Menu);
-    assert!(h.close_on_outside_click);
-    assert!(h.close_on_escape);
+    let handle = &scene.overlay_close_handlers[0];
+    assert_eq!(handle.overlay_id, OverlayId::new(42));
+    assert_eq!(handle.layer, OverlayLayer::Menu);
+    assert!(handle.close_on_outside_click);
+    assert!(handle.close_on_escape);
+    assert!(!handle.close_value);
 }
 
 #[test]
@@ -215,8 +212,6 @@ fn close_handle_rect_matches_solved_rect() {
 
 #[test]
 fn finalize_orders_overlays_by_layer_z_order() {
-    // 先 emit Modal，再 emit Tooltip，再 emit Menu，再 emit Popover。
-    // finalize 后应为 Tooltip(底) → Popover → Menu → Modal(顶)。
     let mut scene = ComputedScene::<()>::default();
     let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
 
@@ -232,7 +227,6 @@ fn finalize_orders_overlays_by_layer_z_order() {
         (overlay, prims)
     };
 
-    // 颜色用来在 finalize 后识别顺序。
     let red = Color::rgba(255, 0, 0, 255);
     let green = Color::rgba(0, 255, 0, 255);
     let blue = Color::rgba(0, 0, 255, 255);
@@ -254,15 +248,13 @@ fn finalize_orders_overlays_by_layer_z_order() {
     }
     scene.finalize_overlay_layers();
 
-    // Shape order: Tooltip → Popover → Menu → Modal
-    let colors: Vec<_> = scene.scene.overlay_shapes.iter().map(|s| s.color).collect();
+    let colors: Vec<_> = scene.scene.overlay_shapes.iter().map(|shape| shape.color).collect();
     assert_eq!(colors, vec![green, yellow, blue, red]);
 
-    // Close handler order matches; iter().rev() consumes Modal first.
     let layers: Vec<_> = scene
         .overlay_close_handlers
         .iter()
-        .map(|h| h.layer)
+        .map(|handle| handle.layer)
         .collect();
     assert_eq!(
         layers,
@@ -277,7 +269,6 @@ fn finalize_orders_overlays_by_layer_z_order() {
 
 #[test]
 fn finalize_keeps_within_layer_emit_order() {
-    // 同层多浮层应保持 emit 顺序：先 emit 的位于平面列表的前面（被同层后续浮层覆盖）。
     let mut scene = ComputedScene::<()>::default();
     let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
 
@@ -301,6 +292,59 @@ fn finalize_keeps_within_layer_emit_order() {
     }
     scene.finalize_overlay_layers();
 
-    let colors: Vec<_> = scene.scene.overlay_shapes.iter().map(|s| s.color).collect();
+    let colors: Vec<_> = scene.scene.overlay_shapes.iter().map(|shape| shape.color).collect();
     assert_eq!(colors, vec![red, blue]);
+}
+
+#[test]
+fn emit_overlay_registers_focus_scope_and_rebases_hit_scope_path() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let scope_id = WidgetId::from_raw(7);
+    let focus_scope = FocusScopeState {
+        scope_id,
+        path: vec![scope_id],
+        options: FocusScopeOptions::new().trap(true),
+    };
+    let focus_target_id = WidgetId::from_raw(8);
+    let overlay = Overlay::<()>::new(OverlayId::new(scope_id.raw()), Anchor::Rect(anchor))
+        .focus_scope(focus_scope.clone());
+    let hits = vec![HitRegion {
+        rect: Rect::new(dp(0.0), dp(0.0), dp(40.0), dp(20.0)),
+        clip_rect: None,
+        geometry: HitGeometry::Rect,
+        scope_path: vec![WidgetId::from_raw(999)],
+        focus: Some(FocusTargetMeta {
+            widget_id: focus_target_id,
+            tab_index: Some(0),
+            order: 0,
+            scope_path: vec![WidgetId::from_raw(999)],
+            on_focus: None,
+            on_blur: None,
+        }),
+        interaction: HitInteraction::Disabled {
+            id: focus_target_id,
+        },
+    }];
+
+    let _ = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(40.0), dp(20.0)),
+        OverlayContent::Hits(hits),
+    );
+    scene.finalize_overlay_layers();
+
+    assert_eq!(scene.focus_scopes, vec![focus_scope.clone()]);
+    assert_eq!(scene.overlay_hit_regions.len(), 1);
+    assert_eq!(scene.overlay_hit_regions[0].scope_path, focus_scope.path);
+    assert_eq!(
+        scene.overlay_hit_regions[0]
+            .focus
+            .as_ref()
+            .expect("overlay focus metadata should be preserved")
+            .scope_path,
+        focus_scope.path
+    );
 }

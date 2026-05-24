@@ -8,6 +8,7 @@ pub struct Element<VM> {
     pub(crate) id: WidgetId,
     pub(crate) key: Option<WidgetKey>,
     pub(crate) layout: LayoutStyle,
+    pub(crate) focus: FocusState,
     pub(crate) visual: VisualStyle,
     pub(crate) interactions: InteractionHandlers<VM>,
     pub(crate) lifecycle_events: LifecycleEventHandlers<VM>,
@@ -23,6 +24,7 @@ impl<VM> Clone for Element<VM> {
             id: self.id,
             key: self.key.clone(),
             layout: self.layout.clone(),
+            focus: self.focus.clone(),
             visual: self.visual.clone(),
             interactions: self.interactions.clone(),
             lifecycle_events: self.lifecycle_events.clone(),
@@ -38,6 +40,7 @@ pub(crate) struct ResolvedElement<VM> {
     pub(crate) id: WidgetId,
     pub(crate) key: Option<WidgetKey>,
     pub(crate) layout: LayoutStyle,
+    pub(crate) focus: FocusState,
     pub(crate) visual: VisualStyle,
     pub(crate) interactions: InteractionHandlers<VM>,
     pub(crate) lifecycle_events: LifecycleEventHandlers<VM>,
@@ -142,6 +145,7 @@ impl<VM> Clone for ResolvedElement<VM> {
             id: self.id,
             key: self.key.clone(),
             layout: self.layout.clone(),
+            focus: self.focus.clone(),
             visual: self.visual.clone(),
             interactions: self.interactions.clone(),
             lifecycle_events: self.lifecycle_events.clone(),
@@ -152,6 +156,13 @@ impl<VM> Clone for ResolvedElement<VM> {
             kind: self.kind.clone(),
         }
     }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct FocusState {
+    pub(crate) focusable: Option<bool>,
+    pub(crate) tab_index: Option<i32>,
+    pub(crate) scope: Option<crate::ui::widget::FocusScopeOptions>,
 }
 
 impl<VM> Clone for ResolvedWidgetKind<VM> {
