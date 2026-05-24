@@ -10,6 +10,7 @@ mod core;
 mod image;
 mod input;
 mod radio;
+mod scroll_view;
 mod select;
 mod slider;
 mod slider_shared;
@@ -18,6 +19,7 @@ mod switch;
 mod text;
 mod textarea;
 mod overlay;
+mod r#virtual;
 mod tooltip;
 #[cfg(feature = "video")]
 mod video;
@@ -67,9 +69,11 @@ pub(crate) use core::LifecycleSnapshot;
 pub(crate) use core::LifecycleWidgetKind;
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub(crate) use core::{
-    CollectedSceneCache, ResolvedSceneLayout, SceneChunkParts, TextInputLayoutOverride,
+    CollectedSceneCache, ResolvedSceneLayout, ResolvedWidgetKind, SceneChunkParts,
+    TextInputLayoutOverride,
     VisualContextSnapshot,
 };
+pub(crate) use r#virtual::VirtualCacheState;
 pub use image::Image;
 pub use input::Input;
 pub use overlay::{
@@ -80,6 +84,7 @@ pub use overlay::{
     SolvedPlacement as OverlaySolvedPlacement,
 };
 pub use radio::{Radio, RadioGroup, RadioOption};
+pub use scroll_view::ScrollView;
 pub use select::{Select, SelectOption};
 pub use slider::Slider;
 pub use style::{
@@ -91,5 +96,9 @@ pub use switch::Switch;
 pub use text::{IntoTextContent, Text};
 pub use textarea::Textarea;
 pub use tooltip::Tooltip;
+pub use r#virtual::{
+    ItemLayout, ItemSource, VirtualArrangement, VirtualDirection, VirtualViewport,
+};
+pub(crate) use r#virtual::VirtualSceneStateUpdate;
 #[cfg(feature = "video")]
 pub use video::VideoSurface;

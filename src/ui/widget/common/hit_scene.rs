@@ -133,6 +133,8 @@ pub(crate) enum MeasureContext {
 pub(crate) struct LayoutNode {
     pub node: TaffyNodeId,
     pub children: Vec<LayoutNode>,
+    pub absolute_offset: Option<Point>,
+    pub absolute_size: Option<(Dp, Dp)>,
 }
 
 pub(crate) enum HitInteraction<VM> {

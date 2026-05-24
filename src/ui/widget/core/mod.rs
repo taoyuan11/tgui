@@ -96,7 +96,7 @@ use self::tree::with_widget_stack;
 pub use self::tree::{rect, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use self::types::Element;
 use self::types::*;
-pub(crate) use self::types::{LifecycleSnapshot, LifecycleWidgetKind};
+pub(crate) use self::types::{LifecycleSnapshot, LifecycleWidgetKind, ResolvedWidgetKind};
 
 /// Caret width in logical pixels.
 pub(super) const CARET_WIDTH: f32 = 2.0;

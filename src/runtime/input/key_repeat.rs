@@ -10,9 +10,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 | KeyCode::ArrowRight
                 | KeyCode::ArrowUp
                 | KeyCode::ArrowDown
+                | KeyCode::PageUp
+                | KeyCode::PageDown
                 | KeyCode::Home
                 | KeyCode::End,
-            ) => self.focused_text_input_id().is_some() || self.focused_slider_hit().is_some(),
+            ) => {
+                self.focused_text_input_id().is_some()
+                    || self.focused_slider_hit().is_some()
+                    || self.focused_scroll_region().is_some()
+            }
             _ if !is_primary_shortcut_modifier(self.modifiers)
                 && !self.modifiers.alt_key()
                 && self.focused_text_input_id().is_some() =>

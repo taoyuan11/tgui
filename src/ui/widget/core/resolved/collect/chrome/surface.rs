@@ -154,8 +154,7 @@ impl<VM> ResolvedElement<VM> {
                 focus: None,
                 interaction: HitInteraction::Disabled { id: self.id },
             });
-        } else if self.interactions.has_any()
-            && !matches!(&self.kind, ResolvedWidgetKind::Text { text } if text.user_select)
+        } else if !matches!(&self.kind, ResolvedWidgetKind::Text { text } if text.user_select)
             && !matches!(&self.kind, ResolvedWidgetKind::Select { .. })
         {
             let fallback_focusable = matches!(
@@ -167,13 +166,13 @@ impl<VM> ResolvedElement<VM> {
                     | ResolvedWidgetKind::Select { .. }
                     | ResolvedWidgetKind::Slider { .. }
                     | ResolvedWidgetKind::TextEditor { .. }
+            ) || matches!(
+                &self.kind,
+                ResolvedWidgetKind::Container { layout, .. } if layout.scroll_view.is_some()
             );
-            let focus = context.build_focus_meta(
-                self.id,
-                &self.focus,
-                &self.interactions,
-                fallback_focusable,
-            );
+            let focus =
+                context.build_focus_meta(self.id, &self.focus, &self.interactions, fallback_focusable);
+            if self.interactions.has_any() || focus.is_some() {
             computed.hit_regions.push(HitRegion {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
@@ -190,6 +189,7 @@ impl<VM> ResolvedElement<VM> {
                     },
                 },
             });
+            }
         }
     }
 }

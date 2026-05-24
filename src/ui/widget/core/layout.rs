@@ -111,6 +111,7 @@ pub(super) fn compute_container_content_bounds<VM>(
                 )
             })
             .unwrap_or(Insets::ZERO),
+        ResolvedWidgetKind::Virtual { .. } => Insets::ZERO,
         _ => Insets::ZERO,
     };
     let mut bounds: Option<Rect> = None;

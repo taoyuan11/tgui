@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widget::r#virtual::{VirtualCacheState, VirtualViewportHint};
 
 #[test]
 fn text_signal_records_layout_and_scene_dependencies() {
@@ -17,6 +18,8 @@ fn text_signal_records_layout_and_scene_dependencies() {
         &media,
         &mut animations,
         UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
         Rect::new(0.0, 0.0, 200.0, 120.0),
     );
 
@@ -75,6 +78,8 @@ fn dynamic_children_signal_records_structure_dependency() {
         &media,
         &mut animations,
         UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
         Rect::new(0.0, 0.0, 200.0, 120.0),
     );
 
@@ -117,6 +122,8 @@ fn keyed_dynamic_children_reuse_widget_ids_across_reorder_patch() {
         &media,
         &mut animations,
         UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
         viewport,
     );
 
@@ -182,6 +189,8 @@ fn canvas_items_signal_records_layout_and_scene_dependencies() {
         &media,
         &mut animations,
         UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
         Rect::new(0.0, 0.0, 200.0, 120.0),
     );
 
@@ -235,6 +244,8 @@ fn multiline_textarea_layout_is_content_independent() {
         &media,
         &mut animations,
         UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
         Rect::new(0.0, 0.0, 200.0, 120.0),
     );
 
@@ -259,6 +270,8 @@ fn textarea_non_focused_render_reuses_stable_layout_snapshot() {
         &media,
         &mut animations,
         UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
         viewport,
     );
 
@@ -373,6 +386,8 @@ fn textarea_show_scrollbar_signal_only_records_scene_dependency() {
         &media,
         &mut animations,
         UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
         Rect::new(0.0, 0.0, 200.0, 120.0),
     );
 
@@ -449,4 +464,216 @@ fn widget_tree_detects_lifecycle_handlers_in_dynamic_children() {
     visible.set(true);
 
     assert!(tree.has_lifecycle_handlers());
+}
+
+#[test]
+fn virtual_viewport_resolves_only_visible_window_children() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 220.0, 120.0);
+    let source: Vec<usize> = (0..100_000).collect();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        VirtualViewport::new(
+            source,
+            VirtualArrangement::Linear(VirtualDirection::Vertical),
+            crate::ui::widget::ItemLayout::Fixed {
+                item_extent: dp(20.0),
+                spacing: Dp::ZERO,
+                overscan: 1,
+            },
+            |index, item| {
+                Text::new(format!("row-{index}-{item}"))
+                    .height(dp(20.0))
+                    .into()
+            },
+        )
+        .size(dp(220.0), dp(120.0)),
+    );
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+
+    let ResolvedWidgetKind::Virtual {
+        children,
+        window_plan,
+        ..
+    } = &layout.resolved_root.kind
+    else {
+        panic!("root should resolve to virtual widget");
+    };
+
+    assert!(children.len() < 16, "visible virtual children should stay bounded");
+    assert_eq!(children.len(), window_plan.placements.len());
+    assert_eq!(window_plan.visible_range.start, 0);
+    assert!(window_plan.visible_range.end <= 14);
+}
+
+#[test]
+fn horizontal_virtual_viewport_uses_scroll_offset_for_visible_range() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 120.0, 40.0);
+    let element: Element<()> = VirtualViewport::new(
+        (0..1_000).collect::<Vec<_>>(),
+        VirtualArrangement::Linear(VirtualDirection::Horizontal),
+        crate::ui::widget::ItemLayout::Fixed {
+            item_extent: dp(20.0),
+            spacing: Dp::ZERO,
+            overscan: 0,
+        },
+        |index, _| Text::new(format!("col-{index}")).width(dp(20.0)).into(),
+    )
+    .size(dp(120.0), dp(40.0))
+    .into();
+    let widget_id = element.id;
+    let tree: WidgetTree<()> = WidgetTree::new(element);
+    let baseline_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let baseline_range = match &baseline_layout.resolved_root.kind {
+        ResolvedWidgetKind::Virtual { window_plan, .. } => window_plan.visible_range.clone(),
+        _ => panic!("root should resolve to horizontal virtual widget"),
+    };
+    let scroll_offsets = HashMap::from([(widget_id, Point::new(dp(80.0), Dp::ZERO))]);
+    let virtual_states = HashMap::from([(
+        widget_id,
+        VirtualCacheState {
+            viewport_hint: Some(VirtualViewportHint {
+                width: dp(120.0),
+                height: dp(40.0),
+            }),
+            ..Default::default()
+        },
+    )]);
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &scroll_offsets,
+        &virtual_states,
+        viewport,
+    );
+
+    let ResolvedWidgetKind::Virtual {
+        window_plan,
+        children,
+        ..
+    } = &layout.resolved_root.kind
+    else {
+        panic!("root should resolve to horizontal virtual widget");
+    };
+
+    assert_eq!(window_plan.visible_range.start, 4);
+    assert!(window_plan.visible_range.end > window_plan.visible_range.start);
+    assert!(window_plan.visible_range.start > baseline_range.start);
+    assert!(window_plan.visible_range.len() < 32);
+    assert_eq!(children.len(), window_plan.visible_range.len());
+}
+
+#[test]
+fn measured_virtual_viewport_updates_total_extent_after_collect_feedback() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 200.0, 80.0);
+    let element: Element<()> = VirtualViewport::new(
+        (0..5).collect::<Vec<_>>(),
+        VirtualArrangement::Linear(VirtualDirection::Vertical),
+        crate::ui::widget::ItemLayout::Measured {
+            estimate: dp(10.0),
+            spacing: Dp::ZERO,
+            overscan: 0,
+        },
+        |index, _| Text::new(format!("row-{index}")).height(dp(30.0)).into(),
+    )
+    .size(dp(200.0), dp(80.0))
+    .into();
+    let widget_id = element.id;
+    let tree: WidgetTree<()> = WidgetTree::new(element);
+
+    let first_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let first_extent = match &first_layout.resolved_root.kind {
+        ResolvedWidgetKind::Virtual { window_plan, .. } => window_plan.total_main_extent,
+        _ => panic!("root should resolve to virtual widget"),
+    };
+    assert_eq!(first_extent, dp(50.0));
+
+    let computed = tree.collect_scene_from_layout(
+        &font_manager,
+        &first_layout,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let update = computed
+        .virtual_state_updates
+        .iter()
+        .find(|entry| entry.widget_id == widget_id)
+        .expect("virtual collect should emit state update");
+    assert!(update.invalidate_layout);
+    assert!(!update.measured_extents.is_empty());
+
+    let next_virtual_state = VirtualCacheState {
+        viewport_hint: Some(update.viewport_hint.clone()),
+        measured_extents: update.measured_extents.iter().copied().collect(),
+        widget_ids_by_key: update.widget_ids_by_key.iter().cloned().collect(),
+    };
+    let second_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::from([(widget_id, next_virtual_state)]),
+        viewport,
+    );
+    let second_extent = match &second_layout.resolved_root.kind {
+        ResolvedWidgetKind::Virtual { window_plan, .. } => window_plan.total_main_extent,
+        _ => panic!("root should resolve to virtual widget"),
+    };
+    assert!(second_extent > first_extent);
 }

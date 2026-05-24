@@ -145,10 +145,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         frame: Rect,
         padding: crate::ui::layout::Insets,
         text_style: &Text,
+        auto_wrap: bool,
+        show_scrollbar: bool,
         scroll_delta: Point,
     ) -> bool {
-        let inner = frame.inset(padding);
-        if inner.is_empty() || scroll_delta.y.abs() <= f32::EPSILON {
+        let content_viewport = crate::ui::widget::text_input_content_viewport(
+            frame,
+            padding,
+            true,
+            show_scrollbar,
+            &self.theme,
+            self.unit_context(),
+        );
+        if content_viewport.is_empty()
+            || (scroll_delta.x.abs() <= f32::EPSILON && scroll_delta.y.abs() <= f32::EPSILON)
+        {
             return false;
         }
 
@@ -165,13 +176,35 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     text_style,
                     value,
                     true,
-                    true,
-                    inner.width.get(),
+                    auto_wrap,
+                    crate::ui::widget::text_input_layout_width(
+                        content_viewport,
+                        true,
+                        auto_wrap,
+                        super::INPUT_CARET_WIDTH,
+                    ),
                 );
                 layout
             });
-        let max_scroll_y = Dp::new((layout.height.max(line_height) - inner.height.get()).max(0.0));
-        if max_scroll_y <= Dp::ZERO {
+        let geometry = crate::ui::widget::text_input_content_geometry(
+            &layout,
+            line_height,
+            content_viewport,
+            true,
+            auto_wrap,
+            self.scroll_states
+                .get(&widget_id)
+                .copied()
+                .unwrap_or(Point::ZERO),
+            super::INPUT_CARET_WIDTH,
+        );
+        let max_scroll_x = if auto_wrap {
+            Dp::ZERO
+        } else {
+            (geometry.content_width - content_viewport.width).max(0.0)
+        };
+        let max_scroll_y = (geometry.content_height - content_viewport.height).max(0.0);
+        if max_scroll_x <= Dp::ZERO && max_scroll_y <= Dp::ZERO {
             return false;
         }
 
@@ -181,10 +214,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .copied()
             .unwrap_or(Point::ZERO);
         let next = Point::new(
-            Dp::ZERO,
+            if auto_wrap {
+                Dp::ZERO
+            } else {
+                (current.x - scroll_delta.x).clamp(Dp::ZERO, max_scroll_x)
+            },
             (current.y - scroll_delta.y).clamp(Dp::ZERO, max_scroll_y),
         );
-        if (next.y - current.y).abs() <= 0.01 {
+        if (next.x - current.x).abs() <= 0.01 && (next.y - current.y).abs() <= 0.01 {
             return false;
         }
 
@@ -193,7 +230,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
-    pub(super) fn set_smooth_scroll_target(&mut self, widget_id: WidgetId, target: Point) {
+    pub(in crate::runtime) fn set_smooth_scroll_target(&mut self, widget_id: WidgetId, target: Point) {
         self.smooth_scroll_states
             .insert(widget_id, SmoothScrollState { target });
         let _ = self.advance_smooth_scroll();

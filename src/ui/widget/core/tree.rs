@@ -1,5 +1,8 @@
 use super::*;
 use std::time::Instant;
+use crate::ui::widget::r#virtual::{
+    apply_virtual_runtime_state_to_element, VirtualCacheState, VirtualViewportHint,
+};
 
 pub struct WidgetTree<VM> {
     pub(super) root: Element<VM>,
@@ -27,7 +30,7 @@ pub(super) fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
     }
 }
 
-impl<VM> WidgetTree<VM> {
+impl<VM: 'static> WidgetTree<VM> {
     pub fn new(root: impl Into<Element<VM>>) -> Self {
         Self { root: root.into() }
     }
@@ -58,6 +61,8 @@ impl<VM> WidgetTree<VM> {
             media,
             animations,
             units,
+            scroll_offsets,
+            &HashMap::new(),
             viewport,
             now,
         );
@@ -89,6 +94,8 @@ impl<VM> WidgetTree<VM> {
         media: &MediaManager,
         animations: &mut AnimationEngine,
         units: UnitContext,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
         viewport: Rect,
     ) -> ResolvedSceneLayout<VM> {
         self.build_scene_layout_at(
@@ -97,6 +104,8 @@ impl<VM> WidgetTree<VM> {
             media,
             animations,
             units,
+            scroll_offsets,
+            virtual_states,
             viewport,
             Instant::now(),
         )
@@ -109,13 +118,25 @@ impl<VM> WidgetTree<VM> {
         media: &MediaManager,
         animations: &mut AnimationEngine,
         units: UnitContext,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
         viewport: Rect,
         now: Instant,
     ) -> ResolvedSceneLayout<VM> {
         let (mut layout, dependencies) = with_widget_stack(|| {
             with_dependency_collection(|| {
                 let mut taffy = TaffyTree::new();
-                let resolved_root = self.root.resolve(theme);
+                let mut root = self.root.clone();
+                apply_virtual_runtime_state_to_element(
+                    &mut root,
+                    scroll_offsets,
+                    virtual_states,
+                    VirtualViewportHint {
+                        width: viewport.width,
+                        height: viewport.height,
+                    },
+                );
+                let resolved_root = root.resolve(theme);
                 let root_layout = resolved_root
                     .build_layout_tree(
                         &mut taffy, animations, theme, units, None, viewport, true, now,
@@ -142,7 +163,7 @@ impl<VM> WidgetTree<VM> {
                     .expect("widget tree layout should compute");
 
                 ResolvedSceneLayout {
-                    source_root: self.root.clone(),
+                    source_root: root,
                     root_id: resolved_root.id,
                     resolved_root,
                     layout_root: root_layout,

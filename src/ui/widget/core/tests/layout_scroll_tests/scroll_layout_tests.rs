@@ -377,3 +377,88 @@ fn scroll_containers_render_scrollbar_track_and_thumb() {
         .iter()
         .any(|primitive| primitive.color == crate::foundation::color::Color::hexa(0x445566FF)));
 }
+
+#[test]
+fn scroll_view_hides_scrollbar_when_disabled() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let scroller: Element<()> = ScrollView::new()
+        .size(dp(120.0), dp(120.0))
+        .show_scrollbar(false)
+        .child(Stack::new().size(dp(120.0), dp(260.0)))
+        .into();
+    let tree = WidgetTree::new(scroller);
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 120.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(
+        rendered.primitives.overlay_shapes.is_empty(),
+        "scrollbar primitives should be omitted when show_scrollbar=false"
+    );
+    assert!(
+        !rendered.scroll_regions.is_empty(),
+        "scroll region should still exist even when scrollbar visuals are hidden"
+    );
+}
+
+#[test]
+fn scroll_view_controller_binds_widget_and_reports_offset() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let ctx = test_context();
+    let controller = ScrollViewController::new(&ctx);
+    let scroller: Element<()> = ScrollView::new()
+        .size(dp(100.0), dp(100.0))
+        .controller(controller.clone())
+        .child(Stack::new().size(dp(100.0), dp(240.0)))
+        .into();
+    let scroller_id = scroller.id;
+    let tree = WidgetTree::new(scroller);
+
+    let mut scroll_offsets = HashMap::new();
+    scroll_offsets.insert(scroller_id, Point::new(Dp::ZERO, dp(32.0)));
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &scroll_offsets,
+        Rect::new(0.0, 0.0, 100.0, 100.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let region = rendered
+        .scroll_regions
+        .into_iter()
+        .find(|region| region.id == scroller_id)
+        .expect("scroll region should exist");
+    controller.bind_widget(scroller_id);
+    controller.sync_offset(region.scroll_offset);
+
+    assert_eq!(controller.widget_id(), Some(scroller_id));
+    assert_eq!(controller.scroll_offset(), region.scroll_offset);
+}

@@ -13,6 +13,11 @@ impl<VM> ResolvedElement<VM> {
                     child.collect_media_event_states(media, states);
                 }
             }
+            ResolvedWidgetKind::Virtual { children, .. } => {
+                for child in children {
+                    child.collect_media_event_states(media, states);
+                }
+            }
             #[cfg(feature = "audio")]
             ResolvedWidgetKind::Audio { audio } => {
                 if !self.media_events.has_any() {
@@ -71,7 +76,9 @@ impl<VM> ResolvedElement<VM> {
             });
         }
 
-        if let ResolvedWidgetKind::Container { children, .. } = &self.kind {
+        if let ResolvedWidgetKind::Container { children, .. }
+        | ResolvedWidgetKind::Virtual { children, .. } = &self.kind
+        {
             for child in children {
                 child.collect_lifecycle_event_states(states);
             }

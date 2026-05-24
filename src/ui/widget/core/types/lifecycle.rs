@@ -1,4 +1,8 @@
 use super::*;
+use crate::ui::widget::style::ContainerStyle;
+use crate::ui::widget::r#virtual::{
+    ItemLayout, VirtualArrangement, VirtualResolvedItemMeta, VirtualWindowPlan,
+};
 
 pub(crate) struct LifecycleSnapshot {
     pub(crate) id: WidgetId,
@@ -19,6 +23,16 @@ pub(crate) enum LifecycleWidgetKind {
     Container {
         layout: ContainerLayout,
         child_ids: Vec<WidgetId>,
+    },
+    Virtual {
+        arrangement: VirtualArrangement,
+        item_layout: ItemLayout,
+        overflow_x: Overflow,
+        overflow_y: Overflow,
+        style: ContainerStyle,
+        window_plan: VirtualWindowPlan,
+        child_ids: Vec<WidgetId>,
+        child_meta: Vec<VirtualResolvedItemMeta>,
     },
     Text {
         text: Text,
@@ -123,6 +137,25 @@ impl Clone for LifecycleWidgetKind {
             Self::Container { layout, child_ids } => Self::Container {
                 layout: layout.clone(),
                 child_ids: child_ids.clone(),
+            },
+            Self::Virtual {
+                arrangement,
+                item_layout,
+                overflow_x,
+                overflow_y,
+                style,
+                window_plan,
+                child_ids,
+                child_meta,
+            } => Self::Virtual {
+                arrangement: *arrangement,
+                item_layout: *item_layout,
+                overflow_x: *overflow_x,
+                overflow_y: *overflow_y,
+                style: style.clone(),
+                window_plan: window_plan.clone(),
+                child_ids: child_ids.clone(),
+                child_meta: child_meta.clone(),
             },
             Self::Text { text } => Self::Text { text: text.clone() },
             #[cfg(feature = "audio")]

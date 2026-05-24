@@ -41,6 +41,23 @@ impl<VM> Element<VM> {
                     .collect(),
                 style,
             },
+            WidgetKind::Virtual {
+                arrangement,
+                item_layout,
+                source,
+                overflow_x,
+                overflow_y,
+                style,
+                runtime_state,
+            } => WidgetKind::Virtual {
+                arrangement,
+                item_layout,
+                source: source.scope(selector.clone()),
+                overflow_x,
+                overflow_y,
+                style,
+                runtime_state,
+            },
             WidgetKind::Text { text } => WidgetKind::Text { text },
             #[cfg(feature = "audio")]
             WidgetKind::Audio { audio } => WidgetKind::Audio { audio },

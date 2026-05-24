@@ -1,4 +1,8 @@
 use super::*;
+use crate::foundation::binding::ScrollViewController;
+use crate::ui::widget::r#virtual::{
+    ErasedVirtualItemSource, ItemLayout, VirtualArrangement, VirtualRuntimeState,
+};
 use crate::ui::widget::core::Element;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -16,6 +20,21 @@ pub(crate) enum ContainerKind {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ScrollViewConfig {
+    pub show_scrollbar: Value<bool>,
+    pub controller: Option<ScrollViewController>,
+}
+
+impl Default for ScrollViewConfig {
+    fn default() -> Self {
+        Self {
+            show_scrollbar: Value::Static(true),
+            controller: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ContainerLayout {
     pub kind: ContainerKind,
     pub padding: Option<Value<Insets>>,
@@ -25,6 +44,7 @@ pub(crate) struct ContainerLayout {
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
     pub scrollbar_style: ScrollbarStyle,
+    pub scroll_view: Option<ScrollViewConfig>,
 }
 
 impl ContainerLayout {
@@ -38,6 +58,7 @@ impl ContainerLayout {
             overflow_x: Overflow::Hidden,
             overflow_y: Overflow::Hidden,
             scrollbar_style: ScrollbarStyle::default(),
+            scroll_view: None,
         }
     }
 }
@@ -130,6 +151,15 @@ pub(crate) enum WidgetKind<VM> {
         layout: ContainerLayout,
         children: Vec<ChildSource<VM>>,
         style: Option<StyleResolver<ContainerStyle>>,
+    },
+    Virtual {
+        arrangement: VirtualArrangement,
+        item_layout: ItemLayout,
+        source: ErasedVirtualItemSource<VM>,
+        overflow_x: Overflow,
+        overflow_y: Overflow,
+        style: Option<StyleResolver<ContainerStyle>>,
+        runtime_state: VirtualRuntimeState,
     },
     Text {
         text: Text,
@@ -254,6 +284,23 @@ impl<VM> Clone for WidgetKind<VM> {
                 layout: layout.clone(),
                 children: children.clone(),
                 style: style.clone(),
+            },
+            Self::Virtual {
+                arrangement,
+                item_layout,
+                source,
+                overflow_x,
+                overflow_y,
+                style,
+                runtime_state,
+            } => Self::Virtual {
+                arrangement: *arrangement,
+                item_layout: *item_layout,
+                source: source.clone(),
+                overflow_x: *overflow_x,
+                overflow_y: *overflow_y,
+                style: style.clone(),
+                runtime_state: runtime_state.clone(),
             },
             Self::Text { text } => Self::Text { text: text.clone() },
             #[cfg(feature = "audio")]

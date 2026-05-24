@@ -1,7 +1,7 @@
 use super::*;
 use std::time::Instant;
 
-impl<VM> WidgetTree<VM> {
+impl<VM: 'static> WidgetTree<VM> {
     #[cfg(test)]
     pub(crate) fn has_lifecycle_handlers(&self) -> bool {
         with_widget_stack(|| super::tree_query::element_has_lifecycle_handlers(&self.root))

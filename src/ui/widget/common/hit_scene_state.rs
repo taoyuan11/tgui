@@ -1,5 +1,6 @@
 use super::*;
 use crate::runtime::overlay::{AnchorKey, AnchorSource};
+use crate::ui::widget::VirtualSceneStateUpdate;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ScrollRegion {
@@ -47,6 +48,7 @@ pub(crate) struct ComputedScene<VM> {
     pub overlay_layers: [OverlayLayerBucket<VM>; OVERLAY_LAYER_COUNT],
     pub scroll_regions: Vec<ScrollRegion>,
     pub ime_cursor_area: Option<Rect>,
+    pub virtual_state_updates: Vec<VirtualSceneStateUpdate>,
     pub(crate) dependencies: DependencyGraph,
 }
 
@@ -62,6 +64,7 @@ impl<VM> Clone for ComputedScene<VM> {
             overlay_layers: std::array::from_fn(|i| self.overlay_layers[i].clone()),
             scroll_regions: self.scroll_regions.clone(),
             ime_cursor_area: self.ime_cursor_area,
+            virtual_state_updates: self.virtual_state_updates.clone(),
             dependencies: self.dependencies.clone(),
         }
     }
@@ -179,6 +182,7 @@ impl<VM> Default for ComputedScene<VM> {
             overlay_layers: std::array::from_fn(|_| OverlayLayerBucket::default()),
             scroll_regions: Vec::new(),
             ime_cursor_area: None,
+            virtual_state_updates: Vec::new(),
             dependencies: DependencyGraph::default(),
         }
     }
@@ -203,6 +207,8 @@ impl<VM> ComputedScene<VM> {
         if self.ime_cursor_area.is_none() {
             self.ime_cursor_area = other.ime_cursor_area;
         }
+        self.virtual_state_updates
+            .extend(other.virtual_state_updates.iter().cloned());
         self.dependencies.merge_from(&other.dependencies);
     }
 

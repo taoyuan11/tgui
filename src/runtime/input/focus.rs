@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widget::ScrollRegion;
 
 #[derive(Clone)]
 struct FocusCandidate<VM> {
@@ -15,6 +16,65 @@ fn scope_path_within(path: &[WidgetId], scope: &[WidgetId]) -> bool {
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(super) fn focused_scroll_region(&mut self) -> Option<ScrollRegion> {
+        let focused_id = self.focused_widget_id()?;
+        self.scroll_regions()
+            .into_iter()
+            .find(|region| region.id == focused_id && (region.can_scroll_x() || region.can_scroll_y()))
+    }
+
+    pub(super) fn scroll_focused_region_by_pages(&mut self, direction: i32) -> bool {
+        let Some(region) = self.focused_scroll_region() else {
+            return false;
+        };
+        let current = self.effective_scroll_offset(region.id, region.scroll_offset);
+        let page_x = (region.content_viewport.width * 0.9).max(Dp::ZERO);
+        let page_y = (region.content_viewport.height * 0.9).max(Dp::ZERO);
+        let max = region.max_offset();
+        let next = Point::new(
+            if region.can_scroll_x() {
+                (current.x + page_x * direction as f32).clamp(Dp::ZERO, max.x)
+            } else {
+                current.x
+            },
+            if region.can_scroll_y() {
+                (current.y + page_y * direction as f32).clamp(Dp::ZERO, max.y)
+            } else {
+                current.y
+            },
+        );
+        if (next.x - current.x).abs() <= 0.01 && (next.y - current.y).abs() <= 0.01 {
+            return false;
+        }
+        self.set_smooth_scroll_target(region.id, next);
+        true
+    }
+
+    pub(super) fn scroll_focused_region_to_edge(&mut self, end: bool) -> bool {
+        let Some(region) = self.focused_scroll_region() else {
+            return false;
+        };
+        let current = self.effective_scroll_offset(region.id, region.scroll_offset);
+        let max = region.max_offset();
+        let next = Point::new(
+            if region.can_scroll_x() {
+                if end { max.x } else { Dp::ZERO }
+            } else {
+                current.x
+            },
+            if region.can_scroll_y() {
+                if end { max.y } else { Dp::ZERO }
+            } else {
+                current.y
+            },
+        );
+        if (next.x - current.x).abs() <= 0.01 && (next.y - current.y).abs() <= 0.01 {
+            return false;
+        }
+        self.set_smooth_scroll_target(region.id, next);
+        true
+    }
+
     pub(super) fn active_focus_trap_scope(&mut self) -> Option<Vec<WidgetId>> {
         self.computed_scene()
             .focus_scopes

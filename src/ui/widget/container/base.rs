@@ -1,18 +1,18 @@
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::ResolvedThemeMode;
-use crate::ui::layout::{Align, Insets, Justify, LayoutStyle, Overflow, Value};
+use crate::ui::layout::{Align, Insets, Justify, LayoutStyle, Overflow, ScrollbarStyle, Value};
 use crate::ui::unit::Dp;
 
 use super::super::common::{
     ContainerLayout, CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers,
-    Point, VisualStyle, WidgetId, WidgetKind,
+    Point, ScrollViewConfig, VisualStyle, WidgetId, WidgetKind,
 };
 use super::super::core::Element;
 use super::super::style::ContainerStyle;
 use super::length::IntoLengthValue;
 use super::IntoChildren;
 
-pub(super) fn apply_layout_api<VM, T>(
+pub(crate) fn apply_layout_api<VM, T>(
     mut owner: T,
     element: impl Fn(&mut T) -> &mut Element<VM>,
     op: impl FnOnce(&mut LayoutStyle),
@@ -25,7 +25,7 @@ pub(super) fn apply_layout_api<VM, T>(
 ///
 /// 该类型负责承载通用交互、生命周期和子节点管理逻辑，具体布局类型在其上继续封装。
 pub struct Container<VM> {
-    pub(super) element: Element<VM>,
+    pub(crate) element: Element<VM>,
 }
 
 impl<VM> Container<VM> {
@@ -341,6 +341,25 @@ impl<VM> Container<VM> {
     pub fn overflow_y(mut self, overflow: Overflow) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
             layout.overflow_y = overflow;
+        }
+        self
+    }
+
+    /// 设置滚动条样式。
+    pub fn scrollbar_style(mut self, style: impl Into<Value<ScrollbarStyle>>) -> Self {
+        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
+            layout.scrollbar_style = style.into().resolve();
+        }
+        self
+    }
+
+    /// 设置是否显示滚动条。
+    pub fn show_scrollbar(mut self, show: impl Into<Value<bool>>) -> Self {
+        if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
+            let config = layout
+                .scroll_view
+                .get_or_insert_with(ScrollViewConfig::default);
+            config.show_scrollbar = show.into();
         }
         self
     }

@@ -1,7 +1,8 @@
 use super::element_path::resolved_child_elements_with_previous;
 use super::*;
+use crate::ui::widget::r#virtual::{resolve_virtual_window_plan, VirtualResolvedItemMeta};
 
-impl<VM> Element<VM> {
+impl<VM: 'static> Element<VM> {
     pub(super) fn resolve(&self, theme: &Theme) -> ResolvedElement<VM> {
         self.resolve_with_previous(theme, None)
     }
@@ -48,6 +49,110 @@ impl<VM> Element<VM> {
                 ResolvedWidgetKind::Container {
                     layout,
                     children: resolved_children,
+                }
+            }
+            WidgetKind::Virtual {
+                arrangement,
+                item_layout,
+                source,
+                overflow_x,
+                overflow_y,
+                style,
+                runtime_state,
+            } => {
+                let resolved_style = resolved_container_style(style.as_ref(), theme);
+                apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
+                let viewport_hint = runtime_state.viewport_hint.clone().unwrap_or_default();
+                let window_plan = resolve_virtual_window_plan(
+                    *arrangement,
+                    *item_layout,
+                    runtime_state,
+                    source.len(),
+                    viewport_hint,
+                );
+                let previous_children = previous
+                    .and_then(|previous| match &previous.kind {
+                        ResolvedWidgetKind::Virtual { children, .. } => Some(children.as_slice()),
+                        _ => None,
+                    })
+                    .unwrap_or(&[]);
+                let previous_by_index: HashMap<usize, &ResolvedElement<VM>> = previous
+                    .and_then(|previous| match &previous.kind {
+                        ResolvedWidgetKind::Virtual { child_meta, children, .. } => Some(
+                            child_meta
+                                .iter()
+                                .zip(children.iter())
+                                .map(|(meta, child)| (meta.item_index, child))
+                                .collect(),
+                        ),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let mut child_meta = Vec::with_capacity(window_plan.placements.len());
+                let mut children = Vec::with_capacity(window_plan.placements.len());
+                for placement in &window_plan.placements {
+                    let Some(mut child) = source.build(placement.item_index) else {
+                        continue;
+                    };
+                    child.layout.position_type = crate::ui::layout::PositionType::Absolute;
+                    child.layout.left = Some(Value::Static(crate::ui::layout::Length::Px(
+                        placement.cross_offset,
+                    )));
+                    child.layout.top = Some(Value::Static(crate::ui::layout::Length::Px(
+                        placement.main_offset,
+                    )));
+                    let item_key = source
+                        .key(placement.item_index)
+                        .unwrap_or_else(|| WidgetKey::from(placement.item_index));
+                    match arrangement.direction() {
+                        crate::ui::widget::VirtualDirection::Vertical => {
+                            child.layout.width = Some(Value::Static(
+                                crate::ui::layout::Length::Px(placement.cross_extent),
+                            ));
+                        }
+                        crate::ui::widget::VirtualDirection::Horizontal => {
+                            child.layout.height = Some(Value::Static(
+                                crate::ui::layout::Length::Px(placement.cross_extent),
+                            ));
+                        }
+                    }
+                    let previous_child = previous_by_index
+                        .get(&placement.item_index)
+                        .copied()
+                        .or_else(|| {
+                            runtime_state
+                                .widget_ids_by_key
+                                .get(&item_key)
+                                .and_then(|id| previous_children.iter().find(|child| child.id == *id))
+                        })
+                        .or_else(|| previous_children.get(children.len()));
+                    if child.key.is_none() {
+                        child.key = Some(item_key.clone());
+                    }
+                    if let Some(previous_child) = previous_child {
+                        child.id = previous_child.id;
+                    }
+                    child_meta.push(VirtualResolvedItemMeta {
+                        item_index: placement.item_index,
+                        stripe_index: placement.stripe_index,
+                        lane_index: placement.lane_index,
+                        main_extent: placement.main_extent,
+                        main_offset: placement.main_offset,
+                        cross_offset: placement.cross_offset,
+                        cross_extent: placement.cross_extent,
+                    });
+                    children.push(child.resolve_with_previous(theme, previous_child));
+                }
+                ResolvedWidgetKind::Virtual {
+                    arrangement: *arrangement,
+                    item_layout: *item_layout,
+                    overflow_x: *overflow_x,
+                    overflow_y: *overflow_y,
+                    style: resolved_style,
+                    runtime_state: runtime_state.clone(),
+                    window_plan,
+                    children,
+                    child_meta,
                 }
             }
             WidgetKind::Text { text } => {

@@ -2,7 +2,7 @@ use super::*;
 #[cfg(test)]
 use crate::ui::widget::common::ChildSource;
 
-impl<VM> WidgetTree<VM> {
+impl<VM: 'static> WidgetTree<VM> {
     #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn render_output(
@@ -385,7 +385,16 @@ impl<VM> WidgetTree<VM> {
         scene_position: Point,
     ) -> Vec<super::CanvasSceneHit> {
         let layout =
-            self.build_scene_layout(font_manager, theme, media, animations, units, viewport);
+            self.build_scene_layout(
+                font_manager,
+                theme,
+                media,
+                animations,
+                units,
+                &HashMap::new(),
+                &HashMap::new(),
+                viewport,
+            );
         layout.query_canvas_scene_all_at_widget(widget_id, font_manager, units, scene_position)
     }
 }

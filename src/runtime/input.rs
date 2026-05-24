@@ -314,15 +314,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             PhysicalKey::Code(KeyCode::Home) => {
                 self.adjust_focused_slider(0, Some(false))
+                    || self.scroll_focused_region_to_edge(false)
                     || self.move_focused_input_cursor(|_, _| 0, self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::End) => {
                 self.adjust_focused_slider(0, Some(true))
+                    || self.scroll_focused_region_to_edge(true)
                     || self.move_focused_input_cursor(
                         |buffer: &RopeBuffer, _state: &TextEditState| buffer.len_bytes(),
                         self.modifiers.shift_key(),
                     )
             }
+            PhysicalKey::Code(KeyCode::PageUp) => self.scroll_focused_region_by_pages(-1),
+            PhysicalKey::Code(KeyCode::PageDown) => self.scroll_focused_region_by_pages(1),
             PhysicalKey::Code(KeyCode::KeyA) if is_primary_shortcut_modifier(self.modifiers) => {
                 self.select_all_focused_input()
             }

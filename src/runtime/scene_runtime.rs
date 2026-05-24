@@ -1,11 +1,100 @@
 use super::*;
+use crate::foundation::binding::ScrollRequestMode;
+use crate::ui::unit::Dp;
+use crate::foundation::binding::{ScrollRequest, ScrollViewController};
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    fn apply_scroll_view_controller_state(
+        &mut self,
+        bindings: Vec<(WidgetId, ScrollRegion, ScrollViewController)>,
+    ) -> bool {
+        let mut changed = false;
+        let mut requests: Vec<(WidgetId, ScrollRegion, ScrollViewController, ScrollRequest)> =
+            Vec::new();
+        for (widget_id, region, controller) in bindings {
+            controller.bind_widget(widget_id);
+            controller.sync_offset(region.scroll_offset);
+            if let Some(request) = controller.take_request() {
+                requests.push((widget_id, region, controller, request));
+            }
+        }
+
+        for (widget_id, region, controller, request) in requests {
+            let max = region.max_offset();
+            let target = Point::new(
+                request.offset.x.clamp(Dp::ZERO, max.x),
+                request.offset.y.clamp(Dp::ZERO, max.y),
+            );
+            match request.mode {
+                ScrollRequestMode::Immediate => {
+                    self.smooth_scroll_states.remove(&widget_id);
+                    self.set_scroll_offset(widget_id, target);
+                }
+                ScrollRequestMode::Smooth => {
+                    self.set_smooth_scroll_target(widget_id, target);
+                }
+            }
+            controller.clear_request(request);
+            changed = true;
+        }
+
+        changed
+    }
+
+    fn consume_scroll_view_requests_from_cached_scene(&mut self) -> bool {
+        let bindings = if let Some(cached) = self.cached_scene.as_ref() {
+            if let Some(layout) = cached.layout.as_ref() {
+                cached
+                    .computed
+                    .scroll_regions
+                    .iter()
+                    .filter_map(|region| {
+                        let resolved = layout.resolved_widget(region.id)?;
+                        let crate::ui::widget::ResolvedWidgetKind::Container { layout, .. } =
+                            &resolved.kind
+                        else {
+                            return None;
+                        };
+                        let controller = layout.scroll_view.as_ref()?.controller.clone()?;
+                        Some((region.id, *region, controller))
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+        self.apply_scroll_view_controller_state(bindings)
+    }
+
+    fn sync_virtual_state_updates(&mut self, computed: &ComputedScene<VM>) -> bool {
+        let mut layout_invalidated = false;
+        for update in &computed.virtual_state_updates {
+            let state = self.virtual_states.entry(update.widget_id).or_default();
+            state.viewport_hint = Some(update.viewport_hint.clone());
+            for (index, extent) in &update.measured_extents {
+                if state.measured_extents.get(index).copied() != Some(*extent) {
+                    layout_invalidated = layout_invalidated || update.invalidate_layout;
+                    state.measured_extents.insert(*index, *extent);
+                }
+            }
+            state.widget_ids_by_key = update.widget_ids_by_key.iter().cloned().collect();
+        }
+        layout_invalidated
+    }
+
     pub(in crate::runtime) fn computed_scene(&mut self) -> &ComputedScene<VM> {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let viewport = self.viewport_rect();
         let units = self.unit_context();
         let now = Instant::now();
+        if self.cached_scene.is_some() {
+            if self.consume_scroll_view_requests_from_cached_scene() {
+                self.invalidate_scene_with_reason("scroll_view_controller_request");
+                self.invalidation.mark_dirty();
+            }
+        }
         let focused_widget = self.focused_widget_id();
         let active_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
         let (
@@ -206,6 +295,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 &self.media_manager,
                                 &mut self.animation_engine,
                                 units,
+                                &self.scroll_states,
+                                &self.virtual_states,
                                 viewport,
                             );
                             layout_duration += layout_started_at.elapsed();
@@ -314,6 +405,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 ),
             };
             let computed = collected.computed.clone();
+            let virtual_layout_invalidated = self.sync_virtual_state_updates(&computed);
+            if virtual_layout_invalidated {
+                self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             self.next_tooltip_wakeup_deadline = collected.next_tooltip_wakeup;
             let focused_input = self.focused_text_input_id_cached(&computed);
             let caret_visible = self.caret_visible_at(now, focused_input);
@@ -352,6 +450,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 scene_chunk_parts: collected.chunk_parts,
                 visual_contexts: collected.visual_contexts,
             });
+            if let Some(cached) = self.cached_scene.as_ref() {
+                let bindings = if let Some(layout) = cached.layout.as_ref() {
+                    cached
+                        .computed
+                        .scroll_regions
+                        .iter()
+                        .filter_map(|region| {
+                            let resolved = layout.resolved_widget(region.id)?;
+                            let crate::ui::widget::ResolvedWidgetKind::Container { layout, .. } =
+                                &resolved.kind
+                            else {
+                                return None;
+                            };
+                            let controller = layout.scroll_view.as_ref()?.controller.clone()?;
+                            Some((region.id, *region, controller))
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let _ = self.apply_scroll_view_controller_state(bindings);
+            }
 
             if let Some(started_at) = started_at {
                 let computed = &self

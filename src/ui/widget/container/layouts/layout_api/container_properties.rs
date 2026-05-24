@@ -219,6 +219,19 @@ macro_rules! impl_container_properties {
             pub fn overflow_y(self, overflow: Overflow) -> Self {
                 Self(self.0.overflow_y(overflow))
             }
+
+            /// 设置滚动条样式。
+            pub fn scrollbar_style(
+                self,
+                style: impl Into<Value<crate::ui::layout::ScrollbarStyle>>,
+            ) -> Self {
+                Self(self.0.scrollbar_style(style))
+            }
+
+            /// 设置是否显示滚动条。
+            pub fn show_scrollbar(self, show: impl Into<Value<bool>>) -> Self {
+                Self(self.0.show_scrollbar(show))
+            }
         }
     };
 }

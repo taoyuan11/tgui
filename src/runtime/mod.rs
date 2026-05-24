@@ -103,7 +103,7 @@ use crate::ui::unit::{dp, UnitContext};
 use crate::ui::widget::LifecycleEventState;
 use crate::ui::widget::{
     CollectedSceneCache, ComputedScene, Point, Rect, ResolvedSceneLayout, ScrollRegion,
-    ScrollbarHandle, TextEditState, WidgetId, WidgetStateMap, WidgetTree,
+    ScrollbarHandle, TextEditState, VirtualCacheState, WidgetId, WidgetStateMap, WidgetTree,
 };
 use image::GenericImageView;
 use std::collections::{HashMap, HashSet};
@@ -388,6 +388,7 @@ pub struct BoundRuntimeHandler<VM> {
     cursor_icon: Option<CursorIcon>,
     scroll_states: HashMap<WidgetId, Point>,
     smooth_scroll_states: HashMap<WidgetId, SmoothScrollState>,
+    virtual_states: HashMap<WidgetId, VirtualCacheState>,
     select_open_states: HashMap<WidgetId, bool>,
     scroll_epoch: u64,
     text_input_epoch: u64,
@@ -494,6 +495,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             cursor_icon: None,
             scroll_states: HashMap::new(),
             smooth_scroll_states: HashMap::new(),
+            virtual_states: HashMap::new(),
             select_open_states: HashMap::new(),
             scroll_epoch: 0,
             text_input_epoch: 0,

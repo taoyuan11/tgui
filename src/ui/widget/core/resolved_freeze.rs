@@ -5,7 +5,7 @@ use crate::ui::widget::style::{
     ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
     InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
     SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle,
-    SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle,
+    SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle, ContainerStyle,
 };
 use crate::ui::widget::{Image, Text};
 
@@ -79,6 +79,10 @@ fn freeze_visual_style(style: &mut VisualStyle) {
 fn freeze_container_layout(layout: &mut ContainerLayout) {
     freeze_option_value(&mut layout.padding);
     freeze_value(&mut layout.gap);
+}
+
+fn freeze_container_style(style: &mut ContainerStyle) {
+    freeze_widget_surface_style(&mut style.surface);
 }
 
 fn freeze_text(text: &mut Text) {
@@ -211,6 +215,30 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             LifecycleWidgetKind::Container {
                 layout,
                 child_ids: children.iter().map(|child| child.id).collect(),
+            }
+        }
+        ResolvedWidgetKind::Virtual {
+            arrangement,
+            item_layout,
+            overflow_x,
+            overflow_y,
+            style,
+            window_plan,
+            children,
+            child_meta,
+            ..
+        } => {
+            let mut style = style.clone();
+            freeze_container_style(&mut style);
+            LifecycleWidgetKind::Virtual {
+                arrangement: *arrangement,
+                item_layout: *item_layout,
+                overflow_x: *overflow_x,
+                overflow_y: *overflow_y,
+                style,
+                window_plan: window_plan.clone(),
+                child_ids: children.iter().map(|child| child.id).collect(),
+                child_meta: child_meta.clone(),
             }
         }
         ResolvedWidgetKind::Text { text } => {

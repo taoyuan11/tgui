@@ -1,12 +1,14 @@
 mod context;
 mod dependency;
 mod invalidation;
+mod scroll;
 mod signal_state;
 #[cfg(test)]
 mod tests;
 mod text;
 
 pub use context::ViewModelContext;
+pub use scroll::{ScrollRequest, ScrollRequestMode, ScrollViewController};
 pub use signal_state::{Signal, State};
 pub use text::{TextChange, TextChangeSet, TextController, TextSnapshot};
 

@@ -178,7 +178,8 @@ pub mod logging {
 /// MVVM state, bindings, commands, and view model contracts.
 pub mod mvvm {
     pub use crate::foundation::binding::{
-        Signal, State, TextChange, TextChangeSet, TextController, TextSnapshot, ViewModelContext,
+        ScrollRequest, ScrollRequestMode, ScrollViewController, Signal, State, TextChange,
+        TextChangeSet, TextController, TextSnapshot, ViewModelContext,
     };
     pub use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
     pub use crate::foundation::window_control::{WindowControl, WindowResizeDirection};
@@ -224,9 +225,9 @@ pub mod prelude {
     pub use crate::logging::{tgui_log, Log, LogLevel};
     pub use crate::media::{ContentFit, MediaBytes, MediaSource};
     pub use crate::mvvm::{
-        Command, CommandContext, Signal, State, TextChange, TextChangeSet, TextController,
-        TextSnapshot, ValueCommand, ViewModel, ViewModelContext, WindowControl,
-        WindowResizeDirection,
+        Command, CommandContext, ScrollRequest, ScrollRequestMode, ScrollViewController, Signal,
+        State, TextChange, TextChangeSet, TextController, TextSnapshot, ValueCommand, ViewModel,
+        ViewModelContext, WindowControl, WindowResizeDirection,
     };
     pub use crate::notification::{
         NotificationAction, NotificationActionEvent, NotificationError, NotificationOptions,
@@ -250,10 +251,12 @@ pub mod prelude {
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
         ContainerStyle, CursorStyle, Element, FocusRingOverride, FocusScopeOptions, Image,
         ImageStyle, Input,
-        InputStyle, IntoTextContent, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
-        OverlaySide, Radio, RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle,
-        Slider, SliderStyle, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
-        Tooltip, TooltipStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
+        InputStyle, IntoTextContent, ItemLayout, ItemSource, OverlayAlignment, OverlayFlipPolicy,
+        OverlayPlacement, OverlaySide, Radio, RadioGroup, RadioOption, RadioStyle, ScrollView,
+        Select,
+        SelectOption, SelectStyle, Slider, SliderStyle, Switch, SwitchStyle, Text,
+        TextWidgetStyle, Textarea, TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
+        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
         WidgetSurfaceStyle, WidgetTree,
     };
 }
@@ -272,7 +275,10 @@ pub mod widgets {
     #[cfg(feature = "audio")]
     pub use crate::audio::Audio;
     pub use crate::layout::{Flex, Grid, IntoLengthValue, Stack};
-    pub use crate::mvvm::{TextChange, TextChangeSet, TextController, TextSnapshot};
+    pub use crate::mvvm::{
+        ScrollRequest, ScrollRequestMode, ScrollViewController, TextChange, TextChangeSet,
+        TextController, TextSnapshot,
+    };
     #[cfg(feature = "bench-support")]
     pub use crate::ui::widget::{
         default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
@@ -282,10 +288,12 @@ pub mod widgets {
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
         ContainerStyle, CursorStyle, Element, FocusRingOverride, FocusScopeOptions, Image,
         ImageStyle, Input,
-        InputStyle, IntoTextContent, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
-        OverlaySide, Radio, RadioGroup, RadioOption, RadioStyle, Select, SelectOption, SelectStyle,
-        Slider, SliderStyle, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
-        Tooltip, TooltipStyle, VideoSurfaceStyle, WidgetCommand, WidgetEventResult,
+        InputStyle, IntoTextContent, ItemLayout, ItemSource, OverlayAlignment, OverlayFlipPolicy,
+        OverlayPlacement, OverlaySide, Radio, RadioGroup, RadioOption, RadioStyle, ScrollView,
+        Select,
+        SelectOption, SelectStyle, Slider, SliderStyle, Switch, SwitchStyle, Text,
+        TextWidgetStyle, Textarea, TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
+        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
         WidgetSurfaceStyle, WidgetTree,
     };
     #[cfg(feature = "video")]

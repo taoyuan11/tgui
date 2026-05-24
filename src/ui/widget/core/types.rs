@@ -3,6 +3,10 @@ mod lifecycle;
 pub(crate) use self::lifecycle::{LifecycleSelectOption, LifecycleSnapshot, LifecycleWidgetKind};
 use super::*;
 use crate::ui::widget::{common, image};
+use crate::ui::widget::style::ContainerStyle;
+use crate::ui::widget::r#virtual::{
+    ItemLayout, VirtualArrangement, VirtualResolvedItemMeta, VirtualRuntimeState, VirtualWindowPlan,
+};
 
 pub struct Element<VM> {
     pub(crate) id: WidgetId,
@@ -55,6 +59,17 @@ pub(crate) enum ResolvedWidgetKind<VM> {
     Container {
         layout: ContainerLayout,
         children: Vec<ResolvedElement<VM>>,
+    },
+    Virtual {
+        arrangement: VirtualArrangement,
+        item_layout: ItemLayout,
+        overflow_x: Overflow,
+        overflow_y: Overflow,
+        style: ContainerStyle,
+        runtime_state: VirtualRuntimeState,
+        window_plan: VirtualWindowPlan,
+        children: Vec<ResolvedElement<VM>>,
+        child_meta: Vec<VirtualResolvedItemMeta>,
     },
     Text {
         text: Text,
@@ -171,6 +186,27 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
             Self::Container { layout, children } => Self::Container {
                 layout: layout.clone(),
                 children: children.clone(),
+            },
+            Self::Virtual {
+                arrangement,
+                item_layout,
+                overflow_x,
+                overflow_y,
+                style,
+                runtime_state,
+                window_plan,
+                children,
+                child_meta,
+            } => Self::Virtual {
+                arrangement: *arrangement,
+                item_layout: *item_layout,
+                overflow_x: *overflow_x,
+                overflow_y: *overflow_y,
+                style: style.clone(),
+                runtime_state: runtime_state.clone(),
+                window_plan: window_plan.clone(),
+                children: children.clone(),
+                child_meta: child_meta.clone(),
             },
             Self::Text { text } => Self::Text { text: text.clone() },
             #[cfg(feature = "audio")]

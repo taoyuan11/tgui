@@ -12,7 +12,9 @@ pub(super) fn collect_indexes<VM>(
     paths.insert(node.id, path.clone());
     parents.insert(node.id, parent);
     depths.insert(node.id, depth);
-    if let ResolvedWidgetKind::Container { children, .. } = &node.kind {
+    if let ResolvedWidgetKind::Container { children, .. }
+    | ResolvedWidgetKind::Virtual { children, .. } = &node.kind
+    {
         for (index, child) in children.iter().enumerate() {
             path.push(index);
             collect_indexes(
@@ -31,7 +33,9 @@ pub(super) fn collect_indexes<VM>(
 
 pub(super) fn collect_resolved_widget_ids<VM>(node: &ResolvedElement<VM>, ids: &mut Vec<WidgetId>) {
     ids.push(node.id);
-    if let ResolvedWidgetKind::Container { children, .. } = &node.kind {
+    if let ResolvedWidgetKind::Container { children, .. }
+    | ResolvedWidgetKind::Virtual { children, .. } = &node.kind
+    {
         for child in children {
             collect_resolved_widget_ids(child, ids);
         }
@@ -69,8 +73,12 @@ pub(super) fn patch_layout_at_path<VM>(
         return Ok(());
     }
 
-    let ResolvedWidgetKind::Container { layout, children } = &mut current.kind else {
-        return Ok(());
+    let (parent_kind, children) = match &mut current.kind {
+        ResolvedWidgetKind::Container { layout, children } => {
+            (Some(layout.kind.clone()), children)
+        }
+        ResolvedWidgetKind::Virtual { children, .. } => (None, children),
+        _ => return Ok(()),
     };
     let child_index = path[0];
     patch_layout_at_path(
@@ -84,7 +92,7 @@ pub(super) fn patch_layout_at_path<VM>(
         units,
         viewport,
         now,
-        Some(layout.kind.clone()),
+        parent_kind,
         false,
     )
 }
@@ -106,6 +114,7 @@ fn patch_layout_tree<VM>(
     track_dependency_scope(owner, || {
         let next_parent_kind = match &next.kind {
             ResolvedWidgetKind::Container { layout, .. } => Some(layout.kind.clone()),
+            ResolvedWidgetKind::Virtual { .. } => None,
             _ => None,
         };
 
@@ -117,6 +126,7 @@ fn patch_layout_tree<VM>(
             },
         ) {
             ResolvedWidgetKind::Container { children, .. } => children,
+            ResolvedWidgetKind::Virtual { children, .. } => children,
             other => {
                 current.kind = other;
                 Vec::new()
@@ -131,6 +141,7 @@ fn patch_layout_tree<VM>(
 
         let next_children = match &mut next.kind {
             ResolvedWidgetKind::Container { children, .. } => std::mem::take(children),
+            ResolvedWidgetKind::Virtual { children, .. } => std::mem::take(children),
             _ => Vec::new(),
         };
 
@@ -176,8 +187,12 @@ fn patch_layout_tree<VM>(
             remove_layout_subtree(taffy, &stale_layout)?;
         }
 
-        if let ResolvedWidgetKind::Container { children, .. } = &mut next.kind {
-            *children = patched_children;
+        match &mut next.kind {
+            ResolvedWidgetKind::Container { children, .. }
+            | ResolvedWidgetKind::Virtual { children, .. } => {
+                *children = patched_children;
+            }
+            _ => {}
         }
 
         taffy.set_style(
@@ -226,8 +241,10 @@ pub(super) fn resolved_at_path<'a, VM>(
     if path.is_empty() {
         return node;
     }
-    let ResolvedWidgetKind::Container { children, .. } = &node.kind else {
-        panic!("resolved path descends into a non-container widget");
+    let children = match &node.kind {
+        ResolvedWidgetKind::Container { children, .. }
+        | ResolvedWidgetKind::Virtual { children, .. } => children,
+        _ => panic!("resolved path descends into a non-container widget"),
     };
     resolved_at_path(&children[path[0]], &path[1..])
 }
@@ -242,8 +259,10 @@ pub(super) fn patch_resolved_at_path<VM>(
         return true;
     }
 
-    let ResolvedWidgetKind::Container { children, .. } = &mut node.kind else {
-        return false;
+    let children = match &mut node.kind {
+        ResolvedWidgetKind::Container { children, .. }
+        | ResolvedWidgetKind::Virtual { children, .. } => children,
+        _ => return false,
     };
     let Some(child) = children.get_mut(path[0]) else {
         return false;

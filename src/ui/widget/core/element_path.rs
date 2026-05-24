@@ -40,7 +40,7 @@ pub(super) fn resolved_child_elements_with_previous<'a, VM>(
     resolved
 }
 
-pub(super) fn resolve_subtree_from_source_path<'a, VM>(
+pub(super) fn resolve_subtree_from_source_path<'a, VM: 'static>(
     source: &Element<VM>,
     previous: Option<&'a ResolvedElement<VM>>,
     theme: &Theme,

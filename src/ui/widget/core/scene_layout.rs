@@ -21,7 +21,7 @@ pub(crate) struct ResolvedSceneLayout<VM> {
     pub(super) depths: HashMap<WidgetId, usize>,
 }
 
-impl<VM> ResolvedSceneLayout<VM> {
+impl<VM: 'static> ResolvedSceneLayout<VM> {
     pub(crate) fn dependencies(&self) -> &DependencyGraph {
         &self.dependencies
     }
@@ -252,7 +252,9 @@ impl<VM> ResolvedSceneLayout<VM> {
         let node = self.resolved_at_path(path);
         let parts = chunk_parts.get(&widget_id)?;
         let mut composed = parts.before_children.clone();
-        if let ResolvedWidgetKind::Container { children, .. } = &node.kind {
+        if let ResolvedWidgetKind::Container { children, .. }
+        | ResolvedWidgetKind::Virtual { children, .. } = &node.kind
+        {
             for child in children {
                 let child_chunk = chunks.get(&child.id)?;
                 composed.extend(&child_chunk);

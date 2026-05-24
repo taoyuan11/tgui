@@ -6,6 +6,7 @@ use crate::animation::AnimationCoordinator;
 use crate::application::{ApplicationConfig, MsaaMode, ResourceBudget, ThemeSelection, WindowRole};
 use crate::dialog::async_dialog_channel;
 use crate::foundation::binding::{DependencyGraph, ViewModelContext};
+use crate::foundation::binding::ScrollViewController;
 use crate::foundation::binding::{InvalidationSignal, Signal, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand, ViewModel};
@@ -30,7 +31,8 @@ use crate::ui::widget::{
     Button, Canvas, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent, CanvasRecorder,
     CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Checkbox,
     ContainerStyle, CursorStyle, Flex, FocusScopeOptions, HitInteraction, Input, Point, Rect,
-    Select, SelectOption, Switch, Text, TextEditState, Textarea, Tooltip, WidgetTree,
+    ScrollView, Select, SelectOption, Switch, Text, TextEditState,
+    Textarea, Tooltip, VirtualCacheState, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle};
@@ -174,6 +176,10 @@ fn pressed_key_event(physical_key: PhysicalKey) -> KeyEvent {
         physical_key,
         logical_key: match physical_key {
             PhysicalKey::Code(KeyCode::Tab) => Key::Named(NamedKey::Tab),
+            PhysicalKey::Code(KeyCode::PageUp) => Key::Named(NamedKey::PageUp),
+            PhysicalKey::Code(KeyCode::PageDown) => Key::Named(NamedKey::PageDown),
+            PhysicalKey::Code(KeyCode::Home) => Key::Named(NamedKey::Home),
+            PhysicalKey::Code(KeyCode::End) => Key::Named(NamedKey::End),
             _ => Key::Character(" ".into()),
         },
         text: None,
@@ -183,6 +189,10 @@ fn pressed_key_event(physical_key: PhysicalKey) -> KeyEvent {
         text_with_all_modifiers: None,
         key_without_modifiers: match physical_key {
             PhysicalKey::Code(KeyCode::Tab) => Key::Named(NamedKey::Tab),
+            PhysicalKey::Code(KeyCode::PageUp) => Key::Named(NamedKey::PageUp),
+            PhysicalKey::Code(KeyCode::PageDown) => Key::Named(NamedKey::PageDown),
+            PhysicalKey::Code(KeyCode::Home) => Key::Named(NamedKey::Home),
+            PhysicalKey::Code(KeyCode::End) => Key::Named(NamedKey::End),
             _ => Key::Character(" ".into()),
         },
     }
@@ -338,6 +348,20 @@ fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
         visual_contexts: Default::default(),
         dependencies: DependencyGraph::default(),
     }
+}
+
+#[test]
+fn prune_removed_widget_state_clears_virtual_state_cache() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    let widget_id = WidgetId::next();
+    handler
+        .virtual_states
+        .insert(widget_id, VirtualCacheState::default());
+
+    handler.prune_removed_widget_state(&std::collections::HashSet::from([widget_id]));
+
+    assert!(!handler.virtual_states.contains_key(&widget_id));
 }
 
 #[derive(Default)]

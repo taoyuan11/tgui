@@ -80,4 +80,8 @@ impl ViewModelContext {
     pub fn text_controller(&self, initial_text: impl Into<String>) -> TextController {
         TextController::new(initial_text, self.invalidation.clone())
     }
+
+    pub(crate) fn invalidation(&self) -> &InvalidationSignal {
+        &self.invalidation
+    }
 }

@@ -81,7 +81,7 @@ pub struct WindowSpec<VM> {
     pub(crate) close_policy: WindowClosePolicy,
 }
 
-impl<VM> WindowSpec<VM> {
+impl<VM: 'static> WindowSpec<VM> {
     /// 创建一个主窗口规格。
     ///
     /// 参数:

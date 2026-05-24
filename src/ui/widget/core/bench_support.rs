@@ -140,6 +140,8 @@ impl WidgetBenchmarkContext {
             &self.media,
             &mut self.animations,
             self.units,
+            &HashMap::new(),
+            &HashMap::new(),
             self.viewport,
             now,
         );

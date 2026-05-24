@@ -50,7 +50,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 padding,
                 text_style,
                 multiline: true,
-                auto_wrap: true,
+                auto_wrap,
+                show_scrollbar,
                 ..
             } = interaction
             {
@@ -64,6 +65,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     frame,
                     padding,
                     &text_style,
+                    auto_wrap,
+                    show_scrollbar,
                     scroll_delta,
                 ) {
                     return true;
@@ -78,7 +81,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
 
             let max_offset = region.max_offset();
-            let mut next_offset = self.effective_scroll_offset(region.id, region.scroll_offset);
+            let current_offset = self.effective_scroll_offset(region.id, region.scroll_offset);
+            let mut next_offset = current_offset;
             if region.can_scroll_x() {
                 next_offset.x = (next_offset.x - scroll_delta.x).clamp(0.0, max_offset.x);
             }
@@ -86,8 +90,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 next_offset.y = (next_offset.y - scroll_delta.y).clamp(0.0, max_offset.y);
             }
 
-            if (next_offset.x - region.scroll_offset.x).abs() > 0.01
-                || (next_offset.y - region.scroll_offset.y).abs() > 0.01
+            if (next_offset.x - current_offset.x).abs() > 0.01
+                || (next_offset.y - current_offset.y).abs() > 0.01
             {
                 self.set_smooth_scroll_target(region.id, next_offset);
                 return true;
@@ -339,7 +343,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
-    pub(super) fn set_scroll_offset(&mut self, widget_id: WidgetId, offset: Point) {
+    pub(in crate::runtime) fn set_scroll_offset(&mut self, widget_id: WidgetId, offset: Point) {
         let offset = Point::new(offset.x.max(Dp::ZERO), offset.y.max(Dp::ZERO));
         let previous = self
             .scroll_states

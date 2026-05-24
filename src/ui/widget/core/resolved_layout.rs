@@ -4,6 +4,7 @@ impl<VM> ResolvedElement<VM> {
     pub(super) fn measure_context(&self) -> MeasureContext {
         match &self.kind {
             ResolvedWidgetKind::Container { .. } => MeasureContext::None,
+            ResolvedWidgetKind::Virtual { .. } => MeasureContext::None,
             ResolvedWidgetKind::Text { text } => MeasureContext::Text {
                 id: self.id,
                 text: text.clone(),
@@ -111,20 +112,38 @@ impl<VM> ResolvedElement<VM> {
         now: std::time::Instant,
     ) -> Result<LayoutNode, taffy::TaffyError> {
         let mut child_layouts = Vec::new();
-        if let ResolvedWidgetKind::Container { layout, children } = &self.kind {
-            child_layouts.reserve(children.len());
-            for child in children {
-                child_layouts.push(child.build_layout_tree(
-                    taffy,
-                    animations,
-                    theme,
-                    units,
-                    Some(layout.kind.clone()),
-                    viewport,
-                    false,
-                    now,
-                )?);
+        match &self.kind {
+            ResolvedWidgetKind::Container { layout, children } => {
+                child_layouts.reserve(children.len());
+                for child in children {
+                    child_layouts.push(child.build_layout_tree(
+                        taffy,
+                        animations,
+                        theme,
+                        units,
+                        Some(layout.kind.clone()),
+                        viewport,
+                        false,
+                        now,
+                    )?);
+                }
             }
+            ResolvedWidgetKind::Virtual { children, .. } => {
+                child_layouts.reserve(children.len());
+                for child in children {
+                    child_layouts.push(child.build_layout_tree(
+                        taffy,
+                        animations,
+                        theme,
+                        units,
+                        None,
+                        viewport,
+                        false,
+                        now,
+                    )?);
+                }
+            }
+            _ => {}
         }
 
         let style = self.taffy_style(
@@ -149,6 +168,8 @@ impl<VM> ResolvedElement<VM> {
         Ok(LayoutNode {
             node,
             children: child_layouts,
+            absolute_offset: None,
+            absolute_size: None,
         })
     }
 
@@ -405,8 +426,20 @@ impl<VM> ResolvedElement<VM> {
             }
         }
 
-        if let ResolvedWidgetKind::Container { layout, .. } = &self.kind {
-            apply_container_style(&mut style, layout, animations, self.id, units, now);
+        match &self.kind {
+            ResolvedWidgetKind::Container { layout, .. } => {
+                apply_container_style(&mut style, layout, animations, self.id, units, now);
+            }
+            ResolvedWidgetKind::Virtual {
+                ..
+            } => {
+                style.display = Display::Grid;
+                style.grid_template_columns =
+                    vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)];
+                style.grid_template_rows =
+                    vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)];
+            }
+            _ => {}
         }
 
         style

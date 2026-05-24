@@ -399,3 +399,112 @@ fn touch_tap_on_clickable_content_still_fires_click() {
 
     assert_eq!(handler.view_model.lock().unwrap().clicks, 1);
 }
+
+#[test]
+fn nested_scroll_wheel_bubbles_to_parent_at_child_boundary() {
+    let invalidation = InvalidationSignal::new();
+    let inner: Element<TestVm> = ScrollView::new()
+        .size(dp(160.0), dp(80.0))
+        .child(Stack::new().size(dp(160.0), dp(80.0)))
+        .into();
+    let outer: Element<TestVm> = ScrollView::new()
+        .size(dp(220.0), dp(140.0))
+        .child(
+            Flex::vertical()
+                .height(dp(360.0))
+                .child([inner, Stack::new().height(dp(240.0)).into()]),
+        )
+        .into();
+    let outer_id = outer.id;
+    let tree = WidgetTree::new(outer);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let target = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id != outer_id)
+        .copied()
+        .expect("inner scroll region should exist");
+    handler.cursor_position = Some(Point {
+        x: target.visible_frame.x + dp(8.0),
+        y: target.visible_frame.y + dp(8.0),
+    });
+
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -3.0)));
+    assert!(
+        handler
+            .scroll_states
+            .get(&outer_id)
+            .map(|offset| offset.y > Dp::ZERO)
+            .unwrap_or(false)
+            || handler.smooth_scroll_states.contains_key(&outer_id),
+        "parent ScrollView should consume wheel input when inner region cannot scroll"
+    );
+}
+
+#[test]
+fn scroll_view_page_down_scrolls_focused_region() {
+    let invalidation = InvalidationSignal::new();
+    let scroller: Element<TestVm> = ScrollView::new()
+        .size(dp(160.0), dp(100.0))
+        .child(Stack::new().size(dp(160.0), dp(360.0)))
+        .into();
+    let scroller_id = scroller.id;
+    let tree = WidgetTree::new(scroller);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let region = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == scroller_id)
+        .copied()
+        .expect("scroll region should exist");
+    handler.cursor_position = Some(Point {
+        x: region.visible_frame.x + dp(8.0),
+        y: region.visible_frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(handler.viewport_rect(), Instant::now(), CanvasMouseButton::Left);
+    assert_eq!(handler.focused_widget_id(), Some(scroller_id));
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(
+        KeyCode::PageDown,
+    ))));
+    assert!(
+        handler
+            .scroll_states
+            .get(&scroller_id)
+            .map(|offset| offset.y > Dp::ZERO)
+            .unwrap_or(false)
+            || handler.smooth_scroll_states.contains_key(&scroller_id)
+    );
+}
+
+#[test]
+fn scroll_view_controller_scroll_to_updates_runtime_offset() {
+    let invalidation = InvalidationSignal::new();
+    let ctx = ViewModelContext::for_benchmarks();
+    let controller = ScrollViewController::new(&ctx);
+    let scroller: Element<TestVm> = ScrollView::new()
+        .size(dp(160.0), dp(100.0))
+        .controller(controller.clone())
+        .child(Stack::new().size(dp(160.0), dp(360.0)))
+        .into();
+    let scroller_id = scroller.id;
+    let tree = WidgetTree::new(scroller);
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    assert_eq!(controller.widget_id(), Some(scroller_id));
+    controller.scroll_to(Point::new(Dp::ZERO, dp(120.0)));
+    let _ = handler.computed_scene();
+
+    assert!(
+        handler
+            .scroll_states
+            .get(&scroller_id)
+            .map(|offset| offset.y > Dp::ZERO)
+            .unwrap_or(false)
+            || handler.smooth_scroll_states.contains_key(&scroller_id)
+    );
+    assert!(controller.scroll_offset().y > Dp::ZERO);
+}

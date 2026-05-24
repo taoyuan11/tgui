@@ -1,6 +1,7 @@
 use super::*;
 use crate::ui::widget::canvas::CanvasHitGeometry;
 use crate::ui::widget::common;
+use crate::ui::widget::common::ContainerLayout;
 
 impl<VM> ResolvedElement<VM> {
     pub(super) fn collect_layout_media_kind(
@@ -63,6 +64,11 @@ impl<VM> ResolvedElement<VM> {
                     context.theme,
                     context.units,
                 );
+                let show_scrollbar = layout
+                    .scroll_view
+                    .as_ref()
+                    .map(|config| config.show_scrollbar.resolve())
+                    .unwrap_or(true);
                 let visible_frame = visual
                     .frame
                     .intersect(visual_context.clip_rect)
@@ -102,12 +108,193 @@ impl<VM> ResolvedElement<VM> {
                     computed.extend(&child_chunk);
                 }
                 let mut after_children = ComputedScene::default();
+                if show_scrollbar {
+                    push_scrollbar_primitives(
+                        &mut after_children.scene,
+                        context.theme,
+                        child_clip_rect,
+                        visual.opacity,
+                        layout,
+                        scrollbar_geometry,
+                        self.id,
+                        context.hovered_scrollbar,
+                        context.active_scrollbar,
+                    );
+                }
+                caches.chunk_parts.insert(
+                    self.id,
+                    SceneChunkParts {
+                        before_children,
+                        after_children: after_children.clone(),
+                    },
+                );
+                computed.extend(&after_children);
+                true
+            }
+            ResolvedWidgetKind::Virtual {
+                arrangement,
+                item_layout,
+                overflow_x,
+                overflow_y,
+                runtime_state,
+                window_plan,
+                children,
+                child_meta,
+                ..
+            } => {
+                let mut scrollbar_layout = ContainerLayout::flow();
+                scrollbar_layout.overflow_x = *overflow_x;
+                scrollbar_layout.overflow_y = *overflow_y;
+                let content_bounds = match arrangement.direction() {
+                    crate::ui::widget::VirtualDirection::Vertical => Rect::new(
+                        visual.background_frame.x,
+                        visual.background_frame.y,
+                        visual.background_frame.width,
+                        window_plan.total_main_extent.max(visual.background_frame.height),
+                    ),
+                    crate::ui::widget::VirtualDirection::Horizontal => Rect::new(
+                        visual.background_frame.x,
+                        visual.background_frame.y,
+                        window_plan.total_main_extent.max(visual.background_frame.width),
+                        visual.background_frame.height,
+                    ),
+                };
+                let max_scroll = Point {
+                    x: (content_bounds.right() - visual.background_frame.right()).max(0.0),
+                    y: (content_bounds.bottom() - visual.background_frame.bottom()).max(0.0),
+                };
+                let scroll_offset = Point {
+                    x: if *overflow_x == Overflow::Scroll {
+                        runtime_state.scroll_offset.x.clamp(0.0, max_scroll.x)
+                    } else {
+                        Dp::ZERO
+                    },
+                    y: if *overflow_y == Overflow::Scroll {
+                        runtime_state.scroll_offset.y.clamp(0.0, max_scroll.y)
+                    } else {
+                        Dp::ZERO
+                    },
+                };
+                let child_clip_rect = apply_overflow_clip(
+                    visual_context.clip_rect,
+                    visual.background_frame,
+                    *overflow_x,
+                    *overflow_y,
+                );
+                let child_clip_mask = apply_overflow_clip_mask(
+                    visual_context.clip_mask,
+                    visual.background_frame,
+                    visual.background_radius.get(),
+                    *overflow_x,
+                    *overflow_y,
+                );
+                let scrollbar_geometry = compute_scrollbar_geometry(
+                    visual.background_frame,
+                    content_bounds,
+                    scroll_offset,
+                    &scrollbar_layout,
+                    context.theme,
+                    context.units,
+                );
+                let visible_frame = visual
+                    .frame
+                    .intersect(visual_context.clip_rect)
+                    .unwrap_or(Rect::new(visual.frame.x, visual.frame.y, 0.0, 0.0));
+                computed.scroll_regions.push(ScrollRegion {
+                    id: self.id,
+                    content_viewport: visual.background_frame,
+                    visible_frame,
+                    content_bounds,
+                    scroll_offset,
+                    overflow_x: *overflow_x,
+                    overflow_y: *overflow_y,
+                    horizontal_track: scrollbar_geometry.horizontal_track,
+                    horizontal_thumb: scrollbar_geometry.horizontal_thumb,
+                    vertical_track: scrollbar_geometry.vertical_track,
+                    vertical_thumb: scrollbar_geometry.vertical_thumb,
+                });
+                let before_children = computed.clone();
+                let mut measured_extents = Vec::new();
+                let mut widget_ids_by_key = Vec::new();
+                let mut invalidate_layout = false;
+                for ((child, child_layout), meta) in children
+                    .iter()
+                    .zip(layout_node.children.iter())
+                    .zip(child_meta.iter())
+                {
+                    let child_origin = match arrangement.direction() {
+                        crate::ui::widget::VirtualDirection::Vertical => Point::new(
+                            visual.background_frame.x + meta.cross_offset,
+                            visual.background_frame.y + meta.main_offset,
+                        ),
+                        crate::ui::widget::VirtualDirection::Horizontal => Point::new(
+                            visual.background_frame.x + meta.main_offset,
+                            visual.background_frame.y + meta.cross_offset,
+                        ),
+                    };
+                    let child_chunk = child.collect_subtree_cache(
+                        child_layout,
+                        VisualContext {
+                            origin: Point::new(
+                                child_origin.x - scroll_offset.x,
+                                child_origin.y - scroll_offset.y,
+                            ),
+                            opacity: visual.opacity,
+                            clip_rect: child_clip_rect,
+                            clip_mask: child_clip_mask,
+                        },
+                        context,
+                        caches.lifecycle_states,
+                        caches.chunks,
+                        caches.chunk_parts,
+                        caches.visual_contexts,
+                    );
+                    if item_layout.is_measured() {
+                        let layout = context
+                            .taffy
+                            .layout(child_layout.node)
+                            .expect("virtual child layout node should exist");
+                        let measured_extent = match arrangement.direction() {
+                            crate::ui::widget::VirtualDirection::Vertical => {
+                                Dp::new(layout.size.height)
+                            }
+                            crate::ui::widget::VirtualDirection::Horizontal => {
+                                Dp::new(layout.size.width)
+                            }
+                        }
+                        .max(Dp::ZERO);
+                        if runtime_state
+                            .measured_extents
+                            .get(&meta.item_index)
+                            .copied()
+                            != Some(measured_extent)
+                        {
+                            invalidate_layout = true;
+                        }
+                        measured_extents.push((meta.item_index, measured_extent));
+                    }
+                    if let Some(key) = child.key.clone() {
+                        widget_ids_by_key.push((key, child.id));
+                    }
+                    computed.extend(&child_chunk);
+                }
+                computed.virtual_state_updates.push(crate::ui::widget::VirtualSceneStateUpdate {
+                    widget_id: self.id,
+                    viewport_hint: crate::ui::widget::r#virtual::VirtualViewportHint {
+                        width: visual.background_frame.width,
+                        height: visual.background_frame.height,
+                    },
+                    measured_extents,
+                    widget_ids_by_key,
+                    invalidate_layout,
+                });
+                let mut after_children = ComputedScene::default();
                 push_scrollbar_primitives(
                     &mut after_children.scene,
                     context.theme,
                     child_clip_rect,
                     visual.opacity,
-                    layout,
+                    &scrollbar_layout,
                     scrollbar_geometry,
                     self.id,
                     context.hovered_scrollbar,
