@@ -405,7 +405,7 @@ impl<VM: 'static> WidgetTree<VM> {
                     )
                 })
             });
-        computed.finalize_overlay_layers();
+        computed.finalize_portals(viewport);
         computed.dependencies = dependencies.clone();
         CollectedSceneCache {
             computed,

@@ -1,11 +1,11 @@
-//! `emit_overlay` collect 阶段集成测试。
+//! `emit_overlay` portal collect 阶段集成测试。
 //!
 //! 验证：
-//! - 浮层 primitive 写到 overlay scene 而非主 scene；
-//! - 局部坐标被正确平移到窗口坐标；
-//! - clip_rect 被强制覆盖为 solver 算出的 clip 范围；
-//! - close handler 被注册到 `ComputedScene::overlay_close_handlers`；
-//! - `FlipPolicy::Hide` 在两侧都放不下时跳过所有 push；
+//! - collect 阶段只登记 portal entry，不直接写 overlay scene；
+//! - finalize 后局部坐标会被平移到窗口坐标；
+//! - finalize 后 clip_rect 会被强制覆盖为 solver 算出的 clip 范围；
+//! - finalize 后 close handler 会注册到 `ComputedScene::overlay_close_handlers`；
+//! - `FlipPolicy::Hide` 在两侧都放不下时 finalize 时跳过所有 push；
 //! - 多浮层按 `OverlayLayer` 顺序进入平面列表（finalize 后 Tooltip < Popover < Menu < Modal）。
 
 use crate::foundation::color::Color;
@@ -55,7 +55,9 @@ fn emit_overlay_writes_to_overlay_scene_not_main() {
         (dp(80.0), dp(40.0)),
         OverlayContent::Primitives(prims),
     );
-    scene.finalize_overlay_layers();
+    assert_eq!(scene.portal_entries.len(), 1);
+    assert_eq!(scene.scene.overlay_shapes.len(), 0);
+    scene.finalize_portals(viewport());
 
     assert!(!solved.was_hidden);
     assert_eq!(scene.scene.shapes.len(), 0);
@@ -82,7 +84,7 @@ fn emit_overlay_translates_primitive_to_window_coords() {
         (dp(80.0), dp(40.0)),
         OverlayContent::Primitives(prims),
     );
-    scene.finalize_overlay_layers();
+    scene.finalize_portals(viewport());
 
     let translated = &scene.scene.overlay_shapes[0];
     let close = |a: Dp, b: f32| (a.get() - b).abs() < 0.001;
@@ -110,7 +112,7 @@ fn emit_overlay_sets_clip_rect_from_solver() {
         (dp(80.0), dp(40.0)),
         OverlayContent::Primitives(prims),
     );
-    scene.finalize_overlay_layers();
+    scene.finalize_portals(viewport());
 
     let shape = &scene.scene.overlay_shapes[0];
     assert_eq!(shape.clip_rect, Some(solved.clip_rect));
@@ -138,7 +140,7 @@ fn was_hidden_skips_all_emit() {
         (dp(300.0), dp(300.0)),
         OverlayContent::Primitives(prims),
     );
-    scene.finalize_overlay_layers();
+    scene.finalize_portals(small_viewport);
 
     assert!(solved.was_hidden);
     assert_eq!(scene.scene.overlay_shapes.len(), 0);
@@ -161,7 +163,7 @@ fn close_handle_registered_when_any_close_hook_set() {
         (dp(80.0), dp(40.0)),
         OverlayContent::Primitives(vec![]),
     );
-    scene.finalize_overlay_layers();
+    scene.finalize_portals(viewport());
 
     assert_eq!(scene.overlay_close_handlers.len(), 1);
     let handle = &scene.overlay_close_handlers[0];
@@ -185,7 +187,7 @@ fn close_handle_not_registered_when_no_close_hooks() {
         (dp(80.0), dp(40.0)),
         OverlayContent::Primitives(vec![]),
     );
-    scene.finalize_overlay_layers();
+    scene.finalize_portals(viewport());
 
     assert_eq!(scene.overlay_close_handlers.len(), 0);
 }
@@ -205,7 +207,7 @@ fn close_handle_rect_matches_solved_rect() {
         (dp(80.0), dp(40.0)),
         OverlayContent::Primitives(vec![]),
     );
-    scene.finalize_overlay_layers();
+    scene.finalize_portals(viewport());
 
     assert_eq!(scene.overlay_close_handlers[0].rect, solved.rect);
 }
@@ -246,7 +248,7 @@ fn finalize_orders_overlays_by_layer_z_order() {
             OverlayContent::Primitives(prims),
         );
     }
-    scene.finalize_overlay_layers();
+    scene.finalize_portals(viewport());
 
     let colors: Vec<_> = scene.scene.overlay_shapes.iter().map(|shape| shape.color).collect();
     assert_eq!(colors, vec![green, yellow, blue, red]);
@@ -290,7 +292,7 @@ fn finalize_keeps_within_layer_emit_order() {
             )]),
         );
     }
-    scene.finalize_overlay_layers();
+    scene.finalize_portals(viewport());
 
     let colors: Vec<_> = scene.scene.overlay_shapes.iter().map(|shape| shape.color).collect();
     assert_eq!(colors, vec![red, blue]);
@@ -334,7 +336,7 @@ fn emit_overlay_registers_focus_scope_and_rebases_hit_scope_path() {
         (dp(40.0), dp(20.0)),
         OverlayContent::Hits(hits),
     );
-    scene.finalize_overlay_layers();
+    scene.finalize_portals(viewport());
 
     assert_eq!(scene.focus_scopes, vec![focus_scope.clone()]);
     assert_eq!(scene.overlay_hit_regions.len(), 1);

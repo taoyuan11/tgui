@@ -175,6 +175,7 @@ impl<VM> ResolvedElement<VM> {
                     OverlayId::new(self.id.raw()),
                     Anchor::Key(AnchorKey::widget(self.id)),
                 )
+                .source_widget(self.id)
                 .placement(crate::ui::widget::OverlayPlacement::bottom())
                 .offset(select_style.menu_gap)
                 .match_anchor_width(true)

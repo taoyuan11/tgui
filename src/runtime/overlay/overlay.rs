@@ -10,6 +10,7 @@ use super::placement::{
 };
 
 pub(crate) struct Overlay<VM> {
+    pub(crate) source_widget_id: Option<WidgetId>,
     pub(crate) id: OverlayId,
     pub(crate) anchor: Anchor,
     pub(crate) options: PlacementOptions,
@@ -25,6 +26,7 @@ pub(crate) struct Overlay<VM> {
 impl<VM> Overlay<VM> {
     pub(crate) fn new(id: OverlayId, anchor: impl Into<Anchor>) -> Self {
         Self {
+            source_widget_id: None,
             id,
             anchor: anchor.into(),
             options: PlacementOptions::default(),
@@ -36,6 +38,11 @@ impl<VM> Overlay<VM> {
             backdrop: None,
             focus_scope: None,
         }
+    }
+
+    pub(crate) fn source_widget(mut self, widget_id: WidgetId) -> Self {
+        self.source_widget_id = Some(widget_id);
+        self
     }
 
     pub(crate) fn placement(mut self, placement: Placement) -> Self {
@@ -104,7 +111,72 @@ impl<VM> Overlay<VM> {
     }
 }
 
-#[derive(Clone)]
+pub(crate) struct PortalEntry<VM> {
+    pub(crate) source_widget_id: Option<WidgetId>,
+    pub(crate) overlay_id: OverlayId,
+    pub(crate) anchor: Anchor,
+    pub(crate) options: PlacementOptions,
+    pub(crate) layer: OverlayLayer,
+    pub(crate) on_close: Option<ValueCommand<VM, bool>>,
+    pub(crate) return_focus_to: Option<WidgetId>,
+    pub(crate) close_on_outside_click: bool,
+    pub(crate) close_on_escape: bool,
+    pub(crate) backdrop: Option<OverlayBackdrop>,
+    pub(crate) focus_scope: Option<FocusScopeState>,
+    pub(crate) content_size: (crate::ui::unit::Dp, crate::ui::unit::Dp),
+    pub(crate) content: OverlayContent<VM>,
+}
+
+impl<VM> Clone for PortalEntry<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            source_widget_id: self.source_widget_id,
+            overlay_id: self.overlay_id,
+            anchor: self.anchor,
+            options: self.options.clone(),
+            layer: self.layer,
+            on_close: self.on_close.clone(),
+            return_focus_to: self.return_focus_to,
+            close_on_outside_click: self.close_on_outside_click,
+            close_on_escape: self.close_on_escape,
+            backdrop: self.backdrop,
+            focus_scope: self.focus_scope.clone(),
+            content_size: self.content_size,
+            content: self.content.clone(),
+        }
+    }
+}
+
+impl<VM> From<Overlay<VM>> for PortalEntry<VM> {
+    fn from(_value: Overlay<VM>) -> Self {
+        unreachable!("PortalEntry::from is not used")
+    }
+}
+
+impl<VM> PortalEntry<VM> {
+    pub(crate) fn new(
+        overlay: Overlay<VM>,
+        content_size: (crate::ui::unit::Dp, crate::ui::unit::Dp),
+        content: OverlayContent<VM>,
+    ) -> Self {
+        Self {
+            source_widget_id: overlay.source_widget_id,
+            overlay_id: overlay.id,
+            anchor: overlay.anchor,
+            options: overlay.options,
+            layer: overlay.layer,
+            on_close: overlay.on_close,
+            return_focus_to: overlay.return_focus_to,
+            close_on_outside_click: overlay.close_on_outside_click,
+            close_on_escape: overlay.close_on_escape,
+            backdrop: overlay.backdrop,
+            focus_scope: overlay.focus_scope,
+            content_size,
+            content,
+        }
+    }
+}
+
 pub(crate) enum OverlayContent<VM> {
     Primitives(Vec<OverlayPrimitive>),
     Hits(Vec<HitRegion<VM>>),
@@ -113,6 +185,24 @@ pub(crate) enum OverlayContent<VM> {
         hits: Vec<HitRegion<VM>>,
         clip_rect: Option<crate::ui::widget::Rect>,
     },
+}
+
+impl<VM> Clone for OverlayContent<VM> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Primitives(primitives) => Self::Primitives(primitives.clone()),
+            Self::Hits(hits) => Self::Hits(hits.clone()),
+            Self::Batch {
+                primitives,
+                hits,
+                clip_rect,
+            } => Self::Batch {
+                primitives: primitives.clone(),
+                hits: hits.clone(),
+                clip_rect: *clip_rect,
+            },
+        }
+    }
 }
 
 #[derive(Clone)]

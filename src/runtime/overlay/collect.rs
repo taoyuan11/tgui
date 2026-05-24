@@ -1,10 +1,8 @@
 use crate::ui::unit::Dp;
-use crate::ui::widget::{
-    BackdropBlurPrimitive, ClipMask, ComputedScene, Point, Rect, RenderCommand,
-};
+use crate::ui::widget::{BackdropBlurPrimitive, ClipMask, ComputedScene, Point, Rect, RenderCommand};
 
 use super::close::OverlayCloseHandle;
-use super::overlay::{Overlay, OverlayBackdrop, OverlayContent, OverlayPrimitive};
+use super::overlay::{Overlay, OverlayBackdrop, OverlayContent, OverlayPrimitive, PortalEntry};
 use super::placement::SolvedPlacement;
 use super::solver::solve_placement;
 
@@ -43,24 +41,53 @@ pub(crate) fn emit_overlay<VM>(
         .unwrap_or_else(|| overlay.anchor.to_rect());
     let solved = solve_placement(anchor_rect.into(), content_size, viewport, &overlay.options);
 
+    computed
+        .portal_entries
+        .push(PortalEntry::new(overlay, content_size, content));
+    solved
+}
+
+pub(crate) fn finalize_portal_entries<VM>(computed: &mut ComputedScene<VM>, viewport: Rect) {
+    let entries = std::mem::take(&mut computed.portal_entries);
+    for entry in entries {
+        finalize_portal_entry(computed, viewport, entry);
+    }
+}
+
+fn finalize_portal_entry<VM>(
+    computed: &mut ComputedScene<VM>,
+    viewport: Rect,
+    entry: PortalEntry<VM>,
+) -> Option<SolvedPlacement> {
+    let anchor_rect = entry
+        .anchor
+        .to_rect_with(|key| computed.resolve_overlay_anchor(key))
+        .unwrap_or_else(|| entry.anchor.to_rect());
+    let solved = solve_placement(
+        anchor_rect.into(),
+        entry.content_size,
+        viewport,
+        &entry.options,
+    );
+
     if solved.was_hidden {
-        return solved;
+        return Some(solved);
     }
 
     let origin = Point::new(solved.rect.x, solved.rect.y);
-    let content_clip = match &content {
+    let content_clip = match &entry.content {
         OverlayContent::Batch { clip_rect, .. } => clip_rect
             .map(|clip| translate_rect(clip, origin))
             .or(Some(solved.clip_rect)),
         _ => Some(solved.clip_rect),
     };
-    let bucket = &mut computed.overlay_layers[overlay.layer.index()];
-    let overlay_scope_path = overlay.focus_scope.as_ref().map(|scope| scope.path.clone());
-    if let Some(scope) = overlay.focus_scope.clone() {
+    let bucket = &mut computed.overlay_layers[entry.layer.index()];
+    let overlay_scope_path = entry.focus_scope.as_ref().map(|scope| scope.path.clone());
+    if let Some(scope) = entry.focus_scope.clone() {
         bucket.focus_scopes.push(scope);
     }
 
-    if let Some(backdrop) = overlay.backdrop {
+    if let Some(backdrop) = entry.backdrop {
         match backdrop {
             OverlayBackdrop::Scrim { mut primitive } => {
                 primitive.clip_rect = content_clip;
@@ -75,7 +102,7 @@ pub(crate) fn emit_overlay<VM>(
         }
     }
 
-    let (primitives, hits) = match content {
+    let (primitives, hits) = match entry.content {
         OverlayContent::Primitives(primitives) => (primitives, Vec::new()),
         OverlayContent::Hits(hits) => (Vec::new(), hits),
         OverlayContent::Batch {
@@ -133,19 +160,19 @@ pub(crate) fn emit_overlay<VM>(
     }
 
     let has_close_hook =
-        overlay.on_close.is_some() || overlay.close_on_outside_click || overlay.close_on_escape;
+        entry.on_close.is_some() || entry.close_on_outside_click || entry.close_on_escape;
     if has_close_hook {
         bucket.close_handlers.push(OverlayCloseHandle {
-            overlay_id: overlay.id,
+            overlay_id: entry.overlay_id,
             rect: solved.rect,
-            layer: overlay.layer,
-            on_close: overlay.on_close,
+            layer: entry.layer,
+            on_close: entry.on_close,
             close_value: false,
-            return_focus_to: overlay.return_focus_to,
-            close_on_outside_click: overlay.close_on_outside_click,
-            close_on_escape: overlay.close_on_escape,
+            return_focus_to: entry.return_focus_to,
+            close_on_outside_click: entry.close_on_outside_click,
+            close_on_escape: entry.close_on_escape,
         });
     }
 
-    solved
+    Some(solved)
 }

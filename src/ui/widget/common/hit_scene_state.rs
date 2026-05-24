@@ -1,5 +1,6 @@
 use super::*;
 use crate::runtime::overlay::{AnchorKey, AnchorSource};
+use crate::runtime::overlay::PortalEntry;
 use crate::ui::widget::VirtualSceneStateUpdate;
 
 #[derive(Clone, Copy, Debug)]
@@ -39,8 +40,10 @@ pub(crate) struct ComputedScene<VM> {
     pub hit_regions: Vec<HitRegion<VM>>,
     pub overlay_hit_regions: Vec<HitRegion<VM>>,
     pub overlay_close_handlers: Vec<crate::runtime::overlay::OverlayCloseHandle<VM>>,
+    pub portal_overlay_counts: PortalOverlayCounts,
     pub focus_scopes: Vec<FocusScopeState>,
     pub overlay_anchors: HashMap<AnchorKey, Rect>,
+    pub portal_entries: Vec<PortalEntry<VM>>,
     /// 每个 `OverlayLayer` 的暂存桶。`emit_overlay` 写入此处，
     /// `finalize_overlay_layers` 在 collect 收尾时按 layer 顺序合并到 `scene.overlay_*` /
     /// `overlay_hit_regions` / `overlay_close_handlers`，从而强制 z-order
@@ -59,8 +62,10 @@ impl<VM> Clone for ComputedScene<VM> {
             hit_regions: self.hit_regions.clone(),
             overlay_hit_regions: self.overlay_hit_regions.clone(),
             overlay_close_handlers: self.overlay_close_handlers.clone(),
+            portal_overlay_counts: self.portal_overlay_counts,
             focus_scopes: self.focus_scopes.clone(),
             overlay_anchors: self.overlay_anchors.clone(),
+            portal_entries: self.portal_entries.clone(),
             overlay_layers: std::array::from_fn(|i| self.overlay_layers[i].clone()),
             scroll_regions: self.scroll_regions.clone(),
             ime_cursor_area: self.ime_cursor_area,
@@ -71,6 +76,18 @@ impl<VM> Clone for ComputedScene<VM> {
 }
 
 pub(crate) const OVERLAY_LAYER_COUNT: usize = 4;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct PortalOverlayCounts {
+    pub shapes: usize,
+    pub textures: usize,
+    pub meshes: usize,
+    pub texts: usize,
+    pub commands: usize,
+    pub hits: usize,
+    pub close_handlers: usize,
+    pub focus_scopes: usize,
+}
 
 /// 单个 `OverlayLayer` 的暂存桶。
 pub(crate) struct OverlayLayerBucket<VM> {
@@ -177,8 +194,10 @@ impl<VM> Default for ComputedScene<VM> {
             hit_regions: Vec::new(),
             overlay_hit_regions: Vec::new(),
             overlay_close_handlers: Vec::new(),
+            portal_overlay_counts: PortalOverlayCounts::default(),
             focus_scopes: Vec::new(),
             overlay_anchors: HashMap::new(),
+            portal_entries: Vec::new(),
             overlay_layers: std::array::from_fn(|_| OverlayLayerBucket::default()),
             scroll_regions: Vec::new(),
             ime_cursor_area: None,
@@ -199,6 +218,16 @@ impl<VM> ComputedScene<VM> {
         self.focus_scopes.extend(other.focus_scopes.iter().cloned());
         self.overlay_anchors
             .extend(other.overlay_anchors.iter().map(|(k, v)| (*k, *v)));
+        self.portal_entries
+            .extend(other.portal_entries.iter().cloned());
+        self.portal_overlay_counts.shapes += other.portal_overlay_counts.shapes;
+        self.portal_overlay_counts.textures += other.portal_overlay_counts.textures;
+        self.portal_overlay_counts.meshes += other.portal_overlay_counts.meshes;
+        self.portal_overlay_counts.texts += other.portal_overlay_counts.texts;
+        self.portal_overlay_counts.commands += other.portal_overlay_counts.commands;
+        self.portal_overlay_counts.hits += other.portal_overlay_counts.hits;
+        self.portal_overlay_counts.close_handlers += other.portal_overlay_counts.close_handlers;
+        self.portal_overlay_counts.focus_scopes += other.portal_overlay_counts.focus_scopes;
         for i in 0..OVERLAY_LAYER_COUNT {
             self.overlay_layers[i].extend_from(&other.overlay_layers[i]);
         }
@@ -235,6 +264,72 @@ impl<VM> ComputedScene<VM> {
             self.overlay_close_handlers.extend(bucket.close_handlers);
             self.focus_scopes.extend(bucket.focus_scopes);
         }
+    }
+
+    pub(crate) fn finalize_portals(&mut self, viewport: Rect) {
+        let base_shapes = self
+            .scene
+            .overlay_shapes
+            .len()
+            .saturating_sub(self.portal_overlay_counts.shapes);
+        let base_textures = self
+            .scene
+            .overlay_textures
+            .len()
+            .saturating_sub(self.portal_overlay_counts.textures);
+        let base_meshes = self
+            .scene
+            .overlay_meshes
+            .len()
+            .saturating_sub(self.portal_overlay_counts.meshes);
+        let base_texts = self
+            .scene
+            .overlay_texts
+            .len()
+            .saturating_sub(self.portal_overlay_counts.texts);
+        let base_commands = self
+            .scene
+            .overlay_commands
+            .len()
+            .saturating_sub(self.portal_overlay_counts.commands);
+        let base_hits = self
+            .overlay_hit_regions
+            .len()
+            .saturating_sub(self.portal_overlay_counts.hits);
+        let base_close_handlers = self
+            .overlay_close_handlers
+            .len()
+            .saturating_sub(self.portal_overlay_counts.close_handlers);
+        let base_focus_scopes = self
+            .focus_scopes
+            .len()
+            .saturating_sub(self.portal_overlay_counts.focus_scopes);
+
+        self.scene.overlay_shapes.truncate(base_shapes);
+        self.scene.overlay_textures.truncate(base_textures);
+        self.scene.overlay_meshes.truncate(base_meshes);
+        self.scene.overlay_texts.truncate(base_texts);
+        self.scene.overlay_commands.truncate(base_commands);
+        self.overlay_hit_regions.truncate(base_hits);
+        self.overlay_close_handlers.truncate(base_close_handlers);
+        self.focus_scopes.truncate(base_focus_scopes);
+        self.portal_overlay_counts = PortalOverlayCounts::default();
+        self.overlay_layers = std::array::from_fn(|_| OverlayLayerBucket::default());
+        crate::runtime::overlay::collect::finalize_portal_entries(self, viewport);
+        self.finalize_overlay_layers();
+        self.portal_overlay_counts = PortalOverlayCounts {
+            shapes: self.scene.overlay_shapes.len().saturating_sub(base_shapes),
+            textures: self.scene.overlay_textures.len().saturating_sub(base_textures),
+            meshes: self.scene.overlay_meshes.len().saturating_sub(base_meshes),
+            texts: self.scene.overlay_texts.len().saturating_sub(base_texts),
+            commands: self.scene.overlay_commands.len().saturating_sub(base_commands),
+            hits: self.overlay_hit_regions.len().saturating_sub(base_hits),
+            close_handlers: self
+                .overlay_close_handlers
+                .len()
+                .saturating_sub(base_close_handlers),
+            focus_scopes: self.focus_scopes.len().saturating_sub(base_focus_scopes),
+        };
     }
 
     pub(crate) fn register_overlay_anchor(&mut self, key: AnchorKey, rect: Rect) {

@@ -335,9 +335,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
 
             let root_clone_started_at = text_profile_enabled().then_some(Instant::now());
-            let Some(root_chunk) = cached.scene_chunks.get(&layout.root_id()).cloned() else {
+            let Some(mut root_chunk) = cached.scene_chunks.get(&layout.root_id()).cloned() else {
                 return false;
             };
+            root_chunk.finalize_portals(viewport);
             root_hit_region_count = root_chunk.hit_regions.len();
             root_scroll_region_count = root_chunk.scroll_regions.len();
             if let Some(root_clone_started_at) = root_clone_started_at {

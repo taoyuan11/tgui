@@ -165,18 +165,22 @@ pub(crate) fn build_select_menu_overlay<VM>(
     } else {
         Some(Rect::new(0.0, full_height - visible_height, menu_width, visible_height))
     };
+    let menu_clip_mask = Some(ClipMask {
+        rect: Rect::new(0.0, 0.0, menu_width, full_height),
+        corner_radius: menu_corner_radius,
+    });
     let option_padding = Insets::symmetric(select_style.padding_x, Dp::ZERO);
     let disabled_text = default_select_disabled_text_color(context.theme);
     let mut option_interactions = InteractionHandlers::default();
     option_interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
     let mut primitives = vec![crate::ui::widget::overlay::OverlayPrimitive::Shape(
         RenderPrimitive {
-            rect: Rect::new(0.0, 0.0, menu_width, full_height),
+            rect: menu_clip_rect.unwrap_or(Rect::new(0.0, 0.0, menu_width, full_height)),
             color: select_style.menu_background.with_alpha_factor(opacity),
             corner_radius: menu_corner_radius,
             stroke_width: 0.0,
             clip_rect: None,
-            clip_mask: None,
+            clip_mask: menu_clip_mask,
         },
     )];
     let mut hits = Vec::new();
@@ -203,7 +207,7 @@ pub(crate) fn build_select_menu_overlay<VM>(
                     corner_radius: 0.0,
                     stroke_width: 0.0,
                     clip_rect: None,
-                    clip_mask: None,
+                    clip_mask: menu_clip_mask,
                 },
             ));
         }
@@ -226,7 +230,7 @@ pub(crate) fn build_select_menu_overlay<VM>(
                 opacity,
                 widget_id,
                 None,
-                None,
+                menu_clip_mask,
             ),
         ));
 

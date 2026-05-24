@@ -139,6 +139,7 @@ impl<VM> ResolvedElement<VM> {
             OverlayId::new(self.id.raw()),
             Anchor::Key(AnchorKey::widget(self.id)),
         )
+            .source_widget(self.id)
             .placement(tooltip.placement)
             .offset(style.offset)
             .flip_policy(tooltip.flip_policy)
