@@ -1,8 +1,8 @@
 use super::*;
-use std::time::Instant;
 use crate::ui::widget::r#virtual::{
     apply_virtual_runtime_state_to_element, VirtualCacheState, VirtualViewportHint,
 };
+use std::time::Instant;
 
 pub struct WidgetTree<VM> {
     pub(super) root: Element<VM>,

@@ -2,11 +2,11 @@ mod lifecycle;
 
 pub(crate) use self::lifecycle::{LifecycleSelectOption, LifecycleSnapshot, LifecycleWidgetKind};
 use super::*;
-use crate::ui::widget::{common, image};
-use crate::ui::widget::style::ContainerStyle;
 use crate::ui::widget::r#virtual::{
     ItemLayout, VirtualArrangement, VirtualResolvedItemMeta, VirtualRuntimeState, VirtualWindowPlan,
 };
+use crate::ui::widget::style::ContainerStyle;
+use crate::ui::widget::{common, image};
 
 pub struct Element<VM> {
     pub(crate) id: WidgetId,

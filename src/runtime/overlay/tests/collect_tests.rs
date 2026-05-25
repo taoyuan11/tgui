@@ -250,7 +250,12 @@ fn finalize_orders_overlays_by_layer_z_order() {
     }
     scene.finalize_portals(viewport());
 
-    let colors: Vec<_> = scene.scene.overlay_shapes.iter().map(|shape| shape.color).collect();
+    let colors: Vec<_> = scene
+        .scene
+        .overlay_shapes
+        .iter()
+        .map(|shape| shape.color)
+        .collect();
     assert_eq!(colors, vec![green, yellow, blue, red]);
 
     let layers: Vec<_> = scene
@@ -294,7 +299,12 @@ fn finalize_keeps_within_layer_emit_order() {
     }
     scene.finalize_portals(viewport());
 
-    let colors: Vec<_> = scene.scene.overlay_shapes.iter().map(|shape| shape.color).collect();
+    let colors: Vec<_> = scene
+        .scene
+        .overlay_shapes
+        .iter()
+        .map(|shape| shape.color)
+        .collect();
     assert_eq!(colors, vec![red, blue]);
 }
 

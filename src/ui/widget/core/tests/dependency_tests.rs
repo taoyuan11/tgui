@@ -512,7 +512,10 @@ fn virtual_viewport_resolves_only_visible_window_children() {
         panic!("root should resolve to virtual widget");
     };
 
-    assert!(children.len() < 16, "visible virtual children should stay bounded");
+    assert!(
+        children.len() < 16,
+        "visible virtual children should stay bounded"
+    );
     assert_eq!(children.len(), window_plan.placements.len());
     assert_eq!(window_plan.visible_range.start, 0);
     assert!(window_plan.visible_range.end <= 14);

@@ -35,7 +35,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
             match &event {
                 WindowEvent::PointerMoved { .. } | WindowEvent::PointerEntered { .. } => {
-                    if self.active_touch_scroll.is_some() {
+                    let finger_id = match &event {
+                        WindowEvent::PointerMoved { source, .. } => {
+                            Self::gesture_finger_id_from_pointer_source(source)
+                        }
+                        WindowEvent::PointerEntered { .. } => None,
+                        _ => None,
+                    };
+                    let touch_input_blocked = finger_id
+                        .map(|finger_id| self.touch_press_is_blocked_by_active_gesture(finger_id))
+                        .unwrap_or(false);
+                    needs_redraw |= self.handle_gesture_pointer_move(viewport, finger_id);
+                    if touch_input_blocked || self.active_pinch.is_some() {
+                    } else if self.active_touch_scroll.is_some() {
                         needs_redraw |= self.handle_touch_scroll_drag();
                     } else if self.active_scrollbar_drag.is_some() {
                         needs_redraw |= self.handle_scrollbar_drag();
@@ -66,8 +78,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 } => {
                     self.set_pointer_position(*position);
                     let is_touch = matches!(button, ButtonSource::Touch { .. });
+                    let touch_finger_id = Self::gesture_finger_id_from_button(button);
                     let canvas_button = canvas_mouse_button(button.clone().mouse_button());
-                    if button.clone().mouse_button() == Some(MouseButton::Left)
+                    needs_redraw |= self.begin_gesture_session(viewport, Instant::now(), button);
+                    if is_touch
+                        && touch_finger_id
+                            .map(|finger_id| {
+                                self.touch_press_is_blocked_by_active_gesture(finger_id)
+                            })
+                            .unwrap_or(false)
+                    {
+                    } else if button.clone().mouse_button() == Some(MouseButton::Left)
                         && self.begin_scrollbar_drag()
                     {
                         needs_redraw = true;
@@ -120,6 +141,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 return self.close_policy() == super::super::WindowClosePolicy::Close
             }
             WindowEvent::Focused(false) => {
+                self.deferred_mouse_click = None;
+                let _ = self.end_gesture_session(None, true);
                 self.end_scrollbar_drag();
                 self.end_touch_scroll_drag();
                 self.end_slider_drag();
@@ -164,7 +187,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.set_pointer_position(position);
                 let touch_scroll_was_active = self.active_touch_scroll.is_some();
                 let is_touch = matches!(button, ButtonSource::Touch { .. });
-                if is_touch && touch_scroll_was_active {
+                let is_mouse = matches!(button, ButtonSource::Mouse(_));
+                let gesture_finger = Self::gesture_finger_id_from_button(&button);
+                let touch_press_blocked = is_touch
+                    && gesture_finger
+                        .map(|finger_id| self.touch_press_is_blocked_by_active_gesture(finger_id))
+                        .unwrap_or(false);
+                let gesture_consumed = self.gesture_consumes_click() || touch_press_blocked;
+                if is_touch && touch_scroll_was_active && !touch_press_blocked {
                     let _ = self.handle_touch_scroll_drag();
                 }
                 let touch_scroll_activated = self
@@ -174,14 +204,50 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .unwrap_or(false);
                 if let Some(canvas_button) = canvas_mouse_button(button.clone().mouse_button()) {
                     if is_touch && touch_scroll_was_active && !touch_scroll_activated {
-                        self.handle_mouse_press(
-                            self.viewport_rect(),
-                            Instant::now(),
-                            canvas_button,
-                        );
-                    } else if !touch_scroll_was_active {
+                        if !gesture_consumed {
+                            self.handle_mouse_press(
+                                self.viewport_rect(),
+                                Instant::now(),
+                                canvas_button,
+                            );
+                        }
+                    } else if !is_touch && !gesture_consumed {
+                        self.handle_canvas_mouse_release(canvas_button);
+                    } else if !touch_scroll_was_active && !gesture_consumed {
                         self.handle_canvas_mouse_release(canvas_button);
                     }
+                }
+                let _ = self.end_gesture_session(gesture_finger, false);
+                if is_mouse && !gesture_consumed {
+                    if let Some(deferred) = self.deferred_mouse_click.take() {
+                        if self.pressed_widget == Some(deferred.widget_id) {
+                            if let Some(handler) = deferred.click_handler {
+                                self.execute_click_handler(&handler, self.cursor_position);
+                            } else {
+                                self.dispatch_widget_click(
+                                    HoverTargetId::Widget(deferred.widget_id),
+                                    deferred.interactions,
+                                    Instant::now(),
+                                );
+                            }
+                        }
+                    }
+                } else if is_touch && !gesture_consumed && !touch_scroll_activated {
+                    if let Some(deferred) = self.deferred_mouse_click.take() {
+                        if self.pressed_widget == Some(deferred.widget_id) {
+                            if let Some(handler) = deferred.click_handler {
+                                self.execute_click_handler(&handler, self.cursor_position);
+                            } else {
+                                self.dispatch_widget_click(
+                                    HoverTargetId::Widget(deferred.widget_id),
+                                    deferred.interactions,
+                                    Instant::now(),
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    self.deferred_mouse_click = None;
                 }
                 self.end_scrollbar_drag();
                 self.end_touch_scroll_drag();
@@ -209,7 +275,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     window.request_redraw();
                 }
             }
-            WindowEvent::PointerLeft { .. } => {
+            WindowEvent::PointerLeft { kind, .. } => {
+                self.deferred_mouse_click = None;
+                let gesture_finger = match kind {
+                    crate::platform::event::PointerKind::Touch(finger_id) => Some(finger_id),
+                    _ => None,
+                };
+                let _ = self.end_gesture_session(gesture_finger, true);
                 self.end_touch_scroll_drag();
             }
             WindowEvent::RedrawRequested => match self.render_current_frame() {

@@ -1,6 +1,6 @@
 use super::*;
-use crate::runtime::overlay::{AnchorKey, AnchorSource};
 use crate::runtime::overlay::PortalEntry;
+use crate::runtime::overlay::{AnchorKey, AnchorSource};
 use crate::ui::widget::VirtualSceneStateUpdate;
 
 #[derive(Clone, Copy, Debug)]
@@ -319,10 +319,18 @@ impl<VM> ComputedScene<VM> {
         self.finalize_overlay_layers();
         self.portal_overlay_counts = PortalOverlayCounts {
             shapes: self.scene.overlay_shapes.len().saturating_sub(base_shapes),
-            textures: self.scene.overlay_textures.len().saturating_sub(base_textures),
+            textures: self
+                .scene
+                .overlay_textures
+                .len()
+                .saturating_sub(base_textures),
             meshes: self.scene.overlay_meshes.len().saturating_sub(base_meshes),
             texts: self.scene.overlay_texts.len().saturating_sub(base_texts),
-            commands: self.scene.overlay_commands.len().saturating_sub(base_commands),
+            commands: self
+                .scene
+                .overlay_commands
+                .len()
+                .saturating_sub(base_commands),
             hits: self.overlay_hit_regions.len().saturating_sub(base_hits),
             close_handlers: self
                 .overlay_close_handlers
@@ -349,10 +357,13 @@ impl<VM> ComputedScene<VM> {
     }
 
     pub(crate) fn resolve_overlay_anchor(&self, key: AnchorKey) -> Option<Rect> {
-        self.overlay_anchors.get(&key).copied().or_else(|| match key.source() {
-            AnchorSource::Caret(_) => None,
-            AnchorSource::Widget(_) | AnchorSource::Point => None,
-        })
+        self.overlay_anchors
+            .get(&key)
+            .copied()
+            .or_else(|| match key.source() {
+                AnchorSource::Caret(_) => None,
+                AnchorSource::Widget(_) | AnchorSource::Point => None,
+            })
     }
 
     #[cfg(test)]

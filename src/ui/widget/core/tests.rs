@@ -28,9 +28,8 @@ use crate::ui::widget::{
     ButtonStyle, Canvas, CanvasParagraphStyle, CanvasRecorder, CanvasStroke, CanvasStyle,
     CanvasTextHorizontalAlign, CanvasTextVerticalAlign, CanvasTextWrap, Checkbox, ClipMask,
     ContainerStyle, Element, Image, Input, InputStyle, Point, Radio, RadioGroup, RadioOption,
-    ScrollView,
-    ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Slider, SliderStyle, Stack, Switch,
-    SwitchStyle, Text, TextEditState, TextWidgetStyle, Textarea, TextareaStyle,
+    ScrollView, ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Slider, SliderStyle, Stack,
+    Switch, SwitchStyle, Text, TextEditState, TextWidgetStyle, Textarea, TextareaStyle,
     VirtualArrangement, VirtualDirection, VirtualViewport, WidgetStateMap, WidgetTree,
 };
 #[cfg(feature = "video")]

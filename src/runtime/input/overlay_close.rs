@@ -4,10 +4,7 @@ use super::BoundRuntimeHandler;
 use crate::runtime::state::FocusedWidget;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
-    fn close_overlay_handle(
-        &mut self,
-        handle: &crate::runtime::overlay::OverlayCloseHandle<VM>,
-    ) {
+    fn close_overlay_handle(&mut self, handle: &crate::runtime::overlay::OverlayCloseHandle<VM>) {
         if let Some(command) = &handle.on_close {
             self.execute_value_command(command, handle.close_value);
             return;

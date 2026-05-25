@@ -48,6 +48,7 @@
 - `State<T>`：可变状态，更新后自动触发重绘
 - `Signal<T>`：从状态派生 UI 值，支持 `map` 和 `animated`
 - `TextController`：`Input` / `Textarea` 的保留式文本状态，支持程序化读写与批量变更通知
+- `Form` / `FormField<T>` / `TextFormField`：纯 ViewModel 层表单值聚合、校验、错误传播与提交/重置抽象
 - `Command<T>` / `ValueCommand<T, V>`：把按钮、输入、画布事件接回 ViewModel
 - 生命周期事件：`on_mount`、`on_unmount`、`on_update`
 - `CommandContext::window()`：在命令中请求窗口拖拽、拉伸、最小化、最大化/还原、关闭
@@ -120,7 +121,7 @@ tgui = { version = "0.1.8", features = ["video"] }
 `tgui` 的公开类型按职责分类导出：
 
 - `application`：应用、窗口和运行入口
-- `mvvm`：`ViewModel`、`ViewModelContext`、`State`、`Signal`、`TextController`、`Command`、`ValueCommand`、`CommandContext`、`WindowControl`
+- `mvvm`：`ViewModel`、`ViewModelContext`、`State`、`Signal`、`TextController`、`Form`、`FormField`、`TextFormField`、`Command`、`ValueCommand`、`CommandContext`、`WindowControl`
 - `layout`：布局容器、尺寸、间距和滚动相关类型
 - `widgets` / `canvas`：基础控件、控件树和 Canvas 绘制 API
 - `theme`：主题、色板、排版、状态和设计 token
@@ -228,7 +229,60 @@ Transition
 AnimatedValue<T>
 AnimationSpec<T>
 Keyframes<T>
+Form
+FormField<T>
+TextFormField
 ```
+
+## 表单校验
+
+`tgui` 的表单抽象位于 `tgui::mvvm`，是纯 ViewModel 层能力，不引入新的 widget。文本类输入使用 `TextFormField`，其他录入控件通常使用 `FormField<T>` 配合现有 `on_change(...)`。
+
+```rust
+use tgui::prelude::*;
+
+fn build_form_ui(ctx: &ViewModelContext) -> Element<()> {
+    let form = Form::new(ctx);
+    let email = form
+        .text_field("email", "")
+        .validator(|value| {
+            if value.trim().is_empty() {
+                ValidationErrors::single("请输入邮箱")
+            } else {
+                ValidationErrors::none()
+            }
+        });
+    let agree = form
+        .field("agree", false)
+        .validator(|value| {
+            if *value {
+                ValidationErrors::none()
+            } else {
+                ValidationErrors::single("请先同意协议")
+            }
+        });
+
+    Flex::new(Axis::Vertical)
+        .gap(dp(8.0))
+        .child(Input::<()>::new(email.controller()).placeholder("邮箱"))
+        .child(
+            Text::new(
+                email
+                    .first_error()
+                    .map(|value| value.unwrap_or_default()),
+            )
+            .color(Color::hexa(0xDC2626FF)),
+        )
+        .child(
+            Checkbox::new(agree.signal())
+                .label("同意协议")
+                .on_change(agree.bind_change()),
+        )
+        .into()
+}
+```
+
+如果你希望在失焦或值变化时提前显示错误，可以继续沿用现有 `on_blur` / `on_change` 事件，在回调里显式调用字段或整个表单的 `validate()`。
 
 ## 组件生命周期事件
 

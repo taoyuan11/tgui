@@ -3,9 +3,8 @@ use super::*;
 #[test]
 fn tab_index_positive_priority_and_negative_values_are_respected() {
     let invalidation = InvalidationSignal::new();
-    let default_first: Element<TestVm> = Button::new("Default First")
-        .size(dp(80.0), dp(30.0))
-        .into();
+    let default_first: Element<TestVm> =
+        Button::new("Default First").size(dp(80.0), dp(30.0)).into();
     let default_first_id = default_first.id;
     let default_first = default_first.tab_index(0);
     let positive_second: Element<TestVm> = Button::new("Positive Second")
@@ -18,9 +17,7 @@ fn tab_index_positive_priority_and_negative_values_are_respected() {
         .into();
     let positive_first_id = positive_first.id;
     let positive_first = positive_first.tab_index(1);
-    let skipped: Element<TestVm> = Button::new("Skipped")
-        .size(dp(80.0), dp(30.0))
-        .into();
+    let skipped: Element<TestVm> = Button::new("Skipped").size(dp(80.0), dp(30.0)).into();
     let skipped = skipped.tab_index(-1);
     let default_second: Element<TestVm> = Button::new("Default Second")
         .size(dp(80.0), dp(30.0))
@@ -54,26 +51,24 @@ fn tab_index_positive_priority_and_negative_values_are_respected() {
 #[test]
 fn focus_trap_loops_tab_order_and_blocks_pointer_focus_escape() {
     let invalidation = InvalidationSignal::new();
-    let inner_first: Element<TestVm> = Button::new("Inner First")
-        .size(dp(80.0), dp(30.0))
-        .into();
+    let inner_first: Element<TestVm> = Button::new("Inner First").size(dp(80.0), dp(30.0)).into();
     let inner_first_id = inner_first.id;
-    let inner_second: Element<TestVm> = Button::new("Inner Second")
-        .size(dp(80.0), dp(30.0))
-        .into();
+    let inner_second: Element<TestVm> = Button::new("Inner Second").size(dp(80.0), dp(30.0)).into();
     let inner_second_id = inner_second.id;
     let outside: Element<TestVm> = Button::new("Outside")
         .size(dp(80.0), dp(30.0))
         .position_absolute()
         .top(dp(90.0))
         .into();
-    let tree = WidgetTree::new(Stack::new().child([
-        Flex::new(Axis::Vertical)
-            .focus_scope(FocusScopeOptions::new().trap(true))
-            .child([inner_first, inner_second])
-            .into(),
-        outside,
-    ]));
+    let tree = WidgetTree::new(
+        Stack::new().child([
+            Flex::new(Axis::Vertical)
+                .focus_scope(FocusScopeOptions::new().trap(true))
+                .child([inner_first, inner_second])
+                .into(),
+            outside,
+        ]),
+    );
     let mut handler = test_handler(Some(tree), invalidation);
     let viewport = handler.viewport_rect();
 
@@ -111,7 +106,9 @@ fn enter_space_and_escape_drive_default_focus_actions() {
     let checkbox: Element<TestVm> = Checkbox::new(false)
         .size(dp(80.0), dp(30.0))
         .on_change(ValueCommand::new(move |_vm: &mut TestVm, value| {
-            *checkbox_value_ref.lock().expect("checkbox state lock should succeed") = value;
+            *checkbox_value_ref
+                .lock()
+                .expect("checkbox state lock should succeed") = value;
         }))
         .into();
     let checkbox_id = checkbox.id;
@@ -120,7 +117,9 @@ fn enter_space_and_escape_drive_default_focus_actions() {
     let switch: Element<TestVm> = Switch::new(false)
         .size(dp(80.0), dp(30.0))
         .on_change(ValueCommand::new(move |_vm: &mut TestVm, value| {
-            *switch_value_ref.lock().expect("switch state lock should succeed") = value;
+            *switch_value_ref
+                .lock()
+                .expect("switch state lock should succeed") = value;
         }))
         .into();
     let switch_id = switch.id;
@@ -144,12 +143,16 @@ fn enter_space_and_escape_drive_default_focus_actions() {
     handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
     assert_eq!(handler.focused_widget_id(), Some(checkbox_id));
     assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Space))));
-    assert!(*checkbox_value.lock().expect("checkbox state lock should succeed"));
+    assert!(*checkbox_value
+        .lock()
+        .expect("checkbox state lock should succeed"));
 
     handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
     assert_eq!(handler.focused_widget_id(), Some(switch_id));
     assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Space))));
-    assert!(*switch_value.lock().expect("switch state lock should succeed"));
+    assert!(*switch_value
+        .lock()
+        .expect("switch state lock should succeed"));
 
     handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
     assert_eq!(handler.focused_widget_id(), Some(select_id));
@@ -160,9 +163,7 @@ fn enter_space_and_escape_drive_default_focus_actions() {
     let _ = handler.computed_scene();
     handler.drive_animations(&event_loop, Instant::now() + Duration::from_millis(40));
     assert!(!handler.computed_scene().overlay_close_handlers.is_empty());
-    assert!(
-        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape)))
-    );
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape))));
     assert_eq!(handler.resolved_select_open_state(select_id), Some(false));
     assert_eq!(handler.focused_widget_id(), Some(select_id));
 }

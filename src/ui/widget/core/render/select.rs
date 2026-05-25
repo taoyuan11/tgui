@@ -136,10 +136,7 @@ pub(crate) fn build_select_menu_overlay<VM>(
     context: &mut CollectContext<'_, '_>,
     opacity: f32,
     open_progress: f32,
-) -> Option<(
-    crate::ui::widget::overlay::OverlayContent<VM>,
-    (Dp, Dp),
-)> {
+) -> Option<(crate::ui::widget::overlay::OverlayContent<VM>, (Dp, Dp))> {
     if options.is_empty() || open_progress <= f32::EPSILON {
         return None;
     }
@@ -163,7 +160,12 @@ pub(crate) fn build_select_menu_overlay<VM>(
     let menu_clip_rect = if open_down {
         Some(Rect::new(0.0, 0.0, menu_width, visible_height))
     } else {
-        Some(Rect::new(0.0, full_height - visible_height, menu_width, visible_height))
+        Some(Rect::new(
+            0.0,
+            full_height - visible_height,
+            menu_width,
+            visible_height,
+        ))
     };
     let menu_clip_mask = Some(ClipMask {
         rect: Rect::new(0.0, 0.0, menu_width, full_height),

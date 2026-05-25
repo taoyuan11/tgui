@@ -56,9 +56,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | WindowEvent::MouseWheel { .. } => true,
             WindowEvent::PointerButton {
                 state: ElementState::Pressed,
-                button,
                 ..
-            } => button.clone().mouse_button() == Some(MouseButton::Left),
+            } => true,
             WindowEvent::KeyboardInput { .. } => true,
             _ => false,
         }

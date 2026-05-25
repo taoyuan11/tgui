@@ -7,8 +7,10 @@ mod checkbox;
 mod common;
 mod container;
 mod core;
+mod gesture;
 mod image;
 mod input;
+mod overlay;
 mod radio;
 mod scroll_view;
 mod select;
@@ -18,11 +20,10 @@ mod style;
 mod switch;
 mod text;
 mod textarea;
-mod overlay;
-mod r#virtual;
 mod tooltip;
 #[cfg(feature = "video")]
 mod video;
+mod r#virtual;
 
 #[cfg(feature = "audio")]
 pub use audio::Audio;
@@ -50,14 +51,14 @@ pub(crate) use common::{
     BackdropBlurPrimitive, BrushPrimitiveData, CanvasCompositePrimitive,
     CanvasItemInteractionHandlers, CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask,
     CompositionState, ComputedScene, DefaultActivation, FocusScopeState, FocusTargetMeta,
-    HitGeometry, HitInteraction, InteractionHandlers,
-    LifecycleEventHandlers, LifecycleEventState, MediaEventPhase, MediaEventState, MeshVertex,
-    HitRegion, MeshPrimitive, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    TextEditState, TextInputContentGeometry, TexturePrimitive, WidgetStateMap,
+    HitGeometry, HitInteraction, HitRegion, InteractionHandlers, LifecycleEventHandlers,
+    LifecycleEventState, MediaEventPhase, MediaEventState, MeshPrimitive, MeshVertex,
+    RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextEditState,
+    TextInputContentGeometry, TexturePrimitive, WidgetStateMap,
 };
 pub use common::{
-    CursorStyle, FocusScopeOptions, Point, Rect, RenderPrimitive, ScenePrimitives,
-    TextPrimitive, WidgetId, WidgetKey,
+    CursorStyle, FocusScopeOptions, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive,
+    WidgetId, WidgetKey,
 };
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
 #[cfg(feature = "bench-support")]
@@ -70,18 +71,24 @@ pub(crate) use core::LifecycleWidgetKind;
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub(crate) use core::{
     CollectedSceneCache, ResolvedSceneLayout, ResolvedWidgetKind, SceneChunkParts,
-    TextInputLayoutOverride,
-    VisualContextSnapshot,
+    TextInputLayoutOverride, VisualContextSnapshot,
 };
-pub(crate) use r#virtual::VirtualCacheState;
+pub use gesture::{
+    DoubleTapEvent, EdgeSwipeEvent, GestureEdge, GestureEdgeSet, GesturePhase, GestureRecognizer,
+    GestureSource, LongPressEvent, PinchGestureEvent, SwipeAxis, SwipeDirection, SwipeGestureEvent,
+};
 pub use image::Image;
 pub use input::Input;
 pub use overlay::{
-    Alignment as OverlayAlignment, Anchor as OverlayAnchor, FlipPolicy as OverlayFlipPolicy,
-    AnchorKey as OverlayAnchorKey, AnchorSource as OverlayAnchorSource, OverlayId, OverlayLayer,
-    Placement as OverlayPlacement,
-    PlacementOptions as OverlayPlacementOptions, Side as OverlaySide,
-    SolvedPlacement as OverlaySolvedPlacement,
+    Alignment as OverlayAlignment, Anchor as OverlayAnchor, AnchorKey as OverlayAnchorKey,
+    AnchorSource as OverlayAnchorSource, FlipPolicy as OverlayFlipPolicy, OverlayId, OverlayLayer,
+    Placement as OverlayPlacement, PlacementOptions as OverlayPlacementOptions,
+    Side as OverlaySide, SolvedPlacement as OverlaySolvedPlacement,
+};
+pub(crate) use r#virtual::VirtualCacheState;
+pub(crate) use r#virtual::VirtualSceneStateUpdate;
+pub use r#virtual::{
+    ItemLayout, ItemSource, VirtualArrangement, VirtualDirection, VirtualViewport,
 };
 pub use radio::{Radio, RadioGroup, RadioOption};
 pub use scroll_view::ScrollView;
@@ -96,9 +103,5 @@ pub use switch::Switch;
 pub use text::{IntoTextContent, Text};
 pub use textarea::Textarea;
 pub use tooltip::Tooltip;
-pub use r#virtual::{
-    ItemLayout, ItemSource, VirtualArrangement, VirtualDirection, VirtualViewport,
-};
-pub(crate) use r#virtual::VirtualSceneStateUpdate;
 #[cfg(feature = "video")]
 pub use video::VideoSurface;

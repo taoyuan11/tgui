@@ -86,6 +86,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         {
             self.pending_click = None;
         }
+        if self
+            .active_gesture
+            .as_ref()
+            .map(|session| removed_ids.contains(&session.widget_id))
+            .unwrap_or(false)
+        {
+            let _ = self.cancel_active_gesture();
+        }
+        if self
+            .active_pinch
+            .as_ref()
+            .map(|session| removed_ids.contains(&session.widget_id))
+            .unwrap_or(false)
+        {
+            let _ = self.cancel_active_gesture();
+        }
 
         self.text_edit_states
             .retain(|widget_id, _| !removed_ids.contains(widget_id));

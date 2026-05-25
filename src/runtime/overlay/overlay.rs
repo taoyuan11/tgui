@@ -5,9 +5,7 @@ use crate::ui::widget::{
 };
 
 use super::anchor::Anchor;
-use super::placement::{
-    FlipPolicy, OverlayId, OverlayLayer, Placement, PlacementOptions,
-};
+use super::placement::{FlipPolicy, OverlayId, OverlayLayer, Placement, PlacementOptions};
 
 pub(crate) struct Overlay<VM> {
     pub(crate) source_widget_id: Option<WidgetId>,
@@ -215,10 +213,6 @@ pub(crate) enum OverlayPrimitive {
 
 #[derive(Clone, Copy)]
 pub(crate) enum OverlayBackdrop {
-    Scrim {
-        primitive: RenderPrimitive,
-    },
-    Blur {
-        primitive: BackdropBlurPrimitive,
-    },
+    Scrim { primitive: RenderPrimitive },
+    Blur { primitive: BackdropBlurPrimitive },
 }

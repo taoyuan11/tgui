@@ -1,6 +1,49 @@
 use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    fn should_defer_mouse_click(
+        &self,
+        interactions: &InteractionHandlers<VM>,
+        has_click_handler: bool,
+    ) -> bool {
+        has_click_handler
+            && self
+                .active_gesture
+                .as_ref()
+                .map(|gesture| {
+                    gesture.source == crate::ui::widget::GestureSource::Mouse
+                        && gesture.recognizer.on_long_press.is_some()
+                        && interactions.on_double_click.is_none()
+                        && interactions
+                            .gesture
+                            .as_ref()
+                            .and_then(|recognizer| recognizer.on_double_tap.as_ref())
+                            .is_none()
+                })
+                .unwrap_or(false)
+    }
+
+    fn should_defer_touch_click(
+        &self,
+        interactions: &InteractionHandlers<VM>,
+        has_click_handler: bool,
+    ) -> bool {
+        has_click_handler
+            && self
+                .active_gesture
+                .as_ref()
+                .map(|gesture| {
+                    gesture.source == crate::ui::widget::GestureSource::Touch
+                        && gesture.recognizer.on_pinch.is_some()
+                        && interactions
+                            .gesture
+                            .as_ref()
+                            .and_then(|recognizer| recognizer.on_pinch.as_ref())
+                            .is_some()
+                })
+                .unwrap_or(false)
+    }
+
     pub(in crate::runtime) fn handle_mouse_press(
         &mut self,
         viewport: Rect,
@@ -490,7 +533,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         if let Some(handler) = click_handler {
-            if interactions.on_double_click.is_some() {
+            let defer_pointer_click = self.should_defer_mouse_click(&interactions, true)
+                || self.should_defer_touch_click(&interactions, true);
+            if defer_pointer_click {
+                self.deferred_mouse_click = Some(super::super::state::DeferredMouseClick {
+                    widget_id,
+                    interactions,
+                    click_handler: Some(handler),
+                });
+                return;
+            }
+            if self.gesture_consumes_click() {
+                return;
+            }
+            let gesture_double_tap = interactions
+                .gesture
+                .as_ref()
+                .and_then(|gesture| gesture.on_double_tap.clone());
+            if interactions.on_double_click.is_some() || gesture_double_tap.is_some() {
                 let target_id = HoverTargetId::Widget(widget_id);
                 let is_double_click = self
                     .pending_click
@@ -500,7 +560,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
                 if is_double_click {
                     self.pending_click = None;
-                    if let Some(command) = interactions
+                    if let Some(command) = gesture_double_tap {
+                        if let Some(gesture) = self.active_gesture.as_ref() {
+                            self.execute_value_command(&command, gesture.double_tap_event());
+                        }
+                    } else if let Some(command) = interactions
                         .on_double_click
                         .clone()
                         .map(ClickHandler::Command)
@@ -513,6 +577,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     self.pending_click = Some(PendingClick {
                         target_id,
                         deadline: now + super::super::DOUBLE_CLICK_THRESHOLD,
+                        position: self.cursor_position.unwrap_or(Point::ZERO),
                         command: Some(handler),
                     });
                 }

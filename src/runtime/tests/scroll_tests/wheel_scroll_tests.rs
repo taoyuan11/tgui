@@ -463,12 +463,16 @@ fn scroll_view_page_down_scrolls_focused_region() {
         x: region.visible_frame.x + dp(8.0),
         y: region.visible_frame.y + dp(8.0),
     });
-    handler.handle_mouse_press(handler.viewport_rect(), Instant::now(), CanvasMouseButton::Left);
+    handler.handle_mouse_press(
+        handler.viewport_rect(),
+        Instant::now(),
+        CanvasMouseButton::Left,
+    );
     assert_eq!(handler.focused_widget_id(), Some(scroller_id));
 
-    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(
-        KeyCode::PageDown,
-    ))));
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::PageDown,)))
+    );
     assert!(
         handler
             .scroll_states

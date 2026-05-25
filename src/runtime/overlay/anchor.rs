@@ -47,10 +47,7 @@ pub enum Anchor {
 }
 
 impl Anchor {
-    pub fn to_rect_with(
-        self,
-        resolve: impl FnOnce(AnchorKey) -> Option<Rect>,
-    ) -> Option<Rect> {
+    pub fn to_rect_with(self, resolve: impl FnOnce(AnchorKey) -> Option<Rect>) -> Option<Rect> {
         match self {
             Anchor::Key(key) => resolve(key),
             Anchor::Rect(rect) => Some(rect),

@@ -1,13 +1,16 @@
 use crate::foundation::binding::{DependencyGraph, TextChange, TextChangeSet};
 use crate::foundation::view_model::{Command, ValueCommand};
+use crate::platform::event::FingerId;
 use crate::text::font::{FontWeight, TextLayoutInfo};
 use crate::ui::unit::{Dp, UnitContext};
 #[cfg(feature = "audio")]
 use crate::ui::widget::LifecycleWidgetKind;
 use crate::ui::widget::{
     CanvasDragEvent, CanvasItemId, CanvasMouseButton, CanvasMouseEvent, CanvasPointerEvent,
-    CanvasWheelEvent, ComputedScene, LifecycleEventState, MediaEventPhase, MediaEventState, Point,
-    Rect, ResolvedSceneLayout, SceneChunkParts, ScrollbarHandle, Text, VisualContextSnapshot,
+    CanvasWheelEvent, ComputedScene, DoubleTapEvent, EdgeSwipeEvent, GestureEdge, GesturePhase,
+    GestureRecognizer, GestureSource, LifecycleEventState, LongPressEvent, MediaEventPhase,
+    MediaEventState, PinchGestureEvent, Point, Rect, ResolvedSceneLayout, SceneChunkParts,
+    ScrollbarHandle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Text, VisualContextSnapshot,
     WidgetId,
 };
 use cosmic_text::Editor;
@@ -234,7 +237,195 @@ pub(super) enum ClickHandler<VM> {
 pub(super) struct PendingClick<VM> {
     pub(super) target_id: HoverTargetId,
     pub(super) deadline: Instant,
+    pub(super) position: Point,
     pub(super) command: Option<ClickHandler<VM>>,
+}
+
+pub(super) struct DeferredMouseClick<VM> {
+    pub(super) widget_id: WidgetId,
+    pub(super) interactions: crate::ui::widget::InteractionHandlers<VM>,
+    pub(super) click_handler: Option<ClickHandler<VM>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GestureRuntimeKind {
+    Swipe,
+    EdgeSwipe,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GestureAxisLock {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct GesturePointerDelta {
+    pub(super) x: f32,
+    pub(super) y: f32,
+}
+
+pub(super) struct ActiveGestureSession<VM> {
+    pub(super) widget_id: WidgetId,
+    pub(super) target_id: HoverTargetId,
+    pub(super) recognizer: GestureRecognizer<VM>,
+    pub(super) source: GestureSource,
+    pub(super) finger_id: Option<FingerId>,
+    pub(super) start_position: Point,
+    pub(super) current_position: Point,
+    pub(super) pressed_at: Instant,
+    pub(super) long_press_deadline: Option<Instant>,
+    pub(super) edge_candidate: Option<GestureEdge>,
+    pub(super) scroll_can_x: bool,
+    pub(super) scroll_can_y: bool,
+    pub(super) axis_lock: Option<GestureAxisLock>,
+    pub(super) active_kind: Option<GestureRuntimeKind>,
+    pub(super) active_direction: Option<SwipeDirection>,
+    pub(super) swipe_axis: Option<SwipeAxis>,
+    pub(super) captured: bool,
+    pub(super) long_press_triggered: bool,
+}
+
+impl<VM> ActiveGestureSession<VM> {
+    pub(super) fn pointer_delta_from(&self, position: Point) -> GesturePointerDelta {
+        GesturePointerDelta {
+            x: (position.x - self.start_position.x).get(),
+            y: (position.y - self.start_position.y).get(),
+        }
+    }
+
+    pub(super) fn delta(&self) -> Point {
+        Point::new(
+            self.current_position.x - self.start_position.x,
+            self.current_position.y - self.start_position.y,
+        )
+    }
+
+    pub(super) fn long_press_event(&self, phase: GesturePhase) -> LongPressEvent {
+        LongPressEvent {
+            widget_id: self.widget_id,
+            source: self.source,
+            phase,
+            start_position: self.start_position,
+            position: self.current_position,
+            finger_id: self.finger_id,
+        }
+    }
+
+    pub(super) fn double_tap_event(&self) -> DoubleTapEvent {
+        DoubleTapEvent {
+            widget_id: self.widget_id,
+            source: self.source,
+            phase: GesturePhase::Recognized,
+            position: self.current_position,
+            finger_id: self.finger_id,
+        }
+    }
+
+    pub(super) fn swipe_event(&self, phase: GesturePhase) -> Option<SwipeGestureEvent> {
+        Some(SwipeGestureEvent {
+            widget_id: self.widget_id,
+            source: self.source,
+            phase,
+            axis: self.swipe_axis?,
+            direction: self.active_direction?,
+            start_position: self.start_position,
+            position: self.current_position,
+            delta: self.delta(),
+            finger_id: self.finger_id,
+        })
+    }
+
+    pub(super) fn edge_swipe_event(&self, phase: GesturePhase) -> Option<EdgeSwipeEvent> {
+        Some(EdgeSwipeEvent {
+            widget_id: self.widget_id,
+            source: self.source,
+            phase,
+            edge: self.edge_candidate?,
+            direction: self.active_direction?,
+            start_position: self.start_position,
+            position: self.current_position,
+            delta: self.delta(),
+            finger_id: self.finger_id,
+        })
+    }
+}
+
+pub(super) struct ActivePinchSession<VM> {
+    pub(super) widget_id: WidgetId,
+    pub(super) target_id: HoverTargetId,
+    pub(super) recognizer: GestureRecognizer<VM>,
+    pub(super) source: GestureSource,
+    pub(super) finger_ids: [FingerId; 2],
+    pub(super) start_positions: [Point; 2],
+    pub(super) current_positions: [Point; 2],
+    pub(super) captured: bool,
+}
+
+impl<VM> ActivePinchSession<VM> {
+    pub(super) fn finger_index(&self, finger_id: FingerId) -> Option<usize> {
+        self.finger_ids
+            .iter()
+            .position(|candidate| *candidate == finger_id)
+    }
+
+    pub(super) fn contains_finger(&self, finger_id: FingerId) -> bool {
+        self.finger_index(finger_id).is_some()
+    }
+
+    fn center_of(positions: [Point; 2]) -> Point {
+        Point::new(
+            (positions[0].x.get() + positions[1].x.get()) * 0.5,
+            (positions[0].y.get() + positions[1].y.get()) * 0.5,
+        )
+    }
+
+    fn distance_of(positions: [Point; 2]) -> Dp {
+        let dx = (positions[1].x - positions[0].x).get();
+        let dy = (positions[1].y - positions[0].y).get();
+        Dp::new((dx * dx + dy * dy).sqrt())
+    }
+
+    pub(super) fn start_center(&self) -> Point {
+        Self::center_of(self.start_positions)
+    }
+
+    pub(super) fn center(&self) -> Point {
+        Self::center_of(self.current_positions)
+    }
+
+    pub(super) fn start_distance(&self) -> Dp {
+        Self::distance_of(self.start_positions)
+    }
+
+    pub(super) fn distance(&self) -> Dp {
+        Self::distance_of(self.current_positions)
+    }
+
+    pub(super) fn scale(&self) -> f32 {
+        let start = self.start_distance().get();
+        if start <= f32::EPSILON {
+            1.0
+        } else {
+            self.distance().get() / start
+        }
+    }
+
+    pub(super) fn pinch_event(&self, phase: GesturePhase) -> PinchGestureEvent {
+        let scale = self.scale();
+        PinchGestureEvent {
+            widget_id: self.widget_id,
+            source: self.source,
+            phase,
+            start_center: self.start_center(),
+            center: self.center(),
+            start_distance: self.start_distance(),
+            distance: self.distance(),
+            scale,
+            delta_scale: scale - 1.0,
+            finger_ids: self.finger_ids,
+        }
+    }
 }
 
 #[derive(Clone)]

@@ -3,9 +3,7 @@ use crate::ui::unit::Dp;
 use crate::ui::widget::Rect;
 
 use super::anchor::Anchor;
-use super::placement::{
-    Alignment, FlipPolicy, Placement, PlacementOptions, Side, SolvedPlacement,
-};
+use super::placement::{Alignment, FlipPolicy, Placement, PlacementOptions, Side, SolvedPlacement};
 
 pub fn solve_placement(
     anchor: Anchor,
@@ -77,7 +75,14 @@ pub fn solve_placement(
                 opts.cross_offset,
             );
             if fits_within(flipped, viewport_inner) {
-                return finalize(flipped, flipped_placement, true, false, viewport, anchor_rect);
+                return finalize(
+                    flipped,
+                    flipped_placement,
+                    true,
+                    false,
+                    viewport,
+                    anchor_rect,
+                );
             }
             let zero = Rect::new(Dp::ZERO, Dp::ZERO, Dp::ZERO, Dp::ZERO);
             return SolvedPlacement {
@@ -97,7 +102,14 @@ pub fn solve_placement(
         after_policy
     };
 
-    finalize(final_rect, resolved_placement, did_flip, false, viewport, anchor_rect)
+    finalize(
+        final_rect,
+        resolved_placement,
+        did_flip,
+        false,
+        viewport,
+        anchor_rect,
+    )
 }
 
 fn place_on_side(

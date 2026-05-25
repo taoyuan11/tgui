@@ -1,5 +1,7 @@
 use crate::ui::unit::Dp;
-use crate::ui::widget::{BackdropBlurPrimitive, ClipMask, ComputedScene, Point, Rect, RenderCommand};
+use crate::ui::widget::{
+    BackdropBlurPrimitive, ClipMask, ComputedScene, Point, Rect, RenderCommand,
+};
 
 use super::close::OverlayCloseHandle;
 use super::overlay::{Overlay, OverlayBackdrop, OverlayContent, OverlayPrimitive, PortalEntry};
@@ -22,7 +24,10 @@ fn translate_clip_mask(mask: Option<ClipMask>, origin: Point) -> Option<ClipMask
     })
 }
 
-fn translate_backdrop(mut primitive: BackdropBlurPrimitive, origin: Point) -> BackdropBlurPrimitive {
+fn translate_backdrop(
+    mut primitive: BackdropBlurPrimitive,
+    origin: Point,
+) -> BackdropBlurPrimitive {
     primitive.rect = translate_rect(primitive.rect, origin);
     primitive.clip_mask = translate_clip_mask(primitive.clip_mask, origin);
     primitive

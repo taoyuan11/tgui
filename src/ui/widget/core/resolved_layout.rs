@@ -132,14 +132,7 @@ impl<VM> ResolvedElement<VM> {
                 child_layouts.reserve(children.len());
                 for child in children {
                     child_layouts.push(child.build_layout_tree(
-                        taffy,
-                        animations,
-                        theme,
-                        units,
-                        None,
-                        viewport,
-                        false,
-                        now,
+                        taffy, animations, theme, units, None, viewport, false, now,
                     )?);
                 }
             }
@@ -430,9 +423,7 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Container { layout, .. } => {
                 apply_container_style(&mut style, layout, animations, self.id, units, now);
             }
-            ResolvedWidgetKind::Virtual {
-                ..
-            } => {
+            ResolvedWidgetKind::Virtual { .. } => {
                 style.display = Display::Grid;
                 style.grid_template_columns =
                     vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)];

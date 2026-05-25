@@ -8,6 +8,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             || self.active_slider_drag.is_some()
             || self.active_canvas_drag.is_some()
             || self.active_text_selection.is_some()
+            || self.active_pinch.is_some()
+            || self
+                .active_gesture
+                .as_ref()
+                .map(|gesture| gesture.captured || gesture.long_press_triggered)
+                .unwrap_or(false)
         {
             return false;
         }
@@ -230,7 +236,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
-    pub(in crate::runtime) fn set_smooth_scroll_target(&mut self, widget_id: WidgetId, target: Point) {
+    pub(in crate::runtime) fn set_smooth_scroll_target(
+        &mut self,
+        widget_id: WidgetId,
+        target: Point,
+    ) {
         self.smooth_scroll_states
             .insert(widget_id, SmoothScrollState { target });
         let _ = self.advance_smooth_scroll();

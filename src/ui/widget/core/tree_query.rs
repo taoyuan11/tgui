@@ -384,17 +384,16 @@ impl<VM: 'static> WidgetTree<VM> {
         viewport: Rect,
         scene_position: Point,
     ) -> Vec<super::CanvasSceneHit> {
-        let layout =
-            self.build_scene_layout(
-                font_manager,
-                theme,
-                media,
-                animations,
-                units,
-                &HashMap::new(),
-                &HashMap::new(),
-                viewport,
-            );
+        let layout = self.build_scene_layout(
+            font_manager,
+            theme,
+            media,
+            animations,
+            units,
+            &HashMap::new(),
+            &HashMap::new(),
+            viewport,
+        );
         layout.query_canvas_scene_all_at_widget(widget_id, font_manager, units, scene_position)
     }
 }

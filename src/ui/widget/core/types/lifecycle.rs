@@ -1,8 +1,8 @@
 use super::*;
-use crate::ui::widget::style::ContainerStyle;
 use crate::ui::widget::r#virtual::{
     ItemLayout, VirtualArrangement, VirtualResolvedItemMeta, VirtualWindowPlan,
 };
+use crate::ui::widget::style::ContainerStyle;
 
 pub(crate) struct LifecycleSnapshot {
     pub(crate) id: WidgetId,

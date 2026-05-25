@@ -206,31 +206,29 @@ fn select_portal_repositions_and_clears_after_scene_patch() {
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let expanded = context.state(false);
     let visible = context.state(true);
-    let tree = WidgetTree::new(
-        Stack::<TestVm>::new().child(visible.signal().map({
-            let expanded = expanded.clone();
-            move |visible| {
-                if !visible {
-                    let hidden: Element<TestVm> = Text::new("hidden").into();
-                    return hidden;
-                }
-                let width = expanded
-                    .signal()
-                    .map(|expanded| if expanded { dp(180.0) } else { dp(120.0) });
-                let select: Element<TestVm> = Select::new(
-                    vec![
-                        SelectOption::new("email".to_string(), "Email".to_string()),
-                        SelectOption::new("sms".to_string(), "SMS".to_string()),
-                    ],
-                    None::<String>,
-                )
-                .open(true)
-                .size(width, dp(40.0))
-                .into();
-                select
+    let tree = WidgetTree::new(Stack::<TestVm>::new().child(visible.signal().map({
+        let expanded = expanded.clone();
+        move |visible| {
+            if !visible {
+                let hidden: Element<TestVm> = Text::new("hidden").into();
+                return hidden;
             }
-        })),
-    );
+            let width = expanded
+                .signal()
+                .map(|expanded| if expanded { dp(180.0) } else { dp(120.0) });
+            let select: Element<TestVm> = Select::new(
+                vec![
+                    SelectOption::new("email".to_string(), "Email".to_string()),
+                    SelectOption::new("sms".to_string(), "SMS".to_string()),
+                ],
+                None::<String>,
+            )
+            .open(true)
+            .size(width, dp(40.0))
+            .into();
+            select
+        }
+    })));
     let mut handler = test_handler(Some(tree), invalidation);
 
     let initial = handler.computed_scene().clone();

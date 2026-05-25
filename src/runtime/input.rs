@@ -4,6 +4,7 @@ use std::time::Instant;
 
 mod editing;
 mod focus;
+mod gesture;
 mod hovering;
 mod interaction;
 mod key_repeat;

@@ -44,11 +44,12 @@ use self::helpers::{
 use self::state::audio_lifecycle_state;
 use self::state::{collect_pending_lifecycle_events, collect_pending_media_event};
 use self::state::{
-    ActiveCanvasDrag, ActiveKeyRepeat, CachedScene, CanvasPointerContext, ClickHandler,
-    ClipboardService, DispatchedLifecycleState, DispatchedMediaState, FocusedWidget,
-    HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget, PendingClick,
-    PendingLifecycleEvent, PendingMediaEvent, ScrollbarDrag, SliderDrag, SmoothScrollState,
-    TextInputBufferState, TextInputSessionConfig, TextSelectionDrag, TouchScrollDrag,
+    ActiveCanvasDrag, ActiveGestureSession, ActiveKeyRepeat, ActivePinchSession, CachedScene,
+    CanvasPointerContext, ClickHandler, ClipboardService, DeferredMouseClick,
+    DispatchedLifecycleState, DispatchedMediaState, FocusedWidget, HoverMoveHandler, HoverTargetId,
+    HoverTransitionHandler, HoveredWidget, PendingClick, PendingLifecycleEvent, PendingMediaEvent,
+    ScrollbarDrag, SliderDrag, SmoothScrollState, TextInputBufferState, TextInputSessionConfig,
+    TextSelectionDrag, TouchScrollDrag,
 };
 #[cfg(all(target_os = "android", feature = "android"))]
 use self::theme::{
@@ -85,7 +86,7 @@ use crate::platform::backend::window::Window;
 use crate::platform::backend::EventLoop;
 use crate::platform::cursor::CursorIcon;
 use crate::platform::dpi::PhysicalPosition;
-use crate::platform::event::{ElementState, MouseButton, WindowEvent};
+use crate::platform::event::{ElementState, WindowEvent};
 use crate::platform::keyboard::ModifiersState;
 #[cfg(all(target_env = "ohos", feature = "ohos"))]
 use crate::platform::ohos::{OhosApp, WindowExtOhos};
@@ -111,11 +112,17 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use winit_core::icon::{Icon, RgbaIcon};
 
-const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
+pub(super) const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const KEY_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(300);
 const KEY_REPEAT_INTERVAL: Duration = Duration::from_millis(33);
-const TOUCH_SCROLL_ACTIVATION_THRESHOLD: f32 = 8.0;
+pub(super) const TOUCH_SCROLL_ACTIVATION_THRESHOLD: f32 = 8.0;
+pub(super) const LONG_PRESS_THRESHOLD: Duration = Duration::from_millis(500);
+pub(super) const LONG_PRESS_MOVE_TOLERANCE: f32 = 8.0;
+pub(super) const SWIPE_ACTIVATION_THRESHOLD: f32 = 12.0;
+pub(super) const SWIPE_AXIS_LOCK_THRESHOLD: f32 = 8.0;
+pub(super) const EDGE_SWIPE_BAND: f32 = 24.0;
+pub(super) const PINCH_ACTIVATION_THRESHOLD: f32 = 12.0;
 #[cfg(all(target_os = "android", feature = "android"))]
 const ANDROID_SYSTEM_THEME_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -369,10 +376,13 @@ pub struct BoundRuntimeHandler<VM> {
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
     active_touch_scroll: Option<TouchScrollDrag>,
+    active_gesture: Option<ActiveGestureSession<VM>>,
+    active_pinch: Option<ActivePinchSession<VM>>,
     active_slider_drag: Option<SliderDrag<VM>>,
     active_canvas_drag: Option<ActiveCanvasDrag<VM>>,
     active_key_repeat: Option<ActiveKeyRepeat>,
     pending_click: Option<PendingClick<VM>>,
+    deferred_mouse_click: Option<DeferredMouseClick<VM>>,
     pressed_widget: Option<WidgetId>,
     focused_widget: Option<FocusedWidget<VM>>,
     focus_visible: bool,
@@ -476,10 +486,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
             active_touch_scroll: None,
+            active_gesture: None,
+            active_pinch: None,
             active_slider_drag: None,
             active_canvas_drag: None,
             active_key_repeat: None,
             pending_click: None,
+            deferred_mouse_click: None,
             pressed_widget: None,
             focused_widget: None,
             focus_visible: false,

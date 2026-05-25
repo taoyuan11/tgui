@@ -85,10 +85,7 @@ impl<VM> Grid<VM> {
         self
     }
 
-    pub fn focus_scope(
-        mut self,
-        options: crate::ui::widget::FocusScopeOptions,
-    ) -> Self {
+    pub fn focus_scope(mut self, options: crate::ui::widget::FocusScopeOptions) -> Self {
         self.0 = self.0.focus_scope(options);
         self
     }

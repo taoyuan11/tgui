@@ -74,9 +74,7 @@ pub(super) fn patch_layout_at_path<VM>(
     }
 
     let (parent_kind, children) = match &mut current.kind {
-        ResolvedWidgetKind::Container { layout, children } => {
-            (Some(layout.kind.clone()), children)
-        }
+        ResolvedWidgetKind::Container { layout, children } => (Some(layout.kind.clone()), children),
         ResolvedWidgetKind::Virtual { children, .. } => (None, children),
         _ => return Ok(()),
     };

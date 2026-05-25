@@ -16,6 +16,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let animation_deadline = self.animation_engine.next_frame_deadline(now);
         let controller_deadline = self.animations.next_frame_deadline(now);
         let click_deadline = self.pending_click.as_ref().map(|pending| pending.deadline);
+        let gesture_deadline = self
+            .active_gesture
+            .as_ref()
+            .and_then(|gesture| gesture.long_press_deadline);
         let caret_deadline = self.next_caret_blink_deadline(now);
         let key_repeat_deadline = self.next_key_repeat_deadline();
         let smooth_scroll_deadline =
@@ -25,6 +29,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             animation_deadline,
             controller_deadline,
             click_deadline,
+            gesture_deadline,
             caret_deadline,
             key_repeat_deadline,
             smooth_scroll_deadline,

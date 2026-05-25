@@ -5,8 +5,8 @@ use super::{
 use crate::animation::AnimationCoordinator;
 use crate::application::{ApplicationConfig, MsaaMode, ResourceBudget, ThemeSelection, WindowRole};
 use crate::dialog::async_dialog_channel;
-use crate::foundation::binding::{DependencyGraph, ViewModelContext};
 use crate::foundation::binding::ScrollViewController;
+use crate::foundation::binding::{DependencyGraph, ViewModelContext};
 use crate::foundation::binding::{InvalidationSignal, Signal, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand, ViewModel};
@@ -31,8 +31,8 @@ use crate::ui::widget::{
     Button, Canvas, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent, CanvasRecorder,
     CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Checkbox,
     ContainerStyle, CursorStyle, Flex, FocusScopeOptions, HitInteraction, Input, Point, Rect,
-    ScrollView, Select, SelectOption, Switch, Text, TextEditState,
-    Textarea, Tooltip, VirtualCacheState, WidgetTree,
+    ScrollView, Select, SelectOption, Switch, Text, TextEditState, Textarea, Tooltip,
+    VirtualCacheState, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle};
@@ -449,6 +449,7 @@ mod audio_video_tests;
 mod cache_lifecycle_tests;
 mod canvas_tests;
 mod focus_selection_tests;
+mod gesture_tests;
 mod scroll_tests;
 mod text_input_tests;
 mod tooltip_tests;

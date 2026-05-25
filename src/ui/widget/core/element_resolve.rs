@@ -78,7 +78,11 @@ impl<VM: 'static> Element<VM> {
                     .unwrap_or(&[]);
                 let previous_by_index: HashMap<usize, &ResolvedElement<VM>> = previous
                     .and_then(|previous| match &previous.kind {
-                        ResolvedWidgetKind::Virtual { child_meta, children, .. } => Some(
+                        ResolvedWidgetKind::Virtual {
+                            child_meta,
+                            children,
+                            ..
+                        } => Some(
                             child_meta
                                 .iter()
                                 .zip(children.iter())
@@ -123,7 +127,9 @@ impl<VM: 'static> Element<VM> {
                             runtime_state
                                 .widget_ids_by_key
                                 .get(&item_key)
-                                .and_then(|id| previous_children.iter().find(|child| child.id == *id))
+                                .and_then(|id| {
+                                    previous_children.iter().find(|child| child.id == *id)
+                                })
                         })
                         .or_else(|| previous_children.get(children.len()));
                     if child.key.is_none() {

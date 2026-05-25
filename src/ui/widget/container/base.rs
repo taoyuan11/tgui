@@ -102,10 +102,7 @@ impl<VM> Container<VM> {
         self
     }
 
-    pub fn focus_scope(
-        mut self,
-        options: super::super::FocusScopeOptions,
-    ) -> Self {
+    pub fn focus_scope(mut self, options: super::super::FocusScopeOptions) -> Self {
         self.element.focus.scope = Some(options);
         self
     }

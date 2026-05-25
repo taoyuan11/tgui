@@ -236,10 +236,7 @@ impl<VM> Element<VM> {
         self
     }
 
-    pub fn focus_scope(
-        mut self,
-        options: crate::ui::widget::FocusScopeOptions,
-    ) -> Self {
+    pub fn focus_scope(mut self, options: crate::ui::widget::FocusScopeOptions) -> Self {
         self.focus.scope = Some(options);
         self
     }
@@ -268,6 +265,11 @@ impl<VM> Element<VM> {
 
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    pub fn gesture(mut self, recognizer: crate::ui::widget::GestureRecognizer<VM>) -> Self {
+        self.interactions.gesture = recognizer.has_any().then_some(recognizer);
         self
     }
 

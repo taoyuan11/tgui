@@ -1,7 +1,7 @@
 use super::*;
 use crate::foundation::binding::ScrollRequestMode;
-use crate::ui::unit::Dp;
 use crate::foundation::binding::{ScrollRequest, ScrollViewController};
+use crate::ui::unit::Dp;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn apply_scroll_view_controller_state(

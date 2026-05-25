@@ -18,9 +18,9 @@ fn scope_path_within(path: &[WidgetId], scope: &[WidgetId]) -> bool {
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn focused_scroll_region(&mut self) -> Option<ScrollRegion> {
         let focused_id = self.focused_widget_id()?;
-        self.scroll_regions()
-            .into_iter()
-            .find(|region| region.id == focused_id && (region.can_scroll_x() || region.can_scroll_y()))
+        self.scroll_regions().into_iter().find(|region| {
+            region.id == focused_id && (region.can_scroll_x() || region.can_scroll_y())
+        })
     }
 
     pub(super) fn scroll_focused_region_by_pages(&mut self, direction: i32) -> bool {
@@ -58,12 +58,20 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let max = region.max_offset();
         let next = Point::new(
             if region.can_scroll_x() {
-                if end { max.x } else { Dp::ZERO }
+                if end {
+                    max.x
+                } else {
+                    Dp::ZERO
+                }
             } else {
                 current.x
             },
             if region.can_scroll_y() {
-                if end { max.y } else { Dp::ZERO }
+                if end {
+                    max.y
+                } else {
+                    Dp::ZERO
+                }
             } else {
                 current.y
             },

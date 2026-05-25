@@ -2,10 +2,10 @@ use super::*;
 #[cfg(feature = "video")]
 use crate::ui::widget::style::VideoSurfaceStyle;
 use crate::ui::widget::style::{
-    ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
+    ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle, ContainerStyle,
     InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
     SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle,
-    SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle, ContainerStyle,
+    SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle,
 };
 use crate::ui::widget::{Image, Text};
 

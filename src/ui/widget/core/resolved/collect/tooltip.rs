@@ -10,7 +10,7 @@
 use crate::text::font::TextFontRequest;
 use crate::ui::layout::Insets;
 use crate::ui::unit::Dp;
-use crate::ui::widget::common::{ComputedScene, RenderPrimitive, Rect, TextPrimitive};
+use crate::ui::widget::common::{ComputedScene, Rect, RenderPrimitive, TextPrimitive};
 use crate::ui::widget::overlay::{
     collect::emit_overlay, Anchor, AnchorKey, Overlay, OverlayContent, OverlayId, OverlayLayer,
     OverlayPrimitive,
@@ -139,12 +139,12 @@ impl<VM> ResolvedElement<VM> {
             OverlayId::new(self.id.raw()),
             Anchor::Key(AnchorKey::widget(self.id)),
         )
-            .source_widget(self.id)
-            .placement(tooltip.placement)
-            .offset(style.offset)
-            .flip_policy(tooltip.flip_policy)
-            .viewport_padding(insets_max(style.padding))
-            .layer(OverlayLayer::Tooltip);
+        .source_widget(self.id)
+        .placement(tooltip.placement)
+        .offset(style.offset)
+        .flip_policy(tooltip.flip_policy)
+        .viewport_padding(insets_max(style.padding))
+        .layer(OverlayLayer::Tooltip);
 
         let _ = emit_overlay(
             computed,

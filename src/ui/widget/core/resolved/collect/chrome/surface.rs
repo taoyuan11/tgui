@@ -170,25 +170,29 @@ impl<VM> ResolvedElement<VM> {
                 &self.kind,
                 ResolvedWidgetKind::Container { layout, .. } if layout.scroll_view.is_some()
             );
-            let focus =
-                context.build_focus_meta(self.id, &self.focus, &self.interactions, fallback_focusable);
+            let focus = context.build_focus_meta(
+                self.id,
+                &self.focus,
+                &self.interactions,
+                fallback_focusable,
+            );
             if self.interactions.has_any() || focus.is_some() {
-            computed.hit_regions.push(HitRegion {
-                rect: visual.frame,
-                clip_rect: visual.primitive_clip,
-                geometry: HitGeometry::Rect,
-                scope_path: context.focus_scope_path(),
-                focus,
-                interaction: HitInteraction::Widget {
-                    id: self.id,
-                    interactions: self.interactions.clone(),
-                    focusable: fallback_focusable,
-                    default_activation: match self.kind {
-                        ResolvedWidgetKind::Button { .. } => DefaultActivation::EnterAndSpace,
-                        _ => DefaultActivation::None,
+                computed.hit_regions.push(HitRegion {
+                    rect: visual.frame,
+                    clip_rect: visual.primitive_clip,
+                    geometry: HitGeometry::Rect,
+                    scope_path: context.focus_scope_path(),
+                    focus,
+                    interaction: HitInteraction::Widget {
+                        id: self.id,
+                        interactions: self.interactions.clone(),
+                        focusable: fallback_focusable,
+                        default_activation: match self.kind {
+                            ResolvedWidgetKind::Button { .. } => DefaultActivation::EnterAndSpace,
+                            _ => DefaultActivation::None,
+                        },
                     },
-                },
-            });
+                });
             }
         }
     }

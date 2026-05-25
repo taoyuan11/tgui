@@ -25,11 +25,7 @@ fn opts_default() -> PlacementOptions {
 }
 
 fn approx_eq(a: Dp, b: f32) {
-    assert!(
-        (a.get() - b).abs() < 0.001,
-        "expected {b}, got {}",
-        a.get()
-    );
+    assert!((a.get() - b).abs() < 0.001, "expected {b}, got {}", a.get());
 }
 
 #[test]
@@ -39,7 +35,12 @@ fn solves_below_when_fits() {
         placement: Placement::bottom(),
         ..opts_default()
     };
-    let solved = solve_placement(Anchor::Rect(anchor), (dp(120.0), dp(60.0)), viewport(), &opts);
+    let solved = solve_placement(
+        Anchor::Rect(anchor),
+        (dp(120.0), dp(60.0)),
+        viewport(),
+        &opts,
+    );
     assert_eq!(solved.resolved_placement.side, Side::Bottom);
     assert!(!solved.did_flip);
     assert!(!solved.was_hidden);
@@ -57,7 +58,12 @@ fn flips_to_top_when_below_overflows() {
         flip: FlipPolicy::FlipSide,
         ..opts_default()
     };
-    let solved = solve_placement(Anchor::Rect(anchor), (dp(120.0), dp(80.0)), viewport(), &opts);
+    let solved = solve_placement(
+        Anchor::Rect(anchor),
+        (dp(120.0), dp(80.0)),
+        viewport(),
+        &opts,
+    );
     assert_eq!(solved.resolved_placement.side, Side::Top);
     assert!(solved.did_flip);
     approx_eq(solved.rect.y, 452.0);
@@ -71,7 +77,12 @@ fn flip_side_picks_better_when_neither_fully_fits() {
         flip: FlipPolicy::FlipSide,
         ..opts_default()
     };
-    let solved = solve_placement(Anchor::Rect(anchor), (dp(80.0), dp(120.0)), viewport(), &opts);
+    let solved = solve_placement(
+        Anchor::Rect(anchor),
+        (dp(80.0), dp(120.0)),
+        viewport(),
+        &opts,
+    );
     assert_eq!(solved.resolved_placement.side, Side::Top);
     assert!(solved.did_flip);
 }
@@ -84,7 +95,12 @@ fn shift_only_clamps_into_viewport_without_flipping() {
         flip: FlipPolicy::ShiftOnly,
         ..opts_default()
     };
-    let solved = solve_placement(Anchor::Rect(anchor), (dp(200.0), dp(60.0)), viewport(), &opts);
+    let solved = solve_placement(
+        Anchor::Rect(anchor),
+        (dp(200.0), dp(60.0)),
+        viewport(),
+        &opts,
+    );
     assert_eq!(solved.resolved_placement.side, Side::Bottom);
     assert!(!solved.did_flip);
     approx_eq(solved.rect.x, 600.0);
@@ -98,7 +114,12 @@ fn flip_and_shift_combines_axes() {
         flip: FlipPolicy::FlipAndShift,
         ..opts_default()
     };
-    let solved = solve_placement(Anchor::Rect(anchor), (dp(200.0), dp(120.0)), viewport(), &opts);
+    let solved = solve_placement(
+        Anchor::Rect(anchor),
+        (dp(200.0), dp(120.0)),
+        viewport(),
+        &opts,
+    );
     assert_eq!(solved.resolved_placement.side, Side::Top);
     assert!(solved.did_flip);
     approx_eq(solved.rect.x, 600.0);
@@ -113,8 +134,12 @@ fn hide_policy_sets_was_hidden_when_neither_side_fits() {
         flip: FlipPolicy::Hide,
         ..opts_default()
     };
-    let solved =
-        solve_placement(Anchor::Rect(anchor), (dp(300.0), dp(150.0)), small_viewport, &opts);
+    let solved = solve_placement(
+        Anchor::Rect(anchor),
+        (dp(300.0), dp(150.0)),
+        small_viewport,
+        &opts,
+    );
     assert!(solved.was_hidden);
 }
 
@@ -126,7 +151,12 @@ fn hide_policy_flips_when_only_other_side_fits() {
         flip: FlipPolicy::Hide,
         ..opts_default()
     };
-    let solved = solve_placement(Anchor::Rect(anchor), (dp(80.0), dp(60.0)), viewport(), &opts);
+    let solved = solve_placement(
+        Anchor::Rect(anchor),
+        (dp(80.0), dp(60.0)),
+        viewport(),
+        &opts,
+    );
     assert!(!solved.was_hidden);
     assert_eq!(solved.resolved_placement.side, Side::Top);
     assert!(solved.did_flip);
@@ -178,7 +208,12 @@ fn match_anchor_width_overrides_content_width() {
         match_anchor_width: true,
         ..opts_default()
     };
-    let solved = solve_placement(Anchor::Rect(anchor), (dp(60.0), dp(80.0)), viewport(), &opts);
+    let solved = solve_placement(
+        Anchor::Rect(anchor),
+        (dp(60.0), dp(80.0)),
+        viewport(),
+        &opts,
+    );
     approx_eq(solved.rect.width, 220.0);
     approx_eq(solved.rect.x, 100.0);
 }
@@ -191,7 +226,12 @@ fn match_anchor_width_ignored_for_horizontal_sides() {
         match_anchor_width: true,
         ..opts_default()
     };
-    let solved = solve_placement(Anchor::Rect(anchor), (dp(60.0), dp(80.0)), viewport(), &opts);
+    let solved = solve_placement(
+        Anchor::Rect(anchor),
+        (dp(60.0), dp(80.0)),
+        viewport(),
+        &opts,
+    );
     approx_eq(solved.rect.width, 60.0);
 }
 
@@ -222,8 +262,12 @@ fn content_larger_than_viewport_clamps_to_origin() {
         clamp_to_viewport: true,
         ..opts_default()
     };
-    let solved =
-        solve_placement(Anchor::Rect(anchor), (dp(200.0), dp(200.0)), small_viewport, &opts);
+    let solved = solve_placement(
+        Anchor::Rect(anchor),
+        (dp(200.0), dp(200.0)),
+        small_viewport,
+        &opts,
+    );
     approx_eq(solved.rect.x, 0.0);
     approx_eq(solved.rect.y, 0.0);
 }
@@ -237,6 +281,11 @@ fn viewport_padding_keeps_distance_from_edges() {
         flip: FlipPolicy::ShiftOnly,
         ..opts_default()
     };
-    let solved = solve_placement(Anchor::Rect(anchor), (dp(40.0), dp(580.0)), viewport(), &opts);
+    let solved = solve_placement(
+        Anchor::Rect(anchor),
+        (dp(40.0), dp(580.0)),
+        viewport(),
+        &opts,
+    );
     approx_eq(solved.rect.y, 16.0);
 }

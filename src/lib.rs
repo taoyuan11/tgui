@@ -181,6 +181,9 @@ pub mod mvvm {
         ScrollRequest, ScrollRequestMode, ScrollViewController, Signal, State, TextChange,
         TextChangeSet, TextController, TextSnapshot, ViewModelContext,
     };
+    pub use crate::foundation::form::{
+        Form, FormField, FormSnapshot, TextFormField, ValidationErrors,
+    };
     pub use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
     pub use crate::foundation::window_control::{WindowControl, WindowResizeDirection};
 }
@@ -225,9 +228,10 @@ pub mod prelude {
     pub use crate::logging::{tgui_log, Log, LogLevel};
     pub use crate::media::{ContentFit, MediaBytes, MediaSource};
     pub use crate::mvvm::{
-        Command, CommandContext, ScrollRequest, ScrollRequestMode, ScrollViewController, Signal,
-        State, TextChange, TextChangeSet, TextController, TextSnapshot, ValueCommand, ViewModel,
-        ViewModelContext, WindowControl, WindowResizeDirection,
+        Command, CommandContext, Form, FormField, FormSnapshot, ScrollRequest, ScrollRequestMode,
+        ScrollViewController, Signal, State, TextChange, TextChangeSet, TextController,
+        TextFormField, TextSnapshot, ValidationErrors, ValueCommand, ViewModel, ViewModelContext,
+        WindowControl, WindowResizeDirection,
     };
     pub use crate::notification::{
         NotificationAction, NotificationActionEvent, NotificationError, NotificationOptions,
@@ -249,15 +253,15 @@ pub mod prelude {
     pub use crate::widgets::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
-        ContainerStyle, CursorStyle, Element, FocusRingOverride, FocusScopeOptions, Image,
-        ImageStyle, Input,
-        InputStyle, IntoTextContent, ItemLayout, ItemSource, OverlayAlignment, OverlayFlipPolicy,
-        OverlayPlacement, OverlaySide, Radio, RadioGroup, RadioOption, RadioStyle, ScrollView,
-        Select,
-        SelectOption, SelectStyle, Slider, SliderStyle, Switch, SwitchStyle, Text,
-        TextWidgetStyle, Textarea, TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
-        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
-        WidgetSurfaceStyle, WidgetTree,
+        ContainerStyle, CursorStyle, DoubleTapEvent, EdgeSwipeEvent, Element, FocusRingOverride,
+        FocusScopeOptions, GestureEdge, GestureEdgeSet, GesturePhase, GestureRecognizer,
+        GestureSource, Image, ImageStyle, Input, InputStyle, IntoTextContent, ItemLayout,
+        ItemSource, LongPressEvent, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
+        OverlaySide, PinchGestureEvent, Radio, RadioGroup, RadioOption, RadioStyle, ScrollView,
+        Select, SelectOption, SelectStyle, Slider, SliderStyle, SwipeAxis, SwipeDirection,
+        SwipeGestureEvent, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
+        Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection,
+        VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
     };
 }
 
@@ -286,15 +290,15 @@ pub mod widgets {
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
-        ContainerStyle, CursorStyle, Element, FocusRingOverride, FocusScopeOptions, Image,
-        ImageStyle, Input,
-        InputStyle, IntoTextContent, ItemLayout, ItemSource, OverlayAlignment, OverlayFlipPolicy,
-        OverlayPlacement, OverlaySide, Radio, RadioGroup, RadioOption, RadioStyle, ScrollView,
-        Select,
-        SelectOption, SelectStyle, Slider, SliderStyle, Switch, SwitchStyle, Text,
-        TextWidgetStyle, Textarea, TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
-        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
-        WidgetSurfaceStyle, WidgetTree,
+        ContainerStyle, CursorStyle, DoubleTapEvent, EdgeSwipeEvent, Element, FocusRingOverride,
+        FocusScopeOptions, GestureEdge, GestureEdgeSet, GesturePhase, GestureRecognizer,
+        GestureSource, Image, ImageStyle, Input, InputStyle, IntoTextContent, ItemLayout,
+        ItemSource, LongPressEvent, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
+        OverlaySide, PinchGestureEvent, Radio, RadioGroup, RadioOption, RadioStyle, ScrollView,
+        Select, SelectOption, SelectStyle, Slider, SliderStyle, SwipeAxis, SwipeDirection,
+        SwipeGestureEvent, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
+        Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection,
+        VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

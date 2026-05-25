@@ -150,12 +150,16 @@ impl<VM> ResolvedElement<VM> {
                         visual.background_frame.x,
                         visual.background_frame.y,
                         visual.background_frame.width,
-                        window_plan.total_main_extent.max(visual.background_frame.height),
+                        window_plan
+                            .total_main_extent
+                            .max(visual.background_frame.height),
                     ),
                     crate::ui::widget::VirtualDirection::Horizontal => Rect::new(
                         visual.background_frame.x,
                         visual.background_frame.y,
-                        window_plan.total_main_extent.max(visual.background_frame.width),
+                        window_plan
+                            .total_main_extent
+                            .max(visual.background_frame.width),
                         visual.background_frame.height,
                     ),
                 };
@@ -278,16 +282,18 @@ impl<VM> ResolvedElement<VM> {
                     }
                     computed.extend(&child_chunk);
                 }
-                computed.virtual_state_updates.push(crate::ui::widget::VirtualSceneStateUpdate {
-                    widget_id: self.id,
-                    viewport_hint: crate::ui::widget::r#virtual::VirtualViewportHint {
-                        width: visual.background_frame.width,
-                        height: visual.background_frame.height,
-                    },
-                    measured_extents,
-                    widget_ids_by_key,
-                    invalidate_layout,
-                });
+                computed
+                    .virtual_state_updates
+                    .push(crate::ui::widget::VirtualSceneStateUpdate {
+                        widget_id: self.id,
+                        viewport_hint: crate::ui::widget::r#virtual::VirtualViewportHint {
+                            width: visual.background_frame.width,
+                            height: visual.background_frame.height,
+                        },
+                        measured_extents,
+                        widget_ids_by_key,
+                        invalidate_layout,
+                    });
                 let mut after_children = ComputedScene::default();
                 push_scrollbar_primitives(
                     &mut after_children.scene,
