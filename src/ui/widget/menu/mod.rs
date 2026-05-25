@@ -8,11 +8,13 @@
 //! 菜单本体通过修饰符（`Element::menu` / `Element::context_menu`）挂在任意
 //! widget 上——与 [`Tooltip`](crate::widgets::Tooltip) 同源风格。
 
+mod contextmenu;
 mod descriptor;
 mod menubar;
 mod types;
 mod widget;
 
+pub use contextmenu::ContextMenu;
 pub(crate) use descriptor::{ContextMenuDescriptor, MenuDescriptor, MenuItemState};
 pub use menubar::{MenuBar, MenuBarEntry};
 pub(crate) use types::MenuBarGroupId;
