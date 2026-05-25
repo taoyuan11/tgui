@@ -37,6 +37,7 @@ pub struct Menu<VM> {
     style: Option<MenuStyle>,
     menubar_group: Option<MenuBarGroupId>,
     menubar_index: Option<usize>,
+    menubar_set_active: Option<ValueCommand<VM, Option<usize>>>,
 }
 
 impl<VM> Menu<VM> {
@@ -53,6 +54,7 @@ impl<VM> Menu<VM> {
             style: None,
             menubar_group: None,
             menubar_index: None,
+            menubar_set_active: None,
         }
     }
 
@@ -111,6 +113,16 @@ impl<VM> Menu<VM> {
         self.menubar_index = Some(index);
         self
     }
+
+    /// MenuBar 内部接口：注入 active_index 切换命令，让 runtime 的 Left/Right
+    /// 在 MenuBar 之间直接切换条目。
+    pub(crate) fn menubar_set_active_command(
+        mut self,
+        command: ValueCommand<VM, Option<usize>>,
+    ) -> Self {
+        self.menubar_set_active = Some(command);
+        self
+    }
 }
 
 impl<VM> From<Menu<VM>> for Element<VM> {
@@ -126,6 +138,7 @@ impl<VM> From<Menu<VM>> for Element<VM> {
             style,
             menubar_group,
             menubar_index,
+            menubar_set_active,
         } = menu;
 
         let descriptor = MenuDescriptor {
@@ -138,6 +151,7 @@ impl<VM> From<Menu<VM>> for Element<VM> {
             style,
             menubar_group,
             menubar_index,
+            menubar_set_active,
         };
         trigger.menu = Some(descriptor);
         trigger

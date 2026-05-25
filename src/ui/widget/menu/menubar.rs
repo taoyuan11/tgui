@@ -167,6 +167,9 @@ where
                 .open(entry_open)
                 .placement(Placement::bottom().align(Alignment::Start))
                 .menubar_binding(group, index);
+            if let Some(on_change) = on_active_change.clone() {
+                menu = menu.menubar_set_active_command(on_change);
+            }
             if let Some(style) = menu_style.clone() {
                 menu = menu.style(style);
             }

@@ -267,6 +267,8 @@ pub(crate) fn emit_menu_layer<VM>(
     let mut hits = Vec::with_capacity(menu.items.len());
     let menu_id = element.id;
     let on_open_change = menu.on_open_change.clone();
+    // 收集子菜单候选：(parent_item_index, item_rect)。emit_overlay 后用它递归 emit 子菜单。
+    let mut submenu_candidates: Vec<(usize, Rect)> = Vec::new();
 
     let mut cursor_y = style.padding.top;
     let item_left = style.padding.left;
@@ -476,6 +478,14 @@ pub(crate) fn emit_menu_layer<VM>(
                         }
                     },
                 });
+                // 收子菜单候选：父项为 Submenu kind + widget_state.hovered + submenu 非空
+                if !disabled
+                    && matches!(menu.items[index].kind, MenuItemKind::Submenu)
+                    && !menu.items[index].submenu.is_empty()
+                    && widget_state.hovered
+                {
+                    submenu_candidates.push((index, item_rect));
+                }
                 cursor_y = cursor_y + height;
             }
         }
@@ -506,7 +516,7 @@ pub(crate) fn emit_menu_layer<VM>(
         overlay = overlay.on_close(cmd);
     }
 
-    let _ = emit_overlay(
+    let solved = emit_overlay(
         computed,
         context.viewport,
         overlay,
@@ -517,6 +527,49 @@ pub(crate) fn emit_menu_layer<VM>(
             clip_rect: None,
         },
     );
+
+    // 递归 emit 子菜单：父 overlay 的解算位置 + 父项 item_rect 组成绝对锚点。
+    if !submenu_candidates.is_empty() {
+        let origin_x = Dp::from(solved.rect.x);
+        let origin_y = Dp::from(solved.rect.y);
+        let parent_overlay_id = overlay_id.0;
+        for (sub_idx, item_rect) in submenu_candidates {
+            let absolute_item_rect = Rect::new(
+                origin_x + item_rect.x,
+                origin_y + item_rect.y,
+                item_rect.width,
+                item_rect.height,
+            );
+            // 合成一个 submenu descriptor：items = 父项的 submenu；其它选项继承自父 menu，
+            // 但 menubar_group / set_active 清空（submenu 不参与 MenuBar 切换）。
+            let nested_descriptor = MenuDescriptor {
+                items: menu.items[sub_idx].submenu.clone(),
+                open: crate::ui::layout::Value::Static(true),
+                on_open_change: on_open_change.clone(),
+                placement: crate::ui::widget::overlay::Placement::right()
+                    .align(crate::ui::widget::overlay::Alignment::Start),
+                flip_policy: menu.flip_policy,
+                disabled: menu.disabled.clone(),
+                style: menu.style.clone(),
+                menubar_group: None,
+                menubar_index: None,
+                menubar_set_active: None,
+            };
+            // 唯一 overlay_id：父 id 与 sub_idx 组合，保证嵌套层级互不冲突。
+            let nested_overlay_id =
+                crate::ui::widget::OverlayId::new(parent_overlay_id ^ ((sub_idx as u64 + 1) << 32));
+            emit_menu_layer(
+                element,
+                context,
+                computed,
+                visual,
+                &nested_descriptor,
+                style,
+                crate::ui::widget::overlay::Anchor::Rect(absolute_item_rect),
+                Some(nested_overlay_id),
+            );
+        }
+    }
 }
 
 enum RowMetrics {

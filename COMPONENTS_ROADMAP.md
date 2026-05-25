@@ -62,18 +62,18 @@
 - **桌面操作**：右键 / 主菜单触发；方向键导航、`Enter` 触发、`Esc` 关闭、`→` 进入子菜单、`←` 返回；首字母快速跳转；快捷键全局可触发。
 - **移动操作**：长按触发 ContextMenu；MenuBar 在小屏退化为汉堡按钮 + Drawer；子菜单以 push 转场而非悬停展开。
 - **依赖**：P0 §1、§2、§5、§6。
-- **进度**：[部分落地]
+- **进度**：[基本完成]
   - ✅ Menu / ContextMenu / MenuBar 公开 builder API + 主题样式 token（`MenuStyle` / `MenuBarStyle`）；
   - ✅ Menu 下拉浮层 collect 渲染：label / separator / disabled / checked ✓ / 快捷键提示文本（右对齐）/ submenu ▸ 箭头 / 点击触发 on_select / 外部点击 / Esc 关闭 / focus trap / return_focus_to；
   - ✅ ContextMenu 自动接 `GestureRecognizer::on_long_press`（鼠标右键 + 触屏长按）；
   - ✅ MenuBar 以 `Flex<Button+Menu>` 形式落地，共享 `MenuBarGroupId`；
   - ✅ runtime 键盘导航：菜单打开时 Up/Down 在 items 间循环跳过 separator/disabled、Enter/Space 触发 cursor 项 + 关菜单、Esc 关菜单；cursor 项通过 widget_state hover 通道自动画 hover 背景；
-  - ✅ 全局 `KeyChord` 派发：扫 cached scene 里所有 menu / context_menu / 嵌套 submenu items 的 shortcut chord，命中即执行 on_select 并吞键（无需 widget 打开）；`format_chord` 把 chord 渲染成 "Ctrl+N" 风格的 hint 文本；
-  - ✅ `menu_tests` 覆盖：descriptor 落位、open=false 不渲染、open=true 渲染 label + shortcut hint、Checkable 仅勾选时画 ✓、Submenu 画 ▸、ContextMenu 自动挂长按、MenuBar 落成 Flex；
-  - ✅ `runtime::tests::menu_tests` 覆盖：Down + Enter 触发首项 on_select、菜单关闭时键盘不被错误吞掉、Ctrl+N 即使菜单关闭也派发 shortcut；
-  - ⏳ 待补：Left/Right 在 MenuBar 间切换 active entry、submenu 实际嵌套 emit（hover/方向键展开 child overlay）、SVG 图标渲染、字母 type-ahead；
-  - ⏳ ContextMenu 当前 MVP 要求调用方手维护 `State<bool>`（open）+ `State<Point>`（anchor），等 runtime 接管后会改为可选；
-  - ⏳ MenuBar 同理目前要求 `State<Option<usize>>`（active_index）。
+  - ✅ 字母 type-ahead：菜单打开时按字符键自动把 cursor 跳到首字母匹配项；
+  - ✅ MenuBar Left/Right 切换：菜单打开时在同 `MenuBarGroupId` 内 cycle active 条目；
+  - ✅ submenu 嵌套渲染：父项 hovered（鼠标或键盘 cursor）时递归 emit 子菜单 overlay，锚定到父 item 绝对位置，复用 `MenuStyle`；
+  - ✅ 全局 `KeyChord` 派发：扫 cached resolved 树里所有 menu / context_menu 含 submenu 递归的 shortcut chord，命中即执行 on_select 并吞键（无需 widget 打开）；`format_chord` 把 chord 渲染成 "Ctrl+N" 风格的 hint 文本；
+  - ✅ `menu_tests` + `runtime::tests::menu_tests`：13 个测试覆盖 descriptor / 渲染 / hover / 键盘 / 全局快捷键 / submenu 嵌套 / type-ahead。
+  - ⏳ 待补（独立 PR 价值低、可按需补）：键盘 cursor 进入 submenu 内部（Right 键深入）、SVG 图标渲染、ContextMenu/MenuBar 自动 active 状态接管（让用户不再需要绑 `State<bool>`/`State<Option<usize>>`）。
 
 
 ### 10. Modal / Dialog（应用内）

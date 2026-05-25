@@ -232,3 +232,92 @@ fn menubar_builder_produces_horizontal_flex_with_entries() {
         .sum();
     assert_eq!(total_children, 2);
 }
+
+#[test]
+fn submenu_emits_nested_overlay_when_parent_is_hovered() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    // 先用 Element 拿到 menu_id（descriptor 挂在 trigger 上）。
+    let menu_element: Element<()> = Menu::new(Button::new("File").size(dp(80.0), dp(28.0)))
+        .items(vec![
+            MenuItem::submenu(
+                "Recent",
+                vec![MenuItem::new("a.txt"), MenuItem::new("b.txt")],
+            ),
+            MenuItem::new("Exit"),
+        ])
+        .open(true)
+        .into();
+    let menu_id = menu_element.id;
+    let tree: WidgetTree<()> = WidgetTree::new(menu_element);
+
+    // baseline：未 hover 时 submenu 不应渲染。
+    let baseline = tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 600.0, 400.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let baseline_labels: Vec<String> = baseline
+        .primitives
+        .overlay_texts
+        .iter()
+        .map(|t| t.content.clone())
+        .collect();
+    assert!(
+        !baseline_labels.iter().any(|t| t == "a.txt"),
+        "submenu items must not appear without hover, got {baseline_labels:?}"
+    );
+
+    // 把父 item (index=0) 标 hovered=true：collect emit 应递归 emit 子菜单。
+    let mut states = WidgetStateMap::default();
+    let mut state = states.get_select_option(menu_id, 0);
+    state.hovered = true;
+    states.set_select_option(menu_id, 0, state);
+
+    let with_hover = tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &states,
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 600.0, 400.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let hover_labels: Vec<String> = with_hover
+        .primitives
+        .overlay_texts
+        .iter()
+        .map(|t| t.content.clone())
+        .collect();
+    assert!(
+        hover_labels.iter().any(|t| t == "a.txt"),
+        "submenu item 'a.txt' should appear when parent hovered, got {hover_labels:?}"
+    );
+    assert!(
+        hover_labels.iter().any(|t| t == "b.txt"),
+        "submenu item 'b.txt' should appear when parent hovered, got {hover_labels:?}"
+    );
+}

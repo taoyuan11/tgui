@@ -262,6 +262,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             PhysicalKey::Code(KeyCode::ArrowDown) if self.topmost_open_menu_id().is_some() => {
                 self.advance_menu_keyboard_cursor(1)
             }
+            PhysicalKey::Code(KeyCode::ArrowLeft) if self.topmost_open_menu_id().is_some() => {
+                self.advance_menubar_active(-1)
+            }
+            PhysicalKey::Code(KeyCode::ArrowRight) if self.topmost_open_menu_id().is_some() => {
+                self.advance_menubar_active(1)
+            }
             PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
                 if self.topmost_open_menu_id().is_some() =>
             {
@@ -272,6 +278,25 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     && self.focused_text_input_id().is_none() =>
             {
                 self.activate_menu_keyboard_cursor()
+            }
+            PhysicalKey::Code(_)
+                if self.topmost_open_menu_id().is_some()
+                    && self.focused_text_input_id().is_none()
+                    && self.modifiers == crate::platform::keyboard::ModifiersState::empty() =>
+            {
+                if let Key::Character(text) = &event.logical_key {
+                    if let Some(letter) = text.chars().next() {
+                        if letter.is_alphanumeric() && self.type_ahead_menu_cursor(letter) {
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
             }
             PhysicalKey::Code(KeyCode::Tab)
                 if !is_primary_shortcut_modifier(self.modifiers) && !self.modifiers.alt_key() =>

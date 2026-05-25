@@ -107,6 +107,124 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
+    /// 在 MenuBar 内左右切换：找当前打开 menu 的 menubar_group + menubar_index，
+    /// 在同 group 的其它 menu 里找下一个（cycle），调用其 menubar_set_active
+    /// 命令切换 active_index。返回是否处理了。
+    pub(super) fn advance_menubar_active(&mut self, dir: i32) -> bool {
+        let Some(menu_id) = self.topmost_open_menu_id() else {
+            return false;
+        };
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
+        };
+        let Some(layout) = cached.layout.as_ref() else {
+            return false;
+        };
+        let Some(current) = layout.resolved_widget(menu_id) else {
+            return false;
+        };
+        let Some(current_menu) = current.menu.as_ref() else {
+            return false;
+        };
+        let (Some(group), Some(current_idx)) =
+            (current_menu.menubar_group, current_menu.menubar_index)
+        else {
+            return false;
+        };
+        let Some(set_active) = current_menu.menubar_set_active.clone() else {
+            return false;
+        };
+        // 扫所有同 group 的 menu，按 menubar_index 排序，取相邻 entry。
+        let ids: Vec<WidgetId> = layout.all_widget_ids().collect();
+        let mut peers: Vec<usize> = ids
+            .into_iter()
+            .filter_map(|id| {
+                let resolved = layout.resolved_widget(id)?;
+                let menu = resolved.menu.as_ref()?;
+                (menu.menubar_group == Some(group)).then(|| menu.menubar_index)?
+            })
+            .collect();
+        peers.sort();
+        peers.dedup();
+        if peers.len() < 2 {
+            return true;
+        }
+        let pos = peers
+            .iter()
+            .position(|&idx| idx == current_idx)
+            .unwrap_or(0);
+        let n = peers.len() as i32;
+        let mut np = pos as i32 + dir;
+        np = ((np % n) + n) % n;
+        let target = peers[np as usize];
+        // 切换 active_index → user state 改 → 下帧 entry_open 切换。
+        self.execute_value_command(&set_active, Some(target));
+        // cursor 清掉，避免下次打开继承上次位置
+        self.menu_keyboard_cursor.remove(&menu_id);
+        self.invalidate_computed_scene();
+        true
+    }
+
+    /// 字母 type-ahead：扫顶层菜单的 items，找到第一个 label 以 `letter`
+    /// 开头（不区分大小写、跳过 separator/disabled）的项，把 cursor 移过去。
+    /// 命中返回 true，未命中返回 false（来键照常走原有路径）。
+    pub(super) fn type_ahead_menu_cursor(&mut self, letter: char) -> bool {
+        let Some(menu_id) = self.topmost_open_menu_id() else {
+            return false;
+        };
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
+        };
+        let Some(layout) = cached.layout.as_ref() else {
+            return false;
+        };
+        let Some(resolved) = layout.resolved_widget(menu_id) else {
+            return false;
+        };
+        let Some(menu) = resolved.menu.as_ref() else {
+            return false;
+        };
+        let target = letter.to_ascii_lowercase();
+        let current_cursor = self.menu_keyboard_cursor.get(&menu_id).copied();
+        let candidates: Vec<usize> = menu
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, item)| {
+                if item.disabled.resolve() {
+                    return None;
+                }
+                match item.kind {
+                    crate::ui::widget::MenuItemKind::Separator => None,
+                    _ => {
+                        let label = item.label.as_ref()?.resolve();
+                        let first = label
+                            .chars()
+                            .find(|c| c.is_alphanumeric())?
+                            .to_ascii_lowercase();
+                        (first == target).then_some(idx)
+                    }
+                }
+            })
+            .collect();
+        if candidates.is_empty() {
+            return false;
+        }
+        // 若有当前 cursor，跳到 cursor 之后的下一个；否则跳到第一个。
+        let next = match current_cursor {
+            Some(cur) => candidates
+                .iter()
+                .copied()
+                .find(|idx| *idx > cur)
+                .or_else(|| candidates.first().copied())
+                .unwrap(),
+            None => candidates[0],
+        };
+        self.menu_keyboard_cursor.insert(menu_id, next);
+        self.invalidate_computed_scene();
+        true
+    }
+
     /// 触发 cursor 项的 on_select + on_open_change(false)。
     /// 返回是否处理了（用来吞键）。
     pub(super) fn activate_menu_keyboard_cursor(&mut self) -> bool {

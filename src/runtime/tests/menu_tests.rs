@@ -101,3 +101,47 @@ fn global_shortcut_dispatches_on_select_even_when_menu_closed() {
     );
     assert_eq!(*counter.lock().unwrap(), 1, "on_select should fire once");
 }
+
+#[test]
+fn type_ahead_jumps_cursor_to_matching_item() {
+    use crate::platform::keyboard::{Key, KeyLocation};
+    use winit_core::event::ElementState;
+    use winit_core::event::KeyEvent;
+
+    let invalidation = InvalidationSignal::new();
+    let counter = Arc::new(Mutex::new(0_u32));
+    let counter_for_cmd = counter.clone();
+    let tree = WidgetTree::new(
+        Menu::new(Button::new("File").size(dp(80.0), dp(28.0)))
+            .items(vec![
+                MenuItem::new("Copy"),
+                MenuItem::new("Paste").on_select(crate::foundation::view_model::Command::new(
+                    move |_: &mut TestVm| {
+                        *counter_for_cmd.lock().unwrap() += 1;
+                    },
+                )),
+                MenuItem::new("Delete"),
+            ])
+            .open(true),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let _ = handler.handle_hover(viewport);
+    handler.invalidate_computed_scene();
+    let _ = handler.computed_scene();
+
+    // 按 'p' → cursor 应跳到 Paste；Enter 触发 Paste.on_select。
+    let p_event = pressed_key_event(PhysicalKey::Code(KeyCode::KeyP));
+    let p_event = KeyEvent {
+        logical_key: Key::Character("p".into()),
+        ..p_event
+    };
+    let _ = p_event.location;
+    let _ = KeyLocation::Standard;
+    let _ = ElementState::Pressed;
+    assert!(handler.handle_keyboard_input(&p_event));
+    handler.invalidate_computed_scene();
+    let _ = handler.computed_scene();
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    assert_eq!(*counter.lock().unwrap(), 1, "type-ahead Paste should fire");
+}

@@ -107,6 +107,9 @@ pub struct MenuDescriptor<VM> {
     pub(crate) menubar_group: Option<MenuBarGroupId>,
     /// 在所属 MenuBar 里的索引（与 menubar_group 同时出现或都为 None）。
     pub(crate) menubar_index: Option<usize>,
+    /// 由 MenuBar 注入：调用即可把 MenuBar 的 active_index 切到目标条目；
+    /// runtime 的 Left/Right 键导航靠这条命令切相邻 entry。
+    pub(crate) menubar_set_active: Option<ValueCommand<VM, Option<usize>>>,
 }
 
 impl<VM> Clone for MenuDescriptor<VM> {
@@ -121,6 +124,7 @@ impl<VM> Clone for MenuDescriptor<VM> {
             style: self.style.clone(),
             menubar_group: self.menubar_group,
             menubar_index: self.menubar_index,
+            menubar_set_active: self.menubar_set_active.clone(),
         }
     }
 }
@@ -137,6 +141,7 @@ impl<VM> MenuDescriptor<VM> {
             style: None,
             menubar_group: None,
             menubar_index: None,
+            menubar_set_active: None,
         }
     }
 
@@ -161,6 +166,9 @@ impl<VM> MenuDescriptor<VM> {
             style: self.style,
             menubar_group: self.menubar_group,
             menubar_index: self.menubar_index,
+            menubar_set_active: self
+                .menubar_set_active
+                .map(|cmd| cmd.scope(selector.clone())),
         }
     }
 
