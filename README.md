@@ -58,7 +58,8 @@
 
 - 布局：`Stack`、`Grid`、`Flex`
 - 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Switch`、`Image`
-- 浮层基础设施：统一的 runtime overlay anchoring 引擎，当前已为 `Tooltip` 与 `Select` 提供锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力
+- 浮层基础设施：统一的 runtime overlay anchoring 引擎，当前已为 `Tooltip`、`Select` 与 `Menu` / `ContextMenu` / `MenuBar` 提供锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力
+- 菜单组件：`Menu`（按钮触发的下拉操作菜单）、`ContextMenu`（长按 / 鼠标右键触发的浮层菜单）、`MenuBar`（顶部主菜单条）；统一 `MenuItem` 模型支持图标占位、勾选项、子菜单标识、快捷键提示文本、分隔线、禁用项
 - 画布：`Canvas`、`CanvasRecorder`、渐变/阴影/混合/裁剪/文字与图片绘制
 - 音频：`Audio`、`AudioController`、`AudioSource`（需启用 `audio` feature）
 - 视频：`VideoSurface`、`VideoController`、`VideoSource`（需启用 `video` feature）

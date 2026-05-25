@@ -64,10 +64,11 @@
 - **依赖**：P0 §1、§2、§5、§6。
 - **进度**：[部分落地]
   - ✅ Menu / ContextMenu / MenuBar 公开 builder API + 主题样式 token（`MenuStyle` / `MenuBarStyle`）；
-  - ✅ Menu 下拉浮层 collect 渲染：label / separator / disabled / 点击触发 on_select / 外部点击 / Esc 关闭 / focus trap / return_focus_to；
+  - ✅ Menu 下拉浮层 collect 渲染：label / separator / disabled / checked ✓ / 快捷键提示文本（右对齐）/ submenu ▸ 箭头 / 点击触发 on_select / 外部点击 / Esc 关闭 / focus trap / return_focus_to；
   - ✅ ContextMenu 自动接 `GestureRecognizer::on_long_press`（鼠标右键 + 触屏长按）；
   - ✅ MenuBar 以 `Flex<Button+Menu>` 形式落地，共享 `MenuBarGroupId`；
-  - ⏳ 待补：方向键导航 / 字母 type-ahead / 子菜单嵌套渲染 / 图标 / 勾选指示器 / 快捷键提示文字 / 全局快捷键派发；
+  - ✅ `menu_tests` 模块覆盖：descriptor 落位、open=false 不渲染、open=true 渲染 label + shortcut hint、Checkable 仅勾选时画 ✓、Submenu 画 ▸、ContextMenu 自动挂长按、MenuBar 落成 Flex；
+  - ⏳ 待补：方向键导航（runtime/menu.rs）、字母 type-ahead、子菜单嵌套实际 emit、SVG 图标渲染、全局 `KeyChord` 派发；
   - ⏳ ContextMenu 当前 MVP 要求调用方手维护 `State<bool>`（open）+ `State<Point>`（anchor），等 runtime 接管后会改为可选；
   - ⏳ MenuBar 同理目前要求 `State<Option<usize>>`（active_index）。
 
