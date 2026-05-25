@@ -256,13 +256,14 @@ pub mod prelude {
         ChordKey, ContainerStyle, CursorStyle, DoubleTapEvent, EdgeSwipeEvent, Element,
         FocusRingOverride, FocusScopeOptions, GestureEdge, GestureEdgeSet, GesturePhase,
         GestureRecognizer, GestureSource, Image, ImageStyle, Input, InputStyle, IntoTextContent,
-        ItemLayout, ItemSource, KeyChord, LongPressEvent, Menu, MenuBarStyle, MenuIcon, MenuItem,
-        MenuItemKind, MenuStyle, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
-        OverlaySide, PinchGestureEvent, Radio, RadioGroup, RadioOption, RadioStyle, ScrollView,
-        Select, SelectOption, SelectStyle, Slider, SliderStyle, SwipeAxis, SwipeDirection,
-        SwipeGestureEvent, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
-        Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection,
-        VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
+        ItemLayout, ItemSource, KeyChord, LongPressEvent, Menu, MenuBar, MenuBarEntry,
+        MenuBarStyle, MenuIcon, MenuItem, MenuItemKind, MenuStyle, OverlayAlignment,
+        OverlayFlipPolicy, OverlayPlacement, OverlaySide, PinchGestureEvent, Radio, RadioGroup,
+        RadioOption, RadioStyle, ScrollView, Select, SelectOption, SelectStyle, Slider,
+        SliderStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle, Text,
+        TextWidgetStyle, Textarea, TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
+        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
+        WidgetSurfaceStyle, WidgetTree,
     };
 }
 
@@ -294,13 +295,14 @@ pub mod widgets {
         ChordKey, ContainerStyle, CursorStyle, DoubleTapEvent, EdgeSwipeEvent, Element,
         FocusRingOverride, FocusScopeOptions, GestureEdge, GestureEdgeSet, GesturePhase,
         GestureRecognizer, GestureSource, Image, ImageStyle, Input, InputStyle, IntoTextContent,
-        ItemLayout, ItemSource, KeyChord, LongPressEvent, Menu, MenuBarStyle, MenuIcon, MenuItem,
-        MenuItemKind, MenuStyle, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
-        OverlaySide, PinchGestureEvent, Radio, RadioGroup, RadioOption, RadioStyle, ScrollView,
-        Select, SelectOption, SelectStyle, Slider, SliderStyle, SwipeAxis, SwipeDirection,
-        SwipeGestureEvent, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
-        Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection,
-        VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
+        ItemLayout, ItemSource, KeyChord, LongPressEvent, Menu, MenuBar, MenuBarEntry,
+        MenuBarStyle, MenuIcon, MenuItem, MenuItemKind, MenuStyle, OverlayAlignment,
+        OverlayFlipPolicy, OverlayPlacement, OverlaySide, PinchGestureEvent, Radio, RadioGroup,
+        RadioOption, RadioStyle, ScrollView, Select, SelectOption, SelectStyle, Slider,
+        SliderStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle, Text,
+        TextWidgetStyle, Textarea, TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
+        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
+        WidgetSurfaceStyle, WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

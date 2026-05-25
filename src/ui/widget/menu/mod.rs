@@ -9,10 +9,12 @@
 //! widget 上——与 [`Tooltip`](crate::widgets::Tooltip) 同源风格。
 
 mod descriptor;
+mod menubar;
 mod types;
 mod widget;
 
 pub(crate) use descriptor::{ContextMenuDescriptor, MenuDescriptor, MenuItemState};
+pub use menubar::{MenuBar, MenuBarEntry};
 pub(crate) use types::MenuBarGroupId;
 pub use types::{ChordKey, KeyChord, MenuIcon, MenuItem, MenuItemKind};
 pub use widget::Menu;

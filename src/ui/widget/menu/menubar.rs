@@ -1,0 +1,191 @@
+//! [`MenuBar`] widget builder。
+//!
+//! MenuBar 不是独立的 `WidgetKind`，而是一个 builder——`From<MenuBar<VM>>`
+//! 把它转成 `Flex<VM>`，每个 entry 是一个挂了 `MenuDescriptor` 的 Button
+//! （参考 `RadioGroup`）。每个 entry 上的 Menu 都关联同一个 `MenuBarGroupId`
+//! 以便 runtime 在它们之间做 Left/Right 切换（step 6 落地）。
+//!
+//! ```ignore
+//! MenuBar::new(state.menubar_active.signal())
+//!     .on_active_change(cmd!(|vm, idx| vm.menubar_active.set(idx)))
+//!     .entry("文件", vec![MenuItem::new("新建")...])
+//!     .entry("编辑", vec![MenuItem::new("撤销")...])
+//! ```
+
+use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
+use crate::ui::layout::{Align, Axis, Value};
+use crate::ui::widget::button::Button;
+use crate::ui::widget::container::Flex;
+use crate::ui::widget::core::Element;
+use crate::ui::widget::overlay::{Alignment, Placement};
+
+use super::descriptor::{MenuDescriptor, MenuItemState};
+use super::types::{MenuBarGroupId, MenuItem};
+use super::widget::Menu;
+
+/// MenuBar 单个顶级条目。
+#[derive(Clone)]
+pub struct MenuBarEntry<VM> {
+    label: Value<String>,
+    items: Vec<MenuItem<VM>>,
+    disabled: Value<bool>,
+}
+
+impl<VM> MenuBarEntry<VM> {
+    pub fn new(label: impl Into<Value<String>>) -> Self {
+        Self {
+            label: label.into(),
+            items: Vec::new(),
+            disabled: Value::Static(false),
+        }
+    }
+
+    pub fn items(mut self, items: Vec<MenuItem<VM>>) -> Self {
+        self.items = items;
+        self
+    }
+
+    pub fn item(mut self, item: MenuItem<VM>) -> Self {
+        self.items.push(item);
+        self
+    }
+
+    pub fn disable(mut self, disable: impl Into<Value<bool>>) -> Self {
+        self.disabled = disable.into();
+        self
+    }
+}
+
+/// MenuBar widget。
+///
+/// `active_index` 是当前展开的条目下标——`None` 表示无菜单展开。点击某个 entry
+/// 会调用 `on_active_change(Some(index) 或 None)` 切换。
+pub struct MenuBar<VM> {
+    entries: Vec<MenuBarEntry<VM>>,
+    active_index: Value<Option<usize>>,
+    on_active_change: Option<ValueCommand<VM, Option<usize>>>,
+    group: MenuBarGroupId,
+    // 主题样式预留位（暂未在 Flex 包装中应用——step 9 一起接 README/examples 时打磨）。
+    _style: Option<crate::ui::widget::style::MenuBarStyle>,
+    _menu_style: Option<crate::ui::widget::style::MenuStyle>,
+}
+
+impl<VM> MenuBar<VM> {
+    /// 创建 MenuBar，绑定外部 `Signal<Option<usize>>` 作为 active_index 数据源。
+    pub fn new(active_index: impl Into<Value<Option<usize>>>) -> Self {
+        Self {
+            entries: Vec::new(),
+            active_index: active_index.into(),
+            on_active_change: None,
+            group: MenuBarGroupId::next(),
+            _style: None,
+            _menu_style: None,
+        }
+    }
+
+    /// 设置 active_index 变更回调。点击 entry 触发：
+    /// - 若当前 active_index == Some(我自己)，调用 `cmd(None)`（收起）；
+    /// - 否则调用 `cmd(Some(我))`（切到我）。
+    /// 若没接此 callback，MenuBar 的 entry 仍可视、但点击不会打开下拉。
+    pub fn on_active_change(mut self, command: ValueCommand<VM, Option<usize>>) -> Self {
+        self.on_active_change = Some(command);
+        self
+    }
+
+    /// 追加一个 entry。
+    pub fn entry(mut self, label: impl Into<Value<String>>, items: Vec<MenuItem<VM>>) -> Self {
+        self.entries.push(MenuBarEntry::new(label).items(items));
+        self
+    }
+
+    /// 追加已构造好的 entry。
+    pub fn entries(mut self, entries: Vec<MenuBarEntry<VM>>) -> Self {
+        self.entries.extend(entries);
+        self
+    }
+
+    pub fn style(mut self, style: crate::ui::widget::style::MenuBarStyle) -> Self {
+        self._style = Some(style);
+        self
+    }
+
+    pub fn menu_style(mut self, style: crate::ui::widget::style::MenuStyle) -> Self {
+        self._menu_style = Some(style);
+        self
+    }
+}
+
+impl<VM> From<MenuBar<VM>> for Element<VM>
+where
+    VM: 'static,
+{
+    fn from(bar: MenuBar<VM>) -> Element<VM> {
+        let MenuBar {
+            entries,
+            active_index,
+            on_active_change,
+            group,
+            _style,
+            _menu_style: menu_style,
+        } = bar;
+
+        let mut children: Vec<Element<VM>> = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.into_iter().enumerate() {
+            let MenuBarEntry {
+                label,
+                items,
+                disabled,
+            } = entry;
+
+            // 每个 entry 的下拉是否展开 = active_index == Some(index)
+            let entry_open = match active_index.clone() {
+                Value::Static(value) => Value::Static(value == Some(index)),
+                Value::Signal(signal) => Value::Signal(signal.map(move |idx| idx == Some(index))),
+            };
+
+            // 点击事件：toggle 我这一项
+            let mut button = Button::new(label).disable(disabled.clone());
+            if let Some(on_change) = on_active_change.clone() {
+                let active_signal = active_index.clone();
+                let click_cmd =
+                    Command::new_with_context(move |vm: &mut VM, ctx: &CommandContext<VM>| {
+                        let current = active_signal.resolve();
+                        let next = if current == Some(index) {
+                            None
+                        } else {
+                            Some(index)
+                        };
+                        on_change.execute_with_context(vm, next, ctx);
+                    });
+                button = button.on_click(click_cmd);
+            }
+
+            // 菜单 entry 切换关闭回调：用户从菜单内部触发 close（外部点击 / Esc / item 选中）时，
+            // 重置 active_index 到 None。
+            let mut menu = Menu::new(button)
+                .items(items)
+                .open(entry_open)
+                .placement(Placement::bottom().align(Alignment::Start))
+                .menubar_binding(group, index);
+            if let Some(style) = menu_style.clone() {
+                menu = menu.style(style);
+            }
+            if let Some(on_change) = on_active_change.clone() {
+                menu = menu.on_open_change(ValueCommand::new_with_context(
+                    move |vm: &mut VM, open: bool, ctx: &CommandContext<VM>| {
+                        if !open {
+                            on_change.execute_with_context(vm, None, ctx);
+                        }
+                    },
+                ));
+            }
+
+            children.push(menu.into());
+        }
+
+        Flex::new(Axis::Horizontal)
+            .align(Align::Center)
+            .child(children)
+            .into()
+    }
+}
