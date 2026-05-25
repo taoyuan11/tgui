@@ -62,6 +62,15 @@
 - **桌面操作**：右键 / 主菜单触发；方向键导航、`Enter` 触发、`Esc` 关闭、`→` 进入子菜单、`←` 返回；首字母快速跳转；快捷键全局可触发。
 - **移动操作**：长按触发 ContextMenu；MenuBar 在小屏退化为汉堡按钮 + Drawer；子菜单以 push 转场而非悬停展开。
 - **依赖**：P0 §1、§2、§5、§6。
+- **进度**：[部分落地]
+  - ✅ Menu / ContextMenu / MenuBar 公开 builder API + 主题样式 token（`MenuStyle` / `MenuBarStyle`）；
+  - ✅ Menu 下拉浮层 collect 渲染：label / separator / disabled / 点击触发 on_select / 外部点击 / Esc 关闭 / focus trap / return_focus_to；
+  - ✅ ContextMenu 自动接 `GestureRecognizer::on_long_press`（鼠标右键 + 触屏长按）；
+  - ✅ MenuBar 以 `Flex<Button+Menu>` 形式落地，共享 `MenuBarGroupId`；
+  - ⏳ 待补：方向键导航 / 字母 type-ahead / 子菜单嵌套渲染 / 图标 / 勾选指示器 / 快捷键提示文字 / 全局快捷键派发；
+  - ⏳ ContextMenu 当前 MVP 要求调用方手维护 `State<bool>`（open）+ `State<Point>`（anchor），等 runtime 接管后会改为可选；
+  - ⏳ MenuBar 同理目前要求 `State<Option<usize>>`（active_index）。
+
 
 ### 10. Modal / Dialog（应用内）
 - **作用**：阻塞式对话框；与 `tgui::dialog`（系统原生对话框）区分——这是 app 内绘制的版本，可放任意内容。
