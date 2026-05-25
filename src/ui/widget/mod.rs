@@ -80,7 +80,7 @@ pub use gesture::{
 };
 pub use image::Image;
 pub use input::Input;
-pub use menu::{ChordKey, KeyChord, MenuIcon, MenuItem, MenuItemKind};
+pub use menu::{ChordKey, KeyChord, Menu, MenuIcon, MenuItem, MenuItemKind};
 pub use overlay::{
     Alignment as OverlayAlignment, Anchor as OverlayAnchor, AnchorKey as OverlayAnchorKey,
     AnchorSource as OverlayAnchorSource, FlipPolicy as OverlayFlipPolicy, OverlayId, OverlayLayer,
