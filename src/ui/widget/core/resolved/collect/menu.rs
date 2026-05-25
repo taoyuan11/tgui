@@ -303,10 +303,8 @@ pub(crate) fn emit_menu_layer<VM>(
             } => {
                 let item_rect = Rect::new(item_left, cursor_y, item_width, height);
                 let disabled = menu.items[index].disabled.resolve();
-                let widget_state = WidgetState {
-                    disabled,
-                    ..Default::default()
-                };
+                let mut widget_state = context.widget_states.get_select_option(menu_id, index);
+                widget_state.disabled = disabled;
                 let item_bg = style.item_background.resolve(widget_state).resolve();
                 if item_bg.a > 0 {
                     primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Shape(

@@ -248,6 +248,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             PhysicalKey::Code(KeyCode::Escape) => {
                 self.consume_topmost_overlay_close_handler_escape()
             }
+            PhysicalKey::Code(KeyCode::ArrowUp) if self.topmost_open_menu_id().is_some() => {
+                self.advance_menu_keyboard_cursor(-1)
+            }
+            PhysicalKey::Code(KeyCode::ArrowDown) if self.topmost_open_menu_id().is_some() => {
+                self.advance_menu_keyboard_cursor(1)
+            }
+            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
+                if self.topmost_open_menu_id().is_some() =>
+            {
+                self.activate_menu_keyboard_cursor()
+            }
+            PhysicalKey::Code(KeyCode::Space)
+                if self.topmost_open_menu_id().is_some()
+                    && self.focused_text_input_id().is_none() =>
+            {
+                self.activate_menu_keyboard_cursor()
+            }
             PhysicalKey::Code(KeyCode::Tab)
                 if !is_primary_shortcut_modifier(self.modifiers) && !self.modifiers.alt_key() =>
             {

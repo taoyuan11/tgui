@@ -11,6 +11,7 @@ mod helpers;
 mod ime_runtime;
 mod input;
 mod lifecycle;
+mod menu;
 pub(crate) mod overlay;
 mod render_cycle;
 mod scene_patch;
@@ -376,6 +377,10 @@ pub struct BoundRuntimeHandler<VM> {
     /// 由 `next_deadline` 汇入 winit ControlFlow，到点后 `drive_animations` 触发 invalidate。
     next_tooltip_wakeup_deadline: Option<Instant>,
     tooltip_state: TooltipState,
+    /// 每个打开的 Menu overlay 的键盘 cursor（值=item 的 option_index）。
+    /// Up/Down 在 `runtime/menu.rs::advance_menu_keyboard_cursor` 维护；
+    /// 菜单关闭时由 `clear_menu_keyboard_cursor` 清除。
+    menu_keyboard_cursor: HashMap<WidgetId, usize>,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
     active_touch_scroll: Option<TouchScrollDrag>,
@@ -494,6 +499,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 long_press_candidate: None,
                 long_press_release_deadline: None,
             },
+            menu_keyboard_cursor: HashMap::new(),
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
             active_touch_scroll: None,

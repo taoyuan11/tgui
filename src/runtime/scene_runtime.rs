@@ -560,6 +560,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             state.pressed = true;
             states.set(handle.id, state);
         }
+        self.apply_menu_keyboard_cursor_to_states(&mut states);
         states
     }
 
