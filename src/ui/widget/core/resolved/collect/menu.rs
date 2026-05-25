@@ -106,6 +106,12 @@ pub(crate) fn emit_menu_layer<VM>(
         .items
         .iter()
         .any(|item| matches!(item.kind, MenuItemKind::Submenu));
+    let any_icon = menu.items.iter().any(|item| {
+        matches!(
+            item.icon.as_ref(),
+            Some(crate::ui::widget::MenuIcon::Glyph(_))
+        )
+    });
     let any_shortcut = menu.items.iter().any(|item| {
         item.shortcut_hint
             .as_ref()
@@ -147,6 +153,17 @@ pub(crate) fn emit_menu_layer<VM>(
     };
     let check_col_w_dp = Dp::from(check_col_w);
     let arrow_col_w_dp = Dp::from(arrow_col_w);
+    // 图标列占主题 item_icon_size，独立于具体 glyph 的实际宽度，保证对齐。
+    let icon_col_w_dp = if any_icon {
+        style.item_icon_size
+    } else {
+        Dp::ZERO
+    };
+    let icon_pad = if any_icon {
+        style.item_icon_gap
+    } else {
+        Dp::ZERO
+    };
     let check_pad = if any_checkable {
         style.item_icon_gap
     } else {
@@ -358,6 +375,38 @@ pub(crate) fn emit_menu_layer<VM>(
                         ));
                     }
                     cursor_x = cursor_x + check_col_w_dp + check_pad;
+                }
+
+                // 图标列：仅当 any_icon=true 时占位（无图标的项保留空白对齐）。
+                if any_icon {
+                    if let Some(crate::ui::widget::MenuIcon::Glyph(glyph)) =
+                        menu.items[index].icon.as_ref()
+                    {
+                        let icon_frame =
+                            Rect::new(cursor_x, label_baseline_y, icon_col_w_dp, text_h);
+                        primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Text(
+                            TextPrimitive {
+                                content: glyph.to_string(),
+                                rich_spans: None,
+                                frame: icon_frame,
+                                quad: None,
+                                color: row_label_color,
+                                force_color: false,
+                                font_family: Some(resolved_font.primary_font.clone()),
+                                font_size,
+                                font_weight: style.text_style.weight,
+                                line_height,
+                                letter_spacing,
+                                wrap: crate::ui::widget::CanvasTextWrap::None,
+                                overflow: CanvasTextOverflow::Clip,
+                                horizontal_align: CanvasTextHorizontalAlign::Start,
+                                vertical_align: CanvasTextVerticalAlign::Start,
+                                clip_rect: None,
+                                clip_mask: None,
+                            },
+                        ));
+                    }
+                    cursor_x = cursor_x + icon_col_w_dp + icon_pad;
                 }
 
                 // 主 label

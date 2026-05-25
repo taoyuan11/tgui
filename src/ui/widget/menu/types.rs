@@ -31,19 +31,28 @@ pub enum MenuItemKind {
 /// 目前仅支持 SVG 字节数据，与 `Image` widget 复用 `media/svg` 栅格化通道。
 #[derive(Clone)]
 pub enum MenuIcon {
-    /// 内嵌 SVG 字节数据。
+    /// 内嵌 SVG 字节数据。当前 collect 阶段尚不渲染 SVG（OverlayPrimitive
+    /// 不支持 Image），仅占位——后续接入 overlay image 时启用。
     Svg(Arc<[u8]>),
+    /// 单个 Unicode 字符 / emoji glyph。collect 阶段直接以文本渲染，
+    /// 是 SVG 落地前的过渡方案。例如 `MenuIcon::glyph('📁')`。
+    Glyph(char),
 }
 
 impl MenuIcon {
-    /// 用静态 SVG 字节切片构造图标。
+    /// 用静态 SVG 字节切片构造图标（暂未在 collect 阶段渲染，见 enum 上的注释）。
     pub fn svg(bytes: &'static [u8]) -> Self {
         MenuIcon::Svg(Arc::from(bytes))
     }
 
-    /// 用任意 SVG 字节数据构造图标（可来自运行时加载）。
+    /// 用任意 SVG 字节数据构造图标。
     pub fn svg_owned(bytes: Vec<u8>) -> Self {
         MenuIcon::Svg(Arc::from(bytes.into_boxed_slice()))
+    }
+
+    /// 用单个 glyph 字符构造图标（emoji / 字体图标）。
+    pub fn glyph(ch: char) -> Self {
+        MenuIcon::Glyph(ch)
     }
 }
 
@@ -54,6 +63,7 @@ impl std::fmt::Debug for MenuIcon {
                 .debug_struct("MenuIcon::Svg")
                 .field("len", &bytes.len())
                 .finish(),
+            MenuIcon::Glyph(ch) => f.debug_tuple("MenuIcon::Glyph").field(ch).finish(),
         }
     }
 }

@@ -1,6 +1,6 @@
 pub(super) use super::*;
 
-use crate::ui::widget::{Button, ContextMenu, Menu, MenuBar, MenuItem};
+use crate::ui::widget::{Button, ContextMenu, Menu, MenuBar, MenuIcon, MenuItem};
 
 #[test]
 fn menu_builder_produces_element_with_descriptor() {
@@ -231,6 +231,47 @@ fn menubar_builder_produces_horizontal_flex_with_entries() {
         })
         .sum();
     assert_eq!(total_children, 2);
+}
+
+#[test]
+fn menu_glyph_icon_renders_when_present() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Menu::new(Button::new("File").size(dp(80.0), dp(28.0)))
+            .items(vec![
+                MenuItem::new("New").icon(MenuIcon::glyph('📄')),
+                MenuItem::new("Open"),
+            ])
+            .open(true),
+    );
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 400.0, 400.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let texts: Vec<&str> = rendered
+        .primitives
+        .overlay_texts
+        .iter()
+        .map(|t| t.content.as_str())
+        .collect();
+    assert!(
+        texts.iter().any(|t| *t == "\u{1F4C4}"),
+        "glyph icon 📄 should render in overlay, got {texts:?}"
+    );
 }
 
 #[test]
