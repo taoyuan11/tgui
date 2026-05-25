@@ -2,23 +2,26 @@
 //!
 //! Tooltip 模块（`runtime/tooltip.rs`）的姐妹文件——所有方法挂在
 //! `BoundRuntimeHandler<VM>` 上，被 `runtime/input.rs` 的键盘分发以及
-//! `runtime/scene_runtime.rs::widget_state_map` 共同使用。
+//! `runtime/scene_runtime.rs::widget_state_map`、`collect/menu.rs` 共同使用。
 //!
-//! 当前覆盖：
+//! 覆盖：
 //! - 找到当前最顶层"已打开"的 Menu overlay（按 `OverlayLayer::Menu` 判定）；
-//! - 收集 menu 的可点选 items（HitInteraction::SelectOption + 非 Disabled）；
-//! - Up/Down 在 items 间循环游走（自动跳过 separator / disabled）；
-//! - Enter / Space 触发 cursor 项的 on_select 并通过 on_open_change(false) 关菜单；
-//! - widget_state_map 把 cursor 项标 hovered=true 让 collect 用 hover 背景渲染。
-//!
-//! 未覆盖（待后续）：Left/Right 在 MenuBar 内切换条目；submenu 嵌套展开；字母 type-ahead。
+//! - 以路径（`Vec<usize>`）表示 cursor：长度=1=最外层、>1=进入了嵌套 submenu；
+//! - Up/Down 调整当前层（路径末元素），跳过 separator / disabled，循环；
+//! - Right：cursor 在 Submenu 项上时入栈，进入 submenu 第一个可点项；否则
+//!   走 MenuBar Left/Right；Left：弹栈直到深度=1，再走 MenuBar 切条目；
+//! - Enter / Space 沿路径找到叶子 item，触发 on_select 并 on_open_change(false)；
+//! - 字母 type-ahead 在当前层跳到首字母匹配项；
+//! - 全局 KeyChord 派发：扫整棵 resolved 树（含 submenu 递归）找 shortcut 命中。
 
 use std::collections::HashMap;
 
 use crate::foundation::view_model::ValueCommand;
 use crate::platform::keyboard::{Key, KeyCode, ModifiersState};
 use crate::runtime::overlay::OverlayLayer;
-use crate::ui::widget::{HitInteraction, KeyChord, MenuItemState, Rect, WidgetId, WidgetStateMap};
+use crate::ui::widget::{
+    HitInteraction, KeyChord, MenuItemKind, MenuItemState, Rect, WidgetId, WidgetStateMap,
+};
 
 use super::BoundRuntimeHandler;
 
@@ -31,13 +34,24 @@ pub(super) struct MenuKeyboardItem<VM> {
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
-    /// 在当前 cached scene 上找最顶层的 Menu overlay；返回它的 widget_id（即
-    /// `OverlayCloseHandle::overlay_id` 还原回的 trigger / menu source）。
+    /// 在当前 cached scene 上找最顶层的 Menu overlay；返回它对应的 widget_id。
+    /// 当 submenu 嵌套打开时 overlay_close_handlers 会含有合成 overlay_id（不
+    /// 对应任何真实 widget），筛选时优先取 `return_focus_to` —— 那是真实的
+    /// trigger widget_id，跨嵌套保持一致。
     pub(super) fn topmost_open_menu_id(&self) -> Option<WidgetId> {
         let cached = self.cached_scene.as_ref()?;
         for handle in cached.computed.overlay_close_handlers.iter().rev() {
-            if handle.layer == OverlayLayer::Menu {
-                return Some(WidgetId::from_raw(handle.overlay_id.0));
+            if handle.layer != OverlayLayer::Menu {
+                continue;
+            }
+            if let Some(target) = handle.return_focus_to {
+                return Some(target);
+            }
+            let candidate = WidgetId::from_raw(handle.overlay_id.0);
+            if let Some(layout) = cached.layout.as_ref() {
+                if layout.resolved_widget(candidate).is_some() {
+                    return Some(candidate);
+                }
             }
         }
         None
@@ -73,22 +87,98 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         items
     }
 
-    /// 让 cursor 在 items 上前进一位（dir = +1 下、-1 上），循环到首尾。
+    /// 沿 `path` 在 resolved menu 的 items 树里走到目标项（不含路径最末元素之外的更深）。
+    /// path = [3, 1] → 返回 items[3].submenu[1]。失败返回 None。
+    fn menu_item_at_path<'a>(
+        &self,
+        menu_id: WidgetId,
+        path: &[usize],
+    ) -> Option<MenuItemSnapshot<VM>> {
+        let cached = self.cached_scene.as_ref()?;
+        let layout = cached.layout.as_ref()?;
+        let resolved = layout.resolved_widget(menu_id)?;
+        let menu = resolved.menu.as_ref()?;
+        if path.is_empty() {
+            return None;
+        }
+        let mut current = menu.items.get(path[0])?;
+        for idx in &path[1..] {
+            current = current.submenu.get(*idx)?;
+        }
+        Some(MenuItemSnapshot {
+            kind: current.kind,
+            disabled: current.disabled.resolve(),
+            has_submenu: !current.submenu.is_empty(),
+            on_select: current.on_select.clone(),
+            label: current.label.as_ref().map(|l| l.resolve()),
+        })
+    }
+
+    /// 返回某菜单某层级（`parent_path` 指定）下所有可"游走"的索引：跳过 Separator
+    /// 与 disabled 项。parent_path 空表示根菜单。
+    fn selectable_indices(&self, menu_id: WidgetId, parent_path: &[usize]) -> Vec<usize> {
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return Vec::new();
+        };
+        let Some(layout) = cached.layout.as_ref() else {
+            return Vec::new();
+        };
+        let Some(resolved) = layout.resolved_widget(menu_id) else {
+            return Vec::new();
+        };
+        let Some(menu) = resolved.menu.as_ref() else {
+            return Vec::new();
+        };
+        // 走到目标父级 items 列表。
+        let mut items: &[MenuItemState<VM>] = &menu.items;
+        for idx in parent_path {
+            let Some(parent) = items.get(*idx) else {
+                return Vec::new();
+            };
+            items = &parent.submenu;
+        }
+        items
+            .iter()
+            .enumerate()
+            .filter_map(|(i, it)| {
+                if it.disabled.resolve() {
+                    return None;
+                }
+                match it.kind {
+                    MenuItemKind::Separator => None,
+                    _ => Some(i),
+                }
+            })
+            .collect()
+    }
+
+    /// 让 cursor 在当前层（路径末层）前进一位（dir = +1 下、-1 上），循环到首尾。
     /// 返回是否真的有 menu 在打开（用来决定是否吞键）。
     pub(super) fn advance_menu_keyboard_cursor(&mut self, dir: i32) -> bool {
         let Some(menu_id) = self.topmost_open_menu_id() else {
             return false;
         };
-        let items = self.menu_keyboard_items(menu_id);
-        if items.is_empty() {
-            return true; // 仍吞键避免冒泡到 focus 切换
+        let mut path = self
+            .menu_keyboard_cursor
+            .get(&menu_id)
+            .cloned()
+            .unwrap_or_default();
+        // 父路径=去掉当前层；当前层是 path.last()（若有）。
+        let parent_path: Vec<usize> = if path.is_empty() {
+            Vec::new()
+        } else {
+            path[..path.len() - 1].to_vec()
+        };
+        let candidates = self.selectable_indices(menu_id, &parent_path);
+        if candidates.is_empty() {
+            return true;
         }
-        let current = self.menu_keyboard_cursor.get(&menu_id).copied();
-        let cur_pos =
-            current.and_then(|opt_idx| items.iter().position(|item| item.option_index == opt_idx));
+        let cur_pos = path
+            .last()
+            .and_then(|idx| candidates.iter().position(|c| c == idx));
         let next_pos = match cur_pos {
             Some(pos) => {
-                let n = items.len() as i32;
+                let n = candidates.len() as i32;
                 let mut p = pos as i32 + dir;
                 p = ((p % n) + n) % n;
                 p as usize
@@ -97,14 +187,68 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 if dir >= 0 {
                     0
                 } else {
-                    items.len() - 1
+                    candidates.len() - 1
                 }
             }
         };
-        let chosen_opt_index = items[next_pos].option_index;
-        self.menu_keyboard_cursor.insert(menu_id, chosen_opt_index);
+        if path.is_empty() {
+            path.push(candidates[next_pos]);
+        } else {
+            *path.last_mut().unwrap() = candidates[next_pos];
+        }
+        self.menu_keyboard_cursor.insert(menu_id, path);
         self.invalidate_computed_scene();
         true
+    }
+
+    /// Right 键：若 cursor 在 Submenu 项上，则入栈进入 submenu 第一个可点项；
+    /// 否则交给 MenuBar Left/Right。返回是否吞键。
+    pub(super) fn enter_submenu_or_advance_menubar(&mut self, dir: i32) -> bool {
+        let Some(menu_id) = self.topmost_open_menu_id() else {
+            return false;
+        };
+        let path = self
+            .menu_keyboard_cursor
+            .get(&menu_id)
+            .cloned()
+            .unwrap_or_default();
+        if !path.is_empty() {
+            // 检查 cursor 是否落在 Submenu 项。
+            if let Some(snapshot) = self.menu_item_at_path(menu_id, &path) {
+                if matches!(snapshot.kind, MenuItemKind::Submenu) && snapshot.has_submenu {
+                    let children = self.selectable_indices(menu_id, &path);
+                    if let Some(first) = children.first().copied() {
+                        let mut new_path = path;
+                        new_path.push(first);
+                        self.menu_keyboard_cursor.insert(menu_id, new_path);
+                        self.invalidate_computed_scene();
+                        return true;
+                    }
+                }
+            }
+        }
+        // 不能深入 → fall through 到 MenuBar 横向切换。
+        self.advance_menubar_active(dir)
+    }
+
+    /// Left 键：若 cursor 已在 submenu（深度>1），弹栈；否则交给 MenuBar Left/Right。
+    pub(super) fn leave_submenu_or_advance_menubar(&mut self, dir: i32) -> bool {
+        let Some(menu_id) = self.topmost_open_menu_id() else {
+            return false;
+        };
+        let path = self
+            .menu_keyboard_cursor
+            .get(&menu_id)
+            .cloned()
+            .unwrap_or_default();
+        if path.len() > 1 {
+            let mut new_path = path;
+            new_path.pop();
+            self.menu_keyboard_cursor.insert(menu_id, new_path);
+            self.invalidate_computed_scene();
+            return true;
+        }
+        self.advance_menubar_active(dir)
     }
 
     /// 在 MenuBar 内左右切换：找当前打开 menu 的 menubar_group + menubar_index，
@@ -165,13 +309,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
-    /// 字母 type-ahead：扫顶层菜单的 items，找到第一个 label 以 `letter`
-    /// 开头（不区分大小写、跳过 separator/disabled）的项，把 cursor 移过去。
-    /// 命中返回 true，未命中返回 false（来键照常走原有路径）。
+    /// 字母 type-ahead：在当前层 items 里找首字母匹配项，把 cursor 移过去。
+    /// 命中返回 true，未命中返回 false。
     pub(super) fn type_ahead_menu_cursor(&mut self, letter: char) -> bool {
         let Some(menu_id) = self.topmost_open_menu_id() else {
             return false;
         };
+        let path = self
+            .menu_keyboard_cursor
+            .get(&menu_id)
+            .cloned()
+            .unwrap_or_default();
+        let parent_path: Vec<usize> = if path.is_empty() {
+            Vec::new()
+        } else {
+            path[..path.len() - 1].to_vec()
+        };
+        // 在父级 items 列表里找匹配。
         let Some(cached) = self.cached_scene.as_ref() else {
             return false;
         };
@@ -184,10 +338,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(menu) = resolved.menu.as_ref() else {
             return false;
         };
+        let mut items: &[MenuItemState<VM>] = &menu.items;
+        for idx in &parent_path {
+            let Some(parent) = items.get(*idx) else {
+                return false;
+            };
+            items = &parent.submenu;
+        }
         let target = letter.to_ascii_lowercase();
-        let current_cursor = self.menu_keyboard_cursor.get(&menu_id).copied();
-        let candidates: Vec<usize> = menu
-            .items
+        let candidates: Vec<usize> = items
             .iter()
             .enumerate()
             .filter_map(|(idx, item)| {
@@ -195,7 +354,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     return None;
                 }
                 match item.kind {
-                    crate::ui::widget::MenuItemKind::Separator => None,
+                    MenuItemKind::Separator => None,
                     _ => {
                         let label = item.label.as_ref()?.resolve();
                         let first = label
@@ -210,8 +369,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if candidates.is_empty() {
             return false;
         }
-        // 若有当前 cursor，跳到 cursor 之后的下一个；否则跳到第一个。
-        let next = match current_cursor {
+        let current_last = path.last().copied();
+        let next = match current_last {
             Some(cur) => candidates
                 .iter()
                 .copied()
@@ -220,30 +379,49 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .unwrap(),
             None => candidates[0],
         };
-        self.menu_keyboard_cursor.insert(menu_id, next);
+        let mut new_path = parent_path;
+        new_path.push(next);
+        self.menu_keyboard_cursor.insert(menu_id, new_path);
         self.invalidate_computed_scene();
         true
     }
 
-    /// 触发 cursor 项的 on_select + on_open_change(false)。
+    /// 触发 cursor 路径上叶子项的 on_select + on_open_change(false)。
     /// 返回是否处理了（用来吞键）。
     pub(super) fn activate_menu_keyboard_cursor(&mut self) -> bool {
         let Some(menu_id) = self.topmost_open_menu_id() else {
             return false;
         };
-        let items = self.menu_keyboard_items(menu_id);
-        let cursor_idx = self.menu_keyboard_cursor.get(&menu_id).copied();
-        let chosen = match cursor_idx {
-            Some(opt_idx) => items.into_iter().find(|item| item.option_index == opt_idx),
-            None => items.into_iter().next(),
-        };
-        let Some(item) = chosen else {
+        let path = self
+            .menu_keyboard_cursor
+            .get(&menu_id)
+            .cloned()
+            .unwrap_or_default();
+        if path.is_empty() {
+            return true;
+        }
+        let Some(snapshot) = self.menu_item_at_path(menu_id, &path) else {
             return true;
         };
-        if let Some(command) = item.on_select {
+        if snapshot.disabled {
+            return true;
+        }
+        // 在 Submenu 项上回车=进入 submenu，等同 Right。
+        if matches!(snapshot.kind, MenuItemKind::Submenu) && snapshot.has_submenu {
+            return self.enter_submenu_or_advance_menubar(1);
+        }
+        if let Some(command) = snapshot.on_select {
             self.execute_command(&command);
         }
-        if let Some(close) = item.on_open_change {
+        // on_open_change 在 menu descriptor 上，不在 item 上；从顶层 menu 取并触发关闭。
+        let close_cmd = self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .and_then(|layout| layout.resolved_widget(menu_id))
+            .and_then(|el| el.menu.as_ref())
+            .and_then(|m| m.on_open_change.clone());
+        if let Some(close) = close_cmd {
             self.execute_value_command(&close, false);
         }
         self.menu_keyboard_cursor.remove(&menu_id);
@@ -253,6 +431,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     /// 在构造 WidgetStateMap 时调用：把当前每个 menu 的 cursor 项标 hovered=true，
     /// 这样 collect 阶段会用 item_background 的 hover 颜色渲染。
+    /// 路径每一层都标 hovered=true，保证嵌套 submenu 自动展开。
     pub(super) fn apply_menu_keyboard_cursor_to_states(&self, states: &mut WidgetStateMap) {
         let open_menus: HashMap<WidgetId, ()> = if let Some(cached) = self.cached_scene.as_ref() {
             cached
@@ -265,13 +444,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         } else {
             HashMap::new()
         };
-        for (menu_id, cursor_opt_index) in &self.menu_keyboard_cursor {
+        for (menu_id, path) in &self.menu_keyboard_cursor {
             if !open_menus.contains_key(menu_id) {
                 continue;
             }
-            let mut state = states.get_select_option(*menu_id, *cursor_opt_index);
-            state.hovered = true;
-            states.set_select_option(*menu_id, *cursor_opt_index, state);
+            // 路径每一层都标 hovered=true，让 submenu 自动展开。最末层是真正的 cursor。
+            for cursor_opt_index in path {
+                let mut state = states.get_select_option(*menu_id, *cursor_opt_index);
+                state.hovered = true;
+                states.set_select_option(*menu_id, *cursor_opt_index, state);
+            }
         }
     }
 
@@ -306,13 +488,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if matched_commands.is_empty() {
             return false;
         }
-        // 同一 chord 同时绑定多处时按 widget 树顺序全部执行（典型场景下只会一个）。
         for command in &matched_commands {
             self.execute_command(command);
         }
         self.invalidate_computed_scene();
         true
     }
+}
+
+/// menu_item_at_path 返回的简易快照（避免暴露 MenuItemState 的具体生命周期）。
+struct MenuItemSnapshot<VM> {
+    kind: MenuItemKind,
+    disabled: bool,
+    has_submenu: bool,
+    on_select: Option<crate::foundation::view_model::Command<VM>>,
+    #[allow(dead_code)]
+    label: Option<String>,
 }
 
 fn collect_shortcut_matches<VM>(

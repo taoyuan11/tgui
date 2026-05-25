@@ -263,10 +263,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.advance_menu_keyboard_cursor(1)
             }
             PhysicalKey::Code(KeyCode::ArrowLeft) if self.topmost_open_menu_id().is_some() => {
-                self.advance_menubar_active(-1)
+                self.leave_submenu_or_advance_menubar(-1)
             }
             PhysicalKey::Code(KeyCode::ArrowRight) if self.topmost_open_menu_id().is_some() => {
-                self.advance_menubar_active(1)
+                self.enter_submenu_or_advance_menubar(1)
             }
             PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
                 if self.topmost_open_menu_id().is_some() =>

@@ -377,10 +377,11 @@ pub struct BoundRuntimeHandler<VM> {
     /// 由 `next_deadline` 汇入 winit ControlFlow，到点后 `drive_animations` 触发 invalidate。
     next_tooltip_wakeup_deadline: Option<Instant>,
     tooltip_state: TooltipState,
-    /// 每个打开的 Menu overlay 的键盘 cursor（值=item 的 option_index）。
-    /// Up/Down 在 `runtime/menu.rs::advance_menu_keyboard_cursor` 维护；
-    /// 菜单关闭时由 `clear_menu_keyboard_cursor` 清除。
-    menu_keyboard_cursor: HashMap<WidgetId, usize>,
+    /// 每个打开的 Menu overlay 的键盘 cursor 路径（每层一个 option_index）。
+    /// 长度=1 表示 cursor 在最外层；>1 表示已进入嵌套 submenu。
+    /// Up/Down 调整最末元素；Right 把当前 cursor（必须是 Submenu 项）的首项 push；
+    /// Left 弹栈直到深度=1，再交给 MenuBar Left/Right。
+    menu_keyboard_cursor: HashMap<WidgetId, Vec<usize>>,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
     active_touch_scroll: Option<TouchScrollDrag>,
