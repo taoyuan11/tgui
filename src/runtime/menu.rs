@@ -16,8 +16,9 @@
 use std::collections::HashMap;
 
 use crate::foundation::view_model::ValueCommand;
+use crate::platform::keyboard::{Key, KeyCode, ModifiersState};
 use crate::runtime::overlay::OverlayLayer;
-use crate::ui::widget::{HitInteraction, Rect, WidgetId, WidgetStateMap};
+use crate::ui::widget::{HitInteraction, KeyChord, MenuItemState, Rect, WidgetId, WidgetStateMap};
 
 use super::BoundRuntimeHandler;
 
@@ -155,4 +156,70 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             states.set_select_option(*menu_id, *cursor_opt_index, state);
         }
     }
+
+    /// 全局快捷键派发：扫描 cached resolved 树里所有挂了 menu / context_menu 的
+    /// element，比对每个 MenuItem 的 `shortcut` chord。命中即执行 on_select。
+    /// 返回是否消费了该按键。
+    pub(super) fn dispatch_global_menu_shortcut(
+        &mut self,
+        mods: ModifiersState,
+        key: &Key,
+        code: KeyCode,
+    ) -> bool {
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
+        };
+        let Some(layout) = cached.layout.as_ref() else {
+            return false;
+        };
+        let ids: Vec<WidgetId> = layout.all_widget_ids().collect();
+        let mut matched_commands: Vec<crate::foundation::view_model::Command<VM>> = Vec::new();
+        for id in ids {
+            let Some(resolved) = layout.resolved_widget(id) else {
+                continue;
+            };
+            if let Some(menu) = resolved.menu.as_ref() {
+                collect_shortcut_matches(&menu.items, mods, key, code, &mut matched_commands);
+            }
+            if let Some(ctx_menu) = resolved.context_menu.as_ref() {
+                collect_shortcut_matches(&ctx_menu.items, mods, key, code, &mut matched_commands);
+            }
+        }
+        if matched_commands.is_empty() {
+            return false;
+        }
+        // 同一 chord 同时绑定多处时按 widget 树顺序全部执行（典型场景下只会一个）。
+        for command in &matched_commands {
+            self.execute_command(command);
+        }
+        self.invalidate_computed_scene();
+        true
+    }
 }
+
+fn collect_shortcut_matches<VM>(
+    items: &[MenuItemState<VM>],
+    mods: ModifiersState,
+    key: &Key,
+    code: KeyCode,
+    out: &mut Vec<crate::foundation::view_model::Command<VM>>,
+) where
+    VM: 'static,
+{
+    for item in items {
+        if item.disabled.resolve() {
+            continue;
+        }
+        if let (Some(chord), Some(command)) = (item.shortcut.as_ref(), item.on_select.as_ref()) {
+            if chord.matches(mods, key, code) {
+                out.push(command.clone());
+            }
+        }
+        if !item.submenu.is_empty() {
+            collect_shortcut_matches(&item.submenu, mods, key, code, out);
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn _keychord_marker(_c: &KeyChord) {}

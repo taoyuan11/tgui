@@ -3,7 +3,7 @@ use super::*;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use crate::ui::widget::{Button, Menu, MenuItem};
+use crate::ui::widget::{Button, KeyChord, Menu, MenuItem};
 
 #[test]
 fn arrow_keys_advance_menu_cursor_and_enter_dispatches_select() {
@@ -66,4 +66,38 @@ fn keyboard_does_not_interfere_when_menu_closed() {
     // 这里只验证不 panic 并且返回不一定为 true；即菜单导航没被错误激活。
     let _ =
         handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown)));
+}
+
+#[test]
+fn global_shortcut_dispatches_on_select_even_when_menu_closed() {
+    use crate::platform::keyboard::ModifiersState;
+
+    let invalidation = InvalidationSignal::new();
+    let counter = Arc::new(Mutex::new(0_u32));
+    let counter_for_cmd = counter.clone();
+    let tree = WidgetTree::new(
+        Menu::new(Button::new("File").size(dp(80.0), dp(28.0)))
+            .items(vec![MenuItem::new("New")
+                .shortcut(KeyChord::new(KeyCode::KeyN).ctrl())
+                .on_select(crate::foundation::view_model::Command::new(
+                    move |_: &mut TestVm| {
+                        *counter_for_cmd.lock().unwrap() += 1;
+                    },
+                ))])
+            .open(false),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.modifiers = ModifiersState::CONTROL;
+    let viewport = handler.viewport_rect();
+    let _ = handler.handle_hover(viewport);
+    handler.invalidate_computed_scene();
+    let _ = handler.computed_scene();
+
+    let consumed =
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::KeyN)));
+    assert!(
+        consumed,
+        "Ctrl+N should be consumed by global menu shortcut"
+    );
+    assert_eq!(*counter.lock().unwrap(), 1, "on_select should fire once");
 }

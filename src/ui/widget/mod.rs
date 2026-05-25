@@ -83,6 +83,7 @@ pub use input::Input;
 pub use menu::{
     ChordKey, ContextMenu, KeyChord, Menu, MenuBar, MenuBarEntry, MenuIcon, MenuItem, MenuItemKind,
 };
+pub(crate) use menu::{ContextMenuDescriptor, MenuDescriptor, MenuItemState};
 pub use overlay::{
     Alignment as OverlayAlignment, Anchor as OverlayAnchor, AnchorKey as OverlayAnchorKey,
     AnchorSource as OverlayAnchorSource, FlipPolicy as OverlayFlipPolicy, OverlayId, OverlayLayer,

@@ -58,6 +58,11 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         Some(self.resolved_at_path(path))
     }
 
+    /// 所有 widget id 的迭代器，用于全局扫描（例如全局快捷键派发）。
+    pub(crate) fn all_widget_ids(&self) -> impl Iterator<Item = WidgetId> + '_ {
+        self.paths.keys().copied()
+    }
+
     pub(crate) fn can_patch_layout_dependency_as_scene(&self, widget_id: WidgetId) -> bool {
         let Some(node) = self.resolved_widget(widget_id) else {
             return false;

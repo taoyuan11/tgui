@@ -244,6 +244,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
+        // 全局菜单快捷键派发：在所有其它键盘处理之前查 cached scene 里挂的 menu /
+        // context_menu 上声明的 KeyChord。命中即执行 on_select 并吞键。
+        if let PhysicalKey::Code(code) = event.physical_key {
+            if self.dispatch_global_menu_shortcut(self.modifiers, &event.logical_key, code) {
+                return true;
+            }
+        }
+
         let handled = match event.physical_key {
             PhysicalKey::Code(KeyCode::Escape) => {
                 self.consume_topmost_overlay_close_handler_escape()

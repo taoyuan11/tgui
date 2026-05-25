@@ -67,8 +67,11 @@
   - ✅ Menu 下拉浮层 collect 渲染：label / separator / disabled / checked ✓ / 快捷键提示文本（右对齐）/ submenu ▸ 箭头 / 点击触发 on_select / 外部点击 / Esc 关闭 / focus trap / return_focus_to；
   - ✅ ContextMenu 自动接 `GestureRecognizer::on_long_press`（鼠标右键 + 触屏长按）；
   - ✅ MenuBar 以 `Flex<Button+Menu>` 形式落地，共享 `MenuBarGroupId`；
-  - ✅ `menu_tests` 模块覆盖：descriptor 落位、open=false 不渲染、open=true 渲染 label + shortcut hint、Checkable 仅勾选时画 ✓、Submenu 画 ▸、ContextMenu 自动挂长按、MenuBar 落成 Flex；
-  - ⏳ 待补：方向键导航（runtime/menu.rs）、字母 type-ahead、子菜单嵌套实际 emit、SVG 图标渲染、全局 `KeyChord` 派发；
+  - ✅ runtime 键盘导航：菜单打开时 Up/Down 在 items 间循环跳过 separator/disabled、Enter/Space 触发 cursor 项 + 关菜单、Esc 关菜单；cursor 项通过 widget_state hover 通道自动画 hover 背景；
+  - ✅ 全局 `KeyChord` 派发：扫 cached scene 里所有 menu / context_menu / 嵌套 submenu items 的 shortcut chord，命中即执行 on_select 并吞键（无需 widget 打开）；`format_chord` 把 chord 渲染成 "Ctrl+N" 风格的 hint 文本；
+  - ✅ `menu_tests` 覆盖：descriptor 落位、open=false 不渲染、open=true 渲染 label + shortcut hint、Checkable 仅勾选时画 ✓、Submenu 画 ▸、ContextMenu 自动挂长按、MenuBar 落成 Flex；
+  - ✅ `runtime::tests::menu_tests` 覆盖：Down + Enter 触发首项 on_select、菜单关闭时键盘不被错误吞掉、Ctrl+N 即使菜单关闭也派发 shortcut；
+  - ⏳ 待补：Left/Right 在 MenuBar 间切换 active entry、submenu 实际嵌套 emit（hover/方向键展开 child overlay）、SVG 图标渲染、字母 type-ahead；
   - ⏳ ContextMenu 当前 MVP 要求调用方手维护 `State<bool>`（open）+ `State<Point>`（anchor），等 runtime 接管后会改为可选；
   - ⏳ MenuBar 同理目前要求 `State<Option<usize>>`（active_index）。
 
