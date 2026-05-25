@@ -12,6 +12,7 @@ use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::Value;
 use crate::ui::widget::overlay::{Alignment, FlipPolicy, Placement};
+use crate::ui::widget::style::MenuStyle;
 
 use super::types::{KeyChord, MenuBarGroupId, MenuIcon, MenuItem, MenuItemKind};
 
@@ -87,23 +88,6 @@ impl<VM> MenuItemState<VM> {
                 .map(|child| child.scope(selector.clone()))
                 .collect(),
         }
-    }
-}
-
-/// Menu 的样式。当前先复用 `WidgetMenuStyle`（在 `style/controls.rs` 落地）；
-/// 这里只持有 `Option<...>` 让默认值由主题解析。
-///
-/// step 1 暂时用空占位 token——真正的 `WidgetMenuStyle` 在 step 2 写。
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct MenuStyle {
-    /// 占位字段，避免空 struct 触发 Rust pattern 推断问题。
-    pub(crate) _placeholder: (),
-}
-
-impl MenuStyle {
-    /// 主题默认值占位实现。step 2 会扩展为真实的 token 组合。
-    pub(crate) fn default_for(_mode: ResolvedThemeMode) -> Self {
-        Self { _placeholder: () }
     }
 }
 

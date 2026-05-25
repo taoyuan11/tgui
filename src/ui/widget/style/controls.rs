@@ -478,3 +478,152 @@ impl TooltipStyle {
         }
     }
 }
+
+/// Menu / ContextMenu widget 共用的样式定义。
+///
+/// MenuBar 走单独的 [`MenuBarStyle`]——条目水平排布、视觉层级更浅，
+/// 与下拉/上下文菜单的浮层语义不同。
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuStyle {
+    pub surface: WidgetSurfaceStyle,
+    pub background: Value<Color>,
+    pub border: Value<Color>,
+    pub border_width: Value<Dp>,
+    pub radius: Value<Dp>,
+    pub shadow: Shadow,
+    /// 浮层最小宽度（不足时按内容撑开到这个值）。
+    pub min_width: Dp,
+    /// 浮层最大宽度（超过时 label 自动截断）。
+    pub max_width: Dp,
+    /// 浮层内侧 padding（上下左右）。
+    pub padding: Insets,
+    /// 单个菜单项内部 padding。
+    pub item_padding: Insets,
+    pub item_min_height: Dp,
+    pub item_background: Stateful<Value<Color>>,
+    pub item_foreground: Stateful<Value<Color>>,
+    pub item_icon_size: Dp,
+    pub item_icon_gap: Dp,
+    pub shortcut_color: Value<Color>,
+    pub shortcut_gap: Dp,
+    pub checked_indicator_color: Value<Color>,
+    pub submenu_arrow_size: Dp,
+    pub submenu_arrow_color: Stateful<Value<Color>>,
+    pub separator_color: Value<Color>,
+    pub separator_height: Dp,
+    pub separator_inset_x: Dp,
+    pub text_style: TextStyle,
+}
+
+impl MenuStyle {
+    /// 按解析后的主题模式创建默认菜单样式。
+    pub fn default_for(mode: ResolvedThemeMode) -> Self {
+        let palette = palette(mode);
+        Self {
+            surface: WidgetSurfaceStyle::default(),
+            background: Value::Static(palette.surface),
+            border: Value::Static(palette.outline),
+            border_width: Value::Static(dp(1.0)),
+            radius: Value::Static(dp(8.0)),
+            shadow: Shadow {
+                offset_x: dp(0.0),
+                offset_y: dp(8.0),
+                blur: dp(24.0),
+                spread: dp(0.0),
+                color: Color::BLACK.with_alpha_factor(0.18),
+            },
+            min_width: dp(160.0),
+            max_width: dp(360.0),
+            padding: Insets::symmetric(dp(0.0), dp(4.0)),
+            item_padding: Insets::symmetric(dp(12.0), dp(6.0)),
+            item_min_height: dp(32.0),
+            item_background: stateful_colors(
+                Color::TRANSPARENT,
+                palette.surface_high.lighten(surface_hover_lighten()),
+                palette.surface_high.darken(surface_hover_lighten()),
+                Color::TRANSPARENT,
+            ),
+            item_foreground: stateful_single(
+                palette.on_surface,
+                palette.on_surface,
+                palette.on_surface,
+                palette.disabled_content,
+            ),
+            item_icon_size: dp(16.0),
+            item_icon_gap: dp(10.0),
+            shortcut_color: Value::Static(palette.on_surface_muted),
+            shortcut_gap: dp(16.0),
+            checked_indicator_color: Value::Static(palette.primary),
+            submenu_arrow_size: dp(8.0),
+            submenu_arrow_color: stateful_single(
+                palette.on_surface_muted,
+                palette.on_surface,
+                palette.on_surface,
+                palette.disabled_content,
+            ),
+            separator_color: Value::Static(palette.outline_muted),
+            separator_height: dp(1.0),
+            separator_inset_x: dp(8.0),
+            text_style: label_text_style(),
+        }
+    }
+}
+
+/// MenuBar widget 的样式定义。
+///
+/// 条目在水平条上排布。当 MenuBar 上某个 entry 展开下拉时，下拉菜单本体
+/// 走 [`MenuStyle`]——所以 MenuBarStyle 只描述条形外壳和顶级条目本身。
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuBarStyle {
+    pub surface: WidgetSurfaceStyle,
+    pub background: Value<Color>,
+    pub border: Value<Color>,
+    pub border_width: Value<Dp>,
+    pub radius: Value<Dp>,
+    /// 条形整体内 padding。
+    pub padding: Insets,
+    /// 条形整体高度。
+    pub height: Dp,
+    /// 顶级条目左右 padding。
+    pub entry_padding_x: Dp,
+    pub entry_min_width: Dp,
+    pub entry_background: Stateful<Value<Color>>,
+    pub entry_foreground: Stateful<Value<Color>>,
+    /// 条目高亮（active=该 entry 展开了下拉时）的强调色。
+    pub entry_active_background: Value<Color>,
+    pub entry_gap: Dp,
+    pub text_style: TextStyle,
+}
+
+impl MenuBarStyle {
+    /// 按解析后的主题模式创建默认 MenuBar 样式。
+    pub fn default_for(mode: ResolvedThemeMode) -> Self {
+        let palette = palette(mode);
+        Self {
+            surface: WidgetSurfaceStyle::default(),
+            background: Value::Static(palette.surface_low),
+            border: Value::Static(palette.outline_muted),
+            border_width: Value::Static(dp(0.0)),
+            radius: Value::Static(dp(0.0)),
+            padding: Insets::symmetric(dp(4.0), dp(2.0)),
+            height: dp(32.0),
+            entry_padding_x: dp(10.0),
+            entry_min_width: dp(48.0),
+            entry_background: stateful_colors(
+                Color::TRANSPARENT,
+                palette.surface_high.lighten(surface_hover_lighten()),
+                palette.surface_high.darken(surface_hover_lighten()),
+                Color::TRANSPARENT,
+            ),
+            entry_foreground: stateful_single(
+                palette.on_surface,
+                palette.on_surface,
+                palette.on_surface,
+                palette.disabled_content,
+            ),
+            entry_active_background: Value::Static(palette.surface_high),
+            entry_gap: dp(2.0),
+            text_style: label_text_style(),
+        }
+    }
+}

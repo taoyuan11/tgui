@@ -98,8 +98,8 @@ pub use select::{Select, SelectOption};
 pub use slider::Slider;
 pub use style::{
     ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, FocusRingOverride, ImageStyle,
-    InputStyle, RadioStyle, SelectStyle, SliderStyle, SwitchStyle, TextWidgetStyle, TextareaStyle,
-    TooltipStyle, VideoSurfaceStyle, WidgetSurfaceStyle,
+    InputStyle, MenuBarStyle, MenuStyle, RadioStyle, SelectStyle, SliderStyle, SwitchStyle,
+    TextWidgetStyle, TextareaStyle, TooltipStyle, VideoSurfaceStyle, WidgetSurfaceStyle,
 };
 pub use switch::Switch;
 pub use text::{IntoTextContent, Text};

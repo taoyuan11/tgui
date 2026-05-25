@@ -11,6 +11,6 @@
 mod descriptor;
 mod types;
 
-pub(crate) use descriptor::{ContextMenuDescriptor, MenuDescriptor, MenuItemState, MenuStyle};
+pub(crate) use descriptor::{ContextMenuDescriptor, MenuDescriptor, MenuItemState};
 pub(crate) use types::MenuBarGroupId;
 pub use types::{ChordKey, KeyChord, MenuIcon, MenuItem, MenuItemKind};
