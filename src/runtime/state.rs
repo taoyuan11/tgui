@@ -5,6 +5,7 @@ use crate::text::font::{FontWeight, TextLayoutInfo};
 use crate::ui::unit::{Dp, UnitContext};
 #[cfg(feature = "audio")]
 use crate::ui::widget::LifecycleWidgetKind;
+use crate::ui::widget::{ActiveTooltipState, TooltipTrigger};
 use crate::ui::widget::{
     CanvasDragEvent, CanvasItemId, CanvasMouseButton, CanvasMouseEvent, CanvasPointerEvent,
     CanvasWheelEvent, ComputedScene, DoubleTapEvent, EdgeSwipeEvent, GestureEdge, GesturePhase,
@@ -18,7 +19,6 @@ use ropey::Rope;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use crate::ui::widget::{ActiveTooltipState, TooltipTrigger};
 
 pub(super) const SMOOTH_SCROLL_EPSILON: f32 = 0.1;
 pub(super) const SMOOTH_SCROLL_LERP: f32 = 0.28;

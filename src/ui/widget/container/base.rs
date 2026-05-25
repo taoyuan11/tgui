@@ -42,6 +42,8 @@ impl<VM> Container<VM> {
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 tooltip: None,
+                menu: None,
+                context_menu: None,
                 kind: WidgetKind::Container {
                     layout,
                     children: Vec::new(),

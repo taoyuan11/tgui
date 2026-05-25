@@ -10,6 +10,7 @@ mod core;
 mod gesture;
 mod image;
 mod input;
+mod menu;
 mod overlay;
 mod radio;
 mod scroll_view;
@@ -71,8 +72,7 @@ pub(crate) use core::LifecycleWidgetKind;
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub(crate) use core::{
     ActiveTooltipState, CollectedSceneCache, ResolvedSceneLayout, ResolvedWidgetKind,
-    SceneChunkParts, TooltipTrigger,
-    TextInputLayoutOverride, VisualContextSnapshot,
+    SceneChunkParts, TextInputLayoutOverride, TooltipTrigger, VisualContextSnapshot,
 };
 pub use gesture::{
     DoubleTapEvent, EdgeSwipeEvent, GestureEdge, GestureEdgeSet, GesturePhase, GestureRecognizer,
@@ -80,6 +80,7 @@ pub use gesture::{
 };
 pub use image::Image;
 pub use input::Input;
+pub use menu::{ChordKey, KeyChord, MenuIcon, MenuItem, MenuItemKind};
 pub use overlay::{
     Alignment as OverlayAlignment, Anchor as OverlayAnchor, AnchorKey as OverlayAnchorKey,
     AnchorSource as OverlayAnchorSource, FlipPolicy as OverlayFlipPolicy, OverlayId, OverlayLayer,

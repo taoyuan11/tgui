@@ -348,6 +348,8 @@ impl Image {
             media_events: MediaEventHandlers::default(),
             background: self.background.clone(),
             tooltip: None,
+            menu: None,
+            context_menu: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -370,6 +372,8 @@ impl Image {
             media_events: MediaEventHandlers::default(),
             background: self.background.clone(),
             tooltip: None,
+            menu: None,
+            context_menu: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -392,6 +396,8 @@ impl Image {
             media_events,
             background: self.background.clone(),
             tooltip: None,
+            menu: None,
+            context_menu: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -413,6 +419,8 @@ impl<VM> From<Image> for Element<VM> {
             media_events: MediaEventHandlers::default(),
             background: value.background.clone(),
             tooltip: None,
+            menu: None,
+            context_menu: None,
             kind: WidgetKind::Image { image: value },
         }
     }

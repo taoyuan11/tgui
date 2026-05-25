@@ -216,7 +216,10 @@ fn tooltip_shows_on_focus_and_hides_on_escape() {
     tooltip_transition_wait();
     handler.invalidate_computed_scene();
     let shown = handler.computed_scene();
-    assert!(!shown.scene.overlay_texts.is_empty(), "focused tooltip should render");
+    assert!(
+        !shown.scene.overlay_texts.is_empty(),
+        "focused tooltip should render"
+    );
 
     assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape))));
     handler.invalidate_computed_scene();
@@ -228,5 +231,8 @@ fn tooltip_shows_on_focus_and_hides_on_escape() {
     tooltip_transition_wait();
     handler.invalidate_computed_scene();
     let hidden = handler.computed_scene();
-    assert!(hidden.scene.overlay_texts.is_empty(), "escape should hide focused tooltip");
+    assert!(
+        hidden.scene.overlay_texts.is_empty(),
+        "escape should hide focused tooltip"
+    );
 }

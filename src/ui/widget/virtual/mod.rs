@@ -513,6 +513,8 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 tooltip: None,
+                menu: None,
+                context_menu: None,
                 kind: WidgetKind::Virtual {
                     arrangement,
                     item_layout,

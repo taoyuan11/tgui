@@ -214,9 +214,11 @@ impl<VM> Element<VM> {
             visual: self.visual,
             interactions: self.interactions.scope(selector.clone()),
             lifecycle_events: self.lifecycle_events.scope(selector.clone()),
-            media_events: self.media_events.scope(selector),
+            media_events: self.media_events.scope(selector.clone()),
             background: self.background,
             tooltip: self.tooltip,
+            menu: self.menu.map(|menu| menu.scope(selector.clone())),
+            context_menu: self.context_menu.map(|menu| menu.scope(selector)),
             kind,
         }
     }
@@ -245,6 +247,26 @@ impl<VM> Element<VM> {
     /// 各 widget 的 builder 通常也会暴露同名 `.tooltip()` 方法，调用本方法的简写形式。
     pub fn with_tooltip(mut self, tooltip: crate::ui::widget::Tooltip) -> Self {
         self.tooltip = Some(tooltip);
+        self
+    }
+
+    /// 给 Element 挂上 Menu 描述符。trigger widget（通常是 Button）的点击/键盘
+    /// 激活会自动切换 `open` 状态；overlay 在 collect 阶段以 Menu 层渲染。
+    pub(crate) fn with_menu_descriptor(
+        mut self,
+        descriptor: crate::ui::widget::menu::MenuDescriptor<VM>,
+    ) -> Self {
+        self.menu = Some(descriptor);
+        self
+    }
+
+    /// 给 Element 挂上 ContextMenu 描述符。runtime 自动接长按 / 右键事件，弹出
+    /// 锚定到 pointer 位置的 overlay。
+    pub(crate) fn with_context_menu_descriptor(
+        mut self,
+        descriptor: crate::ui::widget::menu::ContextMenuDescriptor<VM>,
+    ) -> Self {
+        self.context_menu = Some(descriptor);
         self
     }
 

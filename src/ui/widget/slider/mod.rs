@@ -199,6 +199,8 @@ impl<VM> Slider<VM> {
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 tooltip: None,
+                menu: None,
+                context_menu: None,
                 kind: WidgetKind::Slider {
                     value: value.into(),
                     min,

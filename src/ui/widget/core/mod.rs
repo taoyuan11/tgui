@@ -85,11 +85,11 @@ mod types;
 use self::element_path::resolve_subtree_from_source_path;
 use self::layout::*;
 use self::render::*;
-use self::scene::{CollectContext, VisualContext};
 pub(crate) use self::scene::{
     ActiveTooltipState, CollectedSceneCache, SceneChunkParts, TextInputLayoutOverride,
     TooltipTrigger, VisualContextSnapshot,
 };
+use self::scene::{CollectContext, VisualContext};
 pub(crate) use self::scene_layout::ResolvedSceneLayout;
 use self::scene_layout::*;
 use self::style::*;

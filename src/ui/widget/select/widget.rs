@@ -395,6 +395,8 @@ where
             media_events: select.media_events,
             background: select.background,
             tooltip: None,
+            menu: None,
+            context_menu: None,
             kind: WidgetKind::Select {
                 selected_label,
                 placeholder: select.placeholder,

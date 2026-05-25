@@ -118,11 +118,11 @@ fn finalize_portal_entry<VM>(
     };
 
     for prim in primitives {
-                match prim {
-                    OverlayPrimitive::Shape(mut shape) => {
-                        shape.rect = translate_rect(shape.rect, origin);
-                        shape.clip_rect = content_clip;
-                        shape.clip_mask = translate_clip_mask(shape.clip_mask, origin);
+        match prim {
+            OverlayPrimitive::Shape(mut shape) => {
+                shape.rect = translate_rect(shape.rect, origin);
+                shape.clip_rect = content_clip;
+                shape.clip_mask = translate_clip_mask(shape.clip_mask, origin);
                 bucket.shapes.push(shape);
                 bucket.commands.push(RenderCommand::Shape(shape));
             }
@@ -137,43 +137,41 @@ fn finalize_portal_entry<VM>(
                         Point::new(quad[2].x + origin.x, quad[2].y + origin.y),
                         Point::new(quad[3].x + origin.x, quad[3].y + origin.y),
                     ]);
-                        }
-                        bucket.texts.push(text.clone());
-                        bucket.commands.push(RenderCommand::Text(text));
-                    }
-                    OverlayPrimitive::Mesh(mut mesh) => {
-                        let triangles: Vec<_> = mesh
-                            .triangles
-                            .iter()
-                            .copied()
-                            .map(|triangle| {
-                                triangle.map(|point| {
-                                    Point::new(point.x + origin.x, point.y + origin.y)
-                                })
-                            })
-                            .collect();
-                        let vertices: Vec<_> = mesh
-                            .vertices
-                            .iter()
-                            .copied()
-                            .map(|mut vertex| {
-                                vertex.position[0] += origin.x.get();
-                                vertex.position[1] += origin.y.get();
-                                vertex
-                            })
-                            .collect();
-                        mesh.triangles = std::sync::Arc::from(triangles);
-                        mesh.vertices = std::sync::Arc::from(vertices);
-                        mesh.clip_rect = content_clip;
-                        mesh.clip_mask = translate_clip_mask(mesh.clip_mask, origin);
-                        bucket.meshes.push(mesh.clone());
-                        bucket.commands.push(RenderCommand::Mesh(mesh));
-                    }
-                    OverlayPrimitive::BackdropBlur(primitive) => {
-                        let primitive = translate_backdrop(primitive, origin);
-                        bucket.backdrop_blurs.push(primitive);
-                        bucket.commands.push(RenderCommand::BackdropBlur(primitive));
-                    }
+                }
+                bucket.texts.push(text.clone());
+                bucket.commands.push(RenderCommand::Text(text));
+            }
+            OverlayPrimitive::Mesh(mut mesh) => {
+                let triangles: Vec<_> = mesh
+                    .triangles
+                    .iter()
+                    .copied()
+                    .map(|triangle| {
+                        triangle.map(|point| Point::new(point.x + origin.x, point.y + origin.y))
+                    })
+                    .collect();
+                let vertices: Vec<_> = mesh
+                    .vertices
+                    .iter()
+                    .copied()
+                    .map(|mut vertex| {
+                        vertex.position[0] += origin.x.get();
+                        vertex.position[1] += origin.y.get();
+                        vertex
+                    })
+                    .collect();
+                mesh.triangles = std::sync::Arc::from(triangles);
+                mesh.vertices = std::sync::Arc::from(vertices);
+                mesh.clip_rect = content_clip;
+                mesh.clip_mask = translate_clip_mask(mesh.clip_mask, origin);
+                bucket.meshes.push(mesh.clone());
+                bucket.commands.push(RenderCommand::Mesh(mesh));
+            }
+            OverlayPrimitive::BackdropBlur(primitive) => {
+                let primitive = translate_backdrop(primitive, origin);
+                bucket.backdrop_blurs.push(primitive);
+                bucket.commands.push(RenderCommand::BackdropBlur(primitive));
+            }
             OverlayPrimitive::Command(command) => {
                 bucket.commands.push(command);
             }

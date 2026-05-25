@@ -337,6 +337,8 @@ impl Text {
             media_events: MediaEventHandlers::default(),
             background,
             tooltip: None,
+            menu: None,
+            context_menu: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -362,6 +364,8 @@ impl Text {
             media_events: MediaEventHandlers::default(),
             background,
             tooltip: None,
+            menu: None,
+            context_menu: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -386,6 +390,8 @@ impl<VM> From<Text> for Element<VM> {
             media_events: MediaEventHandlers::default(),
             background,
             tooltip: None,
+            menu: None,
+            context_menu: None,
             kind: WidgetKind::Text { text: value },
         }
     }

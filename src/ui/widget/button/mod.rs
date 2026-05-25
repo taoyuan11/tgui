@@ -195,6 +195,8 @@ impl<VM> Button<VM> {
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 tooltip: None,
+                menu: None,
+                context_menu: None,
                 kind: WidgetKind::Button {
                     label: label.into(),
                     disabled: Value::Static(false),

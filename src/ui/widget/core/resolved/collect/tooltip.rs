@@ -14,8 +14,8 @@ use crate::ui::widget::common::{
     ComputedScene, MeshPrimitive, MeshVertex, Rect, RenderPrimitive, TextPrimitive,
 };
 use crate::ui::widget::overlay::{
-    collect::emit_overlay, solve_placement, Anchor, AnchorKey, Overlay, OverlayContent,
-    OverlayId, OverlayLayer, OverlayPrimitive,
+    collect::emit_overlay, solve_placement, Anchor, AnchorKey, Overlay, OverlayContent, OverlayId,
+    OverlayLayer, OverlayPrimitive,
 };
 use std::sync::Arc;
 
@@ -44,7 +44,8 @@ impl<VM> ResolvedElement<VM> {
             .unwrap_or(false);
 
         let mut target_visible = is_active_tooltip;
-        if let Some(active_tooltip) = active_tooltip.filter(|tooltip_state| tooltip_state.widget_id == self.id)
+        if let Some(active_tooltip) =
+            active_tooltip.filter(|tooltip_state| tooltip_state.widget_id == self.id)
         {
             if active_tooltip.trigger == TooltipTrigger::Hover {
                 if let Some(started_at) = context.tooltip_hover_started_at.get(&self.id).copied() {
@@ -217,9 +218,13 @@ impl<VM> ResolvedElement<VM> {
         .viewport_padding(insets_max(style.padding))
         .layer(OverlayLayer::Tooltip);
 
-        if let Some(active_tooltip) = active_tooltip.filter(|tooltip_state| tooltip_state.widget_id == self.id)
+        if let Some(active_tooltip) =
+            active_tooltip.filter(|tooltip_state| tooltip_state.widget_id == self.id)
         {
-            if matches!(active_tooltip.trigger, TooltipTrigger::Focus | TooltipTrigger::LongPress) {
+            if matches!(
+                active_tooltip.trigger,
+                TooltipTrigger::Focus | TooltipTrigger::LongPress
+            ) {
                 overlay = overlay
                     .close_on_escape(true)
                     .close_on_outside_click(true)
@@ -245,18 +250,16 @@ impl<VM> ResolvedElement<VM> {
                 }),
             );
         }
-        if let Some(pointer_mesh) =
-            tooltip_pointer_mesh(
-                background,
-                &style,
-                &solved,
-                bubble_origin,
-                content_w,
-                content_h,
-                overlay_w,
-                overlay_h,
-            )
-        {
+        if let Some(pointer_mesh) = tooltip_pointer_mesh(
+            background,
+            &style,
+            &solved,
+            bubble_origin,
+            content_w,
+            content_h,
+            overlay_w,
+            overlay_h,
+        ) {
             primitives.push(OverlayPrimitive::Mesh(pointer_mesh));
         }
         let _ = emit_overlay(
@@ -315,7 +318,13 @@ fn tooltip_pointer_mesh(
     let inset = style.pointer_inset.get().max(0.0);
     let (tip, base_a, base_b) = match side {
         OverlaySide::Top => {
-            let center_x = pointer_anchor_x(solved, bubble_origin.0.get(), content_w.get(), inset, base_span);
+            let center_x = pointer_anchor_x(
+                solved,
+                bubble_origin.0.get(),
+                content_w.get(),
+                inset,
+                base_span,
+            );
             (
                 [center_x, overlay_h.get()],
                 [center_x - base_span / 2.0, overlay_h.get() - pointer.get()],
@@ -323,7 +332,13 @@ fn tooltip_pointer_mesh(
             )
         }
         OverlaySide::Bottom => {
-            let center_x = pointer_anchor_x(solved, bubble_origin.0.get(), content_w.get(), inset, base_span);
+            let center_x = pointer_anchor_x(
+                solved,
+                bubble_origin.0.get(),
+                content_w.get(),
+                inset,
+                base_span,
+            );
             (
                 [center_x, 0.0],
                 [center_x - base_span / 2.0, pointer.get()],
@@ -331,7 +346,13 @@ fn tooltip_pointer_mesh(
             )
         }
         OverlaySide::Left => {
-            let center_y = pointer_anchor_y(solved, bubble_origin.1.get(), content_h.get(), inset, base_span);
+            let center_y = pointer_anchor_y(
+                solved,
+                bubble_origin.1.get(),
+                content_h.get(),
+                inset,
+                base_span,
+            );
             (
                 [overlay_w.get(), center_y],
                 [overlay_w.get() - pointer.get(), center_y - base_span / 2.0],
@@ -339,7 +360,13 @@ fn tooltip_pointer_mesh(
             )
         }
         OverlaySide::Right => {
-            let center_y = pointer_anchor_y(solved, bubble_origin.1.get(), content_h.get(), inset, base_span);
+            let center_y = pointer_anchor_y(
+                solved,
+                bubble_origin.1.get(),
+                content_h.get(),
+                inset,
+                base_span,
+            );
             (
                 [0.0, center_y],
                 [pointer.get(), center_y - base_span / 2.0],
@@ -386,7 +413,8 @@ fn pointer_anchor_x(
     inset: f32,
     base_span: f32,
 ) -> f32 {
-    let anchor_center = (solved.anchor_rect.x - solved.rect.x).get() + solved.anchor_rect.width.get() * 0.5;
+    let anchor_center =
+        (solved.anchor_rect.x - solved.rect.x).get() + solved.anchor_rect.width.get() * 0.5;
     clamp_pointer_anchor(anchor_center, bubble_x, bubble_w, inset, base_span)
 }
 
@@ -397,7 +425,8 @@ fn pointer_anchor_y(
     inset: f32,
     base_span: f32,
 ) -> f32 {
-    let anchor_center = (solved.anchor_rect.y - solved.rect.y).get() + solved.anchor_rect.height.get() * 0.5;
+    let anchor_center =
+        (solved.anchor_rect.y - solved.rect.y).get() + solved.anchor_rect.height.get() * 0.5;
     clamp_pointer_anchor(anchor_center, bubble_y, bubble_h, inset, base_span)
 }
 

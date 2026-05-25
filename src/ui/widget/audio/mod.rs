@@ -120,6 +120,8 @@ impl Audio {
             media_events: MediaEventHandlers::default(),
             background: None,
             tooltip: None,
+            menu: None,
+            context_menu: None,
             kind: WidgetKind::Audio { audio: self },
         }
     }
@@ -139,6 +141,8 @@ impl Audio {
             media_events,
             background: None,
             tooltip: None,
+            menu: None,
+            context_menu: None,
             kind: WidgetKind::Audio { audio: self },
         }
     }
@@ -157,6 +161,8 @@ impl<VM> From<Audio> for Element<VM> {
             media_events: MediaEventHandlers::default(),
             background: None,
             tooltip: None,
+            menu: None,
+            context_menu: None,
             kind: WidgetKind::Audio { audio: value },
         }
     }

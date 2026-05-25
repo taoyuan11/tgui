@@ -156,6 +156,8 @@ impl<VM> Canvas<VM> {
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 tooltip: None,
+                menu: None,
+                context_menu: None,
                 kind: WidgetKind::Canvas {
                     scene: scene.into(),
                     item_interactions: CanvasItemInteractionHandlers::default(),

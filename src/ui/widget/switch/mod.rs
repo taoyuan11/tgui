@@ -196,6 +196,8 @@ impl<VM> Switch<VM> {
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 tooltip: None,
+                menu: None,
+                context_menu: None,
                 kind: WidgetKind::Switch {
                     checked: checked.into(),
                     on_change: None,

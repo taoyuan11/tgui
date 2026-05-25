@@ -198,6 +198,8 @@ impl<VM> Radio<VM> {
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 tooltip: None,
+                menu: None,
+                context_menu: None,
                 kind: WidgetKind::Radio {
                     checked: checked.into(),
                     label: None,

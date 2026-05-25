@@ -129,10 +129,7 @@ fn focused_select_opens_upward_and_hits_enabled_and_disabled_options() {
             .clip_rect
             .and_then(|clip| hit.rect.intersect(clip))
             .unwrap_or(hit.rect);
-        Point::new(
-            visible.x + dp(8.0),
-            visible.y + visible.height * 0.5,
-        )
+        Point::new(visible.x + dp(8.0), visible.y + visible.height * 0.5)
     };
     let computed = tree.compute_scene_with_widget_state(
         &font_manager,
@@ -155,9 +152,9 @@ fn focused_select_opens_upward_and_hits_enabled_and_disabled_options() {
         .overlay_hit_regions
         .iter()
         .find_map(|hit| match &hit.interaction {
-            super::HitInteraction::SelectOption { option_index: 0, .. } => {
-                Some(overlay_hit_point(hit))
-            }
+            super::HitInteraction::SelectOption {
+                option_index: 0, ..
+            } => Some(overlay_hit_point(hit)),
             _ => None,
         })
         .expect("enabled option hit region should be present");

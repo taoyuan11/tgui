@@ -253,15 +253,16 @@ pub mod prelude {
     pub use crate::widgets::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
-        ContainerStyle, CursorStyle, DoubleTapEvent, EdgeSwipeEvent, Element, FocusRingOverride,
-        FocusScopeOptions, GestureEdge, GestureEdgeSet, GesturePhase, GestureRecognizer,
-        GestureSource, Image, ImageStyle, Input, InputStyle, IntoTextContent, ItemLayout,
-        ItemSource, LongPressEvent, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
-        OverlaySide, PinchGestureEvent, Radio, RadioGroup, RadioOption, RadioStyle, ScrollView,
-        Select, SelectOption, SelectStyle, Slider, SliderStyle, SwipeAxis, SwipeDirection,
-        SwipeGestureEvent, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
-        Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection,
-        VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
+        ChordKey, ContainerStyle, CursorStyle, DoubleTapEvent, EdgeSwipeEvent, Element,
+        FocusRingOverride, FocusScopeOptions, GestureEdge, GestureEdgeSet, GesturePhase,
+        GestureRecognizer, GestureSource, Image, ImageStyle, Input, InputStyle, IntoTextContent,
+        ItemLayout, ItemSource, KeyChord, LongPressEvent, MenuIcon, MenuItem, MenuItemKind,
+        OverlayAlignment, OverlayFlipPolicy, OverlayPlacement, OverlaySide, PinchGestureEvent,
+        Radio, RadioGroup, RadioOption, RadioStyle, ScrollView, Select, SelectOption, SelectStyle,
+        Slider, SliderStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle,
+        Text, TextWidgetStyle, Textarea, TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
+        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
+        WidgetSurfaceStyle, WidgetTree,
     };
 }
 
@@ -290,15 +291,16 @@ pub mod widgets {
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
-        ContainerStyle, CursorStyle, DoubleTapEvent, EdgeSwipeEvent, Element, FocusRingOverride,
-        FocusScopeOptions, GestureEdge, GestureEdgeSet, GesturePhase, GestureRecognizer,
-        GestureSource, Image, ImageStyle, Input, InputStyle, IntoTextContent, ItemLayout,
-        ItemSource, LongPressEvent, OverlayAlignment, OverlayFlipPolicy, OverlayPlacement,
-        OverlaySide, PinchGestureEvent, Radio, RadioGroup, RadioOption, RadioStyle, ScrollView,
-        Select, SelectOption, SelectStyle, Slider, SliderStyle, SwipeAxis, SwipeDirection,
-        SwipeGestureEvent, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
-        Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection,
-        VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
+        ChordKey, ContainerStyle, CursorStyle, DoubleTapEvent, EdgeSwipeEvent, Element,
+        FocusRingOverride, FocusScopeOptions, GestureEdge, GestureEdgeSet, GesturePhase,
+        GestureRecognizer, GestureSource, Image, ImageStyle, Input, InputStyle, IntoTextContent,
+        ItemLayout, ItemSource, KeyChord, LongPressEvent, MenuIcon, MenuItem, MenuItemKind,
+        OverlayAlignment, OverlayFlipPolicy, OverlayPlacement, OverlaySide, PinchGestureEvent,
+        Radio, RadioGroup, RadioOption, RadioStyle, ScrollView, Select, SelectOption, SelectStyle,
+        Slider, SliderStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle,
+        Text, TextWidgetStyle, Textarea, TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
+        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
+        WidgetSurfaceStyle, WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

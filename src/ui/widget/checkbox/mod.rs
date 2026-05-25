@@ -196,6 +196,8 @@ impl<VM> Checkbox<VM> {
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 tooltip: None,
+                menu: None,
+                context_menu: None,
                 kind: WidgetKind::Checkbox {
                     checked: checked.into(),
                     label: None,
