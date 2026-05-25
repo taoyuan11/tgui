@@ -20,6 +20,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .active_gesture
             .as_ref()
             .and_then(|gesture| gesture.long_press_deadline);
+        let tooltip_release_deadline = self.tooltip_state.long_press_release_deadline;
         let caret_deadline = self.next_caret_blink_deadline(now);
         let key_repeat_deadline = self.next_key_repeat_deadline();
         let smooth_scroll_deadline =
@@ -30,6 +31,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             controller_deadline,
             click_deadline,
             gesture_deadline,
+            tooltip_release_deadline,
             caret_deadline,
             key_repeat_deadline,
             smooth_scroll_deadline,

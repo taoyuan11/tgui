@@ -18,6 +18,7 @@ use ropey::Rope;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
+use crate::ui::widget::{ActiveTooltipState, TooltipTrigger};
 
 pub(super) const SMOOTH_SCROLL_EPSILON: f32 = 0.1;
 pub(super) const SMOOTH_SCROLL_LERP: f32 = 0.28;
@@ -481,6 +482,56 @@ pub(super) struct HoveredWidget<VM> {
     pub(super) on_mouse_enter: Option<HoverTransitionHandler<VM>>,
     pub(super) on_mouse_leave: Option<HoverTransitionHandler<VM>>,
     pub(super) on_mouse_move: Option<HoverMoveHandler<VM>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TooltipDismissReason {
+    Escape,
+    OutsideClick,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TooltipState {
+    pub(super) active: Option<ActiveTooltipState>,
+    pub(super) hover_suppressed: Option<WidgetId>,
+    pub(super) focus_suppressed: Option<WidgetId>,
+    pub(super) long_press_suppressed: Option<WidgetId>,
+    pub(super) long_press_candidate: Option<WidgetId>,
+    pub(super) long_press_release_deadline: Option<Instant>,
+}
+
+impl TooltipState {
+    pub(super) fn clear_active(&mut self) {
+        self.active = None;
+        self.long_press_release_deadline = None;
+    }
+
+    pub(super) fn suppress(&mut self, tooltip: ActiveTooltipState) {
+        match tooltip.trigger {
+            TooltipTrigger::Hover => self.hover_suppressed = Some(tooltip.widget_id),
+            TooltipTrigger::Focus => self.focus_suppressed = Some(tooltip.widget_id),
+            TooltipTrigger::LongPress => self.long_press_suppressed = Some(tooltip.widget_id),
+        }
+    }
+
+    pub(super) fn clear_suppression_for_trigger(
+        &mut self,
+        trigger: TooltipTrigger,
+        widget_id: WidgetId,
+    ) {
+        match trigger {
+            TooltipTrigger::Hover if self.hover_suppressed == Some(widget_id) => {
+                self.hover_suppressed = None;
+            }
+            TooltipTrigger::Focus if self.focus_suppressed == Some(widget_id) => {
+                self.focus_suppressed = None;
+            }
+            TooltipTrigger::LongPress if self.long_press_suppressed == Some(widget_id) => {
+                self.long_press_suppressed = None;
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

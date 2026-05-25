@@ -100,6 +100,7 @@ fn focused_select_opens_upward_and_hits_enabled_and_disabled_options() {
     .into();
     let tree = WidgetTree::new(Stack::new().child(select));
     let widget_states = WidgetStateMap::default();
+    let viewport = Rect::new(0.0, 0.0, 220.0, 90.0);
 
     let rendered = tree.render_output_with_widget_state(
         &font_manager,
@@ -111,7 +112,7 @@ fn focused_select_opens_upward_and_hits_enabled_and_disabled_options() {
         &widget_states,
         &HashMap::new(),
         &HashMap::new(),
-        Rect::new(0.0, 0.0, 220.0, 90.0),
+        viewport,
         None,
         None,
         None,
@@ -123,6 +124,51 @@ fn focused_select_opens_upward_and_hits_enabled_and_disabled_options() {
         .overlay_shapes
         .iter()
         .any(|shape| shape.rect.y < dp(50.0) && shape.rect.height > dp(40.0)));
+    let overlay_hit_point = |hit: &crate::ui::widget::HitRegion<ScopeChildVm>| {
+        let visible = hit
+            .clip_rect
+            .and_then(|clip| hit.rect.intersect(clip))
+            .unwrap_or(hit.rect);
+        Point::new(
+            visible.x + dp(8.0),
+            visible.y + visible.height * 0.5,
+        )
+    };
+    let computed = tree.compute_scene_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &widget_states,
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let enabled_point = computed
+        .overlay_hit_regions
+        .iter()
+        .find_map(|hit| match &hit.interaction {
+            super::HitInteraction::SelectOption { option_index: 0, .. } => {
+                Some(overlay_hit_point(hit))
+            }
+            _ => None,
+        })
+        .expect("enabled option hit region should be present");
+    let disabled_point = computed
+        .overlay_hit_regions
+        .iter()
+        .find_map(|hit| match &hit.interaction {
+            super::HitInteraction::Disabled { .. } => Some(overlay_hit_point(hit)),
+            _ => None,
+        })
+        .expect("disabled option hit region should be present");
 
     let enabled_hit = tree.hit_test_with_widget_state(
         &font_manager,
@@ -134,8 +180,8 @@ fn focused_select_opens_upward_and_hits_enabled_and_disabled_options() {
         &widget_states,
         &HashMap::new(),
         &HashMap::new(),
-        Rect::new(0.0, 0.0, 220.0, 90.0),
-        Some(Point::new(8.0, 10.0)),
+        viewport,
+        Some(enabled_point),
         None,
     );
     let mut vm = ScopeChildVm::default();
@@ -159,8 +205,8 @@ fn focused_select_opens_upward_and_hits_enabled_and_disabled_options() {
         &widget_states,
         &HashMap::new(),
         &HashMap::new(),
-        Rect::new(0.0, 0.0, 220.0, 90.0),
-        Some(Point::new(8.0, 45.0)),
+        viewport,
+        Some(disabled_point),
         None,
     );
     assert!(matches!(

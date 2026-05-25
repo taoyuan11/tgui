@@ -175,6 +175,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         for previous in previous_hovered[prefix_len..].iter() {
             if let HoverTargetId::Widget(id) = previous.target_id {
                 self.tooltip_hover_started_at.remove(&id);
+                self.clear_tooltip_hover_suppression_if_needed(id);
             }
         }
 

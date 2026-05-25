@@ -6,8 +6,8 @@
 //!
 //! 本轮约束：
 //! - 仅支持纯文本内容（`Value<String>`）；Element 子树作为内容留下一轮；
-//! - hover 持续 `delay`（默认 500ms）后显示；hover 离开立即消失；
-//! - 不响应 focus / 长按 / 外部点击。
+//! - `delay` 仅作用于 hover（默认 500ms）；focus / 长按不走 hover delay；
+//! - 内容仍为纯文本，浮层渲染支持主题默认样式与三角指针。
 
 use std::time::Duration;
 
@@ -54,6 +54,7 @@ impl Tooltip {
     }
 
     /// 自定义 hover 延迟。`Duration::ZERO` 表示 hover 即显示。
+    /// 该值仅影响鼠标 hover；focus 与长按不会等待此延迟。
     pub fn delay(mut self, delay: Duration) -> Self {
         self.delay = delay;
         self

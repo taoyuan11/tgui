@@ -200,7 +200,7 @@ impl ViewModel for App {
                 component_card(
                     "Tooltip",
                     Flex::new(Axis::Vertical).gap(dp(10.0)).child(el![
-                        Text::new("把鼠标悬停在按钮上看 Tooltip：四个方向 + 自动换行 + 自定义样式")
+                        Text::new("把鼠标悬停或用 Tab 聚焦按钮查看 Tooltip：支持四个方向、自动换行、自定义样式、Esc 关闭与触摸长按。")
                             .style(status_style),
                         Flex::new(Axis::Horizontal).gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
                             Button::new("上方")
@@ -224,7 +224,11 @@ impl ViewModel for App {
                                 Tooltip::new("自定义 background / radius 即可换风格")
                                     .style(accent_tooltip_style(ResolvedThemeMode::Dark)),
                             ),
+                            Button::new("键盘聚焦")
+                                .tooltip(Tooltip::new("按 Tab 聚焦后也会显示 Tooltip，按 Esc 可隐藏。")),
                         ]),
+                        Text::new("提示：桌面端 hover 默认延迟约 500ms；键盘 focus 会立即显示；触摸端长按显示，松开后会短暂保留并在点击外部时关闭。")
+                            .style(status_style),
                     ]),
                 ),
                 component_card(

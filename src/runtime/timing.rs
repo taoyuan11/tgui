@@ -69,6 +69,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let started_at = text_profile_enabled().then_some(Instant::now());
         self.flush_pending_click_if_due(now);
         let _ = self.flush_pending_long_press_if_due(now);
+        let _ = self.flush_tooltip_release_if_due(now);
 
         let mut frame_advanced = false;
         let mut smooth_scroll_advanced = false;
@@ -130,6 +131,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .active_gesture
             .as_ref()
             .and_then(|gesture| gesture.long_press_deadline);
+        let tooltip_release_deadline = self.tooltip_state.long_press_release_deadline;
         let caret_deadline = self.next_caret_blink_deadline(now);
         let key_repeat_deadline = self.next_key_repeat_deadline();
         let smooth_scroll_deadline =
@@ -167,7 +169,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 "textarea_animation",
                 started_at.elapsed(),
                 format!(
-                    "smooth_scroll_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} animation_active={} controller_active={} pending_click={} gesture_deadline={} caret_deadline={} key_repeat_deadline={} smooth_scroll_deadline={} next_deadline={}",
+                    "smooth_scroll_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} animation_active={} controller_active={} pending_click={} gesture_deadline={} tooltip_release_deadline={} caret_deadline={} key_repeat_deadline={} smooth_scroll_deadline={} next_deadline={}",
                     smooth_scroll_advanced,
                     controller_changed,
                     animation_refresh.changed,
@@ -177,6 +179,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     controller_deadline.is_some(),
                     click_deadline.is_some(),
                     gesture_deadline.is_some(),
+                    tooltip_release_deadline.is_some(),
                     caret_deadline.is_some(),
                     key_repeat_deadline.is_some(),
                     smooth_scroll_deadline.is_some(),

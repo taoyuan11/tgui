@@ -2,7 +2,6 @@ use super::*;
 use crate::foundation::binding::ScrollRequestMode;
 use crate::foundation::binding::{ScrollRequest, ScrollViewController};
 use crate::ui::unit::Dp;
-
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn apply_scroll_view_controller_state(
         &mut self,
@@ -139,6 +138,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .selected_text
             .and_then(|id| self.text_edit_state(id))
             .cloned();
+        let active_tooltip = self.resolve_active_tooltip(now);
 
         let text_input_patch_roots = self.cached_scene.as_ref().and_then(|cached| {
             (layout_cache_valid
@@ -230,6 +230,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 selected_text_state.as_ref(),
                                 caret_visible,
                                 &self.tooltip_hover_started_at,
+                                active_tooltip,
                             );
                             collect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
@@ -278,6 +279,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                         selected_text_state.as_ref(),
                                         actual_caret_visible,
                                         &self.tooltip_hover_started_at,
+                                        active_tooltip,
                                     );
                                 recollect_duration += collect_started_at.elapsed();
                                 collect_passes += 1;
@@ -335,6 +337,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 selected_text_state.as_ref(),
                                 caret_visible,
                                 &self.tooltip_hover_started_at,
+                                active_tooltip,
                             );
                             collect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
@@ -381,6 +384,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 selected_text_state.as_ref(),
                                 actual_caret_visible,
                                 &self.tooltip_hover_started_at,
+                                active_tooltip,
                             );
                             recollect_duration += collect_started_at.elapsed();
                             collect_passes += 1;

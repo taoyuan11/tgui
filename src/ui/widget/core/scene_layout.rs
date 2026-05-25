@@ -6,6 +6,7 @@ use self::patch::{
     patch_resolved_at_path, resolved_at_path,
 };
 use super::*;
+use super::scene::ActiveTooltipState;
 
 #[derive(Clone)]
 pub(crate) struct ResolvedSceneLayout<VM> {
@@ -165,6 +166,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         selected_text: Option<WidgetId>,
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
+        active_tooltip: Option<ActiveTooltipState>,
     ) -> Option<CollectedSceneCache<VM>> {
         let path = self.path_for(widget_id)?;
         let tooltip_hover_started_at: HashMap<WidgetId, std::time::Instant> = HashMap::new();
@@ -211,6 +213,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     focus: super::scene::FocusCollectState::default(),
                     tooltip_hover_started_at: &tooltip_hover_started_at,
                     next_tooltip_wakeup: &next_tooltip_wakeup,
+                    active_tooltip,
                 };
                 let computed = self.resolved_at_path(path).collect_subtree_cache(
                     self.layout_at_path(path),

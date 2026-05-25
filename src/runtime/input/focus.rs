@@ -469,6 +469,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.active_key_repeat = None;
 
         if let Some(previous) = self.focused_widget.take() {
+            self.clear_tooltip_focus_suppression_if_needed(previous.widget_id);
             if let Some((widget_id, region)) = previous_single_line_input.as_ref() {
                 if *widget_id == previous.widget_id {
                     let flushed = self.flush_text_input_session(*widget_id);

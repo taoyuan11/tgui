@@ -70,7 +70,8 @@ pub(crate) use core::LifecycleSnapshot;
 pub(crate) use core::LifecycleWidgetKind;
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub(crate) use core::{
-    CollectedSceneCache, ResolvedSceneLayout, ResolvedWidgetKind, SceneChunkParts,
+    ActiveTooltipState, CollectedSceneCache, ResolvedSceneLayout, ResolvedWidgetKind,
+    SceneChunkParts, TooltipTrigger,
     TextInputLayoutOverride, VisualContextSnapshot,
 };
 pub use gesture::{

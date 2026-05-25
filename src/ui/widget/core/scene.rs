@@ -51,6 +51,7 @@ pub(crate) struct CollectContext<'a, 'b> {
     /// emit_tooltip 写入：尚未达到 delay 时记录下次该唤醒事件循环的时刻，
     /// runtime 会聚合到 `next_deadline` 并在到点后 invalidate scene 触发重 collect。
     pub(crate) next_tooltip_wakeup: &'a Cell<Option<Instant>>,
+    pub(crate) active_tooltip: Option<ActiveTooltipState>,
 }
 
 impl<'a, 'b> CollectContext<'a, 'b> {
@@ -163,4 +164,17 @@ pub(crate) struct CollectedSceneCache<VM> {
 pub(crate) struct SceneChunkParts<VM> {
     pub(crate) before_children: ComputedScene<VM>,
     pub(crate) after_children: ComputedScene<VM>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TooltipTrigger {
+    Hover,
+    Focus,
+    LongPress,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ActiveTooltipState {
+    pub(crate) widget_id: WidgetId,
+    pub(crate) trigger: TooltipTrigger,
 }

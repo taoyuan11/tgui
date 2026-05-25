@@ -87,7 +87,8 @@ use self::layout::*;
 use self::render::*;
 use self::scene::{CollectContext, VisualContext};
 pub(crate) use self::scene::{
-    CollectedSceneCache, SceneChunkParts, TextInputLayoutOverride, VisualContextSnapshot,
+    ActiveTooltipState, CollectedSceneCache, SceneChunkParts, TextInputLayoutOverride,
+    TooltipTrigger, VisualContextSnapshot,
 };
 pub(crate) use self::scene_layout::ResolvedSceneLayout;
 use self::scene_layout::*;

@@ -1,7 +1,7 @@
 use crate::ui::widget::Point;
 
 use super::BoundRuntimeHandler;
-use crate::runtime::state::FocusedWidget;
+use crate::runtime::state::{FocusedWidget, TooltipDismissReason};
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn close_overlay_handle(&mut self, handle: &crate::runtime::overlay::OverlayCloseHandle<VM>) {
@@ -51,6 +51,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         &mut self,
         click_point: Point,
     ) -> Option<crate::ui::widget::WidgetId> {
+        if self.dismiss_active_tooltip(TooltipDismissReason::OutsideClick) {
+            return None;
+        }
         let handlers: Vec<_> = self
             .computed_scene()
             .overlay_close_handlers
@@ -75,6 +78,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     /// Esc 按键时调用：消费栈顶的 `close_on_escape=true` 浮层并触发其 `on_close`。
     /// 若有任一浮层被消费，返回 true（调用方可据此决定是否吞掉按键）。
     pub(in crate::runtime) fn consume_topmost_overlay_close_handler_escape(&mut self) -> bool {
+        if self.dismiss_active_tooltip(TooltipDismissReason::Escape) {
+            return true;
+        }
         let topmost = self
             .computed_scene()
             .overlay_close_handlers

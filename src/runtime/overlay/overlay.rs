@@ -1,7 +1,7 @@
 use crate::foundation::view_model::ValueCommand;
 use crate::ui::widget::{
     BackdropBlurPrimitive, FocusScopeState, HitRegion, RenderCommand, RenderPrimitive,
-    TextPrimitive, WidgetId,
+    TextPrimitive, WidgetId, MeshPrimitive,
 };
 
 use super::anchor::Anchor;
@@ -207,6 +207,7 @@ impl<VM> Clone for OverlayContent<VM> {
 pub(crate) enum OverlayPrimitive {
     Shape(RenderPrimitive),
     Text(TextPrimitive),
+    Mesh(MeshPrimitive),
     BackdropBlur(BackdropBlurPrimitive),
     Command(RenderCommand),
 }

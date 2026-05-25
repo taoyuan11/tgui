@@ -103,6 +103,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 ),
             );
         }
+        let active_tooltip = self.resolve_active_tooltip(now);
         let Some(cached) = self.cached_scene.as_ref() else {
             return false;
         };
@@ -197,6 +198,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.selected_text,
                 selected_text_state.as_ref(),
                 caret_visible,
+                active_tooltip,
             ) else {
                 return false;
             };

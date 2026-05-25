@@ -22,6 +22,7 @@ mod scene_runtime;
 mod state;
 mod theme;
 mod timing;
+mod tooltip;
 mod windows;
 
 #[cfg(all(target_os = "android", feature = "android"))]
@@ -49,7 +50,7 @@ use self::state::{
     DispatchedLifecycleState, DispatchedMediaState, FocusedWidget, HoverMoveHandler, HoverTargetId,
     HoverTransitionHandler, HoveredWidget, PendingClick, PendingLifecycleEvent, PendingMediaEvent,
     ScrollbarDrag, SliderDrag, SmoothScrollState, TextInputBufferState, TextInputSessionConfig,
-    TextSelectionDrag, TouchScrollDrag,
+    TextSelectionDrag, TooltipState, TouchScrollDrag,
 };
 #[cfg(all(target_os = "android", feature = "android"))]
 use self::theme::{
@@ -118,6 +119,7 @@ const KEY_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(300);
 const KEY_REPEAT_INTERVAL: Duration = Duration::from_millis(33);
 pub(super) const TOUCH_SCROLL_ACTIVATION_THRESHOLD: f32 = 8.0;
 pub(super) const LONG_PRESS_THRESHOLD: Duration = Duration::from_millis(500);
+pub(super) const TOOLTIP_LONG_PRESS_HIDE_DELAY: Duration = Duration::from_millis(150);
 pub(super) const LONG_PRESS_MOVE_TOLERANCE: f32 = 8.0;
 pub(super) const SWIPE_ACTIVATION_THRESHOLD: f32 = 12.0;
 pub(super) const SWIPE_AXIS_LOCK_THRESHOLD: f32 = 8.0;
@@ -373,6 +375,7 @@ pub struct BoundRuntimeHandler<VM> {
     /// 最近一次 collect 上报的 tooltip 唤醒时刻（hover_start + delay）。
     /// 由 `next_deadline` 汇入 winit ControlFlow，到点后 `drive_animations` 触发 invalidate。
     next_tooltip_wakeup_deadline: Option<Instant>,
+    tooltip_state: TooltipState,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
     active_touch_scroll: Option<TouchScrollDrag>,
@@ -483,6 +486,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             hovered_widgets: Vec::new(),
             tooltip_hover_started_at: HashMap::new(),
             next_tooltip_wakeup_deadline: None,
+            tooltip_state: TooltipState {
+                active: None,
+                hover_suppressed: None,
+                focus_suppressed: None,
+                long_press_suppressed: None,
+                long_press_candidate: None,
+                long_press_release_deadline: None,
+            },
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
             active_touch_scroll: None,

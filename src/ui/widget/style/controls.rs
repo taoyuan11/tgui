@@ -441,6 +441,9 @@ pub struct TooltipStyle {
     pub padding: Insets,
     pub max_width: Dp,
     pub offset: Dp,
+    pub pointer_size: Dp,
+    pub pointer_inset: Dp,
+    pub shadow: Shadow,
     pub text_style: TextStyle,
 }
 
@@ -462,6 +465,15 @@ impl TooltipStyle {
             padding: Insets::symmetric(dp(8.0), dp(4.0)),
             max_width: dp(240.0),
             offset: dp(8.0),
+            pointer_size: dp(8.0),
+            pointer_inset: dp(16.0),
+            shadow: Shadow {
+                offset_x: dp(0.0),
+                offset_y: dp(6.0),
+                blur: dp(16.0),
+                spread: dp(0.0),
+                color: foreground.with_alpha_factor(0.18),
+            },
             text_style: label_text_style(),
         }
     }

@@ -228,6 +228,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         session.long_press_deadline = None;
         session.long_press_triggered = true;
         self.pending_click = None;
+        if session.source == GestureSource::Touch {
+            self.tooltip_state.long_press_candidate = Some(session.widget_id);
+            self.tooltip_state.long_press_release_deadline = None;
+        }
         let changed = if let Some(command) = session.recognizer.on_long_press.clone() {
             self.execute_value_command(
                 &command,
@@ -257,7 +261,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
         if cancel {
+            if session.source == GestureSource::Touch {
+                self.reset_tooltip_long_press_session(session.widget_id);
+            }
             return self.dispatch_active_gesture_phase(&session, GesturePhase::Cancel);
+        }
+        if session.source == GestureSource::Touch && session.long_press_triggered {
+            self.schedule_tooltip_long_press_hide(session.widget_id, Instant::now());
+        } else if session.source == GestureSource::Touch {
+            self.reset_tooltip_long_press_session(session.widget_id);
         }
         if session.captured {
             return self.dispatch_active_gesture_phase(&session, GesturePhase::End);
@@ -276,6 +288,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(session) = self.active_gesture.take() else {
             return false;
         };
+        if session.source == GestureSource::Touch {
+            self.reset_tooltip_long_press_session(session.widget_id);
+        }
         self.dispatch_active_gesture_phase(&session, GesturePhase::Cancel)
     }
 
