@@ -24,6 +24,7 @@ pub(crate) enum WidgetProperty {
     Opacity,
     Offset,
     TooltipVisibility,
+    ModalVisibility,
     SwitchThumbColor,
     SwitchThumbOffset,
     SelectMenuOpen,

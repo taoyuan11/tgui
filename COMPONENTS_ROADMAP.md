@@ -62,18 +62,20 @@
 - **桌面操作**：右键 / 主菜单触发；方向键导航、`Enter` 触发、`Esc` 关闭、`→` 进入子菜单、`←` 返回；首字母快速跳转；快捷键全局可触发。
 - **移动操作**：长按触发 ContextMenu；MenuBar 在小屏退化为汉堡按钮 + Drawer；子菜单以 push 转场而非悬停展开。
 - **依赖**：P0 §1、§2、§5、§6。
-- **进度**：[基本完成]
+- **进度**：[功能完整]
   - ✅ Menu / ContextMenu / MenuBar 公开 builder API + 主题样式 token（`MenuStyle` / `MenuBarStyle`）；
   - ✅ Menu 下拉浮层 collect 渲染：label / separator / disabled / checked ✓ / 快捷键提示文本（右对齐）/ submenu ▸ 箭头 / `MenuIcon::glyph` 字符图标 / 点击触发 on_select / 外部点击 / Esc 关闭 / focus trap / return_focus_to；
   - ✅ ContextMenu 自动接 `GestureRecognizer::on_long_press`（鼠标右键 + 触屏长按）；
   - ✅ MenuBar 以 `Flex<Button+Menu>` 形式落地，共享 `MenuBarGroupId`；
-  - ✅ runtime 键盘导航：菜单打开时 Up/Down 在 items 间循环跳过 separator/disabled、Enter/Space 触发 cursor 项 + 关菜单、Esc 关菜单；cursor 项通过 widget_state hover 通道自动画 hover 背景；
-  - ✅ 字母 type-ahead：菜单打开时按字符键自动把 cursor 跳到首字母匹配项；
+  - ✅ runtime 键盘导航：Up/Down 在当前层 cycle 跳过 separator/disabled、Enter/Space 触发叶子项 + 关菜单、Esc 关菜单、字母 type-ahead 在当前层匹配跳转；
   - ✅ MenuBar Left/Right 切换：菜单打开时在同 `MenuBarGroupId` 内 cycle active 条目；
-  - ✅ submenu 嵌套渲染：父项 hovered（鼠标或键盘 cursor）时递归 emit 子菜单 overlay，锚定到父 item 绝对位置，复用 `MenuStyle`；
+  - ✅ submenu 嵌套：collect 阶段父项 hovered（鼠标或键盘 cursor）时递归 emit 子菜单 overlay；键盘 cursor 表示为 `Vec<usize>` 路径，Right 入栈进入 submenu / Left 弹栈退出，与 MenuBar 切换自然衔接；
   - ✅ 全局 `KeyChord` 派发：扫 cached resolved 树里所有 menu / context_menu 含 submenu 递归的 shortcut chord，命中即执行 on_select 并吞键（无需 widget 打开）；`format_chord` 把 chord 渲染成 "Ctrl+N" 风格的 hint 文本；
-  - ✅ `menu_tests` + `runtime::tests::menu_tests`：14 个测试覆盖 descriptor / 渲染 / hover / 键盘 / 全局快捷键 / submenu 嵌套 / type-ahead / glyph 图标。
-  - ⏳ 长尾（可独立 PR）：键盘 cursor 进入 submenu 内部（Right 键深入）、SVG 真栅格化渲染（需要 overlay primitive 加 Image variant，`MenuIcon::Svg` 字段已占位）、ContextMenu/MenuBar 自动 active 状态接管（让用户不再绑 `State<bool>`/`State<Option<usize>>`）。
+  - ✅ `MenuIcon::glyph(char)`：在 item label 左侧、checked 列右侧加固定宽度图标列，渲染单字符（emoji / 字体图标）；
+  - ✅ `menu_tests` + `runtime::tests::menu_tests`：16 个测试覆盖 descriptor / 渲染 / hover / 键盘 / 全局快捷键 / submenu 嵌套渲染 + 键盘 cursor 进出 / type-ahead / glyph 图标。
+  - ⏳ 长尾（独立 PR、不影响功能完整性）：
+    - SVG 真栅格化（`MenuIcon::Svg` 字段已占位）——需要给 `OverlayPrimitive` 加 `Texture` variant 并把 bucket.textures 合并到 scene.overlay_textures，再走 `media` 子系统的 SVG 加载管线；
+    - ContextMenu / MenuBar 自动 active 状态接管——需要在 `CollectContext` 加 `internal_context_menu_anchor` / `internal_menubar_active` 字段贯穿调用链，在 gesture 派发里直接写入 runtime state，绕开用户 State 绑定。当前 API 通过 `.on_show(cmd)` / `MenuBar::new(active_signal).on_active_change(cmd)` 与 `State<bool>`/`State<Point>`/`State<Option<usize>>` 绑定，工作良好且可控。
 
 
 ### 10. Modal / Dialog（应用内）

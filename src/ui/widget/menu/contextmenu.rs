@@ -2,23 +2,45 @@
 //!
 //! ContextMenu 是一个修饰符，把任意 child element 包起来并挂上 `context_menu`
 //! 描述符。长按 / 鼠标右键自动通过 `GestureRecognizer::on_long_press` 触发
-//! `on_show(position)` 回调——调用方在 callback 里写入自己的
+//! `on_show(LongPressEvent)` 回调——调用方在 callback 里写入自己的
 //! `State<bool>`（open）与 `State<Point>`（anchor），然后这两个 State
-//! 信号驱动 collect 阶段的菜单浮层渲染（emit 由 step 6 runtime 接入）。
+//! 信号驱动菜单浮层的可见性。点击外部 / Esc 会通过 overlay 的统一关闭
+//! 通道触发 `on_open_change(false)`，调用方在那里清掉 open State。
 //!
-//! 这是 MVP 接法。step 6 runtime 落地后会让 open/anchor 进入 runtime 内部
-//! 状态，调用方无需自己维护两个 State。
+//! 这是当前 MVP 接法。把 open / anchor 收编进 runtime 内部状态（无需用户
+//! 维护两个 State）属于路线图长尾——需要给 `CollectContext` 加 anchor 字段
+//! 并贯穿调用链 + 在 gesture 派发里直接写入 runtime state，单独 PR 落地。
 //!
 //! ```ignore
-//! ContextMenu::new(Image::new("photo.png"))
-//!     .items(vec![
-//!         MenuItem::new("复制").on_select(...),
-//!         MenuItem::new("删除").on_select(...),
-//!     ])
-//!     .on_show(cmd!(|vm, ev: LongPressEvent| {
-//!         vm.ctx_open.set(true);
-//!         vm.ctx_anchor.set(ev.position);
-//!     }))
+//! use tgui::mvvm::{State, ViewModelContext};
+//! use tgui::widgets::{ContextMenu, Image, LongPressEvent, MenuItem};
+//!
+//! struct PhotoVm {
+//!     ctx_open: State<bool>,
+//!     ctx_anchor: State<tgui::core::Point>,
+//! }
+//!
+//! impl PhotoVm {
+//!     fn view(&self) -> tgui::widgets::Element<Self> {
+//!         ContextMenu::new(Image::new("photo.png"))
+//!             .items(vec![
+//!                 MenuItem::new("复制").on_select(/* ... */),
+//!                 MenuItem::new("删除").on_select(/* ... */),
+//!             ])
+//!             // 长按/右键时写两个 State
+//!             .on_show(tgui::mvvm::ValueCommand::new(
+//!                 |vm: &mut Self, ev: LongPressEvent| {
+//!                     vm.ctx_open.set(true);
+//!                     vm.ctx_anchor.set(ev.position);
+//!                 },
+//!             ))
+//!             // 外部点击 / Esc / item 选中 → on_open_change(false)
+//!             .on_open_change(tgui::mvvm::ValueCommand::new(
+//!                 |vm: &mut Self, open: bool| vm.ctx_open.set(open),
+//!             ))
+//!             .into()
+//!     }
+//! }
 //! ```
 
 use crate::foundation::view_model::ValueCommand;
