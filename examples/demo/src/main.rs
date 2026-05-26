@@ -101,7 +101,7 @@ impl VideoPlayer {
             }
         });
 
-        // controller.set_volume(0.0);
+        controller.set_volume(0.0);
         Self {
             video_controller: controller,
             source
@@ -133,45 +133,45 @@ impl VideoPlayer {
 }
 
 struct App {
-    // theme: State<ThemeMode>,
-    // switch: State<bool>,
-    // checkbox: State<bool>,
-    // radio: State<bool>,
-    // slider_value: State<f32>,
-    // contact_method: State<String>,
-    // select_action: State<Option<String>>,
-    // notification_status: State<String>,
-    // popover_open: State<bool>,
-    // popover_switch: State<bool>,
-    // popover_note: TextController,
-    // input_text: TextController,
-    // textarea_text: TextController,
-    // audio_controller: AudioController,
-    // video_player: VideoPlayer
+    theme: State<ThemeMode>,
+    switch: State<bool>,
+    checkbox: State<bool>,
+    radio: State<bool>,
+    slider_value: State<f32>,
+    contact_method: State<String>,
+    select_action: State<Option<String>>,
+    notification_status: State<String>,
+    popover_open: State<bool>,
+    popover_switch: State<bool>,
+    popover_note: TextController,
+    input_text: TextController,
+    textarea_text: TextController,
+    audio_controller: AudioController,
+    video_player: VideoPlayer
 }
 
 impl ViewModel for App {
     fn new(context: &ViewModelContext) -> Self {
-        // let audio = AudioController::new(context);
-        // audio.set_volume(0.8);
+        let audio = AudioController::new(context);
+        audio.set_volume(0.8);
         Self {
-            // theme: context.state(ThemeMode::System),
-            // switch: context.state(false),
-            // checkbox: context.state(false),
-            // radio: context.state(false),
-            // slider_value: context.state(80.0),
-            // contact_method: context.state(String::from("system")),
-            // select_action: context.state(None),
-            // notification_status: context.state(String::from("尚未发送通知")),
-            // popover_open: context.state(false),
-            // popover_switch: context.state(true),
-            // popover_note: context.text_controller("预览状态下也可以直接编辑这里的内容。"),
-            // input_text: context.text_controller("D:\\CloudMusic\\music\\James Blunt - You Are Beautiful.flac"),
-            // textarea_text: context.text_controller(
-            //     "这是一个受控 Textarea。\n你可以在这里输入多行内容，示例不会保存修改。",
-            // ),
-            // audio_controller: audio,
-            // video_player: VideoPlayer::new(context)
+            theme: context.state(ThemeMode::System),
+            switch: context.state(false),
+            checkbox: context.state(false),
+            radio: context.state(false),
+            slider_value: context.state(80.0),
+            contact_method: context.state(String::from("system")),
+            select_action: context.state(None),
+            notification_status: context.state(String::from("尚未发送通知")),
+            popover_open: context.state(false),
+            popover_switch: context.state(true),
+            popover_note: context.text_controller("预览状态下也可以直接编辑这里的内容。"),
+            input_text: context.text_controller("D:\\CloudMusic\\music\\James Blunt - You Are Beautiful.flac"),
+            textarea_text: context.text_controller(
+                "这是一个受控 Textarea。\n你可以在这里输入多行内容，示例不会保存修改。",
+            ),
+            audio_controller: audio,
+            video_player: VideoPlayer::new(context)
         }
     }
 
@@ -181,455 +181,460 @@ impl ViewModel for App {
             .padding(Insets::all(dp(20.0)))
             .gap(dp(10.0))
             .overflow_y(Overflow::Scroll)
-            // .child(el![
-                // Text::new("TGUI 组件列表示例")
-                //     .style(title_style)
-                //     .width(pct(100.0)),
-                // component_card(
-                //     "Text",
-                //     Text::new("这是一段可直接渲染、可复制的文本组件")
-                //         .user_select(true)
-                //         .style(|mode| text_style(mode, sp(16.0))),
-                // ),
-                // component_card(
-                //     "Button",
-                //     Flex::new(Axis::Horizontal).gap(dp(10.0)).child(el![
-                //         Button::new("普通按钮").primary(),
-                //         Button::new("次要按钮").secondary(),
-                //         Button::new("幽灵按钮").ghost(),
-                //         Button::new("危险按钮").danger(),
-                //         Button::new("禁用按钮").disable(true),
-                //     ]),
-                // ),
-                // component_card(
-                //     "Tooltip",
-                //     Flex::new(Axis::Vertical).gap(dp(10.0)).child(el![
-                //         Text::new("把鼠标悬停或用 Tab 聚焦按钮查看 Tooltip：支持四个方向、自动换行、自定义样式、Esc 关闭与触摸长按。")
-                //             .style(status_style),
-                //         Flex::new(Axis::Horizontal).gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
-                //             Button::new("上方")
-                //                 .tooltip(Tooltip::new("默认 Placement::top()")),
-                //             Button::new("下方").tooltip(
-                //                 Tooltip::new("浮层贴在按钮下边缘")
-                //                     .placement(OverlayPlacement::bottom()),
-                //             ),
-                //             Button::new("左侧").tooltip(
-                //                 Tooltip::new("Placement::left()")
-                //                     .placement(OverlayPlacement::left()),
-                //             ),
-                //             Button::new("右侧").tooltip(
-                //                 Tooltip::new("Placement::right()")
-                //                     .placement(OverlayPlacement::right()),
-                //             ),
-                //             Button::new("长文本").tooltip(Tooltip::new(
-                //                 "Tooltip 会在超过 max_width 时自动换行，方便给较长的说明文字使用。",
-                //             )),
-                //             Button::new("强调样式").tooltip(
-                //                 Tooltip::new("自定义 background / radius 即可换风格")
-                //                     .style(accent_tooltip_style(ResolvedThemeMode::Dark)),
-                //             ),
-                //             Button::new("键盘聚焦")
-                //                 .tooltip(Tooltip::new("按 Tab 聚焦后也会显示 Tooltip，按 Esc 可隐藏。")),
-                //         ]),
-                //         Text::new("提示：桌面端 hover 默认延迟约 500ms；键盘 focus 会立即显示；触摸端长按显示，松开后会短暂保留并在点击外部时关闭。")
-                //             .style(status_style),
-                //     ]),
-                // ),
-                // component_card("Popover", self.build_popover_component()),
-                // component_card(
-                //     "Switch",
-                //     Switch::new(self.switch.signal()).on_change(ValueCommand::new(
-                //         |app: &mut App, enable| app.switch.set(enable)
-                //     )),
-                // ),
-                // component_card(
-                //     "Checkbox",
-                //     Checkbox::new(self.checkbox.signal())
-                //         .label("接收通知")
-                //         .on_change(ValueCommand::new(|app: &mut App, checked| {
-                //             app.checkbox.set(checked)
-                //         })),
-                // ),
-                // component_card(
-                //     "Radio",
-                //     Radio::new(self.radio.signal())
-                //         .label("单个单选框")
-                //         .on_change(ValueCommand::new(|app: &mut App, checked| {
-                //             app.radio.set(checked)
-                //         })),
-                // ),
-                // component_card(
-                //     "RadioGroup",
-                //     RadioGroup::new(
-                //         vec![
-                //             RadioOption::new("system".to_string(), "跟随系统".to_string()),
-                //             RadioOption::new("light".to_string(), "明亮".to_string()),
-                //             RadioOption::new("dark".to_string(), "暗淡".to_string()),
-                //         ],
-                //         self.contact_method.signal(),
-                //     )
-                //     .horizontal()
-                //     .on_change(ValueCommand::new(
-                //         |app: &mut App, (key, _label)| {
-                //             if key == "system" {
-                //                 app.theme.set(ThemeMode::System)
-                //             } else if key == "light" {
-                //                 app.theme.set(ThemeMode::Light)
-                //             } else {
-                //                 app.theme.set(ThemeMode::Dark);
-                //             }
-                //             app.contact_method.set(key)
-                //         }
-                //     )),
-                // ),
-                // component_card(
-                //     "Select",
-                //     Select::new(
-                //         vec![
-                //             SelectOption::new("archive".to_string(), "归档".to_string()),
-                //             SelectOption::new("delete".to_string(), "删除".to_string())
-                //                 .disable(true),
-                //             SelectOption::new("share".to_string(), "分享".to_string()),
-                //         ],
-                //         self.select_action.signal(),
-                //     )
-                //     .placeholder("请选择操作")
-                //     .width(dp(220.0))
-                //     .on_change(ValueCommand::new(
-                //         |app: &mut App, (key, _label)| { app.select_action.set(Some(key)) }
-                //     )),
-                // ),
-                // component_card(
-                //     "Shadow",
-                //     demo_shadow_card(),
-                // ),
-                // component_card(
-                //     "Slider",
-                //     Slider::new(self.slider_value.signal(), 0.0, 100.0)
-                //         .width(dp(240.0))
-                //         .step(5.0)
-                //         .show_ticks(true)
-                //         .show_value_label(true)
-                //         .format_value(|value| format!("{value:.0}%"))
-                //         .on_change(ValueCommand::new(|app: &mut App, value| {
-                //             app.slider_value.set(value);
-                //             app.audio_controller.set_volume(value / 100.0)
-                //         })),
-                // ),
-                // component_card(
-                //     "Audio",
-                //     self.build_audio_component()
-                // ),
-                // component_card(
-                //     "Video",
-                //     self.build_video_component()
-                // ),
-                // component_card(
-                //     "Input",
-                //     Input::new(self.input_text.clone())
-                //         .width(dp(260.0))
-                //         .placeholder("请在此输入需要播放的音乐绝对路径")
-                // ),
-                // component_card(
-                //     "Textarea",
-                //     Textarea::new(self.textarea_text.clone())
-                //         .size(dp(320.0), dp(140.0))
-                //         .placeholder("请输入多行内容")
-                //         .on_change(Command::new(|_app: &mut App| {})),
-                // ),
-                // component_card(
-                //     "Notification",
-                //     Flex::vertical().gap(dp(10.0)).child(el![
-                //         Flex::horizontal().gap(dp(10.0)).wrap(Wrap::Wrap).child(el![
-                //             Button::new("请求通知权限").on_click(Command::new_with_context(
-                //                 |_: &mut App, ctx| { App::request_notification_permission(ctx) }
-                //             ),),
-                //             Button::new("发送普通通知").on_click(Command::new_with_context(
-                //                 |app: &mut App, ctx| { app.send_plain_notification(ctx) }
-                //             ),),
-                //             Button::new("发送动作通知").on_click(Command::new_with_context(
-                //                 |app: &mut App, ctx| { app.send_action_notification(ctx) }
-                //             ),),
-                //         ]),
-                //         Text::new(self.notification_status.signal()).style(status_style),
-                //     ]),
-                // ),
-                // component_card(
-                //     "Image",
-                //     Image::from_path(demo_image_path())
-                //         .size(dp(220.0), dp(120.0))
-                //         .style(image_style),
-                // ),
-                // component_card("Canvas", demo_canvas()),
-            // ])
+            .child(el![
+                Text::new("TGUI 组件列表示例")
+                    .style(title_style)
+                    .width(pct(100.0)),
+                component_card(
+                    "Text",
+                    Text::new("这是一段可直接渲染、可复制的文本组件")
+                        .user_select(true)
+                        .style(|mode| text_style(mode, sp(16.0))),
+                ),
+                component_card(
+                    "Button",
+                    Flex::new(Axis::Horizontal).gap(dp(10.0)).child(el![
+                        Button::new("普通按钮").primary(),
+                        Button::new("次要按钮").secondary(),
+                        Button::new("幽灵按钮").ghost(),
+                        Button::new("危险按钮").danger(),
+                        Button::new("禁用按钮").disable(true),
+                    ]),
+                ),
+                component_card(
+                    "Tooltip",
+                    Flex::new(Axis::Vertical).gap(dp(10.0)).child(el![
+                        Text::new("把鼠标悬停或用 Tab 聚焦按钮查看 Tooltip：支持四个方向、自动换行、自定义样式、Esc 关闭与触摸长按。")
+                            .style(status_style),
+                        Flex::new(Axis::Horizontal).gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
+                            Button::new("上方")
+                                .tooltip(Tooltip::new("默认 Placement::top()")),
+                            Button::new("下方").tooltip(
+                                Tooltip::new("浮层贴在按钮下边缘")
+                                    .placement(OverlayPlacement::bottom()),
+                            ),
+                            Button::new("左侧").tooltip(
+                                Tooltip::new("Placement::left()")
+                                    .placement(OverlayPlacement::left()),
+                            ),
+                            Button::new("右侧").tooltip(
+                                Tooltip::new("Placement::right()")
+                                    .placement(OverlayPlacement::right()),
+                            ),
+                            Button::new("长文本").tooltip(Tooltip::new(
+                                "Tooltip 会在超过 max_width 时自动换行，方便给较长的说明文字使用。",
+                            )),
+                            Button::new("强调样式").tooltip(
+                                Tooltip::new("自定义 background / radius 即可换风格")
+                                    .style(accent_tooltip_style(ResolvedThemeMode::Dark)),
+                            ),
+                            Button::new("键盘聚焦")
+                                .tooltip(Tooltip::new("按 Tab 聚焦后也会显示 Tooltip，按 Esc 可隐藏。")),
+                        ]),
+                        Text::new("提示：桌面端 hover 默认延迟约 500ms；键盘 focus 会立即显示；触摸端长按显示，松开后会短暂保留并在点击外部时关闭。")
+                            .style(status_style),
+                    ]),
+                ),
+                component_card("Popover", self.build_popover_component()),
+                component_card(
+                    "Switch",
+                    Switch::new(self.switch.signal()).on_change(ValueCommand::new(
+                        |app: &mut App, enable| app.switch.set(enable)
+                    )),
+                ),
+                component_card(
+                    "Checkbox",
+                    Checkbox::new(self.checkbox.signal())
+                        .label("接收通知")
+                        .on_change(ValueCommand::new(|app: &mut App, checked| {
+                            app.checkbox.set(checked)
+                        })),
+                ),
+                component_card(
+                    "Radio",
+                    Radio::new(self.radio.signal())
+                        .label("单个单选框")
+                        .on_change(ValueCommand::new(|app: &mut App, checked| {
+                            app.radio.set(checked)
+                        })),
+                ),
+                component_card(
+                    "RadioGroup",
+                    RadioGroup::new(
+                        vec![
+                            RadioOption::new("system".to_string(), "跟随系统".to_string()),
+                            RadioOption::new("light".to_string(), "明亮".to_string()),
+                            RadioOption::new("dark".to_string(), "暗淡".to_string()),
+                        ],
+                        self.contact_method.signal(),
+                    )
+                    .horizontal()
+                    .on_change(ValueCommand::new(
+                        |app: &mut App, (key, _label)| {
+                            if key == "system" {
+                                app.theme.set(ThemeMode::System)
+                            } else if key == "light" {
+                                app.theme.set(ThemeMode::Light)
+                            } else {
+                                app.theme.set(ThemeMode::Dark);
+                            }
+                            app.contact_method.set(key)
+                        }
+                    )),
+                ),
+                component_card(
+                    "Select",
+                    Select::new(
+                        vec![
+                            SelectOption::new("archive".to_string(), "归档".to_string()),
+                            SelectOption::new("delete".to_string(), "删除".to_string())
+                                .disable(true),
+                            SelectOption::new("share".to_string(), "分享".to_string()),
+                        ],
+                        self.select_action.signal(),
+                    )
+                    .placeholder("请选择操作")
+                    .width(dp(220.0))
+                    .on_change(ValueCommand::new(
+                        |app: &mut App, (key, _label)| { app.select_action.set(Some(key)) }
+                    )),
+                ),
+                component_card(
+                    "Shadow",
+                    demo_shadow_card(),
+                ),
+                component_card(
+                    "Slider",
+                    Slider::new(self.slider_value.signal(), 0.0, 100.0)
+                        .width(dp(240.0))
+                        .step(5.0)
+                        .show_ticks(true)
+                        .show_value_label(true)
+                        .format_value(|value| format!("{value:.0}%"))
+                        .on_change(ValueCommand::new(|app: &mut App, value| {
+                            app.slider_value.set(value);
+                            app.audio_controller.set_volume(value / 100.0)
+                        })),
+                ),
+                component_card(
+                    "Audio",
+                    self.build_audio_component()
+                ),
+                component_card(
+                    "Video",
+                    self.build_video_component()
+                ),
+                component_card(
+                    "Input",
+                    Input::new(self.input_text.clone())
+                        .width(dp(260.0))
+                        .placeholder("请在此输入需要播放的音乐绝对路径")
+                ),
+                component_card(
+                    "Textarea",
+                    Textarea::new(self.textarea_text.clone())
+                        .size(dp(320.0), dp(140.0))
+                        .placeholder("请输入多行内容")
+                        .on_change(Command::new(|_app: &mut App| {})),
+                ),
+                component_card(
+                    "Notification",
+                    Flex::vertical().gap(dp(10.0)).child(el![
+                        Flex::horizontal().gap(dp(10.0)).wrap(Wrap::Wrap).child(el![
+                            Button::new("请求通知权限").on_click(Command::new_with_context(
+                                |_: &mut App, ctx| { App::request_notification_permission(ctx) }
+                            ),),
+                            Button::new("发送普通通知").on_click(Command::new_with_context(
+                                |app: &mut App, ctx| { app.send_plain_notification(ctx) }
+                            ),),
+                            Button::new("发送动作通知").on_click(Command::new_with_context(
+                                |app: &mut App, ctx| { app.send_action_notification(ctx) }
+                            ),),
+                        ]),
+                        Text::new(self.notification_status.signal()).style(status_style),
+                    ]),
+                ),
+                component_card(
+                    "Image",
+                    Image::from_path(demo_image_path())
+                        .size(dp(220.0), dp(120.0))
+                        .style(image_style),
+                ),
+                component_card("Canvas", demo_canvas()),
+            ])
             .into()
     }
 }
 //
-// fn component_card(title: &str, content: impl Into<Element<App>>) -> Element<App> {
-//     Flex::vertical()
-//         .gap(dp(10.0))
-//         .padding(Insets::all(dp(14.0)))
-//         .style(card_style)
-//         .child(el![
-//             Text::new(title).style(|mode| text_style(mode, sp(18.0))),
-//             content.into(),
-//         ])
-//         .into()
-// }
+fn component_card(title: &str, content: impl Into<Element<App>>) -> Element<App> {
+    Flex::vertical()
+        .gap(dp(10.0))
+        .padding(Insets::all(dp(14.0)))
+        .style(card_style)
+        .child(el![
+            Text::new(title).style(|mode| text_style(mode, sp(18.0))),
+            content.into(),
+        ])
+        .into()
+}
 //
-// fn demo_image_path() -> PathBuf {
-//     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-//         .join("../background_effects/assets/juequling_shushu.jpg")
-// }
+fn demo_image_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../background_effects/assets/juequling_shushu.jpg")
+}
 //
-// fn demo_canvas() -> Element<App> {
-//     Canvas::new(CanvasRecorder::build(|canvas| {
-//         canvas
-//             .set_fill(CanvasLinearGradient::new(
-//                 Point::new(24.0, 20.0),
-//                 Point::new(208.0, 128.0),
-//                 vec![
-//                     CanvasGradientStop::new(0.0, Color::hexa(0x38BDF8FF)),
-//                     CanvasGradientStop::new(1.0, Color::hexa(0x1D4ED8FF)),
-//                 ],
-//             ))
-//             .set_stroke(CanvasStroke::new(dp(3.0), Color::hexa(0xE0F2FEFF)))
-//             .begin_path()
-//             .move_to(24.0, 20.0)
-//             .line_to(208.0, 20.0)
-//             .line_to(208.0, 128.0)
-//             .line_to(24.0, 128.0)
-//             .close_path()
-//             .fill_and_stroke();
+fn demo_canvas() -> Element<App> {
+    Canvas::new(CanvasRecorder::build(|canvas| {
+        canvas
+            .set_fill(CanvasLinearGradient::new(
+                Point::new(24.0, 20.0),
+                Point::new(208.0, 128.0),
+                vec![
+                    CanvasGradientStop::new(0.0, Color::hexa(0x38BDF8FF)),
+                    CanvasGradientStop::new(1.0, Color::hexa(0x1D4ED8FF)),
+                ],
+            ))
+            .set_stroke(CanvasStroke::new(dp(3.0), Color::hexa(0xE0F2FEFF)))
+            .begin_path()
+            .move_to(24.0, 20.0)
+            .line_to(208.0, 20.0)
+            .line_to(208.0, 128.0)
+            .line_to(24.0, 128.0)
+            .close_path()
+            .fill_and_stroke();
 //
-//         canvas
-//             .set_fill(Color::hexa(0x22C55EFF))
-//             .set_stroke(CanvasStroke::new(dp(3.0), Color::hexa(0x14532DFF)))
-//             .begin_path()
-//             .move_to(44.0, 146.0)
-//             .quad_to(116.0, 92.0, 188.0, 146.0)
-//             .line_to(188.0, 188.0)
-//             .line_to(44.0, 188.0)
-//             .close_path()
-//             .fill_and_stroke();
-//     }))
-//         .size(dp(232.0), dp(212.0))
-//         .style(canvas_style)
-//         .into()
-// }
+        canvas
+            .set_fill(Color::hexa(0x22C55EFF))
+            .set_stroke(CanvasStroke::new(dp(3.0), Color::hexa(0x14532DFF)))
+            .begin_path()
+            .move_to(44.0, 146.0)
+            .quad_to(116.0, 92.0, 188.0, 146.0)
+            .line_to(188.0, 188.0)
+            .line_to(44.0, 188.0)
+            .close_path()
+            .fill_and_stroke();
+    }))
+        .size(dp(232.0), dp(212.0))
+        .style(canvas_style)
+        .into()
+}
 //
-// fn demo_shadow_card() -> Element<App> {
-//     Flex::vertical()
-//         .gap(dp(12.0))
-//         .size(dp(200.0), dp(200.0))
-//         .center()
-//         .child(
-//             Stack::new()
-//                 .size(dp(100.0), dp(100.0))
-//                 .style(shadow_showcase_style)
-//         )
-//         .into()
-// }
+fn demo_shadow_card() -> Element<App> {
+    Flex::vertical()
+        .gap(dp(12.0))
+        .size(dp(200.0), dp(200.0))
+        .center()
+        .child(
+            Stack::new()
+                .size(dp(100.0), dp(100.0))
+                .style(shadow_showcase_style)
+        )
+        .into()
+}
 
 impl App {
-    // fn build_popover_component(&self) -> Element<Self> {
-    //     let trigger_text = self
-    //         .popover_open
-    //         .signal()
-    //         .map(|open| if open { "已固定打开" } else { "点击或悬停打开" }.to_string());
+    fn build_popover_component(&self) -> Element<Self> {
+        let trigger_text = self
+            .popover_open
+            .signal()
+            .map(|open| if open { "已固定打开" } else { "点击或悬停打开" }.to_string());
+
+        Flex::vertical()
+            .gap(dp(10.0))
+            .child(el![
+                Text::new("支持点击固定打开，也支持 hover 预览；鼠标移入浮层后可以继续交互，点击外部或按 Esc 关闭固定打开态。")
+                    .style(status_style),
+                Popover::new(
+                    Button::new(trigger_text)
+                        .secondary()
+                        .size(dp(180.0), dp(36.0)),
+                )
+                .content(
+                    Flex::vertical()
+                        .gap(dp(10.0))
+                        .width(dp(280.0))
+                    .style(|th| {
+                        let mut style = ContainerStyle::default_for(th);
+                        style.surface.background = Some(Color::hexa(0xF3F4F6FF).into());
+                        style
+                    })
+                        .child(el![
+                            Text::new("快速设置").style(|mode| text_style(mode, sp(18.0))),
+                            Text::new("同一个 Popover 同时展示 Click 固定打开和 Hover 预览。")
+                                .style(status_style),
+                            Input::new(self.popover_note.clone())
+                                .placeholder("输入浮层里的备注")
+                                .width(dp(240.0)),
+                            Switch::new(self.popover_switch.signal()).on_change(ValueCommand::new(
+                                |app: &mut App, enabled| app.popover_switch.set(enabled)
+                            )),
+                            Checkbox::new(self.checkbox.signal())
+                                .label("沿用页面里的 checkbox 状态")
+                                .on_change(ValueCommand::new(|app: &mut App, checked| {
+                                    app.checkbox.set(checked)
+                                })),
+                            Flex::horizontal().gap(dp(8.0)).child(el![
+                                Button::new("应用")
+                                    .primary()
+                                    .on_click(Command::new(|app: &mut App| {
+                                        app.popover_open.set(false)
+                                    })),
+                                Button::new("关闭")
+                                    .ghost()
+                                    .on_click(Command::new(|app: &mut App| {
+                                        app.popover_open.set(false)
+                                    })),
+                            ]),
+                        ]),
+                )
+                .open(self.popover_open.signal())
+                .on_open_change(ValueCommand::new(|app: &mut App, open| {
+                    app.popover_open.set(open)
+                }))
+                .trigger_mode(PopoverTriggerMode::ClickAndHoverPreview)
+                .match_anchor_width(true),
+                Text::new(
+                    self.popover_switch
+                        .signal()
+                        .map(|enabled| if enabled { "浮层内开关：开启" } else { "浮层内开关：关闭" }.to_string()),
+                )
+                .style(status_style),
+            ])
+            .into()
+    }
     //
-    //     Flex::vertical()
-    //         .gap(dp(10.0))
-    //         .child(el![
-    //             Text::new("支持点击固定打开，也支持 hover 预览；鼠标移入浮层后可以继续交互，点击外部或按 Esc 关闭固定打开态。")
-    //                 .style(status_style),
-    //             Popover::new(
-    //                 Button::new(trigger_text)
-    //                     .secondary()
-    //                     .size(dp(180.0), dp(36.0)),
-    //             )
-    //             .content(
-    //                 Flex::vertical()
-    //                     .gap(dp(10.0))
-    //                     .width(dp(280.0))
-    //                     .child(el![
-    //                         Text::new("快速设置").style(|mode| text_style(mode, sp(18.0))),
-    //                         Text::new("同一个 Popover 同时展示 Click 固定打开和 Hover 预览。")
-    //                             .style(status_style),
-    //                         Input::new(self.popover_note.clone())
-    //                             .placeholder("输入浮层里的备注")
-    //                             .width(dp(240.0)),
-    //                         Switch::new(self.popover_switch.signal()).on_change(ValueCommand::new(
-    //                             |app: &mut App, enabled| app.popover_switch.set(enabled)
-    //                         )),
-    //                         Checkbox::new(self.checkbox.signal())
-    //                             .label("沿用页面里的 checkbox 状态")
-    //                             .on_change(ValueCommand::new(|app: &mut App, checked| {
-    //                                 app.checkbox.set(checked)
-    //                             })),
-    //                         Flex::horizontal().gap(dp(8.0)).child(el![
-    //                             Button::new("应用")
-    //                                 .primary()
-    //                                 .on_click(Command::new(|app: &mut App| {
-    //                                     app.popover_open.set(false)
-    //                                 })),
-    //                             Button::new("关闭")
-    //                                 .ghost()
-    //                                 .on_click(Command::new(|app: &mut App| {
-    //                                     app.popover_open.set(false)
-    //                                 })),
-    //                         ]),
-    //                     ]),
-    //             )
-    //             .open(self.popover_open.signal())
-    //             .on_open_change(ValueCommand::new(|app: &mut App, open| {
-    //                 app.popover_open.set(open)
-    //             }))
-    //             .trigger_mode(PopoverTriggerMode::ClickAndHoverPreview)
-    //             .match_anchor_width(true),
-    //             Text::new(
-    //                 self.popover_switch
-    //                     .signal()
-    //                     .map(|enabled| if enabled { "浮层内开关：开启" } else { "浮层内开关：关闭" }.to_string()),
-    //             )
-    //             .style(status_style),
-    //         ])
-    //         .into()
-    // }
+    fn build_video_component(&self) -> Element<Self> {
+        Flex::vertical()
+            .gap(dp(10.0))
+            .child(el![
+                Input::new(self.video_player.source.clone()).placeholder("在此输入视频地址"),
+                VideoSurface::new(self.video_player.video_controller.clone()).size(dp(300.0), dp(168.0)),
+                Flex::horizontal()
+                .gap(dp(10.0))
+                .child(el![
+                    Button::new("加载")
+                    .on_click(Command::new(|app: &mut App| {
+                        if let Err(err) = app.video_player.change_source(app.video_player.source.text()) {
+                            tgui_log(LogLevel::Error, format!("加载视频失败: {err}"))
+                        }
+                    })),
+                    Button::new("播放")
+                    .on_click(Command::new(|app: &mut App| {
+                        app.video_player.play()
+                    })),
+                    Button::new("暂停")
+                    .on_click(Command::new(|app: &mut App| {
+                        app.video_player.pause()
+                    }))
+                ])
+            ])
+            .into()
+    }
     //
-    // fn build_video_component(&self) -> Element<Self> {
-    //     Flex::vertical()
-    //         .gap(dp(10.0))
-    //         .child(el![
-    //             Input::new(self.video_player.source.clone()).placeholder("在此输入视频地址"),
-    //             VideoSurface::new(self.video_player.video_controller.clone()).size(dp(300.0), dp(168.0)),
-    //             Flex::horizontal()
-    //             .gap(dp(10.0))
-    //             .child(el![
-    //                 Button::new("加载")
-    //                 .on_click(Command::new(|app: &mut App| {
-    //                     if let Err(err) = app.video_player.change_source(app.video_player.source.text()) {
-    //                         tgui_log(LogLevel::Error, format!("加载视频失败: {err}"))
-    //                     }
-    //                 })),
-    //                 Button::new("播放")
-    //                 .on_click(Command::new(|app: &mut App| {
-    //                     app.video_player.play()
-    //                 })),
-    //                 Button::new("暂停")
-    //                 .on_click(Command::new(|app: &mut App| {
-    //                     app.video_player.pause()
-    //                 }))
-    //             ])
-    //         ])
-    //         .into()
-    // }
+    fn build_audio_component(&self) -> Element<Self> {
+        Flex::vertical()
+            .gap(dp(10.0))
+            .child(el![
+                Audio::new(self.audio_controller.clone()),
+                    Text::new(
+                        self.audio_controller
+                            .playback_state()
+                            .map(playback_status_text),
+                    ),
+                    Flex::horizontal()
+                    .gap(dp(10.0))
+                    .child(el![
+                        Button::new("加载")
+                            .on_click(Command::new(|app: &mut App| {
+                                match app.audio_controller.load(AudioSource::File(PathBuf::from(app.input_text.text()))) {
+                                    Ok(()) => {}
+                                    Err(err) => {
+                                        tgui_log(LogLevel::Error, &err);
+                                    }
+                                }
+                            })),
+                        Button::new("播放")
+                            .on_click(Command::new(|app: &mut App| {
+                                app.audio_controller.play()
+                            })),
+                        Button::new("暂停")
+                            .on_click(Command::new(|app: &mut App| {
+                                app.audio_controller.pause()
+                            }))
+                    ])
+                ]).into()
+    }
     //
-    // fn build_audio_component(&self) -> Element<Self> {
-    //     Flex::vertical()
-    //         .gap(dp(10.0))
-    //         .child(el![
-    //             Audio::new(self.audio_controller.clone()),
-    //                 Text::new(
-    //                     self.audio_controller
-    //                         .playback_state()
-    //                         .map(playback_status_text),
-    //                 ),
-    //                 Flex::horizontal()
-    //                 .gap(dp(10.0))
-    //                 .child(el![
-    //                     Button::new("加载")
-    //                         .on_click(Command::new(|app: &mut App| {
-    //                             match app.audio_controller.load(AudioSource::File(PathBuf::from(app.input_text.text()))) {
-    //                                 Ok(()) => {}
-    //                                 Err(err) => {
-    //                                     tgui_log(LogLevel::Error, &err);
-    //                                 }
-    //                             }
-    //                         })),
-    //                     Button::new("播放")
-    //                         .on_click(Command::new(|app: &mut App| {
-    //                             app.audio_controller.play()
-    //                         })),
-    //                     Button::new("暂停")
-    //                         .on_click(Command::new(|app: &mut App| {
-    //                             app.audio_controller.pause()
-    //                         }))
-    //                 ])
-    //             ]).into()
-    // }
+    fn request_notification_permission(ctx: &CommandContext<Self>) {
+        let _ =
+            ctx.notifications()
+                .request_permission(ValueCommand::new(|app: &mut App, result| {
+                    app.notification_status.set(match result {
+                        Ok(permission) => format!("通知权限: {permission:?}"),
+                        Err(error) => format!("通知权限请求失败: {error}"),
+                    });
+                }));
+    }
     //
-    // fn request_notification_permission(ctx: &CommandContext<Self>) {
-    //     let _ =
-    //         ctx.notifications()
-    //             .request_permission(ValueCommand::new(|app: &mut App, result| {
-    //                 app.notification_status.set(match result {
-    //                     Ok(permission) => format!("通知权限: {permission:?}"),
-    //                     Err(error) => format!("通知权限请求失败: {error}"),
-    //                 });
-    //             }));
-    // }
+    fn send_plain_notification(&mut self, ctx: &CommandContext<Self>) {
+        let result = ctx.notifications().send(
+            NotificationOptions::new("TGUI Demo")
+                .body("这是一条普通通知")
+                .app_name("TGUI Demo"),
+        );
+        self.notification_status.set(match result {
+            Ok(id) => format!("已发送普通通知: {id}"),
+            Err(error) => {
+                let string = format!("发送普通通知失败: {error}");
+                tgui_log(LogLevel::Error, &string);
+                string
+            },
+        });
+    }
     //
-    // fn send_plain_notification(&mut self, ctx: &CommandContext<Self>) {
-    //     let result = ctx.notifications().send(
-    //         NotificationOptions::new("TGUI Demo")
-    //             .body("这是一条普通通知")
-    //             .app_name("TGUI Demo"),
-    //     );
-    //     self.notification_status.set(match result {
-    //         Ok(id) => format!("已发送普通通知: {id}"),
-    //         Err(error) => {
-    //             let string = format!("发送普通通知失败: {error}");
-    //             tgui_log(LogLevel::Error, &string);
-    //             string
-    //         },
-    //     });
-    // }
+    fn send_action_notification(&mut self, ctx: &CommandContext<Self>) {
+        let result = ctx.notifications().send_with_actions(
+            NotificationOptions::new("TGUI Demo")
+                .body("请选择一个动作，结果会回到 ViewModel。")
+                .app_name("TGUI Demo")
+                .action(NotificationAction::new("accept", "接受"))
+                .action(NotificationAction::new("dismiss", "忽略")),
+            ValueCommand::new(
+                |app: &mut App, result: Result<NotificationActionEvent, NotificationError>| {
+                    app.notification_status.set(match result {
+                        Ok(event) => format!(
+                            "通知动作: notification_id={}, action_id={}",
+                            event.notification_id, event.action_id
+                        ),
+                        Err(error) => {
+                            let string = format!("通知动作失败: {error}");
+                            tgui_log(LogLevel::Error, &string);
+                            string
+                        },
+                    });
+                },
+            ),
+        );
+        self.notification_status.set(match result {
+            Ok(id) => format!("已发送动作通知: {id}"),
+            Err(error) => {
+                let string = format!("发送动作通知失败: {error}");
+                tgui_log(LogLevel::Error, &string);
+                string
+            },
+        });
+    }
     //
-    // fn send_action_notification(&mut self, ctx: &CommandContext<Self>) {
-    //     let result = ctx.notifications().send_with_actions(
-    //         NotificationOptions::new("TGUI Demo")
-    //             .body("请选择一个动作，结果会回到 ViewModel。")
-    //             .app_name("TGUI Demo")
-    //             .action(NotificationAction::new("accept", "接受"))
-    //             .action(NotificationAction::new("dismiss", "忽略")),
-    //         ValueCommand::new(
-    //             |app: &mut App, result: Result<NotificationActionEvent, NotificationError>| {
-    //                 app.notification_status.set(match result {
-    //                     Ok(event) => format!(
-    //                         "通知动作: notification_id={}, action_id={}",
-    //                         event.notification_id, event.action_id
-    //                     ),
-    //                     Err(error) => {
-    //                         let string = format!("通知动作失败: {error}");
-    //                         tgui_log(LogLevel::Error, &string);
-    //                         string
-    //                     },
-    //                 });
-    //             },
-    //         ),
-    //     );
-    //     self.notification_status.set(match result {
-    //         Ok(id) => format!("已发送动作通知: {id}"),
-    //         Err(error) => {
-    //             let string = format!("发送动作通知失败: {error}");
-    //             tgui_log(LogLevel::Error, &string);
-    //             string
-    //         },
-    //     });
-    // }
-    //
-    // fn theme_binding(&self) -> Signal<ThemeMode> {
-    //     self.theme.signal()
-    // }
+    fn theme_binding(&self) -> Signal<ThemeMode> {
+        self.theme.signal()
+    }
 
     fn run() -> Result<(), TguiError> {
         Application::new()
             .app_id("com.tgui.demo")
             .with_view_model(App::new)
             .root_view(App::view)
-            // .bind_theme_mode(App::theme_binding)
+            .bind_theme_mode(App::theme_binding)
             .run()
     }
 }

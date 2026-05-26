@@ -251,7 +251,7 @@ impl<VM> Button<VM> {
 
     /// 给按钮挂上 Tooltip：hover 时显示说明文本。
     pub fn tooltip(mut self, tooltip: super::Tooltip) -> Self {
-        self.element.tooltip = Some(tooltip);
+        self.element.tooltip = Some(Box::new(tooltip));
         self
     }
 

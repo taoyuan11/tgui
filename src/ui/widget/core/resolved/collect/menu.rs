@@ -46,7 +46,7 @@ impl<VM> ResolvedElement<VM> {
             return;
         }
         let theme_mode = crate::ui::widget::style::infer_theme_mode(context.theme);
-        let style = menu.resolved_style(theme_mode);
+        let style = Box::new(menu.resolved_style(theme_mode));
         emit_menu_layer(
             self,
             context,

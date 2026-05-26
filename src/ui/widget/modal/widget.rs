@@ -316,7 +316,7 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
             .child(card_element);
 
         let mut outer_element: Element<VM> = outer.into();
-        outer_element.modal = Some(ModalDescriptor {
+        outer_element.modal = Some(Box::new(ModalDescriptor {
             open,
             on_open_change,
             close_on_escape,
@@ -325,7 +325,7 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
             backdrop_widget_id,
             card_widget_id,
             style,
-        });
+        }));
         outer_element
     }
 }

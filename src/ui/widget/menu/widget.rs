@@ -153,7 +153,7 @@ impl<VM> From<Menu<VM>> for Element<VM> {
             menubar_index,
             menubar_set_active,
         };
-        trigger.menu = Some(descriptor);
+        trigger.menu = Some(Box::new(descriptor));
         trigger
     }
 }

@@ -142,7 +142,7 @@ where
             disabled,
             style,
         };
-        child.context_menu = Some(descriptor);
+        child.context_menu = Some(Box::new(descriptor));
         child
     }
 }

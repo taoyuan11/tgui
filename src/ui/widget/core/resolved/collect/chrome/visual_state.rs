@@ -9,7 +9,7 @@ impl<VM> ResolvedElement<VM> {
         layout_node: &LayoutNode,
         visual_context: VisualContext,
         context: &mut CollectContext<'_, '_>,
-    ) -> CollectVisualState {
+    ) -> Box<CollectVisualState> {
         let layout = context
             .taffy
             .layout(layout_node.node)
@@ -61,7 +61,7 @@ impl<VM> ResolvedElement<VM> {
         let background_frame = frame.inset(Insets::all(Dp::new(background_inset)));
         let background_radius = (border_radius - background_inset).max(0.0);
 
-        CollectVisualState {
+        Box::new(CollectVisualState {
             frame,
             background_frame,
             background_radius: Dp::new(background_radius),
@@ -75,7 +75,7 @@ impl<VM> ResolvedElement<VM> {
             border_color,
             background,
             styles,
-        }
+        })
     }
 
     fn collect_visual_disabled_state(&self) -> bool {

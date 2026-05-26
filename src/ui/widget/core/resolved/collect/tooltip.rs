@@ -103,7 +103,7 @@ impl<VM> ResolvedElement<VM> {
         }
 
         let theme_mode = crate::ui::widget::style::infer_theme_mode(context.theme);
-        let style = tooltip.resolved_style(theme_mode);
+        let style = Box::new(tooltip.resolved_style(theme_mode));
         let background = style.background;
         let foreground = style.foreground;
         let shadow_blur = style.shadow.blur.get() * visibility;

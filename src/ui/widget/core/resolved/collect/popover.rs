@@ -39,7 +39,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         }
 
         let theme_mode = crate::ui::widget::style::infer_theme_mode(context.theme);
-        let style = popover.resolved_style(theme_mode);
+        let style = Box::new(popover.resolved_style(theme_mode));
         let anchor_width = popover
             .match_anchor_width
             .then_some(visual.frame.width.max(style.min_width).min(style.max_width));

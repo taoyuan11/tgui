@@ -143,7 +143,7 @@ impl<VM: 'static> From<Popover<VM>> for Element<VM> {
             close_on_outside_click,
             match_anchor_width,
         };
-        trigger.popover = Some(descriptor);
+        trigger.popover = Some(Box::new(descriptor));
         trigger
     }
 }

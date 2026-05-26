@@ -217,10 +217,16 @@ impl<VM> Element<VM> {
             media_events: self.media_events.scope(selector.clone()),
             background: self.background,
             tooltip: self.tooltip,
-            popover: self.popover.map(|popover| popover.scope(selector.clone())),
-            menu: self.menu.map(|menu| menu.scope(selector.clone())),
-            context_menu: self.context_menu.map(|menu| menu.scope(selector.clone())),
-            modal: self.modal.map(|modal| modal.scope(selector)),
+            popover: self
+                .popover
+                .map(|popover| Box::new((*popover).scope(selector.clone()))),
+            menu: self
+                .menu
+                .map(|menu| Box::new((*menu).scope(selector.clone()))),
+            context_menu: self
+                .context_menu
+                .map(|menu| Box::new((*menu).scope(selector.clone()))),
+            modal: self.modal.map(|modal| Box::new((*modal).scope(selector))),
             kind,
         }
     }
@@ -248,7 +254,7 @@ impl<VM> Element<VM> {
     /// 给 Element 挂上 Tooltip。任何 widget 通过 `.into()` 转 Element 后都可以链式调用。
     /// 各 widget 的 builder 通常也会暴露同名 `.tooltip()` 方法，调用本方法的简写形式。
     pub fn with_tooltip(mut self, tooltip: crate::ui::widget::Tooltip) -> Self {
-        self.tooltip = Some(tooltip);
+        self.tooltip = Some(Box::new(tooltip));
         self
     }
 
@@ -258,7 +264,7 @@ impl<VM> Element<VM> {
         mut self,
         descriptor: crate::ui::widget::menu::MenuDescriptor<VM>,
     ) -> Self {
-        self.menu = Some(descriptor);
+        self.menu = Some(Box::new(descriptor));
         self
     }
 
@@ -268,7 +274,7 @@ impl<VM> Element<VM> {
         mut self,
         descriptor: crate::ui::widget::menu::ContextMenuDescriptor<VM>,
     ) -> Self {
-        self.context_menu = Some(descriptor);
+        self.context_menu = Some(Box::new(descriptor));
         self
     }
 
@@ -276,7 +282,7 @@ impl<VM> Element<VM> {
         mut self,
         descriptor: crate::ui::widget::popover::PopoverDescriptor<VM>,
     ) -> Self {
-        self.popover = Some(descriptor);
+        self.popover = Some(Box::new(descriptor));
         self
     }
 
