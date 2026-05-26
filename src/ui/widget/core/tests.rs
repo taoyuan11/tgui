@@ -219,6 +219,7 @@ mod controls_tests;
 mod dependency_tests;
 mod layout_scroll_tests;
 mod menu_tests;
+mod modal_tests;
 mod select_tests;
 mod text_and_background;
 mod text_input_tests;

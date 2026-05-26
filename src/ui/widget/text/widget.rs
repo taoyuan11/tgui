@@ -339,6 +339,7 @@ impl Text {
             tooltip: None,
             menu: None,
             context_menu: None,
+            modal: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -366,6 +367,7 @@ impl Text {
             tooltip: None,
             menu: None,
             context_menu: None,
+            modal: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -392,6 +394,7 @@ impl<VM> From<Text> for Element<VM> {
             tooltip: None,
             menu: None,
             context_menu: None,
+            modal: None,
             kind: WidgetKind::Text { text: value },
         }
     }

@@ -198,6 +198,7 @@ impl<VM> Switch<VM> {
                 tooltip: None,
                 menu: None,
                 context_menu: None,
+                modal: None,
                 kind: WidgetKind::Switch {
                     checked: checked.into(),
                     on_change: None,

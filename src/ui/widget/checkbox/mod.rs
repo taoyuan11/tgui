@@ -198,6 +198,7 @@ impl<VM> Checkbox<VM> {
                 tooltip: None,
                 menu: None,
                 context_menu: None,
+                modal: None,
                 kind: WidgetKind::Checkbox {
                     checked: checked.into(),
                     label: None,

@@ -44,6 +44,7 @@ impl<VM> Container<VM> {
                 tooltip: None,
                 menu: None,
                 context_menu: None,
+                modal: None,
                 kind: WidgetKind::Container {
                     layout,
                     children: Vec::new(),

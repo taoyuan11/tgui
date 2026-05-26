@@ -84,6 +84,19 @@
 - **桌面操作**：`Esc` 关闭（可禁用）；`Enter` 触发主动作；Tab 在内部循环（focus trap）；点击 backdrop 关闭（可禁用）。
 - **移动操作**：底部全宽 sheet 形式或居中；向下滑动关闭（参考 P0 §6）；返回键关闭。
 - **依赖**：P0 §1、§2、§5。
+- **进度**：[基本完成]
+  - ✅ `Modal` / `ModalAction` / `ModalStyle` 公开 builder API + 主题样式 token；
+  - ✅ Modal in-tree 子树渲染（任意 widget 内容支持）：semi-transparent backdrop + 居中 card（title / content / actions 三段）；
+  - ✅ Card 自动启用 `FocusScopeOptions::trap(true)`：Tab 在 modal 内循环；
+  - ✅ 主按钮（`ModalAction::primary`）`tab_index=0`，配合 Button 自带 `DefaultActivation::EnterAndSpace`，Tab 一次后 Enter 自动触发；
+  - ✅ Esc 关闭：collect 阶段额外 emit 空内容 sentinel overlay 到 `OverlayLayer::Modal`，piggyback runtime overlay close 机制；可通过 `.close_on_escape(false)` 禁用；
+  - ✅ 点击 backdrop 关闭：backdrop Stack 自带 `on_click` → on_open_change(false)；可通过 `.close_on_backdrop_click(false)` 禁用；
+  - ✅ Fade 动画：backdrop + card 的 `opacity` 由 `open: Signal<bool>` 派生 + `.animated(Transition::ease_in_out(160ms))` 自动过渡；
+  - ✅ `WidgetProperty::ModalVisibility` 注册到动画引擎，复用 tooltip 同源 `AnimationKey::Widget` 通道；
+  - ✅ 单元测试覆盖（5 个 widget core 测试 + 3 个 runtime 测试）：descriptor 挂载、open/close 渲染对比、focus trap、Esc 关闭、close_on_escape=false 抑制；
+  - ✅ `examples/modal_demo/` 独立示例：alert / confirm / 自定义内容（带 Input）三种用法。
+  - ⏳ 待补（独立 PR 价值低、可按需补）：scale 动画（VisualStyle 暂无 scale 字段，需要框架基础设施扩展）、`Modal::return_focus_to(widget_id)` builder API、`FocusScopeOptions::auto_focus_first`（打开时自动 focus primary，省去用户按一次 Tab）、移动端"向下滑动关闭"（依赖 P0 §6 Gesture）。
+
 
 ### 11. Popover
 - **作用**：相对锚点的非阻塞浮层，用于二级表单、详情、操作组等"比 Tooltip 重、比 Modal 轻"的场景。

@@ -218,7 +218,8 @@ impl<VM> Element<VM> {
             background: self.background,
             tooltip: self.tooltip,
             menu: self.menu.map(|menu| menu.scope(selector.clone())),
-            context_menu: self.context_menu.map(|menu| menu.scope(selector)),
+            context_menu: self.context_menu.map(|menu| menu.scope(selector.clone())),
+            modal: self.modal.map(|modal| modal.scope(selector)),
             kind,
         }
     }

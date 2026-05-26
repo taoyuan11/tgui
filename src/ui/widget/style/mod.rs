@@ -3,8 +3,8 @@ mod palette;
 mod shared;
 
 pub use controls::{
-    ButtonStyle, CheckboxStyle, InputStyle, MenuBarStyle, MenuStyle, RadioStyle, SelectStyle,
-    SliderStyle, SwitchStyle, TextareaStyle, TooltipStyle,
+    ButtonStyle, CheckboxStyle, InputStyle, MenuBarStyle, MenuStyle, ModalStyle, RadioStyle,
+    SelectStyle, SliderStyle, SwitchStyle, TextareaStyle, TooltipStyle,
 };
 pub use shared::{
     CanvasStyle, ContainerStyle, FocusRingOverride, ImageStyle, TextWidgetStyle, VideoSurfaceStyle,

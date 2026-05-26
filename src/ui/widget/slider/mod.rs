@@ -201,6 +201,7 @@ impl<VM> Slider<VM> {
                 tooltip: None,
                 menu: None,
                 context_menu: None,
+                modal: None,
                 kind: WidgetKind::Slider {
                     value: value.into(),
                     min,

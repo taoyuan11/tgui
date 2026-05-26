@@ -202,6 +202,7 @@ impl<VM> Textarea<VM> {
                 tooltip: None,
                 menu: None,
                 context_menu: None,
+                modal: None,
                 kind: WidgetKind::TextEditor {
                     controller,
                     placeholder: Value::Static(String::new()),

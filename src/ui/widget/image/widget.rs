@@ -350,6 +350,7 @@ impl Image {
             tooltip: None,
             menu: None,
             context_menu: None,
+            modal: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -374,6 +375,7 @@ impl Image {
             tooltip: None,
             menu: None,
             context_menu: None,
+            modal: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -398,6 +400,7 @@ impl Image {
             tooltip: None,
             menu: None,
             context_menu: None,
+            modal: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -421,6 +424,7 @@ impl<VM> From<Image> for Element<VM> {
             tooltip: None,
             menu: None,
             context_menu: None,
+            modal: None,
             kind: WidgetKind::Image { image: value },
         }
     }

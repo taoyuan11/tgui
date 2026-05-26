@@ -200,6 +200,7 @@ impl<VM> Radio<VM> {
                 tooltip: None,
                 menu: None,
                 context_menu: None,
+                modal: None,
                 kind: WidgetKind::Radio {
                     checked: checked.into(),
                     label: None,

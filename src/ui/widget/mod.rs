@@ -11,6 +11,7 @@ mod gesture;
 mod image;
 mod input;
 mod menu;
+mod modal;
 mod overlay;
 mod radio;
 mod scroll_view;
@@ -84,6 +85,7 @@ pub use menu::{
     ChordKey, ContextMenu, KeyChord, Menu, MenuBar, MenuBarEntry, MenuIcon, MenuItem, MenuItemKind,
 };
 pub(crate) use menu::{ContextMenuDescriptor, MenuDescriptor, MenuItemState};
+pub use modal::{Modal, ModalAction};
 pub use overlay::{
     Alignment as OverlayAlignment, Anchor as OverlayAnchor, AnchorKey as OverlayAnchorKey,
     AnchorSource as OverlayAnchorSource, FlipPolicy as OverlayFlipPolicy, OverlayId, OverlayLayer,
@@ -101,8 +103,9 @@ pub use select::{Select, SelectOption};
 pub use slider::Slider;
 pub use style::{
     ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, FocusRingOverride, ImageStyle,
-    InputStyle, MenuBarStyle, MenuStyle, RadioStyle, SelectStyle, SliderStyle, SwitchStyle,
-    TextWidgetStyle, TextareaStyle, TooltipStyle, VideoSurfaceStyle, WidgetSurfaceStyle,
+    InputStyle, MenuBarStyle, MenuStyle, ModalStyle, RadioStyle, SelectStyle, SliderStyle,
+    SwitchStyle, TextWidgetStyle, TextareaStyle, TooltipStyle, VideoSurfaceStyle,
+    WidgetSurfaceStyle,
 };
 pub use switch::Switch;
 pub use text::{IntoTextContent, Text};

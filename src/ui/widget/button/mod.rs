@@ -197,6 +197,7 @@ impl<VM> Button<VM> {
                 tooltip: None,
                 menu: None,
                 context_menu: None,
+                modal: None,
                 kind: WidgetKind::Button {
                     label: label.into(),
                     disabled: Value::Static(false),

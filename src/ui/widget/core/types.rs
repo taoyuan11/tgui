@@ -21,6 +21,7 @@ pub struct Element<VM> {
     pub(crate) tooltip: Option<crate::ui::widget::tooltip::Tooltip>,
     pub(crate) menu: Option<crate::ui::widget::menu::MenuDescriptor<VM>>,
     pub(crate) context_menu: Option<crate::ui::widget::menu::ContextMenuDescriptor<VM>>,
+    pub(crate) modal: Option<crate::ui::widget::modal::ModalDescriptor<VM>>,
     pub(crate) kind: WidgetKind<VM>,
 }
 
@@ -39,6 +40,7 @@ impl<VM> Clone for Element<VM> {
             tooltip: self.tooltip.clone(),
             menu: self.menu.clone(),
             context_menu: self.context_menu.clone(),
+            modal: self.modal.clone(),
             kind: self.kind.clone(),
         }
     }
@@ -57,6 +59,7 @@ pub(crate) struct ResolvedElement<VM> {
     pub(crate) tooltip: Option<crate::ui::widget::tooltip::Tooltip>,
     pub(crate) menu: Option<crate::ui::widget::menu::MenuDescriptor<VM>>,
     pub(crate) context_menu: Option<crate::ui::widget::menu::ContextMenuDescriptor<VM>>,
+    pub(crate) modal: Option<crate::ui::widget::modal::ModalDescriptor<VM>>,
     pub(crate) child_source_spans: Vec<usize>,
     pub(crate) kind: ResolvedWidgetKind<VM>,
 }
@@ -175,6 +178,7 @@ impl<VM> Clone for ResolvedElement<VM> {
             tooltip: self.tooltip.clone(),
             menu: self.menu.clone(),
             context_menu: self.context_menu.clone(),
+            modal: self.modal.clone(),
             child_source_spans: self.child_source_spans.clone(),
             kind: self.kind.clone(),
         }

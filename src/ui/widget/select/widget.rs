@@ -397,6 +397,7 @@ where
             tooltip: None,
             menu: None,
             context_menu: None,
+            modal: None,
             kind: WidgetKind::Select {
                 selected_label,
                 placeholder: select.placeholder,

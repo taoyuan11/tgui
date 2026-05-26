@@ -627,3 +627,79 @@ impl MenuBarStyle {
         }
     }
 }
+
+/// Modal / Dialog widget 的样式定义。
+///
+/// Modal 由全屏 backdrop（半透明 scrim）+ 居中 card 组成。card 内有
+/// 标题区 / 内容区 / 动作区三段。`enter` / `exit` 过渡走默认
+/// `Transition::ease_in_out`（由 collect 阶段统一应用）。
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModalStyle {
+    /// 半透明遮罩颜色。alpha 通道决定基础不透明度，最终 alpha 还会乘以动画 visibility。
+    pub backdrop_color: Value<Color>,
+    pub surface: WidgetSurfaceStyle,
+    /// Card 背景色。
+    pub background: Value<Color>,
+    pub border: Value<Color>,
+    pub border_width: Value<Dp>,
+    pub radius: Value<Dp>,
+    pub shadow: Shadow,
+    /// Card 最小宽度。
+    pub min_width: Dp,
+    /// Card 最大宽度。
+    pub max_width: Dp,
+    /// Card 最大高度。
+    pub max_height: Dp,
+    /// Card 外边距（card 与 viewport 边缘的最小留空）。
+    pub margin: Insets,
+    /// Card 内边距（card 内部所有段落的统一 padding）。
+    pub padding: Insets,
+    /// 标题文本样式。
+    pub title_text_style: TextStyle,
+    /// 标题区独立 padding（继承在 card padding 之内）。
+    pub title_padding: Insets,
+    /// 内容区独立 padding。
+    pub content_padding: Insets,
+    /// 动作按钮之间的水平间距。
+    pub actions_gap: Dp,
+    /// 动作区独立 padding。
+    pub actions_padding: Insets,
+}
+
+impl ModalStyle {
+    /// 按解析后的主题模式创建默认样式。
+    pub fn default_for(mode: ResolvedThemeMode) -> Self {
+        let palette = palette(mode);
+        // backdrop alpha 在 light/dark 下都用 ~50% 黑遮罩，足够把主界面"压暗"。
+        let backdrop = Color::rgba(0, 0, 0, 0x80);
+        Self {
+            backdrop_color: Value::Static(backdrop),
+            surface: WidgetSurfaceStyle::default(),
+            background: Value::Static(palette.surface),
+            border: Value::Static(palette.outline_muted),
+            border_width: Value::Static(dp(1.0)),
+            radius: Value::Static(dp(12.0)),
+            shadow: Shadow {
+                offset_x: dp(0.0),
+                offset_y: dp(16.0),
+                blur: dp(40.0),
+                spread: dp(0.0),
+                color: Color::BLACK.with_alpha_factor(0.32),
+            },
+            min_width: dp(280.0),
+            max_width: dp(560.0),
+            max_height: dp(640.0),
+            margin: Insets::all(dp(24.0)),
+            padding: Insets::all(dp(0.0)),
+            title_text_style: {
+                let mut style = label_text_style();
+                style.size = crate::ui::unit::sp(18.0);
+                style
+            },
+            title_padding: Insets::symmetric(dp(20.0), dp(16.0)),
+            content_padding: Insets::symmetric(dp(20.0), dp(12.0)),
+            actions_gap: dp(8.0),
+            actions_padding: Insets::symmetric(dp(20.0), dp(16.0)),
+        }
+    }
+}

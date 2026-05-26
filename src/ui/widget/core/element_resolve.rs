@@ -357,6 +357,7 @@ impl<VM: 'static> Element<VM> {
             tooltip: source.tooltip.clone(),
             menu: source.menu.clone(),
             context_menu: source.context_menu.clone(),
+            modal: source.modal.clone(),
             child_source_spans,
             kind,
         }
