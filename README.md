@@ -58,7 +58,8 @@
 
 - 布局：`Stack`、`Grid`、`Flex`
 - 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Switch`、`Image`
-- 浮层基础设施：统一的 runtime overlay anchoring 引擎，当前已为 `Tooltip`、`Select` 与 `Menu` / `ContextMenu` / `MenuBar` 提供锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力
+- 浮层基础设施：统一的 runtime overlay anchoring 引擎，当前已为 `Tooltip`、`Popover`、`Select` 与 `Menu` / `ContextMenu` / `MenuBar` 提供锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力
+- `Popover`：支持 click 固定打开、hover 预览、外部点击 / `Esc` 关闭的锚定轻量浮层，可承载任意 widget 子树
 - 菜单组件：`Menu`（按钮触发的下拉操作菜单）、`ContextMenu`（长按 / 鼠标右键触发的浮层菜单）、`MenuBar`（顶部主菜单条）；统一 `MenuItem` 模型支持图标占位、勾选项、子菜单标识、快捷键提示文本、分隔线、禁用项
 - 画布：`Canvas`、`CanvasRecorder`、渐变/阴影/混合/裁剪/文字与图片绘制
 - 音频：`Audio`、`AudioController`、`AudioSource`（需启用 `audio` feature）
@@ -318,7 +319,7 @@ fn build_form_ui(ctx: &ViewModelContext) -> Element<()> {
 - `canvas`：scene-style 画布，支持 path/text/image/group/clip、渐变、阴影、布尔运算和 item 事件
 - `background_effects`：通用渐变背景和 backdrop blur
 - `frameless_window`：关闭系统装饰后的自绘标题栏、拖拽、拉伸和窗口按钮
-- `demo`：综合展示常用布局、组件、通知和画布
+- `demo`：综合展示常用布局、组件、`Tooltip` / `Popover`、通知和画布
 - `text_area`：受控 `Textarea` 编辑示例，读取自身源码但不保存
 - `multiple_vm_examples`：多页面 / 多 ViewModel 示例
 - `android_basic_window`：Android 入口示例

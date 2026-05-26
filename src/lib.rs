@@ -259,11 +259,12 @@ pub mod prelude {
         ItemLayout, ItemSource, KeyChord, LongPressEvent, Menu, MenuBar, MenuBarEntry,
         MenuBarStyle, MenuIcon, MenuItem, MenuItemKind, MenuStyle, Modal, ModalAction, ModalStyle,
         OverlayAlignment, OverlayFlipPolicy, OverlayPlacement, OverlaySide, PinchGestureEvent,
-        Radio, RadioGroup, RadioOption, RadioStyle, ScrollView, Select, SelectOption, SelectStyle,
-        Slider, SliderStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle,
-        Text, TextWidgetStyle, Textarea, TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
-        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
-        WidgetSurfaceStyle, WidgetTree,
+        Popover, PopoverStyle, PopoverTriggerMode, Radio, RadioGroup, RadioOption, RadioStyle,
+        ScrollView, Select, SelectOption, SelectStyle, Slider, SliderStyle, SwipeAxis,
+        SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea,
+        TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement,
+        VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle,
+        WidgetTree,
     };
 }
 
@@ -298,11 +299,12 @@ pub mod widgets {
         ItemLayout, ItemSource, KeyChord, LongPressEvent, Menu, MenuBar, MenuBarEntry,
         MenuBarStyle, MenuIcon, MenuItem, MenuItemKind, MenuStyle, Modal, ModalAction, ModalStyle,
         OverlayAlignment, OverlayFlipPolicy, OverlayPlacement, OverlaySide, PinchGestureEvent,
-        Radio, RadioGroup, RadioOption, RadioStyle, ScrollView, Select, SelectOption, SelectStyle,
-        Slider, SliderStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle,
-        Text, TextWidgetStyle, Textarea, TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
-        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
-        WidgetSurfaceStyle, WidgetTree,
+        Popover, PopoverStyle, PopoverTriggerMode, Radio, RadioGroup, RadioOption, RadioStyle,
+        ScrollView, Select, SelectOption, SelectStyle, Slider, SliderStyle, SwipeAxis,
+        SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea,
+        TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement,
+        VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle,
+        WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

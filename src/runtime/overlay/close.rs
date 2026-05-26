@@ -4,6 +4,7 @@ use crate::ui::widget::{Rect, WidgetId};
 use super::placement::{OverlayId, OverlayLayer};
 
 pub(crate) struct OverlayCloseHandle<VM> {
+    pub source_widget_id: Option<WidgetId>,
     pub overlay_id: OverlayId,
     pub rect: Rect,
     pub layer: OverlayLayer,
@@ -17,6 +18,7 @@ pub(crate) struct OverlayCloseHandle<VM> {
 impl<VM> Clone for OverlayCloseHandle<VM> {
     fn clone(&self) -> Self {
         Self {
+            source_widget_id: self.source_widget_id,
             overlay_id: self.overlay_id,
             rect: self.rect,
             layer: self.layer,

@@ -13,6 +13,7 @@ mod input;
 mod menu;
 mod modal;
 mod overlay;
+mod popover;
 mod radio;
 mod scroll_view;
 mod select;
@@ -92,6 +93,7 @@ pub use overlay::{
     Placement as OverlayPlacement, PlacementOptions as OverlayPlacementOptions,
     Side as OverlaySide, SolvedPlacement as OverlaySolvedPlacement,
 };
+pub use popover::{Popover, PopoverTriggerMode};
 pub(crate) use r#virtual::VirtualCacheState;
 pub(crate) use r#virtual::VirtualSceneStateUpdate;
 pub use r#virtual::{
@@ -103,8 +105,8 @@ pub use select::{Select, SelectOption};
 pub use slider::Slider;
 pub use style::{
     ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, FocusRingOverride, ImageStyle,
-    InputStyle, MenuBarStyle, MenuStyle, ModalStyle, RadioStyle, SelectStyle, SliderStyle,
-    SwitchStyle, TextWidgetStyle, TextareaStyle, TooltipStyle, VideoSurfaceStyle,
+    InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PopoverStyle, RadioStyle, SelectStyle,
+    SliderStyle, SwitchStyle, TextWidgetStyle, TextareaStyle, TooltipStyle, VideoSurfaceStyle,
     WidgetSurfaceStyle,
 };
 pub use switch::Switch;

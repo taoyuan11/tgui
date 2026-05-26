@@ -452,6 +452,7 @@ mod focus_selection_tests;
 mod gesture_tests;
 mod menu_tests;
 mod modal_tests;
+mod popover_tests;
 mod scroll_tests;
 mod text_input_tests;
 mod tooltip_tests;

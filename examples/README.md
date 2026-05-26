@@ -148,6 +148,7 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 综合展示示例，当前覆盖：
 
 - `Button` / `Switch` / `Checkbox` / `Radio` / `Select`
+- `Tooltip` / `Popover`
 - `Input` / `Textarea`
 - `CommandContext::notifications()`
 - `Image`

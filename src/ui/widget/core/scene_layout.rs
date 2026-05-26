@@ -172,6 +172,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         selected_text_state: Option<&TextEditState>,
         caret_visible: bool,
         active_tooltip: Option<ActiveTooltipState>,
+        active_hover_popover: Option<WidgetId>,
     ) -> Option<CollectedSceneCache<VM>> {
         let path = self.path_for(widget_id)?;
         let tooltip_hover_started_at: HashMap<WidgetId, std::time::Instant> = HashMap::new();
@@ -219,6 +220,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     tooltip_hover_started_at: &tooltip_hover_started_at,
                     next_tooltip_wakeup: &next_tooltip_wakeup,
                     active_tooltip,
+                    active_hover_popover,
                 };
                 let computed = self.resolved_at_path(path).collect_subtree_cache(
                     self.layout_at_path(path),

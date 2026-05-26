@@ -77,13 +77,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let media_started_at = Instant::now();
         self.dispatch_media_events();
         let media_duration = media_started_at.elapsed();
-        let caret_rect = self.ime_cursor_area();
-        if let (Some(window), Some(caret_rect)) = (self.window.as_ref(), caret_rect) {
-            let _ = window.request_ime_update(ImeRequest::Update(Self::ime_cursor_request_data(
-                caret_rect,
-                self.unit_context(),
-            )));
-        }
         let mut renderer = self
             .renderer
             .take()

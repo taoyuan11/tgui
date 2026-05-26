@@ -13,6 +13,7 @@ mod input;
 mod lifecycle;
 mod menu;
 pub(crate) mod overlay;
+mod popover;
 mod render_cycle;
 mod scene_patch;
 mod scene_patch_cleanup;

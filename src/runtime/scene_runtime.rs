@@ -139,6 +139,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .and_then(|id| self.text_edit_state(id))
             .cloned();
         let active_tooltip = self.resolve_active_tooltip(now);
+        let active_hover_popover = self.resolve_active_hover_popover();
 
         let text_input_patch_roots = self.cached_scene.as_ref().and_then(|cached| {
             (layout_cache_valid
@@ -231,6 +232,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 caret_visible,
                                 &self.tooltip_hover_started_at,
                                 active_tooltip,
+                                active_hover_popover,
                             );
                             collect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
@@ -280,6 +282,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                         actual_caret_visible,
                                         &self.tooltip_hover_started_at,
                                         active_tooltip,
+                                        active_hover_popover,
                                     );
                                 recollect_duration += collect_started_at.elapsed();
                                 collect_passes += 1;
@@ -338,6 +341,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 caret_visible,
                                 &self.tooltip_hover_started_at,
                                 active_tooltip,
+                                active_hover_popover,
                             );
                             collect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
@@ -385,6 +389,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 actual_caret_visible,
                                 &self.tooltip_hover_started_at,
                                 active_tooltip,
+                                active_hover_popover,
                             );
                             recollect_duration += collect_started_at.elapsed();
                             collect_passes += 1;

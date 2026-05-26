@@ -355,6 +355,7 @@ impl<VM: 'static> Element<VM> {
             media_events: source.media_events.clone(),
             background,
             tooltip: source.tooltip.clone(),
+            popover: source.popover.clone(),
             menu: source.menu.clone(),
             context_menu: source.context_menu.clone(),
             modal: source.modal.clone(),

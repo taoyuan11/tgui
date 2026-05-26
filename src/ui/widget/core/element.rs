@@ -217,6 +217,7 @@ impl<VM> Element<VM> {
             media_events: self.media_events.scope(selector.clone()),
             background: self.background,
             tooltip: self.tooltip,
+            popover: self.popover.map(|popover| popover.scope(selector.clone())),
             menu: self.menu.map(|menu| menu.scope(selector.clone())),
             context_menu: self.context_menu.map(|menu| menu.scope(selector.clone())),
             modal: self.modal.map(|modal| modal.scope(selector)),
@@ -268,6 +269,14 @@ impl<VM> Element<VM> {
         descriptor: crate::ui::widget::menu::ContextMenuDescriptor<VM>,
     ) -> Self {
         self.context_menu = Some(descriptor);
+        self
+    }
+
+    pub(crate) fn with_popover_descriptor(
+        mut self,
+        descriptor: crate::ui::widget::popover::PopoverDescriptor<VM>,
+    ) -> Self {
+        self.popover = Some(descriptor);
         self
     }
 

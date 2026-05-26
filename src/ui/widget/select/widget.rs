@@ -395,6 +395,7 @@ where
             media_events: select.media_events,
             background: select.background,
             tooltip: None,
+            popover: None,
             menu: None,
             context_menu: None,
             modal: None,

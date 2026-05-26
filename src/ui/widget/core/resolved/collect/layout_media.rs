@@ -3,7 +3,7 @@ use crate::ui::widget::canvas::CanvasHitGeometry;
 use crate::ui::widget::common;
 use crate::ui::widget::common::ContainerLayout;
 
-impl<VM> ResolvedElement<VM> {
+impl<VM: 'static> ResolvedElement<VM> {
     pub(super) fn collect_layout_media_kind(
         &self,
         layout_node: &LayoutNode,

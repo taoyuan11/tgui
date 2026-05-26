@@ -267,6 +267,7 @@ impl<VM: 'static> WidgetTree<VM> {
             now,
             &HashMap::new(),
             None,
+            None,
         )
         .computed
     }
@@ -295,6 +296,7 @@ impl<VM: 'static> WidgetTree<VM> {
         caret_visible: bool,
         tooltip_hover_started_at: &HashMap<WidgetId, Instant>,
         active_tooltip: Option<ActiveTooltipState>,
+        active_hover_popover: Option<WidgetId>,
     ) -> CollectedSceneCache<VM> {
         self.collect_scene_cache_from_layout_with_focus_value_at(
             font_manager,
@@ -320,6 +322,7 @@ impl<VM: 'static> WidgetTree<VM> {
             Instant::now(),
             tooltip_hover_started_at,
             active_tooltip,
+            active_hover_popover,
         )
     }
 
@@ -348,6 +351,7 @@ impl<VM: 'static> WidgetTree<VM> {
         now: Instant,
         tooltip_hover_started_at: &HashMap<WidgetId, Instant>,
         active_tooltip: Option<ActiveTooltipState>,
+        active_hover_popover: Option<WidgetId>,
     ) -> CollectedSceneCache<VM> {
         let next_tooltip_wakeup: std::cell::Cell<Option<Instant>> = std::cell::Cell::new(None);
         let ((mut computed, lifecycle_states, chunks, chunk_parts, visual_contexts), dependencies) =
@@ -384,6 +388,7 @@ impl<VM: 'static> WidgetTree<VM> {
                         tooltip_hover_started_at,
                         next_tooltip_wakeup: &next_tooltip_wakeup,
                         active_tooltip,
+                        active_hover_popover,
                     };
                     let computed = layout.resolved_root.collect_subtree_cache(
                         &layout.layout_root,
@@ -469,6 +474,7 @@ impl<VM: 'static> WidgetTree<VM> {
             selected_text_state,
             caret_visible,
             &HashMap::new(),
+            None,
             None,
         )
         .computed

@@ -195,6 +195,7 @@ impl<VM> Button<VM> {
                 media_events: MediaEventHandlers::default(),
                 background: None,
                 tooltip: None,
+                popover: None,
                 menu: None,
                 context_menu: None,
                 modal: None,

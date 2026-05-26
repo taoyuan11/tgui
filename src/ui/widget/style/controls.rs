@@ -479,6 +479,43 @@ impl TooltipStyle {
     }
 }
 
+/// Popover widget 的样式定义。
+#[derive(Clone, Debug, PartialEq)]
+pub struct PopoverStyle {
+    pub surface: WidgetSurfaceStyle,
+    pub background: Value<Color>,
+    pub border: Value<Color>,
+    pub border_width: Value<Dp>,
+    pub radius: Value<Dp>,
+    pub shadow: Shadow,
+    pub padding: Insets,
+    pub min_width: Dp,
+    pub max_width: Dp,
+    pub offset: Dp,
+    pub pointer_size: Option<Dp>,
+    pub pointer_inset: Dp,
+}
+
+impl PopoverStyle {
+    pub fn default_for(mode: ResolvedThemeMode) -> Self {
+        let menu = MenuStyle::default_for(mode);
+        Self {
+            surface: menu.surface,
+            background: menu.background,
+            border: menu.border,
+            border_width: menu.border_width,
+            radius: menu.radius,
+            shadow: menu.shadow,
+            padding: Insets::all(dp(12.0)),
+            min_width: dp(220.0),
+            max_width: dp(420.0),
+            offset: dp(8.0),
+            pointer_size: None,
+            pointer_inset: dp(20.0),
+        }
+    }
+}
+
 /// Menu / ContextMenu widget 共用的样式定义。
 ///
 /// MenuBar 走单独的 [`MenuBarStyle`]——条目水平排布、视觉层级更浅，

@@ -7,6 +7,7 @@ mod controls;
 mod layout_media;
 mod menu;
 mod modal;
+mod popover;
 mod tooltip;
 
 struct CollectResolvedStyles {
@@ -41,7 +42,7 @@ struct CollectCaches<'a, VM> {
     visual_contexts: &'a mut HashMap<WidgetId, VisualContextSnapshot>,
 }
 
-impl<VM> ResolvedElement<VM> {
+impl<VM: 'static> ResolvedElement<VM> {
     pub(in super::super) fn collect_subtree_cache(
         &self,
         layout_node: &LayoutNode,
@@ -117,6 +118,7 @@ impl<VM> ResolvedElement<VM> {
         }
 
         self.emit_tooltip_if_visible(context, &mut computed, &visual);
+        self.emit_popover_overlay_if_visible(context, &mut computed, &visual);
         self.emit_menu_overlay_if_open(context, &mut computed, &visual);
         self.emit_modal_close_overlay_if_open(context, &mut computed, &visual);
 

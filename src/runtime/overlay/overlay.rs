@@ -1,6 +1,6 @@
 use crate::foundation::view_model::ValueCommand;
 use crate::ui::widget::{
-    BackdropBlurPrimitive, FocusScopeState, HitRegion, MeshPrimitive, RenderCommand,
+    BackdropBlurPrimitive, ComputedScene, FocusScopeState, HitRegion, MeshPrimitive, RenderCommand,
     RenderPrimitive, TextPrimitive, WidgetId,
 };
 
@@ -183,6 +183,7 @@ pub(crate) enum OverlayContent<VM> {
         hits: Vec<HitRegion<VM>>,
         clip_rect: Option<crate::ui::widget::Rect>,
     },
+    Scene(Box<ComputedScene<VM>>),
 }
 
 impl<VM> Clone for OverlayContent<VM> {
@@ -199,6 +200,7 @@ impl<VM> Clone for OverlayContent<VM> {
                 hits: hits.clone(),
                 clip_rect: *clip_rect,
             },
+            Self::Scene(scene) => Self::Scene(Box::new((**scene).clone())),
         }
     }
 }

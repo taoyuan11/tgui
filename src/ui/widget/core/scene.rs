@@ -52,6 +52,7 @@ pub(crate) struct CollectContext<'a, 'b> {
     /// runtime 会聚合到 `next_deadline` 并在到点后 invalidate scene 触发重 collect。
     pub(crate) next_tooltip_wakeup: &'a Cell<Option<Instant>>,
     pub(crate) active_tooltip: Option<ActiveTooltipState>,
+    pub(crate) active_hover_popover: Option<WidgetId>,
 }
 
 impl<'a, 'b> CollectContext<'a, 'b> {
