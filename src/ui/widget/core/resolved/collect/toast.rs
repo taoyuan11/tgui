@@ -94,6 +94,7 @@ fn build_toast_scene<VM: 'static>(
 ) -> Option<(ComputedScene<VM>, (Dp, Dp))> {
     let (result, dependencies): (Option<(ComputedScene<VM>, (Dp, Dp))>, DependencyGraph) =
         crate::foundation::binding::with_dependency_collection(|| {
+            super::super::tree::with_widget_stack(|| {
             let width = toast_width(&style, context.viewport);
             let mut root = Flex::<VM>::new(Axis::Vertical)
                 .gap(style.stack_gap)
@@ -203,6 +204,7 @@ fn build_toast_scene<VM: 'static>(
             );
             computed.finalize_portals(context.viewport);
             Some((computed, size))
+            })
         });
     let (mut computed, size) = result?;
     computed.dependencies = dependencies.clone();

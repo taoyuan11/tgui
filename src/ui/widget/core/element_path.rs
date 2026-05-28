@@ -46,6 +46,17 @@ pub(super) fn resolve_subtree_from_source_path<'a, VM: 'static>(
     theme: &Theme,
     path: &[usize],
 ) -> Option<ResolvedElement<VM>> {
+    super::tree::with_widget_stack_frame(|| {
+        resolve_subtree_from_source_path_inner(source, previous, theme, path)
+    })
+}
+
+fn resolve_subtree_from_source_path_inner<'a, VM: 'static>(
+    source: &Element<VM>,
+    previous: Option<&'a ResolvedElement<VM>>,
+    theme: &Theme,
+    path: &[usize],
+) -> Option<ResolvedElement<VM>> {
     let started_at = text_profile_enabled().then_some(Instant::now());
     if path.is_empty() {
         let resolved = source.resolve_with_previous(theme, previous);

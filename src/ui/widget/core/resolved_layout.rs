@@ -112,18 +112,20 @@ impl<VM> ResolvedElement<VM> {
         is_root: bool,
         now: std::time::Instant,
     ) -> Result<LayoutNode, taffy::TaffyError> {
-        let owner = self.id.dependency_owner(DependencyPhase::Layout);
-        track_dependency_scope(owner, || {
-            self.build_layout_tree_tracked(
-                taffy,
-                animations,
-                theme,
-                units,
-                parent_kind,
-                viewport,
-                is_root,
-                now,
-            )
+        super::tree::with_widget_stack_frame(|| {
+            let owner = self.id.dependency_owner(DependencyPhase::Layout);
+            track_dependency_scope(owner, || {
+                self.build_layout_tree_tracked(
+                    taffy,
+                    animations,
+                    theme,
+                    units,
+                    parent_kind,
+                    viewport,
+                    is_root,
+                    now,
+                )
+            })
         })
     }
 

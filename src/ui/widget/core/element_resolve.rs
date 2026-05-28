@@ -12,6 +12,14 @@ impl<VM: 'static> Element<VM> {
         theme: &Theme,
         previous: Option<&ResolvedElement<VM>>,
     ) -> ResolvedElement<VM> {
+        super::tree::with_widget_stack_frame(|| self.resolve_with_previous_inner(theme, previous))
+    }
+
+    fn resolve_with_previous_inner(
+        &self,
+        theme: &Theme,
+        previous: Option<&ResolvedElement<VM>>,
+    ) -> ResolvedElement<VM> {
         let mut source = self.clone();
         if let Some(previous) = previous {
             source.id = previous.id;

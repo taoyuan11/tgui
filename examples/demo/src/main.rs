@@ -188,6 +188,7 @@ impl ViewModel for App {
         Stack::new()
             .child(
                 Flex::horizontal()
+                    .size(pct(100.0), pct(100.0))
                     .wrap(Wrap::Wrap)
                     .padding(Insets::all(dp(20.0)))
                     .gap(dp(10.0))

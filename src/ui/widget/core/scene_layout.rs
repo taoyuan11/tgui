@@ -294,73 +294,75 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         let units = self.units;
         let (result, dependencies) = with_dependency_collection(
             || -> Result<(HashSet<WidgetId>, HashSet<u64>), taffy::TaffyError> {
-                let mut removed_ids = HashSet::new();
-                let mut touched_owner_ids = HashSet::new();
+                super::tree::with_widget_stack(|| {
+                    let mut removed_ids = HashSet::new();
+                    let mut touched_owner_ids = HashSet::new();
 
-                for root_id in roots {
-                    let Some(path) = self.path_for(*root_id).map(|path| path.to_vec()) else {
-                        continue;
-                    };
+                    for root_id in roots {
+                        let Some(path) = self.path_for(*root_id).map(|path| path.to_vec()) else {
+                            continue;
+                        };
 
-                    let previous_ids = self.subtree_widget_ids(*root_id);
-                    touched_owner_ids.extend(previous_ids.iter().map(|id| id.raw()));
+                        let previous_ids = self.subtree_widget_ids(*root_id);
+                        touched_owner_ids.extend(previous_ids.iter().map(|id| id.raw()));
 
-                    let Some(next) = resolve_subtree_from_source_path(
-                        &self.source_root,
-                        Some(&self.resolved_root),
-                        theme,
-                        &path,
-                    ) else {
-                        continue;
-                    };
-                    let next_ids = {
-                        let mut ids = Vec::new();
-                        collect_resolved_widget_ids(&next, &mut ids);
-                        ids
-                    };
-                    let next_id_set: HashSet<_> = next_ids.into_iter().collect();
-                    removed_ids.extend(
-                        previous_ids
-                            .into_iter()
-                            .filter(|id| !next_id_set.contains(id)),
-                    );
-
-                    patch_layout_at_path(
-                        &mut self.resolved_root,
-                        &mut self.layout_root,
-                        &path,
-                        next,
-                        &mut self.taffy,
-                        animations,
-                        theme,
-                        units,
-                        viewport,
-                        now,
-                        None,
-                        true,
-                    )?;
-                    self.rebuild_indexes();
-                }
-
-                self.taffy.compute_layout_with_measure(
-                    self.layout_root.node,
-                    TaffySize {
-                        width: AvailableSpace::Definite(viewport.width.get()),
-                        height: AvailableSpace::Definite(viewport.height.get()),
-                    },
-                    |known_dimensions, _, _, node_context, _| {
-                        measure_node(
-                            node_context,
-                            known_dimensions,
-                            font_manager,
+                        let Some(next) = resolve_subtree_from_source_path(
+                            &self.source_root,
+                            Some(&self.resolved_root),
                             theme,
-                            media,
-                            units,
-                        )
-                    },
-                )?;
+                            &path,
+                        ) else {
+                            continue;
+                        };
+                        let next_ids = {
+                            let mut ids = Vec::new();
+                            collect_resolved_widget_ids(&next, &mut ids);
+                            ids
+                        };
+                        let next_id_set: HashSet<_> = next_ids.into_iter().collect();
+                        removed_ids.extend(
+                            previous_ids
+                                .into_iter()
+                                .filter(|id| !next_id_set.contains(id)),
+                        );
 
-                Ok((removed_ids, touched_owner_ids))
+                        patch_layout_at_path(
+                            &mut self.resolved_root,
+                            &mut self.layout_root,
+                            &path,
+                            next,
+                            &mut self.taffy,
+                            animations,
+                            theme,
+                            units,
+                            viewport,
+                            now,
+                            None,
+                            true,
+                        )?;
+                        self.rebuild_indexes();
+                    }
+
+                    self.taffy.compute_layout_with_measure(
+                        self.layout_root.node,
+                        TaffySize {
+                            width: AvailableSpace::Definite(viewport.width.get()),
+                            height: AvailableSpace::Definite(viewport.height.get()),
+                        },
+                        |known_dimensions, _, _, node_context, _| {
+                            measure_node(
+                                node_context,
+                                known_dimensions,
+                                font_manager,
+                                theme,
+                                media,
+                                units,
+                            )
+                        },
+                    )?;
+
+                    Ok((removed_ids, touched_owner_ids))
+                })
             },
         );
         let (removed_ids, touched_owner_ids) = result?;

@@ -94,7 +94,8 @@ fn build_popover_scene<VM: 'static>(
 )> {
     let (result, dependencies): (Option<(ComputedScene<VM>, _)>, DependencyGraph) =
         with_dependency_collection(|| {
-            let mut root: Element<VM> = Stack::new()
+            super::super::tree::with_widget_stack(|| {
+                let mut root: Element<VM> = Stack::new()
                 .padding(style.padding)
                 .child(content.clone())
                 .into();
@@ -214,6 +215,7 @@ fn build_popover_scene<VM: 'static>(
             );
             computed.finalize_portals(context.viewport);
             Some((computed, size))
+            })
         });
     let (mut computed, size) = result?;
 

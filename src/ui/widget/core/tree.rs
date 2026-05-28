@@ -9,7 +9,9 @@ pub struct WidgetTree<VM> {
     pub(super) root: Element<VM>,
 }
 
-pub(super) fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
+/// 在递归走 widget 树的入口（root collect / root layout / overlay 子场景）使用，
+/// 一次性预留 8MB 备用栈，避免 debug 构建中每层 ~数十 KB 的局部把默认 1MB 栈打爆。
+pub(crate) fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
     #[cfg(any(
         target_os = "windows",
         target_os = "macos",
@@ -19,6 +21,32 @@ pub(super) fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
         const WIDGET_STACK_SIZE: usize = 8 * 1024 * 1024;
         const WIDGET_STACK_RED_ZONE: usize = WIDGET_STACK_SIZE;
         return stacker::maybe_grow(WIDGET_STACK_RED_ZONE, WIDGET_STACK_SIZE, f);
+    }
+
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    )))]
+    {
+        f()
+    }
+}
+
+/// 每层递归调用都会过一次的轻量栈守护：仅当剩余栈低于红区阈值时才分配额外段。
+/// 用于 `Element::resolve_with_previous` / `ResolvedElement::build_layout_tree` /
+/// `ResolvedElement::collect_subtree_cache` 等递归热点，配合 taffy measure 回调
+/// 等会重入到 widget 树构建链路的场景，保证栈在意外深度下也能动态扩展。
+pub(crate) fn with_widget_stack_frame<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    ))]
+    {
+        const FRAME_RED_ZONE: usize = 1024 * 1024;
+        const FRAME_GROW_SIZE: usize = 4 * 1024 * 1024;
+        return stacker::maybe_grow(FRAME_RED_ZONE, FRAME_GROW_SIZE, f);
     }
 
     #[cfg(not(any(

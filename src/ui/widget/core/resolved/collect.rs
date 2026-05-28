@@ -56,17 +56,19 @@ impl<VM: 'static> ResolvedElement<VM> {
         chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
         visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
     ) -> ComputedScene<VM> {
-        let owner = self.id.dependency_owner(DependencyPhase::Scene);
-        track_dependency_scope(owner, || {
-            self.collect_subtree_cache_tracked(
-                layout_node,
-                visual_context,
-                context,
-                lifecycle_states,
-                chunks,
-                chunk_parts,
-                visual_contexts,
-            )
+        super::super::tree::with_widget_stack_frame(|| {
+            let owner = self.id.dependency_owner(DependencyPhase::Scene);
+            track_dependency_scope(owner, || {
+                self.collect_subtree_cache_tracked(
+                    layout_node,
+                    visual_context,
+                    context,
+                    lifecycle_states,
+                    chunks,
+                    chunk_parts,
+                    visual_contexts,
+                )
+            })
         })
     }
 
