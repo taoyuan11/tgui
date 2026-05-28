@@ -517,6 +517,7 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
                 menu: None,
                 context_menu: None,
                 modal: None,
+                tab_trigger: None,
                 kind: WidgetKind::Virtual {
                     arrangement,
                     item_layout,

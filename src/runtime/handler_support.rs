@@ -26,6 +26,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let smooth_scroll_deadline =
             (!self.smooth_scroll_states.is_empty()).then_some(now + Duration::from_millis(16));
         let tooltip_deadline = self.next_tooltip_wakeup_deadline;
+        let toast_deadline = self.next_toast_wakeup_deadline;
         [
             animation_deadline,
             controller_deadline,
@@ -36,6 +37,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             key_repeat_deadline,
             smooth_scroll_deadline,
             tooltip_deadline,
+            toast_deadline,
         ]
         .into_iter()
         .flatten()

@@ -352,6 +352,7 @@ impl Image {
             menu: None,
             context_menu: None,
             modal: None,
+            tab_trigger: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -378,6 +379,7 @@ impl Image {
             menu: None,
             context_menu: None,
             modal: None,
+            tab_trigger: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -404,6 +406,7 @@ impl Image {
             menu: None,
             context_menu: None,
             modal: None,
+            tab_trigger: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -429,6 +432,7 @@ impl<VM> From<Image> for Element<VM> {
             menu: None,
             context_menu: None,
             modal: None,
+            tab_trigger: None,
             kind: WidgetKind::Image { image: value },
         }
     }

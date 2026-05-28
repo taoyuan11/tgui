@@ -155,6 +155,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         theme: &Theme,
         media: &MediaManager,
         animations: &mut AnimationEngine,
+        reduced_motion: bool,
         visual_context: VisualContextSnapshot,
         hovered_scrollbar: Option<ScrollbarHandle>,
         active_scrollbar: Option<ScrollbarHandle>,
@@ -177,6 +178,8 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         let path = self.path_for(widget_id)?;
         let tooltip_hover_started_at: HashMap<WidgetId, std::time::Instant> = HashMap::new();
         let next_tooltip_wakeup: std::cell::Cell<Option<std::time::Instant>> =
+            std::cell::Cell::new(None);
+        let next_toast_wakeup: std::cell::Cell<Option<std::time::Instant>> =
             std::cell::Cell::new(None);
         let ((mut computed, lifecycle_states, chunks, chunk_parts, visual_contexts), dependencies): (
             (
@@ -215,10 +218,12 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     viewport,
                     units: self.units,
                     animations,
+                    reduced_motion,
                     now: std::time::Instant::now(),
                     focus: super::scene::FocusCollectState::default(),
                     tooltip_hover_started_at: &tooltip_hover_started_at,
                     next_tooltip_wakeup: &next_tooltip_wakeup,
+                    next_toast_wakeup: &next_toast_wakeup,
                     active_tooltip,
                     active_hover_popover,
                 };
@@ -249,6 +254,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             visual_contexts,
             dependencies,
             next_tooltip_wakeup: next_tooltip_wakeup.get(),
+            next_toast_wakeup: next_toast_wakeup.get(),
         })
     }
 

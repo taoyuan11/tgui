@@ -17,8 +17,8 @@ use crate::ui::widget::Element;
 
 use super::config::{Application, ApplicationConfig};
 use super::window_spec::{
-    ClearColorBinding, RootViewFactory, ThemeModeBinding, ThemeSetBinding, TitleBinding,
-    WindowClosePolicy, WindowRole, WindowSpec, WindowsFactory,
+    ClearColorBinding, ReducedMotionBinding, RootViewFactory, ThemeModeBinding,
+    ThemeSetBinding, TitleBinding, WindowClosePolicy, WindowRole, WindowSpec, WindowsFactory,
 };
 
 pub(crate) struct WindowSetFactory<VM> {
@@ -39,6 +39,7 @@ where
     clear_color_binding: Option<ClearColorBinding<VM>>,
     theme_set_binding: Option<ThemeSetBinding<VM>>,
     theme_mode_binding: Option<ThemeModeBinding<VM>>,
+    reduced_motion_binding: Option<ReducedMotionBinding<VM>>,
     root_view: Option<RootViewFactory<VM>>,
     commands: Vec<WindowCommand<VM>>,
     windows_factory: Option<WindowsFactory<VM>>,
@@ -57,6 +58,7 @@ where
             clear_color_binding: None,
             theme_set_binding: None,
             theme_mode_binding: None,
+            reduced_motion_binding: None,
             root_view: None,
             commands: Vec::new(),
             windows_factory: None,
@@ -96,6 +98,15 @@ where
         signal: impl Fn(&VM) -> Signal<ThemeMode> + Send + Sync + 'static,
     ) -> Self {
         self.theme_mode_binding = Some(Arc::new(signal));
+        self
+    }
+
+    /// 绑定 reduced motion 信号。
+    pub fn bind_reduced_motion(
+        mut self,
+        signal: impl Fn(&VM) -> Signal<bool> + Send + Sync + 'static,
+    ) -> Self {
+        self.reduced_motion_binding = Some(Arc::new(signal));
         self
     }
 
@@ -249,6 +260,7 @@ where
             let clear_color_binding = self.clear_color_binding;
             let theme_set_binding = self.theme_set_binding;
             let theme_mode_binding = self.theme_mode_binding;
+            let reduced_motion_binding = self.reduced_motion_binding;
             let root_view = self.root_view;
             let commands = self.commands;
             let main_config = config.clone();
@@ -268,6 +280,7 @@ where
                         clear_color_binding: clear_color_binding.clone(),
                         theme_set_binding: theme_set_binding.clone(),
                         theme_mode_binding: theme_mode_binding.clone(),
+                        reduced_motion_binding: reduced_motion_binding.clone(),
                         root_view: root_view.clone(),
                         commands: commands.clone(),
                         close_policy: WindowClosePolicy::Close,

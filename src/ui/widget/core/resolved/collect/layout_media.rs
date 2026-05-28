@@ -371,6 +371,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 }
                 true
             }
+            ResolvedWidgetKind::ToastHost { .. } => true,
             #[cfg(feature = "audio")]
             ResolvedWidgetKind::Audio { .. } => true,
             ResolvedWidgetKind::Image { image } => {

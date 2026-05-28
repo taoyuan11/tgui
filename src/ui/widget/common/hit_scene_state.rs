@@ -75,7 +75,7 @@ impl<VM> Clone for ComputedScene<VM> {
     }
 }
 
-pub(crate) const OVERLAY_LAYER_COUNT: usize = 4;
+pub(crate) const OVERLAY_LAYER_COUNT: usize = 5;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct PortalOverlayCounts {

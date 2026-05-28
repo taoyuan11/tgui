@@ -215,6 +215,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 &theme,
                                 &self.media_manager,
                                 &mut self.animation_engine,
+                                self.reduced_motion,
                                 self.hovered_scrollbar,
                                 active_scrollbar,
                                 &widget_states,
@@ -265,6 +266,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                         &theme,
                                         &self.media_manager,
                                         &mut self.animation_engine,
+                                        self.reduced_motion,
                                         self.hovered_scrollbar,
                                         active_scrollbar,
                                         &widget_states,
@@ -324,6 +326,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 &theme,
                                 &self.media_manager,
                                 &mut self.animation_engine,
+                                self.reduced_motion,
                                 self.hovered_scrollbar,
                                 active_scrollbar,
                                 &widget_states,
@@ -372,6 +375,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 &theme,
                                 &self.media_manager,
                                 &mut self.animation_engine,
+                                self.reduced_motion,
                                 self.hovered_scrollbar,
                                 active_scrollbar,
                                 &widget_states,
@@ -410,6 +414,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         visual_contexts: HashMap::new(),
                         dependencies: DependencyGraph::default(),
                         next_tooltip_wakeup: None,
+                        next_toast_wakeup: None,
                     },
                 ),
             };
@@ -422,6 +427,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             self.next_tooltip_wakeup_deadline = collected.next_tooltip_wakeup;
+            self.next_toast_wakeup_deadline = collected.next_toast_wakeup;
             let focused_input = self.focused_text_input_id_cached(&computed);
             let caret_visible = self.caret_visible_at(now, focused_input);
             self.prune_text_input_buffers(&computed);

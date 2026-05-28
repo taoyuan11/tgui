@@ -1,5 +1,6 @@
 use super::*;
 use crate::foundation::binding::ScrollViewController;
+use crate::foundation::binding::{ToastPlacement, ToastQueue};
 use crate::ui::widget::core::Element;
 use crate::ui::widget::r#virtual::{
     ErasedVirtualItemSource, ItemLayout, VirtualArrangement, VirtualRuntimeState,
@@ -233,6 +234,19 @@ pub(crate) enum WidgetKind<VM> {
         disabled: Value<bool>,
         style: Option<StyleResolver<WidgetSliderStyle>>,
     },
+    ProgressBar {
+        value: Value<f32>,
+        indeterminate: Value<bool>,
+        show_label: bool,
+        label: Option<Value<String>>,
+        style: Option<StyleResolver<crate::ui::widget::style::ProgressBarStyle>>,
+    },
+    Spinner {
+        style: Option<StyleResolver<crate::ui::widget::style::SpinnerStyle>>,
+        size_override: Option<Value<Dp>>,
+        thickness_override: Option<Value<Dp>>,
+        track_override: Option<bool>,
+    },
     TextEditor {
         controller: TextController,
         placeholder: Value<String>,
@@ -245,6 +259,12 @@ pub(crate) enum WidgetKind<VM> {
         show_scrollbar: Value<bool>,
         auto_wrap: Value<bool>,
     },
+    ToastHost {
+        queue: ToastQueue<VM>,
+        placement: ToastPlacement,
+        max_visible: Option<usize>,
+        style: Option<StyleResolver<crate::ui::widget::style::ToastStyle>>,
+    },
 }
 
 pub(crate) struct SelectOptionState<VM> {
@@ -252,6 +272,64 @@ pub(crate) struct SelectOptionState<VM> {
     pub selected: Value<bool>,
     pub disabled: Value<bool>,
     pub on_select: Option<Command<VM>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabPlacement {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+impl Default for TabPlacement {
+    fn default() -> Self {
+        Self::Top
+    }
+}
+
+impl TabPlacement {
+    pub(crate) fn is_horizontal(self) -> bool {
+        matches!(self, Self::Top | Self::Bottom)
+    }
+}
+
+pub(crate) struct TabTriggerState<VM> {
+    pub group_id: WidgetId,
+    pub index: usize,
+    pub placement: TabPlacement,
+    pub key: String,
+    pub label: String,
+    pub on_change: Option<ValueCommand<VM, (String, String)>>,
+}
+
+impl<VM> Clone for TabTriggerState<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            group_id: self.group_id,
+            index: self.index,
+            placement: self.placement,
+            key: self.key.clone(),
+            label: self.label.clone(),
+            on_change: self.on_change.clone(),
+        }
+    }
+}
+
+impl<VM: 'static> TabTriggerState<VM> {
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> TabTriggerState<RootVm> {
+        TabTriggerState {
+            group_id: self.group_id,
+            index: self.index,
+            placement: self.placement,
+            key: self.key,
+            label: self.label,
+            on_change: self.on_change.map(|command| command.scope(selector)),
+        }
+    }
 }
 
 impl<VM> Clone for SelectOptionState<VM> {
@@ -422,6 +500,30 @@ impl<VM> Clone for WidgetKind<VM> {
                 disabled: disabled.clone(),
                 style: style.clone(),
             },
+            Self::ProgressBar {
+                value,
+                indeterminate,
+                show_label,
+                label,
+                style,
+            } => Self::ProgressBar {
+                value: value.clone(),
+                indeterminate: indeterminate.clone(),
+                show_label: *show_label,
+                label: label.clone(),
+                style: style.clone(),
+            },
+            Self::Spinner {
+                style,
+                size_override,
+                thickness_override,
+                track_override,
+            } => Self::Spinner {
+                style: style.clone(),
+                size_override: size_override.clone(),
+                thickness_override: thickness_override.clone(),
+                track_override: *track_override,
+            },
             Self::TextEditor {
                 controller,
                 placeholder,
@@ -444,6 +546,17 @@ impl<VM> Clone for WidgetKind<VM> {
                 multiline: *multiline,
                 show_scrollbar: show_scrollbar.clone(),
                 auto_wrap: auto_wrap.clone(),
+            },
+            Self::ToastHost {
+                queue,
+                placement,
+                max_visible,
+                style,
+            } => Self::ToastHost {
+                queue: queue.clone(),
+                placement: *placement,
+                max_visible: *max_visible,
+                style: style.clone(),
             },
         }
     }

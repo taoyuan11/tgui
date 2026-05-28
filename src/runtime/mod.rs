@@ -329,6 +329,7 @@ pub struct WindowBindings {
     pub(crate) clear_color: Option<Signal<Color>>,
     pub(crate) theme_set: Option<Signal<ThemeSet>>,
     pub(crate) theme_mode: Option<Signal<ThemeMode>>,
+    pub(crate) reduced_motion: Option<Signal<bool>>,
 }
 
 pub struct WindowCommand<VM> {
@@ -354,6 +355,7 @@ pub struct BoundRuntimeHandler<VM> {
     font_manager: FontManager,
     theme: Theme,
     theme_store: ThemeStore,
+    reduced_motion: bool,
     view_model: Arc<Mutex<VM>>,
     window_bindings: WindowBindings,
     widget_tree: Option<WidgetTree<VM>>,
@@ -377,6 +379,8 @@ pub struct BoundRuntimeHandler<VM> {
     /// 最近一次 collect 上报的 tooltip 唤醒时刻（hover_start + delay）。
     /// 由 `next_deadline` 汇入 winit ControlFlow，到点后 `drive_animations` 触发 invalidate。
     next_tooltip_wakeup_deadline: Option<Instant>,
+    /// 最近一次 collect 上报的 toast 唤醒时刻（最早自动消失 deadline）。
+    next_toast_wakeup_deadline: Option<Instant>,
     tooltip_state: TooltipState,
     /// 每个打开的 Menu overlay 的键盘 cursor 路径（每层一个 option_index）。
     /// 长度=1 表示 cursor 在最外层；>1 表示已进入嵌套 submenu。
@@ -458,6 +462,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         };
         let theme_store = ThemeStore::new(config.theme_set.clone(), ThemeMode::System, None);
         let resource_budget = config.resource_budget;
+        let reduced_motion = config.reduced_motion;
 
         #[cfg(all(target_os = "android", feature = "android"))]
         if let Some(app) = android_app.as_ref() {
@@ -475,6 +480,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             font_manager,
             theme,
             theme_store,
+            reduced_motion,
             view_model,
             window_bindings,
             widget_tree,
@@ -493,6 +499,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             hovered_widgets: Vec::new(),
             tooltip_hover_started_at: HashMap::new(),
             next_tooltip_wakeup_deadline: None,
+            next_toast_wakeup_deadline: None,
             tooltip_state: TooltipState {
                 active: None,
                 hover_suppressed: None,

@@ -222,8 +222,10 @@ mod menu_tests;
 mod modal_tests;
 mod popover_tests;
 mod select_tests;
+mod tabs_tests;
 mod text_and_background;
 mod text_input_tests;
+mod toast_tests;
 
 fn test_media() -> MediaManager {
     MediaManager::new(InvalidationSignal::new())

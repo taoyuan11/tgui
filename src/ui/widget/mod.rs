@@ -14,15 +14,19 @@ mod menu;
 mod modal;
 mod overlay;
 mod popover;
+mod progress_bar;
 mod radio;
 mod scroll_view;
 mod select;
 mod slider;
 mod slider_shared;
+mod spinner;
 mod style;
 mod switch;
+mod tabs;
 mod text;
 mod textarea;
+mod toast;
 mod tooltip;
 #[cfg(feature = "video")]
 mod video;
@@ -60,8 +64,8 @@ pub(crate) use common::{
     TextInputContentGeometry, TexturePrimitive, WidgetStateMap,
 };
 pub use common::{
-    CursorStyle, FocusScopeOptions, Point, Rect, RenderPrimitive, ScenePrimitives, TextPrimitive,
-    WidgetId, WidgetKey,
+    CursorStyle, FocusScopeOptions, Point, Rect, RenderPrimitive, ScenePrimitives, TabPlacement,
+    TextPrimitive, WidgetId, WidgetKey,
 };
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
 #[cfg(feature = "bench-support")]
@@ -94,6 +98,7 @@ pub use overlay::{
     Side as OverlaySide, SolvedPlacement as OverlaySolvedPlacement,
 };
 pub use popover::{Popover, PopoverTriggerMode};
+pub use progress_bar::ProgressBar;
 pub(crate) use r#virtual::VirtualCacheState;
 pub(crate) use r#virtual::VirtualSceneStateUpdate;
 pub use r#virtual::{
@@ -103,15 +108,18 @@ pub use radio::{Radio, RadioGroup, RadioOption};
 pub use scroll_view::ScrollView;
 pub use select::{Select, SelectOption};
 pub use slider::Slider;
+pub use spinner::Spinner;
 pub use style::{
     ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, FocusRingOverride, ImageStyle,
-    InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PopoverStyle, RadioStyle, SelectStyle,
-    SliderStyle, SwitchStyle, TextWidgetStyle, TextareaStyle, TooltipStyle, VideoSurfaceStyle,
-    WidgetSurfaceStyle,
+    InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PopoverStyle, ProgressBarStyle, RadioStyle,
+    SelectStyle, SliderStyle, SpinnerStyle, SwitchStyle, TabsStyle, TextWidgetStyle, TextareaStyle,
+    ToastStyle, TooltipStyle, VideoSurfaceStyle, WidgetSurfaceStyle,
 };
 pub use switch::Switch;
+pub use tabs::{TabItem, TabView, Tabs};
 pub use text::{IntoTextContent, Text};
 pub use textarea::Textarea;
+pub use toast::ToastHost;
 pub use tooltip::Tooltip;
 #[cfg(feature = "video")]
 pub use video::VideoSurface;

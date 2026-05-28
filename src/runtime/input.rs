@@ -17,6 +17,7 @@ mod scrolling;
 mod select_state;
 mod session;
 mod slider;
+mod tabs;
 mod text_input;
 mod window_events;
 
@@ -314,7 +315,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             PhysicalKey::Code(KeyCode::Backspace) => self.delete_backward_at_focused_input(),
             PhysicalKey::Code(KeyCode::Delete) => self.delete_forward_at_focused_input(),
             PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                if self.adjust_focused_slider(-1, None) {
+                if self.focused_tab_is_horizontal() == Some(true) && self.move_focused_tab(-1) {
+                    true
+                } else if self.adjust_focused_slider(-1, None) {
                     true
                 } else {
                     let extend = self.modifiers.shift_key();
@@ -335,7 +338,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             PhysicalKey::Code(KeyCode::ArrowRight) => {
-                if self.adjust_focused_slider(1, None) {
+                if self.focused_tab_is_horizontal() == Some(true) && self.move_focused_tab(1) {
+                    true
+                } else if self.adjust_focused_slider(1, None) {
                     true
                 } else {
                     let extend = self.modifiers.shift_key();
@@ -356,20 +361,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             PhysicalKey::Code(KeyCode::ArrowUp) => {
-                self.adjust_focused_slider(1, None)
+                (self.focused_tab_is_horizontal() == Some(false) && self.move_focused_tab(-1))
+                    || self.adjust_focused_slider(1, None)
                     || self.move_focused_input_cursor_vertically(-1, self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::ArrowDown) => {
-                self.adjust_focused_slider(-1, None)
+                (self.focused_tab_is_horizontal() == Some(false) && self.move_focused_tab(1))
+                    || self.adjust_focused_slider(-1, None)
                     || self.move_focused_input_cursor_vertically(1, self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::Home) => {
-                self.adjust_focused_slider(0, Some(false))
+                self.move_focused_tab_to_edge(false)
+                    || self.adjust_focused_slider(0, Some(false))
                     || self.scroll_focused_region_to_edge(false)
                     || self.move_focused_input_cursor(|_, _| 0, self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::End) => {
-                self.adjust_focused_slider(0, Some(true))
+                self.move_focused_tab_to_edge(true)
+                    || self.adjust_focused_slider(0, Some(true))
                     || self.scroll_focused_region_to_edge(true)
                     || self.move_focused_input_cursor(
                         |buffer: &RopeBuffer, _state: &TextEditState| buffer.len_bytes(),

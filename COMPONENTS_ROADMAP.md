@@ -111,12 +111,26 @@
 - **桌面操作**：右上 / 右下角；鼠标悬停时暂停计时；点 × 关闭。
 - **移动操作**：底部全宽出现；上滑关闭。
 - **依赖**：P0 §1、§5；可选 §6。
+- **进度**：[基础完成]
+  - ✅ `ToastHost`、`ToastQueue`、`Toast`、`ToastAction`、`ToastKind`、`ToastPlacement`、`ToastStyle` 已公开导出；
+  - ✅ 通过 overlay / portal 机制在顶层渲染 app 内 toast 队列，支持 success / error / warning / info 四种语义样式；
+  - ✅ 默认自动消失（5s）、`.duration(...)` 自定义时长、`.persistent(true)` 持久提示、关闭按钮、action 按钮；
+  - ✅ 桌面端 hover 暂停 / 恢复倒计时，移动端保持点击关闭；
+  - ✅ runtime 接入 toast deadline 唤醒，到点后自动触发 scene invalidate 并在下一轮 collect 清理过期项；
+  - ✅ `examples/demo` 已新增 Toast / Snackbar 展示卡片，覆盖 4 种语义提示、撤销 action、持久提示和最近操作状态文本。
 
 ### 13. ProgressBar / Spinner
 - **作用**：表达任务进度。线性进度条 + 环形 spinner，确定（0-1）和不确定两态。
 - **样式**：高度 / 直径 / 轨道色 / 进度色 / 圆角；不确定态用循环动画；可选百分比文字。
 - **操作**：纯展示。`Signal<f32>` 驱动进度值；`prefers-reduced-motion` 关闭循环动画。
 - **依赖**：无新基础设施。
+- **进度**：[基础完成]
+  - ✅ `ProgressBar`、`Spinner`、`ProgressBarStyle`、`SpinnerStyle` 已公开导出，并加入 `prelude` / `widgets`；
+  - ✅ `ProgressBar` 支持确定态数值、非确定态滑动高亮段、可选文本标签与样式覆盖；
+  - ✅ `Spinner` 支持尺寸、厚度、轨道显示开关与颜色样式覆盖，复用现有 mesh primitive 提交链路；
+  - ✅ 应用级 `reduced_motion` 默认值与 `bind_reduced_motion(...)` 绑定链路已接入 runtime，窗口级 binding 优先于应用默认值；
+  - ✅ reduced-motion 开启时，`ProgressBar` 非确定态退化为静态居中高亮段，`Spinner` 退化为静态弧段；
+  - ✅ `examples/demo` 已新增 ProgressBar / Spinner 展示卡片，覆盖确定态、不确定态、自定义 spinner 与 reduced-motion 开关演示。
 
 ### 14. Tabs / TabView
 - **作用**：在一组 panel 之间切换。
@@ -124,6 +138,14 @@
 - **桌面操作**：点击切换；`←/→` 在标签间导航、`Home/End` 跳首尾、`Enter`/`Space` 激活；可拖拽重排（可选）。
 - **移动操作**：点击切换；左右滑动 panel 切换（P0 §6）；标签条横滚。
 - **依赖**：P0 §2、§4；可选 §6。
+- **进度**：[基础完成]
+  - ✅ `Tabs` / `TabView` / `TabItem` / `TabPlacement` / `TabsStyle` 已公开导出，并加入 `prelude` / `widgets`；
+  - ✅ 支持 top / bottom / left / right 标签条布局，panel 按当前 selected key 动态切换；
+  - ✅ tab trigger 复用 Button + ScrollView 组合实现，标签条溢出可滚动，禁用 tab 不进入 tab trigger 命中与焦点导航；
+  - ✅ runtime 键盘导航：方向键在同组 tab trigger 中循环移动并跳过禁用项，`Home` / `End` 跳首尾，`Enter` / `Space` 激活；
+  - ✅ `examples/demo` 已新增 Tabs / TabView 展示卡片，覆盖受控切换、不同 panel 内容与禁用 tab；
+  - ✅ 单元测试覆盖渲染、禁用命中、样式默认值、点击派发、方向键、`Home` / `End`。
+  - ⏳ 待补（独立 PR）：more 折叠菜单、拖拽重排、移动端左右滑动切换（依赖 P0 §6 Gesture 的产品化手势策略）。
 
 ### 15. Drawer / Sidebar
 - **作用**：从屏幕边缘滑出的容器，用于导航、过滤、详情。

@@ -63,6 +63,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or_else(|| self.config.theme_set.clone())
     }
 
+    pub(in crate::runtime) fn active_reduced_motion(&self) -> bool {
+        self.window_bindings
+            .reduced_motion
+            .as_ref()
+            .map(Signal::get)
+            .unwrap_or(self.config.reduced_motion)
+    }
+
     pub(in crate::runtime) fn sync_theme_binding(&mut self) {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let selection = self.active_theme_selection();
@@ -117,6 +125,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let previous_theme = self.theme.clone();
         self.sync_theme_binding();
         let theme_changed = self.theme != previous_theme;
+        let previous_reduced_motion = self.reduced_motion;
+        self.reduced_motion = self.active_reduced_motion();
+        let reduced_motion_changed = previous_reduced_motion != self.reduced_motion;
         #[cfg(all(target_os = "android", feature = "android"))]
         {
             let theme = self.theme.clone();
@@ -153,7 +164,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let _ = started_at;
-        theme_changed || clear_color_changed
+        theme_changed || clear_color_changed || reduced_motion_changed
     }
 
     pub(in crate::runtime) fn request_redraw_if_dirty(&mut self, now: Instant) {

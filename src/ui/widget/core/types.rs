@@ -23,6 +23,7 @@ pub struct Element<VM> {
     pub(crate) menu: Option<Box<crate::ui::widget::menu::MenuDescriptor<VM>>>,
     pub(crate) context_menu: Option<Box<crate::ui::widget::menu::ContextMenuDescriptor<VM>>>,
     pub(crate) modal: Option<Box<crate::ui::widget::modal::ModalDescriptor<VM>>>,
+    pub(crate) tab_trigger: Option<common::TabTriggerState<VM>>,
     pub(crate) kind: WidgetKind<VM>,
 }
 
@@ -43,6 +44,7 @@ impl<VM> Clone for Element<VM> {
             menu: self.menu.clone(),
             context_menu: self.context_menu.clone(),
             modal: self.modal.clone(),
+            tab_trigger: self.tab_trigger.clone(),
             kind: self.kind.clone(),
         }
     }
@@ -63,6 +65,7 @@ pub(crate) struct ResolvedElement<VM> {
     pub(crate) menu: Option<Box<crate::ui::widget::menu::MenuDescriptor<VM>>>,
     pub(crate) context_menu: Option<Box<crate::ui::widget::menu::ContextMenuDescriptor<VM>>>,
     pub(crate) modal: Option<Box<crate::ui::widget::modal::ModalDescriptor<VM>>>,
+    pub(crate) tab_trigger: Option<common::TabTriggerState<VM>>,
     pub(crate) child_source_spans: Vec<usize>,
     pub(crate) kind: ResolvedWidgetKind<VM>,
 }
@@ -153,6 +156,19 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         style: WidgetSliderStyle,
     },
+    ProgressBar {
+        value: Value<f32>,
+        indeterminate: Value<bool>,
+        show_label: bool,
+        label: Option<Value<String>>,
+        style: crate::ui::widget::style::ProgressBarStyle,
+    },
+    Spinner {
+        style: crate::ui::widget::style::SpinnerStyle,
+        size_override: Option<Value<Dp>>,
+        thickness_override: Option<Value<Dp>>,
+        track_override: Option<bool>,
+    },
     TextEditor {
         controller: TextController,
         placeholder: Value<String>,
@@ -163,6 +179,12 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         multiline: bool,
         show_scrollbar: Value<bool>,
         auto_wrap: Value<bool>,
+    },
+    ToastHost {
+        queue: crate::foundation::binding::ToastQueue<VM>,
+        placement: crate::foundation::binding::ToastPlacement,
+        max_visible: Option<usize>,
+        style: crate::ui::widget::style::ToastStyle,
     },
 }
 
@@ -183,6 +205,7 @@ impl<VM> Clone for ResolvedElement<VM> {
             menu: self.menu.clone(),
             context_menu: self.context_menu.clone(),
             modal: self.modal.clone(),
+            tab_trigger: self.tab_trigger.clone(),
             child_source_spans: self.child_source_spans.clone(),
             kind: self.kind.clone(),
         }
@@ -340,6 +363,30 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled: disabled.clone(),
                 style: style.clone(),
             },
+            Self::ProgressBar {
+                value,
+                indeterminate,
+                show_label,
+                label,
+                style,
+            } => Self::ProgressBar {
+                value: value.clone(),
+                indeterminate: indeterminate.clone(),
+                show_label: *show_label,
+                label: label.clone(),
+                style: style.clone(),
+            },
+            Self::Spinner {
+                style,
+                size_override,
+                thickness_override,
+                track_override,
+            } => Self::Spinner {
+                style: style.clone(),
+                size_override: size_override.clone(),
+                thickness_override: thickness_override.clone(),
+                track_override: *track_override,
+            },
             Self::TextEditor {
                 controller,
                 placeholder,
@@ -360,6 +407,17 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 multiline: *multiline,
                 show_scrollbar: show_scrollbar.clone(),
                 auto_wrap: auto_wrap.clone(),
+            },
+            Self::ToastHost {
+                queue,
+                placement,
+                max_visible,
+                style,
+            } => Self::ToastHost {
+                queue: queue.clone(),
+                placement: *placement,
+                max_visible: *max_visible,
+                style: style.clone(),
             },
         }
     }

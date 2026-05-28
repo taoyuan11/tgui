@@ -204,6 +204,7 @@ impl<VM> Input<VM> {
                 menu: None,
                 context_menu: None,
                 modal: None,
+                tab_trigger: None,
                 kind: WidgetKind::TextEditor {
                     controller,
                     placeholder: Value::Static(String::new()),

@@ -160,6 +160,7 @@ impl<VM> Canvas<VM> {
                 menu: None,
                 context_menu: None,
                 modal: None,
+                tab_trigger: None,
                 kind: WidgetKind::Canvas {
                     scene: scene.into(),
                     item_interactions: CanvasItemInteractionHandlers::default(),

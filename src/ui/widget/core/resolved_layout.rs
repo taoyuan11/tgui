@@ -58,6 +58,32 @@ impl<VM> ResolvedElement<VM> {
                 id: self.id,
                 style: style.clone(),
             },
+            ResolvedWidgetKind::ProgressBar {
+                value,
+                indeterminate,
+                show_label,
+                label,
+                style,
+            } => MeasureContext::ProgressBar {
+                id: self.id,
+                value: value.clone(),
+                indeterminate: indeterminate.clone(),
+                show_label: *show_label,
+                label: label.clone(),
+                style: style.clone(),
+            },
+            ResolvedWidgetKind::Spinner {
+                style,
+                size_override,
+                thickness_override,
+                track_override,
+            } => MeasureContext::Spinner {
+                id: self.id,
+                style: style.clone(),
+                size_override: size_override.clone(),
+                thickness_override: thickness_override.clone(),
+                track_override: *track_override,
+            },
             ResolvedWidgetKind::TextEditor {
                 controller,
                 placeholder,
@@ -71,6 +97,7 @@ impl<VM> ResolvedElement<VM> {
                 style: style.clone(),
                 multiline: *multiline,
             },
+            ResolvedWidgetKind::ToastHost { .. } => MeasureContext::None,
         }
     }
 
@@ -136,6 +163,7 @@ impl<VM> ResolvedElement<VM> {
                     )?);
                 }
             }
+            ResolvedWidgetKind::ToastHost { .. } => {}
             _ => {}
         }
 
@@ -183,6 +211,7 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Slider { style, .. } if self.layout.min_width.is_none() => {
                 Dimension::from_length(style.min_width.get())
             }
+            ResolvedWidgetKind::ToastHost { .. } => Dimension::from_length(0.0),
             _ => Dimension::AUTO,
         };
         let width = if is_root {
@@ -429,6 +458,9 @@ impl<VM> ResolvedElement<VM> {
                     vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)];
                 style.grid_template_rows =
                     vec![GridTemplateComponent::Single(TrackSizingFunction::AUTO)];
+            }
+            ResolvedWidgetKind::ToastHost { .. } => {
+                style.display = Display::None;
             }
             _ => {}
         }

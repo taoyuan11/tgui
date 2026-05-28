@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::path::PathBuf;
+use std::time::Duration;
 use tgui::prelude::*;
 
 fn text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
@@ -134,20 +135,24 @@ impl VideoPlayer {
 
 struct App {
     theme: State<ThemeMode>,
+    reduced_motion: State<bool>,
     switch: State<bool>,
     checkbox: State<bool>,
     radio: State<bool>,
     slider_value: State<f32>,
+    active_tab: State<String>,
     contact_method: State<String>,
     select_action: State<Option<String>>,
     notification_status: State<String>,
+    toast_status: State<String>,
     popover_open: State<bool>,
     popover_switch: State<bool>,
     popover_note: TextController,
     input_text: TextController,
     textarea_text: TextController,
     audio_controller: AudioController,
-    video_player: VideoPlayer
+    video_player: VideoPlayer,
+    toast_queue: ToastQueue<App>,
 }
 
 impl ViewModel for App {
@@ -156,13 +161,16 @@ impl ViewModel for App {
         audio.set_volume(0.8);
         Self {
             theme: context.state(ThemeMode::System),
+            reduced_motion: context.state(false),
             switch: context.state(false),
             checkbox: context.state(false),
             radio: context.state(false),
             slider_value: context.state(80.0),
+            active_tab: context.state(String::from("overview")),
             contact_method: context.state(String::from("system")),
             select_action: context.state(None),
             notification_status: context.state(String::from("尚未发送通知")),
+            toast_status: context.state(String::from("尚未触发 Toast 操作")),
             popover_open: context.state(false),
             popover_switch: context.state(true),
             popover_note: context.text_controller("预览状态下也可以直接编辑这里的内容。"),
@@ -171,17 +179,20 @@ impl ViewModel for App {
                 "这是一个受控 Textarea。\n你可以在这里输入多行内容，示例不会保存修改。",
             ),
             audio_controller: audio,
-            video_player: VideoPlayer::new(context)
+            video_player: VideoPlayer::new(context),
+            toast_queue: ToastQueue::new(context),
         }
     }
 
     fn view(&self) -> Element<Self> {
-        Flex::horizontal()
-            .wrap(Wrap::Wrap)
-            .padding(Insets::all(dp(20.0)))
-            .gap(dp(10.0))
-            .overflow_y(Overflow::Scroll)
-            .child(el![
+        Stack::new()
+            .child(
+                Flex::horizontal()
+                    .wrap(Wrap::Wrap)
+                    .padding(Insets::all(dp(20.0)))
+                    .gap(dp(10.0))
+                    .overflow_y(Overflow::Scroll)
+                    .child(el![
                 Text::new("TGUI 组件列表示例")
                     .style(title_style)
                     .width(pct(100.0)),
@@ -317,6 +328,14 @@ impl ViewModel for App {
                         })),
                 ),
                 component_card(
+                    "ProgressBar / Spinner",
+                    self.build_progress_component(),
+                ),
+                component_card(
+                    "Tabs / TabView",
+                    self.build_tabs_component(),
+                ),
+                component_card(
                     "Audio",
                     self.build_audio_component()
                 ),
@@ -354,6 +373,7 @@ impl ViewModel for App {
                         Text::new(self.notification_status.signal()).style(status_style),
                     ]),
                 ),
+                component_card("Toast / Snackbar", self.build_toast_component()),
                 component_card(
                     "Image",
                     Image::from_path(demo_image_path())
@@ -362,6 +382,8 @@ impl ViewModel for App {
                 ),
                 component_card("Canvas", demo_canvas()),
             ])
+            )
+            .child(ToastHost::new(self.toast_queue.clone()))
             .into()
     }
 }
@@ -433,6 +455,178 @@ fn demo_shadow_card() -> Element<App> {
 }
 
 impl App {
+    fn build_tabs_component(&self) -> Element<Self> {
+        Tabs::new(
+            vec![
+                TabItem::new(
+                    "overview",
+                    "概览",
+                    Flex::vertical().gap(dp(8.0)).child(el![
+                        Text::new("Tabs 会根据选中 key 只渲染当前 panel。").style(status_style),
+                        ProgressBar::new(self.slider_value.signal().map(|value| value / 100.0))
+                            .width(dp(240.0))
+                            .show_label(true)
+                            .label(
+                                self.slider_value
+                                    .signal()
+                                    .map(|value| format!("当前音量 {:.0}%", value)),
+                            ),
+                    ]),
+                ),
+                TabItem::new(
+                    "settings",
+                    "设置",
+                    Flex::vertical().gap(dp(8.0)).child(el![
+                        Text::new("这里放置可交互内容，切换 tab 不需要额外容器代码。")
+                            .style(status_style),
+                        Switch::new(self.switch.signal()).on_change(ValueCommand::new(
+                            |app: &mut App, enabled| app.switch.set(enabled),
+                        )),
+                        Checkbox::new(self.checkbox.signal())
+                            .label("同步到偏好设置")
+                            .on_change(ValueCommand::new(|app: &mut App, checked| {
+                                app.checkbox.set(checked)
+                            })),
+                    ]),
+                ),
+                TabItem::new(
+                    "logs",
+                    "日志",
+                    Flex::vertical().gap(dp(8.0)).child(el![
+                        Text::new("日志面板展示当前 tab 状态。").style(status_style),
+                        Text::new(self.active_tab.signal().map(|key| format!("active tab: {key}")))
+                            .style(status_style),
+                    ]),
+                ),
+                TabItem::new(
+                    "archived",
+                    "归档",
+                    Text::new("这个 panel 不会显示，因为 tab 被禁用。").style(status_style),
+                )
+                .disabled(true),
+            ],
+            self.active_tab.signal(),
+        )
+        .width(dp(340.0))
+        .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
+            app.active_tab.set(key);
+        }))
+        .into()
+    }
+
+    fn build_progress_component(&self) -> Element<Self> {
+        Flex::vertical()
+            .gap(dp(12.0))
+            .child(el![
+                Text::new("展示确定态 / 不确定态进度以及 reduced-motion 动画退化。")
+                    .style(status_style),
+                ProgressBar::new(self.slider_value.signal().map(|value| value / 100.0))
+                    .width(dp(260.0))
+                    .show_label(true)
+                    .label(
+                        self.slider_value
+                            .signal()
+                            .map(|value| format!("下载进度 {:.0}%", value)),
+                    ),
+                ProgressBar::indeterminate(true)
+                    .width(dp(260.0))
+                    .show_label(true)
+                    .label("处理中"),
+                Flex::horizontal().gap(dp(12.0)).wrap(Wrap::Wrap).child(el![
+                    Spinner::new(),
+                    Spinner::new().size(dp(32.0), dp(32.0)).style(|mode| {
+                        let mut style = SpinnerStyle::default_for(mode);
+                        style.indicator_color = Color::hexa(0xF97316FF).into();
+                        style.track_color = Color::hexa(0xFDBA7488).into();
+                        style.size = dp(32.0);
+                        style.thickness = dp(4.0);
+                        style
+                    }),
+                ]),
+                Flex::horizontal().gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
+                    Switch::new(self.reduced_motion.signal()).on_change(ValueCommand::new(
+                        |app: &mut App, enabled| app.reduced_motion.set(enabled),
+                    )),
+                    Text::new(
+                        self.reduced_motion.signal().map(|enabled| {
+                            if enabled {
+                                "reduced-motion: 已开启（停止循环动画）".to_string()
+                            } else {
+                                "reduced-motion: 已关闭（播放循环动画）".to_string()
+                            }
+                        }),
+                    )
+                    .style(status_style),
+                ]),
+            ])
+            .into()
+    }
+
+    fn build_toast_component(&self) -> Element<Self> {
+        Flex::vertical()
+            .gap(dp(10.0))
+            .child(el![
+                Text::new("用于应用内短提示；支持语义色、可选 action、持久提示以及桌面端 hover 暂停倒计时。")
+                    .style(status_style),
+                Flex::horizontal().gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
+                    Button::new("Success").on_click(Command::new(|app: &mut App| {
+                        app.toast_queue.success("保存成功");
+                        app.toast_status.set("最近操作：success toast".to_string());
+                    })),
+                    Button::new("Error").danger().on_click(Command::new(|app: &mut App| {
+                        app.toast_queue.push(
+                            Toast::new("保存失败，请稍后重试").title("上传失败").kind(ToastKind::Error)
+                        );
+                        app.toast_status.set("最近操作：error toast".to_string());
+                    })),
+                    Button::new("Warning").secondary().on_click(Command::new(|app: &mut App| {
+                        app.toast_queue.warning("网络波动，已切换为离线模式");
+                        app.toast_status.set("最近操作：warning toast".to_string());
+                    })),
+                    Button::new("Info").ghost().on_click(Command::new(|app: &mut App| {
+                        app.toast_queue.info("后台同步将在 30 秒后开始");
+                        app.toast_status.set("最近操作：info toast".to_string());
+                    })),
+                ]),
+                Flex::horizontal().gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
+                    Button::new("撤销示例").on_click(Command::new(|app: &mut App| {
+                        app.toast_queue.push(
+                            Toast::new("文件已移入回收站")
+                                .title("Snackbar")
+                                .kind(ToastKind::Info)
+                                .action(ToastAction::new(
+                                    "撤销",
+                                    Command::new(|app: &mut App| {
+                                        app.toast_status.set("最近操作：点击了撤销".to_string());
+                                    }),
+                                )),
+                        );
+                        app.toast_status.set("最近操作：弹出撤销 snackbar".to_string());
+                    })),
+                    Button::new("持久提示").on_click(Command::new(|app: &mut App| {
+                        app.toast_queue.push(
+                            Toast::new("正在连接远程设备，请在完成后手动关闭")
+                                .title("持久提示")
+                                .kind(ToastKind::Warning)
+                                .persistent(true)
+                                .show_close_button(true),
+                        );
+                        app.toast_status.set("最近操作：弹出持久 toast".to_string());
+                    })),
+                    Button::new("短时提示").secondary().on_click(Command::new(|app: &mut App| {
+                        app.toast_queue.push(
+                            Toast::new("这个提示将在 2 秒后自动消失")
+                                .title("短时提示")
+                                .kind(ToastKind::Success)
+                                .duration(Duration::from_secs(2)),
+                        );
+                        app.toast_status.set("最近操作：弹出 2 秒 toast".to_string());
+                    })),
+                ]),
+                Text::new(self.toast_status.signal()).style(status_style),
+            ])
+            .into()
+    }
     fn build_popover_component(&self) -> Element<Self> {
         let trigger_text = self
             .popover_open
@@ -629,12 +823,17 @@ impl App {
         self.theme.signal()
     }
 
+    fn reduced_motion_binding(&self) -> Signal<bool> {
+        self.reduced_motion.signal()
+    }
+
     fn run() -> Result<(), TguiError> {
         Application::new()
             .app_id("com.tgui.demo")
             .with_view_model(App::new)
             .root_view(App::view)
             .bind_theme_mode(App::theme_binding)
+            .bind_reduced_motion(App::reduced_motion_binding)
             .run()
     }
 }

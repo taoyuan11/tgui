@@ -61,6 +61,7 @@ pub(crate) use hit_scene_support::*;
 pub use scene_primitives::*;
 pub(crate) use slider::*;
 pub(crate) use text_edit::*;
+pub use widget_kind::TabPlacement;
 pub(crate) use widget_kind::*;
 
 static NEXT_WIDGET_ID: AtomicU64 = AtomicU64::new(1);

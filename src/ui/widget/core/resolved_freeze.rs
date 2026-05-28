@@ -4,6 +4,7 @@ use crate::ui::widget::style::VideoSurfaceStyle;
 use crate::ui::widget::style::{
     ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle, ContainerStyle,
     InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
+    ProgressBarStyle as WidgetProgressBarStyle, SpinnerStyle as WidgetSpinnerStyle,
     SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle,
     SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle,
 };
@@ -187,6 +188,20 @@ fn freeze_input_style(style: &mut WidgetInputStyle) {
     freeze_option_value(&mut style.caret);
     freeze_value(&mut style.border_width);
     freeze_value(&mut style.radius);
+}
+
+fn freeze_progress_bar_style(style: &mut WidgetProgressBarStyle) {
+    freeze_widget_surface_style(&mut style.surface);
+    freeze_value(&mut style.track_color);
+    freeze_value(&mut style.fill_color);
+    freeze_value(&mut style.label_color);
+    freeze_value(&mut style.radius);
+}
+
+fn freeze_spinner_style(style: &mut WidgetSpinnerStyle) {
+    freeze_widget_surface_style(&mut style.surface);
+    freeze_value(&mut style.track_color);
+    freeze_value(&mut style.indicator_color);
 }
 
 pub(super) fn lifecycle_snapshot<VM>(element: &ResolvedElement<VM>) -> LifecycleSnapshot {
@@ -439,6 +454,48 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
                 style,
             }
         }
+        ResolvedWidgetKind::ProgressBar {
+            value,
+            indeterminate,
+            show_label,
+            label,
+            style,
+        } => {
+            let mut value = value.clone();
+            let mut indeterminate = indeterminate.clone();
+            let mut label = label.clone();
+            let mut style = style.clone();
+            freeze_value(&mut value);
+            freeze_value(&mut indeterminate);
+            freeze_option_value(&mut label);
+            freeze_progress_bar_style(&mut style);
+            LifecycleWidgetKind::ProgressBar {
+                value,
+                indeterminate,
+                show_label: *show_label,
+                label,
+                style,
+            }
+        }
+        ResolvedWidgetKind::Spinner {
+            style,
+            size_override,
+            thickness_override,
+            track_override,
+        } => {
+            let mut style = style.clone();
+            let mut size_override = size_override.clone();
+            let mut thickness_override = thickness_override.clone();
+            freeze_spinner_style(&mut style);
+            freeze_option_value(&mut size_override);
+            freeze_option_value(&mut thickness_override);
+            LifecycleWidgetKind::Spinner {
+                style,
+                size_override,
+                thickness_override,
+                track_override: *track_override,
+            }
+        }
         ResolvedWidgetKind::TextEditor {
             controller: _,
             placeholder,
@@ -468,5 +525,6 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
                 auto_wrap,
             }
         }
+        ResolvedWidgetKind::ToastHost { .. } => LifecycleWidgetKind::ToastHost,
     }
 }

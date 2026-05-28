@@ -84,6 +84,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 frame_advanced = true;
             }
         }
+        if let Some(deadline) = self.next_toast_wakeup_deadline {
+            if deadline <= now {
+                self.next_toast_wakeup_deadline = None;
+                self.invalidate_computed_scene();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                frame_advanced = true;
+            }
+        }
         if self.advance_smooth_scroll() {
             frame_advanced = true;
             smooth_scroll_advanced = true;

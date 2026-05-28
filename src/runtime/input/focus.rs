@@ -214,6 +214,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     let _ = self.set_select_open_state(*id, next_open, on_open_change.as_ref());
                     true
                 }
+                HitInteraction::TabTrigger {
+                    id,
+                    key,
+                    label,
+                    on_change,
+                    ..
+                } if *id == focused_id && (enter || space) => {
+                    if let Some(command) = on_change.as_ref() {
+                        self.execute_value_command(command, (key.clone(), label.clone()));
+                        return true;
+                    }
+                    false
+                }
                 _ => false,
             };
             if handles_key {

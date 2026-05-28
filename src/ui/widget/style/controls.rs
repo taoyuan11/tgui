@@ -1,7 +1,10 @@
 mod input;
+mod progress;
 mod slider;
+mod spinner;
 
 use crate::foundation::color::Color;
+use crate::theme::FontWeight;
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Insets, Value};
 use crate::ui::theme::{Shadow, Stateful, TextStyle};
@@ -15,7 +18,9 @@ use super::palette::{
 use super::shared::{FocusRingOverride, WidgetSurfaceStyle};
 
 pub use self::input::{InputStyle, TextareaStyle};
+pub use self::progress::ProgressBarStyle;
 pub use self::slider::SliderStyle;
+pub use self::spinner::SpinnerStyle;
 
 /// 按钮 widget 的样式定义。
 #[derive(Clone, Debug, PartialEq)]
@@ -665,6 +670,66 @@ impl MenuBarStyle {
     }
 }
 
+/// Tabs / TabView widget 的样式定义。
+#[derive(Clone, Debug, PartialEq)]
+pub struct TabsStyle {
+    pub surface: WidgetSurfaceStyle,
+    pub tab_bar_background: Value<Color>,
+    pub panel_background: Value<Color>,
+    pub tab_background: Stateful<Value<Color>>,
+    pub active_tab_background: Value<Color>,
+    pub tab_foreground: Stateful<Value<Color>>,
+    pub active_tab_foreground: Value<Color>,
+    pub indicator_color: Value<Color>,
+    pub border: Value<Color>,
+    pub border_width: Value<Dp>,
+    pub radius: Value<Dp>,
+    pub tab_padding: Insets,
+    pub tab_min_height: Dp,
+    pub tab_min_width: Dp,
+    pub tab_gap: Dp,
+    pub panel_padding: Insets,
+    pub indicator_thickness: Dp,
+    pub text_style: TextStyle,
+}
+
+impl TabsStyle {
+    /// 按解析后的主题模式创建默认 Tabs 样式。
+    pub fn default_for(mode: ResolvedThemeMode) -> Self {
+        let palette = palette(mode);
+        Self {
+            surface: WidgetSurfaceStyle::default(),
+            tab_bar_background: Value::Static(palette.surface_low),
+            panel_background: Value::Static(palette.surface),
+            tab_background: stateful_colors(
+                Color::TRANSPARENT,
+                palette.surface_high.lighten(surface_hover_lighten()),
+                palette.surface_high.darken(surface_hover_lighten()),
+                Color::TRANSPARENT,
+            ),
+            active_tab_background: Value::Static(palette.surface_high),
+            tab_foreground: stateful_single(
+                palette.on_surface_muted,
+                palette.on_surface,
+                palette.on_surface,
+                palette.disabled_content,
+            ),
+            active_tab_foreground: Value::Static(palette.primary),
+            indicator_color: Value::Static(palette.primary),
+            border: Value::Static(palette.outline_muted),
+            border_width: Value::Static(dp(1.0)),
+            radius: Value::Static(dp(8.0)),
+            tab_padding: Insets::symmetric(dp(12.0), dp(6.0)),
+            tab_min_height: dp(36.0),
+            tab_min_width: dp(72.0),
+            tab_gap: dp(4.0),
+            panel_padding: Insets::all(dp(12.0)),
+            indicator_thickness: dp(3.0),
+            text_style: label_text_style(),
+        }
+    }
+}
+
 /// Modal / Dialog widget 的样式定义。
 ///
 /// Modal 由全屏 backdrop（半透明 scrim）+ 居中 card 组成。card 内有
@@ -737,6 +802,95 @@ impl ModalStyle {
             content_padding: Insets::symmetric(dp(20.0), dp(12.0)),
             actions_gap: dp(8.0),
             actions_padding: Insets::symmetric(dp(20.0), dp(16.0)),
+        }
+    }
+}
+
+/// Toast / Snackbar widget 的样式定义。
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToastStyle {
+    pub surface: WidgetSurfaceStyle,
+    pub background: Value<Color>,
+    pub foreground: Value<Color>,
+    pub border: Value<Color>,
+    pub border_width: Value<Dp>,
+    pub radius: Value<Dp>,
+    pub shadow: Shadow,
+    pub padding: Insets,
+    pub gap: Dp,
+    pub title_text_style: TextStyle,
+    pub body_text_style: TextStyle,
+    pub icon_size: Dp,
+    pub min_width: Dp,
+    pub max_width: Dp,
+    pub margin: Dp,
+    pub stack_gap: Dp,
+    pub action_button: ButtonStyle,
+    pub close_button: ButtonStyle,
+    pub success_background: Value<Color>,
+    pub success_foreground: Value<Color>,
+    pub error_background: Value<Color>,
+    pub error_foreground: Value<Color>,
+    pub warning_background: Value<Color>,
+    pub warning_foreground: Value<Color>,
+    pub info_background: Value<Color>,
+    pub info_foreground: Value<Color>,
+}
+
+impl ToastStyle {
+    pub fn default_for(mode: ResolvedThemeMode) -> Self {
+        let palette = palette(mode);
+        let mut action_button =
+            ButtonStyle::default_for(mode, crate::ui::widget::common::ButtonVariantKind::Ghost);
+        action_button.min_height = dp(28.0);
+        action_button.padding_x = dp(6.0);
+        action_button.padding_y = dp(2.0);
+        action_button.radius = Value::Static(dp(6.0));
+
+        let mut close_button =
+            ButtonStyle::default_for(mode, crate::ui::widget::common::ButtonVariantKind::Ghost);
+        close_button.min_height = dp(24.0);
+        close_button.padding_x = dp(4.0);
+        close_button.padding_y = dp(2.0);
+        close_button.radius = Value::Static(dp(999.0));
+
+        Self {
+            surface: WidgetSurfaceStyle::default(),
+            background: Value::Static(palette.surface_high),
+            foreground: Value::Static(palette.on_surface),
+            border: Value::Static(palette.outline_muted),
+            border_width: Value::Static(dp(1.0)),
+            radius: Value::Static(dp(12.0)),
+            shadow: Shadow {
+                offset_x: dp(0.0),
+                offset_y: dp(10.0),
+                blur: dp(28.0),
+                spread: dp(0.0),
+                color: Color::BLACK.with_alpha_factor(0.2),
+            },
+            padding: Insets::all(dp(12.0)),
+            gap: dp(10.0),
+            title_text_style: {
+                let mut style = label_text_style();
+                style.weight = FontWeight::Medium;
+                style
+            },
+            body_text_style: label_text_style(),
+            icon_size: dp(18.0),
+            min_width: dp(240.0),
+            max_width: dp(420.0),
+            margin: dp(16.0),
+            stack_gap: dp(12.0),
+            action_button,
+            close_button,
+            success_background: Value::Static(Color::hexa(0xDCFCE7FF)),
+            success_foreground: Value::Static(Color::hexa(0x166534FF)),
+            error_background: Value::Static(Color::hexa(0xFEE2E2FF)),
+            error_foreground: Value::Static(Color::hexa(0x991B1BFF)),
+            warning_background: Value::Static(Color::hexa(0xFEF3C7FF)),
+            warning_foreground: Value::Static(Color::hexa(0x92400EFF)),
+            info_background: Value::Static(Color::hexa(0xDBEAFEFF)),
+            info_foreground: Value::Static(Color::hexa(0x1D4ED8FF)),
         }
     }
 }

@@ -177,13 +177,19 @@ impl<VM> ResolvedElement<VM> {
                 fallback_focusable,
             );
             if self.interactions.has_any() || focus.is_some() {
-                computed.hit_regions.push(HitRegion {
-                    rect: visual.frame,
-                    clip_rect: visual.primitive_clip,
-                    geometry: HitGeometry::Rect,
-                    scope_path: context.focus_scope_path(),
-                    focus,
-                    interaction: HitInteraction::Widget {
+                let interaction = if let Some(trigger) = self.tab_trigger.as_ref() {
+                    HitInteraction::TabTrigger {
+                        id: self.id,
+                        group_id: trigger.group_id,
+                        index: trigger.index,
+                        placement: trigger.placement,
+                        key: trigger.key.clone(),
+                        label: trigger.label.clone(),
+                        interactions: self.interactions.clone(),
+                        on_change: trigger.on_change.clone(),
+                    }
+                } else {
+                    HitInteraction::Widget {
                         id: self.id,
                         interactions: self.interactions.clone(),
                         focusable: fallback_focusable,
@@ -191,7 +197,15 @@ impl<VM> ResolvedElement<VM> {
                             ResolvedWidgetKind::Button { .. } => DefaultActivation::EnterAndSpace,
                             _ => DefaultActivation::None,
                         },
-                    },
+                    }
+                };
+                computed.hit_regions.push(HitRegion {
+                    rect: visual.frame,
+                    clip_rect: visual.primitive_clip,
+                    geometry: HitGeometry::Rect,
+                    scope_path: context.focus_scope_path(),
+                    focus,
+                    interaction,
                 });
             }
         }

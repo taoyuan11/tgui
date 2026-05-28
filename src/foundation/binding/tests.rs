@@ -2,13 +2,13 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::animation::{AnimationCoordinator, Transition};
 
 use super::{
     track_dependency_scope, with_dependency_collection, DependencyOwner, DependencyPhase,
-    DirtyDependencySet, InvalidationSignal, Signal, State, ViewModelContext,
+    DirtyDependencySet, InvalidationSignal, Signal, State, Toast, ToastQueue, ViewModelContext,
 };
 
 fn context() -> ViewModelContext {
@@ -229,4 +229,51 @@ fn state_project_reads_without_cloning_source_value() {
 
     assert_eq!(projected.get(), "tracked text".len());
     assert_eq!(clone_count.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn toast_queue_push_dismiss_and_clear_work() {
+    let queue = ToastQueue::<()>::new_detached();
+    let first = queue.push(Toast::new("first"));
+    let second = queue.push(Toast::new("second"));
+
+    assert_eq!(queue.snapshot().len(), 2);
+    assert!(queue.dismiss(first));
+    assert_eq!(queue.snapshot().len(), 1);
+    assert_eq!(queue.snapshot()[0].id, second);
+
+    queue.clear();
+    assert!(queue.snapshot().is_empty());
+}
+
+#[test]
+fn toast_queue_flush_expired_filters_deadlines() {
+    let queue = ToastQueue::<()>::new_detached();
+    let now = Instant::now();
+    queue.push_at(Toast::new("short").duration(Duration::from_secs(1)), now);
+    queue.push_at(Toast::new("long").duration(Duration::from_secs(5)), now);
+    queue.push_at(Toast::new("keep").persistent(true), now);
+
+    assert!(queue.flush_expired(now + Duration::from_secs(2)));
+    let entries = queue.snapshot();
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().any(|entry| entry.toast.persistent));
+    assert!(entries.iter().any(|entry| entry.toast.duration == Duration::from_secs(5)));
+}
+
+#[test]
+fn toast_queue_pause_and_resume_preserve_remaining_time() {
+    let queue = ToastQueue::<()>::new_detached();
+    let now = Instant::now();
+    let id = queue.push_at(Toast::new("pause").duration(Duration::from_secs(5)), now);
+
+    assert!(queue.pause_at(id, now + Duration::from_secs(2)));
+    let paused = queue.snapshot().pop().expect("toast should exist");
+    assert!(paused.paused);
+    assert_eq!(paused.paused_remaining, Some(Duration::from_secs(3)));
+
+    assert!(queue.resume_at(id, now + Duration::from_secs(4)));
+    let resumed = queue.snapshot().pop().expect("toast should exist");
+    assert!(!resumed.paused);
+    assert_eq!(resumed.deadline, Some(now + Duration::from_secs(7)));
 }

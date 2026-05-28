@@ -509,6 +509,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | HitInteraction::SelectTrigger {
                 id, interactions, ..
             }
+            | HitInteraction::TabTrigger {
+                id, interactions, ..
+            }
             | HitInteraction::Slider {
                 id, interactions, ..
             }

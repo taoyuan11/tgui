@@ -113,6 +113,7 @@ pub struct Application {
     fonts: FontCatalog,
     theme: ThemeSelection,
     theme_set: ThemeSet,
+    reduced_motion: bool,
     window_icon: Option<&'static [u8]>,
     resource_budget: ResourceBudget,
 }
@@ -138,6 +139,7 @@ impl Application {
             fonts: FontCatalog::default(),
             theme: ThemeSelection::System,
             theme_set: ThemeSet::default(),
+            reduced_motion: false,
             window_icon: None,
             resource_budget: ResourceBudget::DEFAULT,
         }
@@ -340,6 +342,12 @@ impl Application {
         self
     }
 
+    /// 设置应用级 reduced motion 默认值。
+    pub fn reduced_motion(mut self, reduced_motion: bool) -> Self {
+        self.reduced_motion = reduced_motion;
+        self
+    }
+
     /// 设置媒体与缓存的资源预算上限。
     ///
     /// 参数:
@@ -381,6 +389,7 @@ impl Application {
             fonts: self.fonts.clone(),
             theme: self.theme.clone(),
             theme_set: self.theme_set.clone(),
+            reduced_motion: self.reduced_motion,
             window_icon: self.window_icon,
             resource_budget: self.resource_budget,
         };
@@ -411,6 +420,7 @@ pub(crate) struct ApplicationConfig {
     pub(crate) fonts: FontCatalog,
     pub(crate) theme: ThemeSelection,
     pub(crate) theme_set: ThemeSet,
+    pub(crate) reduced_motion: bool,
     pub(crate) window_icon: Option<&'static [u8]>,
     pub(crate) resource_budget: ResourceBudget,
 }

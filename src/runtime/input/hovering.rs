@@ -77,6 +77,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
                 | HitInteraction::SelectTrigger {
                     id, interactions, ..
+                }
+                | HitInteraction::TabTrigger {
+                    id, interactions, ..
                 } => HoveredWidget {
                     target_id: HoverTargetId::Widget(id),
                     cursor_style: interactions.cursor_style.map(|c| c.resolve()),

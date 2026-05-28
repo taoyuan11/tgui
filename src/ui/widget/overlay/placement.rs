@@ -147,15 +147,17 @@ pub enum OverlayLayer {
     Popover,
     Menu,
     Modal,
+    Toast,
 }
 
 impl OverlayLayer {
     /// 所有层级，从最底到最顶。`finalize_overlay_layers` 据此顺序合并 bucket。
-    pub const ALL: [OverlayLayer; 4] = [
+    pub const ALL: [OverlayLayer; 5] = [
         OverlayLayer::Tooltip,
         OverlayLayer::Popover,
         OverlayLayer::Menu,
         OverlayLayer::Modal,
+        OverlayLayer::Toast,
     ];
 
     /// 转换为 0..ALL.len() 的下标。
@@ -165,6 +167,7 @@ impl OverlayLayer {
             OverlayLayer::Popover => 1,
             OverlayLayer::Menu => 2,
             OverlayLayer::Modal => 3,
+            OverlayLayer::Toast => 4,
         }
     }
 }

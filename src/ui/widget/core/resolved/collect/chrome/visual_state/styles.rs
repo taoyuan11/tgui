@@ -25,6 +25,14 @@ impl<VM> ResolvedElement<VM> {
                 }
                 _ => None,
             },
+            progress_bar_style: match &self.kind {
+                ResolvedWidgetKind::ProgressBar { style, .. } => Some(style.clone()),
+                _ => None,
+            },
+            spinner_style: match &self.kind {
+                ResolvedWidgetKind::Spinner { style, .. } => Some(style.clone()),
+                _ => None,
+            },
             input_style: match &self.kind {
                 ResolvedWidgetKind::TextEditor { style, .. } => {
                     Some(resolve_input_style(style, widget_state))

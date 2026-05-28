@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widget::style::{ProgressBarStyle, SpinnerStyle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct FocusScopeOptions {
@@ -120,6 +121,21 @@ pub(crate) enum MeasureContext {
         id: WidgetId,
         style: crate::ui::widget::SliderStyle,
     },
+    ProgressBar {
+        id: WidgetId,
+        value: Value<f32>,
+        indeterminate: Value<bool>,
+        show_label: bool,
+        label: Option<Value<String>>,
+        style: ProgressBarStyle,
+    },
+    Spinner {
+        id: WidgetId,
+        style: SpinnerStyle,
+        size_override: Option<Value<Dp>>,
+        thickness_override: Option<Value<Dp>>,
+        track_override: Option<bool>,
+    },
     TextEditor {
         id: WidgetId,
         controller: TextController,
@@ -178,6 +194,16 @@ pub(crate) enum HitInteraction<VM> {
         interactions: InteractionHandlers<VM>,
         on_open_change: Option<ValueCommand<VM, bool>>,
         is_open: bool,
+    },
+    TabTrigger {
+        id: WidgetId,
+        group_id: WidgetId,
+        index: usize,
+        placement: TabPlacement,
+        key: String,
+        label: String,
+        interactions: InteractionHandlers<VM>,
+        on_change: Option<ValueCommand<VM, (String, String)>>,
     },
     Slider {
         id: WidgetId,
@@ -296,6 +322,25 @@ impl<VM> Clone for HitInteraction<VM> {
                 on_open_change: on_open_change.clone(),
                 is_open: *is_open,
             },
+            Self::TabTrigger {
+                id,
+                group_id,
+                index,
+                placement,
+                key,
+                label,
+                interactions,
+                on_change,
+            } => Self::TabTrigger {
+                id: *id,
+                group_id: *group_id,
+                index: *index,
+                placement: *placement,
+                key: key.clone(),
+                label: label.clone(),
+                interactions: interactions.clone(),
+                on_change: on_change.clone(),
+            },
             Self::Slider {
                 id,
                 interactions,
@@ -388,6 +433,7 @@ impl<VM> HitInteraction<VM> {
             | Self::Checkbox { id, .. }
             | Self::Radio { id, .. }
             | Self::SelectTrigger { id, .. }
+            | Self::TabTrigger { id, .. }
             | Self::Slider { id, .. }
             | Self::TextInput { id, .. } => HitTargetId::Widget(*id),
             Self::SelectOption {

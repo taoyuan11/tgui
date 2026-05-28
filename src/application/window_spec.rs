@@ -17,6 +17,7 @@ pub(crate) type TitleBinding<VM> = Arc<dyn Fn(&VM) -> Signal<String> + Send + Sy
 pub(crate) type ClearColorBinding<VM> = Arc<dyn Fn(&VM) -> Signal<Color> + Send + Sync>;
 pub(crate) type ThemeSetBinding<VM> = Arc<dyn Fn(&VM) -> Signal<ThemeSet> + Send + Sync>;
 pub(crate) type ThemeModeBinding<VM> = Arc<dyn Fn(&VM) -> Signal<ThemeMode> + Send + Sync>;
+pub(crate) type ReducedMotionBinding<VM> = Arc<dyn Fn(&VM) -> Signal<bool> + Send + Sync>;
 pub(crate) type RootViewFactory<VM> = Arc<dyn Fn(&VM) -> Element<VM> + Send + Sync>;
 pub(crate) type WindowsFactory<VM> = Box<dyn Fn(&VM) -> Vec<WindowSpec<VM>> + Send + Sync>;
 
@@ -76,6 +77,7 @@ pub struct WindowSpec<VM> {
     pub(crate) clear_color_binding: Option<ClearColorBinding<VM>>,
     pub(crate) theme_set_binding: Option<ThemeSetBinding<VM>>,
     pub(crate) theme_mode_binding: Option<ThemeModeBinding<VM>>,
+    pub(crate) reduced_motion_binding: Option<ReducedMotionBinding<VM>>,
     pub(crate) root_view: Option<RootViewFactory<VM>>,
     pub(crate) commands: Vec<WindowCommand<VM>>,
     pub(crate) close_policy: WindowClosePolicy,
@@ -113,6 +115,7 @@ impl<VM: 'static> WindowSpec<VM> {
             clear_color_binding: None,
             theme_set_binding: None,
             theme_mode_binding: None,
+            reduced_motion_binding: None,
             root_view: None,
             commands: Vec::new(),
             close_policy: WindowClosePolicy::Close,
@@ -142,6 +145,7 @@ impl<VM: 'static> WindowSpec<VM> {
             clear_color_binding: None,
             theme_set_binding: None,
             theme_mode_binding: None,
+            reduced_motion_binding: None,
             root_view: None,
             commands: Vec::new(),
             close_policy: WindowClosePolicy::Close,
@@ -231,6 +235,15 @@ impl<VM: 'static> WindowSpec<VM> {
         self
     }
 
+    /// 绑定 reduced motion 信号。
+    pub fn bind_reduced_motion(
+        mut self,
+        signal: impl Fn(&VM) -> Signal<bool> + Send + Sync + 'static,
+    ) -> Self {
+        self.reduced_motion_binding = Some(Arc::new(signal));
+        self
+    }
+
     /// 注册当前窗口的根视图工厂。
     pub fn root_view(
         mut self,
@@ -301,6 +314,10 @@ impl<VM: 'static> WindowSpec<VM> {
                 .map(|signal| signal(view_model)),
             theme_mode: self
                 .theme_mode_binding
+                .as_ref()
+                .map(|signal| signal(view_model)),
+            reduced_motion: self
+                .reduced_motion_binding
                 .as_ref()
                 .map(|signal| signal(view_model)),
         }

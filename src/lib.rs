@@ -179,7 +179,8 @@ pub mod logging {
 pub mod mvvm {
     pub use crate::foundation::binding::{
         ScrollRequest, ScrollRequestMode, ScrollViewController, Signal, State, TextChange,
-        TextChangeSet, TextController, TextSnapshot, ViewModelContext,
+        TextChangeSet, TextController, TextSnapshot, Toast, ToastAction, ToastId, ToastKind,
+        ToastPlacement, ToastQueue, ViewModelContext,
     };
     pub use crate::foundation::form::{
         Form, FormField, FormSnapshot, TextFormField, ValidationErrors,
@@ -230,8 +231,9 @@ pub mod prelude {
     pub use crate::mvvm::{
         Command, CommandContext, Form, FormField, FormSnapshot, ScrollRequest, ScrollRequestMode,
         ScrollViewController, Signal, State, TextChange, TextChangeSet, TextController,
-        TextFormField, TextSnapshot, ValidationErrors, ValueCommand, ViewModel, ViewModelContext,
-        WindowControl, WindowResizeDirection,
+        TextFormField, TextSnapshot, Toast, ToastAction, ToastId, ToastKind, ToastPlacement,
+        ToastQueue, ValidationErrors, ValueCommand, ViewModel, ViewModelContext, WindowControl,
+        WindowResizeDirection,
     };
     pub use crate::notification::{
         NotificationAction, NotificationActionEvent, NotificationError, NotificationOptions,
@@ -259,12 +261,13 @@ pub mod prelude {
         ItemLayout, ItemSource, KeyChord, LongPressEvent, Menu, MenuBar, MenuBarEntry,
         MenuBarStyle, MenuIcon, MenuItem, MenuItemKind, MenuStyle, Modal, ModalAction, ModalStyle,
         OverlayAlignment, OverlayFlipPolicy, OverlayPlacement, OverlaySide, PinchGestureEvent,
-        Popover, PopoverStyle, PopoverTriggerMode, Radio, RadioGroup, RadioOption, RadioStyle,
-        ScrollView, Select, SelectOption, SelectStyle, Slider, SliderStyle, SwipeAxis,
-        SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea,
-        TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement,
-        VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle,
-        WidgetTree,
+        Popover, PopoverStyle, PopoverTriggerMode, ProgressBar, ProgressBarStyle, Radio,
+        RadioGroup, RadioOption, RadioStyle, ScrollView, Select, SelectOption, SelectStyle, Slider,
+        SliderStyle, Spinner, SpinnerStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch,
+        SwitchStyle, TabItem, TabPlacement, TabView, Tabs, TabsStyle, Text, TextWidgetStyle,
+        Textarea, TextareaStyle, ToastHost, ToastStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
+        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
+        WidgetSurfaceStyle, WidgetTree,
     };
 }
 
@@ -284,7 +287,8 @@ pub mod widgets {
     pub use crate::layout::{Flex, Grid, IntoLengthValue, Stack};
     pub use crate::mvvm::{
         ScrollRequest, ScrollRequestMode, ScrollViewController, TextChange, TextChangeSet,
-        TextController, TextSnapshot,
+        TextController, TextSnapshot, Toast, ToastAction, ToastId, ToastKind, ToastPlacement,
+        ToastQueue,
     };
     #[cfg(feature = "bench-support")]
     pub use crate::ui::widget::{
@@ -299,12 +303,13 @@ pub mod widgets {
         ItemLayout, ItemSource, KeyChord, LongPressEvent, Menu, MenuBar, MenuBarEntry,
         MenuBarStyle, MenuIcon, MenuItem, MenuItemKind, MenuStyle, Modal, ModalAction, ModalStyle,
         OverlayAlignment, OverlayFlipPolicy, OverlayPlacement, OverlaySide, PinchGestureEvent,
-        Popover, PopoverStyle, PopoverTriggerMode, Radio, RadioGroup, RadioOption, RadioStyle,
-        ScrollView, Select, SelectOption, SelectStyle, Slider, SliderStyle, SwipeAxis,
-        SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle, Text, TextWidgetStyle, Textarea,
-        TextareaStyle, Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement,
-        VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle,
-        WidgetTree,
+        Popover, PopoverStyle, PopoverTriggerMode, ProgressBar, ProgressBarStyle, Radio,
+        RadioGroup, RadioOption, RadioStyle, ScrollView, Select, SelectOption, SelectStyle, Slider,
+        SliderStyle, Spinner, SpinnerStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch,
+        SwitchStyle, TabItem, TabPlacement, TabView, Tabs, TabsStyle, Text, TextWidgetStyle,
+        Textarea, TextareaStyle, ToastHost, ToastStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
+        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
+        WidgetSurfaceStyle, WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

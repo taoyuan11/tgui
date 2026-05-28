@@ -122,14 +122,16 @@ pub enum OverlayLayer {
     Popover,
     Menu,
     Modal,
+    Toast,
 }
 
 impl OverlayLayer {
-    pub const ALL: [OverlayLayer; 4] = [
+    pub const ALL: [OverlayLayer; 5] = [
         OverlayLayer::Tooltip,
         OverlayLayer::Popover,
         OverlayLayer::Menu,
         OverlayLayer::Modal,
+        OverlayLayer::Toast,
     ];
 
     pub(crate) const fn index(self) -> usize {
@@ -138,6 +140,7 @@ impl OverlayLayer {
             OverlayLayer::Popover => 1,
             OverlayLayer::Menu => 2,
             OverlayLayer::Modal => 3,
+            OverlayLayer::Toast => 4,
         }
     }
 }

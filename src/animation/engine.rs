@@ -34,6 +34,8 @@ pub(crate) enum WidgetProperty {
     Padding,
     Gap,
     Grow,
+    ProgressIndeterminatePhase,
+    SpinnerPhase,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -272,6 +274,10 @@ impl<T> Default for AnimationStore<T> {
 }
 
 impl<T: Animatable> AnimationStore<T> {
+    fn contains(&self, key: AnimationKey) -> bool {
+        self.slots.contains_key(&key)
+    }
+
     fn resolve(
         &mut self,
         key: AnimationKey,
@@ -368,6 +374,14 @@ pub(crate) struct AnimationEngine {
 }
 
 impl AnimationEngine {
+    pub(crate) fn contains_key(&self, key: AnimationKey) -> bool {
+        self.colors.contains(key)
+            || self.floats.contains(key)
+            || self.dps.contains(key)
+            || self.points.contains(key)
+            || self.insets.contains(key)
+    }
+
     pub(crate) fn resolve_color(
         &mut self,
         key: AnimationKey,

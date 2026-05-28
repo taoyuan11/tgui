@@ -132,6 +132,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | HitInteraction::Checkbox { .. }
             | HitInteraction::Radio { .. }
             | HitInteraction::SelectTrigger { .. }
+            | HitInteraction::TabTrigger { .. }
             | HitInteraction::SelectOption { .. } => false,
         }
     }

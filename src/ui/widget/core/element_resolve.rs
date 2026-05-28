@@ -301,6 +301,38 @@ impl<VM: 'static> Element<VM> {
                 disabled: disabled.clone(),
                 style: resolved_slider_style(style.as_ref(), theme),
             },
+            WidgetKind::ProgressBar {
+                value,
+                indeterminate,
+                show_label,
+                label,
+                style,
+            } => {
+                let resolved_style = resolved_progress_bar_style(style.as_ref(), theme);
+                apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
+                ResolvedWidgetKind::ProgressBar {
+                    value: value.clone(),
+                    indeterminate: indeterminate.clone(),
+                    show_label: *show_label,
+                    label: label.clone(),
+                    style: resolved_style,
+                }
+            }
+            WidgetKind::Spinner {
+                style,
+                size_override,
+                thickness_override,
+                track_override,
+            } => {
+                let resolved_style = resolved_spinner_style(style.as_ref(), theme);
+                apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
+                ResolvedWidgetKind::Spinner {
+                    style: resolved_style,
+                    size_override: size_override.clone(),
+                    thickness_override: thickness_override.clone(),
+                    track_override: *track_override,
+                }
+            }
             WidgetKind::TextEditor {
                 controller,
                 placeholder,
@@ -342,6 +374,20 @@ impl<VM: 'static> Element<VM> {
                 show_scrollbar: show_scrollbar.clone(),
                 auto_wrap: auto_wrap.clone(),
             },
+            WidgetKind::ToastHost {
+                queue,
+                placement,
+                max_visible,
+                style,
+            } => ResolvedWidgetKind::ToastHost {
+                queue: queue.clone(),
+                placement: *placement,
+                max_visible: *max_visible,
+                style: style
+                    .as_ref()
+                    .map(|resolver| resolver.resolve(crate::ui::widget::style::infer_theme_mode(theme)))
+                    .unwrap_or_else(|| crate::ui::widget::style::ToastStyle::default_for(crate::ui::widget::style::infer_theme_mode(theme))),
+            },
         };
 
         ResolvedElement {
@@ -359,6 +405,7 @@ impl<VM: 'static> Element<VM> {
             menu: source.menu.clone(),
             context_menu: source.context_menu.clone(),
             modal: source.modal.clone(),
+            tab_trigger: source.tab_trigger.clone(),
             child_source_spans,
             kind,
         }

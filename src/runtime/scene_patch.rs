@@ -183,6 +183,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 &theme,
                 &self.media_manager,
                 &mut self.animation_engine,
+                self.reduced_motion,
                 visual_context,
                 self.hovered_scrollbar,
                 active_scrollbar,

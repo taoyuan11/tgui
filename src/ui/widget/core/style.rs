@@ -8,7 +8,8 @@ use super::super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::super::style::{
     infer_theme_mode, ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
     FocusRingOverride, InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
-    SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle, TextWidgetStyle,
+    ProgressBarStyle as WidgetProgressBarStyle, SelectStyle as WidgetSelectStyle,
+    SliderStyle as WidgetSliderStyle, SpinnerStyle as WidgetSpinnerStyle, TextWidgetStyle,
     TextareaStyle as WidgetTextareaStyle,
 };
 use super::{Text, VisualStyle};
@@ -161,6 +162,24 @@ pub(super) fn resolved_slider_style(
     style
         .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
         .unwrap_or_else(|| WidgetSliderStyle::default_for(infer_theme_mode(theme)))
+}
+
+pub(super) fn resolved_progress_bar_style(
+    style: Option<&super::super::style::StyleResolver<WidgetProgressBarStyle>>,
+    theme: &Theme,
+) -> WidgetProgressBarStyle {
+    style
+        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
+        .unwrap_or_else(|| WidgetProgressBarStyle::default_for(infer_theme_mode(theme)))
+}
+
+pub(super) fn resolved_spinner_style(
+    style: Option<&super::super::style::StyleResolver<WidgetSpinnerStyle>>,
+    theme: &Theme,
+) -> WidgetSpinnerStyle {
+    style
+        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
+        .unwrap_or_else(|| WidgetSpinnerStyle::default_for(infer_theme_mode(theme)))
 }
 
 pub(super) fn resolved_input_style(

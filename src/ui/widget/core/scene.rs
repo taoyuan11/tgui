@@ -44,6 +44,7 @@ pub(crate) struct CollectContext<'a, 'b> {
     pub(crate) viewport: Rect,
     pub(crate) units: UnitContext,
     pub(crate) animations: &'b mut AnimationEngine,
+    pub(crate) reduced_motion: bool,
     pub(crate) now: Instant,
     pub(crate) focus: FocusCollectState,
     /// runtime 维护：widget 进入 hover 的时间戳。emit_tooltip 据此判断 hover 是否已持续到 `delay`。
@@ -51,6 +52,8 @@ pub(crate) struct CollectContext<'a, 'b> {
     /// emit_tooltip 写入：尚未达到 delay 时记录下次该唤醒事件循环的时刻，
     /// runtime 会聚合到 `next_deadline` 并在到点后 invalidate scene 触发重 collect。
     pub(crate) next_tooltip_wakeup: &'a Cell<Option<Instant>>,
+    /// emit_toast 写入：当前场景最早的 toast 过期时间。
+    pub(crate) next_toast_wakeup: &'a Cell<Option<Instant>>,
     pub(crate) active_tooltip: Option<ActiveTooltipState>,
     pub(crate) active_hover_popover: Option<WidgetId>,
 }
@@ -159,6 +162,8 @@ pub(crate) struct CollectedSceneCache<VM> {
     /// 最近的 tooltip 唤醒时刻；runtime 据此把事件循环 WaitUntil 至此时间，
     /// 到点后 invalidate scene 再次 collect。若无 tooltip 在等待期内则为 `None`。
     pub(crate) next_tooltip_wakeup: Option<Instant>,
+    /// 最近的 toast 唤醒时刻；runtime 到点后 invalidate scene 触发过期清理。
+    pub(crate) next_toast_wakeup: Option<Instant>,
 }
 
 #[derive(Clone)]

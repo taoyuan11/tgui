@@ -8,12 +8,15 @@ mod layout_media;
 mod menu;
 mod modal;
 mod popover;
+mod toast;
 mod tooltip;
 
 struct CollectResolvedStyles {
     button_style: Option<ResolvedButtonStyle>,
     select_style: Option<ResolvedSelectStyle>,
     slider_style: Option<ResolvedSliderStyle>,
+    progress_bar_style: Option<crate::ui::widget::style::ProgressBarStyle>,
+    spinner_style: Option<crate::ui::widget::style::SpinnerStyle>,
     input_style: Option<ResolvedInputStyle>,
     checkbox_style: Option<ResolvedCheckboxStyle>,
     radio_style: Option<ResolvedRadioStyle>,
@@ -121,6 +124,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         self.emit_popover_overlay_if_visible(context, &mut computed, &visual);
         self.emit_menu_overlay_if_open(context, &mut computed, &visual);
         self.emit_modal_close_overlay_if_open(context, &mut computed, &visual);
+        self.emit_toast_overlay_if_visible(context, &mut computed, &visual);
 
         caches
             .chunk_parts

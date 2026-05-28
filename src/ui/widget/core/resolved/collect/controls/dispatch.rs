@@ -26,6 +26,12 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Slider { .. } => {
                 self.collect_slider_control(context, computed, visual)
             }
+            ResolvedWidgetKind::ProgressBar { .. } => {
+                self.collect_progress_bar_control(context, computed, visual)
+            }
+            ResolvedWidgetKind::Spinner { .. } => {
+                self.collect_spinner_control(context, computed, visual)
+            }
             ResolvedWidgetKind::Select { .. } => {
                 self.collect_select_control(context, computed, visual)
             }

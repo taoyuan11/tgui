@@ -8,6 +8,128 @@ use crate::ui::widget::overlay::{
 use crate::ui::widget::FocusScopeState;
 
 impl<VM> ResolvedElement<VM> {
+    pub(super) fn collect_progress_bar_control(
+        &self,
+        context: &mut CollectContext<'_, '_>,
+        computed: &mut ComputedScene<VM>,
+        visual: &CollectVisualState,
+    ) -> bool {
+        let ResolvedWidgetKind::ProgressBar {
+            value,
+            indeterminate,
+            show_label,
+            label,
+            ..
+        } = &self.kind
+        else {
+            return false;
+        };
+
+        let progress_style = visual
+            .styles
+            .progress_bar_style
+            .as_ref()
+            .expect("progress style should be resolved for progress widgets");
+        let indeterminate = indeterminate.resolve();
+        let phase = if indeterminate {
+            if context.reduced_motion {
+                ((1.0 - progress_style.indeterminate_segment_ratio.clamp(0.1, 1.0)) * 0.5)
+                    .clamp(0.0, 1.0)
+            } else {
+                let key = crate::animation::AnimationKey::Widget {
+                    id: self.id.raw(),
+                    property: WidgetProperty::ProgressIndeterminatePhase,
+                };
+                if !context.animations.contains_key(key) {
+                    let _ = context.animations.resolve_f32(key, 0.0, None, context.now);
+                }
+                context.animations.resolve_f32(
+                    key,
+                    1.0,
+                    Some(default_progress_phase_transition()),
+                    context.now,
+                )
+            }
+        } else {
+            0.0
+        };
+
+        push_progress_bar_primitives(
+            visual.frame,
+            value.resolve().clamp(0.0, 1.0),
+            indeterminate,
+            phase,
+            *show_label,
+            label.as_ref(),
+            progress_style,
+            visual.opacity,
+            self.id,
+            visual.primitive_clip,
+            visual.primitive_clip_mask,
+            context.font_manager,
+            context.theme,
+            context.units,
+            context.animations,
+            context.now,
+            &mut computed.scene,
+        );
+        true
+    }
+
+    pub(super) fn collect_spinner_control(
+        &self,
+        context: &mut CollectContext<'_, '_>,
+        computed: &mut ComputedScene<VM>,
+        visual: &CollectVisualState,
+    ) -> bool {
+        let ResolvedWidgetKind::Spinner {
+            size_override,
+            thickness_override,
+            track_override,
+            ..
+        } = &self.kind
+        else {
+            return false;
+        };
+
+        let spinner_style = visual
+            .styles
+            .spinner_style
+            .as_ref()
+            .expect("spinner style should be resolved for spinner widgets");
+        let phase = if context.reduced_motion {
+            0.0
+        } else {
+            let key = crate::animation::AnimationKey::Widget {
+                id: self.id.raw(),
+                property: WidgetProperty::SpinnerPhase,
+            };
+            if !context.animations.contains_key(key) {
+                let _ = context.animations.resolve_f32(key, 0.0, None, context.now);
+            }
+            context.animations.resolve_f32(
+                key,
+                1.0,
+                Some(default_spinner_phase_transition()),
+                context.now,
+            )
+        };
+        push_spinner_primitives(
+            visual.frame,
+            phase,
+            spinner_style,
+            size_override.as_ref().map(Value::resolve),
+            thickness_override.as_ref().map(Value::resolve),
+            *track_override,
+            visual.opacity,
+            visual.primitive_clip,
+            visual.primitive_clip_mask,
+            context.units,
+            &mut computed.scene,
+        );
+        true
+    }
+
     pub(super) fn collect_slider_control(
         &self,
         context: &mut CollectContext<'_, '_>,

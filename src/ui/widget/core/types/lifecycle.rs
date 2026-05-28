@@ -98,6 +98,19 @@ pub(crate) enum LifecycleWidgetKind {
         disabled: Value<bool>,
         style: WidgetSliderStyle,
     },
+    ProgressBar {
+        value: Value<f32>,
+        indeterminate: Value<bool>,
+        show_label: bool,
+        label: Option<Value<String>>,
+        style: crate::ui::widget::style::ProgressBarStyle,
+    },
+    Spinner {
+        style: crate::ui::widget::style::SpinnerStyle,
+        size_override: Option<Value<Dp>>,
+        thickness_override: Option<Value<Dp>>,
+        track_override: Option<bool>,
+    },
     TextEditor {
         placeholder: Value<String>,
         disabled: Value<bool>,
@@ -106,6 +119,7 @@ pub(crate) enum LifecycleWidgetKind {
         show_scrollbar: Value<bool>,
         auto_wrap: Value<bool>,
     },
+    ToastHost,
 }
 
 impl Clone for LifecycleSnapshot {
@@ -259,6 +273,30 @@ impl Clone for LifecycleWidgetKind {
                 disabled: disabled.clone(),
                 style: style.clone(),
             },
+            Self::ProgressBar {
+                value,
+                indeterminate,
+                show_label,
+                label,
+                style,
+            } => Self::ProgressBar {
+                value: value.clone(),
+                indeterminate: indeterminate.clone(),
+                show_label: *show_label,
+                label: label.clone(),
+                style: style.clone(),
+            },
+            Self::Spinner {
+                style,
+                size_override,
+                thickness_override,
+                track_override,
+            } => Self::Spinner {
+                style: style.clone(),
+                size_override: size_override.clone(),
+                thickness_override: thickness_override.clone(),
+                track_override: *track_override,
+            },
             Self::TextEditor {
                 placeholder,
                 disabled,
@@ -274,6 +312,7 @@ impl Clone for LifecycleWidgetKind {
                 show_scrollbar: show_scrollbar.clone(),
                 auto_wrap: auto_wrap.clone(),
             },
+            Self::ToastHost => Self::ToastHost,
         }
     }
 }

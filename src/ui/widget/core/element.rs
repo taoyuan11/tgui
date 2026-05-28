@@ -181,6 +181,30 @@ impl<VM> Element<VM> {
                 disabled,
                 style,
             },
+            WidgetKind::ProgressBar {
+                value,
+                indeterminate,
+                show_label,
+                label,
+                style,
+            } => WidgetKind::ProgressBar {
+                value,
+                indeterminate,
+                show_label,
+                label,
+                style,
+            },
+            WidgetKind::Spinner {
+                style,
+                size_override,
+                thickness_override,
+                track_override,
+            } => WidgetKind::Spinner {
+                style,
+                size_override,
+                thickness_override,
+                track_override,
+            },
             WidgetKind::TextEditor {
                 controller,
                 placeholder,
@@ -204,6 +228,11 @@ impl<VM> Element<VM> {
                 show_scrollbar,
                 auto_wrap,
             },
+            WidgetKind::ToastHost { .. } => WidgetKind::Container {
+                layout: ContainerLayout::flow(),
+                children: Vec::new(),
+                style: None,
+            },
         };
 
         Element {
@@ -226,7 +255,10 @@ impl<VM> Element<VM> {
             context_menu: self
                 .context_menu
                 .map(|menu| Box::new((*menu).scope(selector.clone()))),
-            modal: self.modal.map(|modal| Box::new((*modal).scope(selector))),
+            modal: self
+                .modal
+                .map(|modal| Box::new((*modal).scope(selector.clone()))),
+            tab_trigger: self.tab_trigger.map(|trigger| trigger.scope(selector)),
             kind,
         }
     }
@@ -283,6 +315,14 @@ impl<VM> Element<VM> {
         descriptor: crate::ui::widget::popover::PopoverDescriptor<VM>,
     ) -> Self {
         self.popover = Some(Box::new(descriptor));
+        self
+    }
+
+    pub(crate) fn with_tab_trigger_state(
+        mut self,
+        trigger: crate::ui::widget::common::TabTriggerState<VM>,
+    ) -> Self {
+        self.tab_trigger = Some(trigger);
         self
     }
 

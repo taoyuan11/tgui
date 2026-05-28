@@ -189,10 +189,12 @@ fn build_popover_scene<VM: 'static>(
                 viewport: context.viewport,
                 units: context.units,
                 animations: context.animations,
+                reduced_motion: context.reduced_motion,
                 now: context.now,
                 focus: Default::default(),
                 tooltip_hover_started_at: context.tooltip_hover_started_at,
                 next_tooltip_wakeup: context.next_tooltip_wakeup,
+                next_toast_wakeup: context.next_toast_wakeup,
                 active_tooltip: context.active_tooltip,
                 active_hover_popover: context.active_hover_popover,
             };

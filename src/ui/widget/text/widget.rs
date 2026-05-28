@@ -341,6 +341,7 @@ impl Text {
             menu: None,
             context_menu: None,
             modal: None,
+            tab_trigger: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -370,6 +371,7 @@ impl Text {
             menu: None,
             context_menu: None,
             modal: None,
+            tab_trigger: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -398,6 +400,7 @@ impl<VM> From<Text> for Element<VM> {
             menu: None,
             context_menu: None,
             modal: None,
+            tab_trigger: None,
             kind: WidgetKind::Text { text: value },
         }
     }

@@ -229,6 +229,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 None,
                 None,
             ),
+            HitInteraction::TabTrigger {
+                id, interactions, ..
+            } => (
+                id,
+                interactions.clone(),
+                Some(id),
+                interactions.on_focus.clone(),
+                interactions.on_click.clone().map(ClickHandler::Command),
+                None,
+                None,
+                None,
+            ),
             HitInteraction::SelectableText {
                 id,
                 frame,

@@ -6,7 +6,7 @@ use crate::animation::AnimationCoordinator;
 use crate::application::{ApplicationConfig, MsaaMode, ResourceBudget, ThemeSelection, WindowRole};
 use crate::dialog::async_dialog_channel;
 use crate::foundation::binding::ScrollViewController;
-use crate::foundation::binding::{DependencyGraph, ViewModelContext};
+use crate::foundation::binding::{DependencyGraph, State, ViewModelContext};
 use crate::foundation::binding::{InvalidationSignal, Signal, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand, ViewModel};
@@ -95,6 +95,7 @@ fn test_config() -> ApplicationConfig {
         fonts: FontCatalog::default(),
         theme: ThemeSelection::System,
         theme_set: ThemeSet::default(),
+        reduced_motion: false,
         window_icon: None,
         resource_budget: ResourceBudget::DEFAULT,
     }
@@ -116,6 +117,7 @@ fn test_config_with_theme(theme: ThemeSelection, theme_set: ThemeSet) -> Applica
         fonts: FontCatalog::default(),
         theme,
         theme_set,
+        reduced_motion: false,
         window_icon: None,
         resource_budget: ResourceBudget::DEFAULT,
     }
@@ -351,6 +353,41 @@ fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
 }
 
 #[test]
+fn reduced_motion_defaults_and_window_binding_override() {
+    let invalidation = InvalidationSignal::new();
+    let mut config = test_config();
+    config.reduced_motion = false;
+    let state = State::new(true, invalidation.clone());
+    let mut bindings = WindowBindings::default();
+    bindings.reduced_motion = Some(state.signal());
+
+    let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
+    let (notification_dispatcher, notification_receiver) = async_notification_channel();
+    let handler = BoundRuntimeHandler::new(
+        "test".to_string(),
+        1,
+        WindowRole::Main,
+        config.clone(),
+        Arc::new(Mutex::new(TestVm)),
+        bindings,
+        None,
+        Vec::new(),
+        invalidation.clone(),
+        AnimationCoordinator::default(),
+        dialog_dispatcher,
+        Some(dialog_receiver),
+        notification_dispatcher,
+        Some(notification_receiver),
+        #[cfg(all(target_os = "android", feature = "android"))]
+        None,
+    );
+    assert!(handler.active_reduced_motion());
+
+    let default_handler = test_handler_with_config(TestVm, None, invalidation, config);
+    assert!(!default_handler.active_reduced_motion());
+}
+
+#[test]
 fn prune_removed_widget_state_clears_virtual_state_cache() {
     let invalidation = InvalidationSignal::new();
     let mut handler = test_handler(None, invalidation);
@@ -454,6 +491,8 @@ mod menu_tests;
 mod modal_tests;
 mod popover_tests;
 mod scroll_tests;
+mod tabs_tests;
 mod text_input_tests;
+mod toast_tests;
 mod tooltip_tests;
 mod window_theme_tests;

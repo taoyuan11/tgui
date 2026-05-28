@@ -128,6 +128,8 @@ pub(crate) fn default_layout_padding<VM>(element: &ResolvedElement<VM>, _theme: 
         ResolvedWidgetKind::Slider { .. } => Insets::ZERO,
         ResolvedWidgetKind::Checkbox { .. } => Insets::ZERO,
         ResolvedWidgetKind::Radio { .. } => Insets::ZERO,
+        ResolvedWidgetKind::ProgressBar { .. } => Insets::ZERO,
+        ResolvedWidgetKind::Spinner { .. } => Insets::ZERO,
         ResolvedWidgetKind::Text { .. } => Insets::ZERO,
         ResolvedWidgetKind::Container { .. } => Insets::ZERO,
         ResolvedWidgetKind::Virtual { .. } => Insets::ZERO,
@@ -135,6 +137,7 @@ pub(crate) fn default_layout_padding<VM>(element: &ResolvedElement<VM>, _theme: 
         ResolvedWidgetKind::Audio { .. } => Insets::ZERO,
         ResolvedWidgetKind::Image { .. } => Insets::ZERO,
         ResolvedWidgetKind::Canvas { .. } => Insets::ZERO,
+        ResolvedWidgetKind::ToastHost { .. } => Insets::ZERO,
         #[cfg(feature = "video")]
         ResolvedWidgetKind::VideoSurface { .. } => Insets::ZERO,
     }
@@ -199,4 +202,11 @@ pub(crate) fn measure_media_content(
         (None, Some(height), None) => (intrinsic_size.width, height),
         (None, None, _) => (intrinsic_size.width, intrinsic_size.height),
     }
+}
+
+pub(crate) fn progress_bar_label_with_theme(
+    label: &Value<String>,
+    progress_style: &crate::ui::widget::style::ProgressBarStyle,
+) -> Text {
+    text_with_typography(label.clone(), &progress_style.text_style)
 }

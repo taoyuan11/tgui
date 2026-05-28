@@ -290,6 +290,8 @@ pub(super) fn measure_node(
         | Some(MeasureContext::Switch { id, .. })
         | Some(MeasureContext::Select { id, .. })
         | Some(MeasureContext::Slider { id, .. })
+        | Some(MeasureContext::ProgressBar { id, .. })
+        | Some(MeasureContext::Spinner { id, .. })
         | Some(MeasureContext::TextEditor { id, .. }) => {
             Some(id.dependency_owner(DependencyPhase::Layout))
         }
@@ -409,6 +411,43 @@ fn measure_node_tracked(
                 units.resolve_dp(style.min_width),
                 units.resolve_dp(style.min_height),
             )
+        }
+        Some(MeasureContext::ProgressBar {
+            value: _,
+            indeterminate: _,
+            show_label,
+            label,
+            style,
+            ..
+        }) => {
+            let base_width = units.resolve_dp(style.min_width);
+            let track_height = units.resolve_dp(style.height);
+            if *show_label {
+                let content = label
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| Value::Static(String::from("0%")));
+                let label_text = progress_bar_label_with_theme(&content, style);
+                let label_size = measure_text_content(&label_text, font_manager, theme, units);
+                (
+                    base_width.max(label_size.0),
+                    track_height + units.resolve_dp(style.gap) + label_size.1,
+                )
+            } else {
+                (base_width, track_height)
+            }
+        }
+        Some(MeasureContext::Spinner {
+            style,
+            size_override,
+            ..
+        }) => {
+            let size = size_override
+                .as_ref()
+                .map(Value::resolve)
+                .unwrap_or(style.size);
+            let resolved = units.resolve_dp(size);
+            (resolved, resolved)
         }
         Some(MeasureContext::TextEditor {
             controller,
