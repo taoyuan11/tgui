@@ -88,7 +88,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 });
                 let before_children = computed.clone();
                 for (child, child_layout) in children.iter().zip(layout_node.children.iter()) {
-                    let child_chunk = child.collect_subtree_cache(
+                    let child_id = child.collect_subtree_cache(
                         child_layout,
                         VisualContext {
                             origin: Point {
@@ -105,7 +105,9 @@ impl<VM: 'static> ResolvedElement<VM> {
                         caches.chunk_parts,
                         caches.visual_contexts,
                     );
-                    computed.extend(&child_chunk);
+                    if let Some(child_chunk) = caches.chunks.get(&child_id) {
+                        computed.extend(child_chunk);
+                    }
                 }
                 let mut after_children = ComputedScene::default();
                 if show_scrollbar {
@@ -236,7 +238,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                             visual.background_frame.y + meta.cross_offset,
                         ),
                     };
-                    let child_chunk = child.collect_subtree_cache(
+                    let child_id = child.collect_subtree_cache(
                         child_layout,
                         VisualContext {
                             origin: Point::new(
@@ -280,7 +282,9 @@ impl<VM: 'static> ResolvedElement<VM> {
                     if let Some(key) = child.key.clone() {
                         widget_ids_by_key.push((key, child.id));
                     }
-                    computed.extend(&child_chunk);
+                    if let Some(child_chunk) = caches.chunks.get(&child_id) {
+                        computed.extend(child_chunk);
+                    }
                 }
                 computed
                     .virtual_state_updates

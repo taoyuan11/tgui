@@ -107,6 +107,17 @@ tgui-winit-ohos = "0.4.11"
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
 
+# Dev 模式性能。仅在以 tgui 为根构建时生效(cargo test / cargo run / cargo bench 的
+# 调试构建),作为依赖被引用时会被下游 workspace 的 profile 覆盖,因此对发布无影响。
+# 本地 crate 保持 opt-level=1(编译快、热点代码仍有基本优化),
+# 把全部依赖(cosmic-text 文本整形 / lyon 镶嵌 / resvg / taffy / image 解码等
+# per-frame 热点)编到 opt-level=3。依赖只编一次,后续增量构建不受影响。
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [[bench]]
 name = "state_signal"
 harness = false

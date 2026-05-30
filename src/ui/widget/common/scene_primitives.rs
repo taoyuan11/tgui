@@ -2,6 +2,19 @@ use super::*;
 #[cfg(feature = "video")]
 use crate::video::VideoController;
 
+/// A primitive whose bounding `rect` lies entirely outside its own `clip_rect`
+/// is scissored to zero pixels by the renderer (see `Renderer::scissor_rect`),
+/// so dropping it from the scene produces identical output. Returning `true`
+/// here lets the collect phase cull off-screen scroll content cheaply, which
+/// also keeps the per-container `ComputedScene` clones small.
+#[inline]
+fn clipped_out(rect: Rect, clip_rect: Option<Rect>) -> bool {
+    match clip_rect {
+        Some(clip) => rect.fully_outside(clip),
+        None => false,
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct RenderPrimitive {
     pub rect: Rect,
@@ -180,22 +193,34 @@ impl ScenePrimitives {
     }
 
     pub(crate) fn push_backdrop_blur(&mut self, primitive: BackdropBlurPrimitive) {
+        if clipped_out(primitive.rect, primitive.clip_rect) {
+            return;
+        }
         self.backdrop_blurs.push(primitive);
         self.commands.push(RenderCommand::BackdropBlur(primitive));
     }
 
     pub(crate) fn push_brush(&mut self, primitive: BrushPrimitive) {
+        if clipped_out(primitive.rect, primitive.clip_rect) {
+            return;
+        }
         self.brushes.push(primitive.clone());
         self.commands.push(RenderCommand::Brush(primitive));
     }
 
     pub(crate) fn push_canvas_composite(&mut self, primitive: CanvasCompositePrimitive) {
+        if clipped_out(primitive.bounds, primitive.clip_rect) {
+            return;
+        }
         self.canvas_composites.push(primitive.clone());
         self.commands
             .push(RenderCommand::CanvasComposite(primitive));
     }
 
     pub(crate) fn push_shape(&mut self, primitive: RenderPrimitive) {
+        if clipped_out(primitive.rect, primitive.clip_rect) {
+            return;
+        }
         self.shapes.push(primitive);
         self.commands.push(RenderCommand::Shape(primitive));
     }
@@ -206,17 +231,26 @@ impl ScenePrimitives {
     }
 
     pub(crate) fn push_texture(&mut self, primitive: TexturePrimitive) {
+        if clipped_out(primitive.frame, primitive.clip_rect) {
+            return;
+        }
         self.textures.push(primitive.clone());
         self.commands.push(RenderCommand::Texture(primitive));
     }
 
     #[cfg(feature = "video")]
     pub(crate) fn push_video_texture(&mut self, primitive: VideoTexturePrimitive) {
+        if clipped_out(primitive.frame, primitive.clip_rect) {
+            return;
+        }
         self.video_textures.push(primitive.clone());
         self.commands.push(RenderCommand::VideoTexture(primitive));
     }
 
     pub(crate) fn push_text(&mut self, primitive: TextPrimitive) {
+        if clipped_out(primitive.frame, primitive.clip_rect) {
+            return;
+        }
         self.texts.push(primitive.clone());
         self.commands.push(RenderCommand::Text(primitive));
     }
@@ -391,4 +425,49 @@ fn solid_stop_colors(color: Color) -> [[f32; 4]; 7] {
     colors[0] = rgba;
     colors[1] = rgba;
     colors
+}
+
+#[cfg(test)]
+mod culling_tests {
+    use super::*;
+
+    fn shape(rect: Rect, clip_rect: Option<Rect>) -> RenderPrimitive {
+        RenderPrimitive {
+            rect,
+            color: Color::WHITE,
+            corner_radius: 0.0,
+            stroke_width: 0.0,
+            clip_rect,
+            clip_mask: None,
+        }
+    }
+
+    #[test]
+    fn shape_inside_its_clip_is_kept() {
+        let mut scene = ScenePrimitives::default();
+        let clip = Rect::new(0.0, 0.0, 100.0, 100.0);
+        scene.push_shape(shape(Rect::new(10.0, 10.0, 20.0, 20.0), Some(clip)));
+        assert_eq!(scene.shapes.len(), 1);
+        assert_eq!(scene.commands.len(), 1);
+    }
+
+    #[test]
+    fn shape_fully_outside_its_clip_is_dropped() {
+        let mut scene = ScenePrimitives::default();
+        let clip = Rect::new(0.0, 0.0, 100.0, 100.0);
+        // Far below the clip region — a scrolled-away row.
+        scene.push_shape(shape(Rect::new(10.0, 500.0, 20.0, 20.0), Some(clip)));
+        assert!(scene.shapes.is_empty());
+        // The parallel command stream must stay in sync, or the renderer would
+        // draw a stale command with no backing primitive.
+        assert!(scene.commands.is_empty());
+    }
+
+    #[test]
+    fn shape_without_clip_is_never_culled() {
+        let mut scene = ScenePrimitives::default();
+        scene.push_shape(shape(Rect::new(10.0, 5000.0, 20.0, 20.0), None));
+        assert_eq!(scene.shapes.len(), 1);
+        assert_eq!(scene.commands.len(), 1);
+    }
 }

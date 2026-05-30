@@ -93,6 +93,18 @@ impl Rect {
         let bottom = self.bottom().max(other.bottom());
         Self::new(x, y, right - x, bottom - y)
     }
+
+    /// True when `self` lies entirely outside `clip` (with a 1px margin to stay
+    /// conservative against the renderer's sub-pixel scissor rounding). A primitive
+    /// for which this holds is scissored to zero pixels by the renderer, so dropping
+    /// it from the scene is rendering-identical.
+    pub(crate) fn fully_outside(self, clip: Rect) -> bool {
+        const MARGIN: f32 = 1.0;
+        self.right() < clip.x - MARGIN
+            || self.x > clip.right() + MARGIN
+            || self.bottom() < clip.y - MARGIN
+            || self.y > clip.bottom() + MARGIN
+    }
 }
 
 pub(crate) fn point_in_triangle(point: Point, a: Point, b: Point, c: Point) -> bool {
@@ -111,4 +123,52 @@ pub(crate) fn point_in_triangle(point: Point, a: Point, b: Point, c: Point) -> b
     let has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
     let has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
     !(has_neg && has_pos)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn r(x: f32, y: f32, w: f32, h: f32) -> Rect {
+        Rect::new(x, y, w, h)
+    }
+
+    #[test]
+    fn overlapping_rect_is_not_outside() {
+        let clip = r(0.0, 0.0, 100.0, 100.0);
+        assert!(!r(10.0, 10.0, 20.0, 20.0).fully_outside(clip));
+        // Partial overlap on each edge still counts as inside.
+        assert!(!r(-10.0, 10.0, 20.0, 20.0).fully_outside(clip));
+        assert!(!r(90.0, 10.0, 20.0, 20.0).fully_outside(clip));
+        assert!(!r(10.0, -10.0, 20.0, 20.0).fully_outside(clip));
+        assert!(!r(10.0, 90.0, 20.0, 20.0).fully_outside(clip));
+    }
+
+    #[test]
+    fn clearly_separated_rect_is_outside_on_every_side() {
+        let clip = r(0.0, 0.0, 100.0, 100.0);
+        assert!(r(-50.0, 10.0, 20.0, 20.0).fully_outside(clip)); // left
+        assert!(r(150.0, 10.0, 20.0, 20.0).fully_outside(clip)); // right
+        assert!(r(10.0, -50.0, 20.0, 20.0).fully_outside(clip)); // above
+        assert!(r(10.0, 150.0, 20.0, 20.0).fully_outside(clip)); // below
+    }
+
+    #[test]
+    fn margin_keeps_rects_within_a_pixel_inside() {
+        let clip = r(0.0, 0.0, 100.0, 100.0);
+        // A rect ending 0.5px before the clip edge stays inside the 1px margin,
+        // so the renderer's sub-pixel scissor rounding can still touch it.
+        assert!(!r(-20.0, 10.0, 19.5, 20.0).fully_outside(clip));
+        // Pushed clear of the margin it is safe to drop.
+        assert!(r(-20.0, 10.0, 18.0, 20.0).fully_outside(clip));
+    }
+
+    #[test]
+    fn touching_edge_is_not_outside() {
+        let clip = r(0.0, 0.0, 100.0, 100.0);
+        // Right edge of the rect exactly on the clip's left edge.
+        assert!(!r(-20.0, 10.0, 20.0, 20.0).fully_outside(clip));
+        // Left edge of the rect exactly on the clip's right edge.
+        assert!(!r(100.0, 10.0, 20.0, 20.0).fully_outside(clip));
+    }
 }

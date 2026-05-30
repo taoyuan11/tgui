@@ -199,7 +199,7 @@ fn build_popover_scene<VM: 'static>(
                 active_tooltip: context.active_tooltip,
                 active_hover_popover: context.active_hover_popover,
             };
-            let mut computed = resolved.collect_subtree_cache(
+            let root_id = resolved.collect_subtree_cache(
                 &layout_root,
                 VisualContext {
                     origin: crate::ui::widget::Point::ZERO,
@@ -213,6 +213,7 @@ fn build_popover_scene<VM: 'static>(
                 &mut chunk_parts,
                 &mut visual_contexts,
             );
+            let mut computed = chunks.get(&root_id).cloned().unwrap_or_default();
             computed.finalize_portals(context.viewport);
             Some((computed, size))
             })

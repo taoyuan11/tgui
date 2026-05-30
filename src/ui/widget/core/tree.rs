@@ -524,7 +524,7 @@ impl<VM: 'static> WidgetTree<VM> {
                         active_tooltip,
                         active_hover_popover,
                     };
-                    let computed = layout.resolved_root.collect_subtree_cache(
+                    let root_id = layout.resolved_root.collect_subtree_cache(
                         &layout.layout_root,
                         VisualContext {
                             origin: Point {
@@ -541,6 +541,7 @@ impl<VM: 'static> WidgetTree<VM> {
                         &mut chunk_parts,
                         &mut visual_contexts,
                     );
+                    let computed = chunks.get(&root_id).cloned().unwrap_or_default();
                     (
                         computed,
                         lifecycle_states,

@@ -227,7 +227,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     active_tooltip,
                     active_hover_popover,
                 };
-                let computed = self.resolved_at_path(path).collect_subtree_cache(
+                let root_id = self.resolved_at_path(path).collect_subtree_cache(
                     self.layout_at_path(path),
                     visual_context.into(),
                     &mut context,
@@ -236,6 +236,12 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     &mut chunk_parts,
                     &mut visual_contexts,
                 );
+                // 根节点的合并场景已存进 chunks;取出一份 owned 副本作为返回值
+                // (整个收集过程中唯一一次必要的子树克隆)。
+                let computed = chunks
+                    .get(&root_id)
+                    .cloned()
+                    .unwrap_or_default();
                 (
                     computed,
                     lifecycle_states,

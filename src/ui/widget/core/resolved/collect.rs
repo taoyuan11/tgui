@@ -46,6 +46,15 @@ struct CollectCaches<'a, VM> {
 }
 
 impl<VM: 'static> ResolvedElement<VM> {
+    /// 收集 `self` 子树的场景 chunk,把结果**移动**进 `chunks[self.id]`,
+    /// 并返回该节点的 `WidgetId`。
+    ///
+    /// 旧实现这里返回整棵合并后的子树(owned `ComputedScene`),再被父节点 `extend`
+    /// 后丢弃 —— 也就是说每个节点都把自己的合并子树深拷贝了两次(一次进 `chunks`,
+    /// 一次作为返回值)。现在结果只在 `chunks` 里存一份:
+    /// - 父节点通过 `chunks.get(&child.id)` 只读引用来 `extend`,不再深拷贝;
+    /// - 需要 owned 场景的根/overlay 调用方在收集结束后 `chunks.get(&id).cloned()`,
+    ///   仅根节点保留这一次必要的克隆。
     pub(in super::super) fn collect_subtree_cache(
         &self,
         layout_node: &LayoutNode,
@@ -55,7 +64,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         chunks: &mut HashMap<WidgetId, ComputedScene<VM>>,
         chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
         visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
-    ) -> ComputedScene<VM> {
+    ) -> WidgetId {
         super::super::tree::with_widget_stack_frame(|| {
             let owner = self.id.dependency_owner(DependencyPhase::Scene);
             track_dependency_scope(owner, || {
@@ -81,7 +90,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         chunks: &mut HashMap<WidgetId, ComputedScene<VM>>,
         chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
         visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
-    ) -> ComputedScene<VM> {
+    ) -> WidgetId {
         let previous_scope_path = context.focus.scope_path.clone();
         if self.focus.scope.is_some() {
             let mut path = previous_scope_path.clone();
@@ -138,9 +147,11 @@ impl<VM: 'static> ResolvedElement<VM> {
         caches
             .visual_contexts
             .insert(self.id, visual_context.into());
-        caches.chunks.insert(self.id, computed.clone());
         context.focus.scope_path = previous_scope_path;
-        computed
+        // 把合并后的子树移动进 chunks(此前是 `clone` + 返回 owned 的双份拷贝)。
+        // 父节点改为 `chunks.get(&child.id)` 只读引用来 extend。
+        caches.chunks.insert(self.id, computed);
+        self.id
     }
 
     fn collect_runtime_lifecycle_state(
