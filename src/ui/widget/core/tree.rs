@@ -6,7 +6,10 @@ use crate::ui::widget::r#virtual::{
 use std::time::Instant;
 
 pub struct WidgetTree<VM> {
-    pub(super) root: Element<VM>,
+    pub(super) root: std::sync::Arc<Element<VM>>,
+    /// 树内是否存在 Virtual 节点。无虚拟节点时全量重建可直接共享源树（Arc clone），
+    /// 跳过整棵树的深拷贝。
+    pub(super) has_virtual: bool,
 }
 
 /// 在递归走 widget 树的入口（root collect / root layout / overlay 子场景）使用，
@@ -59,9 +62,34 @@ pub(crate) fn with_widget_stack_frame<R>(f: impl FnOnce() -> R) -> R {
     }
 }
 
+/// 检测树内是否存在「会被运行时状态注入触及」的 Virtual 节点。遍历方式与
+/// [`apply_virtual_runtime_state_to_element`] 完全一致：仅下钻 Container 的静态
+/// 子节点。动态子节点在该注入阶段尚为未展开的闭包，apply 从不会进入，因此其内部
+/// 的虚拟节点在新旧实现下都拿不到滚动/视口状态——故此处同样不将其计入，保持行为一致
+/// 的同时让含动态子节点的常规树仍能走 Arc 共享的快路径。
+fn element_contains_virtual<VM>(element: &Element<VM>) -> bool {
+    match &element.kind {
+        WidgetKind::Virtual { .. } => true,
+        WidgetKind::Container { children, .. } => children.iter().any(|child_source| {
+            match child_source {
+                crate::ui::widget::common::ChildSource::Static(children) => {
+                    children.iter().any(element_contains_virtual)
+                }
+                crate::ui::widget::common::ChildSource::Dynamic(_) => false,
+            }
+        }),
+        _ => false,
+    }
+}
+
 impl<VM: 'static> WidgetTree<VM> {
     pub fn new(root: impl Into<Element<VM>>) -> Self {
-        Self { root: root.into() }
+        let root = root.into();
+        let has_virtual = element_contains_virtual(&root);
+        Self {
+            root: std::sync::Arc::new(root),
+            has_virtual,
+        }
     }
 
     pub(crate) fn compute_scene_with_units_and_widget_state_at(
@@ -157,16 +185,25 @@ impl<VM: 'static> WidgetTree<VM> {
         let (mut layout, dependencies) = with_widget_stack(|| {
             with_dependency_collection(|| {
                 let mut taffy = TaffyTree::new();
-                let mut root = self.root.clone();
-                apply_virtual_runtime_state_to_element(
-                    &mut root,
-                    scroll_offsets,
-                    virtual_states,
-                    VirtualViewportHint {
-                        width: viewport.width,
-                        height: viewport.height,
-                    },
-                );
+                // Without Virtual nodes there is no per-frame runtime state to
+                // apply, so the source tree is shared via Arc instead of deep
+                // cloned. Virtual trees clone-on-write to inject scroll/viewport
+                // state before resolving.
+                let root: std::sync::Arc<Element<VM>> = if self.has_virtual {
+                    let mut root = (*self.root).clone();
+                    apply_virtual_runtime_state_to_element(
+                        &mut root,
+                        scroll_offsets,
+                        virtual_states,
+                        VirtualViewportHint {
+                            width: viewport.width,
+                            height: viewport.height,
+                        },
+                    );
+                    std::sync::Arc::new(root)
+                } else {
+                    std::sync::Arc::clone(&self.root)
+                };
                 let resolved_root = root.resolve(theme);
                 let root_layout = resolved_root
                     .build_layout_tree(

@@ -20,16 +20,19 @@ impl<VM: 'static> Element<VM> {
         theme: &Theme,
         previous: Option<&ResolvedElement<VM>>,
     ) -> ResolvedElement<VM> {
-        let mut source = self.clone();
-        if let Some(previous) = previous {
-            source.id = previous.id;
-        }
+        // `id` may be carried over from the previously resolved element so widget
+        // identity stays stable across rebuilds.
+        let id = previous.map(|previous| previous.id).unwrap_or(self.id);
 
-        let layout = source.layout.clone();
-        let mut visual = source.visual.clone();
-        let mut background = source.background.clone();
+        // Only the flat per-node fields are needed for the output; `kind` (which
+        // holds the recursive child subtree) is borrowed and rebuilt, never cloned.
+        // Cloning `self` here would deep-copy the entire subtree at every level of
+        // the recursion, which dominates full scene rebuilds.
+        let layout = self.layout.clone();
+        let mut visual = self.visual.clone();
+        let mut background = self.background.clone();
         let mut child_source_spans = Vec::new();
-        let kind = match &source.kind {
+        let kind = match &self.kind {
             WidgetKind::Container {
                 layout: container_layout,
                 children,
@@ -46,7 +49,7 @@ impl<VM: 'static> Element<VM> {
                     })
                     .unwrap_or(&[]);
                 let resolved_children = resolved_child_elements_with_previous(
-                    source.id,
+                    id,
                     children,
                     previous_children,
                     Some(&mut child_source_spans),
@@ -399,21 +402,21 @@ impl<VM: 'static> Element<VM> {
         };
 
         ResolvedElement {
-            id: source.id,
-            key: source.key.clone(),
+            id,
+            key: self.key.clone(),
             layout,
-            focus: source.focus.clone(),
+            focus: self.focus.clone(),
             visual,
-            interactions: source.interactions.clone(),
-            lifecycle_events: source.lifecycle_events.clone(),
-            media_events: source.media_events.clone(),
+            interactions: self.interactions.clone(),
+            lifecycle_events: self.lifecycle_events.clone(),
+            media_events: self.media_events.clone(),
             background,
-            tooltip: source.tooltip.clone(),
-            popover: source.popover.clone(),
-            menu: source.menu.clone(),
-            context_menu: source.context_menu.clone(),
-            modal: source.modal.clone(),
-            tab_trigger: source.tab_trigger.clone(),
+            tooltip: self.tooltip.clone(),
+            popover: self.popover.clone(),
+            menu: self.menu.clone(),
+            context_menu: self.context_menu.clone(),
+            modal: self.modal.clone(),
+            tab_trigger: self.tab_trigger.clone(),
             child_source_spans,
             kind,
         }

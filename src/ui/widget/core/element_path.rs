@@ -1,14 +1,15 @@
 use super::*;
 use crate::log::{log_text_profile, text_profile_enabled};
 use crate::ui::widget::common::ChildSource;
+use std::borrow::Cow;
 use std::time::Instant;
 
-pub(super) fn resolved_child_elements_with_previous<'a, VM>(
+pub(super) fn resolved_child_elements_with_previous<'a, 'b, VM>(
     owner_id: WidgetId,
-    child_sources: &[ChildSource<VM>],
+    child_sources: &'b [ChildSource<VM>],
     previous_children: &'a [ResolvedElement<VM>],
     child_source_spans: Option<&mut Vec<usize>>,
-) -> Vec<(Element<VM>, Option<&'a ResolvedElement<VM>>)> {
+) -> Vec<(Cow<'b, Element<VM>>, Option<&'a ResolvedElement<VM>>)> {
     let previous_by_key: HashMap<_, _> = previous_children
         .iter()
         .filter_map(|child| child.key.as_ref().map(|key| (key.clone(), child)))
@@ -21,23 +22,53 @@ pub(super) fn resolved_child_elements_with_previous<'a, VM>(
     let mut resolved = Vec::new();
     let mut spans = child_source_spans;
     for child_source in child_sources {
-        let source_children = child_source.resolve(Some(owner_id));
-        if let Some(spans) = spans.as_mut() {
-            spans.push(source_children.len());
-        }
-        resolved.extend(source_children.into_iter().map(|mut child| {
-            let previous_child = child
-                .key
-                .as_ref()
-                .and_then(|key| previous_by_key.get(key).copied())
-                .or_else(|| previous_by_id.get(&child.id).copied());
-            if let Some(previous_child) = previous_child {
-                child.id = previous_child.id;
+        // Static children are borrowed straight from the source tree; only
+        // dynamic resolvers produce freshly owned elements. The previous output's
+        // id is carried over inside `resolve_with_previous`, so child ids no
+        // longer need to be rewritten here.
+        match child_source {
+            ChildSource::Static(children) => {
+                if let Some(spans) = spans.as_mut() {
+                    spans.push(children.len());
+                }
+                resolved.extend(children.iter().map(|child| {
+                    let previous_child = lookup_previous(
+                        child,
+                        &previous_by_key,
+                        &previous_by_id,
+                    );
+                    (Cow::Borrowed(child), previous_child)
+                }));
             }
-            (child, previous_child)
-        }));
+            ChildSource::Dynamic(_) => {
+                let source_children = child_source.resolve(Some(owner_id));
+                if let Some(spans) = spans.as_mut() {
+                    spans.push(source_children.len());
+                }
+                resolved.extend(source_children.into_iter().map(|child| {
+                    let previous_child = lookup_previous(
+                        &child,
+                        &previous_by_key,
+                        &previous_by_id,
+                    );
+                    (Cow::Owned(child), previous_child)
+                }));
+            }
+        }
     }
     resolved
+}
+
+fn lookup_previous<'a, VM>(
+    child: &Element<VM>,
+    previous_by_key: &HashMap<WidgetKey, &'a ResolvedElement<VM>>,
+    previous_by_id: &HashMap<WidgetId, &'a ResolvedElement<VM>>,
+) -> Option<&'a ResolvedElement<VM>> {
+    child
+        .key
+        .as_ref()
+        .and_then(|key| previous_by_key.get(key).copied())
+        .or_else(|| previous_by_id.get(&child.id).copied())
 }
 
 pub(super) fn resolve_subtree_from_source_path<'a, VM: 'static>(

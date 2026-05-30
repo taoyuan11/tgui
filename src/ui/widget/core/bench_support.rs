@@ -177,6 +177,9 @@ impl WidgetBenchmarkContext {
             None,
             false,
             now,
+            &Default::default(),
+            None,
+            None,
         );
         self.store_scene_cache(collected);
     }
@@ -330,6 +333,8 @@ impl WidgetBenchmarkContext {
                     None,
                     None,
                     false,
+                    None,
+                    None,
                 ) else {
                     return false;
                 };

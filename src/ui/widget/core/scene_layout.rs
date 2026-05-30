@@ -10,7 +10,7 @@ use super::*;
 
 #[derive(Clone)]
 pub(crate) struct ResolvedSceneLayout<VM> {
-    pub(super) source_root: Element<VM>,
+    pub(super) source_root: std::sync::Arc<Element<VM>>,
     pub(super) resolved_root: ResolvedElement<VM>,
     pub(super) layout_root: LayoutNode,
     pub(super) taffy: TaffyTree<MeasureContext>,
