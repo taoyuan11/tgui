@@ -113,17 +113,26 @@ impl<VM: 'static> ResolvedElement<VM> {
                 options: scope,
             });
         }
-        let visual = self.resolve_collect_visual_state(layout_node, visual_context, context);
-        self.push_surface_primitives_and_base_hit_regions(&mut computed, context, &visual);
+        use super::super::collect_profile::{record_node, timed, Phase};
+        record_node();
+        let visual = timed(Phase::VisualState, || {
+            self.resolve_collect_visual_state(layout_node, visual_context, context)
+        });
+        timed(Phase::Surface, || {
+            self.push_surface_primitives_and_base_hit_regions(&mut computed, context, &visual)
+        });
 
-        if !self.collect_layout_media_kind(
-            layout_node,
-            visual_context,
-            context,
-            &mut caches,
-            &mut computed,
-            &visual,
-        ) {
+        let kind_handled = timed(Phase::KindBody, || {
+            self.collect_layout_media_kind(
+                layout_node,
+                visual_context,
+                context,
+                &mut caches,
+                &mut computed,
+                &visual,
+            )
+        });
+        if !kind_handled {
             let handled = self.collect_control_kind(context, &mut computed, &visual);
             debug_assert!(
                 handled,
@@ -137,20 +146,38 @@ impl<VM: 'static> ResolvedElement<VM> {
         self.emit_modal_close_overlay_if_open(context, &mut computed, &visual);
         self.emit_toast_overlay_if_visible(context, &mut computed, &visual);
 
-        caches
-            .chunk_parts
-            .entry(self.id)
-            .or_insert_with(|| SceneChunkParts {
-                before_children: computed.clone(),
-                after_children: ComputedScene::default(),
-            });
-        caches
-            .visual_contexts
-            .insert(self.id, visual_context.into());
-        context.focus.scope_path = previous_scope_path;
-        // 把合并后的子树移动进 chunks(此前是 `clone` + 返回 owned 的双份拷贝)。
-        // 父节点改为 `chunks.get(&child.id)` 只读引用来 extend。
-        caches.chunks.insert(self.id, computed);
+        timed(Phase::Bookkeeping, || {
+            // `chunk_parts` 只被 `recompose_scene_chunk` 读取(scene_layout.rs),而 recompose
+            // 仅在「祖先」节点上运行(scene_patch.rs / bench_support.rs 都由 `parent_of` 向上推导
+            // 祖先集合),且仅对 `Container` / `Virtual` 这两种带子节点的 kind 迭代子 chunk。
+            // 其余 kind 在 resolved 树里都是叶子,永远不会成为祖先 → 它们的 `chunk_parts` 是
+            // 只写不读的死数据。而 `Container` / `Virtual` 收集臂(layout_media.rs)又各自显式
+            // `insert` 了自己的 `chunk_parts`,所以这里的兜底 `or_insert_with` 对它们也已是空操作。
+            //
+            // 因此把兜底克隆限定到带子节点的 kind:对叶子(占节点总数绝大多数,且每个都要
+            // `before_children: computed.clone()`)直接跳过,消除逐帧重收集里最大的单项独占开销
+            // (n=1000 长列表约 22%)。即便未来出现意外读取,`recompose` 的 `chunk_parts.get(&id)?`
+            // 会得到 `None` 并安全回退到整帧重收集,绝不会产生错误渲染。
+            if matches!(
+                self.kind,
+                ResolvedWidgetKind::Container { .. } | ResolvedWidgetKind::Virtual { .. }
+            ) {
+                caches
+                    .chunk_parts
+                    .entry(self.id)
+                    .or_insert_with(|| SceneChunkParts {
+                        before_children: computed.clone(),
+                        after_children: ComputedScene::default(),
+                    });
+            }
+            caches
+                .visual_contexts
+                .insert(self.id, visual_context.into());
+            context.focus.scope_path = previous_scope_path;
+            // 把合并后的子树移动进 chunks(此前是 `clone` + 返回 owned 的双份拷贝)。
+            // 父节点改为 `chunks.get(&child.id)` 只读引用来 extend。
+            caches.chunks.insert(self.id, computed);
+        });
         self.id
     }
 

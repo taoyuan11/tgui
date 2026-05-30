@@ -36,6 +36,10 @@ audio = ["dep:ffmpeg-next", "dep:cpal"]
 video = ["audio"]
 video-static = ["video", "ffmpeg-next/static"]
 bench-support = []
+# 逐帧场景重收集的相位计时探针(collect_profile)。与 bench-support 解耦:criterion
+# 基准只开 bench-support,probe 编译成 inline 空操作,热路径零成本、不污染基准数字。
+# 需要相位画像时单独开启 collect-profile(它自动带上 bench-support)。
+collect-profile = ["bench-support"]
 
 [dependencies]
 bytemuck = { version = "1.24", features = ["derive"] }

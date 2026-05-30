@@ -371,7 +371,7 @@ impl ViewModel for App {
                                 |app: &mut App, ctx| { app.send_action_notification(ctx) }
                             ),),
                         ]),
-                        Text::new(self.notification_status.signal()).style(status_style),
+                        Text::new(self.notification_status.signal()).style(status_style).user_select(true),
                     ]),
                 ),
                 component_card("Toast / Snackbar", self.build_toast_component()),

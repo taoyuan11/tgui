@@ -334,27 +334,32 @@ impl<VM: 'static> ResolvedElement<VM> {
                         )
                     })
                     .unwrap_or(Insets::ZERO);
-                push_text_primitives(
-                    text,
-                    visual.frame,
-                    context.font_manager,
-                    context.theme,
-                    context.units,
-                    context.animations,
-                    context.now,
-                    &mut computed.scene,
-                    false,
-                    false,
-                    padding,
-                    None,
-                    (text.user_select && context.selected_text == Some(self.id))
-                        .then_some(context.selected_text_state)
-                        .flatten(),
-                    context.theme.colors.on_surface,
-                    visual.opacity,
-                    self.id,
-                    visual.primitive_clip,
-                    visual.primitive_clip_mask,
+                super::super::collect_profile::timed(
+                    super::super::collect_profile::Phase::Text,
+                    || {
+                        push_text_primitives(
+                            text,
+                            visual.frame,
+                            context.font_manager,
+                            context.theme,
+                            context.units,
+                            context.animations,
+                            context.now,
+                            &mut computed.scene,
+                            false,
+                            false,
+                            padding,
+                            None,
+                            (text.user_select && context.selected_text == Some(self.id))
+                                .then_some(context.selected_text_state)
+                                .flatten(),
+                            context.theme.colors.on_surface,
+                            visual.opacity,
+                            self.id,
+                            visual.primitive_clip,
+                            visual.primitive_clip_mask,
+                        )
+                    },
                 );
                 if text.user_select && !visual.disabled {
                     computed.hit_regions.push(HitRegion {

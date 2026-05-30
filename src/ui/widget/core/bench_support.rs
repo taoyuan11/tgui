@@ -441,8 +441,12 @@ impl Default for WidgetBenchmarkContext {
 mod tests {
     use super::*;
     use crate::ui::layout::Axis;
+    #[cfg(feature = "collect-profile")]
+    use crate::ui::layout::{Insets, Overflow};
     use crate::ui::unit::dp;
     use crate::ui::widget::{Flex, Text};
+    #[cfg(feature = "collect-profile")]
+    use crate::ui::widget::Stack;
 
     #[test]
     fn reuses_layout_cache_for_stable_tree() {
@@ -469,5 +473,72 @@ mod tests {
             .expect("second layout should be cached");
 
         assert_eq!(first_layout_ptr, second_layout_ptr);
+    }
+
+    #[cfg(feature = "collect-profile")]
+    fn build_profile_scroll_tree(node_count: usize) -> WidgetTree<()> {
+        let mut content = Flex::new(Axis::Vertical)
+            .width(dp(1240.0))
+            .padding(Insets::all(dp(8.0)))
+            .gap(dp(6.0));
+        for row in 0..node_count {
+            let line = format!("Row {row} content line with a bit of repeated text to shape");
+            let card = Stack::new()
+                .width(dp(1200.0))
+                .padding(Insets::all(dp(6.0)))
+                .child(Text::new(format!("Row {row}")))
+                .child(Text::new(line))
+                .child(
+                    Flex::new(Axis::Horizontal)
+                        .gap(dp(4.0))
+                        .child(Text::new("left metric"))
+                        .child(Text::new("center metric"))
+                        .child(Text::new("right metric")),
+                );
+            content = content.child(card);
+        }
+        WidgetTree::new(
+            Flex::new(Axis::Vertical)
+                .width(dp(1280.0))
+                .height(dp(800.0))
+                .overflow_y(Overflow::Scroll)
+                .child(content),
+        )
+    }
+
+    /// 手动运行: `cargo test --features collect-profile profile_recollect_breakdown -- --ignored --nocapture`
+    /// 打印每相位独占耗时占比,用来在结构性优化前定位真实热点。
+    #[cfg(feature = "collect-profile")]
+    #[test]
+    #[ignore]
+    fn profile_recollect_breakdown() {
+        for node_count in [200_usize, 1000_usize] {
+            let tree = build_profile_scroll_tree(node_count);
+            let mut bench = WidgetBenchmarkContext::default()
+                .with_viewport(Rect::new(0.0, 0.0, 1280.0, 800.0));
+            // 预热布局 + 字体缓存。
+            let _ = bench.recollect_scene_only(&tree, Instant::now());
+
+            const RUNS: usize = 30;
+            crate::ui::widget::core::collect_profile::reset();
+            let wall = Instant::now();
+            for _ in 0..RUNS {
+                let _ = bench.recollect_scene_only(&tree, Instant::now());
+            }
+            let wall_ms = wall.elapsed().as_secs_f64() * 1000.0 / RUNS as f64;
+            let b = crate::ui::widget::core::collect_profile::snapshot();
+            let per = |total: f64| total / RUNS as f64;
+            println!(
+                "n={node_count}: wall={wall_ms:.2}ms/frame nodes={} \
+                 visual_state={:.2}ms surface={:.2}ms kind_body(incl recursion)={:.2}ms \
+                 text={:.2}ms bookkeeping={:.2}ms",
+                b.node_count / RUNS as u64,
+                per(b.visual_state_ms),
+                per(b.surface_ms),
+                per(b.kind_body_ms),
+                per(b.text_ms),
+                per(b.bookkeeping_ms),
+            );
+        }
     }
 }
