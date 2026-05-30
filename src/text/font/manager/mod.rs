@@ -15,7 +15,7 @@ use super::platform::{
 mod keys;
 mod layout_ops;
 
-use keys::{TextLayoutKey, TextMeasureKey};
+use keys::{TextLayoutKey, TextMeasureKey, TextResolveKey};
 
 pub(crate) struct FontManager {
     pub(super) font_system: RefCell<FontSystem>,
@@ -23,6 +23,7 @@ pub(crate) struct FontManager {
     default_font: Option<String>,
     measure_cache: RefCell<HashMap<TextMeasureKey, (f32, f32)>>,
     layout_cache: RefCell<HashMap<TextLayoutKey, TextLayoutInfo>>,
+    resolve_cache: RefCell<HashMap<TextResolveKey, ResolvedText>>,
 }
 
 impl FontManager {
@@ -36,6 +37,7 @@ impl FontManager {
             default_font: catalog.default_font.clone(),
             measure_cache: RefCell::new(HashMap::new()),
             layout_cache: RefCell::new(HashMap::new()),
+            resolve_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -48,8 +50,26 @@ impl FontManager {
     }
 
     pub(crate) fn resolve_text(&self, text: &str, request: TextFontRequest<'_>) -> ResolvedText {
+        // 解析结果依赖文本内容(脚本感知 CJK 回退)、优先字体与字重,三者作键。
+        let cache_key = TextResolveKey {
+            text: Cow::Owned(text.to_owned()),
+            preferred_font: request.preferred_font.map(|name| Cow::Owned(name.to_owned())),
+            weight: request.weight,
+        };
+        if let Some(cached) = self.resolve_cache.borrow().get(&cache_key) {
+            return cached.clone();
+        }
+
         let font_system = self.font_system.borrow();
-        self.resolve_text_with_database(font_system.db(), text, request)
+        let resolved = self.resolve_text_with_database(font_system.db(), text, request);
+        drop(font_system);
+
+        let mut cache = self.resolve_cache.borrow_mut();
+        if cache.len() > 4096 {
+            cache.clear();
+        }
+        cache.insert(cache_key, resolved.clone());
+        resolved
     }
 
     fn resolve_text_with_database(

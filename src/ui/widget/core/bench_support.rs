@@ -80,6 +80,32 @@ impl WidgetBenchmarkContext {
         self.clear_scene_cache();
     }
 
+    /// 模拟滚动 / 动画帧的热路径：保留已缓存的布局，仅强制重新 collect 整个场景。
+    /// 运行时在 `scroll_epoch` / `animation_epoch` 变化但 `layout_cache` 仍有效时
+    /// 走这条路径（见 `scene_runtime::computed_scene`）。
+    #[allow(dead_code)]
+    pub fn recollect_scene_only(&mut self, tree: &WidgetTree<()>, now: Instant) -> WidgetBenchmarkStats {
+        if self.cached_layout.is_none() {
+            self.rebuild_layout(tree, now);
+        }
+        self.clear_scene_cache();
+        self.rebuild_scene(tree, now);
+        let computed = self
+            .cached_scene
+            .as_ref()
+            .expect("benchmark scene cache should exist");
+        WidgetBenchmarkStats {
+            dependency_count: computed.dependencies.dependency_count(),
+            has_global_dependency: computed.dependencies.has_global_dependency(),
+            shape_count: computed.scene.shapes.len(),
+            text_count: computed.scene.texts.len(),
+            texture_count: computed.scene.textures.len(),
+            overlay_shape_count: computed.scene.overlay_shapes.len(),
+            hit_region_count: computed.hit_regions.len() + computed.overlay_hit_regions.len(),
+            scroll_region_count: computed.scroll_regions.len(),
+        }
+    }
+
     #[allow(dead_code)]
     pub fn run_layout(&mut self, tree: &WidgetTree<()>, now: Instant) -> WidgetBenchmarkStats {
         self.sync_cache(tree, now, false);

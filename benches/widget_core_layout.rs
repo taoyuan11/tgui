@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use tgui::animation::Transition;
 use tgui::core::dp;
-use tgui::layout::{Axis, Insets};
+use tgui::layout::{Axis, Insets, Overflow};
 use tgui::mvvm::{State, ViewModelContext};
 use tgui::widgets::{Element, Flex, Stack, Text, Textarea, WidgetBenchmarkContext, WidgetTree};
 
@@ -56,6 +56,38 @@ fn build_text_heavy_tree(short_lines: usize, long_blocks: usize) -> WidgetTree<(
                 .height(dp(220.0)),
         );
     }
+
+    WidgetTree::new(root)
+}
+
+fn build_scroll_tree(node_count: usize) -> WidgetTree<()> {
+    let mut content = Flex::new(Axis::Vertical)
+        .width(dp(1240.0))
+        .padding(Insets::all(dp(8.0)))
+        .gap(dp(6.0));
+
+    for row in 0..node_count {
+        let card = Stack::new()
+            .width(dp(1200.0))
+            .padding(Insets::all(dp(6.0)))
+            .child(Text::new(format!("Row {row}")))
+            .child(Text::new(repeated_line(row)))
+            .child(
+                Flex::new(Axis::Horizontal)
+                    .gap(dp(4.0))
+                    .child(Text::new("left metric"))
+                    .child(Text::new("center metric"))
+                    .child(Text::new("right metric")),
+            );
+        content = content.child(card);
+    }
+
+    // 长内容放入定高滚动容器,只有少量行落在视口内 —— 复现 demo 的长列表滚动。
+    let root = Flex::new(Axis::Vertical)
+        .width(dp(1280.0))
+        .height(dp(800.0))
+        .overflow_y(Overflow::Scroll)
+        .child(content);
 
     WidgetTree::new(root)
 }
@@ -222,10 +254,38 @@ fn bench_animated_scene_recompute(c: &mut Criterion) {
     group.finish();
 }
 
+/// 复现滚动 / 动画帧的热路径:布局缓存有效,但 `scroll_epoch`/`animation_epoch`
+/// 变化导致整个场景每帧重新 collect(见 `scene_runtime::computed_scene`)。
+/// 滚动容器内容远超视口,理想情况下绝大多数子节点应被裁剪掉。
+fn bench_scroll_recollect(c: &mut Criterion) {
+    let mut group = c.benchmark_group("scroll_recollect");
+
+    for node_count in [200_usize, 1000_usize] {
+        let tree = build_scroll_tree(node_count);
+
+        group.bench_with_input(
+            BenchmarkId::new("recollect_scene", node_count),
+            &node_count,
+            |b, _| {
+                let mut bench = WidgetBenchmarkContext::default();
+                // 预热布局缓存、字体/纹理缓存。
+                let _ = bench.recollect_scene_only(&tree, Instant::now());
+                b.iter(|| {
+                    let stats = bench.recollect_scene_only(&tree, Instant::now());
+                    black_box((stats.text_count, stats.shape_count, stats.hit_region_count))
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     widget_core_layout_benches,
     bench_many_widgets_layout,
     bench_text_heavy_layout,
-    bench_animated_scene_recompute
+    bench_animated_scene_recompute,
+    bench_scroll_recollect
 );
 criterion_main!(widget_core_layout_benches);
