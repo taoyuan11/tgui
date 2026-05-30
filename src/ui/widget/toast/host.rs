@@ -1,7 +1,10 @@
 use crate::foundation::binding::{ToastPlacement, ToastQueue};
 use crate::ui::layout::{LayoutStyle, Value};
-use crate::ui::widget::common::{CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, WidgetId, WidgetKind};
 use crate::ui::widget::common::VisualStyle;
+use crate::ui::widget::common::{
+    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, WidgetId,
+    WidgetKind,
+};
 use crate::ui::widget::core::Element;
 use crate::ui::widget::style::StyleResolver;
 use crate::ui::widget::style::ToastStyle;
@@ -43,7 +46,9 @@ impl<VM> From<ToastHost<VM>> for Element<VM> {
     fn from(value: ToastHost<VM>) -> Self {
         let mut interactions = InteractionHandlers::default();
         interactions.cursor_style = Some(Value::Static(CursorStyle::Default));
-        let style = value.style.map(|style| StyleResolver::new(move |_| style.clone()));
+        let style = value
+            .style
+            .map(|style| StyleResolver::new(move |_| style.clone()));
         Element {
             id: WidgetId::next(),
             key: None,

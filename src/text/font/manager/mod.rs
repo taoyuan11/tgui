@@ -53,7 +53,9 @@ impl FontManager {
         // 解析结果依赖文本内容(脚本感知 CJK 回退)、优先字体与字重,三者作键。
         let cache_key = TextResolveKey {
             text: Cow::Owned(text.to_owned()),
-            preferred_font: request.preferred_font.map(|name| Cow::Owned(name.to_owned())),
+            preferred_font: request
+                .preferred_font
+                .map(|name| Cow::Owned(name.to_owned())),
             weight: request.weight,
         };
         if let Some(cached) = self.resolve_cache.borrow().get(&cache_key) {

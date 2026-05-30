@@ -32,11 +32,7 @@ pub(super) fn resolved_child_elements_with_previous<'a, 'b, VM>(
                     spans.push(children.len());
                 }
                 resolved.extend(children.iter().map(|child| {
-                    let previous_child = lookup_previous(
-                        child,
-                        &previous_by_key,
-                        &previous_by_id,
-                    );
+                    let previous_child = lookup_previous(child, &previous_by_key, &previous_by_id);
                     (Cow::Borrowed(child), previous_child)
                 }));
             }
@@ -46,11 +42,7 @@ pub(super) fn resolved_child_elements_with_previous<'a, 'b, VM>(
                     spans.push(source_children.len());
                 }
                 resolved.extend(source_children.into_iter().map(|child| {
-                    let previous_child = lookup_previous(
-                        &child,
-                        &previous_by_key,
-                        &previous_by_id,
-                    );
+                    let previous_child = lookup_previous(&child, &previous_by_key, &previous_by_id);
                     (Cow::Owned(child), previous_child)
                 }));
             }

@@ -96,126 +96,126 @@ fn build_popover_scene<VM: 'static>(
         with_dependency_collection(|| {
             super::super::tree::with_widget_stack(|| {
                 let mut root: Element<VM> = Stack::new()
-                .padding(style.padding)
-                .child(content.clone())
-                .into();
-            root.background = Some(style.background.clone());
-            root.visual.background_brush = style.surface.background_brush.clone();
-            root.visual.background_image = style.surface.background_image.clone();
-            root.visual.background_blur = style.surface.background_blur.clone();
-            root.visual.border_color = Some(style.border.clone());
-            root.visual.border_width = Some(style.border_width.clone());
-            root.visual.border_radius = Some(style.radius.clone());
-            root.visual.shadow = Some(crate::ui::layout::Value::Static(style.shadow.clone()));
-            root.visual.opacity = style.surface.opacity.clone();
-            root.visual.offset = style.surface.offset.clone();
-            root.layout.min_width = Some(crate::ui::layout::Value::Static(Length::Px(
-                style.min_width,
-            )));
-            root.layout.max_width = Some(crate::ui::layout::Value::Static(Length::Px(
-                style.max_width,
-            )));
-            if let Some(width) = anchor_width {
-                root.layout.width = Some(crate::ui::layout::Value::Static(Length::Px(width)));
-            }
+                    .padding(style.padding)
+                    .child(content.clone())
+                    .into();
+                root.background = Some(style.background.clone());
+                root.visual.background_brush = style.surface.background_brush.clone();
+                root.visual.background_image = style.surface.background_image.clone();
+                root.visual.background_blur = style.surface.background_blur.clone();
+                root.visual.border_color = Some(style.border.clone());
+                root.visual.border_width = Some(style.border_width.clone());
+                root.visual.border_radius = Some(style.radius.clone());
+                root.visual.shadow = Some(crate::ui::layout::Value::Static(style.shadow.clone()));
+                root.visual.opacity = style.surface.opacity.clone();
+                root.visual.offset = style.surface.offset.clone();
+                root.layout.min_width = Some(crate::ui::layout::Value::Static(Length::Px(
+                    style.min_width,
+                )));
+                root.layout.max_width = Some(crate::ui::layout::Value::Static(Length::Px(
+                    style.max_width,
+                )));
+                if let Some(width) = anchor_width {
+                    root.layout.width = Some(crate::ui::layout::Value::Static(Length::Px(width)));
+                }
 
-            let resolved = root.resolve(context.theme);
-            let mut taffy = TaffyTree::new();
-            let layout_root = resolved
-                .build_layout_tree(
-                    &mut taffy,
-                    context.animations,
-                    context.theme,
-                    context.units,
-                    None,
-                    context.viewport,
-                    false,
-                    context.now,
-                )
-                .ok()?;
-            taffy
-                .compute_layout_with_measure(
-                    layout_root.node,
-                    TaffySize {
-                        width: AvailableSpace::Definite(context.viewport.width.get()),
-                        height: AvailableSpace::Definite(context.viewport.height.get()),
-                    },
-                    |known_dimensions, _, _, node_context, _| {
-                        measure_node(
-                            node_context,
-                            known_dimensions,
-                            context.font_manager,
-                            context.theme,
-                            context.media,
-                            context.units,
-                        )
-                    },
-                )
-                .ok()?;
-            let layout = taffy.layout(layout_root.node).ok()?;
-            let size = (
-                crate::ui::unit::Dp::new(layout.size.width),
-                crate::ui::unit::Dp::new(layout.size.height),
-            );
-            let local_bounds = Rect::new(
-                crate::ui::unit::Dp::ZERO,
-                crate::ui::unit::Dp::ZERO,
-                size.0,
-                size.1,
-            );
+                let resolved = root.resolve(context.theme);
+                let mut taffy = TaffyTree::new();
+                let layout_root = resolved
+                    .build_layout_tree(
+                        &mut taffy,
+                        context.animations,
+                        context.theme,
+                        context.units,
+                        None,
+                        context.viewport,
+                        false,
+                        context.now,
+                    )
+                    .ok()?;
+                taffy
+                    .compute_layout_with_measure(
+                        layout_root.node,
+                        TaffySize {
+                            width: AvailableSpace::Definite(context.viewport.width.get()),
+                            height: AvailableSpace::Definite(context.viewport.height.get()),
+                        },
+                        |known_dimensions, _, _, node_context, _| {
+                            measure_node(
+                                node_context,
+                                known_dimensions,
+                                context.font_manager,
+                                context.theme,
+                                context.media,
+                                context.units,
+                            )
+                        },
+                    )
+                    .ok()?;
+                let layout = taffy.layout(layout_root.node).ok()?;
+                let size = (
+                    crate::ui::unit::Dp::new(layout.size.width),
+                    crate::ui::unit::Dp::new(layout.size.height),
+                );
+                let local_bounds = Rect::new(
+                    crate::ui::unit::Dp::ZERO,
+                    crate::ui::unit::Dp::ZERO,
+                    size.0,
+                    size.1,
+                );
 
-            let mut lifecycle_states = std::collections::HashMap::new();
-            let mut chunks = std::collections::HashMap::new();
-            let mut chunk_parts = std::collections::HashMap::new();
-            let mut visual_contexts = std::collections::HashMap::new();
-            let mut local_context = CollectContext {
-                taffy: &taffy,
-                font_manager: context.font_manager,
-                theme: context.theme,
-                media: context.media,
-                focused_input: context.focused_input,
-                focused_text_state: context.focused_text_state,
-                focused_text_value: context.focused_text_value,
-                focused_text_layout: context.focused_text_layout,
-                text_layout_overrides: context.text_layout_overrides,
-                active_slider_value: context.active_slider_value,
-                caret_visible: context.caret_visible,
-                selected_text: context.selected_text,
-                selected_text_state: context.selected_text_state,
-                hovered_scrollbar: context.hovered_scrollbar,
-                active_scrollbar: context.active_scrollbar,
-                widget_states: context.widget_states,
-                select_open_states: context.select_open_states,
-                scroll_offsets: context.scroll_offsets,
-                viewport: context.viewport,
-                units: context.units,
-                animations: context.animations,
-                reduced_motion: context.reduced_motion,
-                now: context.now,
-                focus: Default::default(),
-                tooltip_hover_started_at: context.tooltip_hover_started_at,
-                next_tooltip_wakeup: context.next_tooltip_wakeup,
-                next_toast_wakeup: context.next_toast_wakeup,
-                active_tooltip: context.active_tooltip,
-                active_hover_popover: context.active_hover_popover,
-            };
-            let root_id = resolved.collect_subtree_cache(
-                &layout_root,
-                VisualContext {
-                    origin: crate::ui::widget::Point::ZERO,
-                    opacity: 1.0,
-                    clip_rect: local_bounds,
-                    clip_mask: None,
-                },
-                &mut local_context,
-                &mut lifecycle_states,
-                &mut chunks,
-                &mut chunk_parts,
-                &mut visual_contexts,
-            );
-            let mut computed = chunks.get(&root_id).cloned().unwrap_or_default();
-            computed.finalize_portals(context.viewport);
-            Some((computed, size))
+                let mut lifecycle_states = std::collections::HashMap::new();
+                let mut chunks = std::collections::HashMap::new();
+                let mut chunk_parts = std::collections::HashMap::new();
+                let mut visual_contexts = std::collections::HashMap::new();
+                let mut local_context = CollectContext {
+                    taffy: &taffy,
+                    font_manager: context.font_manager,
+                    theme: context.theme,
+                    media: context.media,
+                    focused_input: context.focused_input,
+                    focused_text_state: context.focused_text_state,
+                    focused_text_value: context.focused_text_value,
+                    focused_text_layout: context.focused_text_layout,
+                    text_layout_overrides: context.text_layout_overrides,
+                    active_slider_value: context.active_slider_value,
+                    caret_visible: context.caret_visible,
+                    selected_text: context.selected_text,
+                    selected_text_state: context.selected_text_state,
+                    hovered_scrollbar: context.hovered_scrollbar,
+                    active_scrollbar: context.active_scrollbar,
+                    widget_states: context.widget_states,
+                    select_open_states: context.select_open_states,
+                    scroll_offsets: context.scroll_offsets,
+                    viewport: context.viewport,
+                    units: context.units,
+                    animations: context.animations,
+                    reduced_motion: context.reduced_motion,
+                    now: context.now,
+                    focus: Default::default(),
+                    tooltip_hover_started_at: context.tooltip_hover_started_at,
+                    next_tooltip_wakeup: context.next_tooltip_wakeup,
+                    next_toast_wakeup: context.next_toast_wakeup,
+                    active_tooltip: context.active_tooltip,
+                    active_hover_popover: context.active_hover_popover,
+                };
+                let root_id = resolved.collect_subtree_cache(
+                    &layout_root,
+                    VisualContext {
+                        origin: crate::ui::widget::Point::ZERO,
+                        opacity: 1.0,
+                        clip_rect: local_bounds,
+                        clip_mask: None,
+                    },
+                    &mut local_context,
+                    &mut lifecycle_states,
+                    &mut chunks,
+                    &mut chunk_parts,
+                    &mut visual_contexts,
+                );
+                let mut computed = chunks.get(&root_id).cloned().unwrap_or_default();
+                computed.finalize_portals(context.viewport);
+                Some((computed, size))
             })
         });
     let (mut computed, size) = result?;

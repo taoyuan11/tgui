@@ -17,8 +17,8 @@ use crate::ui::widget::Element;
 
 use super::config::{Application, ApplicationConfig};
 use super::window_spec::{
-    ClearColorBinding, ReducedMotionBinding, RootViewFactory, ThemeModeBinding,
-    ThemeSetBinding, TitleBinding, WindowClosePolicy, WindowRole, WindowSpec, WindowsFactory,
+    ClearColorBinding, ReducedMotionBinding, RootViewFactory, ThemeModeBinding, ThemeSetBinding,
+    TitleBinding, WindowClosePolicy, WindowRole, WindowSpec, WindowsFactory,
 };
 
 pub(crate) struct WindowSetFactory<VM> {

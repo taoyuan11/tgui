@@ -396,8 +396,14 @@ impl<VM: 'static> Element<VM> {
                 max_visible: *max_visible,
                 style: style
                     .as_ref()
-                    .map(|resolver| resolver.resolve(crate::ui::widget::style::infer_theme_mode(theme)))
-                    .unwrap_or_else(|| crate::ui::widget::style::ToastStyle::default_for(crate::ui::widget::style::infer_theme_mode(theme))),
+                    .map(|resolver| {
+                        resolver.resolve(crate::ui::widget::style::infer_theme_mode(theme))
+                    })
+                    .unwrap_or_else(|| {
+                        crate::ui::widget::style::ToastStyle::default_for(
+                            crate::ui::widget::style::infer_theme_mode(theme),
+                        )
+                    }),
             },
         };
 

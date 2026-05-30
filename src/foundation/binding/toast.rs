@@ -266,7 +266,8 @@ impl<VM> ToastQueue<VM> {
             *next += 1;
             id
         }));
-        self.entries.mutate(|entries| entries.push(ToastEntry::new(id, toast, now)));
+        self.entries
+            .mutate(|entries| entries.push(ToastEntry::new(id, toast, now)));
         self.invalidation.mark_dependency_dirty(self.dependency);
         id
     }
@@ -325,8 +326,7 @@ impl<VM> ToastQueue<VM> {
         )
     }
 
-    pub fn snapshot(&self) -> Vec<ToastEntry<VM>>
-    {
+    pub fn snapshot(&self) -> Vec<ToastEntry<VM>> {
         record_dependency_read(Some(self.dependency));
         self.entries.read(|entries| entries.clone())
     }
@@ -394,5 +394,4 @@ impl<VM> ToastQueue<VM> {
         });
         changed
     }
-
 }

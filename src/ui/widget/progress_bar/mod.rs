@@ -219,7 +219,10 @@ impl<VM> ProgressBar<VM> {
     }
 
     pub fn show_label(mut self, show_label: bool) -> Self {
-        if let WidgetKind::ProgressBar { show_label: target, .. } = &mut self.element.kind {
+        if let WidgetKind::ProgressBar {
+            show_label: target, ..
+        } = &mut self.element.kind
+        {
             *target = show_label;
         }
         self

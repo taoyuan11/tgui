@@ -60,13 +60,19 @@ impl<VM: 'static> ResolvedElement<VM> {
         }
 
         let resolved_placement = default_placement(*placement);
-        let Some((content_scene, content_size)) =
-            build_toast_scene(queue.clone(), entries, style.clone(), resolved_placement, context)
-        else {
+        let Some((content_scene, content_size)) = build_toast_scene(
+            queue.clone(),
+            entries,
+            style.clone(),
+            resolved_placement,
+            context,
+        ) else {
             return;
         };
 
-        computed.dependencies.merge_from(&content_scene.dependencies);
+        computed
+            .dependencies
+            .merge_from(&content_scene.dependencies);
         let overlay_id = OverlayId::new(self.id.raw() ^ TOAST_OVERLAY_TAG);
         let overlay = Overlay::<VM>::new(overlay_id, Anchor::Rect(context.viewport))
             .source_widget(self.id)
@@ -95,116 +101,116 @@ fn build_toast_scene<VM: 'static>(
     let (result, dependencies): (Option<(ComputedScene<VM>, (Dp, Dp))>, DependencyGraph) =
         crate::foundation::binding::with_dependency_collection(|| {
             super::super::tree::with_widget_stack(|| {
-            let width = toast_width(&style, context.viewport);
-            let mut root = Flex::<VM>::new(Axis::Vertical)
-                .gap(style.stack_gap)
-                .width(width)
-                .align(match placement {
-                    ToastPlacement::TopCenter | ToastPlacement::BottomCenter => {
-                        crate::ui::layout::Align::Center
-                    }
-                    ToastPlacement::TopEnd | ToastPlacement::BottomEnd => {
-                        crate::ui::layout::Align::End
-                    }
-                    _ => crate::ui::layout::Align::Start,
-                })
-                .justify(Justify::Start);
+                let width = toast_width(&style, context.viewport);
+                let mut root = Flex::<VM>::new(Axis::Vertical)
+                    .gap(style.stack_gap)
+                    .width(width)
+                    .align(match placement {
+                        ToastPlacement::TopCenter | ToastPlacement::BottomCenter => {
+                            crate::ui::layout::Align::Center
+                        }
+                        ToastPlacement::TopEnd | ToastPlacement::BottomEnd => {
+                            crate::ui::layout::Align::End
+                        }
+                        _ => crate::ui::layout::Align::Start,
+                    })
+                    .justify(Justify::Start);
 
-            let rendered_entries = ordered_entries(entries, placement);
-            for entry in rendered_entries {
-                root = root.child(build_toast_card(queue.clone(), entry, style.clone()));
-            }
+                let rendered_entries = ordered_entries(entries, placement);
+                for entry in rendered_entries {
+                    root = root.child(build_toast_card(queue.clone(), entry, style.clone()));
+                }
 
-            let resolved: Element<VM> = root.into();
-            let resolved = resolved.resolve(context.theme);
-            let mut taffy = TaffyTree::new();
-            let layout_root = resolved
-                .build_layout_tree(
-                    &mut taffy,
-                    context.animations,
-                    context.theme,
-                    context.units,
-                    None,
-                    context.viewport,
-                    false,
-                    context.now,
-                )
-                .ok()?;
-            taffy
-                .compute_layout_with_measure(
-                    layout_root.node,
-                    TaffySize {
-                        width: AvailableSpace::Definite(context.viewport.width.get()),
-                        height: AvailableSpace::Definite(context.viewport.height.get()),
+                let resolved: Element<VM> = root.into();
+                let resolved = resolved.resolve(context.theme);
+                let mut taffy = TaffyTree::new();
+                let layout_root = resolved
+                    .build_layout_tree(
+                        &mut taffy,
+                        context.animations,
+                        context.theme,
+                        context.units,
+                        None,
+                        context.viewport,
+                        false,
+                        context.now,
+                    )
+                    .ok()?;
+                taffy
+                    .compute_layout_with_measure(
+                        layout_root.node,
+                        TaffySize {
+                            width: AvailableSpace::Definite(context.viewport.width.get()),
+                            height: AvailableSpace::Definite(context.viewport.height.get()),
+                        },
+                        |known_dimensions, _, _, node_context, _| {
+                            measure_node(
+                                node_context,
+                                known_dimensions,
+                                context.font_manager,
+                                context.theme,
+                                context.media,
+                                context.units,
+                            )
+                        },
+                    )
+                    .ok()?;
+                let layout = taffy.layout(layout_root.node).ok()?;
+                let size = (Dp::new(layout.size.width), Dp::new(layout.size.height));
+                let local_bounds = Rect::new(Dp::ZERO, Dp::ZERO, size.0, size.1);
+
+                let mut lifecycle_states = std::collections::HashMap::new();
+                let mut chunks = std::collections::HashMap::new();
+                let mut chunk_parts = std::collections::HashMap::new();
+                let mut visual_contexts = std::collections::HashMap::new();
+                let mut local_context = CollectContext {
+                    taffy: &taffy,
+                    font_manager: context.font_manager,
+                    theme: context.theme,
+                    media: context.media,
+                    focused_input: context.focused_input,
+                    focused_text_state: context.focused_text_state,
+                    focused_text_value: context.focused_text_value,
+                    focused_text_layout: context.focused_text_layout,
+                    text_layout_overrides: context.text_layout_overrides,
+                    active_slider_value: context.active_slider_value,
+                    caret_visible: context.caret_visible,
+                    selected_text: context.selected_text,
+                    selected_text_state: context.selected_text_state,
+                    hovered_scrollbar: context.hovered_scrollbar,
+                    active_scrollbar: context.active_scrollbar,
+                    widget_states: context.widget_states,
+                    select_open_states: context.select_open_states,
+                    scroll_offsets: context.scroll_offsets,
+                    viewport: context.viewport,
+                    units: context.units,
+                    animations: context.animations,
+                    reduced_motion: context.reduced_motion,
+                    now: context.now,
+                    focus: Default::default(),
+                    tooltip_hover_started_at: context.tooltip_hover_started_at,
+                    next_tooltip_wakeup: context.next_tooltip_wakeup,
+                    next_toast_wakeup: context.next_toast_wakeup,
+                    active_tooltip: context.active_tooltip,
+                    active_hover_popover: context.active_hover_popover,
+                };
+                let root_id = resolved.collect_subtree_cache(
+                    &layout_root,
+                    VisualContext {
+                        origin: crate::ui::widget::Point::ZERO,
+                        opacity: 1.0,
+                        clip_rect: local_bounds,
+                        clip_mask: None,
                     },
-                    |known_dimensions, _, _, node_context, _| {
-                        measure_node(
-                            node_context,
-                            known_dimensions,
-                            context.font_manager,
-                            context.theme,
-                            context.media,
-                            context.units,
-                        )
-                    },
-                )
-                .ok()?;
-            let layout = taffy.layout(layout_root.node).ok()?;
-            let size = (Dp::new(layout.size.width), Dp::new(layout.size.height));
-            let local_bounds = Rect::new(Dp::ZERO, Dp::ZERO, size.0, size.1);
-
-            let mut lifecycle_states = std::collections::HashMap::new();
-            let mut chunks = std::collections::HashMap::new();
-            let mut chunk_parts = std::collections::HashMap::new();
-            let mut visual_contexts = std::collections::HashMap::new();
-            let mut local_context = CollectContext {
-                taffy: &taffy,
-                font_manager: context.font_manager,
-                theme: context.theme,
-                media: context.media,
-                focused_input: context.focused_input,
-                focused_text_state: context.focused_text_state,
-                focused_text_value: context.focused_text_value,
-                focused_text_layout: context.focused_text_layout,
-                text_layout_overrides: context.text_layout_overrides,
-                active_slider_value: context.active_slider_value,
-                caret_visible: context.caret_visible,
-                selected_text: context.selected_text,
-                selected_text_state: context.selected_text_state,
-                hovered_scrollbar: context.hovered_scrollbar,
-                active_scrollbar: context.active_scrollbar,
-                widget_states: context.widget_states,
-                select_open_states: context.select_open_states,
-                scroll_offsets: context.scroll_offsets,
-                viewport: context.viewport,
-                units: context.units,
-                animations: context.animations,
-                reduced_motion: context.reduced_motion,
-                now: context.now,
-                focus: Default::default(),
-                tooltip_hover_started_at: context.tooltip_hover_started_at,
-                next_tooltip_wakeup: context.next_tooltip_wakeup,
-                next_toast_wakeup: context.next_toast_wakeup,
-                active_tooltip: context.active_tooltip,
-                active_hover_popover: context.active_hover_popover,
-            };
-            let root_id = resolved.collect_subtree_cache(
-                &layout_root,
-                VisualContext {
-                    origin: crate::ui::widget::Point::ZERO,
-                    opacity: 1.0,
-                    clip_rect: local_bounds,
-                    clip_mask: None,
-                },
-                &mut local_context,
-                &mut lifecycle_states,
-                &mut chunks,
-                &mut chunk_parts,
-                &mut visual_contexts,
-            );
-            let mut computed = chunks.get(&root_id).cloned().unwrap_or_default();
-            computed.finalize_portals(context.viewport);
-            Some((computed, size))
+                    &mut local_context,
+                    &mut lifecycle_states,
+                    &mut chunks,
+                    &mut chunk_parts,
+                    &mut visual_contexts,
+                );
+                let mut computed = chunks.get(&root_id).cloned().unwrap_or_default();
+                computed.finalize_portals(context.viewport);
+                Some((computed, size))
             })
         });
     let (mut computed, size) = result?;
@@ -364,16 +370,25 @@ fn default_placement(placement: ToastPlacement) -> ToastPlacement {
 
 fn map_overlay_placement(placement: ToastPlacement) -> Placement {
     match placement {
-        ToastPlacement::Adaptive | ToastPlacement::BottomEnd => Placement::bottom().align(crate::ui::widget::OverlayAlignment::End),
+        ToastPlacement::Adaptive | ToastPlacement::BottomEnd => {
+            Placement::bottom().align(crate::ui::widget::OverlayAlignment::End)
+        }
         ToastPlacement::BottomCenter => Placement::bottom(),
-        ToastPlacement::BottomStart => Placement::bottom().align(crate::ui::widget::OverlayAlignment::Start),
-        ToastPlacement::TopStart => Placement::top().align(crate::ui::widget::OverlayAlignment::Start),
+        ToastPlacement::BottomStart => {
+            Placement::bottom().align(crate::ui::widget::OverlayAlignment::Start)
+        }
+        ToastPlacement::TopStart => {
+            Placement::top().align(crate::ui::widget::OverlayAlignment::Start)
+        }
         ToastPlacement::TopCenter => Placement::top(),
         ToastPlacement::TopEnd => Placement::top().align(crate::ui::widget::OverlayAlignment::End),
     }
 }
 
-fn ordered_entries<VM>(entries: Vec<ToastEntry<VM>>, placement: ToastPlacement) -> Vec<ToastEntry<VM>> {
+fn ordered_entries<VM>(
+    entries: Vec<ToastEntry<VM>>,
+    placement: ToastPlacement,
+) -> Vec<ToastEntry<VM>> {
     match placement {
         ToastPlacement::BottomStart
         | ToastPlacement::BottomCenter
@@ -396,12 +411,30 @@ fn pct_or_fixed(width: Dp) -> Value<Length> {
     Value::Static(Length::Px(width))
 }
 
-fn colors_for_kind(style: &ToastStyle, kind: ToastKind) -> (crate::foundation::color::Color, crate::foundation::color::Color) {
+fn colors_for_kind(
+    style: &ToastStyle,
+    kind: ToastKind,
+) -> (
+    crate::foundation::color::Color,
+    crate::foundation::color::Color,
+) {
     match kind {
-        ToastKind::Success => (style.success_background.resolve(), style.success_foreground.resolve()),
-        ToastKind::Error => (style.error_background.resolve(), style.error_foreground.resolve()),
-        ToastKind::Warning => (style.warning_background.resolve(), style.warning_foreground.resolve()),
-        ToastKind::Info => (style.info_background.resolve(), style.info_foreground.resolve()),
+        ToastKind::Success => (
+            style.success_background.resolve(),
+            style.success_foreground.resolve(),
+        ),
+        ToastKind::Error => (
+            style.error_background.resolve(),
+            style.error_foreground.resolve(),
+        ),
+        ToastKind::Warning => (
+            style.warning_background.resolve(),
+            style.warning_foreground.resolve(),
+        ),
+        ToastKind::Info => (
+            style.info_background.resolve(),
+            style.info_foreground.resolve(),
+        ),
     }
 }
 

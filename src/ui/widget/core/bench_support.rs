@@ -84,7 +84,11 @@ impl WidgetBenchmarkContext {
     /// 运行时在 `scroll_epoch` / `animation_epoch` 变化但 `layout_cache` 仍有效时
     /// 走这条路径（见 `scene_runtime::computed_scene`）。
     #[allow(dead_code)]
-    pub fn recollect_scene_only(&mut self, tree: &WidgetTree<()>, now: Instant) -> WidgetBenchmarkStats {
+    pub fn recollect_scene_only(
+        &mut self,
+        tree: &WidgetTree<()>,
+        now: Instant,
+    ) -> WidgetBenchmarkStats {
         if self.cached_layout.is_none() {
             self.rebuild_layout(tree, now);
         }
@@ -444,9 +448,9 @@ mod tests {
     #[cfg(feature = "collect-profile")]
     use crate::ui::layout::{Insets, Overflow};
     use crate::ui::unit::dp;
-    use crate::ui::widget::{Flex, Text};
     #[cfg(feature = "collect-profile")]
     use crate::ui::widget::Stack;
+    use crate::ui::widget::{Flex, Text};
 
     #[test]
     fn reuses_layout_cache_for_stable_tree() {
@@ -514,8 +518,8 @@ mod tests {
     fn profile_recollect_breakdown() {
         for node_count in [200_usize, 1000_usize] {
             let tree = build_profile_scroll_tree(node_count);
-            let mut bench = WidgetBenchmarkContext::default()
-                .with_viewport(Rect::new(0.0, 0.0, 1280.0, 800.0));
+            let mut bench =
+                WidgetBenchmarkContext::default().with_viewport(Rect::new(0.0, 0.0, 1280.0, 800.0));
             // 预热布局 + 字体缓存。
             let _ = bench.recollect_scene_only(&tree, Instant::now());
 

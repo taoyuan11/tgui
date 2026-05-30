@@ -99,8 +99,8 @@ pub(crate) fn push_progress_bar_primitives(
                 clip_mask,
             });
         } else {
-            let fill_width = Dp::new(track_rect.width.get() * value.clamp(0.0, 1.0))
-                .min(track_rect.width);
+            let fill_width =
+                Dp::new(track_rect.width.get() * value.clamp(0.0, 1.0)).min(track_rect.width);
             if fill_width > Dp::ZERO {
                 scene.push_shape(RenderPrimitive {
                     rect: Rect::new(track_rect.x, track_rect.y, fill_width, track_rect.height),

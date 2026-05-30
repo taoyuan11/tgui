@@ -3,9 +3,9 @@ use super::*;
 use crate::ui::widget::style::VideoSurfaceStyle;
 use crate::ui::widget::style::{
     ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle, ContainerStyle,
-    InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
-    ProgressBarStyle as WidgetProgressBarStyle, SpinnerStyle as WidgetSpinnerStyle,
-    SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle,
+    InputStyle as WidgetInputStyle, ProgressBarStyle as WidgetProgressBarStyle,
+    RadioStyle as WidgetRadioStyle, SelectStyle as WidgetSelectStyle,
+    SliderStyle as WidgetSliderStyle, SpinnerStyle as WidgetSpinnerStyle,
     SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle,
 };
 use crate::ui::widget::{Image, Text};

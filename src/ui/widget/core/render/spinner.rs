@@ -60,7 +60,12 @@ fn ring_arc_mesh(
         );
 
         let quad = [outer0, outer1, inner1, inner0];
-        let local = |point: Point| [point.x.get() - center.x.get(), point.y.get() - center.y.get()];
+        let local = |point: Point| {
+            [
+                point.x.get() - center.x.get(),
+                point.y.get() - center.y.get(),
+            ]
+        };
         let push_vertex = |point: Point, vertices: &mut Vec<MeshVertex>| {
             vertices.push(MeshVertex {
                 position: [point.x.get(), point.y.get()],
@@ -106,7 +111,9 @@ pub(crate) fn push_spinner_primitives(
     units: UnitContext,
     scene: &mut ScenePrimitives,
 ) -> Rect {
-    let size = units.resolve_dp(size_override.unwrap_or(style.size)).max(1.0);
+    let size = units
+        .resolve_dp(size_override.unwrap_or(style.size))
+        .max(1.0);
     let thickness = units
         .resolve_dp(thickness_override.unwrap_or(style.thickness))
         .max(1.0)

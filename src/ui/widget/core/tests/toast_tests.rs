@@ -20,13 +20,11 @@ fn toast_host_emits_overlay_content_in_stack_order_and_tracks_wakeup() {
     queue.push_at(Toast::new("third").duration(Duration::from_secs(8)), now);
 
     let tree = WidgetTree::new(
-        Stack::new()
-            .child(Text::new("content"))
-            .child(
-                ToastHost::new(queue.clone())
-                    .placement(ToastPlacement::BottomEnd)
-                    .max_visible(2),
-            ),
+        Stack::new().child(Text::new("content")).child(
+            ToastHost::new(queue.clone())
+                .placement(ToastPlacement::BottomEnd)
+                .max_visible(2),
+        ),
     );
     let viewport = Rect::new(0.0, 0.0, 480.0, 320.0);
     let layout = tree.build_scene_layout_at(

@@ -7,8 +7,8 @@ use crate::ui::unit::Dp;
 use super::super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::super::style::{
     infer_theme_mode, ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
-    FocusRingOverride, InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
-    ProgressBarStyle as WidgetProgressBarStyle, SelectStyle as WidgetSelectStyle,
+    FocusRingOverride, InputStyle as WidgetInputStyle, ProgressBarStyle as WidgetProgressBarStyle,
+    RadioStyle as WidgetRadioStyle, SelectStyle as WidgetSelectStyle,
     SliderStyle as WidgetSliderStyle, SpinnerStyle as WidgetSpinnerStyle, TextWidgetStyle,
     TextareaStyle as WidgetTextareaStyle,
 };

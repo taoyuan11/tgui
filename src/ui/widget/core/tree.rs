@@ -70,14 +70,14 @@ pub(crate) fn with_widget_stack_frame<R>(f: impl FnOnce() -> R) -> R {
 fn element_contains_virtual<VM>(element: &Element<VM>) -> bool {
     match &element.kind {
         WidgetKind::Virtual { .. } => true,
-        WidgetKind::Container { children, .. } => children.iter().any(|child_source| {
-            match child_source {
+        WidgetKind::Container { children, .. } => {
+            children.iter().any(|child_source| match child_source {
                 crate::ui::widget::common::ChildSource::Static(children) => {
                     children.iter().any(element_contains_virtual)
                 }
                 crate::ui::widget::common::ChildSource::Dynamic(_) => false,
-            }
-        }),
+            })
+        }
         _ => false,
     }
 }

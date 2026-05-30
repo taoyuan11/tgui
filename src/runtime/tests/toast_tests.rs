@@ -18,7 +18,9 @@ impl crate::foundation::view_model::ViewModel for ToastRuntimeVm {
     where
         Self: Sized,
     {
-        Stack::new().child(ToastHost::new(self.queue.clone())).into()
+        Stack::new()
+            .child(ToastHost::new(self.queue.clone()))
+            .into()
     }
 }
 

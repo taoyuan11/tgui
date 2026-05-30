@@ -186,7 +186,10 @@ impl<VM> Spinner<VM> {
     }
 
     pub fn thickness(mut self, thickness: impl Into<Value<crate::ui::unit::Dp>>) -> Self {
-        if let WidgetKind::Spinner { thickness_override, .. } = &mut self.element.kind {
+        if let WidgetKind::Spinner {
+            thickness_override, ..
+        } = &mut self.element.kind
+        {
             *thickness_override = Some(thickness.into());
         }
         self

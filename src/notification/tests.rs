@@ -53,6 +53,21 @@ fn sanitizes_windows_shortcut_file_names() {
     assert_eq!(sanitize_windows_shortcut_file_name("."), "tgui");
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn escapes_applescript_injection() {
+    use super::platform::applescript_string;
+
+    // 普通字符串两侧加引号即可。
+    assert_eq!(applescript_string("hello"), "\"hello\"");
+    // 内嵌引号和反斜杠必须转义,避免提前闭合字符串或注入命令。
+    assert_eq!(
+        applescript_string("a\" & (do shell script \"rm -rf\") & \"b"),
+        "\"a\\\" & (do shell script \\\"rm -rf\\\") & \\\"b\""
+    );
+    assert_eq!(applescript_string("back\\slash"), "\"back\\\\slash\"");
+}
+
 #[derive(Default)]
 struct TestVm {
     value: Arc<Mutex<Option<String>>>,

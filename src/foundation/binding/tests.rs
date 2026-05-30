@@ -258,7 +258,9 @@ fn toast_queue_flush_expired_filters_deadlines() {
     let entries = queue.snapshot();
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().any(|entry| entry.toast.persistent));
-    assert!(entries.iter().any(|entry| entry.toast.duration == Duration::from_secs(5)));
+    assert!(entries
+        .iter()
+        .any(|entry| entry.toast.duration == Duration::from_secs(5)));
 }
 
 #[test]

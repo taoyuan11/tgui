@@ -25,6 +25,8 @@ pub(crate) use android::{
 pub(crate) use linux::{platform_permission_status, platform_request_permission, platform_send};
 #[cfg(target_os = "macos")]
 pub(crate) use macos::{platform_permission_status, platform_request_permission, platform_send};
+#[cfg(all(target_os = "macos", test))]
+pub(crate) use macos::applescript_string;
 #[cfg(target_env = "ohos")]
 pub(crate) use unsupported::{
     platform_permission_status, platform_request_permission, platform_send,
