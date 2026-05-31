@@ -15,7 +15,7 @@
 //! - 动画：backdrop fade + panel slide（通过 `left`/`right`/`top`/`bottom` 的 animated 值）；
 //! - 使用 `FocusScopeOptions::trap(true)` 实现 focus trap；
 //! - Esc 关闭、focus return、关闭命令派发通过 `DrawerDescriptor` + collect 阶段 sentinel overlay 完成；
-//! - backdrop 点击关闭通过 `on_click` 命令实现。
+//! - backdrop 点击关闭在 collect 阶段按当前 open 状态注入命中区。
 
 mod descriptor;
 mod placement;

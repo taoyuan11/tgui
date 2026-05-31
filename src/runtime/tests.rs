@@ -485,6 +485,7 @@ impl crate::foundation::view_model::ViewModel for CanvasEventVm {
 mod audio_video_tests;
 mod cache_lifecycle_tests;
 mod canvas_tests;
+mod drawer_tests;
 mod focus_selection_tests;
 mod gesture_tests;
 mod menu_tests;

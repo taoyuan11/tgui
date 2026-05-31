@@ -23,20 +23,21 @@
 //!   （left/right/top/bottom）+ `opacity` 组合实现 slide + fade；
 //! - Esc 关闭 / on_close 派发 / focus return 由挂在外层 Stack 上的
 //!   `DrawerDescriptor` + collect 阶段 sentinel overlay 完成；
-//! - `close_on_backdrop_click` 由 backdrop 自己的 `on_click` 命令直接驱动。
+//! - `close_on_backdrop_click` 在 collect 阶段按当前 open 信号注入 backdrop hit
+//!   region，避免初始关闭的 Drawer 打开后缺少点击 handler。
 
 use std::time::Duration;
 
 use crate::animation::Transition;
 use crate::foundation::color::Color;
-use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
+use crate::foundation::view_model::ValueCommand;
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{pct, Axis, Insets, Value};
 use crate::ui::unit::Dp;
 use crate::ui::widget::container::{Flex, Stack};
 use crate::ui::widget::core::Element;
 use crate::ui::widget::style::{ContainerStyle, DrawerStyle};
-use crate::ui::widget::{FocusScopeOptions, WidgetId};
+use crate::ui::widget::{CursorStyle, FocusScopeOptions, WidgetId};
 
 use super::descriptor::DrawerDescriptor;
 use super::placement::DrawerPlacement;
@@ -145,15 +146,6 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
         };
 
         // -----------------------------------------------------------------
-        // close 命令：把 on_open_change(false) 包成 Command<VM>，用于 backdrop 点击
-        // -----------------------------------------------------------------
-        let close_command: Option<Command<VM>> = on_open_change.clone().map(|cmd| {
-            Command::new_with_context(move |vm: &mut VM, ctx: &CommandContext<VM>| {
-                cmd.execute_with_context(vm, false, ctx);
-            })
-        });
-
-        // -----------------------------------------------------------------
         // backdrop：覆盖整个区域的半透明 scrim
         // 根据 open 状态动态设置背景色，确保关闭时完全透明
         // -----------------------------------------------------------------
@@ -194,7 +186,7 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
             }
         };
 
-        let mut backdrop = Stack::<VM>::new()
+        let backdrop = Stack::<VM>::new()
             .size(pct(100.0), pct(100.0))
             .position_absolute()
             .left(Dp::ZERO)
@@ -209,12 +201,6 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
                 s
             });
         let is_open = open.resolve();
-        let should_capture_backdrop_click = close_on_backdrop_click && is_open;
-        if should_capture_backdrop_click {
-            if let Some(close_cmd) = close_command.clone() {
-                backdrop = backdrop.on_click(close_cmd);
-            }
-        }
         let backdrop_element: Element<VM> = backdrop.into();
         let backdrop_widget_id = backdrop_element.id;
 
@@ -277,6 +263,7 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
         // 构建 panel 容器
         let mut panel: Flex<VM> = Flex::new(Axis::Vertical)
             .position_absolute()
+            .cursor(CursorStyle::Default)
             // 不在 panel 上设置 opacity，由外层 Stack 统一控制
             .style(move |mode| {
                 let resolved = drawer_style_for_panel
