@@ -1,0 +1,374 @@
+//! [`Drawer`] widget builder。
+//!
+//! ```ignore
+//! Drawer::new(state.drawer_open.signal())
+//!     .on_open_change(ValueCommand::new(|vm, open| vm.drawer_open.set(open)))
+//!     .placement(DrawerPlacement::Left)
+//!     .content(
+//!         Flex::new(Axis::Vertical)
+//!             .child(Text::new("Navigation"))
+//!             .child(Button::new("Home"))
+//!             .child(Button::new("Settings"))
+//!             .into()
+//!     )
+//! ```
+//!
+//! 实现要点：
+//! - `Drawer::From<Element>` 把自身展开为一个 `position_absolute + 全屏 fill`
+//!   的 Stack，里面放两个常驻 child：backdrop（半透明遮罩）+ panel（侧边栏面板）；
+//! - panel 根据 placement 决定从哪个边缘滑出，使用 `position_absolute` 定位；
+//! - panel 上挂 `FocusScopeOptions::trap(true)`，使 Tab 在 drawer 内循环；
+//! - backdrop + panel 的动画：backdrop 走 `opacity` fade，panel 走对应方向的位移
+//!   （left/right/top/bottom）+ `opacity` 组合实现 slide + fade；
+//! - Esc 关闭 / on_close 派发 / focus return 由挂在外层 Stack 上的
+//!   `DrawerDescriptor` + collect 阶段 sentinel overlay 完成；
+//! - `close_on_backdrop_click` 由 backdrop 自己的 `on_click` 命令直接驱动。
+
+use std::time::Duration;
+
+use crate::animation::Transition;
+use crate::foundation::color::Color;
+use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
+use crate::theme::ResolvedThemeMode;
+use crate::ui::layout::{pct, Axis, Insets, Value};
+use crate::ui::unit::Dp;
+use crate::ui::widget::container::{Flex, Stack};
+use crate::ui::widget::core::Element;
+use crate::ui::widget::style::{ContainerStyle, DrawerStyle};
+use crate::ui::widget::{FocusScopeOptions, WidgetId};
+
+use super::descriptor::DrawerDescriptor;
+use super::placement::DrawerPlacement;
+
+const DRAWER_SLIDE_DURATION_MS: u64 = 250;
+
+/// 从屏幕边缘滑出的侧边栏 builder。
+pub struct Drawer<VM> {
+    open: Value<bool>,
+    on_open_change: Option<ValueCommand<VM, bool>>,
+    placement: DrawerPlacement,
+    content: Option<Element<VM>>,
+    close_on_escape: bool,
+    close_on_backdrop_click: bool,
+    style: Option<DrawerStyle>,
+}
+
+impl<VM: 'static> Drawer<VM> {
+    /// 用绑定 open 状态的 `Signal<bool>`（或常量 bool）创建 Drawer。
+    pub fn new(open: impl Into<Value<bool>>) -> Self {
+        Self {
+            open: open.into(),
+            on_open_change: None,
+            placement: DrawerPlacement::default(),
+            content: None,
+            close_on_escape: true,
+            close_on_backdrop_click: true,
+            style: None,
+        }
+    }
+
+    /// 关闭时（Esc / backdrop click / overlay close）触发的回调。
+    /// 值参为新的 `open`（恒为 `false`）。
+    pub fn on_open_change(mut self, command: ValueCommand<VM, bool>) -> Self {
+        self.on_open_change = Some(command);
+        self
+    }
+
+    /// 设置 Drawer 从哪个边缘滑出（默认 Left）。
+    pub fn placement(mut self, placement: DrawerPlacement) -> Self {
+        self.placement = placement;
+        self
+    }
+
+    /// 设置内容区元素（任意 widget 子树）。
+    pub fn content(mut self, content: impl Into<Element<VM>>) -> Self {
+        self.content = Some(content.into());
+        self
+    }
+
+    /// 是否允许 Esc 关闭（默认 `true`）。
+    pub fn close_on_escape(mut self, on: bool) -> Self {
+        self.close_on_escape = on;
+        self
+    }
+
+    /// 是否允许点击 backdrop 关闭（默认 `true`）。
+    pub fn close_on_backdrop_click(mut self, on: bool) -> Self {
+        self.close_on_backdrop_click = on;
+        self
+    }
+
+    /// 覆盖默认主题样式。
+    pub fn style(mut self, style: DrawerStyle) -> Self {
+        self.style = Some(style);
+        self
+    }
+}
+
+impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
+    fn from(drawer: Drawer<VM>) -> Element<VM> {
+        let Drawer {
+            open,
+            on_open_change,
+            placement,
+            content,
+            close_on_escape,
+            close_on_backdrop_click,
+            style,
+        } = drawer;
+
+        // -----------------------------------------------------------------
+        // 如果是静态 false，直接返回空元素，避免渲染蒙层
+        // -----------------------------------------------------------------
+        if let Value::Static(false) = open {
+            return Stack::<VM>::new()
+                .size(Dp::ZERO, Dp::ZERO)
+                .position_absolute()
+                .into();
+        }
+
+        // -----------------------------------------------------------------
+        // 动画过渡配置
+        // -----------------------------------------------------------------
+        let slide_transition =
+            Transition::ease_in_out(Duration::from_millis(DRAWER_SLIDE_DURATION_MS));
+
+        // backdrop fade 动画
+        let backdrop_visibility: Value<f32> = match open.clone() {
+            Value::Static(open_now) => Value::Static(if open_now { 1.0 } else { 0.0 }),
+            Value::Signal(signal) => Value::Signal(
+                signal
+                    .map(|o| if o { 1.0 } else { 0.0 })
+                    .animated(slide_transition),
+            ),
+        };
+
+        // -----------------------------------------------------------------
+        // close 命令：把 on_open_change(false) 包成 Command<VM>，用于 backdrop 点击
+        // -----------------------------------------------------------------
+        let close_command: Option<Command<VM>> = on_open_change.clone().map(|cmd| {
+            Command::new_with_context(move |vm: &mut VM, ctx: &CommandContext<VM>| {
+                cmd.execute_with_context(vm, false, ctx);
+            })
+        });
+
+        // -----------------------------------------------------------------
+        // backdrop：覆盖整个区域的半透明 scrim
+        // 根据 open 状态动态设置背景色，确保关闭时完全透明
+        // -----------------------------------------------------------------
+        let backdrop_color_base = match &style {
+            Some(s) => s.backdrop_color.clone(),
+            None => Value::Static(Color::rgba(0, 0, 0, 0x80)),
+        };
+
+        // 根据 open 状态动态设置背景色
+        // 关键：无论是 Static 还是 Signal，关闭时都必须是透明色
+        let backdrop_color = match open.clone() {
+            Value::Static(open_now) => {
+                if open_now {
+                    backdrop_color_base
+                } else {
+                    Value::Static(Color::TRANSPARENT)
+                }
+            }
+            Value::Signal(signal) => {
+                // 对于 Signal，根据 open 状态动态切换颜色
+                let base_color = match backdrop_color_base {
+                    Value::Static(c) => c,
+                    Value::Signal(_) => {
+                        // 如果 backdrop_color 本身也是 Signal，取第一个值
+                        // 这种情况很少见，通常 backdrop_color 是静态的
+                        Color::rgba(0, 0, 0, 0x80)
+                    }
+                };
+                Value::Signal(signal.map(
+                    move |open| {
+                        if open {
+                            base_color
+                        } else {
+                            Color::TRANSPARENT
+                        }
+                    },
+                ))
+            }
+        };
+
+        let mut backdrop = Stack::<VM>::new()
+            .size(pct(100.0), pct(100.0))
+            .position_absolute()
+            .left(Dp::ZERO)
+            .top(Dp::ZERO)
+            .opacity(backdrop_visibility.clone())
+            .style(move |mode| {
+                let mut s = ContainerStyle::default_for(mode);
+                s.surface.background = Some(backdrop_color.clone());
+                s.surface.border_color = Some(Color::TRANSPARENT.into());
+                s.surface.border_width = Some(Dp::ZERO.into());
+                s.surface.border_radius = Some(Dp::ZERO.into());
+                s
+            });
+        if close_on_backdrop_click {
+            if let Some(close_cmd) = close_command.clone() {
+                backdrop = backdrop.on_click(close_cmd);
+            }
+        }
+        let backdrop_element: Element<VM> = backdrop.into();
+        let backdrop_widget_id = backdrop_element.id;
+
+        // -----------------------------------------------------------------
+        // panel：侧边栏面板，根据 placement 决定位置和滑动方向
+        // -----------------------------------------------------------------
+        let drawer_style_for_panel = style.clone();
+        let resolved_style_for_layout = style
+            .clone()
+            .unwrap_or_else(|| DrawerStyle::default_for(ResolvedThemeMode::Light));
+
+        // 根据 placement 计算 panel 的位置和尺寸
+        let (panel_width, panel_height) = match placement {
+            DrawerPlacement::Left | DrawerPlacement::Right => {
+                (Some(resolved_style_for_layout.width), None)
+            }
+            DrawerPlacement::Top | DrawerPlacement::Bottom => {
+                (None, Some(resolved_style_for_layout.height))
+            }
+        };
+
+        // 计算 slide 动画的位移值
+        // open=true 时位置为 0，open=false 时位置为负的宽度/高度（隐藏在屏幕外）
+        // 注意：left/right/top/bottom 都使用负值来表示"移出屏幕"
+        let slide_offset: Value<Dp> = match open.clone() {
+            Value::Static(open_now) => {
+                if open_now {
+                    Value::Static(Dp::ZERO)
+                } else {
+                    match placement {
+                        DrawerPlacement::Left => Value::Static(-resolved_style_for_layout.width),
+                        DrawerPlacement::Right => Value::Static(-resolved_style_for_layout.width),
+                        DrawerPlacement::Top => Value::Static(-resolved_style_for_layout.height),
+                        DrawerPlacement::Bottom => Value::Static(-resolved_style_for_layout.height),
+                    }
+                }
+            }
+            Value::Signal(signal) => {
+                let width = resolved_style_for_layout.width;
+                let height = resolved_style_for_layout.height;
+                Value::Signal(
+                    signal
+                        .map(move |o| {
+                            if o {
+                                Dp::ZERO
+                            } else {
+                                match placement {
+                                    DrawerPlacement::Left => -width,
+                                    DrawerPlacement::Right => -width,
+                                    DrawerPlacement::Top => -height,
+                                    DrawerPlacement::Bottom => -height,
+                                }
+                            }
+                        })
+                        .animated(slide_transition),
+                )
+            }
+        };
+
+        // 构建 panel 容器
+        let mut panel: Flex<VM> = Flex::new(Axis::Vertical)
+            .focus_scope(FocusScopeOptions::new().trap(true))
+            .position_absolute()
+            // 不在 panel 上设置 opacity，由外层 Stack 统一控制
+            .style(move |mode| {
+                let resolved = drawer_style_for_panel
+                    .clone()
+                    .unwrap_or_else(|| DrawerStyle::default_for(mode));
+                let mut s = ContainerStyle::default_for(mode);
+                s.surface.background = Some(resolved.background.clone());
+                s.surface.border_color = Some(resolved.border.clone());
+                s.surface.border_width = Some(resolved.border_width.clone());
+                s.surface.border_radius = Some(resolved.radius.clone());
+                s.surface.shadow = Some(resolved.shadow.into());
+                s
+            });
+
+        // 根据 placement 设置位置和尺寸
+        match placement {
+            DrawerPlacement::Left => {
+                panel = panel
+                    .left(slide_offset)
+                    .top(Dp::ZERO)
+                    .width(panel_width.unwrap())
+                    .height(pct(100.0));
+            }
+            DrawerPlacement::Right => {
+                panel = panel
+                    .right(slide_offset)
+                    .top(Dp::ZERO)
+                    .width(panel_width.unwrap())
+                    .height(pct(100.0));
+            }
+            DrawerPlacement::Top => {
+                panel = panel
+                    .left(Dp::ZERO)
+                    .top(slide_offset)
+                    .width(pct(100.0))
+                    .height(panel_height.unwrap());
+            }
+            DrawerPlacement::Bottom => {
+                panel = panel
+                    .left(Dp::ZERO)
+                    .bottom(slide_offset)
+                    .width(pct(100.0))
+                    .height(panel_height.unwrap());
+            }
+        }
+
+        // 设置 padding
+        if resolved_style_for_layout.padding != Insets::ZERO {
+            panel = panel.padding(resolved_style_for_layout.padding);
+        }
+
+        // 添加内容
+        if let Some(content_element) = content {
+            panel = panel.child(content_element);
+        }
+
+        let panel_element: Element<VM> = panel.into();
+        let panel_widget_id = panel_element.id;
+
+        // -----------------------------------------------------------------
+        // 外层 Stack：全屏容器，不使用 position_absolute
+        // backdrop 和 panel 各自使用 position_absolute 来覆盖内容
+        // 这样当 drawer 关闭时（opacity=0）不会拦截底层元素的点击事件
+        // -----------------------------------------------------------------
+        let outer: Stack<VM> = Stack::<VM>::new()
+            .size(pct(100.0), pct(100.0))
+            .child(backdrop_element)
+            .child(panel_element);
+
+        let mut outer_element: Element<VM> = outer.into();
+        outer_element.drawer = Some(Box::new(DrawerDescriptor {
+            open,
+            on_open_change,
+            placement,
+            close_on_escape,
+            close_on_backdrop_click,
+            return_focus_to: None,
+            backdrop_widget_id,
+            panel_widget_id,
+            style,
+        }));
+        outer_element
+    }
+}
+
+impl<VM> Drawer<VM> {
+    /// 暴露内部常量，方便 tests 引用。
+    pub(crate) const _DRAWER_SLIDE_DURATION_MS: u64 = DRAWER_SLIDE_DURATION_MS;
+    #[doc(hidden)]
+    pub fn _backdrop_id_of(element: &Element<VM>) -> Option<WidgetId> {
+        element.drawer.as_ref().map(|d| d.backdrop_widget_id)
+    }
+    #[doc(hidden)]
+    pub fn _panel_id_of(element: &Element<VM>) -> Option<WidgetId> {
+        element.drawer.as_ref().map(|d| d.panel_widget_id)
+    }
+}

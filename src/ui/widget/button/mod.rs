@@ -199,6 +199,7 @@ impl<VM> Button<VM> {
                 menu: None,
                 context_menu: None,
                 modal: None,
+                drawer: None,
                 tab_trigger: None,
                 kind: WidgetKind::Button {
                     label: label.into(),

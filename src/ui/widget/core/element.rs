@@ -258,6 +258,9 @@ impl<VM> Element<VM> {
             modal: self
                 .modal
                 .map(|modal| Box::new((*modal).scope(selector.clone()))),
+            drawer: self
+                .drawer
+                .map(|drawer| Box::new((*drawer).scope(selector.clone()))),
             tab_trigger: self.tab_trigger.map(|trigger| trigger.scope(selector)),
             kind,
         }

@@ -46,6 +46,7 @@ impl<VM> Container<VM> {
                 menu: None,
                 context_menu: None,
                 modal: None,
+                drawer: None,
                 tab_trigger: None,
                 kind: WidgetKind::Container {
                     layout,

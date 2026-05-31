@@ -894,3 +894,50 @@ impl ToastStyle {
         }
     }
 }
+
+/// Drawer / Sidebar widget 的样式定义。
+#[derive(Clone, Debug, PartialEq)]
+pub struct DrawerStyle {
+    /// 半透明遮罩颜色。alpha 通道决定基础不透明度，最终 alpha 还会乘以动画 visibility。
+    pub backdrop_color: Value<Color>,
+    pub surface: WidgetSurfaceStyle,
+    /// Panel 背景色。
+    pub background: Value<Color>,
+    pub border: Value<Color>,
+    pub border_width: Value<Dp>,
+    pub radius: Value<Dp>,
+    pub shadow: Shadow,
+    /// Panel 宽度（Left/Right placement）。
+    pub width: Dp,
+    /// Panel 高度（Top/Bottom placement）。
+    pub height: Dp,
+    /// Panel 内边距。
+    pub padding: Insets,
+}
+
+impl DrawerStyle {
+    /// 按解析后的主题模式创建默认样式。
+    pub fn default_for(mode: ResolvedThemeMode) -> Self {
+        let palette = palette(mode);
+        // backdrop alpha 在 light/dark 下都用 ~50% 黑遮罩。
+        let backdrop = Color::rgba(0, 0, 0, 0x80);
+        Self {
+            backdrop_color: Value::Static(backdrop),
+            surface: WidgetSurfaceStyle::default(),
+            background: Value::Static(palette.surface),
+            border: Value::Static(palette.outline_muted),
+            border_width: Value::Static(dp(1.0)),
+            radius: Value::Static(dp(0.0)),
+            shadow: Shadow {
+                offset_x: dp(0.0),
+                offset_y: dp(0.0),
+                blur: dp(24.0),
+                spread: dp(0.0),
+                color: Color::BLACK.with_alpha_factor(0.24),
+            },
+            width: dp(280.0),
+            height: dp(240.0),
+            padding: Insets::all(dp(16.0)),
+        }
+    }
+}

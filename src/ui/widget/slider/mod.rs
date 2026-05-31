@@ -203,6 +203,7 @@ impl<VM> Slider<VM> {
                 menu: None,
                 context_menu: None,
                 modal: None,
+                drawer: None,
                 tab_trigger: None,
                 kind: WidgetKind::Slider {
                     value: value.into(),

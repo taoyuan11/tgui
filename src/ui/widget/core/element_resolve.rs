@@ -422,6 +422,7 @@ impl<VM: 'static> Element<VM> {
             menu: self.menu.clone(),
             context_menu: self.context_menu.clone(),
             modal: self.modal.clone(),
+            drawer: self.drawer.clone(),
             tab_trigger: self.tab_trigger.clone(),
             child_source_spans,
             kind,

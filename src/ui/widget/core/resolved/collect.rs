@@ -4,6 +4,7 @@ use crate::ui::widget::FocusScopeState;
 
 mod chrome;
 mod controls;
+mod drawer;
 mod layout_media;
 mod menu;
 mod modal;
@@ -144,6 +145,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         self.emit_popover_overlay_if_visible(context, &mut computed, &visual);
         self.emit_menu_overlay_if_open(context, &mut computed, &visual);
         self.emit_modal_close_overlay_if_open(context, &mut computed, &visual);
+        self.emit_drawer_close_overlay_if_open(context, &mut computed, &visual);
         self.emit_toast_overlay_if_visible(context, &mut computed, &visual);
 
         timed(Phase::Bookkeeping, || {

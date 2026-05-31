@@ -7,6 +7,7 @@ mod checkbox;
 mod common;
 mod container;
 mod core;
+mod drawer;
 mod gesture;
 mod image;
 mod input;
@@ -80,6 +81,7 @@ pub(crate) use core::{
     ActiveTooltipState, CollectedSceneCache, ResolvedSceneLayout, ResolvedWidgetKind,
     SceneChunkParts, TextInputLayoutOverride, TooltipTrigger, VisualContextSnapshot,
 };
+pub use drawer::{Drawer, DrawerPlacement};
 pub use gesture::{
     DoubleTapEvent, EdgeSwipeEvent, GestureEdge, GestureEdgeSet, GesturePhase, GestureRecognizer,
     GestureSource, LongPressEvent, PinchGestureEvent, SwipeAxis, SwipeDirection, SwipeGestureEvent,
@@ -110,10 +112,10 @@ pub use select::{Select, SelectOption};
 pub use slider::Slider;
 pub use spinner::Spinner;
 pub use style::{
-    ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, FocusRingOverride, ImageStyle,
-    InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PopoverStyle, ProgressBarStyle, RadioStyle,
-    SelectStyle, SliderStyle, SpinnerStyle, SwitchStyle, TabsStyle, TextWidgetStyle, TextareaStyle,
-    ToastStyle, TooltipStyle, VideoSurfaceStyle, WidgetSurfaceStyle,
+    ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, DrawerStyle, FocusRingOverride,
+    ImageStyle, InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PopoverStyle, ProgressBarStyle,
+    RadioStyle, SelectStyle, SliderStyle, SpinnerStyle, SwitchStyle, TabsStyle, TextWidgetStyle,
+    TextareaStyle, ToastStyle, TooltipStyle, VideoSurfaceStyle, WidgetSurfaceStyle,
 };
 pub use switch::Switch;
 pub use tabs::{TabItem, TabView, Tabs};
