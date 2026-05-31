@@ -646,20 +646,50 @@ impl App {
                 )
                 .content(
                     Flex::vertical()
-                        .gap(dp(10.0))
+                        .gap(dp(12.0))
                         .width(dp(280.0))
-                    .style(|th| {
-                        let mut style = ContainerStyle::default_for(th);
-                        style.surface.background = Some(Color::hexa(0xF3F4F6FF).into());
-                        style
-                    })
+                        .padding(Insets::all(dp(16.0)))
+                        .style(|mode| {
+                            let mut style = ContainerStyle::default_for(mode);
+                            // 根据主题模式设置背景色
+                            style.surface.background = Some(match mode {
+                                ResolvedThemeMode::Light => Color::hexa(0xFFFFFFFF),
+                                ResolvedThemeMode::Dark => Color::hexa(0x1E293BFF),
+                            }.into());
+                            // 添加圆角
+                            style.surface.border_radius = Some(dp(12.0).into());
+                            // 添加边框
+                            style.surface.border_width = Some(dp(1.0).into());
+                            style.surface.border_color = Some(match mode {
+                                ResolvedThemeMode::Light => Color::hexa(0xE2E8F0FF),
+                                ResolvedThemeMode::Dark => Color::hexa(0x334155FF),
+                            }.into());
+                            // 添加阴影，营造浮起效果
+                            style.surface.shadow = Some(Shadow {
+                                offset_x: dp(0.0),
+                                offset_y: dp(8.0),
+                                blur: dp(24.0),
+                                spread: dp(0.0),
+                                color: match mode {
+                                    ResolvedThemeMode::Light => Color::rgba(0, 0, 0, 31),
+                                    ResolvedThemeMode::Dark => Color::rgba(0, 0, 0, 102),
+                                },
+                            }.into());
+                            // 添加背景模糊效果
+                            style.surface.background_blur = dp(16.0).into();
+                            style
+                        })
                         .child(el![
-                            Text::new("快速设置").style(|mode| text_style(mode, sp(18.0))),
+                            Text::new("快速设置").style(|mode| {
+                                let mut style = text_style(mode, sp(18.0));
+                                style.typography.weight = FontWeight::SemiBold;
+                                style
+                            }),
                             Text::new("同一个 Popover 同时展示 Click 固定打开和 Hover 预览。")
                                 .style(status_style),
                             Input::new(self.popover_note.clone())
                                 .placeholder("输入浮层里的备注")
-                                .width(dp(240.0)),
+                                .width(dp(248.0)),
                             Switch::new(self.popover_switch.signal()).on_change(ValueCommand::new(
                                 |app: &mut App, enabled| app.popover_switch.set(enabled)
                             )),
@@ -686,8 +716,7 @@ impl App {
                 .on_open_change(ValueCommand::new(|app: &mut App, open| {
                     app.popover_open.set(open)
                 }))
-                .trigger_mode(PopoverTriggerMode::ClickAndHoverPreview)
-                .match_anchor_width(true),
+                .trigger_mode(PopoverTriggerMode::ClickAndHoverPreview),
                 Text::new(
                     self.popover_switch
                         .signal()

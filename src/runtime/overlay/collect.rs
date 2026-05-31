@@ -490,6 +490,10 @@ fn finalize_portal_entry<VM>(
         for command in scene.scene.commands {
             push_overlay_command!(bucket, translate_render_command(command, origin));
         }
+        // 处理嵌套场景的 overlay_commands（例如光标）
+        for command in scene.scene.overlay_commands {
+            push_overlay_command!(bucket, translate_render_command(command, origin));
+        }
         for hit in scene.hit_regions {
             bucket.hits.push(translate_hit_region(
                 hit,
