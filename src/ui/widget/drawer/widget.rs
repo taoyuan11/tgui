@@ -17,7 +17,8 @@
 //! - `Drawer::From<Element>` 把自身展开为一个 `position_absolute + 全屏 fill`
 //!   的 Stack，里面放两个常驻 child：backdrop（半透明遮罩）+ panel（侧边栏面板）；
 //! - panel 根据 placement 决定从哪个边缘滑出，使用 `position_absolute` 定位；
-//! - panel 上挂 `FocusScopeOptions::trap(true)`，使 Tab 在 drawer 内循环；
+//! - 外层 Stack 在打开时挂 `FocusScopeOptions::trap(true)`，使 Tab 在 drawer 内循环，
+//!   同时让 backdrop 点击留在 trap scope 内；
 //! - backdrop + panel 的动画：backdrop 走 `opacity` fade，panel 走对应方向的位移
 //!   （left/right/top/bottom）+ `opacity` 组合实现 slide + fade；
 //! - Esc 关闭 / on_close 派发 / focus return 由挂在外层 Stack 上的
@@ -207,7 +208,9 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
                 s.surface.border_radius = Some(Dp::ZERO.into());
                 s
             });
-        if close_on_backdrop_click {
+        let is_open = open.resolve();
+        let should_capture_backdrop_click = close_on_backdrop_click && is_open;
+        if should_capture_backdrop_click {
             if let Some(close_cmd) = close_command.clone() {
                 backdrop = backdrop.on_click(close_cmd);
             }
@@ -273,7 +276,6 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
 
         // 构建 panel 容器
         let mut panel: Flex<VM> = Flex::new(Axis::Vertical)
-            .focus_scope(FocusScopeOptions::new().trap(true))
             .position_absolute()
             // 不在 panel 上设置 opacity，由外层 Stack 统一控制
             .style(move |mode| {
@@ -288,7 +290,6 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
                 s.surface.shadow = Some(resolved.shadow.into());
                 s
             });
-
         // 根据 placement 设置位置和尺寸
         match placement {
             DrawerPlacement::Left => {
@@ -335,14 +336,18 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
         let panel_widget_id = panel_element.id;
 
         // -----------------------------------------------------------------
-        // 外层 Stack：全屏容器，不使用 position_absolute
-        // backdrop 和 panel 各自使用 position_absolute 来覆盖内容
-        // 这样当 drawer 关闭时（opacity=0）不会拦截底层元素的点击事件
+        // 外层 Stack：全屏绝对定位容器，backdrop 仅在打开时捕获点击。
         // -----------------------------------------------------------------
-        let outer: Stack<VM> = Stack::<VM>::new()
+        let mut outer: Stack<VM> = Stack::<VM>::new()
             .size(pct(100.0), pct(100.0))
+            .position_absolute()
+            .left(Dp::ZERO)
+            .top(Dp::ZERO)
             .child(backdrop_element)
             .child(panel_element);
+        if is_open {
+            outer = outer.focus_scope(FocusScopeOptions::new().trap(true));
+        }
 
         let mut outer_element: Element<VM> = outer.into();
         outer_element.drawer = Some(Box::new(DrawerDescriptor {

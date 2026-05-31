@@ -32,6 +32,7 @@ use crate::ui::widget::{
     Switch, SwitchStyle, Text, TextEditState, TextWidgetStyle, Textarea, TextareaStyle,
     VirtualArrangement, VirtualDirection, VirtualViewport, WidgetStateMap, WidgetTree,
 };
+use crate::ui::widget::{Drawer, DrawerPlacement};
 #[cfg(feature = "video")]
 use crate::video::backend::{
     BackendSharedState, VideoBackend, DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
@@ -217,6 +218,7 @@ mod canvas_tests;
 mod command_video_tests;
 mod controls_tests;
 mod dependency_tests;
+mod drawer_tests;
 mod layout_scroll_tests;
 mod menu_tests;
 mod modal_tests;
