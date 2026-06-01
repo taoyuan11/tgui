@@ -18,6 +18,7 @@ struct CollectResolvedStyles {
     slider_style: Option<ResolvedSliderStyle>,
     progress_bar_style: Option<crate::ui::widget::style::ProgressBarStyle>,
     spinner_style: Option<crate::ui::widget::style::SpinnerStyle>,
+    divider_style: Option<crate::ui::widget::style::DividerStyle>,
     input_style: Option<ResolvedInputStyle>,
     checkbox_style: Option<ResolvedCheckboxStyle>,
     radio_style: Option<ResolvedRadioStyle>,

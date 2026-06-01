@@ -292,6 +292,7 @@ pub(super) fn measure_node(
         | Some(MeasureContext::Slider { id, .. })
         | Some(MeasureContext::ProgressBar { id, .. })
         | Some(MeasureContext::Spinner { id, .. })
+        | Some(MeasureContext::Divider { id, .. })
         | Some(MeasureContext::TextEditor { id, .. }) => {
             Some(id.dependency_owner(DependencyPhase::Layout))
         }
@@ -448,6 +449,37 @@ fn measure_node_tracked(
                 .unwrap_or(style.size);
             let resolved = units.resolve_dp(size);
             (resolved, resolved)
+        }
+        Some(MeasureContext::Divider {
+            orientation,
+            thickness_override,
+            label,
+            style,
+            ..
+        }) => {
+            let thickness = units
+                .resolve_dp(
+                    thickness_override
+                        .as_ref()
+                        .map(Value::resolve)
+                        .unwrap_or_else(|| style.thickness.resolve()),
+                )
+                .max(1.0);
+            if orientation.is_horizontal() {
+                // 主轴（宽度）交由父级 / grow 决定，intrinsic 给 0；
+                // cross（高度）= 线宽，带标签时取标签高度与线宽的较大者。
+                let cross = if let Some(label) = label {
+                    let label_text = text_with_typography(label.clone(), &style.text_style);
+                    let label_size = measure_text_content(&label_text, font_manager, theme, units);
+                    thickness.max(label_size.1)
+                } else {
+                    thickness
+                };
+                (0.0, cross)
+            } else {
+                // 垂直：cross（宽度）= 线宽；主轴（高度）交由父级决定。
+                (thickness, 0.0)
+            }
         }
         Some(MeasureContext::TextEditor {
             controller,

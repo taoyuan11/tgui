@@ -241,6 +241,15 @@ pub(crate) enum WidgetKind<VM> {
         label: Option<Value<String>>,
         style: Option<StyleResolver<crate::ui::widget::style::ProgressBarStyle>>,
     },
+    Divider {
+        orientation: DividerOrientation,
+        dashed: Value<bool>,
+        color_override: Option<Value<Color>>,
+        thickness_override: Option<Value<Dp>>,
+        inset_override: Option<Value<Dp>>,
+        label: Option<Value<String>>,
+        style: Option<StyleResolver<crate::ui::widget::style::DividerStyle>>,
+    },
     Spinner {
         style: Option<StyleResolver<crate::ui::widget::style::SpinnerStyle>>,
         size_override: Option<Value<Dp>>,
@@ -280,6 +289,25 @@ pub enum TabPlacement {
     Bottom,
     Left,
     Right,
+}
+
+/// 分隔线的朝向。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DividerOrientation {
+    Horizontal,
+    Vertical,
+}
+
+impl Default for DividerOrientation {
+    fn default() -> Self {
+        Self::Horizontal
+    }
+}
+
+impl DividerOrientation {
+    pub(crate) fn is_horizontal(self) -> bool {
+        matches!(self, Self::Horizontal)
+    }
 }
 
 impl Default for TabPlacement {
@@ -510,6 +538,23 @@ impl<VM> Clone for WidgetKind<VM> {
                 value: value.clone(),
                 indeterminate: indeterminate.clone(),
                 show_label: *show_label,
+                label: label.clone(),
+                style: style.clone(),
+            },
+            Self::Divider {
+                orientation,
+                dashed,
+                color_override,
+                thickness_override,
+                inset_override,
+                label,
+                style,
+            } => Self::Divider {
+                orientation: *orientation,
+                dashed: dashed.clone(),
+                color_override: color_override.clone(),
+                thickness_override: thickness_override.clone(),
+                inset_override: inset_override.clone(),
                 label: label.clone(),
                 style: style.clone(),
             },

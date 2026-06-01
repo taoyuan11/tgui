@@ -332,6 +332,7 @@ impl ViewModel for App {
                     "ProgressBar / Spinner",
                     self.build_progress_component(),
                 ),
+                component_card("Divider", self.build_divider_component()),
                 component_card(
                     "Tabs / TabView",
                     self.build_tabs_component(),
@@ -558,6 +559,34 @@ impl App {
                         }),
                     )
                     .style(status_style),
+                ]),
+            ])
+            .into()
+    }
+
+    fn build_divider_component(&self) -> Element<Self> {
+        Flex::vertical()
+            .gap(dp(12.0))
+            .child(el![
+                Text::new("默认水平分隔线").style(status_style),
+                Divider::new().width(dp(280.0)),
+                Text::new("带标签的分隔线").style(status_style),
+                Divider::new().width(dp(280.0)).label("或"),
+                Text::new("虚线 + 自定义颜色 / 粗细").style(status_style),
+                Divider::new()
+                    .width(dp(280.0))
+                    .dashed(true)
+                    .thickness(dp(2.0))
+                    .color(Color::hexa(0x2563EBFF)),
+                Text::new("两端内缩").style(status_style),
+                Divider::new().width(dp(280.0)).end_inset(dp(40.0)),
+                Text::new("垂直分隔线").style(status_style),
+                Flex::horizontal().gap(dp(12.0)).child(el![
+                    Text::new("左侧").style(status_style),
+                    Divider::new().vertical().height(dp(24.0)),
+                    Text::new("中间").style(status_style),
+                    Divider::new().vertical().height(dp(24.0)),
+                    Text::new("右侧").style(status_style),
                 ]),
             ])
             .into()

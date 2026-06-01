@@ -165,7 +165,10 @@ fn input_inside_popover_can_receive_focus_and_show_caret() {
         .iter()
         .filter(|region| matches!(region.interaction, HitInteraction::TextInput { .. }))
         .collect();
-    assert!(!text_input_regions.is_empty(), "Input inside popover should generate TextInput hit region");
+    assert!(
+        !text_input_regions.is_empty(),
+        "Input inside popover should generate TextInput hit region"
+    );
 
     // 点击 Input 使其获得焦点
     let input_region = text_input_regions[0];
@@ -180,12 +183,18 @@ fn input_inside_popover_can_receive_focus_and_show_caret() {
 
     // 验证 Input 获得了焦点
     let focused_input = handler.focused_text_input_id();
-    assert!(focused_input.is_some(), "Input inside popover should be focusable");
+    assert!(
+        focused_input.is_some(),
+        "Input inside popover should be focusable"
+    );
 
     // 验证光标可见性（在闪烁周期的可见阶段）
     let now = Instant::now();
     let caret_visible = handler.caret_visible_at(now, focused_input);
-    assert!(caret_visible, "Caret should be visible when input is focused");
+    assert!(
+        caret_visible,
+        "Caret should be visible when input is focused"
+    );
 
     // 重新渲染以获取光标状态
     handler.invalidate_computed_scene();

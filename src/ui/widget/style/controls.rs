@@ -1,3 +1,4 @@
+mod divider;
 mod input;
 mod progress;
 mod slider;
@@ -17,6 +18,7 @@ use super::palette::{
 };
 use super::shared::{FocusRingOverride, WidgetSurfaceStyle};
 
+pub use self::divider::DividerStyle;
 pub use self::input::{InputStyle, TextareaStyle};
 pub use self::progress::ProgressBarStyle;
 pub use self::slider::SliderStyle;

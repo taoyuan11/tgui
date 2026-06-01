@@ -3,10 +3,10 @@ use super::*;
 use crate::ui::widget::style::VideoSurfaceStyle;
 use crate::ui::widget::style::{
     ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle, ContainerStyle,
-    InputStyle as WidgetInputStyle, ProgressBarStyle as WidgetProgressBarStyle,
-    RadioStyle as WidgetRadioStyle, SelectStyle as WidgetSelectStyle,
-    SliderStyle as WidgetSliderStyle, SpinnerStyle as WidgetSpinnerStyle,
-    SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle,
+    DividerStyle as WidgetDividerStyle, InputStyle as WidgetInputStyle,
+    ProgressBarStyle as WidgetProgressBarStyle, RadioStyle as WidgetRadioStyle,
+    SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle,
+    SpinnerStyle as WidgetSpinnerStyle, SwitchStyle as WidgetSwitchStyle, WidgetSurfaceStyle,
 };
 use crate::ui::widget::{Image, Text};
 
@@ -202,6 +202,14 @@ fn freeze_spinner_style(style: &mut WidgetSpinnerStyle) {
     freeze_widget_surface_style(&mut style.surface);
     freeze_value(&mut style.track_color);
     freeze_value(&mut style.indicator_color);
+}
+
+fn freeze_divider_style(style: &mut WidgetDividerStyle) {
+    freeze_widget_surface_style(&mut style.surface);
+    freeze_value(&mut style.color);
+    freeze_value(&mut style.thickness);
+    freeze_value(&mut style.inset);
+    freeze_value(&mut style.label_color);
 }
 
 pub(super) fn lifecycle_snapshot<VM>(element: &ResolvedElement<VM>) -> LifecycleSnapshot {
@@ -494,6 +502,37 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
                 size_override,
                 thickness_override,
                 track_override: *track_override,
+            }
+        }
+        ResolvedWidgetKind::Divider {
+            orientation,
+            dashed,
+            color_override,
+            thickness_override,
+            inset_override,
+            label,
+            style,
+        } => {
+            let mut dashed = dashed.clone();
+            let mut color_override = color_override.clone();
+            let mut thickness_override = thickness_override.clone();
+            let mut inset_override = inset_override.clone();
+            let mut label = label.clone();
+            let mut style = style.clone();
+            freeze_value(&mut dashed);
+            freeze_option_value(&mut color_override);
+            freeze_option_value(&mut thickness_override);
+            freeze_option_value(&mut inset_override);
+            freeze_option_value(&mut label);
+            freeze_divider_style(&mut style);
+            LifecycleWidgetKind::Divider {
+                orientation: *orientation,
+                dashed,
+                color_override,
+                thickness_override,
+                inset_override,
+                label,
+                style,
             }
         }
         ResolvedWidgetKind::TextEditor {

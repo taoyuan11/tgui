@@ -130,6 +130,7 @@ pub(crate) fn default_layout_padding<VM>(element: &ResolvedElement<VM>, _theme: 
         ResolvedWidgetKind::Radio { .. } => Insets::ZERO,
         ResolvedWidgetKind::ProgressBar { .. } => Insets::ZERO,
         ResolvedWidgetKind::Spinner { .. } => Insets::ZERO,
+        ResolvedWidgetKind::Divider { .. } => Insets::ZERO,
         ResolvedWidgetKind::Text { .. } => Insets::ZERO,
         ResolvedWidgetKind::Container { .. } => Insets::ZERO,
         ResolvedWidgetKind::Virtual { .. } => Insets::ZERO,

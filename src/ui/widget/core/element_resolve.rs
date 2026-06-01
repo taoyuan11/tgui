@@ -344,6 +344,27 @@ impl<VM: 'static> Element<VM> {
                     track_override: *track_override,
                 }
             }
+            WidgetKind::Divider {
+                orientation,
+                dashed,
+                color_override,
+                thickness_override,
+                inset_override,
+                label,
+                style,
+            } => {
+                let resolved_style = resolved_divider_style(style.as_ref(), theme);
+                apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
+                ResolvedWidgetKind::Divider {
+                    orientation: *orientation,
+                    dashed: dashed.clone(),
+                    color_override: color_override.clone(),
+                    thickness_override: thickness_override.clone(),
+                    inset_override: inset_override.clone(),
+                    label: label.clone(),
+                    style: resolved_style,
+                }
+            }
             WidgetKind::TextEditor {
                 controller,
                 placeholder,

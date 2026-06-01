@@ -32,6 +32,9 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Spinner { .. } => {
                 self.collect_spinner_control(context, computed, visual)
             }
+            ResolvedWidgetKind::Divider { .. } => {
+                self.collect_divider_control(context, computed, visual)
+            }
             ResolvedWidgetKind::Select { .. } => {
                 self.collect_select_control(context, computed, visual)
             }

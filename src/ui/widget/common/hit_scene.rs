@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui::widget::style::{ProgressBarStyle, SpinnerStyle};
+use crate::ui::widget::style::{DividerStyle, ProgressBarStyle, SpinnerStyle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct FocusScopeOptions {
@@ -135,6 +135,13 @@ pub(crate) enum MeasureContext {
         size_override: Option<Value<Dp>>,
         thickness_override: Option<Value<Dp>>,
         track_override: Option<bool>,
+    },
+    Divider {
+        id: WidgetId,
+        orientation: DividerOrientation,
+        thickness_override: Option<Value<Dp>>,
+        label: Option<Value<String>>,
+        style: DividerStyle,
     },
     TextEditor {
         id: WidgetId,

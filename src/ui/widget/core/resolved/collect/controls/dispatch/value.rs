@@ -130,6 +130,82 @@ impl<VM> ResolvedElement<VM> {
         true
     }
 
+    pub(super) fn collect_divider_control(
+        &self,
+        context: &mut CollectContext<'_, '_>,
+        computed: &mut ComputedScene<VM>,
+        visual: &CollectVisualState,
+    ) -> bool {
+        let ResolvedWidgetKind::Divider {
+            orientation,
+            dashed,
+            color_override,
+            thickness_override,
+            inset_override,
+            label,
+            ..
+        } = &self.kind
+        else {
+            return false;
+        };
+
+        let divider_style = visual
+            .styles
+            .divider_style
+            .as_ref()
+            .expect("divider style should be resolved for divider widgets");
+        let color = color_override
+            .as_ref()
+            .map(Value::resolve)
+            .unwrap_or_else(|| divider_style.color.resolve());
+        let thickness = context
+            .units
+            .resolve_dp(
+                thickness_override
+                    .as_ref()
+                    .map(Value::resolve)
+                    .unwrap_or_else(|| divider_style.thickness.resolve()),
+            )
+            .max(1.0);
+        let inset = context
+            .units
+            .resolve_dp(
+                inset_override
+                    .as_ref()
+                    .map(Value::resolve)
+                    .unwrap_or_else(|| divider_style.inset.resolve()),
+            )
+            .max(0.0);
+        let dash_length = context.units.resolve_dp(divider_style.dash_length);
+        let dash_gap = context.units.resolve_dp(divider_style.dash_gap);
+        let label_gap = context.units.resolve_dp(divider_style.label_gap);
+
+        push_divider_primitives(
+            visual.frame,
+            *orientation,
+            dashed.resolve(),
+            color,
+            thickness,
+            inset,
+            dash_length,
+            dash_gap,
+            label.as_ref(),
+            label_gap,
+            divider_style,
+            visual.opacity,
+            self.id,
+            visual.primitive_clip,
+            visual.primitive_clip_mask,
+            context.font_manager,
+            context.theme,
+            context.units,
+            context.animations,
+            context.now,
+            &mut computed.scene,
+        );
+        true
+    }
+
     pub(super) fn collect_slider_control(
         &self,
         context: &mut CollectContext<'_, '_>,

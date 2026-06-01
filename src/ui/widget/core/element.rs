@@ -194,6 +194,23 @@ impl<VM> Element<VM> {
                 label,
                 style,
             },
+            WidgetKind::Divider {
+                orientation,
+                dashed,
+                color_override,
+                thickness_override,
+                inset_override,
+                label,
+                style,
+            } => WidgetKind::Divider {
+                orientation,
+                dashed,
+                color_override,
+                thickness_override,
+                inset_override,
+                label,
+                style,
+            },
             WidgetKind::Spinner {
                 style,
                 size_override,

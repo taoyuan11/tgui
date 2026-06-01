@@ -7,10 +7,10 @@ use crate::ui::unit::Dp;
 use super::super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::super::style::{
     infer_theme_mode, ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
-    FocusRingOverride, InputStyle as WidgetInputStyle, ProgressBarStyle as WidgetProgressBarStyle,
-    RadioStyle as WidgetRadioStyle, SelectStyle as WidgetSelectStyle,
-    SliderStyle as WidgetSliderStyle, SpinnerStyle as WidgetSpinnerStyle, TextWidgetStyle,
-    TextareaStyle as WidgetTextareaStyle,
+    DividerStyle as WidgetDividerStyle, FocusRingOverride, InputStyle as WidgetInputStyle,
+    ProgressBarStyle as WidgetProgressBarStyle, RadioStyle as WidgetRadioStyle,
+    SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle,
+    SpinnerStyle as WidgetSpinnerStyle, TextWidgetStyle, TextareaStyle as WidgetTextareaStyle,
 };
 use super::{Text, VisualStyle};
 
@@ -180,6 +180,15 @@ pub(super) fn resolved_spinner_style(
     style
         .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
         .unwrap_or_else(|| WidgetSpinnerStyle::default_for(infer_theme_mode(theme)))
+}
+
+pub(super) fn resolved_divider_style(
+    style: Option<&super::super::style::StyleResolver<WidgetDividerStyle>>,
+    theme: &Theme,
+) -> WidgetDividerStyle {
+    style
+        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
+        .unwrap_or_else(|| WidgetDividerStyle::default_for(infer_theme_mode(theme)))
 }
 
 pub(super) fn resolved_input_style(

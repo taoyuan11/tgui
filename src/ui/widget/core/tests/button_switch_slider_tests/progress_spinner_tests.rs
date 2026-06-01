@@ -1,5 +1,5 @@
 use super::*;
-use crate::widgets::{ProgressBar, Spinner};
+use crate::widgets::{Divider, ProgressBar, Spinner};
 
 #[test]
 fn progress_bar_renders_track_fill_and_label() {
@@ -143,4 +143,87 @@ fn spinner_renders_mesh_and_reduced_motion_disables_rotation_animation() {
     assert!(!reduced.primitives.meshes.is_empty());
     assert!(animated_engine.has_active_animations());
     assert!(!reduced_engine.has_active_animations());
+}
+
+fn render_divider(
+    divider: Divider<()>,
+    viewport: Rect,
+) -> crate::ui::widget::common::RenderedWidgetScene {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(divider);
+    tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    )
+}
+
+#[test]
+fn divider_descriptor_mounts() {
+    let rendered = render_divider(
+        Divider::new().width(dp(200.0)),
+        Rect::new(0.0, 0.0, 240.0, 24.0),
+    );
+    assert!(!rendered.primitives.shapes.is_empty());
+}
+
+#[test]
+fn horizontal_divider_renders_single_segment() {
+    // 测试环境下 root widget 由 taffy 撑满 viewport（240x24）。
+    let rendered = render_divider(
+        Divider::new().horizontal().width(dp(200.0)),
+        Rect::new(0.0, 0.0, 240.0, 24.0),
+    );
+    assert_eq!(rendered.primitives.shapes.len(), 1);
+    let line = rendered.primitives.shapes[0].rect;
+    // 线沿水平方向铺满 frame，粗细 1dp 且垂直居中。
+    assert!(line.width.get() >= 200.0, "unexpected line rect: {line:?}");
+    assert!((line.height.get() - 1.0).abs() <= 0.5);
+    assert!((line.y.get() - (24.0 - 1.0) * 0.5).abs() <= 0.5);
+}
+
+#[test]
+fn vertical_divider_renders_single_segment() {
+    let rendered = render_divider(
+        Divider::new().vertical().height(dp(100.0)),
+        Rect::new(0.0, 0.0, 24.0, 120.0),
+    );
+    assert_eq!(rendered.primitives.shapes.len(), 1);
+    let line = rendered.primitives.shapes[0].rect;
+    // 线沿垂直方向铺满 frame，粗细 1dp 且水平居中。
+    assert!((line.width.get() - 1.0).abs() <= 0.5);
+    assert!(line.height.get() >= 100.0, "unexpected line rect: {line:?}");
+    assert!((line.x.get() - (24.0 - 1.0) * 0.5).abs() <= 0.5);
+}
+
+#[test]
+fn dashed_divider_emits_multiple_segments() {
+    let rendered = render_divider(
+        Divider::new().dashed(true).width(dp(200.0)),
+        Rect::new(0.0, 0.0, 240.0, 24.0),
+    );
+    assert!(rendered.primitives.shapes.len() > 1);
+}
+
+#[test]
+fn divider_with_label_splits_line_and_emits_text() {
+    let rendered = render_divider(
+        Divider::new().label("OR").width(dp(200.0)),
+        Rect::new(0.0, 0.0, 240.0, 24.0),
+    );
+    assert_eq!(rendered.primitives.shapes.len(), 2);
+    assert!(!rendered.primitives.texts.is_empty());
 }

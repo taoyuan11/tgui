@@ -7,6 +7,7 @@ mod checkbox;
 mod common;
 mod container;
 mod core;
+mod divider;
 mod drawer;
 mod gesture;
 mod image;
@@ -65,8 +66,8 @@ pub(crate) use common::{
     TextInputContentGeometry, TexturePrimitive, WidgetStateMap,
 };
 pub use common::{
-    CursorStyle, FocusScopeOptions, Point, Rect, RenderPrimitive, ScenePrimitives, TabPlacement,
-    TextPrimitive, WidgetId, WidgetKey,
+    CursorStyle, DividerOrientation, FocusScopeOptions, Point, Rect, RenderPrimitive,
+    ScenePrimitives, TabPlacement, TextPrimitive, WidgetId, WidgetKey,
 };
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
 #[cfg(feature = "bench-support")]
@@ -81,6 +82,7 @@ pub(crate) use core::{
     ActiveTooltipState, CollectedSceneCache, ResolvedSceneLayout, ResolvedWidgetKind,
     SceneChunkParts, TextInputLayoutOverride, TooltipTrigger, VisualContextSnapshot,
 };
+pub use divider::Divider;
 pub use drawer::{Drawer, DrawerPlacement};
 pub use gesture::{
     DoubleTapEvent, EdgeSwipeEvent, GestureEdge, GestureEdgeSet, GesturePhase, GestureRecognizer,
@@ -112,10 +114,11 @@ pub use select::{Select, SelectOption};
 pub use slider::Slider;
 pub use spinner::Spinner;
 pub use style::{
-    ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, DrawerStyle, FocusRingOverride,
-    ImageStyle, InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PopoverStyle, ProgressBarStyle,
-    RadioStyle, SelectStyle, SliderStyle, SpinnerStyle, SwitchStyle, TabsStyle, TextWidgetStyle,
-    TextareaStyle, ToastStyle, TooltipStyle, VideoSurfaceStyle, WidgetSurfaceStyle,
+    ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, DividerStyle, DrawerStyle,
+    FocusRingOverride, ImageStyle, InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PopoverStyle,
+    ProgressBarStyle, RadioStyle, SelectStyle, SliderStyle, SpinnerStyle, SwitchStyle, TabsStyle,
+    TextWidgetStyle, TextareaStyle, ToastStyle, TooltipStyle, VideoSurfaceStyle,
+    WidgetSurfaceStyle,
 };
 pub use switch::Switch;
 pub use tabs::{TabItem, TabView, Tabs};

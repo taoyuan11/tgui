@@ -84,6 +84,19 @@ impl<VM> ResolvedElement<VM> {
                 thickness_override: thickness_override.clone(),
                 track_override: *track_override,
             },
+            ResolvedWidgetKind::Divider {
+                orientation,
+                thickness_override,
+                label,
+                style,
+                ..
+            } => MeasureContext::Divider {
+                id: self.id,
+                orientation: *orientation,
+                thickness_override: thickness_override.clone(),
+                label: label.clone(),
+                style: style.clone(),
+            },
             ResolvedWidgetKind::TextEditor {
                 controller,
                 placeholder,

@@ -1,6 +1,7 @@
 use super::*;
 
 mod controls;
+mod divider;
 mod frame;
 mod media;
 mod progress;
@@ -12,6 +13,7 @@ mod text;
 mod text_input;
 
 pub(crate) use self::controls::*;
+pub(crate) use self::divider::*;
 pub(crate) use self::frame::*;
 pub(crate) use self::media::*;
 pub(crate) use self::progress::*;

@@ -33,6 +33,10 @@ impl<VM> ResolvedElement<VM> {
                 ResolvedWidgetKind::Spinner { style, .. } => Some(style.clone()),
                 _ => None,
             },
+            divider_style: match &self.kind {
+                ResolvedWidgetKind::Divider { style, .. } => Some(style.clone()),
+                _ => None,
+            },
             input_style: match &self.kind {
                 ResolvedWidgetKind::TextEditor { style, .. } => {
                     Some(resolve_input_style(style, widget_state))
