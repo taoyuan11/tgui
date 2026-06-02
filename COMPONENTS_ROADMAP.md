@@ -1,6 +1,6 @@
 # tgui 组件成熟度路线图
 
-> 目标：补齐"通用 GUI 库"应有的组件矩阵，使下游不需要为常用 UI 模式自行造轮子。本文只列**缺失项**；已有组件（Button / Text / Input / Textarea / Image / Slider / Canvas / Checkbox / Radio / Select / Switch / Flex / Grid / Stack / Audio / Video）的增强诉求请走 `PRODUCTION_READINESS.md`。
+> 目标：补齐"通用 GUI 库"应有的组件矩阵，使下游不需要为常用 UI 模式自行造轮子。本文保留**缺失项 + 已补齐项进度**；已有基础组件（Button / Text / Input / Textarea / Image / Slider / Canvas / Checkbox / Radio / Select / Switch / Flex / Grid / Stack / Audio / Video）的增强诉求请走 `PRODUCTION_READINESS.md`。
 >
 > 排序原则：**基础设施 → 被多个组件复用的容器 → 单点组件**。优先级越靠前，越是"不补就堵后续组件"的瓶颈。
 >
@@ -14,36 +14,83 @@
 - **作用**：以"锚点 + 偏移 + 翻转策略"在屏幕坐标里定位浮层；监听窗口/滚动尺寸变化自动重定位；管理浮层 z-order 与 backdrop。
 - **被依赖组件**：Tooltip、Menu / ContextMenu、Popover、Dropdown、Select（重构）、DatePicker、ColorPicker、Toast、Modal、Combobox、AutoComplete。
 - **要点**：放在 `src/runtime/overlay/`，与 widget tree 解耦；提供 `OverlayLayer` API 让 widget 层只描述"我要从 anchor 弹出 X"，由 runtime 决定真实坐标和翻转方向；与 IME caret 矩形共享 caret rect 通道。
+- **进度**：[基础完成]
+  - ✅ 已迁移到 runtime-owned `src/runtime/overlay/`，widget 层通过兼容 re-export 使用 `Overlay` / `OverlayLayer` / `Anchor` / `PlacementOptions`；
+  - ✅ 支持 `Anchor::Rect` / `Point` / `Key` / `Source`，并可从 collect 输出的 overlay anchor 解析真实窗口坐标；
+  - ✅ `solve_placement` 支持 Top / Bottom / Left / Right、Start / Center / End、offset / cross_offset、match_anchor_width、viewport padding、FlipSide / ShiftOnly / FlipAndShift / Hide 等策略；
+  - ✅ `OverlayLayer::{Tooltip, Popover, Menu, Modal, Toast}` 分层合并，finalize 后保持跨层 z-order 与层内 emit 顺序；
+  - ✅ close handler 统一处理 outside click / Esc / return_focus_to，Popover、Menu、Modal、Drawer、Tooltip 均已复用；
+  - ✅ 单元测试覆盖 solver、portal collect、clip、hide、close handler、focus scope rebasing、z-order。
+  - ⏳ 待补：把 overlay texture / SVG icon 管线纳入统一 bucket；移动端 sheet 化策略仍由具体组件决定。
 
 ### 2. Focus Management（焦点链 + 焦点陷阱）
 - **作用**：定义 Tab 顺序（DOM-like 树序 + `tab_index` 覆盖）、可聚焦集合、`Esc`/`Enter`/`Space` 默认行为、模态浮层中的 focus trap、跨浮层焦点回归。
 - **被依赖组件**：Modal、Drawer、Menu、Popover、Form、Tabs、DataGrid、Tree、所有需要键盘可用的录入类组件。
 - **要点**：扩展 `src/runtime/input/` 现有 focus state；新增 `FocusScope`（可嵌套，模态作用域压栈）；与 a11y（PRODUCTION_READINESS §五）同源实现，避免重复。
+- **进度**：[基础完成]
+  - ✅ `tab_index` 已支持正数优先级、0/默认树序、负数跳过；
+  - ✅ `FocusScopeOptions::trap(true)` 已接入容器、Modal、Drawer、Menu / Select overlay，Tab 在 active trap 内循环；
+  - ✅ pointer focus escape 会被 active trap 拦截，overlay close 后可按 `return_focus_to` 回焦；
+  - ✅ `DefaultActivation` 已让 Button / Checkbox / Switch / Select 等响应 Enter / Space，Esc 走 overlay close；
+  - ✅ runtime 测试覆盖 tab 顺序、focus trap、默认激活、Esc 关闭与焦点回归。
+  - ⏳ 待补：`auto_focus_first` / declarative `return_focus_to` builder 仍未全面公开；a11y 树还需与同一焦点源进一步打通。
 
 ### 3. Virtual Scrolling 框架
 - **作用**：按可见视口仅实例化部分子节点；行高可定（固定 / 估算 / 测量）；支持横向、纵向、网格三种排布。
 - **被依赖组件**：List、Table / DataGrid、Tree、长选项的 Select / Combobox、Calendar 月视图（年范围）。
 - **要点**：新增 `src/ui/widget/virtual/`；先抽象 `ItemSource<T>` + `ItemLayout`（fixed/estimated/measured）；接入现有 `ScrollRegion`，但只让可见范围进入 widget tree 解析，否则 100k 行会击穿 layout。
+- **进度**：[基础完成]
+  - ✅ `src/ui/widget/virtual/` 已提供 `ItemSource<T>`、`ItemLayout::{Fixed, Estimated, Measured}`、`VirtualArrangement::{Linear, Grid}`、`VirtualDirection`、`VirtualViewport`；
+  - ✅ `Vec<T>` / `Arc<[T]>` 默认实现 `ItemSource`，支持稳定 key、render closure 按可见 index 构建子树；
+  - ✅ 接入 runtime `VirtualCacheState`，缓存 viewport hint、scroll offset、measured extents、key -> widget id 映射；
+  - ✅ 纵向 / 横向 overflow 与 scroll region 协作，只解析 visible_range + overscan；
+  - ✅ 单元测试覆盖依赖失效、横向/纵向可见范围、估算/测量高度、总 extent 更新。
+  - ⏳ 待补：公开更高层 `VirtualList` 语义组件；长选项 Select / Combobox 尚未迁移到虚拟列表；measured 模式的滚动抖动策略仍可继续优化。
 
 ### 4. ScrollView（独立可滚动容器）
 - **作用**：把目前散在 Input / Textarea 内部的滚动逻辑抽成通用容器；支持 overflow x/y 独立控制、滚动条样式、惯性滚动、键盘 PgUp/PgDn/Home/End。
 - **被依赖组件**：List、Modal 内长内容、Drawer、Tabs panel、Accordion 内容区、Form、Table（与 VirtualList 协作）。
 - **要点**：现有 `ScrollRegion` 已具备核心数据结构，需要把内部 widget core 的私有路径提升到公开 widget；明确"滚动事件冒泡到父级"的规则。
+- **进度**：[基础完成]
+  - ✅ `ScrollView` 已公开导出，默认垂直滚动并可配置 `overflow` / `overflow_x` / `overflow_y`、scrollbar 显示与样式；
+  - ✅ 支持 `ScrollViewController` 绑定 widget、同步 offset、`scroll_to` 请求与 immediate / smooth 模式；
+  - ✅ wheel scroll 已支持嵌套 ScrollView 冒泡：内层不能继续滚动时父级接管；
+  - ✅ widget core / runtime 测试覆盖滚动条渲染、clip、controller 绑定与请求、嵌套滚动冒泡。
+  - ⏳ 待补：键盘 PgUp / PgDn / Home / End 语义仍需产品化；移动端惯性滚动与回弹策略仍未单独抽象。
 
 ### 5. Portal / Layer Stack
 - **作用**：允许 widget 在树中声明、却渲染到顶层（脱离父级 clip / transform）。是浮层、Toast 队列、Modal backdrop 的底层机制。
 - **被依赖组件**：Tooltip、Menu、Popover、Modal、Drawer、Toast、Snackbar。
 - **要点**：与 §1 配套，但职责不同——§1 算坐标，Portal 管 widget 树重定位 + 渲染顺序。建议在 scene patch 阶段引入 layer 概念，避免回退到全树重建。
+- **进度**：[基础完成]
+  - ✅ `PortalEntry` 已进入 runtime overlay，collect 阶段先登记 portal，finalize 阶段再求解、平移、合并到 overlay scene；
+  - ✅ `OverlayContent` 支持 primitives / hits / batch / nested `ComputedScene`，可承载 Popover 这类任意子树浮层；
+  - ✅ portal 内 hit region、focus scope、overlay anchors、nested portal entries 会按 origin 重定位并保持 clip；
+  - ✅ scene patch cleanup 已覆盖 Select portal 重定位与关闭后清理，避免 stale overlay handler。
+  - ⏳ 待补：Portal 仍是内部基础设施，没有独立 public widget API；跨窗口 portal / 多窗口层栈尚未抽象。
 
 ### 6. Gesture 抽象（移动端可用性前提）
 - **作用**：把当前事件层的"按下/抬起/移动"升级为高阶手势——长按、双击、滑动方向判定、滑动关闭、双指缩放、边缘滑动。桌面端退化为鼠标等价。
 - **被依赖组件**：Drawer（边缘滑动）、Modal（向下滑动关闭）、Tabs（左右滑切换）、List item（左滑显示动作）、Calendar（左右滑切月）、Carousel、ContextMenu（长按触发）。
 - **要点**：放在 `src/runtime/input/gesture.rs`；与已有 hover/pressed 状态机互不冲突；提供 `GestureRecognizer` 让 widget 订阅。
+- **进度**：[基础完成]
+  - ✅ `GestureRecognizer` 已公开导出，可订阅 long press、double tap、swipe、edge swipe、pinch；
+  - ✅ 事件类型覆盖 source / phase / position / delta / finger id / scale / edge / direction；
+  - ✅ runtime `src/runtime/input/gesture.rs` 已接入 mouse / touch session、axis lock、threshold、cancel/end/update 派发、双指 pinch session；
+  - ✅ ContextMenu 已复用 long press；runtime 测试覆盖长按、双击、水平/垂直滑动、边缘滑动、pinch start/update/end/cancel，以及 click 抑制。
+  - ⏳ 待补：Drawer 边缘滑动打开、Modal 下滑关闭、Tabs 左右滑切换等组件级产品行为仍需逐个接入；移动端手势参数 token 化尚未完成。
 
 ### 7. Form 抽象（值聚合 + 校验 + 错误传播）
 - **作用**：统一录入类组件的值绑定、校验规则、错误展示、提交/重置；不强加 schema，仅约定"字段 ↔ State ↔ Validator ↔ 错误信息"四元组。
 - **被依赖组件**：Input、Textarea、Select、Checkbox、Radio、Switch、Slider、NumberInput、DatePicker、ColorPicker、Upload。
 - **要点**：纯 ViewModel 层抽象，不引入新 widget；可放 `src/foundation/form/`。
+- **进度**：[基础完成]
+  - ✅ `src/foundation/form/` 已提供 `Form`、`FormField<T>`、`TextFormField`、`ValidationErrors`、`FormSnapshot`；
+  - ✅ 支持字段注册、重复字段名检测、字段级 validator、全表 validate / submit / snapshot / reset / clear_errors；
+  - ✅ `FormField<T>::bind_change()` 可直接接 Checkbox / Radio / Switch / Slider 等 `on_change`，`TextFormField::controller()` 可接 Input / Textarea；
+  - ✅ 表单级 `errors()` / `is_valid()` 与字段级 `errors()` / `first_error()` / `is_valid()` 均为 Signal；
+  - ✅ 单元测试覆盖聚合校验、快照取值、reset、clear_errors、文本字段与重复注册。
+  - ⏳ 待补：录入组件的错误态视觉约定尚未统一绑定到 Form；异步 validator / submit lifecycle 仍未抽象。
 
 ---
 
@@ -55,6 +102,13 @@
 - **桌面操作**：鼠标进入 anchor 延迟（默认 ~500ms）显示、离开立即隐藏；键盘 focus 也触发；`Esc` 隐藏。
 - **移动操作**：长按 anchor 显示，松开延迟隐藏；点击其它区域立即隐藏。
 - **依赖**：P0 §1、§5。
+- **进度**：[基础完成]
+  - ✅ `Tooltip` 已公开导出，作为任意 widget 的 `Element::tooltip(...)` 修饰符使用；
+  - ✅ 支持纯文本 `Value<String>`、默认 500ms hover delay、自定义 `placement` / `flip_policy` / `delay` / `TooltipStyle`；
+  - ✅ collect 阶段通过 Overlay 引擎渲染背景、文本与三角指针，使用 `OverlayLayer::Tooltip`；
+  - ✅ runtime 已支持 hover 延迟、离开 fade-out、focus 触发、Esc 隐藏、下一次 wakeup deadline；
+  - ✅ runtime 测试覆盖 hover 显示/隐藏、默认 delay、延迟唤醒、focus 显示、Esc 关闭、无 descriptor 不渲染。
+  - ⏳ 待补：移动端长按 tooltip 行为尚未单独接入；Tooltip 内容仍是纯文本，暂不支持任意 Element 子树。
 
 ### 9. Menu / ContextMenu / MenuBar
 - **作用**：层级化的操作命令列表；支持图标、快捷键提示、子菜单、分隔线、勾选项、禁用项。
@@ -163,12 +217,26 @@
 - **桌面操作**：按钮触发；`Esc` 关闭；focus trap；点遮罩关闭。
 - **移动操作**：边缘滑动打开（P0 §6）；反向滑动关闭。
 - **依赖**：P0 §1、§2、§5、§6。
+- **进度**：[基础完成]
+  - ✅ `Drawer` / `DrawerPlacement` / `DrawerStyle` 已公开导出，并加入 `prelude` / `widgets`；
+  - ✅ 支持 Left / Right / Top / Bottom 四方向，内容区接受任意 widget 子树；
+  - ✅ overlay 模式已落地：全屏 Stack + backdrop + panel，backdrop fade、panel slide + fade，打开时启用 focus trap；
+  - ✅ 支持 `on_open_change`、`close_on_escape`、`close_on_backdrop_click`、主题样式覆盖；
+  - ✅ collect 阶段通过 sentinel overlay 处理 Esc / close handler / backdrop hit，关闭状态不拦截底层 hit，也不注册 focus trap；
+  - ✅ `examples/drawer_demo/` 独立示例覆盖四方向 Drawer；widget core / runtime 测试覆盖 hit 穿透、focus trap、backdrop 点击关闭。
+  - ⏳ 待补：Push 模式暂未实现；`return_focus_to` builder 尚未公开；移动端边缘滑动打开 / 反向滑动关闭尚未接入组件行为。
 
 ### 16. Divider
 - **作用**：水平/垂直分隔线，带可选标签。
 - **样式**：颜色 token 化；粗细、虚线/实线、内边距。
 - **操作**：纯展示。
 - **依赖**：无。
+- **进度**：[功能完整]
+  - ✅ `Divider` / `DividerOrientation` / `DividerStyle` 已公开导出，并加入 `prelude` / `widgets`；
+  - ✅ 支持 horizontal / vertical、thickness、dashed、color、end_inset、水平标签、style resolver；
+  - ✅ 继承通用 layout builder API，可设置尺寸、margin、padding、grid row/column、absolute inset 等；
+  - ✅ 渲染测试覆盖默认水平线、显式水平/垂直、虚线、标签；
+  - ✅ `examples/demo` 已新增 Divider 展示卡片，覆盖普通、带标签、虚线、内缩、垂直分隔。
 
 ---
 
@@ -315,12 +383,13 @@
 
 ---
 
-## 实施建议
+## 下一步实施建议
 
-1. **批 1（P0 §1-§5）**：先打浮层、焦点、虚拟滚动、Portal、ScrollView 五件套；这之后 Tooltip / Menu / Modal / Popover / Toast 都能在一两周内陆续上。
-2. **批 2（P0 §6-§7 + P1）**：补 Gesture 和 Form 抽象后，并行铺 P1 全部组件；Tabs / Drawer / Modal 三个对移动端尤其依赖手势。
-3. **批 3（P2）**：数据类组件成本最高，但都依赖批 1、批 2；尤其 Table / Tree 不要在虚拟滚动落地前动手，否则会重写两次。
-4. **批 4（P3）**：视觉完善类，按用户呼声排队。
+1. **批 1（P0 收尾）**：Overlay / Portal / Focus / Virtual / ScrollView / Gesture / Form 都已进入基础完成状态，下一步优先补 public API 长尾、移动端策略、a11y 同源焦点与 texture/SVG overlay 管线。
+2. **批 2（P1 收尾）**：Tooltip / Menu / Modal / Popover / Toast / ProgressBar / Spinner / Tabs / Drawer / Divider 已铺开，建议集中补 Drawer push 模式、移动端手势接入、Popover 指针渲染、Modal autofocus/scale 动画、Menu SVG 图标。
+3. **批 3（P2 开工）**：数据类组件成本最高，但基础设施已可支撑；建议先做 List / VirtualList，把 selection、keyboard nav、empty/loading 状态跑通，再推进 Table / DataGrid 与 Tree。
+4. **批 4（P2 录入扩展）**：NumberInput、DatePicker、ColorPicker、Upload 依赖 Form + Overlay + Popover + Gesture，适合在 List 基础交互稳定后并行推进。
+5. **批 5（P3）**：视觉完善类，按用户呼声排队；Badge / Avatar / Skeleton / Card / Breadcrumb 可以先作为低风险组件快速补齐。
 
 每批结束都要：
 - 更新 `src/lib.rs` re-export 与 `README.md` 组件清单
