@@ -54,13 +54,13 @@ fn modern_toast_style(mode: ResolvedThemeMode) -> ToastStyle {
     let mut style = ToastStyle::default_for(mode);
 
     // 更现代的圆角
-    style.radius = Value::Static(dp(16.0));
+    style.radius = Value::Static(dp(10.0));
 
     // 增强阴影效果，营造更好的层次感
     style.shadow = Shadow {
         offset_x: dp(0.0),
-        offset_y: dp(12.0),
-        blur: dp(40.0),
+        offset_y: dp(8.0),
+        blur: dp(28.0),
         spread: dp(0.0),
         color: match mode {
             ResolvedThemeMode::Light => Color::rgba(0, 0, 0, 40),
@@ -72,8 +72,8 @@ fn modern_toast_style(mode: ResolvedThemeMode) -> ToastStyle {
     style.border_width = Value::Static(dp(0.0));
 
     // 更舒适的内边距
-    style.padding = Insets::all(dp(16.0));
-    style.gap = dp(12.0);
+    style.padding = Insets::all(dp(12.0));
+    style.gap = dp(8.0);
 
     // 优化图标圆圈颜色 - 更鲜明、更现代的配色
     // Success - 清新的绿色
@@ -96,21 +96,21 @@ fn modern_toast_style(mode: ResolvedThemeMode) -> ToastStyle {
     style.title_text_style.weight = FontWeight::SemiBold;
 
     // 优化按钮样式
-    style.action_button.min_height = dp(32.0);
-    style.action_button.padding_x = dp(12.0);
-    style.action_button.padding_y = dp(6.0);
-    style.action_button.radius = Value::Static(dp(8.0));
+    style.action_button.min_height = dp(24.0);
+    style.action_button.padding_x = dp(8.0);
+    style.action_button.padding_y = dp(4.0);
+    style.action_button.radius = Value::Static(dp(6.0));
 
-    style.close_button.min_height = dp(28.0);
-    style.close_button.padding_x = dp(6.0);
-    style.close_button.padding_y = dp(4.0);
+    style.close_button.min_height = dp(20.0);
+    style.close_button.padding_x = dp(4.0);
+    style.close_button.padding_y = dp(3.0);
 
     // 调整最小和最大宽度
-    style.min_width = dp(280.0);
-    style.max_width = dp(480.0);
+    style.min_width = dp(200.0);
+    style.max_width = dp(320.0);
 
     // 增加 Toast 之间的间距
-    style.stack_gap = dp(16.0);
+    style.stack_gap = dp(12.0);
 
     style
 }

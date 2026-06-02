@@ -9,7 +9,7 @@ use crate::theme::FontWeight;
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Insets, Value};
 use crate::ui::theme::{Shadow, Stateful, TextStyle};
-use crate::ui::unit::{dp, Dp};
+use crate::ui::unit::{dp, sp, Dp};
 
 use super::super::common::ButtonVariantKind;
 use super::palette::{
@@ -844,16 +844,16 @@ impl ToastStyle {
         let palette = palette(mode);
         let mut action_button =
             ButtonStyle::default_for(mode, crate::ui::widget::common::ButtonVariantKind::Ghost);
-        action_button.min_height = dp(28.0);
-        action_button.padding_x = dp(6.0);
-        action_button.padding_y = dp(2.0);
-        action_button.radius = Value::Static(dp(6.0));
+        action_button.min_height = dp(20.0);
+        action_button.padding_x = dp(4.0);
+        action_button.padding_y = dp(1.0);
+        action_button.radius = Value::Static(dp(4.0));
 
         let mut close_button =
             ButtonStyle::default_for(mode, crate::ui::widget::common::ButtonVariantKind::Ghost);
-        close_button.min_height = dp(24.0);
-        close_button.padding_x = dp(4.0);
-        close_button.padding_y = dp(2.0);
+        close_button.min_height = dp(18.0);
+        close_button.padding_x = dp(3.0);
+        close_button.padding_y = dp(1.0);
         close_button.radius = Value::Static(dp(999.0));
 
         Self {
@@ -862,27 +862,32 @@ impl ToastStyle {
             foreground: Value::Static(palette.on_surface),
             border: Value::Static(palette.outline_muted),
             border_width: Value::Static(dp(1.0)),
-            radius: Value::Static(dp(8.0)),
+            radius: Value::Static(dp(6.0)),
             shadow: Shadow {
                 offset_x: dp(0.0),
-                offset_y: dp(4.0),
-                blur: dp(12.0),
+                offset_y: dp(3.0),
+                blur: dp(8.0),
                 spread: dp(0.0),
                 color: Color::BLACK.with_alpha_factor(0.15),
             },
-            padding: Insets::symmetric(dp(16.0), dp(12.0)),
-            gap: dp(12.0),
+            padding: Insets::symmetric(dp(10.0), dp(8.0)),
+            gap: dp(8.0),
             title_text_style: {
                 let mut style = label_text_style();
                 style.weight = FontWeight::Medium;
+                style.size = sp(13.0);
                 style
             },
-            body_text_style: label_text_style(),
-            icon_size: dp(18.0),
-            min_width: dp(280.0),
-            max_width: dp(400.0),
-            margin: dp(16.0),
-            stack_gap: dp(10.0),
+            body_text_style: {
+                let mut style = label_text_style();
+                style.size = sp(12.0);
+                style
+            },
+            icon_size: dp(12.0),
+            min_width: dp(200.0),
+            max_width: dp(280.0),
+            margin: dp(12.0),
+            stack_gap: dp(8.0),
             action_button,
             close_button,
             success_icon_background: Value::Static(Color::hexa(0x10B981FF)),

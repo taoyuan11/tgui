@@ -290,27 +290,27 @@ fn build_toast_card<VM: 'static>(
 
     // 顶部行：图标圆圈 + 类型文字 + spacer + 关闭按钮
     let icon_circle = Stack::<VM>::new()
-        .size(dp(25.0), dp(25.0))
+        .size(dp(18.0), dp(18.0))
         .style(move |mode| {
             let mut container = ContainerStyle::default_for(mode);
             container.surface.background = Some(Value::Static(icon_bg));
-            container.surface.border_radius = Some(Value::Static(dp(12.5)));
+            container.surface.border_radius = Some(Value::Static(dp(9.0)));
             container
         })
         .child(
             Stack::<VM>::new()
-                .size(dp(25.0), dp(25.0))
+                .size(dp(18.0), dp(18.0))
                 .child(
                     Text::new(kind_icon_glyph(kind))
                         .style(move |mode| {
                             let mut text_style = TextWidgetStyle::default_for(mode);
                             text_style.color = Value::Static(icon_fg);
-                            text_style.typography.size = sp(16.0);
+                            text_style.typography.size = sp(12.0);
                             text_style.typography.font_family = Some("tgui-icons".to_string());
                             text_style
                         })
-                        .width(dp(25.0))
-                        .height(dp(25.0)),
+                        .width(dp(18.0))
+                        .height(dp(18.0)),
                 ),
         );
 
@@ -332,7 +332,7 @@ fn build_toast_card<VM: 'static>(
             .style(move |_| {
                 let mut button_style = close_style.clone();
                 button_style.text_style.font_family = Some("tgui-icons".to_string());
-                button_style.text_style.size = sp(18.0);
+                button_style.text_style.size = sp(14.0);
                 button_style.foreground = crate::ui::theme::Stateful {
                     normal: close_fg.into(),
                     hovered: close_hover.into(),
@@ -350,7 +350,7 @@ fn build_toast_card<VM: 'static>(
     };
 
     let top_row = Flex::<VM>::new(Axis::Horizontal)
-        .gap(dp(8.0))
+        .gap(dp(6.0))
         .align(crate::ui::layout::Align::Center)
         .child(icon_circle)
         .child(kind_label)
@@ -363,7 +363,7 @@ fn build_toast_card<VM: 'static>(
     let body_style_for_content_else = body_text_style.clone();
     let content_area = if let Some(title_text) = title {
         Flex::<VM>::new(Axis::Vertical)
-            .gap(dp(4.0))
+            .gap(dp(3.0))
             .child(Text::new(title_text).style(move |mode| {
                 let mut text_style = TextWidgetStyle::default_for(mode);
                 text_style.color = Value::Static(foreground);
@@ -389,7 +389,7 @@ fn build_toast_card<VM: 'static>(
     // 底部按钮区（如果有 action）
     let bottom_buttons: Element<VM> = if let Some(action) = action {
         Flex::<VM>::new(Axis::Horizontal)
-            .gap(dp(8.0))
+            .gap(dp(6.0))
             .child(
                 Button::new(action.label)
                     .ghost()
@@ -415,7 +415,7 @@ fn build_toast_card<VM: 'static>(
         .child(
             Flex::<VM>::new(Axis::Vertical)
                 .padding(style.padding)
-                .gap(dp(12.0))
+                .gap(dp(8.0))
                 .child(top_row)
                 .child(content_area)
                 .child(bottom_buttons),
