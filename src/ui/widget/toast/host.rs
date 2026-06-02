@@ -1,4 +1,5 @@
 use crate::foundation::binding::{ToastPlacement, ToastQueue};
+use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{LayoutStyle, Value};
 use crate::ui::widget::common::VisualStyle;
 use crate::ui::widget::common::{
@@ -13,7 +14,7 @@ pub struct ToastHost<VM> {
     queue: ToastQueue<VM>,
     placement: ToastPlacement,
     max_visible: Option<usize>,
-    style: Option<ToastStyle>,
+    style: Option<StyleResolver<ToastStyle>>,
 }
 
 impl<VM> ToastHost<VM> {
@@ -36,8 +37,11 @@ impl<VM> ToastHost<VM> {
         self
     }
 
-    pub fn style(mut self, style: ToastStyle) -> Self {
-        self.style = Some(style);
+    pub fn style(
+        mut self,
+        style: impl Fn(ResolvedThemeMode) -> ToastStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::new(style));
         self
     }
 }
@@ -46,9 +50,7 @@ impl<VM> From<ToastHost<VM>> for Element<VM> {
     fn from(value: ToastHost<VM>) -> Self {
         let mut interactions = InteractionHandlers::default();
         interactions.cursor_style = Some(Value::Static(CursorStyle::Default));
-        let style = value
-            .style
-            .map(|style| StyleResolver::new(move |_| style.clone()));
+        let style = value.style;
         Element {
             id: WidgetId::next(),
             key: None,

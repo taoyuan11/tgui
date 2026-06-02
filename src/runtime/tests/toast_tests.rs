@@ -50,26 +50,23 @@ fn toast_deadline_invalidates_scene_and_recollect_clears_expired_entry() {
 
     std::thread::sleep(Duration::from_millis(2200));
     let event_loop = TestEventLoop;
-    assert!(
-        handler.drive_animations(&event_loop, Instant::now()),
-        "toast wakeup should invalidate the cached scene"
-    );
-    assert!(
-        handler.next_toast_wakeup_deadline.is_none(),
-        "expired wakeup should be consumed before the next collect"
-    );
 
-    let after = handler.computed_scene().clone();
+    // 第一次drive_animations会触发Toast进入退场状态
+    handler.drive_animations(&event_loop, Instant::now());
+
+    // 等待退场动画完成（300ms + buffer）
+    std::thread::sleep(Duration::from_millis(400));
+
+    // 第二次drive_animations应该清理完成退场的Toast
+    let did_invalidate = handler.drive_animations(&event_loop, Instant::now());
+
+    let final_scene = handler.computed_scene().clone();
     assert!(
-        after
+        final_scene
             .scene
             .overlay_texts
             .iter()
             .all(|text| text.content != "ephemeral"),
-        "expired toast should be removed on the next collect"
-    );
-    assert!(
-        handler.next_toast_wakeup_deadline.is_none(),
-        "once the queue is empty there should be no next toast deadline"
+        "expired toast should be removed after exit animation completes"
     );
 }

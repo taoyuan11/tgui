@@ -50,6 +50,71 @@ fn accent_tooltip_style(mode: ResolvedThemeMode) -> TooltipStyle {
     style
 }
 
+fn modern_toast_style(mode: ResolvedThemeMode) -> ToastStyle {
+    let mut style = ToastStyle::default_for(mode);
+
+    // 更现代的圆角
+    style.radius = Value::Static(dp(16.0));
+
+    // 增强阴影效果，营造更好的层次感
+    style.shadow = Shadow {
+        offset_x: dp(0.0),
+        offset_y: dp(12.0),
+        blur: dp(40.0),
+        spread: dp(0.0),
+        color: match mode {
+            ResolvedThemeMode::Light => Color::rgba(0, 0, 0, 40),
+            ResolvedThemeMode::Dark => Color::rgba(0, 0, 0, 120),
+        },
+    };
+
+    // 调整边框
+    style.border_width = Value::Static(dp(0.0));
+
+    // 更舒适的内边距
+    style.padding = Insets::all(dp(16.0));
+    style.gap = dp(12.0);
+
+    // 优化图标圆圈颜色 - 更鲜明、更现代的配色
+    // Success - 清新的绿色
+    style.success_icon_background = Value::Static(Color::hexa(0x10B981FF));
+    style.success_icon_foreground = Value::Static(Color::hexa(0xFFFFFFFF));
+
+    // Error - 醒目的红色
+    style.error_icon_background = Value::Static(Color::hexa(0xEF4444FF));
+    style.error_icon_foreground = Value::Static(Color::hexa(0xFFFFFFFF));
+
+    // Warning - 温暖的橙色
+    style.warning_icon_background = Value::Static(Color::hexa(0xF59E0BFF));
+    style.warning_icon_foreground = Value::Static(Color::hexa(0xFFFFFFFF));
+
+    // Info - 清澈的蓝色
+    style.info_icon_background = Value::Static(Color::hexa(0x3B82F6FF));
+    style.info_icon_foreground = Value::Static(Color::hexa(0xFFFFFFFF));
+
+    // 调整文字样式
+    style.title_text_style.weight = FontWeight::SemiBold;
+
+    // 优化按钮样式
+    style.action_button.min_height = dp(32.0);
+    style.action_button.padding_x = dp(12.0);
+    style.action_button.padding_y = dp(6.0);
+    style.action_button.radius = Value::Static(dp(8.0));
+
+    style.close_button.min_height = dp(28.0);
+    style.close_button.padding_x = dp(6.0);
+    style.close_button.padding_y = dp(4.0);
+
+    // 调整最小和最大宽度
+    style.min_width = dp(280.0);
+    style.max_width = dp(480.0);
+
+    // 增加 Toast 之间的间距
+    style.stack_gap = dp(16.0);
+
+    style
+}
+
 fn image_style(mode: ResolvedThemeMode) -> ImageStyle {
     let mut style = ImageStyle::default_for(mode);
     style.surface.border_radius = Some(dp(12.0).into());
@@ -153,6 +218,11 @@ struct App {
     audio_controller: AudioController,
     video_player: VideoPlayer,
     toast_queue: ToastQueue<App>,
+    toast_top_start: ToastQueue<App>,
+    toast_top_center: ToastQueue<App>,
+    toast_top_end: ToastQueue<App>,
+    toast_bottom_start: ToastQueue<App>,
+    toast_bottom_center: ToastQueue<App>,
 }
 
 impl ViewModel for App {
@@ -181,6 +251,11 @@ impl ViewModel for App {
             audio_controller: audio,
             video_player: VideoPlayer::new(context),
             toast_queue: ToastQueue::new(context),
+            toast_top_start: ToastQueue::new(context),
+            toast_top_center: ToastQueue::new(context),
+            toast_top_end: ToastQueue::new(context),
+            toast_bottom_start: ToastQueue::new(context),
+            toast_bottom_center: ToastQueue::new(context),
         }
     }
 
@@ -385,7 +460,12 @@ impl ViewModel for App {
                 component_card("Canvas", demo_canvas()),
             ])
             )
-            .child(ToastHost::new(self.toast_queue.clone()))
+            .child(ToastHost::new(self.toast_queue.clone()).style(|mode| modern_toast_style(mode)))
+            .child(ToastHost::new(self.toast_top_start.clone()).placement(ToastPlacement::TopStart).style(|mode| modern_toast_style(mode)))
+            .child(ToastHost::new(self.toast_top_center.clone()).placement(ToastPlacement::TopCenter).style(|mode| modern_toast_style(mode)))
+            .child(ToastHost::new(self.toast_top_end.clone()).placement(ToastPlacement::TopEnd).style(|mode| modern_toast_style(mode)))
+            .child(ToastHost::new(self.toast_bottom_start.clone()).placement(ToastPlacement::BottomStart).style(|mode| modern_toast_style(mode)))
+            .child(ToastHost::new(self.toast_bottom_center.clone()).placement(ToastPlacement::BottomCenter).style(|mode| modern_toast_style(mode)))
             .into()
     }
 }
@@ -596,30 +676,44 @@ impl App {
         Flex::vertical()
             .gap(dp(10.0))
             .child(el![
-                Text::new("用于应用内短提示；支持语义色、可选 action、持久提示以及桌面端 hover 暂停倒计时。")
+                Text::new("用于应用内短提示；现已优化为现代化设计，支持语义色、可选 action、持久提示以及桌面端 hover 暂停倒计时。")
                     .style(status_style),
                 Flex::horizontal().gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
-                    Button::new("Success").on_click(Command::new(|app: &mut App| {
-                        app.toast_queue.success("保存成功");
+                    Button::new("✓ Success").on_click(Command::new(|app: &mut App| {
+                        app.toast_queue.push(
+                            Toast::new("文件已成功保存到云端")
+                                .title("保存成功")
+                                .kind(ToastKind::Success)
+                        );
                         app.toast_status.set("最近操作：success toast".to_string());
                     })),
-                    Button::new("Error").danger().on_click(Command::new(|app: &mut App| {
+                    Button::new("✕ Error").danger().on_click(Command::new(|app: &mut App| {
                         app.toast_queue.push(
-                            Toast::new("保存失败，请稍后重试").title("上传失败").kind(ToastKind::Error)
+                            Toast::new("网络连接失败，请检查您的网络设置")
+                                .title("上传失败")
+                                .kind(ToastKind::Error)
                         );
                         app.toast_status.set("最近操作：error toast".to_string());
                     })),
-                    Button::new("Warning").secondary().on_click(Command::new(|app: &mut App| {
-                        app.toast_queue.warning("网络波动，已切换为离线模式");
+                    Button::new("⚠ Warning").secondary().on_click(Command::new(|app: &mut App| {
+                        app.toast_queue.push(
+                            Toast::new("检测到网络波动，已自动切换为离线模式")
+                                .title("网络提醒")
+                                .kind(ToastKind::Warning)
+                        );
                         app.toast_status.set("最近操作：warning toast".to_string());
                     })),
-                    Button::new("Info").ghost().on_click(Command::new(|app: &mut App| {
-                        app.toast_queue.info("后台同步将在 30 秒后开始");
+                    Button::new("ℹ Info").ghost().on_click(Command::new(|app: &mut App| {
+                        app.toast_queue.push(
+                            Toast::new("后台同步将在 30 秒后自动开始")
+                                .title("提示")
+                                .kind(ToastKind::Info)
+                        );
                         app.toast_status.set("最近操作：info toast".to_string());
                     })),
                 ]),
                 Flex::horizontal().gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
-                    Button::new("撤销示例").on_click(Command::new(|app: &mut App| {
+                    Button::new("↶ 撤销示例").on_click(Command::new(|app: &mut App| {
                         app.toast_queue.push(
                             Toast::new("文件已移入回收站")
                                 .title("Snackbar")
@@ -633,24 +727,81 @@ impl App {
                         );
                         app.toast_status.set("最近操作：弹出撤销 snackbar".to_string());
                     })),
-                    Button::new("持久提示").on_click(Command::new(|app: &mut App| {
+                    Button::new("📌 持久提示").on_click(Command::new(|app: &mut App| {
                         app.toast_queue.push(
-                            Toast::new("正在连接远程设备，请在完成后手动关闭")
-                                .title("持久提示")
+                            Toast::new("正在连接远程设备，完成后请手动关闭此提示")
+                                .title("持久连接")
                                 .kind(ToastKind::Warning)
                                 .persistent(true)
                                 .show_close_button(true),
                         );
                         app.toast_status.set("最近操作：弹出持久 toast".to_string());
                     })),
-                    Button::new("短时提示").secondary().on_click(Command::new(|app: &mut App| {
+                    Button::new("⚡ 短时提示").secondary().on_click(Command::new(|app: &mut App| {
                         app.toast_queue.push(
                             Toast::new("这个提示将在 2 秒后自动消失")
-                                .title("短时提示")
+                                .title("快速提示")
                                 .kind(ToastKind::Success)
                                 .duration(Duration::from_secs(2)),
                         );
                         app.toast_status.set("最近操作：弹出 2 秒 toast".to_string());
+                    })),
+                ]),
+                Text::new("位置示例：").style(status_style),
+                Flex::horizontal().gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
+                    Button::new("↖ 左上").ghost().on_click(Command::new(|app: &mut App| {
+                        app.toast_top_start.push(
+                            Toast::new("左上角弹出的提示")
+                                .title("TopStart")
+                                .kind(ToastKind::Info)
+                                .duration(Duration::from_secs(3)),
+                        );
+                        app.toast_status.set("最近操作：左上 toast".to_string());
+                    })),
+                    Button::new("↑ 顶部居中").ghost().on_click(Command::new(|app: &mut App| {
+                        app.toast_top_center.push(
+                            Toast::new("顶部居中弹出的提示")
+                                .title("TopCenter")
+                                .kind(ToastKind::Success)
+                                .duration(Duration::from_secs(3)),
+                        );
+                        app.toast_status.set("最近操作：顶部居中 toast".to_string());
+                    })),
+                    Button::new("↗ 右上").ghost().on_click(Command::new(|app: &mut App| {
+                        app.toast_top_end.push(
+                            Toast::new("右上角弹出的提示")
+                                .title("TopEnd")
+                                .kind(ToastKind::Warning)
+                                .duration(Duration::from_secs(3)),
+                        );
+                        app.toast_status.set("最近操作：右上 toast".to_string());
+                    })),
+                    Button::new("↙ 左下").ghost().on_click(Command::new(|app: &mut App| {
+                        app.toast_bottom_start.push(
+                            Toast::new("左下角弹出的提示")
+                                .title("BottomStart")
+                                .kind(ToastKind::Error)
+                                .duration(Duration::from_secs(3)),
+                        );
+                        app.toast_status.set("最近操作：左下 toast".to_string());
+                    })),
+                    Button::new("↓ 底部居中").ghost().on_click(Command::new(|app: &mut App| {
+                        app.toast_bottom_center.push(
+                            Toast::new("底部居中弹出的提示")
+                                .title("BottomCenter")
+                                .kind(ToastKind::Success)
+                                .duration(Duration::from_secs(3)),
+                        );
+                        app.toast_status.set("最近操作：底部居中 toast".to_string());
+                    })),
+                    Button::new("↘ 右下 (默认)").ghost().on_click(Command::new(|app: &mut App| {
+                        app.toast_queue.push(
+                            Toast::new("右下角弹出的提示（默认位置）")
+                                .title("BottomEnd / Adaptive")
+                                .kind(ToastKind::Info)
+                                .duration(Duration::from_secs(3)),
+                        );
+                        app.toast_status.set("最近操作：右下 toast（默认）".to_string());
                     })),
                 ]),
                 Text::new(self.toast_status.signal()).style(status_style),

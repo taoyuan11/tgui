@@ -384,10 +384,25 @@ impl<VM> ToastQueue<VM> {
     }
 
     pub fn flush_expired(&self, now: Instant) -> bool {
+        /// 退场动画时长，与collect/toast.rs中的EXIT_DURATION_MS保持一致
+        const EXIT_DURATION_MS: u64 = 300;
+
         let changed = self.entries.mutate(|entries| {
             let before = entries.len();
             entries.retain(|entry| match entry.deadline {
-                Some(deadline) => deadline > now,
+                Some(deadline) => {
+                    if deadline > now {
+                        // deadline未到，保留
+                        true
+                    } else if entry.paused {
+                        // 暂停中，保留
+                        true
+                    } else {
+                        // deadline已到，但需要等待退场动画完成后才移除
+                        let exit_elapsed = now.saturating_duration_since(deadline);
+                        exit_elapsed.as_millis() < EXIT_DURATION_MS as u128
+                    }
+                }
                 None => true,
             });
             before != entries.len()
