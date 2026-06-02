@@ -47,6 +47,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn clear_pointer_position(&mut self) {
         let previous_position = self.cursor_position;
         self.cursor_position = None;
+        self.hover_popover_anchor = None;
         let had_hovered_widgets = !self.hovered_widgets.is_empty();
         let previous_scrollbar = self.hovered_scrollbar;
         for hovered in std::mem::take(&mut self.hovered_widgets).into_iter().rev() {

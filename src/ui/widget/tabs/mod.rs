@@ -222,11 +222,10 @@ impl<VM: 'static> From<Tabs<VM>> for Element<VM> {
             on_change,
             layout,
         } = tabs;
-        let selected_now = selected.resolve();
         let strip = build_tab_strip(
             id,
             &items,
-            &selected_now,
+            selected.clone(),
             placement,
             style.clone(),
             on_change,
@@ -252,7 +251,7 @@ impl<VM: 'static> From<Tabs<VM>> for Element<VM> {
 fn build_tab_strip<VM: 'static>(
     group_id: WidgetId,
     items: &[TabItem<VM>],
-    selected: &str,
+    selected: Value<String>,
     placement: TabPlacement,
     style: Option<StyleResolver<TabsStyle>>,
     on_change: Option<ValueCommand<VM, (String, String)>>,
@@ -263,8 +262,84 @@ fn build_tab_strip<VM: 'static>(
         Axis::Vertical
     };
     let layout_style = resolve_tabs_style_for_layout(style.as_ref());
-    let mut triggers = Vec::with_capacity(items.len());
-    for (index, item) in items.iter().enumerate() {
+    // 仅保留构建触发按钮所需的轻量信息，便于在选中信号变化时整体重建。
+    let specs: Vec<TabTriggerSpec> = items
+        .iter()
+        .map(|item| TabTriggerSpec {
+            key: item.key.clone(),
+            label: item.label.clone(),
+            disabled: item.disabled.clone(),
+        })
+        .collect();
+
+    let list = Flex::new(axis)
+        .gap(layout_style.tab_gap)
+        .align(Align::Start);
+    // 触发按钮的 active 样式依赖选中值，必须与 panel 一样走信号驱动的动态子节点，
+    // 否则点击切换后 active 样式会停留在首帧的值上。
+    let list = match selected {
+        Value::Static(selected) => list.child(build_triggers(
+            group_id,
+            &specs,
+            &selected,
+            placement,
+            style.clone(),
+            on_change,
+        )),
+        Value::Signal(signal) => {
+            let strip_style = style.clone();
+            list.child(signal.map(move |selected| {
+                build_triggers(
+                    group_id,
+                    &specs,
+                    &selected,
+                    placement,
+                    strip_style.clone(),
+                    on_change.clone(),
+                )
+            }))
+        }
+    };
+    ScrollView::new()
+        .focusable(false)
+        .overflow_x(if placement.is_horizontal() {
+            Overflow::Scroll
+        } else {
+            Overflow::Hidden
+        })
+        .overflow_y(if placement.is_horizontal() {
+            Overflow::Hidden
+        } else {
+            Overflow::Scroll
+        })
+        .show_scrollbar(false)
+        .style({
+            let style = style.clone();
+            move |mode| tab_bar_container_style(resolve_tabs_style(style.as_ref(), mode))
+        })
+        .child(list)
+        .into()
+}
+
+/// 构建 tab 触发按钮所需的轻量信息（不含 panel 内容）。
+#[derive(Clone)]
+struct TabTriggerSpec {
+    key: String,
+    label: String,
+    disabled: Value<bool>,
+}
+
+fn build_triggers<VM: 'static>(
+    group_id: WidgetId,
+    specs: &[TabTriggerSpec],
+    selected: &str,
+    placement: TabPlacement,
+    style: Option<StyleResolver<TabsStyle>>,
+    on_change: Option<ValueCommand<VM, (String, String)>>,
+) -> Vec<Element<VM>> {
+    let layout_style = resolve_tabs_style_for_layout(style.as_ref());
+    let mut triggers = Vec::with_capacity(specs.len());
+    for (index, item) in specs.iter().enumerate() {
         let active = item.key == selected;
         let disabled_now = item.disabled.resolve();
         let mut button = Button::new(item.label.clone())
@@ -300,30 +375,7 @@ fn build_tab_strip<VM: 'static>(
         });
         triggers.push(element);
     }
-
-    let list = Flex::new(axis)
-        .gap(layout_style.tab_gap)
-        .align(Align::Start)
-        .child(triggers);
-    ScrollView::new()
-        .focusable(false)
-        .overflow_x(if placement.is_horizontal() {
-            Overflow::Scroll
-        } else {
-            Overflow::Hidden
-        })
-        .overflow_y(if placement.is_horizontal() {
-            Overflow::Hidden
-        } else {
-            Overflow::Scroll
-        })
-        .show_scrollbar(false)
-        .style({
-            let style = style.clone();
-            move |mode| tab_bar_container_style(resolve_tabs_style(style.as_ref(), mode))
-        })
-        .child(list)
-        .into()
+    triggers
 }
 
 fn build_panel<VM: 'static>(

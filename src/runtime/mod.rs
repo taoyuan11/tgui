@@ -382,6 +382,12 @@ pub struct BoundRuntimeHandler<VM> {
     /// 最近一次 collect 上报的 toast 唤醒时刻（最早自动消失 deadline）。
     next_toast_wakeup_deadline: Option<Instant>,
     tooltip_state: TooltipState,
+    /// 最近一次成功解析出的 hover 预览浮层锚点（Popover 触发 widget 的 id）。
+    /// `resolve_active_hover_popover` 正常依赖上一帧 `cached_scene` 的 overlay rect 判断光标是否仍在
+    /// 触发器或浮层内容内；但命令执行（点击浮层内交互元素）会 `invalidate_scene_with_reason` 把
+    /// `cached_scene` 硬清空，导致本帧无法推断，浮层会误关闭。点击不移动光标，故这里缓存上一次结果，
+    /// 在 cache 缺失的重建帧里复用，重建后新 cache 会恢复正常解析。光标离开窗口时清空。
+    hover_popover_anchor: Option<WidgetId>,
     /// 每个打开的 Menu overlay 的键盘 cursor 路径（每层一个 option_index）。
     /// 长度=1 表示 cursor 在最外层；>1 表示已进入嵌套 submenu。
     /// Up/Down 调整最末元素；Right 把当前 cursor（必须是 Submenu 项）的首项 push；
@@ -508,6 +514,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 long_press_candidate: None,
                 long_press_release_deadline: None,
             },
+            hover_popover_anchor: None,
             menu_keyboard_cursor: HashMap::new(),
             hovered_scrollbar: None,
             active_scrollbar_drag: None,

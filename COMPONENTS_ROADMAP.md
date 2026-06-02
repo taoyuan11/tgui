@@ -104,6 +104,16 @@
 - **桌面操作**：点击 anchor 触发；点击外部关闭；`Esc` 关闭；可设置 hover 触发模式。
 - **移动操作**：点击 anchor 触发；退化为底部 sheet 或居中 popover。
 - **依赖**：P0 §1、§2、§5。
+- **进度**：[基础完成]
+  - ✅ `Popover`、`PopoverStyle`、`PopoverTriggerMode` 已公开导出（`prelude` / `widgets`）；
+  - ✅ Popover 作为任意 widget 的可选修饰（`Element::popover`）而非独立 `WidgetKind`，内容支持任意子树；
+  - ✅ 通过 overlay / portal 机制锚定到 trigger（`Anchor::Key` + `OverlayLayer::Popover`），带阴影圆角面板，支持 `placement` / `flip_policy` / `match_anchor_width`；
+  - ✅ 桌面端点击 anchor 触发（toggle 注入 trigger 的 `on_click`）、`close_on_outside_click`、`close_on_escape`（均默认开启）、`return_focus_to` 还原焦点；
+  - ✅ `PopoverTriggerMode::{Click, Hover, ClickAndHoverPreview}` 三种触发模式，runtime 解析 active hover popover，cursor 移入浮层 rect 后保持可见；
+  - ✅ 浮层内交互元素可正常获得焦点 / 输入 / 点击（覆盖 Input caret、内部点击不关闭）；
+  - ✅ `examples/demo` 已新增 Popover 展示卡片，覆盖 click 固定打开 + hover 预览，浮层内含 Input / Switch / Checkbox / Button。
+  - ✅ 单元测试覆盖 builder 挂载 descriptor、open 态 overlay 收集、click+hover 包装、外部点击 / `Esc` 关闭、hover 预览可见性、浮层内焦点与 caret。
+  - ⏳ 待补（独立 PR）：可选指针 / 箭头渲染（`PopoverStyle::pointer_size` / `pointer_inset` 字段已存在但尚未接入渲染，目前为占位）；移动端退化为底部 sheet 或居中 popover（当前所有平台均走锚定 overlay，无移动端分支）。
 
 ### 12. Toast / Snackbar
 - **作用**：临时通知（区别于系统级 `tgui::notification`），用于 app 内成功/错误/警告/信息提示。

@@ -207,6 +207,72 @@ fn input_inside_popover_can_receive_focus_and_show_caret() {
     );
 }
 
+fn popover_content_visible(handler: &mut BoundRuntimeHandler<PopoverVm>, label: &str) -> bool {
+    let computed = handler.computed_scene();
+    computed
+        .scene
+        .overlay_texts
+        .iter()
+        .any(|text| text.content.as_str() == label)
+}
+
+#[test]
+fn hover_preview_survives_clicking_interactive_content() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let click_count = Arc::new(Mutex::new(0usize));
+    let click_count_cmd = click_count.clone();
+
+    let tree = WidgetTree::new(
+        Popover::<PopoverVm>::new(Button::new("Trigger").size(dp(90.0), dp(36.0)))
+            .content(
+                Button::new("Inside Action")
+                    .size(dp(140.0), dp(36.0))
+                    .on_click(Command::new(move |_vm: &mut PopoverVm| {
+                        *click_count_cmd.lock().unwrap() += 1;
+                    })),
+            )
+            .trigger_mode(PopoverTriggerMode::ClickAndHoverPreview),
+    );
+    let mut handler = test_handler_with_vm(PopoverVm::new(&context), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+
+    // Hover the trigger to open the preview.
+    handler.cursor_position = Some(Point::new(dp(40.0), dp(20.0)));
+    let _ = handler.handle_hover(viewport);
+    handler.invalidate_computed_scene();
+    let popover_rect = handler
+        .computed_scene()
+        .overlay_close_handlers
+        .iter()
+        .find(|handle| handle.layer == crate::runtime::overlay::OverlayLayer::Popover)
+        .map(|handle| handle.rect)
+        .expect("popover overlay rect should exist");
+
+    // Move into the content.
+    handler.cursor_position = Some(Point::new(
+        popover_rect.x + dp(12.0),
+        popover_rect.y + dp(12.0),
+    ));
+    let _ = handler.handle_hover(viewport);
+    handler.invalidate_computed_scene();
+    assert!(
+        popover_content_visible(&mut handler, "Inside Action"),
+        "hover preview should be visible after moving into content"
+    );
+
+    // Click the interactive element inside the content (executes a command -> invalidates scene).
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert_eq!(*click_count.lock().unwrap(), 1, "inner click should fire");
+
+    // Recollect: the hover preview must remain visible.
+    handler.invalidate_computed_scene();
+    assert!(
+        popover_content_visible(&mut handler, "Inside Action"),
+        "hover preview should remain visible after clicking interactive content"
+    );
+}
+
 #[test]
 fn clicking_inside_popover_should_not_close_it() {
     let invalidation = InvalidationSignal::new();
