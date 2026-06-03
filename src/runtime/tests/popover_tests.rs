@@ -313,7 +313,7 @@ fn clicking_inside_popover_should_not_close_it() {
     // Popover 不应该被关闭
     assert_eq!(
         close_calls.lock().unwrap().as_slice(),
-        &[],
+        &[] as &[bool],
         "Popover should not close when clicking inside it"
     );
 }

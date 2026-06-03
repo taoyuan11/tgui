@@ -1,6 +1,7 @@
 use taffy::prelude::{AvailableSpace, TaffyTree};
 use taffy::Size as TaffySize;
 
+use crate::animation::{AnimationKey, Transition, WidgetProperty};
 use crate::foundation::binding::{ToastEntry, ToastKind, ToastPlacement, ToastQueue};
 use crate::ui::layout::{pct, Axis, Justify, Length, Value};
 use crate::ui::unit::{dp, sp, Dp};
@@ -12,7 +13,10 @@ use crate::ui::widget::overlay::{
 };
 use crate::ui::widget::style::{ContainerStyle, TextWidgetStyle, ToastStyle};
 use crate::ui::widget::text::Text;
-use crate::ui::widget::{ComputedScene, Element, Point, Rect};
+use crate::ui::widget::{
+    ComputedScene, CursorStyle, DefaultActivation, Element, HitGeometry, HitInteraction, HitRegion,
+    InteractionHandlers, Point, Rect, WidgetId,
+};
 
 use super::super::scene::{CollectContext, VisualContext};
 use super::super::types::ResolvedElement;
@@ -21,6 +25,15 @@ use crate::foundation::binding::DependencyGraph;
 use crate::foundation::view_model::Command;
 
 const TOAST_OVERLAY_TAG: u64 = 0x544F4153545F484F; // "TOAST_HO"
+const TOAST_STACK_HOVER_TAG: u64 = 0x544F4153545F5354; // "TOAST_ST"
+const TOAST_AUTO_COLLAPSE_THRESHOLD: usize = 3;
+const TOAST_STACK_TRANSITION_MS: u64 = 180;
+const TOAST_STACK_VISIBLE_BACK_LAYERS: usize = 2;
+const TOAST_STACK_LAYER_INSET_X: Dp = Dp::new(12.0);
+const TOAST_STACK_LAYER_OFFSET_Y: Dp = Dp::new(16.0);
+const TOAST_STACK_LAYER_OPACITY_STEP: f32 = 0.08;
+const TOAST_ENTER_CLIP_MARGIN_X: Dp = Dp::new(160.0);
+const TOAST_ENTER_CLIP_MARGIN_Y: Dp = Dp::new(48.0);
 const ENTER_DURATION_MS: u64 = 400;
 const EXIT_DURATION_MS: u64 = 300;
 
@@ -54,17 +67,12 @@ impl<VM: 'static> ResolvedElement<VM> {
         // 检查是否有正在动画中的Toast
         let has_animating = entries_have_animation(queue, now);
         if has_animating {
-            // 动画进行中，设置下一帧唤醒（60fps）
-            let next_frame = now + std::time::Duration::from_millis(16);
-            let merged = match context.next_toast_wakeup.get() {
-                Some(current) => Some(current.min(next_frame)),
-                None => Some(next_frame),
-            };
-            context.next_toast_wakeup.set(merged);
+            request_next_toast_frame(context, now);
         }
 
         let mut entries = queue.snapshot();
         if entries.is_empty() {
+            queue.set_stack_expanded(false);
             return;
         }
         if let Some(limit) = *max_visible {
@@ -72,13 +80,24 @@ impl<VM: 'static> ResolvedElement<VM> {
                 entries = entries.split_off(entries.len() - limit);
             }
         }
+        if entries.is_empty() {
+            queue.set_stack_expanded(false);
+            return;
+        }
+        let auto_collapsible = entries.len() > TOAST_AUTO_COLLAPSE_THRESHOLD;
+        if !auto_collapsible {
+            queue.set_stack_expanded(false);
+        }
 
         let resolved_placement = default_placement(*placement);
+        let stack_hover_widget_id = WidgetId::from_raw(self.id.raw() ^ TOAST_STACK_HOVER_TAG);
         let Some((content_scene, content_size)) = build_toast_scene(
             queue.clone(),
             entries,
             style.clone(),
             resolved_placement,
+            auto_collapsible,
+            stack_hover_widget_id,
             context,
         ) else {
             return;
@@ -110,6 +129,8 @@ fn build_toast_scene<VM: 'static>(
     entries: Vec<ToastEntry<VM>>,
     style: ToastStyle,
     placement: ToastPlacement,
+    auto_collapsible: bool,
+    stack_hover_widget_id: WidgetId,
     context: &mut CollectContext<'_, '_>,
 ) -> Option<(ComputedScene<VM>, (Dp, Dp))> {
     let now = context.now;
@@ -117,142 +138,143 @@ fn build_toast_scene<VM: 'static>(
         crate::foundation::binding::with_dependency_collection(|| {
             super::super::tree::with_widget_stack(|| {
                 let width = toast_width(&style, context.viewport);
+                let stack_target = if auto_collapsible && queue.stack_expanded() {
+                    1.0
+                } else {
+                    0.0
+                };
+                let stack_progress = if auto_collapsible {
+                    context.animations.resolve_f32(
+                        AnimationKey::Widget {
+                            id: stack_hover_widget_id.raw(),
+                            property: WidgetProperty::ToastStackExpand,
+                        },
+                        stack_target,
+                        Some(Transition::ease_in_out(std::time::Duration::from_millis(
+                            TOAST_STACK_TRANSITION_MS,
+                        ))),
+                        now,
+                    )
+                } else {
+                    1.0
+                };
+                if auto_collapsible && (stack_progress - stack_target).abs() > 0.001 {
+                    request_next_toast_frame(context, now);
+                }
 
-                // 为每个Toast entry独立构建scene，以便单独应用动画
-                let rendered_entries = ordered_entries(entries, placement);
-                let mut combined = ComputedScene::default();
-                let mut total_height = Dp::ZERO;
-                let mut max_width = Dp::ZERO;
-
+                let rendered_entries = ordered_entries(entries);
+                let rendered_len = rendered_entries.len();
+                let mut expanded_sizes = Vec::with_capacity(rendered_len);
                 for entry in rendered_entries.iter() {
-                    let (opacity, offset_x, offset_y) =
-                        calculate_animation_progress(entry, placement, now);
-
-                    // 构建单个Toast card
-                    let mut root = Flex::<VM>::new(Axis::Vertical)
-                        .width(width)
-                        .align(match placement {
-                            ToastPlacement::TopCenter | ToastPlacement::BottomCenter => {
-                                crate::ui::layout::Align::Center
-                            }
-                            ToastPlacement::TopEnd | ToastPlacement::BottomEnd => {
-                                crate::ui::layout::Align::End
-                            }
-                            _ => crate::ui::layout::Align::Start,
-                        })
-                        .justify(Justify::Start);
-
-                    root = root.child(build_toast_card(
+                    expanded_sizes.push(measure_toast_card_size(
                         queue.clone(),
                         entry.clone(),
                         style.clone(),
-                    ));
+                        placement,
+                        width,
+                        context,
+                    )?);
+                }
 
-                    let resolved: Element<VM> = root.into();
-                    let resolved = resolved.resolve(context.theme);
-                    let mut taffy = TaffyTree::new();
-                    let layout_root = resolved
-                        .build_layout_tree(
-                            &mut taffy,
-                            context.animations,
-                            context.theme,
-                            context.units,
-                            None,
-                            context.viewport,
-                            false,
-                            context.now,
-                        )
-                        .ok()?;
-                    taffy
-                        .compute_layout_with_measure(
-                            layout_root.node,
-                            TaffySize {
-                                width: AvailableSpace::Definite(context.viewport.width.get()),
-                                height: AvailableSpace::Definite(context.viewport.height.get()),
-                            },
-                            |known_dimensions, _, _, node_context, _| {
-                                measure_node(
-                                    node_context,
-                                    known_dimensions,
-                                    context.font_manager,
-                                    context.theme,
-                                    context.media,
-                                    context.units,
-                                )
-                            },
-                        )
-                        .ok()?;
-                    let layout = taffy.layout(layout_root.node).ok()?;
-                    let card_size = (Dp::new(layout.size.width), Dp::new(layout.size.height));
+                let mut combined = ComputedScene::default();
+                let mut cards = Vec::with_capacity(rendered_len);
+                let mut expanded_y = Dp::ZERO;
+                let mut expanded_height = Dp::ZERO;
 
-                    let mut lifecycle_states = std::collections::HashMap::new();
-                    let mut chunks = std::collections::HashMap::new();
-                    let mut chunk_parts = std::collections::HashMap::new();
-                    let mut visual_contexts = std::collections::HashMap::new();
-                    let mut local_context = CollectContext {
-                        taffy: &taffy,
-                        font_manager: context.font_manager,
-                        theme: context.theme,
-                        media: context.media,
-                        focused_input: context.focused_input,
-                        focused_text_state: context.focused_text_state,
-                        focused_text_value: context.focused_text_value,
-                        focused_text_layout: context.focused_text_layout,
-                        text_layout_overrides: context.text_layout_overrides,
-                        active_slider_value: context.active_slider_value,
-                        caret_visible: context.caret_visible,
-                        selected_text: context.selected_text,
-                        selected_text_state: context.selected_text_state,
-                        hovered_scrollbar: context.hovered_scrollbar,
-                        active_scrollbar: context.active_scrollbar,
-                        widget_states: context.widget_states,
-                        select_open_states: context.select_open_states,
-                        scroll_offsets: context.scroll_offsets,
-                        viewport: context.viewport,
-                        units: context.units,
-                        animations: context.animations,
-                        reduced_motion: context.reduced_motion,
-                        now: context.now,
-                        focus: Default::default(),
-                        tooltip_hover_started_at: context.tooltip_hover_started_at,
-                        next_tooltip_wakeup: context.next_tooltip_wakeup,
-                        next_toast_wakeup: context.next_toast_wakeup,
-                        active_tooltip: context.active_tooltip,
-                        active_hover_popover: context.active_hover_popover,
+                for (index, entry) in rendered_entries.iter().enumerate() {
+                    let expanded_size = expanded_sizes[index];
+                    let (opacity, offset_x, offset_y) =
+                        calculate_animation_progress(entry, placement, now);
+                    let collapsed = collapsed_stack_frame(index, width);
+                    let expanded = ToastStackFrame {
+                        x: Dp::ZERO,
+                        y: expanded_y,
+                        width,
+                        opacity: 1.0,
                     };
+                    let stack_frame = if auto_collapsible {
+                        interpolate_stack_frame(collapsed, expanded, stack_progress)
+                    } else {
+                        expanded
+                    };
+                    let origin = Point::new(stack_frame.x + offset_x, stack_frame.y + offset_y);
+                    let content_reveal = if auto_collapsible && index > 0 {
+                        stack_progress
+                    } else {
+                        1.0
+                    };
+                    let card_opacity = opacity * content_reveal;
 
-                    // 关键！将动画opacity和offset传入VisualContext
-                    let origin = Point::new(offset_x, total_height + offset_y);
-                    let root_id = resolved.collect_subtree_cache(
-                        &layout_root,
-                        VisualContext {
+                    let (card_scene, card_size) = collect_toast_card_scene(
+                        queue.clone(),
+                        entry.clone(),
+                        style.clone(),
+                        placement,
+                        stack_frame.width,
+                        origin,
+                        card_opacity,
+                        context,
+                    )?;
+
+                    let all_cards_interactive = !auto_collapsible || stack_progress >= 0.98;
+                    let shell_scene = if auto_collapsible
+                        && stack_progress < 0.999
+                        && (1..=TOAST_STACK_VISIBLE_BACK_LAYERS).contains(&index)
+                    {
+                        let shell_opacity = stack_frame.opacity * (1.0 - stack_progress);
+                        Some(collect_toast_card_shell_scene(
+                            style.clone(),
+                            stack_frame.width,
+                            expanded_size.1,
                             origin,
-                            opacity,
-                            clip_rect: Rect::new(
-                                Dp::ZERO,
-                                Dp::ZERO,
-                                context.viewport.width,
-                                context.viewport.height,
-                            ),
-                            clip_mask: None,
-                        },
-                        &mut local_context,
-                        &mut lifecycle_states,
-                        &mut chunks,
-                        &mut chunk_parts,
-                        &mut visual_contexts,
-                    );
-                    if let Some(card_scene) = chunks.get(&root_id) {
-                        combined.extend(card_scene);
-                    }
+                            shell_opacity,
+                            context,
+                        )?)
+                    } else {
+                        None
+                    };
+                    cards.push(ToastCardRender {
+                        scene: card_scene,
+                        shell_scene,
+                        scene_visible: card_opacity > 0.001 || index == 0,
+                        size: card_size,
+                        interactive: all_cards_interactive || index == 0,
+                    });
 
-                    total_height = total_height + card_size.1 + style.stack_gap;
-                    if card_size.0 > max_width {
-                        max_width = card_size.0;
+                    expanded_height = expanded_y + expanded_size.1;
+                    if index + 1 < rendered_len {
+                        expanded_y = expanded_y + expanded_size.1 + style.stack_gap;
+                    } else {
+                        expanded_y = expanded_y + expanded_size.1;
                     }
                 }
 
-                let size = (max_width, total_height);
+                let collapsed_height = collapsed_stack_height(&cards);
+                let total_height = if auto_collapsible {
+                    interpolate_dp(collapsed_height, expanded_height, stack_progress)
+                } else {
+                    expanded_height
+                };
+                let draw_back_to_front = auto_collapsible && stack_progress < 0.999;
+                if draw_back_to_front {
+                    for index in (0..cards.len()).rev() {
+                        extend_toast_card_scene(&mut combined, &cards[index]);
+                    }
+                } else {
+                    for card in cards.iter() {
+                        extend_toast_card_scene(&mut combined, card);
+                    }
+                }
+
+                let size = (width, total_height);
+                if auto_collapsible {
+                    push_toast_stack_hover_region(
+                        &mut combined,
+                        queue.clone(),
+                        stack_hover_widget_id,
+                        size,
+                    );
+                }
                 Some((combined, size))
             })
         });
@@ -261,10 +283,429 @@ fn build_toast_scene<VM: 'static>(
     Some((computed, size))
 }
 
+struct ToastCardRender<VM> {
+    scene: ComputedScene<VM>,
+    shell_scene: Option<ComputedScene<VM>>,
+    scene_visible: bool,
+    size: (Dp, Dp),
+    interactive: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ToastStackFrame {
+    x: Dp,
+    y: Dp,
+    width: Dp,
+    opacity: f32,
+}
+
+fn collect_toast_card_scene<VM: 'static>(
+    queue: ToastQueue<VM>,
+    entry: ToastEntry<VM>,
+    style: ToastStyle,
+    placement: ToastPlacement,
+    card_width: Dp,
+    origin: Point,
+    opacity: f32,
+    context: &mut CollectContext<'_, '_>,
+) -> Option<(ComputedScene<VM>, (Dp, Dp))> {
+    let root = toast_card_root(queue, entry, style, placement, card_width);
+    let resolved: Element<VM> = root.into();
+    let resolved = resolved.resolve(context.theme);
+    let mut taffy = TaffyTree::new();
+    let layout_root = resolved
+        .build_layout_tree(
+            &mut taffy,
+            context.animations,
+            context.theme,
+            context.units,
+            None,
+            context.viewport,
+            false,
+            context.now,
+        )
+        .ok()?;
+    taffy
+        .compute_layout_with_measure(
+            layout_root.node,
+            TaffySize {
+                width: AvailableSpace::Definite(context.viewport.width.get()),
+                height: AvailableSpace::Definite(context.viewport.height.get()),
+            },
+            |known_dimensions, _, _, node_context, _| {
+                measure_node(
+                    node_context,
+                    known_dimensions,
+                    context.font_manager,
+                    context.theme,
+                    context.media,
+                    context.units,
+                )
+            },
+        )
+        .ok()?;
+    let layout = taffy.layout(layout_root.node).ok()?;
+    let card_size = (Dp::new(layout.size.width), Dp::new(layout.size.height));
+
+    let mut lifecycle_states = std::collections::HashMap::new();
+    let mut chunks = std::collections::HashMap::new();
+    let mut chunk_parts = std::collections::HashMap::new();
+    let mut visual_contexts = std::collections::HashMap::new();
+    let mut local_context = CollectContext {
+        taffy: &taffy,
+        font_manager: context.font_manager,
+        theme: context.theme,
+        media: context.media,
+        focused_input: context.focused_input,
+        focused_text_state: context.focused_text_state,
+        focused_text_value: context.focused_text_value,
+        focused_text_layout: context.focused_text_layout,
+        text_layout_overrides: context.text_layout_overrides,
+        active_slider_value: context.active_slider_value,
+        caret_visible: context.caret_visible,
+        selected_text: context.selected_text,
+        selected_text_state: context.selected_text_state,
+        hovered_scrollbar: context.hovered_scrollbar,
+        active_scrollbar: context.active_scrollbar,
+        widget_states: context.widget_states,
+        select_open_states: context.select_open_states,
+        scroll_offsets: context.scroll_offsets,
+        viewport: context.viewport,
+        units: context.units,
+        animations: context.animations,
+        reduced_motion: context.reduced_motion,
+        now: context.now,
+        focus: Default::default(),
+        tooltip_hover_started_at: context.tooltip_hover_started_at,
+        next_tooltip_wakeup: context.next_tooltip_wakeup,
+        next_toast_wakeup: context.next_toast_wakeup,
+        active_tooltip: context.active_tooltip,
+        active_hover_popover: context.active_hover_popover,
+    };
+
+    let root_id = resolved.collect_subtree_cache(
+        &layout_root,
+        VisualContext {
+            origin,
+            opacity,
+            clip_rect: toast_scene_clip_rect(context.viewport),
+            clip_mask: None,
+        },
+        &mut local_context,
+        &mut lifecycle_states,
+        &mut chunks,
+        &mut chunk_parts,
+        &mut visual_contexts,
+    );
+    let scene = chunks.get(&root_id).cloned().unwrap_or_default();
+    Some((scene, card_size))
+}
+
+fn toast_card_root<VM: 'static>(
+    queue: ToastQueue<VM>,
+    entry: ToastEntry<VM>,
+    style: ToastStyle,
+    placement: ToastPlacement,
+    card_width: Dp,
+) -> Flex<VM> {
+    Flex::<VM>::new(Axis::Vertical)
+        .width(card_width)
+        .align(match placement {
+            ToastPlacement::TopCenter | ToastPlacement::BottomCenter => {
+                crate::ui::layout::Align::Center
+            }
+            ToastPlacement::TopEnd | ToastPlacement::BottomEnd => crate::ui::layout::Align::End,
+            _ => crate::ui::layout::Align::Start,
+        })
+        .justify(Justify::Start)
+        .child(build_toast_card(queue, entry, style, card_width))
+}
+
+fn measure_toast_card_size<VM: 'static>(
+    queue: ToastQueue<VM>,
+    entry: ToastEntry<VM>,
+    style: ToastStyle,
+    placement: ToastPlacement,
+    card_width: Dp,
+    context: &mut CollectContext<'_, '_>,
+) -> Option<(Dp, Dp)> {
+    let root = toast_card_root(queue, entry, style, placement, card_width);
+    let resolved: Element<VM> = root.into();
+    let resolved = resolved.resolve(context.theme);
+    let mut taffy = TaffyTree::new();
+    let layout_root = resolved
+        .build_layout_tree(
+            &mut taffy,
+            context.animations,
+            context.theme,
+            context.units,
+            None,
+            context.viewport,
+            false,
+            context.now,
+        )
+        .ok()?;
+    taffy
+        .compute_layout_with_measure(
+            layout_root.node,
+            TaffySize {
+                width: AvailableSpace::Definite(context.viewport.width.get()),
+                height: AvailableSpace::Definite(context.viewport.height.get()),
+            },
+            |known_dimensions, _, _, node_context, _| {
+                measure_node(
+                    node_context,
+                    known_dimensions,
+                    context.font_manager,
+                    context.theme,
+                    context.media,
+                    context.units,
+                )
+            },
+        )
+        .ok()?;
+    let layout = taffy.layout(layout_root.node).ok()?;
+    Some((Dp::new(layout.size.width), Dp::new(layout.size.height)))
+}
+
+fn collect_toast_card_shell_scene<VM: 'static>(
+    style: ToastStyle,
+    width: Dp,
+    height: Dp,
+    origin: Point,
+    opacity: f32,
+    context: &mut CollectContext<'_, '_>,
+) -> Option<ComputedScene<VM>> {
+    let background = style.background.resolve();
+    let shell = Stack::<VM>::new().size(width, height).style(move |mode| {
+        let mut container = ContainerStyle::default_for(mode);
+        container.surface.background = Some(Value::Static(background));
+        container.surface.border_color = Some(style.border.clone());
+        container.surface.border_width = Some(style.border_width.clone());
+        container.surface.border_radius = Some(style.radius.clone());
+        container.surface.shadow = Some(Value::Static(style.shadow.clone()));
+        container
+    });
+
+    let resolved: Element<VM> = shell.into();
+    let resolved = resolved.resolve(context.theme);
+    let mut taffy = TaffyTree::new();
+    let layout_root = resolved
+        .build_layout_tree(
+            &mut taffy,
+            context.animations,
+            context.theme,
+            context.units,
+            None,
+            context.viewport,
+            false,
+            context.now,
+        )
+        .ok()?;
+    taffy
+        .compute_layout_with_measure(
+            layout_root.node,
+            TaffySize {
+                width: AvailableSpace::Definite(context.viewport.width.get()),
+                height: AvailableSpace::Definite(context.viewport.height.get()),
+            },
+            |known_dimensions, _, _, node_context, _| {
+                measure_node(
+                    node_context,
+                    known_dimensions,
+                    context.font_manager,
+                    context.theme,
+                    context.media,
+                    context.units,
+                )
+            },
+        )
+        .ok()?;
+
+    let mut lifecycle_states = std::collections::HashMap::new();
+    let mut chunks = std::collections::HashMap::new();
+    let mut chunk_parts = std::collections::HashMap::new();
+    let mut visual_contexts = std::collections::HashMap::new();
+    let mut local_context = CollectContext {
+        taffy: &taffy,
+        font_manager: context.font_manager,
+        theme: context.theme,
+        media: context.media,
+        focused_input: context.focused_input,
+        focused_text_state: context.focused_text_state,
+        focused_text_value: context.focused_text_value,
+        focused_text_layout: context.focused_text_layout,
+        text_layout_overrides: context.text_layout_overrides,
+        active_slider_value: context.active_slider_value,
+        caret_visible: context.caret_visible,
+        selected_text: context.selected_text,
+        selected_text_state: context.selected_text_state,
+        hovered_scrollbar: context.hovered_scrollbar,
+        active_scrollbar: context.active_scrollbar,
+        widget_states: context.widget_states,
+        select_open_states: context.select_open_states,
+        scroll_offsets: context.scroll_offsets,
+        viewport: context.viewport,
+        units: context.units,
+        animations: context.animations,
+        reduced_motion: context.reduced_motion,
+        now: context.now,
+        focus: Default::default(),
+        tooltip_hover_started_at: context.tooltip_hover_started_at,
+        next_tooltip_wakeup: context.next_tooltip_wakeup,
+        next_toast_wakeup: context.next_toast_wakeup,
+        active_tooltip: context.active_tooltip,
+        active_hover_popover: context.active_hover_popover,
+    };
+    let root_id = resolved.collect_subtree_cache(
+        &layout_root,
+        VisualContext {
+            origin,
+            opacity,
+            clip_rect: toast_scene_clip_rect(context.viewport),
+            clip_mask: None,
+        },
+        &mut local_context,
+        &mut lifecycle_states,
+        &mut chunks,
+        &mut chunk_parts,
+        &mut visual_contexts,
+    );
+    Some(chunks.get(&root_id).cloned().unwrap_or_default())
+}
+
+fn extend_toast_card_scene<VM>(combined: &mut ComputedScene<VM>, card: &ToastCardRender<VM>) {
+    if let Some(shell_scene) = card.shell_scene.as_ref() {
+        combined.extend(shell_scene);
+    }
+    if !card.scene_visible {
+        combined.dependencies.merge_from(&card.scene.dependencies);
+        return;
+    }
+    if card.interactive {
+        combined.extend(&card.scene);
+        return;
+    }
+
+    let mut visual_only = card.scene.clone();
+    visual_only.hit_regions.clear();
+    visual_only.overlay_hit_regions.clear();
+    visual_only.overlay_close_handlers.clear();
+    visual_only.focus_scopes.clear();
+    combined.extend(&visual_only);
+}
+
+fn collapsed_stack_frame(index: usize, width: Dp) -> ToastStackFrame {
+    let layer = index.min(TOAST_STACK_VISIBLE_BACK_LAYERS);
+    let layer_factor = layer as f32;
+    let hidden = index > TOAST_STACK_VISIBLE_BACK_LAYERS;
+    let inset = TOAST_STACK_LAYER_INSET_X * layer_factor;
+    ToastStackFrame {
+        x: inset,
+        y: TOAST_STACK_LAYER_OFFSET_Y * layer_factor,
+        width: (width - inset * 2.0).max(Dp::ZERO),
+        opacity: if hidden {
+            0.0
+        } else {
+            (1.0 - TOAST_STACK_LAYER_OPACITY_STEP * layer_factor).clamp(0.0, 1.0)
+        },
+    }
+}
+
+fn collapsed_stack_height<VM>(cards: &[ToastCardRender<VM>]) -> Dp {
+    let Some(front) = cards.first() else {
+        return Dp::ZERO;
+    };
+    let visible_back_layers = cards
+        .len()
+        .saturating_sub(1)
+        .min(TOAST_STACK_VISIBLE_BACK_LAYERS);
+    front.size.1 + TOAST_STACK_LAYER_OFFSET_Y * visible_back_layers as f32
+}
+
+fn interpolate_stack_frame(
+    from: ToastStackFrame,
+    to: ToastStackFrame,
+    progress: f32,
+) -> ToastStackFrame {
+    ToastStackFrame {
+        x: interpolate_dp(from.x, to.x, progress),
+        y: interpolate_dp(from.y, to.y, progress),
+        width: interpolate_dp(from.width, to.width, progress),
+        opacity: interpolate_f32(from.opacity, to.opacity, progress),
+    }
+}
+
+fn interpolate_dp(from: Dp, to: Dp, progress: f32) -> Dp {
+    from + (to - from) * progress
+}
+
+fn interpolate_f32(from: f32, to: f32, progress: f32) -> f32 {
+    from + (to - from) * progress
+}
+
+fn toast_scene_clip_rect(viewport: Rect) -> Rect {
+    Rect::new(
+        -TOAST_ENTER_CLIP_MARGIN_X,
+        -TOAST_ENTER_CLIP_MARGIN_Y,
+        viewport.width + TOAST_ENTER_CLIP_MARGIN_X * 2.0,
+        viewport.height + TOAST_ENTER_CLIP_MARGIN_Y * 2.0,
+    )
+}
+
+fn request_next_toast_frame(context: &mut CollectContext<'_, '_>, now: std::time::Instant) {
+    let next_frame = now + std::time::Duration::from_millis(16);
+    let merged = match context.next_toast_wakeup.get() {
+        Some(current) => Some(current.min(next_frame)),
+        None => Some(next_frame),
+    };
+    context.next_toast_wakeup.set(merged);
+}
+
+fn push_toast_stack_hover_region<VM: 'static>(
+    computed: &mut ComputedScene<VM>,
+    queue: ToastQueue<VM>,
+    stack_hover_widget_id: WidgetId,
+    size: (Dp, Dp),
+) {
+    if size.0 <= Dp::ZERO || size.1 <= Dp::ZERO {
+        return;
+    }
+
+    let expand_queue = queue.clone();
+    let collapse_queue = queue;
+    let mut interactions = InteractionHandlers::default();
+    interactions.cursor_style = Some(Value::Static(CursorStyle::Default));
+    interactions.on_mouse_enter = Some(Command::new(move |_vm| {
+        expand_queue.set_stack_expanded(true);
+    }));
+    interactions.on_mouse_leave = Some(Command::new(move |_vm| {
+        collapse_queue.set_stack_expanded(false);
+    }));
+
+    computed.hit_regions.insert(
+        0,
+        HitRegion {
+            rect: Rect::new(Dp::ZERO, Dp::ZERO, size.0, size.1),
+            clip_rect: None,
+            geometry: HitGeometry::Rect,
+            scope_path: Vec::new(),
+            focus: None,
+            interaction: HitInteraction::Widget {
+                id: stack_hover_widget_id,
+                interactions,
+                focusable: false,
+                default_activation: DefaultActivation::None,
+            },
+        },
+    );
+}
+
 fn build_toast_card<VM: 'static>(
     queue: ToastQueue<VM>,
     entry: ToastEntry<VM>,
     style: ToastStyle,
+    card_width: Dp,
 ) -> Element<VM> {
     let (icon_bg, icon_fg) = icon_colors_for_kind(&style, entry.toast.kind);
     let show_hover_pause = cfg!(any(
@@ -297,12 +738,11 @@ fn build_toast_card<VM: 'static>(
             container.surface.border_radius = Some(Value::Static(dp(9.0)));
             container
         })
-        .child(Text::new(kind_icon_glyph(kind)).style(move |mode| {
+        .child(Text::new(kind_glyph(kind)).style(move |mode| {
             let mut text_style = TextWidgetStyle::default_for(mode);
             text_style.color = Value::Static(icon_fg);
             text_style.typography.size = sp(12.0);
             text_style.typography.line_height = Some(sp(12.0));
-            text_style.typography.font_family = Some("tgui-icons".to_string());
             text_style
         }));
 
@@ -394,7 +834,7 @@ fn build_toast_card<VM: 'static>(
     };
 
     let mut card = Stack::<VM>::new()
-        .width(pct_or_fixed(style.max_width))
+        .width(pct_or_fixed(card_width))
         .style(move |mode| {
             let mut container = ContainerStyle::default_for(mode);
             container.surface.background = Some(Value::Static(background));
@@ -426,7 +866,7 @@ fn build_toast_card<VM: 'static>(
             }));
     }
 
-    card.max_width(style.max_width).into()
+    card.max_width(card_width).into()
 }
 
 fn default_placement(placement: ToastPlacement) -> ToastPlacement {
@@ -462,17 +902,8 @@ fn map_overlay_placement(placement: ToastPlacement) -> Placement {
     }
 }
 
-fn ordered_entries<VM>(
-    entries: Vec<ToastEntry<VM>>,
-    placement: ToastPlacement,
-) -> Vec<ToastEntry<VM>> {
-    match placement {
-        ToastPlacement::BottomStart
-        | ToastPlacement::BottomCenter
-        | ToastPlacement::BottomEnd
-        | ToastPlacement::Adaptive => entries.into_iter().rev().collect(),
-        _ => entries,
-    }
+fn ordered_entries<VM>(entries: Vec<ToastEntry<VM>>) -> Vec<ToastEntry<VM>> {
+    entries.into_iter().rev().collect()
 }
 
 fn toast_width(style: &ToastStyle, viewport: Rect) -> Dp {
@@ -524,20 +955,11 @@ fn kind_label(kind: ToastKind) -> &'static str {
     }
 }
 
-fn kind_icon_glyph(kind: ToastKind) -> &'static str {
-    match kind {
-        ToastKind::Success => "\u{e86c}", // check_circle
-        ToastKind::Error => "\u{e000}",   // error
-        ToastKind::Warning => "\u{e002}", // warning
-        ToastKind::Info => "\u{e88e}",    // info
-    }
-}
-
 fn kind_glyph(kind: ToastKind) -> &'static str {
     match kind {
         ToastKind::Success => "✓",
-        ToastKind::Error => "!",
-        ToastKind::Warning => "⚠",
+        ToastKind::Error => "×",
+        ToastKind::Warning => "!",
         ToastKind::Info => "i",
     }
 }

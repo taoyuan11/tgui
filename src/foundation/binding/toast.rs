@@ -219,6 +219,7 @@ pub enum ToastPlacement {
 pub struct ToastQueue<VM> {
     entries: State<Vec<ToastEntry<VM>>>,
     next_id: State<u64>,
+    stack_expanded: State<bool>,
     invalidation: InvalidationSignal,
     dependency: DependencyId,
 }
@@ -228,6 +229,7 @@ impl<VM> Clone for ToastQueue<VM> {
         Self {
             entries: self.entries.clone(),
             next_id: self.next_id.clone(),
+            stack_expanded: self.stack_expanded.clone(),
             invalidation: self.invalidation.clone(),
             dependency: self.dependency,
         }
@@ -239,6 +241,7 @@ impl<VM> ToastQueue<VM> {
         Self {
             entries: ctx.state(Vec::new()),
             next_id: ctx.state(1),
+            stack_expanded: ctx.state(false),
             invalidation: ctx.invalidation().clone(),
             dependency: DependencyId::next(),
         }
@@ -250,6 +253,7 @@ impl<VM> ToastQueue<VM> {
         Self {
             entries: State::new(Vec::new(), invalidation.clone()),
             next_id: State::new(1, invalidation.clone()),
+            stack_expanded: State::new(false, invalidation.clone()),
             invalidation,
             dependency: DependencyId::next(),
         }
@@ -329,6 +333,22 @@ impl<VM> ToastQueue<VM> {
     pub fn snapshot(&self) -> Vec<ToastEntry<VM>> {
         record_dependency_read(Some(self.dependency));
         self.entries.read(|entries| entries.clone())
+    }
+
+    pub(crate) fn stack_expanded(&self) -> bool {
+        record_dependency_read(Some(self.dependency));
+        self.stack_expanded.get()
+    }
+
+    pub(crate) fn set_stack_expanded(&self, expanded: bool) {
+        let changed = self.stack_expanded.update(|current| {
+            let changed = *current != expanded;
+            *current = expanded;
+            changed
+        });
+        if changed {
+            self.invalidation.mark_dependency_dirty(self.dependency);
+        }
     }
 
     pub fn pause(&self, id: ToastId) -> bool {
