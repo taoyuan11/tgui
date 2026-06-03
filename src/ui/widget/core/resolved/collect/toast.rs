@@ -2,8 +2,8 @@ use taffy::prelude::{AvailableSpace, TaffyTree};
 use taffy::Size as TaffySize;
 
 use crate::foundation::binding::{ToastEntry, ToastKind, ToastPlacement, ToastQueue};
-use crate::ui::layout::{Axis, Justify, Length, Value};
-use crate::ui::unit::{dp, sp, Dp, Sp};
+use crate::ui::layout::{pct, Axis, Justify, Length, Value};
+use crate::ui::unit::{dp, sp, Dp};
 use crate::ui::widget::button::Button;
 use crate::ui::widget::container::{Flex, Stack};
 use crate::ui::widget::core::measure_node;
@@ -124,7 +124,7 @@ fn build_toast_scene<VM: 'static>(
                 let mut total_height = Dp::ZERO;
                 let mut max_width = Dp::ZERO;
 
-                for (i, entry) in rendered_entries.iter().enumerate() {
+                for entry in rendered_entries.iter() {
                     let (opacity, offset_x, offset_y) =
                         calculate_animation_progress(entry, placement, now);
 
@@ -184,7 +184,6 @@ fn build_toast_scene<VM: 'static>(
                         .ok()?;
                     let layout = taffy.layout(layout_root.node).ok()?;
                     let card_size = (Dp::new(layout.size.width), Dp::new(layout.size.height));
-                    let card_bounds = Rect::new(Dp::ZERO, Dp::ZERO, card_size.0, card_size.1);
 
                     let mut lifecycle_states = std::collections::HashMap::new();
                     let mut chunks = std::collections::HashMap::new();
@@ -291,28 +290,21 @@ fn build_toast_card<VM: 'static>(
     // 顶部行：图标圆圈 + 类型文字 + spacer + 关闭按钮
     let icon_circle = Stack::<VM>::new()
         .size(dp(18.0), dp(18.0))
+        .center()
         .style(move |mode| {
             let mut container = ContainerStyle::default_for(mode);
             container.surface.background = Some(Value::Static(icon_bg));
             container.surface.border_radius = Some(Value::Static(dp(9.0)));
             container
         })
-        .child(
-            Stack::<VM>::new()
-                .size(dp(18.0), dp(18.0))
-                .child(
-                    Text::new(kind_icon_glyph(kind))
-                        .style(move |mode| {
-                            let mut text_style = TextWidgetStyle::default_for(mode);
-                            text_style.color = Value::Static(icon_fg);
-                            text_style.typography.size = sp(12.0);
-                            text_style.typography.font_family = Some("tgui-icons".to_string());
-                            text_style
-                        })
-                        .width(dp(18.0))
-                        .height(dp(18.0)),
-                ),
-        );
+        .child(Text::new(kind_icon_glyph(kind)).style(move |mode| {
+            let mut text_style = TextWidgetStyle::default_for(mode);
+            text_style.color = Value::Static(icon_fg);
+            text_style.typography.size = sp(12.0);
+            text_style.typography.line_height = Some(sp(12.0));
+            text_style.typography.font_family = Some("tgui-icons".to_string());
+            text_style
+        }));
 
     let title_style_for_label = title_text_style.clone();
     let kind_label = Text::new(kind_label(kind)).style(move |mode| {
@@ -350,6 +342,7 @@ fn build_toast_card<VM: 'static>(
     };
 
     let top_row = Flex::<VM>::new(Axis::Horizontal)
+        .width(pct(100.0))
         .gap(dp(6.0))
         .align(crate::ui::layout::Align::Center)
         .child(icon_circle)
@@ -377,13 +370,12 @@ fn build_toast_card<VM: 'static>(
                 text_style
             }))
     } else {
-        Flex::<VM>::new(Axis::Vertical)
-            .child(Text::new(message).style(move |mode| {
-                let mut text_style = TextWidgetStyle::default_for(mode);
-                text_style.color = Value::Static(foreground);
-                text_style.typography = body_style_for_content_else.clone();
-                text_style
-            }))
+        Flex::<VM>::new(Axis::Vertical).child(Text::new(message).style(move |mode| {
+            let mut text_style = TextWidgetStyle::default_for(mode);
+            text_style.color = Value::Static(foreground);
+            text_style.typography = body_style_for_content_else.clone();
+            text_style
+        }))
     };
 
     // 底部按钮区（如果有 action）
@@ -414,6 +406,7 @@ fn build_toast_card<VM: 'static>(
         })
         .child(
             Flex::<VM>::new(Axis::Vertical)
+                .width(pct(100.0))
                 .padding(style.padding)
                 .gap(dp(8.0))
                 .child(top_row)
@@ -535,7 +528,7 @@ fn kind_icon_glyph(kind: ToastKind) -> &'static str {
     match kind {
         ToastKind::Success => "\u{e86c}", // check_circle
         ToastKind::Error => "\u{e000}",   // error
-        ToastKind::Warning => "\u{e002}",  // warning
+        ToastKind::Warning => "\u{e002}", // warning
         ToastKind::Info => "\u{e88e}",    // info
     }
 }
