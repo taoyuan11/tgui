@@ -19,19 +19,15 @@ mod imp {
     use super::LogLevel;
 
     #[cfg(test)]
-    pub(super) fn format_line(level: LogLevel, tag: &str, message: &str) -> String {
-        let message = message.trim_end_matches('\n');
-        format!("[{level}] [{tag}] {message}")
+    pub(super) fn format_line(_level: LogLevel, _tag: &str, line: &str) -> String {
+        line.trim_end_matches('\n').to_string()
     }
 
-    pub(super) fn write(level: LogLevel, tag: &str, message: &str) {
+    pub(super) fn write(_level: LogLevel, _tag: &str, line: &str) {
         #[cfg(test)]
-        let line = format_line(level, tag, message);
+        let line = format_line(_level, _tag, line);
         #[cfg(not(test))]
-        let line = {
-            let message = message.trim_end_matches('\n');
-            format!("[{level}] [{tag}] {message}")
-        };
+        let line = line.trim_end_matches('\n');
         let _ = writeln!(io::stderr().lock(), "{line}");
     }
 }
@@ -52,10 +48,10 @@ mod imp {
         fn __android_log_write(prio: c_int, tag: *const c_char, text: *const c_char) -> c_int;
     }
 
-    pub(super) fn write(level: LogLevel, tag: &str, message: &str) {
+    pub(super) fn write(level: LogLevel, tag: &str, line: &str) {
         let tag = CString::new(sanitize_c_string(tag).as_ref())
             .expect("Android log tag should not contain interior nulls");
-        let message = CString::new(sanitize_c_string(message).as_ref())
+        let message = CString::new(sanitize_c_string(line).as_ref())
             .expect("Android log message should not contain interior nulls");
         // SAFETY: `tag.as_ptr()` 和 `message.as_ptr()` 指向上面 `CString` 拥有的
         // 以 NUL 结尾的 UTF-8 缓冲区，并在调用期间保持有效；`priority(level)`
@@ -87,10 +83,10 @@ mod imp {
     const OHOS_APP_DOMAIN: u32 = 0x0000;
     const OHOS_PUBLIC_STRING_FMT: &[u8] = b"%{public}s\0";
 
-    pub(super) fn write(level: LogLevel, tag: &str, message: &str) {
+    pub(super) fn write(level: LogLevel, tag: &str, line: &str) {
         let tag = CString::new(sanitize_c_string(tag).as_ref())
             .expect("OHOS log tag should not contain interior nulls");
-        let message = CString::new(sanitize_c_string(message).as_ref())
+        let message = CString::new(sanitize_c_string(line).as_ref())
             .expect("OHOS log message should not contain interior nulls");
         // SAFETY: `tag.as_ptr()` 和 `message.as_ptr()` 在调用期间持有 `CString`
         // 拥有的、以 NUL 结尾的 UTF-8 缓冲区；`OHOS_PUBLIC_STRING_FMT` 是常量
@@ -118,12 +114,12 @@ mod imp {
     }
 }
 
-pub(super) fn write(level: LogLevel, tag: &str, message: &str) {
-    imp::write(level, tag, message);
+pub(super) fn write(level: LogLevel, tag: &str, line: &str) {
+    imp::write(level, tag, line);
 }
 
 #[cfg(test)]
 #[cfg(not(any(target_os = "android", target_env = "ohos")))]
-pub(super) fn format_line(level: LogLevel, tag: &str, message: &str) -> String {
-    imp::format_line(level, tag, message)
+pub(super) fn format_line(level: LogLevel, tag: &str, line: &str) -> String {
+    imp::format_line(level, tag, line)
 }

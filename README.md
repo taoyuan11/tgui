@@ -87,7 +87,7 @@
 - 对话框：文件选择、消息框，同步/异步两种调用方式
 - 通知：权限查询 / 请求、普通通知、带 action 的交互式通知
 - 窗口控制：`WindowControl`、`WindowResizeDirection`
-- 日志：`Log`、`tgui_log`
+- 日志：`Log`、`tgui_log`、`init_logging_from_cargo_toml!`
 - 平台导出：`platform::*`
 
 ## 安装
@@ -605,6 +605,35 @@ Button::new("Close")
 透明无边框窗口通常同时设置 `clear_color(Color::TRANSPARENT)`，渲染器会根据 clear color 的 alpha 选择合适的 surface alpha mode。
 
 ## 对话框与运行时服务
+
+### 日志配置
+
+所有 `tgui` 日志行都会带本地时间戳：
+
+```text
+[YYYY-MM-DD HH:mm:ss.SSS +08:00] [INFO] [tgui] message
+```
+
+默认不写本地文件，且最低等级为 `trace`，保持未配置应用的既有输出行为。应用可以在自己的 `Cargo.toml` 中配置日志，并在第一条需要配置生效的日志之前初始化：
+
+```toml
+[package.metadata.tgui.logging]
+level = "debug"
+log_dir = "logs"
+file_name = "tgui.log"
+max_file_size_bytes = 10485760
+max_files = 5
+```
+
+```rust
+fn main() -> Result<(), tgui::core::TguiError> {
+    tgui::init_logging_from_cargo_toml!()?;
+    // start Application here
+    Ok(())
+}
+```
+
+`log_dir` 相对路径基于应用 `Cargo.toml` 所在目录解析。设置后日志会继续输出到平台日志 sink，同时写入本地文件；轮转文件命名为 `tgui.log.1`、`tgui.log.2` 等。
 
 通过 `Command::new_with_context` 或 `ValueCommand::new_with_context`，可以在命令处理中访问运行时服务：
 

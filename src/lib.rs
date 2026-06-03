@@ -120,6 +120,20 @@ macro_rules! el {
     };
 }
 
+#[macro_export]
+/// Initializes `tgui` logging from the calling crate's `Cargo.toml`.
+///
+/// The macro embeds the application manifest at compile time and resolves
+/// relative log paths from the manifest directory.
+macro_rules! init_logging_from_cargo_toml {
+    () => {
+        $crate::logging::configure_logging_from_manifest(
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")),
+            ::std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        )
+    };
+}
+
 /// Canvas drawing widgets and drawing primitives.
 pub mod canvas {
     pub use crate::ui::widget::{
@@ -172,7 +186,10 @@ pub mod layout {
 
 /// Logging helpers used by platform integrations and examples.
 pub mod logging {
-    pub use crate::log::{tgui_log, Log, LogLevel};
+    pub use crate::log::{
+        configure_logging, configure_logging_from_manifest, tgui_log, Log, LogConfig,
+        LogConfigError, LogFileConfig, LogLevel,
+    };
 }
 
 /// MVVM state, bindings, commands, and view model contracts.
@@ -226,7 +243,7 @@ pub mod prelude {
         fr, pct, Align, Axis, Flex, Grid, Insets, IntoLengthValue, Justify, LayoutStyle, Length,
         Overflow, PositionType, ScrollbarStyle, Stack, Track, Value, Wrap,
     };
-    pub use crate::logging::{tgui_log, Log, LogLevel};
+    pub use crate::logging::{tgui_log, Log, LogConfig, LogConfigError, LogFileConfig, LogLevel};
     pub use crate::media::{ContentFit, MediaBytes, MediaSource};
     pub use crate::mvvm::{
         Command, CommandContext, Form, FormField, FormSnapshot, ScrollRequest, ScrollRequestMode,

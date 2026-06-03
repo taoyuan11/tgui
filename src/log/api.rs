@@ -1,11 +1,14 @@
 use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 use std::sync::Arc;
 
+use super::config::{self, LogConfigError};
 use super::dispatcher::{logger, LogRecord};
 
 const DEFAULT_TAG: &str = "tgui";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum LogLevel {
     Trace,
     Debug,
@@ -25,6 +28,21 @@ impl Display for LogLevel {
             Self::Error => "ERROR",
         };
         f.write_str(level)
+    }
+}
+
+impl FromStr for LogLevel {
+    type Err = LogConfigError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "trace" => Ok(Self::Trace),
+            "debug" => Ok(Self::Debug),
+            "info" => Ok(Self::Info),
+            "warn" | "warning" => Ok(Self::Warn),
+            "error" => Ok(Self::Error),
+            _ => Err(LogConfigError::InvalidLevel(value.to_string())),
+        }
     }
 }
 
@@ -95,6 +113,10 @@ impl Log {
     /// - `level`：日志级别。
     /// - `message`：日志消息。
     pub fn log(&self, level: LogLevel, message: impl Display) {
+        if !config::enabled(level) {
+            return;
+        }
+
         let Some(reservation) = logger().reserve(level) else {
             return;
         };

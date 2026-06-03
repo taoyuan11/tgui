@@ -2,9 +2,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread;
 
+use chrono::Local;
 use crossbeam_channel::{select_biased, unbounded, Receiver, Sender};
 
 use super::api::LogLevel;
+use super::config::{self, LogFileConfig};
+use super::file::LogFileSink;
 use super::platform;
 
 const HIGH_PRIORITY_QUEUE_CAPACITY: usize = 256;
@@ -165,18 +168,19 @@ fn worker_loop(
     high_slots: Arc<QueueSlots>,
     low_slots: Arc<QueueSlots>,
 ) {
+    let mut file_sink: Option<(LogFileConfig, LogFileSink)> = None;
     loop {
         select_biased! {
             recv(high_rx) -> record => match record {
                 Ok(record) => {
-                    emit_record(record);
+                    emit_record(record, &mut file_sink);
                     high_slots.release();
                 }
                 Err(_) => return,
             },
             recv(low_rx) -> record => match record {
                 Ok(record) => {
-                    emit_record(record);
+                    emit_record(record, &mut file_sink);
                     low_slots.release();
                 }
                 Err(_) => return,
@@ -185,8 +189,51 @@ fn worker_loop(
     }
 }
 
-fn emit_record(record: LogRecord) {
-    platform::write(record.level, &record.tag, &record.message);
+fn emit_record(record: LogRecord, file_sink: &mut Option<(LogFileConfig, LogFileSink)>) {
+    let line = format_record(&record);
+    platform::write(record.level, &record.tag, &line);
+    write_file_line(&line, file_sink, config::current_config().file);
+}
+
+fn write_file_line(
+    line: &str,
+    file_sink: &mut Option<(LogFileConfig, LogFileSink)>,
+    file_config: Option<LogFileConfig>,
+) {
+    let Some(config) = file_config else {
+        *file_sink = None;
+        return;
+    };
+
+    let needs_open = file_sink
+        .as_ref()
+        .map(|(current, _)| current != &config)
+        .unwrap_or(true);
+    if needs_open {
+        *file_sink = LogFileSink::new(config.clone())
+            .ok()
+            .map(|sink| (config.clone(), sink));
+    }
+
+    if let Some((_, sink)) = file_sink {
+        if sink.write_line(line).is_err() {
+            *file_sink = None;
+        }
+    }
+}
+
+pub(super) fn format_record(record: &LogRecord) -> String {
+    format!(
+        "[{}] [{}] [{}] {}",
+        format_timestamp(Local::now()),
+        record.level,
+        record.tag,
+        record.message.trim_end_matches('\n')
+    )
+}
+
+pub(super) fn format_timestamp(now: chrono::DateTime<Local>) -> String {
+    now.format("%Y-%m-%d %H:%M:%S%.3f %:z").to_string()
 }
 
 pub(super) fn logger() -> &'static LogDispatcher {
@@ -206,6 +253,14 @@ impl LogDispatcher {
             low_rx,
             high_slots: Arc::new(QueueSlots::new(high_capacity)),
             low_slots: Arc::new(QueueSlots::new(low_capacity)),
+        }
+    }
+
+    pub(super) fn reserve_if_enabled(&self, level: LogLevel) -> Option<QueueKind> {
+        if config::enabled(level) {
+            self.reserve(level)
+        } else {
+            None
         }
     }
 }

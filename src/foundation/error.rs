@@ -14,6 +14,7 @@ pub enum TguiError {
     TextRender(String),
     Media(String),
     Icon(String),
+    Logging(crate::log::LogConfigError),
 }
 
 impl Display for TguiError {
@@ -32,11 +33,18 @@ impl Display for TguiError {
             Self::TextRender(error) => write!(f, "failed to render text: {error}"),
             Self::Media(error) => write!(f, "{error}"),
             Self::Icon(error) => write!(f, "load icon failed: {error}"),
+            Self::Logging(error) => write!(f, "logging configuration failed: {error}"),
         }
     }
 }
 
 impl Error for TguiError {}
+
+impl From<crate::log::LogConfigError> for TguiError {
+    fn from(value: crate::log::LogConfigError) -> Self {
+        Self::Logging(value)
+    }
+}
 
 impl From<crate::platform::error::EventLoopError> for TguiError {
     fn from(value: crate::platform::error::EventLoopError) -> Self {

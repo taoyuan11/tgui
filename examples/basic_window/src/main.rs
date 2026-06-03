@@ -58,6 +58,8 @@ impl ViewModel for AppVm {
 }
 
 fn main() -> Result<(), TguiError> {
+    tgui::init_logging_from_cargo_toml!()?;
+
     let mut theme = Theme::dark();
     theme.colors.background = Color::hexa(0x0B1220FF);
     theme.colors.surface = Color::hexa(0x111B2EFF);

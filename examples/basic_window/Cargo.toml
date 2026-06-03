@@ -6,3 +6,10 @@ publish = false
 
 [dependencies]
 tgui = { path = "../.." }
+
+[package.metadata.tgui.logging]
+level = "debug"
+log_dir = "logs"
+file_name = "basic_window.log"
+max_file_size_bytes = 10485760
+max_files = 5
