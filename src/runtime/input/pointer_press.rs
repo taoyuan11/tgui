@@ -74,7 +74,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         };
 
-        if matches!(hit, HitInteraction::Disabled { .. }) {
+        if matches!(
+            hit,
+            HitInteraction::Disabled { .. } | HitInteraction::Occluder { .. }
+        ) {
             if active_trap.is_some() && focus_restore.is_none() {
                 self.pending_click = None;
                 self.pressed_widget = None;
@@ -439,6 +442,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 None,
                 None,
             ),
+            HitInteraction::Occluder { .. } => unreachable!("occluder hit handled above"),
             HitInteraction::Disabled { .. } => unreachable!("disabled hit handled above"),
             HitInteraction::CanvasItem { .. } => unreachable!("canvas item handled above"),
         };

@@ -110,4 +110,3 @@ pub(super) const CARET_END_GAP: f32 = 1.0;
 const SELECT_DEFAULT_WIDTH: f32 = 160.0;
 
 const CHECKBOX_CHECKMARK_ICON: &str = "\u{e687}";
-const SELECT_ARROW_ICON: &str = "\u{e686}";

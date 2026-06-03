@@ -535,7 +535,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 },
                 interactions.gesture.clone(),
             ),
-            HitInteraction::Disabled { .. } | HitInteraction::CanvasItem { .. } => return None,
+            HitInteraction::Occluder { .. }
+            | HitInteraction::Disabled { .. }
+            | HitInteraction::CanvasItem { .. } => return None,
         };
 
         recognizer

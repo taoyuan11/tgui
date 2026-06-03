@@ -23,6 +23,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     || Some(*index) == topmost_canvas_item
             })
             .map(|(_, interaction)| interaction)
+            .filter(|interaction| !matches!(interaction, HitInteraction::Occluder { .. }))
             .map(|interaction| match interaction {
                 HitInteraction::Disabled { id } => HoveredWidget {
                     target_id: HoverTargetId::Widget(id),
@@ -144,6 +145,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             .map(|command| HoverMoveHandler::Canvas(command, context)),
                     }
                 }
+                HitInteraction::Occluder { .. } => unreachable!("occluders are filtered above"),
             })
             .collect()
     }

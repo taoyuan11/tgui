@@ -2,7 +2,6 @@ use super::{
     apply_text_widget_style, centered_text_frame, media_loading_fill_color,
     resolve_stateful_widget_color, resolved_text_metrics, text_with_typography, HitInteraction,
     ResolvedWidgetKind, TextInputLayoutOverride, CARET_WIDTH, CHECKBOX_CHECKMARK_ICON,
-    SELECT_ARROW_ICON,
 };
 use std::collections::HashMap;
 use std::sync::Arc;

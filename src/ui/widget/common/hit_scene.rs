@@ -161,6 +161,9 @@ pub(crate) struct LayoutNode {
 }
 
 pub(crate) enum HitInteraction<VM> {
+    Occluder {
+        id: WidgetId,
+    },
     Disabled {
         id: WidgetId,
     },
@@ -258,6 +261,7 @@ pub(crate) enum HitInteraction<VM> {
 impl<VM> Clone for HitInteraction<VM> {
     fn clone(&self) -> Self {
         match self {
+            Self::Occluder { id } => Self::Occluder { id: *id },
             Self::Disabled { id } => Self::Disabled { id: *id },
             Self::Widget {
                 id,
@@ -433,7 +437,8 @@ impl<VM> Clone for HitInteraction<VM> {
 impl<VM> HitInteraction<VM> {
     pub(crate) fn target_id(&self) -> HitTargetId {
         match self {
-            Self::Disabled { id }
+            Self::Occluder { id }
+            | Self::Disabled { id }
             | Self::Widget { id, .. }
             | Self::SelectableText { id, .. }
             | Self::Switch { id, .. }

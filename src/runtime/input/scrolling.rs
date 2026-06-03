@@ -122,7 +122,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn touch_hit_claims_drag(interaction: &HitInteraction<VM>) -> bool {
         match interaction {
-            HitInteraction::Disabled { .. } => false,
+            HitInteraction::Occluder { .. } | HitInteraction::Disabled { .. } => false,
             HitInteraction::Widget { interactions, .. } => interactions.on_mouse_move.is_some(),
             HitInteraction::SelectableText { .. }
             | HitInteraction::Slider { .. }

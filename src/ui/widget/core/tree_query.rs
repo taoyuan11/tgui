@@ -188,6 +188,11 @@ impl<VM: 'static> WidgetTree<VM> {
         {
             let id = hit.interaction.target_id();
 
+            if matches!(hit.interaction, HitInteraction::Occluder { .. }) {
+                ids.clear();
+                path.clear();
+            }
+
             if let Some(index) = ids.iter().position(|existing| *existing == id) {
                 path[index] = hit.interaction.clone();
             } else {

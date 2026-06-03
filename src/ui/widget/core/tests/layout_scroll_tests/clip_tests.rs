@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widget::Button;
 
 #[test]
 fn clipped_children_keep_clip_rect_and_do_not_hit_outside_parent() {
@@ -214,4 +215,62 @@ fn rounded_overflow_clips_children_with_parent_corner_mask() {
             corner_radius: 18.0,
         })
     );
+}
+
+#[test]
+fn painted_stack_overlay_occludes_button_hit() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let covered_button: Element<()> = Button::new("covered").into();
+    let overlay: Element<()> = Stack::new()
+        .size(dp(100.0), dp(100.0))
+        .style(|mode| {
+            container_style(
+                mode,
+                Some(crate::foundation::color::Color::hexa(0x00000055)),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        })
+        .into();
+    let tree = WidgetTree::new(
+        Stack::<()>::new()
+            .size(dp(100.0), dp(100.0))
+            .child([covered_button, overlay]),
+    );
+
+    let computed = tree.compute_scene_with_units_and_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        UnitContext::default(),
+        &mut animations,
+        false,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 100.0, 100.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let hit_path = WidgetTree::hit_path_from_computed(&computed, Point::new(50.0, 50.0));
+
+    assert_eq!(hit_path.len(), 1);
+    assert!(matches!(
+        hit_path.last(),
+        Some(super::HitInteraction::Occluder { .. })
+    ));
 }

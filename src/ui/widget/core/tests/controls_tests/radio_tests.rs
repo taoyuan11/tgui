@@ -113,6 +113,7 @@ fn checked_radio_renders_indicator() {
         .overlay_shapes
         .iter()
         .any(|shape| shape.color == checked_style.indicator));
+    assert!(rendered.primitives.texts.is_empty());
 }
 
 #[test]

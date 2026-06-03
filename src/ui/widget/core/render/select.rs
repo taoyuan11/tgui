@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use super::super::*;
 use super::centered_text_frame;
+use crate::ui::widget::{MeshPrimitive, MeshVertex};
 
 pub(crate) fn default_select_menu_transition() -> crate::animation::Transition {
     crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(160))
@@ -115,7 +118,6 @@ pub(crate) fn push_select_primitives(
             arrow_width.min(frame.width),
             frame.height,
         ),
-        font_manager,
         select_style,
         units,
         scene,
@@ -373,7 +375,6 @@ pub(crate) fn push_select_text(
 
 pub(crate) fn push_select_icon(
     frame: Rect,
-    font_manager: &FontManager,
     select_style: &ResolvedSelectStyle,
     units: UnitContext,
     scene: &mut ScenePrimitives,
@@ -381,49 +382,42 @@ pub(crate) fn push_select_icon(
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
 ) {
-    let font_size = units
-        .resolve_sp(select_style.text_style.size)
-        .min(frame.width.get())
-        .min(frame.height.get())
-        .max(1.0);
-    let line_height = font_size;
-    let letter_spacing = 0.0;
-    let text_request = TextFontRequest {
-        preferred_font: Some(ICON_FONT_FAMILY),
-        weight: select_style.text_style.weight,
-    };
-    let resolved = font_manager.resolve_text(SELECT_ARROW_ICON, text_request.clone());
-    let layout = font_manager.measure_text_layout(
-        SELECT_ARROW_ICON,
-        text_request,
-        font_size,
-        line_height,
-        letter_spacing,
-    );
-    let icon_frame = centered_text_frame(
-        frame,
-        layout.width.max(font_size),
-        layout.height.max(line_height),
-        line_height,
-        true,
-    );
+    let icon_width = units.resolve_dp(dp(9.0)).min(frame.width.get()).max(1.0);
+    let icon_height = units.resolve_dp(dp(5.0)).min(frame.height.get()).max(1.0);
+    let center_x = frame.x + frame.width * 0.5;
+    let center_y = frame.y + frame.height * 0.5 + dp(1.0);
+    let half_width = Dp::new(icon_width * 0.5);
+    let half_height = Dp::new(icon_height * 0.5);
+    let points = [
+        Point::new(center_x - half_width, center_y - half_height),
+        Point::new(center_x + half_width, center_y - half_height),
+        Point::new(center_x, center_y + half_height),
+    ];
+    let brush_meta = [0.0, 1.0, 0.0, 0.0];
+    let rgba = select_style
+        .arrow
+        .with_alpha_factor(opacity)
+        .to_linear_rgba_f32();
+    let mut stop_colors = [[0.0; 4]; 8];
+    stop_colors[0] = rgba;
+    stop_colors[1] = rgba;
+    let vertices = points
+        .iter()
+        .map(|point| MeshVertex {
+            position: [point.x.get(), point.y.get()],
+            local_position: [point.x.get() - frame.x.get(), point.y.get() - frame.y.get()],
+            brush_meta,
+            gradient_data0: [0.0; 4],
+            gradient_data1: [0.0; 4],
+            stop_offsets0: [0.0; 4],
+            stop_offsets1: [0.0; 4],
+            stop_colors,
+        })
+        .collect::<Vec<_>>();
 
-    scene.push_text(TextPrimitive {
-        content: SELECT_ARROW_ICON.to_string(),
-        rich_spans: None,
-        frame: icon_frame,
-        quad: None,
-        color: select_style.arrow.with_alpha_factor(opacity),
-        force_color: true,
-        font_family: Some(resolved.primary_font),
-        font_size,
-        font_weight: select_style.text_style.weight,
-        line_height,
-        letter_spacing,
-        wrap: crate::ui::widget::CanvasTextWrap::None,
-        overflow: crate::ui::widget::CanvasTextOverflow::Clip,
-        horizontal_align: crate::ui::widget::CanvasTextHorizontalAlign::Start,
-        vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Start,
+    scene.push_mesh(MeshPrimitive {
+        vertices: Arc::from(vertices),
+        triangles: Arc::from([points]),
         clip_rect,
         clip_mask,
     });

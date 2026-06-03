@@ -4,3 +4,4 @@ examples/**/Cargo.lock
 examples/**/ohos-app
 .idea
 .claude
+*.log

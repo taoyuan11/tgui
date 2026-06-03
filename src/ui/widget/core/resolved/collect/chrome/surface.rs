@@ -31,12 +31,12 @@ impl<VM> ResolvedElement<VM> {
             .as_ref()
             .map(|image| image.resolve_widget());
 
-        if let Some(shadow) = shadow {
+        if let Some(shadow) = shadow.as_ref() {
             if let Some(texture) = rounded_rect_shadow_texture(
                 visual.background_frame,
                 visual.background_radius.get(),
                 RoundedRectShadowSpec {
-                    shadow,
+                    shadow: shadow.clone(),
                     opacity: visual.opacity,
                     clip_rect: visual.primitive_clip,
                     clip_mask: visual.primitive_clip_mask,
@@ -145,6 +145,14 @@ impl<VM> ResolvedElement<VM> {
             visual.opacity,
         );
 
+        let paints_surface = visual.opacity > 0.0
+            && (background_blur > 0.0
+                || shadow.is_some()
+                || background_image.is_some()
+                || background_brush.is_some()
+                || visual.background.a > 0
+                || (visual.border_width > Dp::ZERO && visual.border_color.a > 0));
+
         if visual.disabled {
             computed.hit_regions.push(HitRegion {
                 rect: visual.frame,
@@ -206,6 +214,15 @@ impl<VM> ResolvedElement<VM> {
                     scope_path: context.focus_scope_path(),
                     focus,
                     interaction,
+                });
+            } else if matches!(self.kind, ResolvedWidgetKind::Container { .. }) && paints_surface {
+                computed.hit_regions.push(HitRegion {
+                    rect: visual.frame,
+                    clip_rect: visual.primitive_clip,
+                    geometry: HitGeometry::Rect,
+                    scope_path: context.focus_scope_path(),
+                    focus: None,
+                    interaction: HitInteraction::Occluder { id: self.id },
                 });
             }
         }
