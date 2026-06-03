@@ -316,10 +316,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 window.request_redraw();
             }
         }
-        #[cfg(all(target_os = "android", feature = "android"))]
-        let android_text_changed = self.drain_android_text_input_snapshot();
-        #[cfg(not(all(target_os = "android", feature = "android")))]
-        let android_text_changed = false;
         let flush_started_at = Instant::now();
         let flush_outcome = self.flush_pending_text_input_changes();
         let flush_duration = flush_started_at.elapsed();
@@ -346,31 +342,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let lifecycle_started_at = Instant::now();
         self.dispatch_lifecycle_events_if_needed();
         let lifecycle_duration = lifecycle_started_at.elapsed();
-        #[cfg(all(target_os = "android", feature = "android"))]
-        let (animation_frame_advanced, animation_duration) = {
-            let animation_started_at = Instant::now();
-            let advanced = self.drive_animations(event_loop, now);
-            (advanced, animation_started_at.elapsed())
-        };
-        #[cfg(not(all(target_os = "android", feature = "android")))]
         let animation_duration = {
             let animation_started_at = Instant::now();
             self.drive_animations(event_loop, now);
             animation_started_at.elapsed()
         };
-        #[cfg(all(target_os = "android", feature = "android"))]
-        if theme_changed || animation_frame_advanced {
-            self.render_immediately(event_loop);
-        }
         let close_requested = self.drain_window_requests();
         if let Some(started_at) = started_at {
             log_text_profile(
                 "textarea_about_to_wait",
                 started_at.elapsed(),
                 format!(
-                    "repeated_key_handled={} android_text_changed={} flushed_text_changes={} flush_ms={:.3} lifecycle_ms={:.3} theme_changed={} theme_ms={:.3} redraw_ms={:.3} animation_ms={:.3} close_requested={}",
+                    "repeated_key_handled={} flushed_text_changes={} flush_ms={:.3} lifecycle_ms={:.3} theme_changed={} theme_ms={:.3} redraw_ms={:.3} animation_ms={:.3} close_requested={}",
                     repeated_key_handled,
-                    android_text_changed,
                     flush_outcome.changed,
                     flush_duration.as_secs_f64() * 1000.0,
                     lifecycle_duration.as_secs_f64() * 1000.0,

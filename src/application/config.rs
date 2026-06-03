@@ -78,7 +78,7 @@ impl ResourceBudget {
         svg_raster_cache_entries: 4,
     };
 
-    /// 构造适合内存受限设备（移动端、嵌入式）的紧凑预算。
+    /// 构造适合内存受限环境的紧凑预算。
     pub const fn compact() -> Self {
         Self {
             canvas_shadow_cache_entries: 4,

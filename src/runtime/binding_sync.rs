@@ -1,26 +1,6 @@
 use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
-    #[cfg(all(target_os = "android", feature = "android"))]
-    pub(super) fn sync_system_bar_style(&mut self, theme: &Theme) {
-        let Some(app) = self.android_app.as_ref() else {
-            return;
-        };
-        let style = SystemBarStyle::from_theme(theme);
-        if self.system_bar_style == Some(style) {
-            return;
-        }
-
-        if let Err(error) = apply_android_system_bar_style(app, style) {
-            Log::with_tag("tgui-runtime").warn(format_args!(
-                "failed to sync Android system bar style: {error}"
-            ));
-            return;
-        }
-
-        self.system_bar_style = Some(style);
-    }
-
     pub(in crate::runtime) fn uses_system_theme(&self) -> bool {
         matches!(self.active_theme_selection(), ThemeSelection::System)
     }
@@ -37,12 +17,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.apply_theme(resolve_theme(
                 &self.active_theme_selection(),
                 &self.active_theme_set(),
-                resolve_window_theme(
-                    self.window.as_deref(),
-                    #[cfg(all(target_os = "android", feature = "android"))]
-                    self.android_app.as_ref(),
-                )
-                .or(window_theme),
+                resolve_window_theme(self.window.as_deref()).or(window_theme),
             ));
         }
     }
@@ -75,11 +50,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let selection = self.active_theme_selection();
         let theme_set = self.active_theme_set();
-        let resolved_system_theme = resolve_window_theme(
-            self.window.as_deref(),
-            #[cfg(all(target_os = "android", feature = "android"))]
-            self.android_app.as_ref(),
-        );
+        let resolved_system_theme = resolve_window_theme(self.window.as_deref());
         let previous_store_theme = self.theme_store.system_theme();
         let system_theme = resolved_system_theme.or(previous_store_theme);
         self.theme_store.set_theme_set(theme_set.clone());
@@ -128,11 +99,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let previous_reduced_motion = self.reduced_motion;
         self.reduced_motion = self.active_reduced_motion();
         let reduced_motion_changed = previous_reduced_motion != self.reduced_motion;
-        #[cfg(all(target_os = "android", feature = "android"))]
-        {
-            let theme = self.theme.clone();
-            self.sync_system_bar_style(&theme);
-        }
 
         if let Some(window) = self.window.as_ref() {
             if let Some(signal) = self.window_bindings.title.as_ref() {

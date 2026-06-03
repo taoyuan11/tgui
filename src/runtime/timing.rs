@@ -24,23 +24,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn platform_font_scale(&self) -> f32 {
-        #[cfg(all(target_env = "ohos", feature = "ohos"))]
-        {
-            if let Some(scale) = self
-                .window
-                .as_ref()
-                .map(|window| window.font_scale() as f32)
-                .filter(|scale| scale.is_finite() && *scale > 0.0)
-            {
-                return scale;
-            }
-        }
-        #[cfg(all(target_os = "android", feature = "android"))]
-        {
-            if let Some(scale) = android_font_scale(self.android_app.as_ref()) {
-                return scale;
-            }
-        }
         1.0
     }
 
@@ -152,14 +135,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if let Some(deadline) = next_deadline {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         } else {
-            #[cfg(all(target_os = "android", feature = "android"))]
-            if self.uses_system_theme() {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(
-                    now + ANDROID_SYSTEM_THEME_POLL_INTERVAL,
-                ));
-                return frame_advanced;
-            }
-
             event_loop.set_control_flow(ControlFlow::Wait);
         }
 

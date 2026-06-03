@@ -5,15 +5,6 @@ use crate::foundation::view_model::{CommandContext, ValueCommand};
 use crate::platform::backend::event_loop::EventLoopProxy;
 use crate::platform::backend::window::Window;
 
-#[cfg(target_os = "android")]
-use super::platform::{
-    dispatch_file_async_path, dispatch_file_async_paths, dispatch_message_async,
-};
-#[cfg(any(
-    target_os = "windows",
-    target_os = "macos",
-    all(target_os = "linux", not(target_env = "ohos"))
-))]
 use super::platform::{run_file_dialog_path, run_file_dialog_paths, run_message_dialog};
 use super::platform::{DialogParentHandles, FileDialogRequest};
 use super::types::{DialogError, FileDialogOptions, MessageDialogOptions, MessageDialogResult};
@@ -284,21 +275,8 @@ impl<VM: 'static> Dialogs<VM> {
         &self,
         options: MessageDialogOptions,
     ) -> Result<MessageDialogResult, DialogError> {
-        #[cfg(any(target_os = "android", all(target_env = "ohos", feature = "ohos")))]
-        {
-            let _ = options;
-            return Err(DialogError::UnsupportedPlatform);
-        }
-
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            all(target_os = "linux", not(target_env = "ohos"))
-        ))]
-        {
-            let runtime = self.runtime_context()?;
-            run_message_dialog(options, runtime.parent.as_ref())
-        }
+        let runtime = self.runtime_context()?;
+        run_message_dialog(options, runtime.parent.as_ref())
     }
 
     /// 异步打开消息对话框。
@@ -308,61 +286,21 @@ impl<VM: 'static> Dialogs<VM> {
         callback: ValueCommand<VM, Result<MessageDialogResult, DialogError>>,
     ) -> Result<(), DialogError> {
         let runtime = self.runtime_context()?.clone();
-
-        #[cfg(target_os = "android")]
-        {
-            let dispatcher = runtime.dispatcher.clone();
-            let window_key = runtime.window_key.clone();
-            let window_instance_id = runtime.window_instance_id;
-            return dispatch_message_async(options, move |result| {
-                let _ = dispatcher(PendingDialogCompletion {
-                    window_key,
-                    window_instance_id,
-                    callback: Box::new(move |view_model, context| {
-                        callback.execute_with_context(view_model, result, context);
-                    }),
-                });
-            });
-        }
-
-        #[cfg(all(target_env = "ohos", feature = "ohos"))]
-        {
-            let _ = options;
-            return (runtime.dispatcher)(PendingDialogCompletion {
-                window_key: runtime.window_key,
-                window_instance_id: runtime.window_instance_id,
+        let parent = runtime.parent.clone();
+        let dispatcher = runtime.dispatcher.clone();
+        let window_key = runtime.window_key;
+        let window_instance_id = runtime.window_instance_id;
+        std::thread::spawn(move || {
+            let result = run_message_dialog(options, parent.as_ref());
+            let _ = dispatcher(PendingDialogCompletion {
+                window_key,
+                window_instance_id,
                 callback: Box::new(move |view_model, context| {
-                    callback.execute_with_context(
-                        view_model,
-                        Err(DialogError::UnsupportedPlatform),
-                        context,
-                    );
+                    callback.execute_with_context(view_model, result, context);
                 }),
             });
-        }
-
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            all(target_os = "linux", not(target_env = "ohos"))
-        ))]
-        {
-            let parent = runtime.parent.clone();
-            let dispatcher = runtime.dispatcher.clone();
-            let window_key = runtime.window_key;
-            let window_instance_id = runtime.window_instance_id;
-            std::thread::spawn(move || {
-                let result = run_message_dialog(options, parent.as_ref());
-                let _ = dispatcher(PendingDialogCompletion {
-                    window_key,
-                    window_instance_id,
-                    callback: Box::new(move |view_model, context| {
-                        callback.execute_with_context(view_model, result, context);
-                    }),
-                });
-            });
-            Ok(())
-        }
+        });
+        Ok(())
     }
 
     fn runtime_context(&self) -> Result<&DialogRuntimeContext<VM>, DialogError> {
@@ -376,21 +314,8 @@ impl<VM: 'static> Dialogs<VM> {
         request: FileDialogRequest,
         options: FileDialogOptions,
     ) -> Result<Option<PathBuf>, DialogError> {
-        #[cfg(any(target_os = "android", all(target_env = "ohos", feature = "ohos")))]
-        {
-            let _ = (request, options);
-            return Err(DialogError::UnsupportedPlatform);
-        }
-
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            all(target_os = "linux", not(target_env = "ohos"))
-        ))]
-        {
-            let runtime = self.runtime_context()?;
-            run_file_dialog_path(request, options, runtime.parent.as_ref())
-        }
+        let runtime = self.runtime_context()?;
+        run_file_dialog_path(request, options, runtime.parent.as_ref())
     }
 
     fn run_file_dialog_paths(
@@ -398,21 +323,8 @@ impl<VM: 'static> Dialogs<VM> {
         request: FileDialogRequest,
         options: FileDialogOptions,
     ) -> Result<Option<Vec<PathBuf>>, DialogError> {
-        #[cfg(any(target_os = "android", all(target_env = "ohos", feature = "ohos")))]
-        {
-            let _ = (request, options);
-            return Err(DialogError::UnsupportedPlatform);
-        }
-
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            all(target_os = "linux", not(target_env = "ohos"))
-        ))]
-        {
-            let runtime = self.runtime_context()?;
-            run_file_dialog_paths(request, options, runtime.parent.as_ref())
-        }
+        let runtime = self.runtime_context()?;
+        run_file_dialog_paths(request, options, runtime.parent.as_ref())
     }
 
     fn spawn_async_path(
@@ -422,61 +334,21 @@ impl<VM: 'static> Dialogs<VM> {
         callback: ValueCommand<VM, Result<Option<PathBuf>, DialogError>>,
     ) -> Result<(), DialogError> {
         let runtime = self.runtime_context()?.clone();
-
-        #[cfg(target_os = "android")]
-        {
-            let dispatcher = runtime.dispatcher.clone();
-            let window_key = runtime.window_key.clone();
-            let window_instance_id = runtime.window_instance_id;
-            return dispatch_file_async_path(request, options, move |result| {
-                let _ = dispatcher(PendingDialogCompletion {
-                    window_key,
-                    window_instance_id,
-                    callback: Box::new(move |view_model, context| {
-                        callback.execute_with_context(view_model, result, context);
-                    }),
-                });
-            });
-        }
-
-        #[cfg(all(target_env = "ohos", feature = "ohos"))]
-        {
-            let _ = (request, options);
-            return (runtime.dispatcher)(PendingDialogCompletion {
-                window_key: runtime.window_key,
-                window_instance_id: runtime.window_instance_id,
+        let parent = runtime.parent.clone();
+        let dispatcher = runtime.dispatcher.clone();
+        let window_key = runtime.window_key;
+        let window_instance_id = runtime.window_instance_id;
+        std::thread::spawn(move || {
+            let result = run_file_dialog_path(request, options, parent.as_ref());
+            let _ = dispatcher(PendingDialogCompletion {
+                window_key,
+                window_instance_id,
                 callback: Box::new(move |view_model, context| {
-                    callback.execute_with_context(
-                        view_model,
-                        Err(DialogError::UnsupportedPlatform),
-                        context,
-                    );
+                    callback.execute_with_context(view_model, result, context);
                 }),
             });
-        }
-
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            all(target_os = "linux", not(target_env = "ohos"))
-        ))]
-        {
-            let parent = runtime.parent.clone();
-            let dispatcher = runtime.dispatcher.clone();
-            let window_key = runtime.window_key;
-            let window_instance_id = runtime.window_instance_id;
-            std::thread::spawn(move || {
-                let result = run_file_dialog_path(request, options, parent.as_ref());
-                let _ = dispatcher(PendingDialogCompletion {
-                    window_key,
-                    window_instance_id,
-                    callback: Box::new(move |view_model, context| {
-                        callback.execute_with_context(view_model, result, context);
-                    }),
-                });
-            });
-            Ok(())
-        }
+        });
+        Ok(())
     }
 
     fn spawn_async_paths(
@@ -486,60 +358,20 @@ impl<VM: 'static> Dialogs<VM> {
         callback: ValueCommand<VM, Result<Option<Vec<PathBuf>>, DialogError>>,
     ) -> Result<(), DialogError> {
         let runtime = self.runtime_context()?.clone();
-
-        #[cfg(target_os = "android")]
-        {
-            let dispatcher = runtime.dispatcher.clone();
-            let window_key = runtime.window_key.clone();
-            let window_instance_id = runtime.window_instance_id;
-            return dispatch_file_async_paths(request, options, move |result| {
-                let _ = dispatcher(PendingDialogCompletion {
-                    window_key,
-                    window_instance_id,
-                    callback: Box::new(move |view_model, context| {
-                        callback.execute_with_context(view_model, result, context);
-                    }),
-                });
-            });
-        }
-
-        #[cfg(all(target_env = "ohos", feature = "ohos"))]
-        {
-            let _ = (request, options);
-            return (runtime.dispatcher)(PendingDialogCompletion {
-                window_key: runtime.window_key,
-                window_instance_id: runtime.window_instance_id,
+        let parent = runtime.parent.clone();
+        let dispatcher = runtime.dispatcher.clone();
+        let window_key = runtime.window_key;
+        let window_instance_id = runtime.window_instance_id;
+        std::thread::spawn(move || {
+            let result = run_file_dialog_paths(request, options, parent.as_ref());
+            let _ = dispatcher(PendingDialogCompletion {
+                window_key,
+                window_instance_id,
                 callback: Box::new(move |view_model, context| {
-                    callback.execute_with_context(
-                        view_model,
-                        Err(DialogError::UnsupportedPlatform),
-                        context,
-                    );
+                    callback.execute_with_context(view_model, result, context);
                 }),
             });
-        }
-
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            all(target_os = "linux", not(target_env = "ohos"))
-        ))]
-        {
-            let parent = runtime.parent.clone();
-            let dispatcher = runtime.dispatcher.clone();
-            let window_key = runtime.window_key;
-            let window_instance_id = runtime.window_instance_id;
-            std::thread::spawn(move || {
-                let result = run_file_dialog_paths(request, options, parent.as_ref());
-                let _ = dispatcher(PendingDialogCompletion {
-                    window_key,
-                    window_instance_id,
-                    callback: Box::new(move |view_model, context| {
-                        callback.execute_with_context(view_model, result, context);
-                    }),
-                });
-            });
-            Ok(())
-        }
+        });
+        Ok(())
     }
 }

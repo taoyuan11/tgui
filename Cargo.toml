@@ -30,8 +30,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
-android = []
-ohos = []
 audio = ["dep:ffmpeg-next", "dep:cpal"]
 video = ["audio"]
 video-static = ["video", "ffmpeg-next/static"]
@@ -89,7 +87,7 @@ rfd = "0.17"
 stacker = "0.1.24"
 winit-appkit = "0.31.0-beta.2"
 
-[target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 arboard = "3.6"
 cpal = { version = "0.17.3", optional = true }
 log = "0.4.30"
@@ -99,16 +97,6 @@ rfd = "0.17"
 stacker = "0.1.24"
 winit-wayland = "0.31.0-beta.2"
 winit-x11 = "0.31.0-beta.2"
-
-[target.'cfg(target_os = "android")'.dependencies]
-jni = "0.22"
-winit-android = { version = "0.31.0-beta.2", features = ["native-activity"] }
-
-[target.'cfg(target_env = "ohos")'.dependencies]
-hilog-sys = "0.1.7"
-raw-window-handle = "0.6"
-tgui-winit-ohos = "0.4.11"
-#tgui-winit-ohos = { path = "../winit-ohos" }
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }

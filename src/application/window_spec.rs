@@ -22,11 +22,7 @@ pub(crate) type RootViewFactory<VM> = Arc<dyn Fn(&VM) -> Element<VM> + Send + Sy
 pub(crate) type WindowsFactory<VM> = Box<dyn Fn(&VM) -> Vec<WindowSpec<VM>> + Send + Sync>;
 
 fn build_root_element<VM>(root_view: &RootViewFactory<VM>, view_model: &VM) -> Element<VM> {
-    #[cfg(any(
-        target_os = "windows",
-        target_os = "macos",
-        all(target_os = "linux", not(target_env = "ohos"))
-    ))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
         const ROOT_VIEW_STACK_SIZE: usize = 8 * 1024 * 1024;
         const ROOT_VIEW_STACK_RED_ZONE: usize = ROOT_VIEW_STACK_SIZE;
@@ -35,11 +31,7 @@ fn build_root_element<VM>(root_view: &RootViewFactory<VM>, view_model: &VM) -> E
         })
     }
 
-    #[cfg(not(any(
-        target_os = "windows",
-        target_os = "macos",
-        all(target_os = "linux", not(target_env = "ohos"))
-    )))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         root_view(view_model)
     }

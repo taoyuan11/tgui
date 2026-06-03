@@ -274,8 +274,6 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
                     None,
                     self.notification_dispatcher.clone(),
                     None,
-                    #[cfg(all(target_os = "android", feature = "android"))]
-                    None,
                 );
                 window.close_policy = resolved_window.close_policy;
                 window.create_or_resume_surface(event_loop, modal_parent.as_ref());

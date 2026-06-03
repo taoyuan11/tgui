@@ -4,7 +4,7 @@
 
 ## 一、依赖与发布稳定性（阻塞 1.0）
 
-- **winit 升级到稳定版**：当前锁在 `winit-core/-win32/-wayland/-x11/-appkit/-android 0.31.0-beta.2`，beta 依赖会让下游 lockfile 不稳；需要等 winit 0.31 stable 或回退到稳定线，并把 `tgui-winit-ohos` 同步对齐。
+- **winit 升级到稳定版**：当前锁在 `winit-core/-win32/-wayland/-x11/-appkit 0.31.0-beta.2`，beta 依赖会让下游 lockfile 不稳；需要等 winit 0.31 stable 或回退到稳定线。
 - **`wgpu 29` 升级策略**：明确支持的 wgpu 版本范围与升级节奏（每个 minor 写入 CHANGELOG）。
 - **MSRV 声明**：`Cargo.toml` 增加 `rust-version = "..."`，并在 CI 矩阵中固定。
 - **语义化版本承诺**：在 README/CHANGELOG 中明确 0.x → 1.0 的 breaking 节奏；公共 API（`src/lib.rs` re-export 列表）冻结前需要一次系统 review。
@@ -18,7 +18,6 @@
 - **GitHub Actions 矩阵**（已实现）：
   - OS：`ubuntu-latest`、`windows-latest`、`macos-latest`
   - Feature 组合：`default`、`audio + video + bench-support`（FFmpeg：Linux 用 apt、macOS 用 brew、Windows 走 BtbN 钉版本 + cache）
-  - Target：`aarch64-linux-android` 已加 `cargo check`；OHOS 需要 nightly + 自定义 target spec，暂不进 CI（本地手动验证）
 - **必跑步骤**（已实现）：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`、`cargo doc --no-deps --all-features`（`RUSTDOCFLAGS=-D warnings`）、`cargo-deny` licenses/advisories/bans/sources
 - **基准回归**（骨架）：`bench-compile` job 用 `cargo check --benches --all-features` 守编译；`bench-publish` job 接 Bencher.dev，需仓库 owner 设 `vars.ENABLE_BENCH=true` + `secrets.BENCHER_API_TOKEN` 后启用
 - **覆盖率**（骨架）：`coverage` job 用 `cargo-llvm-cov` + Codecov，需仓库 owner 设 `vars.ENABLE_COVERAGE=true` + `secrets.CODECOV_TOKEN` 后启用；目标仍为 `src/runtime/`、`src/ui/widget/core/` ≥ 80%
@@ -39,11 +38,9 @@
 
 - **macOS 通知后端**：`AGENTS.md` 提到"接口已公开但仍依赖 UserNotifications bridge，调用时可能返回 backend error"。需要走通 `objc2-user-notifications`，含权限请求、分类注册、action 回调。
 - **Linux 通知**：当前用 `notify-rust`，需要验证 GNOME / KDE / 老桌面环境（无 dbus 时降级）。
-- **Android / OHOS 对话框 + 通知**：当前直接返回 unsupported；至少补文件选择器（SAF）和系统通知，否则移动端不可用。
 - **Wayland**：HiDPI、fractional scaling、IME（fcitx5/ibus）、剪贴板、CSD 在 GNOME/KDE/wlroots 三类 compositor 上的实地验证。
 - **Windows**：DPI awareness manifest、HiDPI、暗色标题栏（DWM）、jump list、taskbar progress 至少给一组示例。
 - **WebAssembly**：当前不支持，但很多 GUI crate 把 wasm 作为试金石。明确 roadmap（暂不支持也要写在 README）。
-- **iOS**：同上，写明状态。
 
 ## 五、可访问性（a11y）
 
@@ -84,7 +81,7 @@
 > 状态：基础设施已落地。`docs/performance.md` 汇总了 benchmark 基线、`ResourceBudget` 配置、冷启动与空闲帧规则、调优清单。后续在数据点变化时只需更新该文档。
 
 - **基准基线**：`benches/` 现有 9 个 bench；`docs/performance.md` §1 给出代表性中位耗时和 0.x 阶段的 SLA 草案，PR 让任意 bench 退步 > 20% 需要在描述里说明原因。CI 的 `bench-publish` job（见第二章）启用 Bencher.dev 后会自动跟踪回归。
-- **GPU 内存预算**：新增公开类型 [`tgui::application::ResourceBudget`]，覆盖 canvas / widget 阴影离屏纹理缓存、image 与 SVG 多分辨率缓存的 LRU 容量上限；`Application::resource_budget(...)` 注入，`ResourceBudget::compact()` 提供移动端紧凑组合。详见 `docs/performance.md` §2。
+- **GPU 内存预算**：新增公开类型 [`tgui::application::ResourceBudget`]，覆盖 canvas / widget 阴影离屏纹理缓存、image 与 SVG 多分辨率缓存的 LRU 容量上限；`Application::resource_budget(...)` 注入，`ResourceBudget::compact()` 提供内存受限环境的紧凑组合。详见 `docs/performance.md` §2。
 - **冷启动**：环境变量 `TGUI_PROFILE_STARTUP=1` 启动后，第一帧 `RenderStatus::Rendered` 会通过 `tgui-startup` tag 输出 `first_frame took ...ms` 日志（`src/log/profiler.rs::log_startup_phase` + `src/runtime/render_cycle.rs`）。桌面默认主题目标 < 200 ms。
 - **空闲帧 CPU**：事件循环统一走 `ControlFlow::Wait` / `WaitUntil(deadline)`，无动画 / smooth scroll / caret blink / key repeat 时不会空转；调优入口与排查路径见 `docs/performance.md` §4。
 - **大图片 / 大文档**：`MAX_IMAGE_DIMENSION = 2048` 会把过大的图片在解码前缩到 2048 长边；`Textarea` 走 `ropey` + `cosmic-text` viewport 增量 shape；具体边界在 `docs/performance.md` §5。
@@ -129,5 +126,5 @@
 
 1. **现在就该做**：CI 矩阵 + clippy/fmt/audit、CHANGELOG/CONTRIBUTING/SECURITY、`unsafe` SAFETY 注释、`todo!()` 清理、API 文档覆盖率、`accesskit` 接入草案。
 2. **0.2 之前**：winit 稳定版升级、macOS 通知后端、Linux 通知兼容性、错误类型对外固化、`cargo public-api` 守门。
-3. **0.3 ~ 0.5**：移动端通知/对话框、a11y 屏幕阅读器实测、复杂脚本/IME 回归、Tabs/Tooltip/Menu/Table 等 widget、视觉回归测试、打包样例。
+3. **0.3 ~ 0.5**：a11y 屏幕阅读器实测、复杂脚本/IME 回归、Tabs/Tooltip/Menu/Table 等 widget、视觉回归测试、桌面打包样例。
 4. **1.0 之前**：API 冻结、性能基线、安全审计、官方站点、多平台 release 工作流。

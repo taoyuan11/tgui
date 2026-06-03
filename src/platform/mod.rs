@@ -24,24 +24,4 @@ pub mod window {
     pub use winit_core::window::*;
 }
 
-#[cfg(all(target_os = "android", feature = "android"))]
-pub mod android {
-    pub mod activity {
-        pub use winit_android::activity::*;
-    }
-
-    pub use winit_android::{
-        ActiveEventLoopExtAndroid, EventLoopBuilderExtAndroid, EventLoopExtAndroid,
-        WindowExtAndroid,
-    };
-}
-
-#[cfg(all(target_env = "ohos", feature = "ohos"))]
-pub mod ohos {
-    pub use tgui_winit_ohos::{
-        export_ohos_winit_app, ActiveEventLoopExtOhos, EventLoopBuilderExtOhos, OhosApp,
-        WindowExtOhos,
-    };
-}
-
 pub(crate) mod backend;

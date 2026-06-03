@@ -116,8 +116,8 @@ tgui = { version = "0.1.8", features = ["video"] }
 - `audio`：启用 FFmpeg + CPAL 音频播放能力
 - `video`：启用 FFmpeg 视频播放能力
 - `video-static`：在 `video` 基础上启用静态链接 FFmpeg 的音视频能力
-- `android`：启用 Android 入口
-- `ohos`：启用 HarmonyOS / OpenHarmony 入口
+
+移动端支持说明：当前版本暂时放弃 Android、HarmonyOS / OpenHarmony 等移动端支持，相关入口、feature、示例和平台依赖已经移除。`tgui` 目前聚焦 Windows、macOS 与 Linux 桌面端。
 
 ## 公开 API 结构
 
@@ -324,8 +324,6 @@ fn build_form_ui(ctx: &ViewModelContext) -> Element<()> {
 - `toast_snackbar`：`ToastHost` / `ToastQueue` 专项示例，覆盖语义提示、action、持久提示、短时提示和不同位置
 - `text_area`：受控 `Textarea` 编辑示例，读取自身源码但不保存
 - `multiple_vm_examples`：多页面 / 多 ViewModel 示例
-- `android_basic_window`：Android 入口示例
-- `ohos_basic_window`：OpenHarmony / HarmonyOS 入口示例
 
 这些示例是独立小工程，运行方式如下：
 
@@ -371,8 +369,6 @@ Button::new("发送通知").on_click(Command::new_with_context(|_, ctx| {
 - Windows：建议始终设置 `Application::app_id(...)`，这是通知身份的前置条件。
 - Linux：当前通过 `notify-rust` 发送通知，并支持 action 回调。
 - macOS：公开 API 已提供，但当前后端仍依赖额外 bridge，调用时可能返回错误。
-- Android：宿主 manifest 需要声明 `android.permission.POST_NOTIFICATIONS`；Android 13+ 需要先请求权限；action 回调只保证在应用进程仍然存活时有效。
-- OHOS：当前返回 unsupported。
 
 ## 图片、画布与视频
 
@@ -577,10 +573,7 @@ controller.load(source)?;
 
 ## 多窗口与平台支持
 
-桌面端当前包含 Windows、macOS、Linux 相关实现；同时提供：
-
-- `run_android` / `android` feature
-- `run_ohos` / `ohos` feature
+当前仅支持 Windows、macOS、Linux 桌面端。项目暂时放弃移动端支持，因此不再提供 `run_android`、`run_ohos`、`android` feature、`ohos` feature 或对应示例。
 
 多窗口通过 `WindowSpec` 描述，主窗口与子窗口共享同一个 ViewModel，适合做文档窗口、检查器窗口、浮动工具面板等场景。
 
@@ -706,8 +699,6 @@ cargo test
 
 ```bash
 cargo check --features video
-cargo check --features android
-cargo check --features ohos
 ```
 
 贡献时请注意：
@@ -719,7 +710,7 @@ cargo check --features ohos
 - 新增示例时保持示例独立、可运行，并同步更新 README 中的示例列表。
 - 音频相关改动需要考虑 `audio` feature、本机 FFmpeg 解码链路以及桌面端 `cpal` 播放行为。
 - 视频相关改动需要考虑 `video` / `video-static` feature，以及本机 FFmpeg 链接环境差异。
-- Android / OHOS / 桌面平台相关改动请使用 `cfg` 明确隔离，避免影响其他平台构建。
+- 桌面平台相关改动请使用 `cfg` 明确隔离，避免影响其他平台构建。
 - 文档和示例同样重要；如果你发现某个 API 已经可用但缺少说明，欢迎直接补充。
 
 较大的功能改动建议先开 issue 讨论设计方向，尤其是涉及公开 API、运行时事件、布局行为、渲染管线或平台抽象的改动。

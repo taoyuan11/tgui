@@ -20,8 +20,6 @@ cargo test -p tgui <module>::    # 按模块跑
 cargo check --features audio
 cargo check --features video
 cargo check --features video-static
-cargo check --features android
-cargo check --features ohos
 ```
 
 Benchmarks 在 `benches/`，需要 `bench-support` feature：
@@ -83,7 +81,7 @@ Application::new()
 - **Windows 通知**：必须 `Application::app_id(...)`，否则通知身份初始化失败。
 - **透明 / 无边框窗口**：`decorations(false)` 通常要配 `clear_color(Color::TRANSPARENT)`；renderer 根据 clear color alpha 选 surface alpha mode（Windows 优先 DX12 / DXGI visual swapchain）。
 - **公共 API 变更**：同步改 `src/lib.rs` 的 re-export、`README.md`、相关示例。`Cargo.toml` 的 `exclude` 把 `examples/*`、`*.png`、`.github/*`、`AGENTS.md`、`skills/*` 排除出 crate，发布前要确认资源不会进 crate。
-- **平台代码**：Android/OHOS 路径要 `cfg` 严格隔离；新增平台能力优先走 `src/platform/` 的后端抽象。
+- **平台代码**：桌面平台路径要 `cfg` 严格隔离；新增平台能力优先走 `src/platform/` 的后端抽象。
 - **文本输入**：改 `Input` / `Textarea` / IME / 选择 / 滚动 时，要把 `TextController`、`src/ui/widget/common.rs`、`src/ui/widget/core/`、`src/runtime/input/` 当成同一套基础设施一起改，不要只动一处。注意 UTF-8 边界、IME composition、caret 可见性、横向滚动。
 - **未跟踪文件 `Video.md`**：根目录这个文件是工作中的笔记，不要在没有明确请求时删除/重命名/覆盖。
 

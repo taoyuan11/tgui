@@ -145,7 +145,7 @@ impl DrawerDemoVm {
                             .gap(16.0)
                             .child(Text::new("底部面板"))
                             .child(Text::new("这是从底部滑出的抽屉"))
-                            .child(Text::new("常用于移动端的操作面板"))
+                            .child(Text::new("适合承载临时操作和上下文详情"))
                             .child(
                                 Button::new("关闭")
                                     .on_click(Command::new(Self::toggle_bottom_drawer)),

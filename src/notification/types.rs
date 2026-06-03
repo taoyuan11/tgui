@@ -31,13 +31,6 @@ impl Display for NotificationError {
 
 impl Error for NotificationError {}
 
-#[cfg(target_os = "android")]
-impl From<jni::errors::Error> for NotificationError {
-    fn from(err: jni::errors::Error) -> Self {
-        NotificationError::Backend(format!("jni error: {err}"))
-    }
-}
-
 /// 表示当前平台的通知权限状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationPermission {

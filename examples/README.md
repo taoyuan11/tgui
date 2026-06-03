@@ -176,17 +176,6 @@ cargo run --manifest-path examples/toast_snackbar/Cargo.toml
 
 `Textarea` 专项示例。启动时读取自身 `src/main.rs` 到受控文本状态中，界面里可自由编辑，但不会保存修改到磁盘。
 
-## 平台示例
-
-### `android_basic_window`
-
-Android 入口示例，展示如何在 Android 环境下启动 `tgui` 应用。  
-更详细说明见 [android_basic_window/README.md](D:/Project/Rust/libs/tgui/examples/android_basic_window/README.md)。
-
-### `ohos_basic_window`
-
-OpenHarmony / HarmonyOS 入口示例，展示如何导出并运行 `tgui` 的 OHOS 应用入口。
-
 ## 共享资源目录
 
 ### `static`

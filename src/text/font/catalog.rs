@@ -84,9 +84,6 @@ impl FontCatalog {
         &self,
         font_system: &mut FontSystem,
     ) -> Vec<(String, String)> {
-        #[cfg(any(target_os = "android", target_env = "ohos"))]
-        super::platform::load_mobile_system_fonts(font_system.db_mut());
-
         let mut aliases = Vec::with_capacity(self.named_fonts.len());
         for font in &self.named_fonts {
             let ids = font_system.db_mut().load_font_source(match &font.source {

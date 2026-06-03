@@ -5,14 +5,10 @@ use crate::foundation::error::TguiError;
 use crate::log::Log;
 #[cfg(target_os = "windows")]
 use crate::notification::prepare_platform_notifications;
-#[cfg(all(target_os = "android", feature = "android"))]
-use crate::platform::android::activity::AndroidApp;
 use crate::platform::backend::event_loop::{ActiveEventLoop, ControlFlow};
 use crate::platform::backend::window::Window;
 use crate::platform::backend::EventLoop;
 use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-#[cfg(all(target_env = "ohos", feature = "ohos"))]
-use crate::platform::ohos::OhosApp;
 use crate::platform::window::WindowAttributes;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -152,26 +148,6 @@ pub(super) fn prepare_notifications_for_runtime(_config: &ApplicationConfig) {
 
 pub(super) fn build_event_loop(control_flow: ControlFlow) -> Result<EventLoop, TguiError> {
     let event_loop = EventLoop::new()?;
-    event_loop.set_control_flow(control_flow);
-    Ok(event_loop)
-}
-
-#[cfg(all(target_os = "android", feature = "android"))]
-pub(super) fn build_event_loop_with_android_app(
-    control_flow: ControlFlow,
-    app: AndroidApp,
-) -> Result<EventLoop, TguiError> {
-    let event_loop = EventLoop::with_android_app(app)?;
-    event_loop.set_control_flow(control_flow);
-    Ok(event_loop)
-}
-
-#[cfg(all(target_env = "ohos", feature = "ohos"))]
-pub(super) fn build_event_loop_with_ohos_app(
-    control_flow: ControlFlow,
-    app: OhosApp,
-) -> Result<EventLoop, TguiError> {
-    let event_loop = EventLoop::with_ohos_app(app)?;
     event_loop.set_control_flow(control_flow);
     Ok(event_loop)
 }

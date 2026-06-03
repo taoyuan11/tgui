@@ -104,7 +104,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let mut attributes = WindowAttributes::default()
-            .with_transparent(!cfg!(all(target_env = "ohos", feature = "ohos")))
+            .with_transparent(true)
             .with_decorations(self.config.decorations)
             .with_title(self.config.title.clone())
             .with_surface_size(self.config.size)
@@ -168,17 +168,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.theme = resolve_theme(
             &self.active_theme_selection(),
             &self.active_theme_set(),
-            resolve_window_theme(
-                Some(window.as_ref()),
-                #[cfg(all(target_os = "android", feature = "android"))]
-                self.android_app.as_ref(),
-            ),
+            resolve_window_theme(Some(window.as_ref())),
         );
-        #[cfg(all(target_os = "android", feature = "android"))]
-        {
-            let theme = self.theme.clone();
-            self.sync_system_bar_style(&theme);
-        }
         let clear_color =
             if self.window_bindings.clear_color.is_some() || self.config.clear_color_overridden {
                 self.config.clear_color

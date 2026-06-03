@@ -711,7 +711,7 @@ fn build_toast_card<VM: 'static>(
     let show_hover_pause = cfg!(any(
         target_os = "windows",
         target_os = "macos",
-        all(target_os = "linux", not(target_env = "ohos"))
+        target_os = "linux"
     ));
 
     let title_text_style = style.title_text_style.clone();
@@ -871,16 +871,7 @@ fn build_toast_card<VM: 'static>(
 
 fn default_placement(placement: ToastPlacement) -> ToastPlacement {
     match placement {
-        ToastPlacement::Adaptive => {
-            #[cfg(any(target_os = "android", target_env = "ohos"))]
-            {
-                ToastPlacement::BottomCenter
-            }
-            #[cfg(not(any(target_os = "android", target_env = "ohos")))]
-            {
-                ToastPlacement::BottomEnd
-            }
-        }
+        ToastPlacement::Adaptive => ToastPlacement::BottomEnd,
         other => other,
     }
 }
@@ -907,12 +898,8 @@ fn ordered_entries<VM>(entries: Vec<ToastEntry<VM>>) -> Vec<ToastEntry<VM>> {
 }
 
 fn toast_width(style: &ToastStyle, viewport: Rect) -> Dp {
-    let mobile_like = cfg!(any(target_os = "android", target_env = "ohos"));
-    if mobile_like {
-        (viewport.width - style.margin * 2.0).max(style.min_width)
-    } else {
-        style.max_width
-    }
+    let _ = viewport;
+    style.max_width
 }
 
 fn pct_or_fixed(width: Dp) -> Value<Length> {

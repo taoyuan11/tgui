@@ -32,7 +32,7 @@ crate 信息：
 - `src/rendering/shader/`：WGSL shader。
 - `src/media/mod.rs`：图片、SVG、网络/本地/内存媒体加载，纹理缓存，SVG 栅格化，canvas shadow 缓存。
 - `src/audio/`：启用 `audio` feature 后的 `AudioController`、`Audio` 组件、播放状态与 FFmpeg/CPAL 后端。
-- `src/dialog/mod.rs`：同步和异步原生对话框封装；桌面用 `rfd`，Android 通过 `src/dialog/platform/android_bridge`（库内附带 `bridge.dex` + JNI `InMemoryDexClassLoader`）支持异步消息和文件对话框，OHOS 仍返回 unsupported。
+- `src/dialog/mod.rs`：同步和异步原生对话框封装；桌面端通过 `rfd` 提供文件选择和消息框能力。
 - `src/notification/mod.rs`：系统通知抽象，包含通知选项、权限状态、动作回调分发与平台后端实现。
 - `src/platform/mod.rs`：平台抽象和不同 winit 后端的选择。
 - `src/video/`：启用 `video` feature 后的 `VideoController`、`VideoSurface`、FFmpeg 后端。
@@ -44,8 +44,6 @@ crate 信息：
 `Cargo.toml` 中的 features：
 
 - `default = []`
-- `android`：启用 Android 入口和 `winit-android`。
-- `ohos`：启用 HarmonyOS / OpenHarmony 入口和 `tgui-winit-ohos`。
 - `audio`：启用 `ffmpeg-next` 音频解码能力。
 - `video`：在 `audio` 基础上启用视频能力。
 - `video-static`：在 `video` 基础上启用 `ffmpeg-next/static`。
@@ -53,8 +51,6 @@ crate 信息：
 平台依赖按 target 区分：
 
 - Windows、macOS、Linux：桌面窗口、剪贴板、对话框、音频相关依赖。
-- Android：`jni`、`winit-android`。
-- OHOS：`hilog-sys`、`tgui-winit-ohos`。
 
 Windows 下启用 `video` feature 时，`build.rs` 会额外链接 `strmiids` 和 `mfuuid`。
 
@@ -176,7 +172,6 @@ Application::new()
 - Windows：要求 `Application::app_id(...)`，运行时会准备通知身份。
 - Linux：当前通过 `notify-rust` 发送通知并监听 action。
 - macOS：接口已公开，但当前仍依赖 UserNotifications bridge，调用时可能返回 backend error。
-- Android / OHOS：当前返回 unsupported。
 
 ## 音频系统
 
@@ -214,8 +209,6 @@ Application::new()
 - `demo`
 - `text_area`
 - `multiple_vm_examples`
-- `android_basic_window`
-- `ohos_basic_window`
 
 运行桌面示例：
 
@@ -241,8 +234,6 @@ cargo fmt
 ```bash
 cargo check --features video
 cargo check --features video-static
-cargo check --features android
-cargo check --features ohos
 ```
 
 运行某个测试：

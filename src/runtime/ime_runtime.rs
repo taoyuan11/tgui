@@ -61,32 +61,25 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn sync_ime_state(&mut self) {
-        #[cfg(all(target_os = "android", feature = "android"))]
-        {
-            self.sync_android_text_input_state();
-        }
-        #[cfg(not(all(target_os = "android", feature = "android")))]
-        {
-            if let Some(request_data) = self.ime_request_data_for_text_input() {
-                let capabilities = ImeCapabilities::new()
-                    .with_hint_and_purpose()
-                    .with_cursor_area();
-                let capabilities = if request_data.surrounding_text.is_some() {
-                    capabilities.with_surrounding_text()
-                } else {
-                    capabilities
-                };
-                if let Some(enable) = ImeEnableRequest::new(capabilities, request_data.clone()) {
-                    if let Some(window) = self.window.as_ref() {
-                        let _ = window.request_ime_update(ImeRequest::Enable(enable));
-                    }
-                }
+        if let Some(request_data) = self.ime_request_data_for_text_input() {
+            let capabilities = ImeCapabilities::new()
+                .with_hint_and_purpose()
+                .with_cursor_area();
+            let capabilities = if request_data.surrounding_text.is_some() {
+                capabilities.with_surrounding_text()
+            } else {
+                capabilities
+            };
+            if let Some(enable) = ImeEnableRequest::new(capabilities, request_data.clone()) {
                 if let Some(window) = self.window.as_ref() {
-                    let _ = window.request_ime_update(ImeRequest::Update(request_data));
+                    let _ = window.request_ime_update(ImeRequest::Enable(enable));
                 }
-            } else if let Some(window) = self.window.as_ref() {
-                let _ = window.request_ime_update(ImeRequest::Disable);
             }
+            if let Some(window) = self.window.as_ref() {
+                let _ = window.request_ime_update(ImeRequest::Update(request_data));
+            }
+        } else if let Some(window) = self.window.as_ref() {
+            let _ = window.request_ime_update(ImeRequest::Disable);
         }
     }
 }

@@ -61,7 +61,7 @@
 | `image_raster_cache_entries`    | 8      | 单个位图文档保留的多分辨率纹理数               |
 | `svg_raster_cache_entries`      | 4      | 单个 SVG 文档保留的多分辨率纹理数              |
 
-任意字段为 `0` 时禁用对应缓存（每次都会重新生成纹理，仅适合内存极度紧张的场景）。`ResourceBudget::compact()` 提供一组适合移动端 / 嵌入式的紧凑值。
+任意字段为 `0` 时禁用对应缓存（每次都会重新生成纹理，仅适合内存极度紧张的场景）。`ResourceBudget::compact()` 提供一组适合内存受限环境的紧凑值。
 
 ```rust
 use tgui::application::{Application, ResourceBudget};
@@ -108,7 +108,6 @@ canvas_shadow + widget_shadow 默认上限 = 40 张
 `tgui` 使用 winit 的 `ControlFlow::Wait`（或 `WaitUntil(deadline)`）来挂起事件循环，无事件 / 无动画 / 无 caret 闪烁时事件循环不会空转。具体规则在 `src/runtime/timing.rs::drive_animations` 里：
 
 - 有动画 / smooth scroll / pending click / caret blink / key repeat 时，`WaitUntil(next_deadline)`；
-- Android 系统主题轮询时，`WaitUntil(now + 500ms)`；
 - 其它时刻，`Wait`。
 
 如果在 `cargo flamegraph` / `dtrace` 下观察到空闲时仍有持续 CPU 占用，可优先排查：

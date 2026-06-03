@@ -31,8 +31,6 @@ use crate::platform::dpi::PhysicalSize;
 use crate::text::font::FontCatalog;
 use crate::ui::widget::ScenePrimitives;
 use cosmic_text::{FontSystem, SwashCache};
-#[cfg(all(target_env = "ohos", feature = "ohos"))]
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 pub enum RenderStatus {
     Rendered,

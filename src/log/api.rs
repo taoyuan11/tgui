@@ -48,7 +48,7 @@ impl FromStr for LogLevel {
 
 /// 跨平台日志工具。
 ///
-/// 桌面端输出到 `stderr`，Android 输出到 `logcat`，OHOS 输出到 `hilog`。
+/// 当前桌面端输出到 `stderr`。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Log {
     tag: Arc<str>,

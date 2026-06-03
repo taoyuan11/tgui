@@ -64,8 +64,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn render_current_frame(&mut self) -> Result<RenderStatus, TguiError> {
-        // Android can deliver a redraw before a replacement surface is ready.
-        // In that case we simply skip the frame and wait for the next resume/redraw.
+        // Some lifecycle paths can request redraw before a renderer exists.
+        // In that case we skip the frame and wait for the next resume/redraw.
         if self.renderer.is_none() {
             return Ok(RenderStatus::SkipFrame);
         }
@@ -124,39 +124,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         status
     }
 
-    #[cfg(all(target_os = "android", feature = "android"))]
-    pub(in crate::runtime) fn render_immediately(&mut self, event_loop: &dyn ActiveEventLoop) {
-        if self.window.is_none() || self.renderer.is_none() {
-            return;
-        }
-
-        match self.render_current_frame() {
-            Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
-            Ok(RenderStatus::ReconfigureSurface) => {
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.reconfigure();
-                }
-                match self.render_current_frame() {
-                    Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
-                    Ok(RenderStatus::ReconfigureSurface) => {}
-                    Err(error) => self.fail(event_loop, error),
-                }
-            }
-            Err(error) => self.fail(event_loop, error),
-        }
-    }
-
     pub(in crate::runtime) fn render_hidden_frame(
         &mut self,
         event_loop: &dyn ActiveEventLoop,
     ) -> bool {
-        #[cfg(all(target_env = "ohos", feature = "ohos"))]
-        {
-            let _ = event_loop;
-            return true;
-        }
-
-        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
         let status = match self.render_current_frame() {
             Ok(status) => status,
             Err(error) => {
@@ -165,7 +136,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         };
 
-        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
         if matches!(status, RenderStatus::ReconfigureSurface) {
             if let Some(renderer) = self.renderer.as_mut() {
                 renderer.reconfigure();
@@ -177,7 +147,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
         true
     }
 
@@ -211,12 +180,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        #[cfg(all(target_os = "android", feature = "android"))]
-        {
-            let theme = self.theme.clone();
-            self.sync_system_bar_style(&theme);
-        }
-
         if !self.render_hidden_frame(event_loop) {
             return;
         }
@@ -230,9 +193,5 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.cached_scene = None;
         self.media_event_states.clear();
         self.lifecycle_event_states.clear();
-        #[cfg(all(target_os = "android", feature = "android"))]
-        {
-            self.system_bar_style = None;
-        }
     }
 }

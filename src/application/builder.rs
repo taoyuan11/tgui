@@ -1,10 +1,5 @@
 use std::sync::Arc;
 
-#[cfg(all(target_os = "android", feature = "android"))]
-use crate::platform::android::activity::AndroidApp;
-#[cfg(all(target_env = "ohos", feature = "ohos"))]
-use crate::platform::ohos::OhosApp;
-
 use crate::animation::AnimationCoordinator;
 use crate::foundation::binding::{InvalidationSignal, Signal, ViewModelContext};
 use crate::foundation::color::Color;
@@ -139,101 +134,6 @@ where
         let (config, view_model, windows, invalidation, animations) = self.into_runtime_parts();
 
         BoundRuntime::new(config, view_model, windows, invalidation, animations)?.run()
-    }
-
-    /// 在 Android 平台上启动应用。
-    #[cfg(all(target_os = "android", feature = "android"))]
-    pub fn run_android(self, app: AndroidApp) -> Result<(), TguiError> {
-        let (config, view_model, windows, invalidation, animations) = self.into_runtime_parts();
-
-        if windows.explicit_windows {
-            return Err(TguiError::Unsupported(
-                "multi-window applications are not supported on Android yet".to_string(),
-            ));
-        }
-
-        let main = (windows.factory)(&view_model)
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| WindowSpec::new("main"));
-        let window_bindings = main.build_window_bindings(&view_model);
-        let widget_tree = main.build_widget_tree(&view_model);
-        let commands = main.commands;
-
-        BoundRuntime::new_android(
-            config,
-            view_model,
-            window_bindings,
-            widget_tree,
-            commands,
-            invalidation,
-            animations,
-            app,
-        )?
-        .run()
-    }
-
-    /// 在 OHOS 平台上启动应用。
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    pub fn run_ohos(self, app: OhosApp) -> Result<(), TguiError> {
-        let (config, view_model, windows, invalidation, animations) = self.into_runtime_parts();
-
-        if windows.explicit_windows {
-            return Err(TguiError::Unsupported(
-                "multi-window applications are not supported on OHOS yet".to_string(),
-            ));
-        }
-
-        let main = (windows.factory)(&view_model)
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| WindowSpec::new("main"));
-        let window_bindings = main.build_window_bindings(&view_model);
-        let widget_tree = main.build_widget_tree(&view_model);
-        let commands = main.commands;
-
-        BoundRuntime::new_ohos(
-            config,
-            view_model,
-            window_bindings,
-            widget_tree,
-            commands,
-            invalidation,
-            animations,
-            app,
-        )?
-        .run()
-    }
-
-    /// 构建 OHOS 平台处理器。
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    pub fn into_ohos_handler(self) -> impl winit_core::application::ApplicationHandler + Send
-    where
-        VM: Send,
-    {
-        let (config, view_model, windows, invalidation, animations) = self.into_runtime_parts();
-
-        if windows.explicit_windows {
-            panic!("multi-window applications are not supported on OHOS yet");
-        }
-
-        let main = (windows.factory)(&view_model)
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| WindowSpec::new("main"));
-        let window_bindings = main.build_window_bindings(&view_model);
-        let widget_tree = main.build_widget_tree(&view_model);
-        let commands = main.commands;
-
-        BoundRuntime::handler(
-            config,
-            view_model,
-            window_bindings,
-            widget_tree,
-            commands,
-            invalidation,
-            animations,
-        )
     }
 
     fn into_runtime_parts(

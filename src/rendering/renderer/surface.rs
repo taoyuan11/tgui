@@ -1,8 +1,5 @@
 use std::sync::Arc;
 
-#[cfg(all(target_env = "ohos", feature = "ohos"))]
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-
 use crate::application::MsaaMode;
 use crate::foundation::color::Color as TguiColor;
 use crate::foundation::error::TguiError;
@@ -47,46 +44,12 @@ pub(super) fn create_surface(
     instance: &wgpu::Instance,
     window: Arc<dyn Window>,
 ) -> Result<wgpu::Surface<'static>, TguiError> {
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    {
-        let raw_display_handle = window.display_handle().map_err(|error| {
-            TguiError::TextRender(format!("display handle unavailable: {error}"))
-        })?;
-        let raw_window_handle = window.window_handle().map_err(|error| {
-            TguiError::TextRender(format!("window handle unavailable: {error}"))
-        })?;
-
-        return Ok(unsafe {
-            // SAFETY: OHOS 后端要求显式按 raw handle 创建 surface，因为
-            // `wgpu::Instance::create_surface(window)` 在 ohos 上拿不到合适的
-            // 实现。`raw_display_handle` / `raw_window_handle` 来自 `window`，
-            // 与 `Arc<dyn Window>` 同生命周期；后者会作为 `'static` 句柄被
-            // surface 长期持有，但 surface 本身在窗口关闭前不会脱离持有者，
-            // 因此符合 wgpu 的要求。
-            instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                raw_display_handle: Some(raw_display_handle.as_raw()),
-                raw_window_handle: raw_window_handle.as_raw(),
-            })?
-        });
-    }
-
-    #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
-    {
-        instance.create_surface(window).map_err(Into::into)
-    }
+    instance.create_surface(window).map_err(Into::into)
 }
 
 pub(super) fn required_device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    {
-        return adapter.limits();
-    }
-
-    #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
-    {
-        let _ = adapter;
-        wgpu::Limits::default()
-    }
+    let _ = adapter;
+    wgpu::Limits::default()
 }
 
 pub(super) fn resolve_surface_msaa_sample_count(
@@ -94,11 +57,6 @@ pub(super) fn resolve_surface_msaa_sample_count(
     format: wgpu::TextureFormat,
     requested_mode: MsaaMode,
 ) -> u32 {
-    #[cfg(all(target_os = "android", feature = "android"))]
-    if adapter.get_info().backend == wgpu::Backend::Gl {
-        return 1;
-    }
-
     let features = adapter.get_texture_format_features(format);
     supported_msaa_sample_count(features.flags, requested_mode)
 }
@@ -191,24 +149,7 @@ pub(super) fn default_backends() -> wgpu::Backends {
         return wgpu::Backends::METAL;
     }
 
-    #[cfg(all(
-        target_os = "android",
-        feature = "android",
-        any(target_arch = "x86", target_arch = "x86_64")
-    ))]
-    {
-        return wgpu::Backends::GL;
-    }
-
-    #[cfg(any(
-        target_os = "windows",
-        all(target_os = "linux", not(target_env = "ohos")),
-        all(
-            target_os = "android",
-            feature = "android",
-            not(any(target_arch = "x86", target_arch = "x86_64"))
-        )
-    ))]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
         #[cfg(target_os = "windows")]
         {
@@ -224,74 +165,38 @@ pub(super) fn default_backends() -> wgpu::Backends {
 }
 
 pub(super) fn surface_present_mode(modes: &[wgpu::PresentMode]) -> wgpu::PresentMode {
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    {
-        return modes
-            .iter()
-            .copied()
-            .find(|mode| *mode == wgpu::PresentMode::Fifo)
-            .or_else(|| {
-                modes
-                    .iter()
-                    .copied()
-                    .find(|mode| *mode == wgpu::PresentMode::AutoVsync)
-            })
-            .or_else(|| {
-                modes
-                    .iter()
-                    .copied()
-                    .find(|mode| *mode == wgpu::PresentMode::AutoNoVsync)
-            })
-            .unwrap_or(wgpu::PresentMode::Fifo);
-    }
-
-    #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
-    {
-        modes
-            .iter()
-            .copied()
-            .find(|mode| *mode == wgpu::PresentMode::AutoNoVsync)
-            .or_else(|| {
-                modes
-                    .iter()
-                    .copied()
-                    .find(|mode| *mode == wgpu::PresentMode::AutoVsync)
-            })
-            .or_else(|| {
-                modes
-                    .iter()
-                    .copied()
-                    .find(|mode| *mode == wgpu::PresentMode::Fifo)
-            })
-            .unwrap_or(wgpu::PresentMode::Fifo)
-    }
+    modes
+        .iter()
+        .copied()
+        .find(|mode| *mode == wgpu::PresentMode::AutoNoVsync)
+        .or_else(|| {
+            modes
+                .iter()
+                .copied()
+                .find(|mode| *mode == wgpu::PresentMode::AutoVsync)
+        })
+        .or_else(|| {
+            modes
+                .iter()
+                .copied()
+                .find(|mode| *mode == wgpu::PresentMode::Fifo)
+        })
+        .unwrap_or(wgpu::PresentMode::Fifo)
 }
 
 pub(super) fn surface_alpha_mode(
     modes: &[wgpu::CompositeAlphaMode],
     clear_color: TguiColor,
 ) -> wgpu::CompositeAlphaMode {
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    {
-        return modes
-            .iter()
-            .copied()
-            .find(|mode| *mode == wgpu::CompositeAlphaMode::Opaque)
-            .unwrap_or(wgpu::CompositeAlphaMode::Auto);
+    if clear_color.a < 255 {
+        return transparent_surface_alpha_mode(modes);
     }
 
-    #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
-    {
-        if clear_color.a < 255 {
-            return transparent_surface_alpha_mode(modes);
-        }
-
-        modes
-            .iter()
-            .copied()
-            .find(|mode| *mode == wgpu::CompositeAlphaMode::Opaque)
-            .unwrap_or(wgpu::CompositeAlphaMode::Auto)
-    }
+    modes
+        .iter()
+        .copied()
+        .find(|mode| *mode == wgpu::CompositeAlphaMode::Opaque)
+        .unwrap_or(wgpu::CompositeAlphaMode::Auto)
 }
 
 pub(super) fn surface_clear_color(color: TguiColor) -> wgpu::Color {
@@ -314,24 +219,11 @@ fn instance_descriptor(clear_color: TguiColor) -> wgpu::InstanceDescriptor {
                 wgpu::Dx12SwapchainKind::DxgiFromVisual;
         }
     }
-    #[cfg(all(target_os = "android", feature = "android"))]
-    {
-        descriptor.flags = wgpu::InstanceFlags::empty();
-        descriptor.backend_options.gl.debug_fns = wgpu::GlDebugFns::Disabled;
-    }
     descriptor
 }
 
 fn adapter_power_preference() -> wgpu::PowerPreference {
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    {
-        return wgpu::PowerPreference::HighPerformance;
-    }
-
-    #[cfg(not(all(target_env = "ohos", feature = "ohos")))]
-    {
-        wgpu::PowerPreference::default()
-    }
+    wgpu::PowerPreference::default()
 }
 
 fn supported_msaa_sample_count(

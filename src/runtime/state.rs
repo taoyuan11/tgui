@@ -667,21 +667,13 @@ pub(super) fn collect_pending_lifecycle_events<VM>(
 
 #[derive(Default)]
 pub(super) struct ClipboardService {
-    #[cfg(any(
-        target_os = "windows",
-        target_os = "macos",
-        all(target_os = "linux", not(target_env = "ohos"))
-    ))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     inner: Option<arboard::Clipboard>,
 }
 
 impl ClipboardService {
     pub(super) fn get_text(&mut self) -> Option<String> {
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            all(target_os = "linux", not(target_env = "ohos"))
-        ))]
+        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
         {
             if self.inner.is_none() {
                 self.inner = arboard::Clipboard::new().ok();
@@ -695,11 +687,7 @@ impl ClipboardService {
     }
 
     pub(super) fn set_text(&mut self, text: String) {
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            all(target_os = "linux", not(target_env = "ohos"))
-        ))]
+        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
         {
             if self.inner.is_none() {
                 self.inner = arboard::Clipboard::new().ok();

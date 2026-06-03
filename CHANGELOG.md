@@ -46,7 +46,7 @@
 
 ### winit 升级策略
 
-- 当前依赖：`winit-core/-win32/-wayland/-x11/-appkit/-android = "0.31.0-beta.2"`、`tgui-winit-ohos = "0.4.11"`。
+- 当前依赖：`winit-core/-win32/-wayland/-x11/-appkit = "0.31.0-beta.2"`。
 - 在 `winit 0.31` 进入 stable 之前会保持 beta 系列，所有平台后端版本一同升级。stable 化时会作为一次显式 minor 升级，并在迁移说明中列出 lockfile 影响。
 
 [Unreleased]: https://github.com/nandebishitaoyuan/tgui/compare/v0.1.8...HEAD

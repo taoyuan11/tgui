@@ -10,7 +10,7 @@ Crate metadata: package `tgui`, current version `0.1.8`, edition `2021`, license
 
 - `Cargo.toml`: crate metadata, features, target-specific dependencies, publish excludes.
 - `src/lib.rs`: public API exports and `prelude`.
-- `src/application/mod.rs`: `Application`, `WindowSpec`, multi-window declarations, window decoration configuration, window bindings, platform run entry points.
+- `src/application/mod.rs`: `Application`, `WindowSpec`, multi-window declarations, window decoration configuration, window bindings, and the desktop run entry point.
 - `src/foundation/binding/mod.rs`: `ViewModelContext`, `State`, `Signal`, `TextController`, dependency tracking, invalidation.
 - `src/foundation/view_model/mod.rs`: `ViewModel`, `Command`, `ValueCommand`, `CommandContext`.
 - `src/foundation/window_control.rs`: `WindowControl`, `WindowResizeDirection`, and queued native window requests for command handlers.
@@ -23,7 +23,7 @@ Crate metadata: package `tgui`, current version `0.1.8`, edition `2021`, license
 - `src/rendering/renderer.rs`: `wgpu` renderer and pipelines for rects, brushes, meshes, text, textures, transparent window surfaces, backdrop blur.
 - `src/rendering/shader/*.wgsl`: shader code.
 - `src/media/mod.rs`: raster image/SVG/network/memory loading, texture and shadow caches.
-- `src/dialog/mod.rs`: native dialogs through `rfd` on desktop; unsupported stubs on Android/OHOS.
+- `src/dialog/mod.rs`: native dialogs through `rfd` on desktop.
 - `src/notification/mod.rs`: notifications, permissions, platform dispatch, and interactive action callbacks.
 - `src/platform/mod.rs`: platform abstraction and selected winit backend.
 - `src/video/`: `video` feature API and FFmpeg backend.
@@ -32,13 +32,11 @@ Crate metadata: package `tgui`, current version `0.1.8`, edition `2021`, license
 ## Features
 
 - `default = []`
-- `android`: Android entry and `winit-android`.
-- `ohos`: HarmonyOS/OpenHarmony entry and `tgui-winit-ohos`.
 - `audio`: enables `ffmpeg-next` for audio decode/playback support.
 - `video`: enables video on top of `audio`.
 - `video-static`: enables `video` plus `ffmpeg-next/static`.
 
-Desktop targets use windowing, clipboard, dialog, raw-window-handle, logging, and audio dependencies. Android uses `jni` and `winit-android`. OHOS uses `hilog-sys` and `tgui-winit-ohos`. Windows video builds link extra system libraries in `build.rs`.
+Desktop targets use windowing, clipboard, dialog, raw-window-handle, logging, and audio dependencies. Windows video builds link extra system libraries in `build.rs`.
 
 ## Public API Groups
 
@@ -146,8 +144,6 @@ Use `rg --files examples -g Cargo.toml` before editing docs because README prose
 - `demo`
 - `text_area`
 - `multiple_vm_examples`
-- `android_basic_window`
-- `ohos_basic_window`
 
 Run examples with:
 

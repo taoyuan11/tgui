@@ -168,8 +168,6 @@ fn test_handler_with_config<VM: crate::foundation::view_model::ViewModel>(
         Some(dialog_receiver),
         notification_dispatcher,
         Some(notification_receiver),
-        #[cfg(all(target_os = "android", feature = "android"))]
-        None,
     )
 }
 
@@ -378,8 +376,6 @@ fn reduced_motion_defaults_and_window_binding_override() {
         Some(dialog_receiver),
         notification_dispatcher,
         Some(notification_receiver),
-        #[cfg(all(target_os = "android", feature = "android"))]
-        None,
     );
     assert!(handler.active_reduced_motion());
 

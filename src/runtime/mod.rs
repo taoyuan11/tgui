@@ -1,5 +1,3 @@
-#[cfg(all(target_os = "android", feature = "android"))]
-mod android_text_input;
 mod application_handler;
 mod binding_sync;
 mod bootstrap;
@@ -27,10 +25,6 @@ mod timing;
 mod tooltip;
 mod windows;
 
-#[cfg(all(target_os = "android", feature = "android"))]
-use self::bootstrap::build_event_loop_with_android_app;
-#[cfg(all(target_env = "ohos", feature = "ohos"))]
-use self::bootstrap::build_event_loop_with_ohos_app;
 #[cfg(test)]
 pub(super) use self::bootstrap::centered_window_position_for_monitor;
 pub(super) use self::bootstrap::window_sync_priority;
@@ -53,10 +47,6 @@ use self::state::{
     HoverTransitionHandler, HoveredWidget, PendingClick, PendingLifecycleEvent, PendingMediaEvent,
     ScrollbarDrag, SliderDrag, SmoothScrollState, TextInputBufferState, TextInputSessionConfig,
     TextSelectionDrag, TooltipState, TouchScrollDrag,
-};
-#[cfg(all(target_os = "android", feature = "android"))]
-use self::theme::{
-    android_font_scale, apply_android_system_bar_style, is_light_color, SystemBarStyle,
 };
 use self::theme::{resolve_theme, resolve_window_theme};
 use self::windows::MultiWindowHandler;
@@ -81,8 +71,6 @@ use crate::media::MediaManager;
 use crate::notification::{
     async_notification_channel, AsyncNotificationDispatcher, AsyncNotificationReceiver,
 };
-#[cfg(all(target_os = "android", feature = "android"))]
-use crate::platform::android::activity::AndroidApp;
 use crate::platform::backend::application::ApplicationHandler;
 use crate::platform::backend::event_loop::{ActiveEventLoop, ControlFlow};
 use crate::platform::backend::window::Window;
@@ -91,8 +79,6 @@ use crate::platform::cursor::CursorIcon;
 use crate::platform::dpi::PhysicalPosition;
 use crate::platform::event::{ElementState, WindowEvent};
 use crate::platform::keyboard::ModifiersState;
-#[cfg(all(target_env = "ohos", feature = "ohos"))]
-use crate::platform::ohos::{OhosApp, WindowExtOhos};
 use crate::platform::window::{
     ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeSurroundingText,
     Theme as WindowTheme, WindowAttributes, WindowId,
@@ -127,9 +113,6 @@ pub(super) const SWIPE_ACTIVATION_THRESHOLD: f32 = 12.0;
 pub(super) const SWIPE_AXIS_LOCK_THRESHOLD: f32 = 8.0;
 pub(super) const EDGE_SWIPE_BAND: f32 = 24.0;
 pub(super) const PINCH_ACTIVATION_THRESHOLD: f32 = 12.0;
-#[cfg(all(target_os = "android", feature = "android"))]
-const ANDROID_SYSTEM_THEME_POLL_INTERVAL: Duration = Duration::from_millis(500);
-
 pub struct BoundRuntime<VM> {
     event_loop: EventLoop,
     config: ApplicationConfig,
@@ -138,8 +121,6 @@ pub struct BoundRuntime<VM> {
     single_window: Option<SingleWindowSetup<VM>>,
     invalidation: InvalidationSignal,
     animations: AnimationCoordinator,
-    #[cfg(all(target_os = "android", feature = "android"))]
-    android_app: Option<AndroidApp>,
 }
 
 struct SingleWindowSetup<VM> {
@@ -166,67 +147,6 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             single_window: None,
             invalidation: invalidation.clone(),
             animations,
-            #[cfg(all(target_os = "android", feature = "android"))]
-            android_app: None,
-        })
-    }
-
-    #[cfg(all(target_os = "android", feature = "android"))]
-    pub fn new_android(
-        config: ApplicationConfig,
-        view_model: VM,
-        window_bindings: WindowBindings,
-        widget_tree: Option<WidgetTree<VM>>,
-        commands: Vec<WindowCommand<VM>>,
-        invalidation: InvalidationSignal,
-        animations: AnimationCoordinator,
-        app: AndroidApp,
-    ) -> Result<Self, TguiError> {
-        let event_loop = build_event_loop_with_android_app(ControlFlow::Wait, app.clone())?;
-        Ok(Self {
-            event_loop,
-            config,
-            view_model: Arc::new(Mutex::new(view_model)),
-            windows: None,
-            single_window: Some(SingleWindowSetup {
-                key: "main".to_string(),
-                window_bindings,
-                widget_tree,
-                commands,
-            }),
-            invalidation: invalidation.clone(),
-            animations,
-            android_app: Some(app),
-        })
-    }
-
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    pub fn new_ohos(
-        config: ApplicationConfig,
-        view_model: VM,
-        window_bindings: WindowBindings,
-        widget_tree: Option<WidgetTree<VM>>,
-        commands: Vec<WindowCommand<VM>>,
-        invalidation: InvalidationSignal,
-        animations: AnimationCoordinator,
-        app: OhosApp,
-    ) -> Result<Self, TguiError> {
-        let event_loop = build_event_loop_with_ohos_app(ControlFlow::Wait, app)?;
-        Ok(Self {
-            event_loop,
-            config,
-            view_model: Arc::new(Mutex::new(view_model)),
-            windows: None,
-            single_window: Some(SingleWindowSetup {
-                key: "main".to_string(),
-                window_bindings,
-                widget_tree,
-                commands,
-            }),
-            invalidation: invalidation.clone(),
-            animations,
-            #[cfg(all(target_os = "android", feature = "android"))]
-            android_app: None,
         })
     }
 
@@ -249,38 +169,6 @@ impl<VM: ViewModel> BoundRuntime<VM> {
         }
 
         Ok(())
-    }
-
-    #[cfg(all(target_env = "ohos", feature = "ohos"))]
-    pub(crate) fn handler(
-        config: ApplicationConfig,
-        view_model: VM,
-        window_bindings: WindowBindings,
-        widget_tree: Option<WidgetTree<VM>>,
-        commands: Vec<WindowCommand<VM>>,
-        invalidation: InvalidationSignal,
-        animations: AnimationCoordinator,
-    ) -> BoundRuntimeHandler<VM> {
-        let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
-        let (notification_dispatcher, notification_receiver) = async_notification_channel();
-        BoundRuntimeHandler::new(
-            "main".to_string(),
-            1,
-            WindowRole::Main,
-            config,
-            Arc::new(Mutex::new(view_model)),
-            window_bindings,
-            widget_tree,
-            commands,
-            invalidation,
-            animations,
-            dialog_dispatcher,
-            Some(dialog_receiver),
-            notification_dispatcher,
-            Some(notification_receiver),
-            #[cfg(all(target_os = "android", feature = "android"))]
-            None,
-        )
     }
 
     fn into_parts(self) -> (EventLoop, MultiWindowHandler<VM>) {
@@ -316,8 +204,6 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             Some(dialog_receiver),
             notification_dispatcher,
             Some(notification_receiver),
-            #[cfg(all(target_os = "android", feature = "android"))]
-            self.android_app,
         );
         (self.event_loop, handler)
     }
@@ -437,10 +323,6 @@ pub struct BoundRuntimeHandler<VM> {
     dialog_receiver: Option<AsyncDialogReceiver<VM>>,
     notification_dispatcher: AsyncNotificationDispatcher<VM>,
     notification_receiver: Option<AsyncNotificationReceiver<VM>>,
-    #[cfg(all(target_os = "android", feature = "android"))]
-    android_app: Option<AndroidApp>,
-    #[cfg(all(target_os = "android", feature = "android"))]
-    system_bar_style: Option<SystemBarStyle>,
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
@@ -459,7 +341,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         dialog_receiver: Option<AsyncDialogReceiver<VM>>,
         notification_dispatcher: AsyncNotificationDispatcher<VM>,
         notification_receiver: Option<AsyncNotificationReceiver<VM>>,
-        #[cfg(all(target_os = "android", feature = "android"))] android_app: Option<AndroidApp>,
     ) -> Self {
         let font_manager = FontManager::new(&config.fonts);
         let theme = match &config.theme {
@@ -469,14 +350,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let theme_store = ThemeStore::new(config.theme_set.clone(), ThemeMode::System, None);
         let resource_budget = config.resource_budget;
         let reduced_motion = config.reduced_motion;
-
-        #[cfg(all(target_os = "android", feature = "android"))]
-        if let Some(app) = android_app.as_ref() {
-            // 装载 dialog JNI 桥接（幂等）；失败时 Android dialog 调度返回 Backend 错误。
-            let _ = crate::dialog::install_android_app(app);
-            let _ = crate::notification::install_android_app(app);
-            let _ = self::android_text_input::install_android_text_input_bridge(app, &invalidation);
-        }
 
         Self {
             window_key,
@@ -560,10 +433,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             dialog_receiver,
             notification_dispatcher,
             notification_receiver,
-            #[cfg(all(target_os = "android", feature = "android"))]
-            android_app,
-            #[cfg(all(target_os = "android", feature = "android"))]
-            system_bar_style: None,
         }
     }
 }

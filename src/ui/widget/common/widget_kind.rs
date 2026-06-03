@@ -113,11 +113,7 @@ impl<VM> ChildSource<VM> {
 fn resolve_dynamic_children<VM>(
     resolver: &Arc<dyn Fn() -> Vec<Element<VM>> + Send + Sync>,
 ) -> Vec<Element<VM>> {
-    #[cfg(any(
-        target_os = "windows",
-        target_os = "macos",
-        all(target_os = "linux", not(target_env = "ohos"))
-    ))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
         const CHILD_RESOLVER_STACK_SIZE: usize = 8 * 1024 * 1024;
         const CHILD_RESOLVER_STACK_RED_ZONE: usize = CHILD_RESOLVER_STACK_SIZE;
@@ -128,11 +124,7 @@ fn resolve_dynamic_children<VM>(
         )
     }
 
-    #[cfg(not(any(
-        target_os = "windows",
-        target_os = "macos",
-        all(target_os = "linux", not(target_env = "ohos"))
-    )))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         resolver()
     }

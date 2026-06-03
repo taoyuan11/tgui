@@ -57,12 +57,10 @@ cargo test
 cargo check --features audio
 cargo check --features video
 cargo check --features video-static
-cargo check --features android
-cargo check --features ohos
 ```
 
 Prefer module tests for `src/runtime/tests.rs`, `src/ui/widget/core/tests.rs`, `src/application/mod.rs`, `src/foundation/window_control.rs`, `src/notification/tests.rs`, `src/media/tests.rs`, `src/animation/tests.rs`, audio backend/controller changes, and video backend changes. Running an example is useful for smoke testing, but it is not a substitute for focused tests when shared behavior changes.
 
 ## Local Cautions
 
-Do not delete, rename, or overwrite the untracked `Video.md` unless the user explicitly asks. Do not rely on README example names without checking `examples/`; the actual example set may differ from prose documentation. Keep platform-specific dependencies and code under the existing `cfg` structure in `Cargo.toml`, `platform.rs`, `application`, runtime, notification, and video modules. Remember that `Cargo.toml` excludes `AGENTS.md` and `skills/*` from publishing, so release-facing documentation changes may also need README or docs updates elsewhere.
+Do not delete, rename, or overwrite the untracked `Video.md` unless the user explicitly asks. Do not rely on README example names without checking `examples/`; the actual example set may differ from prose documentation. Keep desktop platform-specific dependencies and code under the existing `cfg` structure in `Cargo.toml`, `platform.rs`, `application`, runtime, notification, and video modules. Remember that `Cargo.toml` excludes `AGENTS.md` and `skills/*` from publishing, so release-facing documentation changes may also need README or docs updates elsewhere.

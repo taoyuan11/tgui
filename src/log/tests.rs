@@ -147,7 +147,6 @@ fn warn_logs_use_high_queue_before_low_overflow() {
 
 #[test]
 fn log_desktop_format_line_keeps_formatted_record_shape() {
-    #[cfg(not(any(target_os = "android", target_env = "ohos")))]
     assert_eq!(
         platform::format_plain_line(
             LogLevel::Info,
@@ -160,7 +159,6 @@ fn log_desktop_format_line_keeps_formatted_record_shape() {
 
 #[test]
 fn log_desktop_format_line_colors_level_marker() {
-    #[cfg(not(any(target_os = "android", target_env = "ohos")))]
     assert_eq!(
         platform::format_colored_line(
             LogLevel::Error,

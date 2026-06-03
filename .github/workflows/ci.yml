@@ -8,7 +8,6 @@
 #   - clippy           :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
 #   - test             :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
 #   - bench-compile    :  cargo check --benches  (Linux, bench-support 编译可达性)
-#   - android-check    :  cargo check --target aarch64-linux-android  (Linux)
 #   - deny             :  cargo-deny licenses/advisories/bans/sources  (Linux)
 #   - coverage         :  Codecov 上传，需要 vars.ENABLE_COVERAGE=true 与 secrets.CODECOV_TOKEN
 #   - bench-publish    :  Bencher.dev 上报，需要 vars.ENABLE_BENCH=true 与 secrets.BENCHER_API_TOKEN
@@ -223,36 +222,6 @@ jobs:
       # Cargo.toml 中 audio_pipeline / video_pipeline / state_signal / widget_core_layout / animation_engine
       # / text_controller 这几个 bench 依赖 bench-support，所以 --all-features 才能编译全部 bench。
       - run: cargo check --benches --all-features
-
-  android-check:
-    name: android-check (aarch64-linux-android)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: android-actions/setup-android@v4
-      - uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r27d
-          add-to-path: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: android
-      - name: Configure Android NDK toolchain
-        shell: bash
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: |
-          TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          echo "CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android34-clang" >> "$GITHUB_ENV"
-          echo "AR_aarch64_linux_android=$TOOLCHAIN/llvm-ar" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/aarch64-linux-android34-clang" >> "$GITHUB_ENV"
-      # ring 的构建脚本会为 Android target 编译 C 代码，因此这里需要可用的 NDK clang/ar。
-      # ohos target 需要 nightly + 自定义 target spec，暂不在 CI 矩阵；本地验证。
-      - run: cargo check --target aarch64-linux-android --features android
 
   deny:
     name: cargo-deny
