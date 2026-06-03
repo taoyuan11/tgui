@@ -393,6 +393,102 @@ fn toast_stack_top_placements_animate_new_front_toast_while_collapsed() {
 }
 
 #[test]
+fn toast_manual_dismiss_and_clear_use_exit_animation() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let context = test_context();
+    let queue = ToastQueue::<()>::new(&context);
+    let now = Instant::now();
+    let created_at = now - Duration::from_secs(1);
+
+    let first = queue.push_at(
+        Toast::new("toast 1").duration(Duration::from_secs(10)),
+        created_at,
+    );
+    queue.push_at(
+        Toast::new("toast 2").duration(Duration::from_secs(10)),
+        created_at,
+    );
+
+    let tree = WidgetTree::new(
+        Stack::new()
+            .child(Text::new("content"))
+            .child(ToastHost::new(queue.clone()).placement(ToastPlacement::BottomEnd)),
+    );
+    let viewport = Rect::new(0.0, 0.0, 480.0, 360.0);
+
+    assert!(queue.dismiss_at(first, now));
+    assert!(
+        !queue.pause_at(first, now + Duration::from_millis(50)),
+        "hover pause should not hold a toast that is already exiting"
+    );
+    let dismiss_mid = compute_scene_at(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        now + Duration::from_millis(150),
+    );
+    let dismiss_mid_labels = toast_message_labels(&dismiss_mid);
+    assert!(
+        dismiss_mid_labels.iter().any(|label| label == "toast 1"),
+        "manual dismiss should keep toast visible during exit animation, got {dismiss_mid_labels:?}"
+    );
+
+    let dismiss_done = compute_scene_at(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        now + Duration::from_millis(301),
+    );
+    let dismiss_done_labels = toast_message_labels(&dismiss_done);
+    assert!(
+        !dismiss_done_labels.iter().any(|label| label == "toast 1")
+            && dismiss_done_labels.iter().any(|label| label == "toast 2"),
+        "manual dismiss should remove only after exit completes, got {dismiss_done_labels:?}"
+    );
+
+    let clear_at = now + Duration::from_secs(1);
+    queue.clear_at(clear_at);
+    let clear_mid = compute_scene_at(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        clear_at + Duration::from_millis(150),
+    );
+    let clear_mid_labels = toast_message_labels(&clear_mid);
+    assert!(
+        clear_mid_labels.iter().any(|label| label == "toast 2"),
+        "clear should keep toasts visible during exit animation, got {clear_mid_labels:?}"
+    );
+
+    let clear_done = compute_scene_at(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        clear_at + Duration::from_millis(301),
+    );
+    let clear_done_labels = toast_message_labels(&clear_done);
+    assert!(
+        clear_done_labels.iter().all(|label| label != "toast 2"),
+        "clear should remove toasts after exit completes, got {clear_done_labels:?}"
+    );
+}
+
+#[test]
 fn toast_stack_hover_region_toggles_auto_collapse_state() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

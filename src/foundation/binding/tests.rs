@@ -234,15 +234,43 @@ fn state_project_reads_without_cloning_source_value() {
 #[test]
 fn toast_queue_push_dismiss_and_clear_work() {
     let queue = ToastQueue::<()>::new_detached();
-    let first = queue.push(Toast::new("first"));
-    let second = queue.push(Toast::new("second"));
+    let now = Instant::now();
+    let first = queue.push_at(Toast::new("first"), now - Duration::from_secs(1));
+    let second = queue.push_at(Toast::new("second"), now - Duration::from_secs(1));
 
     assert_eq!(queue.snapshot().len(), 2);
-    assert!(queue.dismiss(first));
-    assert_eq!(queue.snapshot().len(), 1);
-    assert_eq!(queue.snapshot()[0].id, second);
+    assert!(queue.dismiss_at(first, now));
+    let entries = queue.snapshot();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(
+        entries
+            .iter()
+            .find(|entry| entry.id == first)
+            .and_then(|entry| entry.deadline),
+        Some(now),
+        "dismiss should mark a toast for exit animation before removal"
+    );
+    assert!(
+        !queue.pause_at(first, now + Duration::from_millis(50)),
+        "hover pause should not hold a toast that is already exiting"
+    );
 
-    queue.clear();
+    assert!(!queue.flush_expired(now + Duration::from_millis(299)));
+    assert_eq!(queue.snapshot().len(), 2);
+    assert!(queue.flush_expired(now + Duration::from_millis(301)));
+    let entries = queue.snapshot();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, second);
+
+    let clear_at = now + Duration::from_secs(1);
+    queue.clear_at(clear_at);
+    assert_eq!(
+        queue.snapshot()[0].deadline,
+        Some(clear_at),
+        "clear should mark remaining toasts for exit animation before removal"
+    );
+    assert!(!queue.snapshot().is_empty());
+    assert!(queue.flush_expired(clear_at + Duration::from_millis(301)));
     assert!(queue.snapshot().is_empty());
 }
 

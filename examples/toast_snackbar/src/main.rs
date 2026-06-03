@@ -11,29 +11,22 @@ fn text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
 fn title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
     let mut style = text_style(mode, sp(28.0));
     style.typography.weight = FontWeight::SemiBold;
-    style.color = Color::hexa(0xF8FAFCFF).into();
     style
 }
 
 fn body_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = text_style(mode, sp(15.0));
-    style.color = match mode {
-        ResolvedThemeMode::Light => Color::hexa(0xDDE7F7FF),
-        ResolvedThemeMode::Dark => Color::hexa(0xCBD5E1FF),
-    }
-    .into();
+    let style = text_style(mode, sp(15.0));
     style
 }
 
 fn status_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
     let mut style = text_style(mode, sp(14.0));
-    style.color = Color::hexa(0xA7F3D0FF).into();
+    style.color = Color::BLUE.into();
     style
 }
 
 fn panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
     let mut style = ContainerStyle::default_for(mode);
-    style.surface.background = Some(Color::hexa(0x111827F0).into());
     style.surface.border_color = Some(Color::hexa(0x334155FF).into());
     style.surface.border_width = Some(dp(1.0).into());
     style.surface.border_radius = Some(dp(8.0).into());
@@ -338,11 +331,6 @@ impl ViewModel for ToastDemoVm {
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(28.0)))
             .center()
-            .style(|mode| {
-                let mut style = ContainerStyle::default_for(mode);
-                style.surface.background = Some(Color::hexa(0x0F172AFF).into());
-                style
-            })
             .child(self.controls())
             .child(ToastHost::new(self.main_queue.clone()).style(toast_style))
             .child(

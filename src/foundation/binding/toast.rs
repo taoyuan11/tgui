@@ -293,17 +293,49 @@ impl<VM> ToastQueue<VM> {
     }
 
     pub fn dismiss(&self, id: ToastId) -> bool {
-        let removed = self.entries.mutate(|entries| {
-            let before = entries.len();
-            entries.retain(|entry| entry.id != id);
-            before != entries.len()
+        self.dismiss_at(id, Instant::now())
+    }
+
+    pub(crate) fn dismiss_at(&self, id: ToastId, now: Instant) -> bool {
+        let changed = self.entries.mutate(|entries| {
+            let Some(entry) = entries.iter_mut().find(|entry| entry.id == id) else {
+                return false;
+            };
+            if entry.deadline.is_some_and(|deadline| deadline <= now) && !entry.paused {
+                return false;
+            }
+            entry.deadline = Some(now);
+            entry.paused = false;
+            entry.paused_remaining = None;
+            true
         });
-        removed
+        if changed {
+            self.invalidation.mark_dependency_dirty(self.dependency);
+        }
+        changed
     }
 
     pub fn clear(&self) {
-        self.entries.mutate(|entries| entries.clear());
-        self.invalidation.mark_dependency_dirty(self.dependency);
+        self.clear_at(Instant::now());
+    }
+
+    pub(crate) fn clear_at(&self, now: Instant) {
+        let changed = self.entries.mutate(|entries| {
+            let mut changed = false;
+            for entry in entries.iter_mut() {
+                if entry.deadline.is_some_and(|deadline| deadline <= now) && !entry.paused {
+                    continue;
+                }
+                entry.deadline = Some(now);
+                entry.paused = false;
+                entry.paused_remaining = None;
+                changed = true;
+            }
+            changed
+        });
+        if changed {
+            self.invalidation.mark_dependency_dirty(self.dependency);
+        }
     }
 
     pub fn is_empty(&self) -> Signal<bool>
@@ -360,7 +392,10 @@ impl<VM> ToastQueue<VM> {
             let Some(entry) = entries.iter_mut().find(|entry| entry.id == id) else {
                 return false;
             };
-            if entry.toast.persistent || entry.paused {
+            if entry.toast.persistent
+                || entry.paused
+                || entry.deadline.is_some_and(|deadline| deadline <= now)
+            {
                 return false;
             }
             entry.paused_remaining = entry.remaining_at(now);

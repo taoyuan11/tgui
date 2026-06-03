@@ -982,26 +982,7 @@ fn calculate_animation_progress<VM>(
 ) -> (f32, Dp, Dp) {
     let elapsed = now.saturating_duration_since(entry.created_at);
 
-    // 入场动画
-    if elapsed.as_millis() < ENTER_DURATION_MS as u128 {
-        let progress = (elapsed.as_millis() as f32 / ENTER_DURATION_MS as f32).min(1.0);
-        let eased = 1.0 - (1.0 - progress).powi(3); // ease-out
-
-        let opacity = eased;
-        let (offset_x, offset_y) = match placement {
-            ToastPlacement::TopStart | ToastPlacement::BottomStart => {
-                (dp((1.0 - eased) * -150.0), Dp::ZERO)
-            }
-            ToastPlacement::TopEnd | ToastPlacement::BottomEnd | ToastPlacement::Adaptive => {
-                (dp((1.0 - eased) * 150.0), Dp::ZERO)
-            }
-            ToastPlacement::TopCenter => (Dp::ZERO, dp((1.0 - eased) * -40.0)),
-            ToastPlacement::BottomCenter => (Dp::ZERO, dp((1.0 - eased) * 40.0)),
-        };
-        return (opacity, offset_x, offset_y);
-    }
-
-    // 退场动画：检查是否已过deadline
+    // 退场动画优先于入场动画，确保刚创建后手动关闭也能立即退出。
     if let Some(deadline) = entry.deadline {
         if now >= deadline && !entry.paused {
             let exit_elapsed = now.saturating_duration_since(deadline);
@@ -1021,6 +1002,25 @@ fn calculate_animation_progress<VM>(
             };
             return (opacity, offset_x, offset_y);
         }
+    }
+
+    // 入场动画
+    if elapsed.as_millis() < ENTER_DURATION_MS as u128 {
+        let progress = (elapsed.as_millis() as f32 / ENTER_DURATION_MS as f32).min(1.0);
+        let eased = 1.0 - (1.0 - progress).powi(3); // ease-out
+
+        let opacity = eased;
+        let (offset_x, offset_y) = match placement {
+            ToastPlacement::TopStart | ToastPlacement::BottomStart => {
+                (dp((1.0 - eased) * -150.0), Dp::ZERO)
+            }
+            ToastPlacement::TopEnd | ToastPlacement::BottomEnd | ToastPlacement::Adaptive => {
+                (dp((1.0 - eased) * 150.0), Dp::ZERO)
+            }
+            ToastPlacement::TopCenter => (Dp::ZERO, dp((1.0 - eased) * -40.0)),
+            ToastPlacement::BottomCenter => (Dp::ZERO, dp((1.0 - eased) * 40.0)),
+        };
+        return (opacity, offset_x, offset_y);
     }
 
     // 正常显示
