@@ -26,7 +26,8 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 3. `animation_showcase`
 4. `multi_window`
 5. `demo`
-6. `text_area`
+6. `toast_snackbar`
+7. `text_area`
 
 ## 桌面示例说明
 
@@ -148,11 +149,28 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 综合展示示例，当前覆盖：
 
 - `Button` / `Switch` / `Checkbox` / `Radio` / `Select`
-- `Tooltip` / `Popover`
+- `Tooltip` / `Popover` / `Tabs` / `Toast`
 - `Input` / `Textarea`
 - `CommandContext::notifications()`
 - `Image`
 - `Canvas`
+
+### `toast_snackbar`
+
+Toast / Snackbar 专项示例。演示：
+
+- `ToastHost`
+- `ToastQueue`
+- success / error / warning / info 语义提示
+- snackbar action
+- 持久提示、短时提示和清空队列
+- Top / Bottom 不同位置
+
+运行方式：
+
+```bash
+cargo run --manifest-path examples/toast_snackbar/Cargo.toml
+```
 
 ### `text_area`
 

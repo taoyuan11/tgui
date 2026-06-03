@@ -1,0 +1,10 @@
+[package]
+name = "toast_snackbar"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tgui = { path = "../.." }
+
+[profile.dev]
+opt-level = 1
