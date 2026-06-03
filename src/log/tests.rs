@@ -149,12 +149,25 @@ fn warn_logs_use_high_queue_before_low_overflow() {
 fn log_desktop_format_line_keeps_formatted_record_shape() {
     #[cfg(not(any(target_os = "android", target_env = "ohos")))]
     assert_eq!(
-        platform::format_line(
+        platform::format_plain_line(
             LogLevel::Info,
             "tgui",
             "[2026-06-03 12:34:56.789 +08:00] [INFO] [tgui] hello\n"
         ),
         "[2026-06-03 12:34:56.789 +08:00] [INFO] [tgui] hello"
+    );
+}
+
+#[test]
+fn log_desktop_format_line_colors_level_marker() {
+    #[cfg(not(any(target_os = "android", target_env = "ohos")))]
+    assert_eq!(
+        platform::format_colored_line(
+            LogLevel::Error,
+            "tgui",
+            "[2026-06-03 12:34:56.789 +08:00] [ERROR] [tgui] hello\n"
+        ),
+        "[2026-06-03 12:34:56.789 +08:00] \x1b[31m[ERROR]\x1b[0m [tgui] hello"
     );
 }
 
