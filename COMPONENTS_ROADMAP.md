@@ -58,12 +58,13 @@
 - **作用**：把目前散在 Input / Textarea 内部的滚动逻辑抽成通用容器；支持 overflow x/y 独立控制、滚动条样式、惯性滚动、键盘 PgUp/PgDn/Home/End。
 - **被依赖组件**：List、Modal 内长内容、Drawer、Tabs panel、Accordion 内容区、Form、Table（与 VirtualList 协作）。
 - **要点**：现有 `ScrollRegion` 已具备核心数据结构，需要把内部 widget core 的私有路径提升到公开 widget；明确"滚动事件冒泡到父级"的规则。
-- **进度**：[基础完成]
+- **进度**：[功能完整]
   - ✅ `ScrollView` 已公开导出，默认垂直滚动并可配置 `overflow` / `overflow_x` / `overflow_y`、scrollbar 显示与样式；
   - ✅ 支持 `ScrollViewController` 绑定 widget、同步 offset、`scroll_to` 请求与 immediate / smooth 模式；
   - ✅ wheel scroll 已支持嵌套 ScrollView 冒泡：内层不能继续滚动时父级接管；
-  - ✅ widget core / runtime 测试覆盖滚动条渲染、clip、controller 绑定与请求、嵌套滚动冒泡。
-  - ⏳ 待补：键盘 PgUp / PgDn / Home / End 语义仍需产品化；触控惯性滚动策略仍未单独抽象。
+  - ✅ focused ScrollView 支持 PgUp / PgDn / Home / End 键盘滚动，纵向与横向 overflow 语义均有 runtime 测试覆盖；
+  - ✅ 触控拖拽释放后支持惯性滚动，运行时会在 wheel、scrollbar drag、controller 请求、再次触控或 widget 移除时取消旧惯性；
+  - ✅ widget core / runtime 测试覆盖滚动条渲染、clip、controller 绑定与请求、嵌套滚动冒泡、键盘滚动和触控惯性。
 
 ### 5. Portal / Layer Stack
 - **作用**：允许 widget 在树中声明、却渲染到顶层（脱离父级 clip / transform）。是浮层、Toast 队列、Modal backdrop 的底层机制。

@@ -26,7 +26,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             );
             match request.mode {
                 ScrollRequestMode::Immediate => {
-                    self.smooth_scroll_states.remove(&widget_id);
+                    self.cancel_scroll_motion(widget_id);
                     self.set_scroll_offset(widget_id, target);
                 }
                 ScrollRequestMode::Smooth => {

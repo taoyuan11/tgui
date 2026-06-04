@@ -38,11 +38,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
 
-        self.smooth_scroll_states.remove(&region.id);
+        self.cancel_scroll_motion(region.id);
+        let now = Instant::now();
         self.active_touch_scroll = Some(TouchScrollDrag {
             widget_id: region.id,
             start_cursor: cursor_position,
             start_scroll_offset: self.effective_scroll_offset(region.id, region.scroll_offset),
+            last_sample_offset: self.effective_scroll_offset(region.id, region.scroll_offset),
+            last_sample_at: now,
+            velocity: Point::ZERO,
             max_offset: region.max_offset(),
             visible_frame: region.visible_frame,
             can_scroll_x: region.can_scroll_x(),
@@ -72,9 +76,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
+        let now = Instant::now();
         drag.activated = true;
         self.pending_click = None;
-        self.active_touch_scroll = Some(drag);
 
         let mut next_offset = Point::new(
             if drag.can_scroll_x {
@@ -103,6 +107,32 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 },
             );
         }
+
+        let elapsed = now
+            .saturating_duration_since(drag.last_sample_at)
+            .as_secs_f32();
+        if elapsed > 0.0 {
+            let sample_velocity = Point::new(
+                if drag.can_scroll_x {
+                    (next_offset.x - drag.last_sample_offset.x) / elapsed
+                } else {
+                    Dp::ZERO
+                },
+                if drag.can_scroll_y {
+                    (next_offset.y - drag.last_sample_offset.y) / elapsed
+                } else {
+                    Dp::ZERO
+                },
+            );
+            drag.velocity = Point::new(
+                drag.velocity.x * 0.35 + sample_velocity.x * 0.65,
+                drag.velocity.y * 0.35 + sample_velocity.y * 0.65,
+            );
+            drag.last_sample_offset = next_offset;
+            drag.last_sample_at = now;
+        }
+
+        self.active_touch_scroll = Some(drag);
         let previous = self
             .scroll_states
             .get(&drag.widget_id)
@@ -117,7 +147,135 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn end_touch_scroll_drag(&mut self) -> bool {
-        self.active_touch_scroll.take().is_some()
+        let Some(drag) = self.active_touch_scroll.take() else {
+            return false;
+        };
+        if drag.activated {
+            self.start_touch_scroll_inertia(drag);
+        }
+        true
+    }
+
+    pub(in crate::runtime) fn cancel_scroll_motion(&mut self, widget_id: WidgetId) {
+        self.smooth_scroll_states.remove(&widget_id);
+        self.touch_scroll_inertia_states.remove(&widget_id);
+    }
+
+    fn start_touch_scroll_inertia(&mut self, drag: TouchScrollDrag) {
+        let velocity = Point::new(
+            if drag.can_scroll_x {
+                drag.velocity.x.clamp(
+                    -super::super::TOUCH_SCROLL_INERTIA_MAX_VELOCITY,
+                    super::super::TOUCH_SCROLL_INERTIA_MAX_VELOCITY,
+                )
+            } else {
+                Dp::ZERO
+            },
+            if drag.can_scroll_y {
+                drag.velocity.y.clamp(
+                    -super::super::TOUCH_SCROLL_INERTIA_MAX_VELOCITY,
+                    super::super::TOUCH_SCROLL_INERTIA_MAX_VELOCITY,
+                )
+            } else {
+                Dp::ZERO
+            },
+        );
+        if velocity.x.abs().get() < super::super::TOUCH_SCROLL_INERTIA_MIN_VELOCITY
+            && velocity.y.abs().get() < super::super::TOUCH_SCROLL_INERTIA_MIN_VELOCITY
+        {
+            return;
+        }
+
+        self.touch_scroll_inertia_states.insert(
+            drag.widget_id,
+            TouchScrollInertiaState {
+                velocity,
+                max_offset: drag.max_offset,
+                can_scroll_x: drag.can_scroll_x,
+                can_scroll_y: drag.can_scroll_y,
+                last_advanced_at: Instant::now(),
+            },
+        );
+    }
+
+    pub(in crate::runtime) fn advance_touch_scroll_inertia(&mut self, now: Instant) -> bool {
+        if self.touch_scroll_inertia_states.is_empty() {
+            return false;
+        }
+
+        let mut changed = false;
+        let mut finished = Vec::new();
+        let updates: Vec<_> = self
+            .touch_scroll_inertia_states
+            .iter()
+            .map(|(widget_id, state)| (*widget_id, *state))
+            .collect();
+
+        for (widget_id, mut state) in updates {
+            let elapsed = now
+                .saturating_duration_since(state.last_advanced_at)
+                .as_secs_f32()
+                .clamp(0.0, 0.05);
+            if elapsed <= 0.0 {
+                continue;
+            }
+
+            let current = self
+                .scroll_states
+                .get(&widget_id)
+                .copied()
+                .unwrap_or(Point::ZERO);
+            let mut next = current;
+            if state.can_scroll_x {
+                next.x =
+                    (current.x + state.velocity.x * elapsed).clamp(Dp::ZERO, state.max_offset.x);
+            }
+            if state.can_scroll_y {
+                next.y =
+                    (current.y + state.velocity.y * elapsed).clamp(Dp::ZERO, state.max_offset.y);
+            }
+
+            let hit_x_edge = state.can_scroll_x
+                && (next.x <= Dp::ZERO || next.x >= state.max_offset.x)
+                && (state.velocity.x.abs().get()
+                    >= super::super::TOUCH_SCROLL_INERTIA_MIN_VELOCITY);
+            let hit_y_edge = state.can_scroll_y
+                && (next.y <= Dp::ZERO || next.y >= state.max_offset.y)
+                && (state.velocity.y.abs().get()
+                    >= super::super::TOUCH_SCROLL_INERTIA_MIN_VELOCITY);
+
+            if (next.x - current.x).abs() > 0.01 || (next.y - current.y).abs() > 0.01 {
+                self.set_scroll_offset(widget_id, next);
+                changed = true;
+            }
+
+            let decay = (-super::super::TOUCH_SCROLL_INERTIA_DECAY_PER_SECOND * elapsed).exp();
+            if hit_x_edge {
+                state.velocity.x = Dp::ZERO;
+            } else {
+                state.velocity.x = state.velocity.x * decay;
+            }
+            if hit_y_edge {
+                state.velocity.y = Dp::ZERO;
+            } else {
+                state.velocity.y = state.velocity.y * decay;
+            }
+            state.last_advanced_at = now;
+
+            if state.velocity.x.abs().get() < super::super::TOUCH_SCROLL_INERTIA_MIN_VELOCITY
+                && state.velocity.y.abs().get() < super::super::TOUCH_SCROLL_INERTIA_MIN_VELOCITY
+            {
+                finished.push(widget_id);
+            } else {
+                self.touch_scroll_inertia_states.insert(widget_id, state);
+            }
+        }
+
+        for widget_id in finished {
+            self.touch_scroll_inertia_states.remove(&widget_id);
+        }
+
+        changed
     }
 
     fn touch_hit_claims_drag(interaction: &HitInteraction<VM>) -> bool {
@@ -244,6 +402,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) {
         self.smooth_scroll_states
             .insert(widget_id, SmoothScrollState { target });
+        self.touch_scroll_inertia_states.remove(&widget_id);
         let _ = self.advance_smooth_scroll();
     }
 

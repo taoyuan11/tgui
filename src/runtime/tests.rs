@@ -1,3 +1,4 @@
+use super::state::TouchScrollInertiaState;
 use super::{
     centered_window_position_for_monitor, input, input_text_layout, text_cursor_index_at_point,
     BoundRuntimeHandler, CachedScene, FocusedWidget, WindowBindings,

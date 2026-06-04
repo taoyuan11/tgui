@@ -25,6 +25,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let key_repeat_deadline = self.next_key_repeat_deadline();
         let smooth_scroll_deadline =
             (!self.smooth_scroll_states.is_empty()).then_some(now + Duration::from_millis(16));
+        let touch_scroll_inertia_deadline = (!self.touch_scroll_inertia_states.is_empty())
+            .then_some(now + super::TOUCH_SCROLL_INERTIA_FRAME);
         let tooltip_deadline = self.next_tooltip_wakeup_deadline;
         let toast_deadline = self.next_toast_wakeup_deadline;
         [
@@ -36,6 +38,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             caret_deadline,
             key_repeat_deadline,
             smooth_scroll_deadline,
+            touch_scroll_inertia_deadline,
             tooltip_deadline,
             toast_deadline,
         ]

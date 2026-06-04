@@ -26,6 +26,7 @@ use super::{
     text_cursor_index_at_point, BoundRuntimeHandler, CanvasPointerContext, ClickHandler,
     FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
     PendingClick, ScrollbarDrag, SliderDrag, SmoothScrollState, TextSelectionDrag, TouchScrollDrag,
+    TouchScrollInertiaState,
 };
 use crate::foundation::binding::TextChange;
 use crate::foundation::view_model::{Command, ValueCommand};

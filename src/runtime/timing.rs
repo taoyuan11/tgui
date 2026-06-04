@@ -57,6 +57,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let mut frame_advanced = false;
         let mut smooth_scroll_advanced = false;
+        let mut touch_scroll_inertia_advanced = false;
         // tooltip 唤醒到点：invalidate scene 让下一帧 collect 看到 elapsed >= delay。
         if let Some(deadline) = self.next_tooltip_wakeup_deadline {
             if deadline <= now {
@@ -81,6 +82,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if self.advance_smooth_scroll() {
             frame_advanced = true;
             smooth_scroll_advanced = true;
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
+        if self.advance_touch_scroll_inertia(now) {
+            frame_advanced = true;
+            touch_scroll_inertia_advanced = true;
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
@@ -130,6 +138,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let key_repeat_deadline = self.next_key_repeat_deadline();
         let smooth_scroll_deadline =
             (!self.smooth_scroll_states.is_empty()).then_some(now + Duration::from_millis(16));
+        let touch_scroll_inertia_deadline = (!self.touch_scroll_inertia_states.is_empty())
+            .then_some(now + super::TOUCH_SCROLL_INERTIA_FRAME);
         let next_deadline = self.next_deadline(now);
 
         if let Some(deadline) = next_deadline {
@@ -155,8 +165,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 "textarea_animation",
                 started_at.elapsed(),
                 format!(
-                    "smooth_scroll_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} animation_active={} controller_active={} pending_click={} gesture_deadline={} tooltip_release_deadline={} caret_deadline={} key_repeat_deadline={} smooth_scroll_deadline={} next_deadline={}",
+                    "smooth_scroll_advanced={} touch_scroll_inertia_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} animation_active={} controller_active={} pending_click={} gesture_deadline={} tooltip_release_deadline={} caret_deadline={} key_repeat_deadline={} smooth_scroll_deadline={} touch_scroll_inertia_deadline={} next_deadline={}",
                     smooth_scroll_advanced,
+                    touch_scroll_inertia_advanced,
                     controller_changed,
                     animation_refresh.changed,
                     animation_refresh.layout_changed,
@@ -169,6 +180,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     caret_deadline.is_some(),
                     key_repeat_deadline.is_some(),
                     smooth_scroll_deadline.is_some(),
+                    touch_scroll_inertia_deadline.is_some(),
                     next_deadline.is_some(),
                 ),
             );

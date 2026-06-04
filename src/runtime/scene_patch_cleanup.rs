@@ -115,6 +115,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .retain(|widget_id, _| !removed_ids.contains(widget_id));
         self.smooth_scroll_states
             .retain(|widget_id, _| !removed_ids.contains(widget_id));
+        self.touch_scroll_inertia_states
+            .retain(|widget_id, _| !removed_ids.contains(widget_id));
         self.virtual_states
             .retain(|widget_id, _| !removed_ids.contains(widget_id));
         self.select_open_states

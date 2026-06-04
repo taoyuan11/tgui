@@ -429,6 +429,12 @@ fn touch_drag_scrolls_clickable_content_without_firing_tap() {
             .unwrap_or(false),
         "touch drag should scroll the parent scroller"
     );
+    assert!(
+        handler
+            .touch_scroll_inertia_states
+            .contains_key(&scroller_id),
+        "released touch drag should continue with inertia"
+    );
     assert_eq!(handler.view_model.lock().unwrap().clicks, 0);
 }
 
@@ -484,6 +490,73 @@ fn touch_tap_on_clickable_content_still_fires_click() {
     );
 
     assert_eq!(handler.view_model.lock().unwrap().clicks, 1);
+    assert!(handler.touch_scroll_inertia_states.is_empty());
+}
+
+#[test]
+fn small_touch_move_still_taps_without_starting_inertia() {
+    let invalidation = InvalidationSignal::new();
+    let button: Element<TouchScrollVm> = Button::new("tap me")
+        .height(dp(80.0))
+        .on_click(Command::new(TouchScrollVm::click))
+        .into();
+    let scroller: Element<TouchScrollVm> = ScrollView::new()
+        .size(dp(320.0), dp(240.0))
+        .child(
+            Flex::vertical()
+                .height(dp(860.0))
+                .gap(dp(12.0))
+                .child([button, Stack::new().height(dp(760.0)).into()]),
+        )
+        .into();
+    let mut handler = test_handler_with_vm(
+        TouchScrollVm::default(),
+        Some(WidgetTree::new(scroller)),
+        invalidation,
+    );
+    let event_loop = TestEventLoop;
+
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerButton {
+            device_id: None,
+            position: PhysicalPosition::new(24.0, 40.0),
+            state: ElementState::Pressed,
+            button: ButtonSource::Touch {
+                finger_id: FingerId::from_raw(1),
+                force: None,
+            },
+            primary: true,
+        },
+    );
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerMoved {
+            device_id: None,
+            position: PhysicalPosition::new(24.0, 36.0),
+            primary: true,
+            source: PointerSource::Touch {
+                finger_id: FingerId::from_raw(1),
+                force: None,
+            },
+        },
+    );
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerButton {
+            device_id: None,
+            position: PhysicalPosition::new(24.0, 36.0),
+            state: ElementState::Released,
+            button: ButtonSource::Touch {
+                finger_id: FingerId::from_raw(1),
+                force: None,
+            },
+            primary: true,
+        },
+    );
+
+    assert_eq!(handler.view_model.lock().unwrap().clicks, 1);
+    assert!(handler.touch_scroll_inertia_states.is_empty());
 }
 
 #[test]
@@ -528,13 +601,10 @@ fn nested_scroll_wheel_bubbles_to_parent_at_child_boundary() {
     );
 }
 
-#[test]
-fn scroll_view_page_down_scrolls_focused_region() {
+fn focused_scroll_view_handler(
+    scroller: Element<TestVm>,
+) -> (BoundRuntimeHandler<TestVm>, WidgetId) {
     let invalidation = InvalidationSignal::new();
-    let scroller: Element<TestVm> = ScrollView::new()
-        .size(dp(160.0), dp(100.0))
-        .child(Stack::new().size(dp(160.0), dp(360.0)))
-        .into();
     let scroller_id = scroller.id;
     let tree = WidgetTree::new(scroller);
     let mut handler = test_handler(Some(tree), invalidation);
@@ -555,17 +625,126 @@ fn scroll_view_page_down_scrolls_focused_region() {
         CanvasMouseButton::Left,
     );
     assert_eq!(handler.focused_widget_id(), Some(scroller_id));
+    (handler, scroller_id)
+}
+
+#[test]
+fn scroll_view_page_keys_scroll_focused_region() {
+    let scroller: Element<TestVm> = ScrollView::new()
+        .size(dp(160.0), dp(100.0))
+        .child(Stack::new().size(dp(160.0), dp(360.0)))
+        .into();
+    let (mut handler, scroller_id) = focused_scroll_view_handler(scroller);
 
     assert!(
         handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::PageDown,)))
     );
-    assert!(
+    while handler.advance_smooth_scroll() {}
+    let page_down_y = handler
+        .scroll_states
+        .get(&scroller_id)
+        .map(|offset| offset.y)
+        .unwrap_or(Dp::ZERO);
+    assert!(page_down_y > Dp::ZERO);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::PageUp,))));
+    while handler.advance_smooth_scroll() {}
+    let page_up_y = handler
+        .scroll_states
+        .get(&scroller_id)
+        .map(|offset| offset.y)
+        .unwrap_or(Dp::ZERO);
+    assert!(page_up_y < page_down_y);
+}
+
+#[test]
+fn scroll_view_home_end_scroll_focused_region_to_edges() {
+    let scroller: Element<TestVm> = ScrollView::new()
+        .size(dp(160.0), dp(100.0))
+        .child(Stack::new().size(dp(160.0), dp(360.0)))
+        .into();
+    let (mut handler, scroller_id) = focused_scroll_view_handler(scroller);
+    let max_y = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == scroller_id)
+        .expect("scroll region should exist")
+        .max_offset()
+        .y;
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::End))));
+    while handler.advance_smooth_scroll() {}
+    assert_eq!(
         handler
             .scroll_states
             .get(&scroller_id)
-            .map(|offset| offset.y > Dp::ZERO)
-            .unwrap_or(false)
-            || handler.smooth_scroll_states.contains_key(&scroller_id)
+            .map(|offset| offset.y)
+            .unwrap_or(Dp::ZERO),
+        max_y
+    );
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Home))));
+    while handler.advance_smooth_scroll() {}
+    assert_eq!(
+        handler
+            .scroll_states
+            .get(&scroller_id)
+            .map(|offset| offset.y)
+            .unwrap_or(Dp::ZERO),
+        Dp::ZERO
+    );
+}
+
+#[test]
+fn horizontal_scroll_view_keyboard_scrolls_x_axis() {
+    let scroller: Element<TestVm> = ScrollView::new()
+        .size(dp(100.0), dp(80.0))
+        .overflow_x(Overflow::Scroll)
+        .overflow_y(Overflow::Hidden)
+        .child(Stack::new().size(dp(620.0), dp(80.0)))
+        .into();
+    let (mut handler, scroller_id) = focused_scroll_view_handler(scroller);
+    let max_x = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == scroller_id)
+        .expect("scroll region should exist")
+        .max_offset()
+        .x;
+
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::PageDown,)))
+    );
+    while handler.advance_smooth_scroll() {}
+    let page_x = handler
+        .scroll_states
+        .get(&scroller_id)
+        .map(|offset| offset.x)
+        .unwrap_or(Dp::ZERO);
+    assert!(page_x > Dp::ZERO);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::End))));
+    while handler.advance_smooth_scroll() {}
+    assert_eq!(
+        handler
+            .scroll_states
+            .get(&scroller_id)
+            .map(|offset| offset.x)
+            .unwrap_or(Dp::ZERO),
+        max_x
+    );
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Home))));
+    while handler.advance_smooth_scroll() {}
+    assert_eq!(
+        handler
+            .scroll_states
+            .get(&scroller_id)
+            .map(|offset| offset.x)
+            .unwrap_or(Dp::ZERO),
+        Dp::ZERO
     );
 }
 
@@ -597,4 +776,115 @@ fn scroll_view_controller_scroll_to_updates_runtime_offset() {
             || handler.smooth_scroll_states.contains_key(&scroller_id)
     );
     assert!(controller.scroll_offset().y > Dp::ZERO);
+}
+
+#[test]
+fn touch_scroll_inertia_advances_and_stops_within_bounds() {
+    let invalidation = InvalidationSignal::new();
+    let scroller: Element<TestVm> = ScrollView::new()
+        .size(dp(160.0), dp(100.0))
+        .child(Stack::new().size(dp(160.0), dp(500.0)))
+        .into();
+    let scroller_id = scroller.id;
+    let mut handler = test_handler(Some(WidgetTree::new(scroller)), invalidation);
+    let max = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == scroller_id)
+        .expect("scroll region should exist")
+        .max_offset();
+    let start = Instant::now();
+    handler.touch_scroll_inertia_states.insert(
+        scroller_id,
+        TouchScrollInertiaState {
+            velocity: Point::new(Dp::ZERO, dp(900.0)),
+            max_offset: max,
+            can_scroll_x: false,
+            can_scroll_y: true,
+            last_advanced_at: start,
+        },
+    );
+
+    assert!(handler.advance_touch_scroll_inertia(start + Duration::from_millis(16)));
+    let advanced = handler
+        .scroll_states
+        .get(&scroller_id)
+        .map(|offset| offset.y)
+        .unwrap_or(Dp::ZERO);
+    assert!(advanced > Dp::ZERO);
+
+    for frame in 2..240 {
+        let _ = handler.advance_touch_scroll_inertia(start + Duration::from_millis(frame * 16));
+        let offset = handler
+            .scroll_states
+            .get(&scroller_id)
+            .copied()
+            .unwrap_or(Point::ZERO);
+        assert!(offset.y >= Dp::ZERO && offset.y <= max.y);
+        if handler.touch_scroll_inertia_states.is_empty() {
+            break;
+        }
+    }
+    assert!(
+        handler.touch_scroll_inertia_states.is_empty(),
+        "inertia should eventually decay below threshold or stop at the edge"
+    );
+}
+
+#[test]
+fn touch_scroll_inertia_is_cancelled_by_wheel_and_controller_requests() {
+    let invalidation = InvalidationSignal::new();
+    let ctx = ViewModelContext::for_benchmarks();
+    let controller = ScrollViewController::new(&ctx);
+    let scroller: Element<TestVm> = ScrollView::new()
+        .size(dp(160.0), dp(100.0))
+        .controller(controller.clone())
+        .child(Stack::new().size(dp(160.0), dp(500.0)))
+        .into();
+    let scroller_id = scroller.id;
+    let mut handler = test_handler(Some(WidgetTree::new(scroller)), invalidation);
+    let region = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == scroller_id)
+        .copied()
+        .expect("scroll region should exist");
+    let max = region.max_offset();
+    handler.touch_scroll_inertia_states.insert(
+        scroller_id,
+        TouchScrollInertiaState {
+            velocity: Point::new(Dp::ZERO, dp(800.0)),
+            max_offset: max,
+            can_scroll_x: false,
+            can_scroll_y: true,
+            last_advanced_at: Instant::now(),
+        },
+    );
+    handler.cursor_position = Some(Point {
+        x: region.visible_frame.x + dp(8.0),
+        y: region.visible_frame.y + dp(8.0),
+    });
+
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -1.0)));
+    assert!(!handler
+        .touch_scroll_inertia_states
+        .contains_key(&scroller_id));
+
+    handler.touch_scroll_inertia_states.insert(
+        scroller_id,
+        TouchScrollInertiaState {
+            velocity: Point::new(Dp::ZERO, dp(800.0)),
+            max_offset: max,
+            can_scroll_x: false,
+            can_scroll_y: true,
+            last_advanced_at: Instant::now(),
+        },
+    );
+    controller.jump_to(Point::new(Dp::ZERO, dp(120.0)));
+    let _ = handler.computed_scene();
+    assert!(!handler
+        .touch_scroll_inertia_states
+        .contains_key(&scroller_id));
 }

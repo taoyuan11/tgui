@@ -93,6 +93,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if (next_offset.x - current_offset.x).abs() > 0.01
                 || (next_offset.y - current_offset.y).abs() > 0.01
             {
+                self.touch_scroll_inertia_states.remove(&region.id);
                 self.set_smooth_scroll_target(region.id, next_offset);
                 return true;
             }
@@ -179,7 +180,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
 
-        self.smooth_scroll_states.remove(&handle.id);
+        self.cancel_scroll_motion(handle.id);
         self.active_scrollbar_drag = Some(ScrollbarDrag {
             handle,
             start_cursor: cursor_position,
@@ -244,6 +245,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             });
         if (previous.x - next_offset.x).abs() > 0.01 || (previous.y - next_offset.y).abs() > 0.01 {
+            self.touch_scroll_inertia_states.remove(&drag.handle.id);
             self.set_scroll_offset(drag.handle.id, next_offset);
             return true;
         }

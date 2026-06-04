@@ -549,11 +549,23 @@ pub(super) struct TouchScrollDrag {
     pub(super) widget_id: WidgetId,
     pub(super) start_cursor: Point,
     pub(super) start_scroll_offset: Point,
+    pub(super) last_sample_offset: Point,
+    pub(super) last_sample_at: Instant,
+    pub(super) velocity: Point,
     pub(super) max_offset: Point,
     pub(super) visible_frame: Rect,
     pub(super) can_scroll_x: bool,
     pub(super) can_scroll_y: bool,
     pub(super) activated: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct TouchScrollInertiaState {
+    pub(super) velocity: Point,
+    pub(super) max_offset: Point,
+    pub(super) can_scroll_x: bool,
+    pub(super) can_scroll_y: bool,
+    pub(super) last_advanced_at: Instant,
 }
 
 #[derive(Clone, Copy)]

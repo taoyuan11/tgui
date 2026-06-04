@@ -47,7 +47,7 @@ use self::state::{
     DispatchedLifecycleState, DispatchedMediaState, FocusedWidget, HoverMoveHandler, HoverTargetId,
     HoverTransitionHandler, HoveredWidget, PendingClick, PendingLifecycleEvent, PendingMediaEvent,
     ScrollbarDrag, SliderDrag, SmoothScrollState, TextInputBufferState, TextInputSessionConfig,
-    TextSelectionDrag, TooltipState, TouchScrollDrag,
+    TextSelectionDrag, TooltipState, TouchScrollDrag, TouchScrollInertiaState,
 };
 use self::theme::{resolve_theme, resolve_window_theme};
 use self::windows::MultiWindowHandler;
@@ -109,6 +109,10 @@ const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const KEY_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(300);
 const KEY_REPEAT_INTERVAL: Duration = Duration::from_millis(33);
 pub(super) const TOUCH_SCROLL_ACTIVATION_THRESHOLD: f32 = 8.0;
+pub(super) const TOUCH_SCROLL_INERTIA_MIN_VELOCITY: f32 = 30.0;
+pub(super) const TOUCH_SCROLL_INERTIA_MAX_VELOCITY: f32 = 3600.0;
+pub(super) const TOUCH_SCROLL_INERTIA_DECAY_PER_SECOND: f32 = 8.0;
+pub(super) const TOUCH_SCROLL_INERTIA_FRAME: Duration = Duration::from_millis(16);
 pub(super) const LONG_PRESS_THRESHOLD: Duration = Duration::from_millis(500);
 pub(super) const TOOLTIP_LONG_PRESS_HIDE_DELAY: Duration = Duration::from_millis(150);
 pub(super) const LONG_PRESS_MOVE_TOLERANCE: f32 = 8.0;
@@ -308,6 +312,7 @@ pub struct BoundRuntimeHandler<VM> {
     cursor_icon: Option<CursorIcon>,
     scroll_states: HashMap<WidgetId, Point>,
     smooth_scroll_states: HashMap<WidgetId, SmoothScrollState>,
+    touch_scroll_inertia_states: HashMap<WidgetId, TouchScrollInertiaState>,
     virtual_states: HashMap<WidgetId, VirtualCacheState>,
     select_open_states: HashMap<WidgetId, bool>,
     scroll_epoch: u64,
@@ -424,6 +429,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             cursor_icon: None,
             scroll_states: HashMap::new(),
             smooth_scroll_states: HashMap::new(),
+            touch_scroll_inertia_states: HashMap::new(),
             virtual_states: HashMap::new(),
             select_open_states: HashMap::new(),
             scroll_epoch: 0,
