@@ -2,12 +2,13 @@ use super::surface::*;
 use super::*;
 use crate::application::MsaaMode;
 use crate::foundation::color::Color as TguiColorAlias;
+use crate::media::TextureFrame;
 use crate::text::font::FontWeight;
-use crate::ui::widget::Rect;
 use crate::ui::widget::{
     CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextVerticalAlign, CanvasTextWrap,
     TextPrimitive,
 };
+use crate::ui::widget::{Rect, ScenePrimitives, TexturePrimitive};
 
 #[cfg(target_os = "windows")]
 #[test]
@@ -87,4 +88,33 @@ fn text_primitive_can_represent_ellipsis_overflow() {
     };
 
     assert_eq!(primitive.overflow, CanvasTextOverflow::Ellipsis);
+}
+
+#[test]
+fn active_texture_keys_include_overlay_textures() {
+    let main_texture = std::sync::Arc::new(TextureFrame::new(2, 2, vec![255; 2 * 2 * 4]));
+    let overlay_texture = std::sync::Arc::new(TextureFrame::new(3, 3, vec![128; 3 * 3 * 4]));
+    let mut scene = ScenePrimitives::default();
+    scene.textures.push(texture_primitive(main_texture.clone()));
+    scene
+        .overlay_textures
+        .push(texture_primitive(overlay_texture.clone()));
+
+    let keys = active_texture_keys(&scene);
+
+    assert!(keys.contains(&main_texture.id()));
+    assert!(keys.contains(&overlay_texture.id()));
+}
+
+fn texture_primitive(texture: std::sync::Arc<TextureFrame>) -> TexturePrimitive {
+    TexturePrimitive {
+        texture,
+        frame: Rect::new(0.0, 0.0, 8.0, 8.0),
+        quad: None,
+        uv_rect: None,
+        corner_radius: 0.0,
+        opacity: 1.0,
+        clip_rect: None,
+        clip_mask: None,
+    }
 }

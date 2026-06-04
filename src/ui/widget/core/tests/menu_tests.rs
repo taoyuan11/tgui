@@ -1,6 +1,8 @@
 pub(super) use super::*;
 
-use crate::ui::widget::{Button, ContextMenu, Menu, MenuBar, MenuIcon, MenuItem};
+use crate::ui::widget::{Button, ContextMenu, Menu, MenuBar, MenuIcon, MenuItem, RenderCommand};
+
+const SIMPLE_MENU_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#2f80ed"/></svg>"##;
 
 #[test]
 fn menu_builder_produces_element_with_descriptor() {
@@ -271,6 +273,56 @@ fn menu_glyph_icon_renders_when_present() {
     assert!(
         texts.iter().any(|t| *t == "\u{1F4C4}"),
         "glyph icon 📄 should render in overlay, got {texts:?}"
+    );
+}
+
+#[test]
+fn menu_svg_icon_renders_as_overlay_texture() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Menu::new(Button::new("File").size(dp(80.0), dp(28.0)))
+            .items(vec![
+                MenuItem::new("New").icon(MenuIcon::svg(SIMPLE_MENU_SVG)),
+                MenuItem::new("Open"),
+            ])
+            .open(true),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 400.0, 400.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert_eq!(
+        rendered.primitives.overlay_textures.len(),
+        1,
+        "SVG menu icon should render as one overlay texture"
+    );
+    assert!(
+        rendered
+            .primitives
+            .overlay_commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::Texture(_))),
+        "SVG menu icon should participate in overlay command ordering"
+    );
+    assert_eq!(
+        rendered.primitives.overlay_textures[0].texture.size(),
+        (16, 16)
     );
 }
 

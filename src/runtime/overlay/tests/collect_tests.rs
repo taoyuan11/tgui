@@ -9,6 +9,7 @@
 //! - 多浮层按 `OverlayLayer` 顺序进入平面列表（finalize 后 Tooltip < Popover < Menu < Modal）。
 
 use crate::foundation::color::Color;
+use crate::media::TextureFrame;
 use crate::runtime::overlay::collect::emit_overlay;
 use crate::runtime::overlay::{
     Anchor, FlipPolicy, Overlay, OverlayContent, OverlayId, OverlayLayer, OverlayPrimitive,
@@ -17,7 +18,7 @@ use crate::runtime::overlay::{
 use crate::ui::unit::{dp, Dp};
 use crate::ui::widget::{
     ComputedScene, FocusScopeOptions, FocusScopeState, FocusTargetMeta, HitGeometry,
-    HitInteraction, HitRegion, Rect, RenderPrimitive, WidgetId,
+    HitInteraction, HitRegion, Rect, RenderCommand, RenderPrimitive, TexturePrimitive, WidgetId,
 };
 
 fn viewport() -> Rect {
@@ -30,6 +31,19 @@ fn shape(rect_local: Rect, color: Color) -> OverlayPrimitive {
         color,
         corner_radius: 0.0,
         stroke_width: 0.0,
+        clip_rect: None,
+        clip_mask: None,
+    })
+}
+
+fn texture(frame_local: Rect) -> OverlayPrimitive {
+    OverlayPrimitive::Texture(TexturePrimitive {
+        texture: std::sync::Arc::new(TextureFrame::new(4, 4, vec![255; 4 * 4 * 4])),
+        frame: frame_local,
+        quad: None,
+        uv_rect: None,
+        corner_radius: 2.0,
+        opacity: 0.75,
         clip_rect: None,
         clip_mask: None,
     })
@@ -116,6 +130,48 @@ fn emit_overlay_sets_clip_rect_from_solver() {
 
     let shape = &scene.scene.overlay_shapes[0];
     assert_eq!(shape.clip_rect, Some(solved.clip_rect));
+}
+
+#[test]
+fn emit_overlay_texture_writes_to_overlay_texture_bucket() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Rect(anchor))
+        .placement(Placement::bottom())
+        .offset(dp(8.0));
+
+    let solved = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(80.0), dp(40.0)),
+        OverlayContent::Primitives(vec![texture(Rect::new(
+            dp(10.0),
+            dp(5.0),
+            dp(16.0),
+            dp(12.0),
+        ))]),
+    );
+    scene.finalize_portals(viewport());
+
+    assert_eq!(scene.scene.textures.len(), 0);
+    assert_eq!(scene.scene.overlay_textures.len(), 1);
+    assert!(
+        scene
+            .scene
+            .overlay_commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::Texture(_))),
+        "overlay texture must also be present in overlay command order"
+    );
+
+    let translated = &scene.scene.overlay_textures[0];
+    let close = |a: Dp, b: f32| (a.get() - b).abs() < 0.001;
+    assert!(close(translated.frame.x, 90.0));
+    assert!(close(translated.frame.y, 153.0));
+    assert!(close(translated.frame.width, 16.0));
+    assert!(close(translated.frame.height, 12.0));
+    assert_eq!(translated.clip_rect, Some(solved.clip_rect));
 }
 
 #[test]

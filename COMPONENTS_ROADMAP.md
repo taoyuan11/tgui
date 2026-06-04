@@ -14,14 +14,15 @@
 - **作用**：以"锚点 + 偏移 + 翻转策略"在屏幕坐标里定位浮层；监听窗口/滚动尺寸变化自动重定位；管理浮层 z-order 与 backdrop。
 - **被依赖组件**：Tooltip、Menu / ContextMenu、Popover、Dropdown、Select（重构）、DatePicker、ColorPicker、Toast、Modal、Combobox、AutoComplete。
 - **要点**：放在 `src/runtime/overlay/`，与 widget tree 解耦；提供 `OverlayLayer` API 让 widget 层只描述"我要从 anchor 弹出 X"，由 runtime 决定真实坐标和翻转方向；与 IME caret 矩形共享 caret rect 通道。
-- **进度**：[基础完成]
+- **进度**：[功能完整]
   - ✅ 已迁移到 runtime-owned `src/runtime/overlay/`，widget 层通过兼容 re-export 使用 `Overlay` / `OverlayLayer` / `Anchor` / `PlacementOptions`；
   - ✅ 支持 `Anchor::Rect` / `Point` / `Key` / `Source`，并可从 collect 输出的 overlay anchor 解析真实窗口坐标；
   - ✅ `solve_placement` 支持 Top / Bottom / Left / Right、Start / Center / End、offset / cross_offset、match_anchor_width、viewport padding、FlipSide / ShiftOnly / FlipAndShift / Hide 等策略；
   - ✅ `OverlayLayer::{Tooltip, Popover, Menu, Modal, Toast}` 分层合并，finalize 后保持跨层 z-order 与层内 emit 顺序；
   - ✅ close handler 统一处理 outside click / Esc / return_focus_to，Popover、Menu、Modal、Drawer、Tooltip 均已复用；
-  - ✅ 单元测试覆盖 solver、portal collect、clip、hide、close handler、focus scope rebasing、z-order。
-  - ⏳ 待补：把 overlay texture / SVG icon 管线纳入统一 bucket；复杂浮层的桌面降级布局策略仍由具体组件决定。
+  - ✅ overlay texture / SVG icon 管线已纳入统一 bucket，finalize 后进入 `scene.overlay_textures` 与 `overlay_commands`，renderer cache 会保留 overlay 纹理；
+  - ✅ 单元测试覆盖 solver、portal collect、clip、hide、close handler、focus scope rebasing、z-order、overlay texture。
+  - ℹ️ 复杂浮层的窄窗口 / 桌面降级布局策略仍由具体组件决定，不再阻塞 Overlay 引擎完整性。
 
 ### 2. Focus Management（焦点链 + 焦点陷阱）
 - **作用**：定义 Tab 顺序（DOM-like 树序 + `tab_index` 覆盖）、可聚焦集合、`Esc`/`Enter`/`Space` 默认行为、模态浮层中的 focus trap、跨浮层焦点回归。
@@ -125,10 +126,9 @@
   - ✅ MenuBar Left/Right 切换：菜单打开时在同 `MenuBarGroupId` 内 cycle active 条目；
   - ✅ submenu 嵌套：collect 阶段父项 hovered（鼠标或键盘 cursor）时递归 emit 子菜单 overlay；键盘 cursor 表示为 `Vec<usize>` 路径，Right 入栈进入 submenu / Left 弹栈退出，与 MenuBar 切换自然衔接；
   - ✅ 全局 `KeyChord` 派发：扫 cached resolved 树里所有 menu / context_menu 含 submenu 递归的 shortcut chord，命中即执行 on_select 并吞键（无需 widget 打开）；`format_chord` 把 chord 渲染成 "Ctrl+N" 风格的 hint 文本；
-  - ✅ `MenuIcon::glyph(char)`：在 item label 左侧、checked 列右侧加固定宽度图标列，渲染单字符（emoji / 字体图标）；
-  - ✅ `menu_tests` + `runtime::tests::menu_tests`：16 个测试覆盖 descriptor / 渲染 / hover / 键盘 / 全局快捷键 / submenu 嵌套渲染 + 键盘 cursor 进出 / type-ahead / glyph 图标。
+  - ✅ `MenuIcon::glyph(char)` / `MenuIcon::svg(...)`：在 item label 左侧、checked 列右侧加固定宽度图标列，glyph 走文本渲染，SVG 走 overlay texture 管线；
+  - ✅ `menu_tests` + `runtime::tests::menu_tests`：覆盖 descriptor / 渲染 / hover / 键盘 / 全局快捷键 / submenu 嵌套渲染 + 键盘 cursor 进出 / type-ahead / glyph 与 SVG 图标。
   - ⏳ 长尾（独立 PR、不影响功能完整性）：
-    - SVG 真栅格化（`MenuIcon::Svg` 字段已占位）——需要给 `OverlayPrimitive` 加 `Texture` variant 并把 bucket.textures 合并到 scene.overlay_textures，再走 `media` 子系统的 SVG 加载管线；
     - ContextMenu / MenuBar 自动 active 状态接管——需要在 `CollectContext` 加 `internal_context_menu_anchor` / `internal_menubar_active` 字段贯穿调用链，在 gesture 派发里直接写入 runtime state，绕开用户 State 绑定。当前 API 通过 `.on_show(cmd)` / `MenuBar::new(active_signal).on_active_change(cmd)` 与 `State<bool>`/`State<Point>`/`State<Option<usize>>` 绑定，工作良好且可控。
 
 

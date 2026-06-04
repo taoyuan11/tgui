@@ -437,6 +437,12 @@ fn finalize_portal_entry<VM>(
                 bucket.texts.push(text.clone());
                 bucket.commands.push(RenderCommand::Text(text));
             }
+            OverlayPrimitive::Texture(texture) => {
+                let mut texture = translate_texture(texture, origin);
+                texture.clip_rect = content_clip;
+                bucket.textures.push(texture.clone());
+                bucket.commands.push(RenderCommand::Texture(texture));
+            }
             OverlayPrimitive::Mesh(mut mesh) => {
                 let triangles: Vec<_> = mesh
                     .triangles

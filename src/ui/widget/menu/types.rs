@@ -28,19 +28,18 @@ pub enum MenuItemKind {
 
 /// 菜单项前缀图标。
 ///
-/// 目前仅支持 SVG 字节数据，与 `Image` widget 复用 `media/svg` 栅格化通道。
+/// SVG 图标与 `Image` widget 复用 `media/svg` 栅格化通道；glyph 图标以文本渲染。
 #[derive(Clone)]
 pub enum MenuIcon {
-    /// 内嵌 SVG 字节数据。当前 collect 阶段尚不渲染 SVG（OverlayPrimitive
-    /// 不支持 Image），仅占位——后续接入 overlay image 时启用。
+    /// 内嵌 SVG 字节数据。打开菜单时会栅格化到主题的图标槽中。
     Svg(Arc<[u8]>),
     /// 单个 Unicode 字符 / emoji glyph。collect 阶段直接以文本渲染，
-    /// 是 SVG 落地前的过渡方案。例如 `MenuIcon::glyph('📁')`。
+    /// 例如 `MenuIcon::glyph('📁')`。
     Glyph(char),
 }
 
 impl MenuIcon {
-    /// 用静态 SVG 字节切片构造图标（暂未在 collect 阶段渲染，见 enum 上的注释）。
+    /// 用静态 SVG 字节切片构造图标。
     pub fn svg(bytes: &'static [u8]) -> Self {
         MenuIcon::Svg(Arc::from(bytes))
     }

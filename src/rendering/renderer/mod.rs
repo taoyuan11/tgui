@@ -38,6 +38,35 @@ pub enum RenderStatus {
     SkipFrame,
 }
 
+#[cfg(feature = "video")]
+fn active_texture_keys(scene: &ScenePrimitives) -> HashSet<u64> {
+    let mut keys: HashSet<_> = scene
+        .textures
+        .iter()
+        .chain(scene.overlay_textures.iter())
+        .map(|texture| texture.texture.id())
+        .collect();
+
+    keys.extend(
+        scene
+            .video_textures
+            .iter()
+            .filter_map(|texture| texture.controller.current_frame().map(|frame| frame.id())),
+    );
+
+    keys
+}
+
+#[cfg(not(feature = "video"))]
+fn active_texture_keys(scene: &ScenePrimitives) -> HashSet<u64> {
+    scene
+        .textures
+        .iter()
+        .chain(scene.overlay_textures.iter())
+        .map(|texture| texture.texture.id())
+        .collect()
+}
+
 pub struct Renderer {
     window: Arc<dyn Window>,
     surface: wgpu::Surface<'static>,
@@ -109,26 +138,7 @@ impl Renderer {
         }
         let (logical_width, logical_height) = self.logical_viewport_size();
 
-        #[cfg(feature = "video")]
-        let active_texture_keys: HashSet<_> =
-            {
-                let mut keys: HashSet<_> = scene
-                    .textures
-                    .iter()
-                    .map(|texture| texture.texture.id())
-                    .collect();
-                keys.extend(scene.video_textures.iter().filter_map(|texture| {
-                    texture.controller.current_frame().map(|frame| frame.id())
-                }));
-                keys
-            };
-
-        #[cfg(not(feature = "video"))]
-        let active_texture_keys: HashSet<_> = scene
-            .textures
-            .iter()
-            .map(|texture| texture.texture.id())
-            .collect();
+        let active_texture_keys = active_texture_keys(scene);
         self.texture_cache
             .retain(|key, _| active_texture_keys.contains(key));
 

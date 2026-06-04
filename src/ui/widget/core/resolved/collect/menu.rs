@@ -1,23 +1,21 @@
 //! Menu / ContextMenu 在 collect 阶段的浮层渲染。
 //!
-//! step 3 范围：
-//! - 仅渲染 label（暂不画 icon / shortcut hint / checked indicator / submenu 箭头）；
+//! 渲染 label、separator、checked indicator、glyph/SVG icon、shortcut hint 与 submenu 箭头；
 //! - 分隔线 (`Separator`) 用细矩形；
 //! - 每个非分隔项一个 `HitInteraction::SelectOption`——复用 select 已有的
 //!   点击 → on_select + on_open_change(false) 关菜单链路；
 //! - 接外部点击与 Esc 自动关闭，`return_focus_to` 指回 trigger；
-//! - 不画 hover / pressed 态背景（由 runtime widget_states 标记，step 5+ 拼）。
 
 use crate::foundation::color::Color;
+use crate::media::{resolve_media_rect, ContentFit, MediaSource, RasterRequest};
 use crate::text::font::TextFontRequest;
 use crate::ui::layout::Insets;
-use crate::ui::theme::WidgetState;
 use crate::ui::unit::Dp;
 use crate::ui::widget::common::{
     ComputedScene, FocusScopeState, HitGeometry, HitInteraction, HitRegion, Rect, RenderPrimitive,
-    TextPrimitive,
+    TextPrimitive, TexturePrimitive,
 };
-use crate::ui::widget::menu::{MenuDescriptor, MenuItemKind, MenuItemState};
+use crate::ui::widget::menu::{MenuDescriptor, MenuIcon, MenuItemKind, MenuItemState};
 use crate::ui::widget::overlay::{
     collect::emit_overlay, Anchor, AnchorKey, Overlay, OverlayContent, OverlayId, OverlayLayer,
 };
@@ -109,7 +107,7 @@ pub(crate) fn emit_menu_layer<VM>(
     let any_icon = menu.items.iter().any(|item| {
         matches!(
             item.icon.as_ref(),
-            Some(crate::ui::widget::MenuIcon::Glyph(_))
+            Some(MenuIcon::Glyph(_) | MenuIcon::Svg(_))
         )
     });
     let any_shortcut = menu.items.iter().any(|item| {
@@ -379,32 +377,50 @@ pub(crate) fn emit_menu_layer<VM>(
 
                 // 图标列：仅当 any_icon=true 时占位（无图标的项保留空白对齐）。
                 if any_icon {
-                    if let Some(crate::ui::widget::MenuIcon::Glyph(glyph)) =
-                        menu.items[index].icon.as_ref()
-                    {
-                        let icon_frame =
-                            Rect::new(cursor_x, label_baseline_y, icon_col_w_dp, text_h);
-                        primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Text(
-                            TextPrimitive {
-                                content: glyph.to_string(),
-                                rich_spans: None,
-                                frame: icon_frame,
-                                quad: None,
-                                color: row_label_color,
-                                force_color: false,
-                                font_family: Some(resolved_font.primary_font.clone()),
-                                font_size,
-                                font_weight: style.text_style.weight,
-                                line_height,
-                                letter_spacing,
-                                wrap: crate::ui::widget::CanvasTextWrap::None,
-                                overflow: CanvasTextOverflow::Clip,
-                                horizontal_align: CanvasTextHorizontalAlign::Start,
-                                vertical_align: CanvasTextVerticalAlign::Start,
-                                clip_rect: None,
-                                clip_mask: None,
-                            },
-                        ));
+                    match menu.items[index].icon.as_ref() {
+                        Some(MenuIcon::Glyph(glyph)) => {
+                            let icon_frame =
+                                Rect::new(cursor_x, label_baseline_y, icon_col_w_dp, text_h);
+                            primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Text(
+                                TextPrimitive {
+                                    content: glyph.to_string(),
+                                    rich_spans: None,
+                                    frame: icon_frame,
+                                    quad: None,
+                                    color: row_label_color,
+                                    force_color: false,
+                                    font_family: Some(resolved_font.primary_font.clone()),
+                                    font_size,
+                                    font_weight: style.text_style.weight,
+                                    line_height,
+                                    letter_spacing,
+                                    wrap: crate::ui::widget::CanvasTextWrap::None,
+                                    overflow: CanvasTextOverflow::Clip,
+                                    horizontal_align: CanvasTextHorizontalAlign::Start,
+                                    vertical_align: CanvasTextVerticalAlign::Start,
+                                    clip_rect: None,
+                                    clip_mask: None,
+                                },
+                            ));
+                        }
+                        Some(MenuIcon::Svg(bytes)) => {
+                            let icon_size = icon_col_w_dp.min(height);
+                            let icon_frame = Rect::new(
+                                cursor_x,
+                                cursor_y + ((height - icon_size) * 0.5).max(Dp::ZERO),
+                                icon_size,
+                                icon_size,
+                            );
+                            if let Some(primitive) = svg_menu_icon_primitive(
+                                bytes,
+                                icon_frame,
+                                row_label_color.a as f32 / 255.0,
+                                context,
+                            ) {
+                                primitives.push(primitive);
+                            }
+                        }
+                        None => {}
                     }
                     cursor_x = cursor_x + icon_col_w_dp + icon_pad;
                 }
@@ -647,6 +663,33 @@ fn insets_max(insets: Insets) -> Dp {
         m = insets.bottom;
     }
     m
+}
+
+fn svg_menu_icon_primitive(
+    bytes: &std::sync::Arc<[u8]>,
+    icon_frame: Rect,
+    opacity: f32,
+    context: &CollectContext<'_, '_>,
+) -> Option<crate::ui::widget::overlay::OverlayPrimitive> {
+    let source = MediaSource::bytes(bytes.clone());
+    let metadata = context.media.image_snapshot(&source, None);
+    let target_frame = resolve_media_rect(icon_frame, metadata.intrinsic_size, ContentFit::Contain);
+    let raster_request = RasterRequest::from_frame(target_frame, context.units.scale_factor())?;
+    let snapshot = context.media.image_snapshot(&source, Some(raster_request));
+    let texture = snapshot.texture.as_ref()?;
+
+    Some(crate::ui::widget::overlay::OverlayPrimitive::Texture(
+        TexturePrimitive {
+            texture: std::sync::Arc::clone(texture),
+            frame: target_frame,
+            quad: None,
+            uv_rect: None,
+            corner_radius: 0.0,
+            opacity: opacity.clamp(0.0, 1.0),
+            clip_rect: None,
+            clip_mask: None,
+        },
+    ))
 }
 
 /// 把 `KeyChord` 渲染成人类可读的显示文本，例如 "Ctrl+N"、"Ctrl+Shift+Z"。
