@@ -206,7 +206,12 @@ impl Renderer {
             });
             if self.apply_scissor(&mut pass, blur.primitive.clip_rect) {
                 pass.set_pipeline(&self.backdrop_composite_pipeline);
-                pass.set_vertex_buffer(0, blur.composite_buffer.slice(..));
+                pass.set_vertex_buffer(
+                    0,
+                    self.vertex_pool
+                        .current_buffer()
+                        .slice(blur.composite_offset..),
+                );
                 pass.set_bind_group(0, &composite_bind_group, &[]);
                 pass.draw(0..blur.composite_vertex_count, 0..1);
             }

@@ -60,6 +60,12 @@
 //!         .run()
 //! }
 //! ```
+// 可选的 mimalloc 全局分配器。仅在显式开启 `mimalloc` feature 时生效。
+// 场景收集热路径分配密集，mimalloc 通常带来 10-25% 分配吞吐提升。
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 pub mod animation;
 pub mod application;
 #[cfg(feature = "audio")]

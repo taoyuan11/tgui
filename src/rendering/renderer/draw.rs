@@ -191,14 +191,24 @@ impl Renderer {
                     PreparedCommand::Rect(batch) => {
                         if self.apply_scissor(&mut pass, batch.clip_rect) {
                             pass.set_pipeline(&self.rect_pipeline);
-                            pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(
+                                0,
+                                self.vertex_pool
+                                    .current_buffer()
+                                    .slice(batch.vertex_offset..),
+                            );
                             pass.draw(0..batch.vertex_count, 0..1);
                         }
                     }
                     PreparedCommand::Brush(batch) => {
                         if self.apply_scissor(&mut pass, batch.clip_rect) {
                             pass.set_pipeline(&self.brush_pipeline);
-                            pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(
+                                0,
+                                self.vertex_pool
+                                    .current_buffer()
+                                    .slice(batch.vertex_offset..),
+                            );
                             pass.draw(0..batch.vertex_count, 0..1);
                         }
                     }
@@ -206,14 +216,24 @@ impl Renderer {
                         if self.apply_scissor(&mut pass, batch.clip_rect) {
                             pass.set_pipeline(&self.mesh_pipeline);
                             pass.set_bind_group(0, &batch.clip_bind_group, &[]);
-                            pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(
+                                0,
+                                self.vertex_pool
+                                    .current_buffer()
+                                    .slice(batch.vertex_offset..),
+                            );
                             pass.draw(0..batch.vertex_count, 0..1);
                         }
                     }
                     PreparedCommand::Sprite(batch) => {
                         if self.apply_scissor(&mut pass, batch.clip_rect) {
                             pass.set_pipeline(&self.scene_text_pipeline);
-                            pass.set_vertex_buffer(0, batch.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(
+                                0,
+                                self.vertex_pool
+                                    .current_buffer()
+                                    .slice(batch.vertex_offset..),
+                            );
                             pass.set_bind_group(0, &batch.bind_group, &[]);
                             pass.draw(0..batch.vertex_count, 0..1);
                         }

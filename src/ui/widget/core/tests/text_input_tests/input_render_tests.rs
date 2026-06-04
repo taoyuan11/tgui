@@ -41,7 +41,7 @@ fn input_renders_composition_preview_text() {
         .primitives
         .texts
         .iter()
-        .any(|primitive| primitive.content == "aXYZc"));
+        .any(|primitive| primitive.content.as_ref() == "aXYZc"));
 }
 
 #[test]

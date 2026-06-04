@@ -1,5 +1,6 @@
 use super::super::*;
 use super::centered_text_frame;
+use std::sync::Arc;
 
 pub(crate) fn push_text_primitives(
     text: &Text,
@@ -108,13 +109,13 @@ pub(crate) fn push_text_primitives(
     }
 
     scene.push_text(TextPrimitive {
-        content: content.clone(),
+        content: Arc::from(content.clone()),
         rich_spans: None,
         frame: content_frame,
         quad: None,
         color: color.with_alpha_factor(opacity),
         force_color: false,
-        font_family: Some(primary_font.clone()),
+        font_family: Some(Arc::from(primary_font.clone())),
         font_size,
         font_weight: text.font_weight.unwrap_or(default_style.weight),
         line_height,

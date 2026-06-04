@@ -9,6 +9,7 @@ mod text;
 mod texture;
 mod types;
 mod vertex;
+mod vertex_pool;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -100,6 +101,7 @@ pub struct Renderer {
     text_system: TextSystem,
     text_cache: HashMap<TextCacheKey, TextCacheEntry>,
     texture_cache: HashMap<u64, TextureCacheEntry>,
+    vertex_pool: self::vertex_pool::VertexBufferPool,
 }
 
 impl Renderer {
@@ -157,6 +159,9 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        // 推进到下一个轮转池缓冲并清空 staging；prepare_commands 会 bump-allocate 进来。
+        self.vertex_pool.begin_frame();
+
         let command_buffers = self.prepare_commands(
             &scene.commands,
             logical_width,
@@ -173,6 +178,8 @@ impl Renderer {
             self.config.height as f32,
             self.scale_factor,
         )?;
+        // 两次 prepare 的顶点数据都已进 staging，这里一次性上传到 GPU。
+        self.vertex_pool.flush(&self.device, &self.queue);
         let color_attachment_view = view.clone();
 
         let mut encoder = self

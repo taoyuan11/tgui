@@ -47,8 +47,8 @@ fn rich_text_records_span_payload() {
 
     let spans = text.rich_spans.as_ref().expect("rich spans should exist");
     assert_eq!(spans.len(), 2);
-    assert_eq!(spans[0].content, "Hello ");
-    assert_eq!(spans[1].content, "Canvas");
+    assert_eq!(&*spans[0].content, "Hello ");
+    assert_eq!(&*spans[1].content, "Canvas");
     assert_eq!(spans[1].font_weight, FontWeight::Bold);
 }
 

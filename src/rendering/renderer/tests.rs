@@ -42,7 +42,7 @@ fn msaa_mode_default_is_auto() {
 #[test]
 fn text_cache_key_tracks_overflow_mode() {
     let clip = TextCacheKey {
-        content: "hello".to_string(),
+        content: Arc::from("hello"),
         font_family: None,
         width: 10,
         height: 10,
@@ -68,7 +68,7 @@ fn text_cache_key_tracks_overflow_mode() {
 #[test]
 fn text_primitive_can_represent_ellipsis_overflow() {
     let primitive = TextPrimitive {
-        content: "very long text".to_string(),
+        content: Arc::from("very long text"),
         rich_spans: None,
         frame: Rect::new(0.0, 0.0, 60.0, 20.0),
         quad: None,

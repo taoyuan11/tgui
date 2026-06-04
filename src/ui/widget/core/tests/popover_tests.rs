@@ -84,7 +84,7 @@ fn popover_open_true_emits_overlay_content() {
         .primitives
         .overlay_texts
         .iter()
-        .map(|text| text.content.as_str())
+        .map(|text| text.content.as_ref())
         .collect();
     assert!(labels.iter().any(|text| *text == "popover body"));
     assert!(labels.iter().any(|text| *text == "Action"));

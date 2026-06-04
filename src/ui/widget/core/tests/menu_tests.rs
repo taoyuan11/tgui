@@ -91,7 +91,7 @@ fn menu_open_true_emits_items_in_overlay() {
         .primitives
         .overlay_texts
         .iter()
-        .map(|text| text.content.as_str())
+        .map(|text| text.content.as_ref())
         .collect();
     assert!(
         labels.iter().any(|t| *t == "New"),
@@ -142,7 +142,7 @@ fn menu_checkable_item_renders_checkmark() {
         .primitives
         .overlay_texts
         .iter()
-        .map(|t| t.content.as_str())
+        .map(|t| t.content.as_ref())
         .collect();
     let check_count = texts.iter().filter(|t| **t == "\u{2713}").count();
     assert_eq!(
@@ -185,7 +185,7 @@ fn menu_submenu_item_renders_arrow() {
         .primitives
         .overlay_texts
         .iter()
-        .filter(|t| t.content == "\u{25B8}")
+        .filter(|t| t.content.as_ref() == "\u{25B8}")
         .count();
     assert_eq!(arrow_count, 1, "submenu item should render ▸ arrow");
 }
@@ -268,7 +268,7 @@ fn menu_glyph_icon_renders_when_present() {
         .primitives
         .overlay_texts
         .iter()
-        .map(|t| t.content.as_str())
+        .map(|t| t.content.as_ref())
         .collect();
     assert!(
         texts.iter().any(|t| *t == "\u{1F4C4}"),
@@ -370,7 +370,7 @@ fn submenu_emits_nested_overlay_when_parent_is_hovered() {
         .primitives
         .overlay_texts
         .iter()
-        .map(|t| t.content.clone())
+        .map(|t| t.content.to_string())
         .collect();
     assert!(
         !baseline_labels.iter().any(|t| t == "a.txt"),
@@ -405,7 +405,7 @@ fn submenu_emits_nested_overlay_when_parent_is_hovered() {
         .primitives
         .overlay_texts
         .iter()
-        .map(|t| t.content.clone())
+        .map(|t| t.content.to_string())
         .collect();
     assert!(
         hover_labels.iter().any(|t| t == "a.txt"),

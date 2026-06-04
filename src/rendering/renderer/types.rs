@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bytemuck::{Pod, Zeroable};
 use cosmic_text::{FontSystem, SwashCache};
 
@@ -29,8 +31,8 @@ pub(super) struct TextureCacheEntry {
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) struct TextCacheKey {
-    pub(super) content: String,
-    pub(super) font_family: Option<String>,
+    pub(super) content: Arc<str>,
+    pub(super) font_family: Option<Arc<str>>,
     pub(super) width: u32,
     pub(super) height: u32,
     pub(super) color: [u8; 4],

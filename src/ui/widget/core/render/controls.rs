@@ -348,13 +348,13 @@ pub(crate) fn push_checkbox_checkmark_primitives(
     icon_frame.y += dp(1.0);
 
     scene.push_text(TextPrimitive {
-        content: CHECKBOX_CHECKMARK_ICON.to_string(),
+        content: Arc::from(CHECKBOX_CHECKMARK_ICON.to_string()),
         rich_spans: None,
         frame: icon_frame,
         quad: None,
         color: checkbox_style.checkmark.with_alpha_factor(opacity),
         force_color: true,
-        font_family: Some(resolved.primary_font),
+        font_family: Some(Arc::from(resolved.primary_font)),
         font_size,
         font_weight: checkbox_style.text_style.weight,
         line_height,

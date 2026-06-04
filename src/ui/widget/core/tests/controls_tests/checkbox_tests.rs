@@ -65,7 +65,7 @@ fn checkbox_label_extends_measure_and_hit_region() {
         .primitives
         .texts
         .iter()
-        .find(|text| text.content == "Accept")
+        .find(|text| text.content.as_ref() == "Accept")
         .expect("checkbox label should render");
 
     assert_eq!(label.frame.x, size + gap);
@@ -121,7 +121,7 @@ fn checked_checkbox_renders_checked_background_and_checkmark() {
         .primitives
         .texts
         .iter()
-        .find(|text| text.content == super::CHECKBOX_CHECKMARK_ICON)
+        .find(|text| text.content.as_ref() == super::CHECKBOX_CHECKMARK_ICON)
         .expect("checked checkbox should render checkmark icon");
     assert_eq!(checkmark.color, Color::WHITE);
     assert!(checkmark.force_color);
@@ -327,7 +327,7 @@ fn focused_unchecked_checkbox_keeps_default_box_colors() {
         .primitives
         .texts
         .iter()
-        .all(|text| text.content != super::CHECKBOX_CHECKMARK_ICON));
+        .all(|text| text.content.as_ref() != super::CHECKBOX_CHECKMARK_ICON));
 }
 
 #[test]

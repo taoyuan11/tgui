@@ -88,7 +88,12 @@ fn output_to_commands(output: CanvasRenderOutput) -> Vec<RenderCommand> {
     let mut commands = output.commands;
     commands.extend(output.meshes.into_iter().map(RenderCommand::Mesh));
     commands.extend(output.textures.into_iter().map(RenderCommand::Texture));
-    commands.extend(output.texts.into_iter().map(RenderCommand::Text));
+    commands.extend(
+        output
+            .texts
+            .into_iter()
+            .map(|t| RenderCommand::Text(Box::new(t))),
+    );
     commands
 }
 
@@ -155,26 +160,28 @@ fn tessellate_composite_item(
     let content_commands: Arc<[RenderCommand]> = output_to_commands(content_output).into();
     output
         .commands
-        .push(RenderCommand::CanvasComposite(CanvasCompositePrimitive {
-            bounds: bounds_rect,
-            opacity: 1.0,
-            blend_mode,
-            blur_radius: resolved_effects.blur_radius,
-            color_filter: resolved_effects.color_filter,
-            inner_shadow_color: resolved_effects.inner_shadow.map(|shadow| shadow.color),
-            inner_shadow_offset: resolved_effects
-                .inner_shadow
-                .map(|shadow| shadow.offset)
-                .unwrap_or(Point::ZERO),
-            inner_shadow_blur_radius: resolved_effects
-                .inner_shadow
-                .map(|shadow| shadow.blur.get().max(0.0))
-                .unwrap_or(0.0),
-            clip_rect: clip.clip_rect,
-            clip_mask: clip.clip_mask,
-            content_commands,
-            mask_commands,
-        }));
+        .push(RenderCommand::CanvasComposite(Box::new(
+            CanvasCompositePrimitive {
+                bounds: bounds_rect,
+                opacity: 1.0,
+                blend_mode,
+                blur_radius: resolved_effects.blur_radius,
+                color_filter: resolved_effects.color_filter,
+                inner_shadow_color: resolved_effects.inner_shadow.map(|shadow| shadow.color),
+                inner_shadow_offset: resolved_effects
+                    .inner_shadow
+                    .map(|shadow| shadow.offset)
+                    .unwrap_or(Point::ZERO),
+                inner_shadow_blur_radius: resolved_effects
+                    .inner_shadow
+                    .map(|shadow| shadow.blur.get().max(0.0))
+                    .unwrap_or(0.0),
+                clip_rect: clip.clip_rect,
+                clip_mask: clip.clip_mask,
+                content_commands,
+                mask_commands,
+            },
+        )));
     output
 }
 
@@ -197,8 +204,8 @@ fn tessellate_text(
                 .iter()
                 .cloned()
                 .map(|span| CanvasTextSpanPrimitive {
-                    content: span.content,
-                    font_family: span.style.font_family,
+                    content: Arc::from(span.content),
+                    font_family: span.style.font_family.map(Arc::from),
                     color: span
                         .style
                         .color
@@ -213,7 +220,7 @@ fn tessellate_text(
     };
     CanvasRenderOutput {
         texts: vec![TextPrimitive {
-            content,
+            content: Arc::from(content),
             rich_spans,
             frame,
             quad: None,
@@ -222,7 +229,7 @@ fn tessellate_text(
                 .color
                 .with_alpha_factor(opacity * text.style.opacity),
             force_color: true,
-            font_family: text.text_style.font_family.clone(),
+            font_family: text.text_style.font_family.clone().map(Arc::from),
             font_size: text.text_style.font_size.get(),
             font_weight: text.text_style.font_weight,
             line_height: line_height.get(),

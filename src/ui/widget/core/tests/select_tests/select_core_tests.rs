@@ -35,12 +35,12 @@ fn select_renders_placeholder_and_arrow_when_unselected() {
         .primitives
         .texts
         .iter()
-        .any(|text| text.content == "Choose one"));
+        .any(|text| text.content.as_ref() == "Choose one"));
     assert!(rendered
         .primitives
         .texts
         .iter()
-        .any(|text| text.content == SELECT_ARROW_ICON && text.force_color));
+        .any(|text| text.content.as_ref() == SELECT_ARROW_ICON && text.force_color));
 }
 
 #[test]

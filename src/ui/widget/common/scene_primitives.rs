@@ -2,6 +2,7 @@ use super::*;
 #[cfg(feature = "video")]
 use crate::video::VideoController;
 use smallvec::SmallVec;
+use std::sync::Arc;
 
 /// A primitive whose bounding `rect` lies entirely outside its own `clip_rect`
 /// is scissored to zero pixels by the renderer (see `Renderer::scissor_rect`),
@@ -46,8 +47,8 @@ pub struct BackdropBlurPrimitive {
 
 #[derive(Clone)]
 pub struct CanvasTextSpanPrimitive {
-    pub content: String,
-    pub font_family: Option<String>,
+    pub content: Arc<str>,
+    pub font_family: Option<Arc<str>>,
     pub color: Color,
     pub font_size: f32,
     pub font_weight: FontWeight,
@@ -57,13 +58,13 @@ pub struct CanvasTextSpanPrimitive {
 
 #[derive(Clone)]
 pub struct TextPrimitive {
-    pub content: String,
+    pub content: Arc<str>,
     pub rich_spans: Option<Arc<[CanvasTextSpanPrimitive]>>,
     pub frame: Rect,
     pub quad: Option<[Point; 4]>,
     pub color: Color,
     pub force_color: bool,
-    pub font_family: Option<String>,
+    pub font_family: Option<Arc<str>>,
     pub font_size: f32,
     pub font_weight: FontWeight,
     pub line_height: f32,
@@ -148,12 +149,12 @@ pub struct MeshPrimitive {
 pub(crate) enum RenderCommand {
     BackdropBlur(BackdropBlurPrimitive),
     Brush(BrushPrimitive),
-    CanvasComposite(CanvasCompositePrimitive),
+    CanvasComposite(Box<CanvasCompositePrimitive>),
     Shape(RenderPrimitive),
     Texture(TexturePrimitive),
     #[cfg(feature = "video")]
     VideoTexture(VideoTexturePrimitive),
-    Text(TextPrimitive),
+    Text(Box<TextPrimitive>),
     Mesh(MeshPrimitive),
 }
 
@@ -183,12 +184,12 @@ impl ScenePrimitives {
         match command {
             RenderCommand::BackdropBlur(primitive) => self.push_backdrop_blur(primitive),
             RenderCommand::Brush(primitive) => self.push_brush(primitive),
-            RenderCommand::CanvasComposite(primitive) => self.push_canvas_composite(primitive),
+            RenderCommand::CanvasComposite(primitive) => self.push_canvas_composite(*primitive),
             RenderCommand::Shape(primitive) => self.push_shape(primitive),
             RenderCommand::Texture(primitive) => self.push_texture(primitive),
             #[cfg(feature = "video")]
             RenderCommand::VideoTexture(primitive) => self.push_video_texture(primitive),
-            RenderCommand::Text(primitive) => self.push_text(primitive),
+            RenderCommand::Text(primitive) => self.push_text(*primitive),
             RenderCommand::Mesh(primitive) => self.push_mesh(primitive),
         }
     }
@@ -215,7 +216,7 @@ impl ScenePrimitives {
         }
         self.canvas_composites.push(primitive.clone());
         self.commands
-            .push(RenderCommand::CanvasComposite(primitive));
+            .push(RenderCommand::CanvasComposite(Box::new(primitive)));
     }
 
     pub(crate) fn push_shape(&mut self, primitive: RenderPrimitive) {
@@ -253,7 +254,7 @@ impl ScenePrimitives {
             return;
         }
         self.texts.push(primitive.clone());
-        self.commands.push(RenderCommand::Text(primitive));
+        self.commands.push(RenderCommand::Text(Box::new(primitive)));
     }
 
     pub(crate) fn push_overlay_shape(&mut self, primitive: RenderPrimitive) {
@@ -277,7 +278,8 @@ impl ScenePrimitives {
     #[allow(dead_code)]
     pub(crate) fn push_overlay_text(&mut self, primitive: TextPrimitive) {
         self.overlay_texts.push(primitive.clone());
-        self.overlay_commands.push(RenderCommand::Text(primitive));
+        self.overlay_commands
+            .push(RenderCommand::Text(Box::new(primitive)));
     }
 
     pub(crate) fn extend(&mut self, other: &ScenePrimitives) {

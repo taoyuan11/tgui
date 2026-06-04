@@ -43,7 +43,7 @@ fn tabs_render_strip_and_selected_panel() {
         .primitives
         .texts
         .iter()
-        .map(|text| text.content.as_str())
+        .map(|text| text.content.as_ref())
         .collect();
 
     assert!(texts.contains(&"One"));

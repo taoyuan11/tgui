@@ -6,6 +6,8 @@
 //!   点击 → on_select + on_open_change(false) 关菜单链路；
 //! - 接外部点击与 Esc 自动关闭，`return_focus_to` 指回 trigger；
 
+use std::sync::Arc;
+
 use crate::foundation::color::Color;
 use crate::media::{resolve_media_rect, ContentFit, MediaSource, RasterRequest};
 use crate::text::font::TextFontRequest;
@@ -352,13 +354,13 @@ pub(crate) fn emit_menu_layer<VM>(
                             Rect::new(cursor_x, label_baseline_y, check_col_w_dp, text_h);
                         primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Text(
                             TextPrimitive {
-                                content: check_glyph.to_string(),
+                                content: Arc::from(check_glyph.to_string()),
                                 rich_spans: None,
                                 frame: check_frame,
                                 quad: None,
                                 color: style.checked_indicator_color.resolve(),
                                 force_color: false,
-                                font_family: Some(resolved_font.primary_font.clone()),
+                                font_family: Some(Arc::from(resolved_font.primary_font.clone())),
                                 font_size,
                                 font_weight: style.text_style.weight,
                                 line_height,
@@ -383,13 +385,15 @@ pub(crate) fn emit_menu_layer<VM>(
                                 Rect::new(cursor_x, label_baseline_y, icon_col_w_dp, text_h);
                             primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Text(
                                 TextPrimitive {
-                                    content: glyph.to_string(),
+                                    content: Arc::from(glyph.to_string()),
                                     rich_spans: None,
                                     frame: icon_frame,
                                     quad: None,
                                     color: row_label_color,
                                     force_color: false,
-                                    font_family: Some(resolved_font.primary_font.clone()),
+                                    font_family: Some(Arc::from(
+                                        resolved_font.primary_font.clone(),
+                                    )),
                                     font_size,
                                     font_weight: style.text_style.weight,
                                     line_height,
@@ -441,13 +445,13 @@ pub(crate) fn emit_menu_layer<VM>(
                 );
                 primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Text(
                     TextPrimitive {
-                        content: label,
+                        content: Arc::from(label),
                         rich_spans: None,
                         frame: label_frame,
                         quad: None,
                         color: row_label_color,
                         force_color: false,
-                        font_family: Some(resolved_font.primary_font.clone()),
+                        font_family: Some(Arc::from(resolved_font.primary_font.clone())),
                         font_size,
                         font_weight: style.text_style.weight,
                         line_height,
@@ -468,13 +472,13 @@ pub(crate) fn emit_menu_layer<VM>(
                     let arrow_frame = Rect::new(arrow_x, label_baseline_y, arrow_col_w_dp, text_h);
                     primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Text(
                         TextPrimitive {
-                            content: arrow_glyph.to_string(),
+                            content: Arc::from(arrow_glyph.to_string()),
                             rich_spans: None,
                             frame: arrow_frame,
                             quad: None,
                             color: style.submenu_arrow_color.resolve(widget_state).resolve(),
                             force_color: false,
-                            font_family: Some(resolved_font.primary_font.clone()),
+                            font_family: Some(Arc::from(resolved_font.primary_font.clone())),
                             font_size,
                             font_weight: style.text_style.weight,
                             line_height,
@@ -503,13 +507,13 @@ pub(crate) fn emit_menu_layer<VM>(
                         Rect::new(shortcut_x, label_baseline_y, shortcut_w, text_h);
                     primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Text(
                         TextPrimitive {
-                            content: shortcut_text.clone(),
+                            content: Arc::from(shortcut_text.clone()),
                             rich_spans: None,
                             frame: shortcut_frame,
                             quad: None,
                             color: style.shortcut_color.resolve(),
                             force_color: false,
-                            font_family: Some(resolved_font.primary_font.clone()),
+                            font_family: Some(Arc::from(resolved_font.primary_font.clone())),
                             font_size,
                             font_weight: style.text_style.weight,
                             line_height,

@@ -57,7 +57,7 @@ fn modal_closed_renders_minimal() {
             .primitives
             .overlay_texts
             .iter()
-            .map(|t| t.content.as_str())
+            .map(|t| t.content.as_ref())
             .collect::<Vec<_>>()
     );
 }
@@ -96,7 +96,7 @@ fn modal_open_renders_title_and_action_labels() {
         .primitives
         .texts
         .iter()
-        .map(|t| t.content.as_str())
+        .map(|t| t.content.as_ref())
         .collect();
     assert!(
         labels.iter().any(|t| *t == "Confirm"),

@@ -1,5 +1,6 @@
 use super::super::*;
 use super::centered_text_frame;
+use std::sync::Arc;
 
 pub(crate) fn default_select_menu_transition() -> crate::animation::Transition {
     crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(160))
@@ -311,13 +312,13 @@ pub(crate) fn build_select_text_primitive(
     );
     let content_frame = centered_text_frame(inner, layout.width, layout.height, line_height, false);
     TextPrimitive {
-        content,
+        content: Arc::from(content),
         rich_spans: None,
         frame: content_frame,
         quad: None,
         color,
         force_color: false,
-        font_family: Some(resolved.primary_font),
+        font_family: Some(Arc::from(resolved.primary_font)),
         font_size,
         font_weight: text.font_weight.unwrap_or(default_style.weight),
         line_height,
@@ -410,13 +411,13 @@ pub(crate) fn push_select_icon(
     icon_frame.y += dp(3.0);
 
     scene.push_text(TextPrimitive {
-        content: SELECT_ARROW_ICON.to_string(),
+        content: Arc::from(SELECT_ARROW_ICON.to_string()),
         rich_spans: None,
         frame: icon_frame,
         quad: None,
         color: select_style.arrow.with_alpha_factor(opacity),
         force_color: true,
-        font_family: Some(resolved.primary_font),
+        font_family: Some(Arc::from(resolved.primary_font)),
         font_size,
         font_weight: select_style.text_style.weight,
         line_height,

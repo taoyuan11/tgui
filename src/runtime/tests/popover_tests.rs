@@ -92,7 +92,7 @@ fn hover_preview_visible_when_trigger_hovered() {
         .scene
         .overlay_texts
         .iter()
-        .map(|text| text.content.as_str())
+        .map(|text| text.content.as_ref())
         .collect();
     assert!(labels.iter().any(|text| *text == "Preview body"));
 }
@@ -131,7 +131,7 @@ fn hover_preview_remains_visible_when_cursor_moves_into_popover_rect() {
         .scene
         .overlay_texts
         .iter()
-        .map(|text| text.content.as_str())
+        .map(|text| text.content.as_ref())
         .collect();
     assert!(labels.iter().any(|text| *text == "Inside Action"));
 
@@ -213,7 +213,7 @@ fn popover_content_visible(handler: &mut BoundRuntimeHandler<PopoverVm>, label: 
         .scene
         .overlay_texts
         .iter()
-        .any(|text| text.content.as_str() == label)
+        .any(|text| text.content.as_ref() == label)
 }
 
 #[test]

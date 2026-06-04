@@ -60,6 +60,46 @@ fn build_text_heavy_tree(short_lines: usize, long_blocks: usize) -> WidgetTree<(
     WidgetTree::new(root)
 }
 
+/// 深层嵌套、文字密集的树：每个容器层级的 collect 都会 `extend` 合并所有后代图元，
+/// 因此嵌套越深、文字越多，`ComputedScene::extend` 的克隆成本越突出 —— 这正是
+/// `Arc<str>` 文本与 Box 大枚举变体优化的发力点（克隆从 String 堆分配降为引用计数自增）。
+/// 大量重复 label 也复现真实 UI 里共享文案的场景。
+fn build_nested_text_tree(depth: usize, breadth: usize) -> WidgetTree<()> {
+    // 复用同一批 label 字符串，模拟 UI 中重复出现的文案。
+    let labels = [
+        "Status: ready",
+        "Updated just now",
+        "0 items selected",
+        "Tap to expand",
+    ];
+
+    fn nest(depth: usize, breadth: usize, labels: &[&str]) -> Element<()> {
+        if depth == 0 {
+            let mut leaf = Flex::new(Axis::Horizontal).gap(dp(4.0));
+            for (index, label) in labels.iter().enumerate() {
+                leaf = leaf.child(Text::new(format!("{label} #{index}")));
+            }
+            return leaf.into();
+        }
+        let mut container = Flex::new(Axis::Vertical)
+            .padding(Insets::all(dp(4.0)))
+            .gap(dp(4.0))
+            .child(Text::new(labels[depth % labels.len()]));
+        for _ in 0..breadth {
+            container = container.child(nest(depth - 1, breadth, labels));
+        }
+        container.into()
+    }
+
+    let root = Flex::new(Axis::Vertical)
+        .width(dp(1280.0))
+        .height(dp(800.0))
+        .overflow_y(Overflow::Scroll)
+        .child(nest(depth, breadth, &labels));
+
+    WidgetTree::new(root)
+}
+
 fn build_scroll_tree(node_count: usize) -> WidgetTree<()> {
     let mut content = Flex::new(Axis::Vertical)
         .width(dp(1240.0))
@@ -281,11 +321,39 @@ fn bench_scroll_recollect(c: &mut Criterion) {
     group.finish();
 }
 
+/// 深层嵌套 + 文字密集场景的每帧重收集。每个容器层级 `extend` 合并后代图元，
+/// 嵌套越深克隆越多 —— 直接量化 `Arc<str>` 文本 / Box 大枚举变体对 `extend` 克隆成本的改善。
+fn bench_nested_text_recollect(c: &mut Criterion) {
+    let mut group = c.benchmark_group("nested_text_recollect");
+
+    // (depth, breadth)：节点数 ≈ breadth^depth。控制在合理规模。
+    for (label, depth, breadth) in [("depth4_breadth3", 4, 3), ("depth5_breadth3", 5, 3)] {
+        let tree = build_nested_text_tree(depth, breadth);
+
+        group.bench_with_input(
+            BenchmarkId::new("recollect_scene", label),
+            &label,
+            |b, _| {
+                let mut bench = WidgetBenchmarkContext::default();
+                // 预热布局缓存、字体缓存。
+                let _ = bench.recollect_scene_only(&tree, Instant::now());
+                b.iter(|| {
+                    let stats = bench.recollect_scene_only(&tree, Instant::now());
+                    black_box((stats.text_count, stats.shape_count, stats.hit_region_count))
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     widget_core_layout_benches,
     bench_many_widgets_layout,
     bench_text_heavy_layout,
     bench_animated_scene_recompute,
-    bench_scroll_recollect
+    bench_scroll_recollect,
+    bench_nested_text_recollect
 );
 criterion_main!(widget_core_layout_benches);

@@ -223,7 +223,7 @@ pub(crate) fn push_text_input_primitives(
             }
 
             scene.push_text(TextPrimitive {
-                content: display_content[start..end].to_string(),
+                content: Arc::from(display_content[start..end].to_string()),
                 rich_spans: None,
                 frame: Rect::new(
                     content_frame.x,
@@ -234,7 +234,7 @@ pub(crate) fn push_text_input_primitives(
                 quad: None,
                 color: text_color,
                 force_color: false,
-                font_family: font_family.clone(),
+                font_family: font_family.clone().map(Arc::from),
                 font_size,
                 font_weight,
                 line_height,
@@ -249,13 +249,13 @@ pub(crate) fn push_text_input_primitives(
         }
     } else {
         scene.push_text(TextPrimitive {
-            content: display_content.as_ref().to_string(),
+            content: Arc::from(display_content.as_ref().to_string()),
             rich_spans: None,
             frame: content_frame,
             quad: None,
             color: text_color,
             force_color: false,
-            font_family,
+            font_family: font_family.map(Arc::from),
             font_size,
             font_weight,
             line_height,

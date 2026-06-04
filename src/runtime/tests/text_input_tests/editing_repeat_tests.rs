@@ -286,7 +286,7 @@ fn focused_input_renders_local_buffer_until_bound_value_catches_up() {
         .scene
         .texts
         .iter()
-        .any(|primitive| primitive.content == "abc"));
+        .any(|primitive| primitive.content.as_ref() == "abc"));
 }
 
 #[test]

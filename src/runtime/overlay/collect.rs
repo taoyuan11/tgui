@@ -241,7 +241,7 @@ fn translate_render_command(command: RenderCommand, origin: Point) -> RenderComm
             RenderCommand::Brush(primitive)
         }
         RenderCommand::CanvasComposite(primitive) => {
-            RenderCommand::CanvasComposite(translate_canvas_composite(primitive, origin))
+            RenderCommand::CanvasComposite(Box::new(translate_canvas_composite(*primitive, origin)))
         }
         RenderCommand::Shape(mut primitive) => {
             primitive.rect = translate_rect(primitive.rect, origin);
@@ -260,7 +260,9 @@ fn translate_render_command(command: RenderCommand, origin: Point) -> RenderComm
             primitive.clip_mask = translate_clip_mask(primitive.clip_mask, origin);
             RenderCommand::VideoTexture(primitive)
         }
-        RenderCommand::Text(primitive) => RenderCommand::Text(translate_text(primitive, origin)),
+        RenderCommand::Text(primitive) => {
+            RenderCommand::Text(Box::new(translate_text(*primitive, origin)))
+        }
         RenderCommand::Mesh(mut primitive) => {
             let triangles = translate_triangles(&primitive.triangles, origin);
             let vertices: Vec<_> = primitive
@@ -319,7 +321,7 @@ macro_rules! push_overlay_command {
             RenderCommand::Texture(primitive) => $bucket.textures.push(primitive.clone()),
             #[cfg(feature = "video")]
             RenderCommand::VideoTexture(_) => {}
-            RenderCommand::Text(primitive) => $bucket.texts.push(primitive.clone()),
+            RenderCommand::Text(primitive) => $bucket.texts.push((**primitive).clone()),
             RenderCommand::Mesh(primitive) => $bucket.meshes.push(primitive.clone()),
             RenderCommand::Brush(_) | RenderCommand::CanvasComposite(_) => {}
         }
@@ -434,8 +436,10 @@ fn finalize_portal_entry<VM>(
                         Point::new(quad[3].x + origin.x, quad[3].y + origin.y),
                     ]);
                 }
-                bucket.texts.push(text.clone());
-                bucket.commands.push(RenderCommand::Text(text));
+                bucket
+                    .commands
+                    .push(RenderCommand::Text(Box::new(text.clone())));
+                bucket.texts.push(text);
             }
             OverlayPrimitive::Texture(texture) => {
                 let mut texture = translate_texture(texture, origin);

@@ -93,7 +93,7 @@ fn toast_host_emits_overlay_content_in_stack_order_and_tracks_wakeup() {
         .scene
         .overlay_texts
         .iter()
-        .map(|text| text.content.as_str())
+        .map(|text| text.content.as_ref())
         .collect();
     assert!(
         !labels.iter().any(|text| *text == "first"),
@@ -642,7 +642,7 @@ fn toast_close_button_aligns_to_card_trailing_edge() {
         .scene
         .overlay_texts
         .iter()
-        .find(|text| text.content == "\u{e5cd}")
+        .find(|text| text.content.as_ref() == "\u{e5cd}")
         .expect("toast close icon should render");
 
     assert!(
@@ -714,7 +714,7 @@ fn toast_kind_icon_is_centered_inside_circle() {
         .scene
         .overlay_texts
         .iter()
-        .find(|text| text.content == "i")
+        .find(|text| text.content.as_ref() == "i")
         .expect("toast info icon should render");
 
     let circle_center_x = circle.rect.x + circle.rect.width * 0.5;
@@ -776,7 +776,7 @@ fn toast_message_labels(computed: &ComputedScene<()>) -> Vec<String> {
         .filter_map(|text| {
             text.content
                 .starts_with("toast ")
-                .then(|| text.content.clone())
+                .then(|| text.content.to_string())
         })
         .collect()
 }
@@ -786,7 +786,7 @@ fn toast_label_frame(computed: &ComputedScene<()>, label: &str) -> Rect {
         .scene
         .overlay_texts
         .iter()
-        .find_map(|text| (text.content == label).then_some(text.frame))
+        .find_map(|text| (text.content.as_ref() == label).then_some(text.frame))
         .unwrap_or_else(|| panic!("toast label {label:?} should render"))
 }
 

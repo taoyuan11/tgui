@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use cosmic_text::{Attrs, Buffer, Color, Family, Metrics, Shaping, Weight};
 
 use crate::foundation::color::Color as TguiColor;
@@ -24,7 +26,7 @@ impl Renderer {
         let letter_spacing = self.logical_to_physical(text.letter_spacing);
 
         Some(TextCacheKey {
-            content: text.content.clone(),
+            content: Arc::clone(&text.content),
             font_family: text.font_family.clone(),
             width,
             height,
@@ -98,7 +100,7 @@ impl Renderer {
             buffer.set_rich_text(
                 rich_spans.iter().map(|span| {
                     (
-                        span.content.as_str(),
+                        span.content.as_ref(),
                         attrs_for_span(span, font_size, line_height, letter_spacing),
                     )
                 }),
@@ -348,17 +350,17 @@ fn overflow_content(
         text.overflow,
         crate::ui::widget::CanvasTextOverflow::Ellipsis
     ) {
-        return text.content.clone();
+        return text.content.to_string();
     }
 
     buffer.set_text(&text.content, attrs, Shaping::Advanced, None);
     buffer.shape_until_scroll(font_system, false);
 
     if !text_requires_ellipsis(text, buffer) {
-        return text.content.clone();
+        return text.content.to_string();
     }
 
-    let mut candidate = text.content.clone();
+    let mut candidate = text.content.to_string();
     while !candidate.is_empty() {
         candidate.pop();
         let ellipsized = format!("{}…", candidate.trim_end_matches(char::is_whitespace));

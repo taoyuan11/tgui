@@ -34,6 +34,11 @@ audio = ["dep:ffmpeg-next", "dep:cpal"]
 video = ["audio"]
 video-static = ["video", "ffmpeg-next/static"]
 bench-support = []
+# 可选：用 mimalloc 替换全局分配器。场景收集是分配密集型热路径
+# （per-frame SmallVec 溢出、文本整形、HashMap），mimalloc 在 macOS/Windows 上
+# 通常带来 10-25% 的分配吞吐改善。作为库默认不开启——是否替换全局分配器应由
+# 下游二进制 crate 决定，避免与其分配器选择冲突。
+mimalloc = ["dep:mimalloc"]
 # 逐帧场景重收集的相位计时探针(collect_profile)。与 bench-support 解耦:criterion
 # 基准只开 bench-support,probe 编译成 inline 空操作,热路径零成本、不污染基准数字。
 # 需要相位画像时单独开启 collect-profile(它自动带上 bench-support)。
@@ -48,6 +53,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 image = { version = "0.25", default-features = true, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 geo = "0.33"
 lyon = "1.0"
+mimalloc = { version = "0.1", optional = true }
 parking_lot = "0.12"
 pollster = "0.4"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider"] }

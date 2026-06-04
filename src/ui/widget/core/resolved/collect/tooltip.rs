@@ -1,9 +1,11 @@
 //! Tooltip 在 collect 阶段的浮层渲染。
 //!
-//! Tooltip 由 runtime 先解析“当前唯一激活的 tooltip”，collect 阶段只负责：
+//! Tooltip 由 runtime 先解析”当前唯一激活的 tooltip”，collect 阶段只负责：
 //! - hover trigger 的 delay 门控与 wakeup 注册；
 //! - 按最终 solved placement 画背景、文字、阴影和三角指针；
 //! - 对 focus / long-press tooltip 接入外部点击与 Esc 关闭。
+
+use std::sync::Arc;
 
 use crate::animation::{AnimationKey, Transition, WidgetProperty};
 use crate::foundation::color::Color;
@@ -17,7 +19,6 @@ use crate::ui::widget::overlay::{
     collect::emit_overlay, solve_placement, Anchor, AnchorKey, Overlay, OverlayContent, OverlayId,
     OverlayLayer, OverlayPrimitive,
 };
-use std::sync::Arc;
 
 use super::super::scene::{CollectContext, TooltipTrigger};
 use super::super::types::ResolvedElement;
@@ -187,13 +188,13 @@ impl<VM> ResolvedElement<VM> {
             text_h,
         );
         let text_prim = TextPrimitive {
-            content: text,
+            content: Arc::from(text),
             rich_spans: None,
             frame: text_frame,
             quad: None,
             color: foreground,
             force_color: false,
-            font_family: Some(resolved_font.primary_font),
+            font_family: Some(Arc::from(resolved_font.primary_font)),
             font_size,
             font_weight: style.text_style.weight,
             line_height,

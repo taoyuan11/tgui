@@ -11,33 +11,33 @@ use super::{
 
 pub(super) struct PreparedRect {
     pub(super) clip_rect: Option<Rect>,
-    pub(super) vertex_buffer: wgpu::Buffer,
+    pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
 }
 
 pub(super) struct PreparedBrush {
     pub(super) clip_rect: Option<Rect>,
-    pub(super) vertex_buffer: wgpu::Buffer,
+    pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
 }
 
 pub(super) struct PreparedMesh {
     pub(super) clip_rect: Option<Rect>,
     pub(super) clip_bind_group: wgpu::BindGroup,
-    pub(super) vertex_buffer: wgpu::Buffer,
+    pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
 }
 
 pub(super) struct PreparedSprite {
     pub(super) bind_group: wgpu::BindGroup,
     pub(super) clip_rect: Option<Rect>,
-    pub(super) vertex_buffer: wgpu::Buffer,
+    pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
 }
 
 pub(super) struct PreparedBackdropBlur {
     pub(super) primitive: crate::ui::widget::BackdropBlurPrimitive,
-    pub(super) composite_buffer: wgpu::Buffer,
+    pub(super) composite_offset: u64,
     pub(super) composite_vertex_count: u32,
 }
 
@@ -66,7 +66,7 @@ impl Renderer {
         physical_height: f32,
         scale_factor: f32,
     ) -> Result<PreparedCommands, TguiError> {
-        let mut prepared = Vec::new();
+        let mut prepared = Vec::with_capacity(commands.len());
 
         for command in commands {
             match command {
@@ -81,16 +81,11 @@ impl Renderer {
                         primitive.corner_radius,
                         primitive.clip_mask,
                     );
-                    let composite_buffer =
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("tgui-backdrop-composite-vertices"),
-                                contents: bytemuck::cast_slice(&vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
+                    let composite_offset =
+                        self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     prepared.push(PreparedCommand::BackdropBlur(PreparedBackdropBlur {
                         primitive: *primitive,
-                        composite_buffer,
+                        composite_offset,
                         composite_vertex_count: vertices.len() as u32,
                     }));
                 }
@@ -111,16 +106,10 @@ impl Renderer {
                         physical_height,
                         scale_factor,
                     );
-                    let vertex_buffer =
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("tgui-brush-vertices"),
-                                contents: bytemuck::cast_slice(&vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
+                    let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     prepared.push(PreparedCommand::Brush(PreparedBrush {
                         clip_rect: primitive.clip_rect,
-                        vertex_buffer,
+                        vertex_offset,
                         vertex_count: vertices.len() as u32,
                     }));
                 }
@@ -129,7 +118,7 @@ impl Renderer {
                         continue;
                     }
                     prepared.push(PreparedCommand::CanvasComposite(PreparedCanvasComposite {
-                        primitive: primitive.clone(),
+                        primitive: (**primitive).clone(),
                     }));
                 }
                 RenderCommand::Shape(primitive) => {
@@ -142,16 +131,10 @@ impl Renderer {
                         physical_height,
                         scale_factor,
                     );
-                    let vertex_buffer =
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("tgui-rect-vertices"),
-                                contents: bytemuck::cast_slice(&vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
+                    let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     prepared.push(PreparedCommand::Rect(PreparedRect {
                         clip_rect: primitive.clip_rect,
-                        vertex_buffer,
+                        vertex_offset,
                         vertex_count: vertices.len() as u32,
                     }));
                 }
@@ -167,13 +150,7 @@ impl Renderer {
                             MeshVertex::from_scene_vertex(vertex, logical_width, logical_height)
                         })
                         .collect();
-                    let vertex_buffer =
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("tgui-mesh-vertices"),
-                                contents: bytemuck::cast_slice(&vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
+                    let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     let clip_buffer =
                         self.device
                             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -196,7 +173,7 @@ impl Renderer {
                     prepared.push(PreparedCommand::Mesh(PreparedMesh {
                         clip_rect: primitive.clip_rect,
                         clip_bind_group,
-                        vertex_buffer,
+                        vertex_offset,
                         vertex_count: vertices.len() as u32,
                     }));
                 }
@@ -230,17 +207,12 @@ impl Renderer {
                                 )
                             },
                         );
-                        let vertex_buffer =
-                            self.device
-                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                    label: Some("tgui-sprite-vertices"),
-                                    contents: bytemuck::cast_slice(&vertices),
-                                    usage: wgpu::BufferUsages::VERTEX,
-                                });
+                        let vertex_offset =
+                            self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                         prepared.push(PreparedCommand::Sprite(PreparedSprite {
                             bind_group,
                             clip_rect: texture.clip_rect,
-                            vertex_buffer,
+                            vertex_offset,
                             vertex_count: vertices.len() as u32,
                         }));
                     }
@@ -279,17 +251,12 @@ impl Renderer {
                                 )
                             },
                         );
-                        let vertex_buffer =
-                            self.device
-                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                    label: Some("tgui-video-sprite-vertices"),
-                                    contents: bytemuck::cast_slice(&vertices),
-                                    usage: wgpu::BufferUsages::VERTEX,
-                                });
+                        let vertex_offset =
+                            self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                         prepared.push(PreparedCommand::Sprite(PreparedSprite {
                             bind_group,
                             clip_rect: texture.clip_rect,
-                            vertex_buffer,
+                            vertex_offset,
                             vertex_count: vertices.len() as u32,
                         }));
                     }
@@ -325,17 +292,12 @@ impl Renderer {
                                 )
                             },
                         );
-                        let vertex_buffer =
-                            self.device
-                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                    label: Some("tgui-text-vertices"),
-                                    contents: bytemuck::cast_slice(&vertices),
-                                    usage: wgpu::BufferUsages::VERTEX,
-                                });
+                        let vertex_offset =
+                            self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                         prepared.push(PreparedCommand::Sprite(PreparedSprite {
                             bind_group,
                             clip_rect: text.clip_rect,
-                            vertex_buffer,
+                            vertex_offset,
                             vertex_count: vertices.len() as u32,
                         }));
                     }

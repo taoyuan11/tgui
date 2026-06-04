@@ -40,7 +40,7 @@ fn toast_deadline_invalidates_scene_and_recollect_clears_expired_entry() {
             .scene
             .overlay_texts
             .iter()
-            .any(|text| text.content == "ephemeral"),
+            .any(|text| text.content.as_ref() == "ephemeral"),
         "toast should be visible before its deadline"
     );
     assert!(
@@ -66,7 +66,7 @@ fn toast_deadline_invalidates_scene_and_recollect_clears_expired_entry() {
             .scene
             .overlay_texts
             .iter()
-            .all(|text| text.content != "ephemeral"),
+            .all(|text| text.content.as_ref() != "ephemeral"),
         "expired toast should be removed after exit animation completes"
     );
 }

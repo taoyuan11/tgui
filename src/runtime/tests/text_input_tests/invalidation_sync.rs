@@ -203,7 +203,7 @@ fn textarea_on_change_state_update_keeps_text_input_scene_in_sync() {
         "{texts:?}"
     );
     assert!(
-        texts.iter().any(|content| content == "count=1"),
+        texts.iter().any(|content| content.as_ref() == "count=1"),
         "{texts:?}"
     );
 }
@@ -305,7 +305,7 @@ fn textarea_on_change_state_update_does_not_resolve_unrelated_dynamic_sibling() 
         "{texts:?}"
     );
     assert!(
-        texts.iter().any(|content| content == "count=1"),
+        texts.iter().any(|content| content.as_ref() == "count=1"),
         "{texts:?}"
     );
 }

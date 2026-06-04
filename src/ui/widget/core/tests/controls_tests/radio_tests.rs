@@ -64,7 +64,7 @@ fn radio_label_extends_measure_and_hit_region() {
         .primitives
         .texts
         .iter()
-        .find(|text| text.content == "Email")
+        .find(|text| text.content.as_ref() == "Email")
         .expect("radio label should render");
 
     assert_eq!(label.frame.x, size + gap);

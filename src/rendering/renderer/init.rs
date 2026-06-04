@@ -57,6 +57,7 @@ impl Renderer {
 
         surface.configure(&device, &config);
         let targets = RendererTargets::new(&device, &config, msaa_sample_count);
+        let vertex_pool = super::vertex_pool::VertexBufferPool::new(&device);
 
         Ok(Self {
             window,
@@ -94,6 +95,7 @@ impl Renderer {
             },
             text_cache: HashMap::new(),
             texture_cache: HashMap::new(),
+            vertex_pool,
         })
     }
 }
