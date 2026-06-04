@@ -223,6 +223,19 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         max_visible: Option<usize>,
         style: crate::ui::widget::style::ToastStyle,
     },
+    Portal {
+        content: Box<Element<VM>>,
+        open: Value<bool>,
+        target: crate::ui::widget::PortalTarget,
+        anchor: Option<crate::ui::widget::PortalAnchor>,
+        options: crate::ui::widget::OverlayPlacementOptions,
+        layer: crate::ui::widget::OverlayLayer,
+        on_open_change: Option<ValueCommand<VM, bool>>,
+        return_focus_to: Option<WidgetId>,
+        close_on_outside_click: bool,
+        close_on_escape: bool,
+        focus_scope: Option<crate::ui::widget::FocusScopeOptions>,
+    },
 }
 
 impl<VM> Clone for ResolvedElement<VM> {
@@ -486,6 +499,31 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 placement: *placement,
                 max_visible: *max_visible,
                 style: style.clone(),
+            },
+            Self::Portal {
+                content,
+                open,
+                target,
+                anchor,
+                options,
+                layer,
+                on_open_change,
+                return_focus_to,
+                close_on_outside_click,
+                close_on_escape,
+                focus_scope,
+            } => Self::Portal {
+                content: content.clone(),
+                open: open.clone(),
+                target: target.clone(),
+                anchor: anchor.clone(),
+                options: options.clone(),
+                layer: *layer,
+                on_open_change: on_open_change.clone(),
+                return_focus_to: *return_focus_to,
+                close_on_outside_click: *close_on_outside_click,
+                close_on_escape: *close_on_escape,
+                focus_scope: focus_scope.clone(),
             },
         }
     }

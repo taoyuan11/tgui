@@ -432,6 +432,31 @@ impl<VM: 'static> Element<VM> {
                         )
                     }),
             },
+            WidgetKind::Portal {
+                content,
+                open,
+                target,
+                anchor,
+                options,
+                layer,
+                on_open_change,
+                return_focus_to,
+                close_on_outside_click,
+                close_on_escape,
+                focus_scope,
+            } => ResolvedWidgetKind::Portal {
+                content: content.clone(),
+                open: open.clone(),
+                target: target.clone(),
+                anchor: anchor.clone(),
+                options: options.clone(),
+                layer: *layer,
+                on_open_change: on_open_change.clone(),
+                return_focus_to: *return_focus_to,
+                close_on_outside_click: *close_on_outside_click,
+                close_on_escape: *close_on_escape,
+                focus_scope: focus_scope.clone(),
+            },
         };
 
         ResolvedElement {

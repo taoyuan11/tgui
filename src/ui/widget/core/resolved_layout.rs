@@ -112,6 +112,7 @@ impl<VM> ResolvedElement<VM> {
                 multiline: *multiline,
             },
             ResolvedWidgetKind::ToastHost { .. } => MeasureContext::None,
+            ResolvedWidgetKind::Portal { .. } => MeasureContext::None,
         }
     }
 
@@ -227,7 +228,9 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Slider { style, .. } if self.layout.min_width.is_none() => {
                 Dimension::from_length(style.min_width.get())
             }
-            ResolvedWidgetKind::ToastHost { .. } => Dimension::from_length(0.0),
+            ResolvedWidgetKind::ToastHost { .. } | ResolvedWidgetKind::Portal { .. } => {
+                Dimension::from_length(0.0)
+            }
             _ => Dimension::AUTO,
         };
         let width = if is_root {

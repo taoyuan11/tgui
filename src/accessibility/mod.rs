@@ -201,9 +201,9 @@ fn role_for_widget<VM>(resolved: &ResolvedElement<VM>) -> Role {
         ResolvedWidgetKind::Container { layout, .. } if layout.scroll_view.is_some() => {
             Role::ScrollView
         }
-        ResolvedWidgetKind::Container { .. } | ResolvedWidgetKind::Virtual { .. } => {
-            Role::GenericContainer
-        }
+        ResolvedWidgetKind::Container { .. }
+        | ResolvedWidgetKind::Virtual { .. }
+        | ResolvedWidgetKind::Portal { .. } => Role::GenericContainer,
         ResolvedWidgetKind::Text { .. } => Role::TextRun,
         ResolvedWidgetKind::Image { .. } => Role::Image,
         ResolvedWidgetKind::Canvas { .. } => Role::Canvas,

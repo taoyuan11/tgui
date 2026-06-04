@@ -13,6 +13,7 @@ mod lifecycle;
 mod menu;
 pub(crate) mod overlay;
 mod popover;
+pub(crate) mod portal;
 mod render_cycle;
 mod scene_patch;
 mod scene_patch_cleanup;
@@ -86,6 +87,7 @@ use crate::platform::window::{
     Theme as WindowTheme, WindowAttributes, WindowId,
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
+use crate::runtime::portal::ExternalPortalRequest;
 #[cfg(feature = "audio")]
 use crate::runtime::state::AudioLifecycleState;
 use crate::text::font::FontManager;
@@ -315,6 +317,8 @@ pub struct BoundRuntimeHandler<VM> {
     touch_scroll_inertia_states: HashMap<WidgetId, TouchScrollInertiaState>,
     virtual_states: HashMap<WidgetId, VirtualCacheState>,
     select_open_states: HashMap<WidgetId, bool>,
+    external_portal_requests: Vec<ExternalPortalRequest<VM>>,
+    external_portal_revision: u64,
     scroll_epoch: u64,
     text_input_epoch: u64,
     media_event_states: HashMap<WidgetId, DispatchedMediaState>,
@@ -432,6 +436,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             touch_scroll_inertia_states: HashMap::new(),
             virtual_states: HashMap::new(),
             select_open_states: HashMap::new(),
+            external_portal_requests: Vec::new(),
+            external_portal_revision: 0,
             scroll_epoch: 0,
             text_input_epoch: 0,
             media_event_states: HashMap::new(),

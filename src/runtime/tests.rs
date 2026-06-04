@@ -338,6 +338,7 @@ fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
         scroll_epoch: 0,
         hover_epoch: 0,
         text_input_epoch: 0,
+        external_portal_revision: 0,
         hovered_scrollbar: None,
         active_scrollbar: None,
         computed_valid: true,
@@ -489,6 +490,7 @@ mod gesture_tests;
 mod menu_tests;
 mod modal_tests;
 mod popover_tests;
+mod portal_tests;
 mod scroll_tests;
 mod tabs_tests;
 mod text_input_tests;

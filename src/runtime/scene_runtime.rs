@@ -434,7 +434,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     },
                 ),
             };
-            let computed = collected.computed.clone();
+            self.next_tooltip_wakeup_deadline = collected.next_tooltip_wakeup;
+            self.next_toast_wakeup_deadline = collected.next_toast_wakeup;
+            let mut computed = collected.computed.clone();
+            self.append_external_portals_to_computed(&mut computed, now);
             let virtual_layout_invalidated = self.sync_virtual_state_updates(&computed);
             if virtual_layout_invalidated {
                 self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
@@ -442,8 +445,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     window.request_redraw();
                 }
             }
-            self.next_tooltip_wakeup_deadline = collected.next_tooltip_wakeup;
-            self.next_toast_wakeup_deadline = collected.next_toast_wakeup;
             let focused_input = self.focused_text_input_id_cached(&computed);
             let caret_visible = self.caret_visible_at(now, focused_input);
             self.prune_text_input_buffers(&computed);
@@ -463,6 +464,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 scroll_epoch: self.scroll_epoch,
                 hover_epoch: self.hover_epoch,
                 text_input_epoch: self.text_input_epoch,
+                external_portal_revision: self.external_portal_revision,
                 hovered_scrollbar: self.hovered_scrollbar,
                 active_scrollbar,
                 computed_valid: true,
@@ -471,7 +473,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     if let Some(layout) = layout.as_ref() {
                         dependencies.merge_from(layout.dependencies());
                     }
-                    dependencies.merge_from(&collected.dependencies);
+                    dependencies.merge_from(&computed.dependencies);
                     dependencies
                 },
                 layout,

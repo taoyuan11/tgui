@@ -135,6 +135,7 @@ pub(crate) enum LifecycleWidgetKind {
         auto_wrap: Value<bool>,
     },
     ToastHost,
+    Portal,
 }
 
 impl Clone for LifecycleSnapshot {
@@ -356,6 +357,7 @@ impl Clone for LifecycleWidgetKind {
                 auto_wrap: auto_wrap.clone(),
             },
             Self::ToastHost => Self::ToastHost,
+            Self::Portal => Self::Portal,
         }
     }
 }

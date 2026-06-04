@@ -24,6 +24,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && cached.scroll_epoch == self.scroll_epoch
             && cached.hover_epoch == self.hover_epoch
             && cached.text_input_epoch == self.text_input_epoch
+            && cached.external_portal_revision == self.external_portal_revision
             && cached.hovered_scrollbar == self.hovered_scrollbar
             && cached.active_scrollbar == active_scrollbar
     }
@@ -88,6 +89,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if cached.text_input_epoch != self.text_input_epoch {
             reasons.push("text_input_epoch");
         }
+        if cached.external_portal_revision != self.external_portal_revision {
+            reasons.push("external_portal_revision");
+        }
         if cached.hovered_scrollbar != self.hovered_scrollbar {
             reasons.push("hovered_scrollbar");
         }
@@ -123,6 +127,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && cached.animation_epoch == self.animation_epoch
             && cached.layout_animation_epoch == self.layout_animation_epoch
             && cached.hover_epoch == self.hover_epoch
+            && cached.external_portal_revision == self.external_portal_revision
             && cached.hovered_scrollbar == self.hovered_scrollbar
             && cached.active_scrollbar == active_scrollbar;
         stable_shell

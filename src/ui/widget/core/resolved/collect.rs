@@ -10,6 +10,7 @@ mod layout_media;
 mod menu;
 mod modal;
 mod popover;
+pub(crate) mod portal;
 mod toast;
 mod tooltip;
 
@@ -168,6 +169,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         self.emit_modal_close_overlay_if_open(context, &mut computed, &visual);
         self.emit_drawer_close_overlay_if_open(context, &mut computed, &visual);
         self.emit_toast_overlay_if_visible(context, &mut computed, &visual);
+        self.emit_portal_if_open(context, &mut computed, &visual);
 
         timed(Phase::Bookkeeping, || {
             // `chunk_parts` 只被 `recompose_scene_chunk` 读取(scene_layout.rs),而 recompose

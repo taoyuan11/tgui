@@ -1,6 +1,7 @@
 use super::*;
 use crate::runtime::overlay::PortalEntry;
 use crate::runtime::overlay::{AnchorKey, AnchorSource};
+use crate::runtime::portal::ExternalPortalRequest;
 use crate::ui::widget::VirtualSceneStateUpdate;
 use smallvec::SmallVec;
 
@@ -45,6 +46,7 @@ pub(crate) struct ComputedScene<VM> {
     pub focus_scopes: SmallVec<[FocusScopeState; 1]>,
     pub overlay_anchors: HashMap<AnchorKey, Rect>,
     pub portal_entries: SmallVec<[PortalEntry<VM>; 1]>,
+    pub external_portal_requests: SmallVec<[ExternalPortalRequest<VM>; 1]>,
     /// 每个 `OverlayLayer` 的暂存桶。`emit_overlay` 写入此处，
     /// `finalize_overlay_layers` 在 collect 收尾时按 layer 顺序合并到 `scene.overlay_*` /
     /// `overlay_hit_regions` / `overlay_close_handlers`，从而强制 z-order
@@ -67,6 +69,7 @@ impl<VM> Clone for ComputedScene<VM> {
             focus_scopes: self.focus_scopes.clone(),
             overlay_anchors: self.overlay_anchors.clone(),
             portal_entries: self.portal_entries.clone(),
+            external_portal_requests: self.external_portal_requests.clone(),
             overlay_layers: std::array::from_fn(|i| self.overlay_layers[i].clone()),
             scroll_regions: self.scroll_regions.clone(),
             ime_cursor_area: self.ime_cursor_area,
@@ -199,6 +202,7 @@ impl<VM> Default for ComputedScene<VM> {
             focus_scopes: SmallVec::new(),
             overlay_anchors: HashMap::new(),
             portal_entries: SmallVec::new(),
+            external_portal_requests: SmallVec::new(),
             overlay_layers: std::array::from_fn(|_| OverlayLayerBucket::default()),
             scroll_regions: SmallVec::new(),
             ime_cursor_area: None,
@@ -221,6 +225,8 @@ impl<VM> ComputedScene<VM> {
             .extend(other.overlay_anchors.iter().map(|(k, v)| (*k, *v)));
         self.portal_entries
             .extend(other.portal_entries.iter().cloned());
+        self.external_portal_requests
+            .extend(other.external_portal_requests.iter().cloned());
         self.portal_overlay_counts.shapes += other.portal_overlay_counts.shapes;
         self.portal_overlay_counts.textures += other.portal_overlay_counts.textures;
         self.portal_overlay_counts.meshes += other.portal_overlay_counts.meshes;
@@ -339,6 +345,49 @@ impl<VM> ComputedScene<VM> {
                 .saturating_sub(base_close_handlers),
             focus_scopes: self.focus_scopes.len().saturating_sub(base_focus_scopes),
         };
+    }
+
+    pub(crate) fn finalize_additional_portals(
+        &mut self,
+        viewport: Rect,
+        entries: impl IntoIterator<Item = PortalEntry<VM>>,
+    ) {
+        let base_shapes = self.scene.overlay_shapes.len();
+        let base_textures = self.scene.overlay_textures.len();
+        let base_meshes = self.scene.overlay_meshes.len();
+        let base_texts = self.scene.overlay_texts.len();
+        let base_commands = self.scene.overlay_commands.len();
+        let base_hits = self.overlay_hit_regions.len();
+        let base_close_handlers = self.overlay_close_handlers.len();
+        let base_focus_scopes = self.focus_scopes.len();
+
+        self.portal_entries.extend(entries);
+        crate::runtime::overlay::collect::finalize_portal_entries(self, viewport);
+        self.finalize_overlay_layers();
+
+        self.portal_overlay_counts.shapes +=
+            self.scene.overlay_shapes.len().saturating_sub(base_shapes);
+        self.portal_overlay_counts.textures += self
+            .scene
+            .overlay_textures
+            .len()
+            .saturating_sub(base_textures);
+        self.portal_overlay_counts.meshes +=
+            self.scene.overlay_meshes.len().saturating_sub(base_meshes);
+        self.portal_overlay_counts.texts +=
+            self.scene.overlay_texts.len().saturating_sub(base_texts);
+        self.portal_overlay_counts.commands += self
+            .scene
+            .overlay_commands
+            .len()
+            .saturating_sub(base_commands);
+        self.portal_overlay_counts.hits += self.overlay_hit_regions.len().saturating_sub(base_hits);
+        self.portal_overlay_counts.close_handlers += self
+            .overlay_close_handlers
+            .len()
+            .saturating_sub(base_close_handlers);
+        self.portal_overlay_counts.focus_scopes +=
+            self.focus_scopes.len().saturating_sub(base_focus_scopes);
     }
 
     pub(crate) fn register_overlay_anchor(&mut self, key: AnchorKey, rect: Rect) {

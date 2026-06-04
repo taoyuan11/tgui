@@ -314,6 +314,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 computed.extend(&after_children);
                 true
             }
+            ResolvedWidgetKind::Portal { .. } => true,
             ResolvedWidgetKind::Text { text } => {
                 let padding = text
                     .layout

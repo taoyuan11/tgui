@@ -587,5 +587,6 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             }
         }
         ResolvedWidgetKind::ToastHost { .. } => LifecycleWidgetKind::ToastHost,
+        ResolvedWidgetKind::Portal { .. } => LifecycleWidgetKind::Portal,
     }
 }

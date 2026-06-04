@@ -2,6 +2,8 @@ use super::*;
 use crate::foundation::binding::ScrollViewController;
 use crate::foundation::binding::{ToastPlacement, ToastQueue};
 use crate::ui::widget::core::Element;
+use crate::ui::widget::overlay::{OverlayLayer, PlacementOptions};
+use crate::ui::widget::portal::{PortalAnchor, PortalTarget};
 use crate::ui::widget::r#virtual::{
     ErasedVirtualItemSource, ItemLayout, VirtualArrangement, VirtualRuntimeState,
 };
@@ -272,6 +274,19 @@ pub(crate) enum WidgetKind<VM> {
         placement: ToastPlacement,
         max_visible: Option<usize>,
         style: Option<StyleResolver<crate::ui::widget::style::ToastStyle>>,
+    },
+    Portal {
+        content: Box<Element<VM>>,
+        open: Value<bool>,
+        target: PortalTarget,
+        anchor: Option<PortalAnchor>,
+        options: PlacementOptions,
+        layer: OverlayLayer,
+        on_open_change: Option<ValueCommand<VM, bool>>,
+        return_focus_to: Option<WidgetId>,
+        close_on_outside_click: bool,
+        close_on_escape: bool,
+        focus_scope: Option<crate::ui::widget::FocusScopeOptions>,
     },
 }
 
@@ -625,6 +640,31 @@ impl<VM> Clone for WidgetKind<VM> {
                 placement: *placement,
                 max_visible: *max_visible,
                 style: style.clone(),
+            },
+            Self::Portal {
+                content,
+                open,
+                target,
+                anchor,
+                options,
+                layer,
+                on_open_change,
+                return_focus_to,
+                close_on_outside_click,
+                close_on_escape,
+                focus_scope,
+            } => Self::Portal {
+                content: content.clone(),
+                open: open.clone(),
+                target: target.clone(),
+                anchor: anchor.clone(),
+                options: options.clone(),
+                layer: *layer,
+                on_open_change: on_open_change.clone(),
+                return_focus_to: *return_focus_to,
+                close_on_outside_click: *close_on_outside_click,
+                close_on_escape: *close_on_escape,
+                focus_scope: focus_scope.clone(),
             },
         }
     }

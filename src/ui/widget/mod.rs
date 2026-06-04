@@ -16,6 +16,7 @@ mod menu;
 mod modal;
 mod overlay;
 mod popover;
+mod portal;
 mod progress_bar;
 mod radio;
 mod scroll_view;
@@ -61,8 +62,8 @@ pub(crate) use common::{
     CanvasItemInteractionHandlers, CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask,
     CompositionState, ComputedScene, DefaultActivation, FocusScopeState, FocusTargetMeta,
     HitGeometry, HitInteraction, HitRegion, InteractionHandlers, LifecycleEventHandlers,
-    LifecycleEventState, MediaEventPhase, MediaEventState, MeshPrimitive, MeshVertex,
-    RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextEditState,
+    LifecycleEventState, MeasureContext, MediaEventPhase, MediaEventState, MeshPrimitive,
+    MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextEditState,
     TextInputContentGeometry, TexturePrimitive, WidgetStateMap,
 };
 pub use common::{
@@ -77,12 +78,13 @@ pub use core::bench_support::{
 pub(crate) use core::LifecycleSnapshot;
 #[cfg(feature = "audio")]
 pub(crate) use core::LifecycleWidgetKind;
-pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub(crate) use core::{
-    ActiveTooltipState, CollectedSceneCache, ResolvedElement, ResolvedSceneLayout,
-    ResolvedWidgetKind, SceneChunkParts, TextInputLayoutOverride, TooltipTrigger,
-    VisualContextSnapshot,
+    build_external_portal_overlay, collect_portal_content_scene, resolve_external_portal_anchor,
+    ActiveTooltipState, CollectContext, CollectedSceneCache, FocusCollectState, ResolvedElement,
+    ResolvedSceneLayout, ResolvedWidgetKind, SceneChunkParts, TextInputLayoutOverride,
+    TooltipTrigger, VisualContextSnapshot,
 };
+pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use divider::Divider;
 pub use drawer::{Drawer, DrawerPlacement};
 pub use gesture::{
@@ -103,6 +105,7 @@ pub use overlay::{
     Side as OverlaySide, SolvedPlacement as OverlaySolvedPlacement,
 };
 pub use popover::{Popover, PopoverTriggerMode};
+pub use portal::{LayerStack, Portal, PortalAnchor, PortalTarget};
 pub use progress_bar::ProgressBar;
 pub(crate) use r#virtual::VirtualSceneStateUpdate;
 pub use r#virtual::{

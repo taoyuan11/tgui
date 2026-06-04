@@ -139,7 +139,7 @@ pub struct SolvedPlacement {
     pub anchor_rect: Rect,
 }
 
-/// 浮层在 z-order 上的归属层级。低 -> 高：Tooltip / Popover / Menu / Modal。
+/// 浮层在 z-order 上的归属层级。低 -> 高：Tooltip / Popover / Menu / Modal / Toast。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum OverlayLayer {
     #[default]

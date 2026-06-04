@@ -86,11 +86,13 @@ mod types;
 use self::element_path::resolve_subtree_from_source_path;
 use self::layout::*;
 use self::render::*;
-pub(crate) use self::scene::{
-    ActiveTooltipState, CollectedSceneCache, SceneChunkParts, TextInputLayoutOverride,
-    TooltipTrigger, VisualContextSnapshot,
+pub(crate) use self::resolved::{
+    build_external_portal_overlay, collect_portal_content_scene, resolve_external_portal_anchor,
 };
-use self::scene::{CollectContext, VisualContext};
+pub(crate) use self::scene::{
+    ActiveTooltipState, CollectContext, CollectedSceneCache, FocusCollectState, SceneChunkParts,
+    TextInputLayoutOverride, TooltipTrigger, VisualContext, VisualContextSnapshot,
+};
 pub(crate) use self::scene_layout::ResolvedSceneLayout;
 use self::scene_layout::*;
 use self::style::*;

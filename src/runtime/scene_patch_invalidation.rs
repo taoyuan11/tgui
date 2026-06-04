@@ -29,20 +29,31 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let mut layout_affected_ids = HashSet::new();
         let mut scene_affected_ids = HashSet::new();
+        let mut detached_scene_dependency = false;
         for dependency in dirty_dependencies {
             let Some(owners) = cached.dependencies.owners_for(*dependency) else {
                 continue;
             };
             for owner in owners {
+                let widget_id = WidgetId::from_raw(owner.widget_id);
+                if layout.path_for(widget_id).is_none() {
+                    detached_scene_dependency = true;
+                    continue;
+                }
                 match owner.phase {
                     DependencyPhase::Structure | DependencyPhase::Layout => {
-                        layout_affected_ids.insert(WidgetId::from_raw(owner.widget_id));
+                        layout_affected_ids.insert(widget_id);
                     }
                     DependencyPhase::Scene => {
-                        scene_affected_ids.insert(WidgetId::from_raw(owner.widget_id));
+                        scene_affected_ids.insert(widget_id);
                     }
                 }
             }
+        }
+
+        if detached_scene_dependency {
+            self.invalidate_computed_scene();
+            return "detached_scene_dependency_recollect";
         }
 
         let scene_only_layout_ids = layout_affected_ids

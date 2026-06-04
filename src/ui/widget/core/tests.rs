@@ -223,6 +223,7 @@ mod layout_scroll_tests;
 mod menu_tests;
 mod modal_tests;
 mod popover_tests;
+mod portal_tests;
 mod select_tests;
 mod tabs_tests;
 mod text_and_background;

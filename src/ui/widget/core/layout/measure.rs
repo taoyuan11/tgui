@@ -140,6 +140,7 @@ pub(crate) fn default_layout_padding<VM>(element: &ResolvedElement<VM>, _theme: 
         ResolvedWidgetKind::Image { .. } => Insets::ZERO,
         ResolvedWidgetKind::Canvas { .. } => Insets::ZERO,
         ResolvedWidgetKind::ToastHost { .. } => Insets::ZERO,
+        ResolvedWidgetKind::Portal { .. } => Insets::ZERO,
         #[cfg(feature = "video")]
         ResolvedWidgetKind::VideoSurface { .. } => Insets::ZERO,
     }

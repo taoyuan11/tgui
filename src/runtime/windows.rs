@@ -13,6 +13,7 @@ use crate::platform::backend::event_loop::ActiveEventLoop;
 use crate::platform::backend::window::Window;
 use crate::platform::event::WindowEvent;
 use crate::platform::window::WindowId;
+use crate::runtime::portal::PortalRegistry;
 use crate::ui::widget::WidgetTree;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -45,6 +46,7 @@ pub(super) struct MultiWindowHandler<VM> {
     closed_window_keys: HashSet<String>,
     last_window_sync_revision: u64,
     windows_need_sync: bool,
+    portal_registry: PortalRegistry<VM>,
     shutting_down: bool,
     #[cfg(target_os = "windows")]
     main_window_disabled_for_modal: bool,
@@ -77,6 +79,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
             closed_window_keys: HashSet::new(),
             last_window_sync_revision: 0,
             windows_need_sync: true,
+            portal_registry: PortalRegistry::default(),
             shutting_down: false,
             #[cfg(target_os = "windows")]
             main_window_disabled_for_modal: false,
@@ -317,6 +320,32 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
                 self.window_keys_by_id.remove(&window_id);
             }
         }
+        let changed_targets = self.portal_registry.remove_source(key);
+        self.apply_portal_target_updates(changed_targets);
+    }
+
+    fn sync_portal_registry(&mut self) {
+        let keys = self.windows_by_key.keys().cloned().collect::<Vec<_>>();
+        let mut targets_to_update = std::collections::BTreeSet::new();
+        for key in &keys {
+            let Some(window) = self.windows_by_key.get_mut(key) else {
+                continue;
+            };
+            let requests = window.external_portal_requests_from_computed();
+            targets_to_update.extend(self.portal_registry.publish_source(key, requests));
+        }
+        targets_to_update.extend(keys);
+        self.apply_portal_target_updates(targets_to_update.into_iter().collect());
+    }
+
+    fn apply_portal_target_updates(&mut self, targets: Vec<String>) {
+        for target in targets {
+            let requests = self.portal_registry.requests_for_target(&target);
+            let revision = self.portal_registry.target_revision(&target);
+            if let Some(window) = self.windows_by_key.get_mut(&target) {
+                window.set_external_portal_requests(requests, revision);
+            }
+        }
     }
 }
 
@@ -404,6 +433,7 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
         if self.error.is_some() {
             return;
         }
+        self.sync_portal_registry();
 
         let keys: Vec<String> = self.windows_by_key.keys().cloned().collect();
         for key in keys {

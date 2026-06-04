@@ -37,6 +37,7 @@ pub(super) struct CachedScene<VM> {
     pub(super) scroll_epoch: u64,
     pub(super) hover_epoch: u64,
     pub(super) text_input_epoch: u64,
+    pub(super) external_portal_revision: u64,
     pub(super) hovered_scrollbar: Option<ScrollbarHandle>,
     pub(super) active_scrollbar: Option<ScrollbarHandle>,
     pub(super) computed_valid: bool,

@@ -267,7 +267,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let recompose_started_at = text_profile_enabled().then_some(Instant::now());
-        let updated_computed = {
+        let mut updated_computed = {
             let Some(cached) = self.cached_scene.as_mut() else {
                 return false;
             };
@@ -376,11 +376,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 cached.scroll_epoch = self.scroll_epoch;
                 cached.hover_epoch = self.hover_epoch;
                 cached.text_input_epoch = self.text_input_epoch;
+                cached.external_portal_revision = self.external_portal_revision;
                 cached.hovered_scrollbar = self.hovered_scrollbar;
                 cached.active_scrollbar = active_scrollbar;
             }
             cached.computed.clone()
         };
+        self.append_external_portals_to_computed(&mut updated_computed, now);
+        if let Some(cached) = self.cached_scene.as_mut() {
+            cached
+                .dependencies
+                .merge_from(&updated_computed.dependencies);
+            cached.computed = updated_computed.clone();
+        }
 
         let actual_focused_input = self.focused_text_input_id_cached(&updated_computed);
         let actual_caret_visible = self.caret_visible_at(now, actual_focused_input);
