@@ -109,4 +109,5 @@ pub(super) const CARET_END_GAP: f32 = 1.0;
 /// Default intrinsic width for selects when no explicit width is set.
 const SELECT_DEFAULT_WIDTH: f32 = 160.0;
 
-const CHECKBOX_CHECKMARK_ICON: &str = "\u{e687}";
+const CHECKBOX_CHECKMARK_ICON: &str = "check";
+const SELECT_ARROW_ICON: &str = "keyboard_arrow_down";

@@ -38,14 +38,9 @@ fn select_renders_placeholder_and_arrow_when_unselected() {
         .any(|text| text.content == "Choose one"));
     assert!(rendered
         .primitives
-        .meshes
-        .iter()
-        .any(|mesh| mesh.vertices.len() == 3));
-    assert!(rendered
-        .primitives
         .texts
         .iter()
-        .all(|text| text.font_family.as_deref() != Some("tgui-icons")));
+        .any(|text| text.content == SELECT_ARROW_ICON && text.force_color));
 }
 
 #[test]
