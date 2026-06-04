@@ -404,7 +404,7 @@ fn emit_overlay_registers_focus_scope_and_rebases_hit_scope_path() {
     );
     scene.finalize_portals(viewport());
 
-    assert_eq!(scene.focus_scopes, vec![focus_scope.clone()]);
+    assert_eq!(scene.focus_scopes.to_vec(), vec![focus_scope.clone()]);
     assert_eq!(scene.overlay_hit_regions.len(), 1);
     assert_eq!(scene.overlay_hit_regions[0].scope_path, focus_scope.path);
     assert_eq!(

@@ -2,6 +2,7 @@ use super::*;
 use crate::runtime::overlay::PortalEntry;
 use crate::runtime::overlay::{AnchorKey, AnchorSource};
 use crate::ui::widget::VirtualSceneStateUpdate;
+use smallvec::SmallVec;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ScrollRegion {
@@ -37,21 +38,21 @@ impl ScrollRegion {
 
 pub(crate) struct ComputedScene<VM> {
     pub scene: ScenePrimitives,
-    pub hit_regions: Vec<HitRegion<VM>>,
-    pub overlay_hit_regions: Vec<HitRegion<VM>>,
-    pub overlay_close_handlers: Vec<crate::runtime::overlay::OverlayCloseHandle<VM>>,
+    pub hit_regions: SmallVec<[HitRegion<VM>; 1]>,
+    pub overlay_hit_regions: SmallVec<[HitRegion<VM>; 1]>,
+    pub overlay_close_handlers: SmallVec<[crate::runtime::overlay::OverlayCloseHandle<VM>; 1]>,
     pub portal_overlay_counts: PortalOverlayCounts,
-    pub focus_scopes: Vec<FocusScopeState>,
+    pub focus_scopes: SmallVec<[FocusScopeState; 1]>,
     pub overlay_anchors: HashMap<AnchorKey, Rect>,
-    pub portal_entries: Vec<PortalEntry<VM>>,
+    pub portal_entries: SmallVec<[PortalEntry<VM>; 1]>,
     /// 每个 `OverlayLayer` 的暂存桶。`emit_overlay` 写入此处，
     /// `finalize_overlay_layers` 在 collect 收尾时按 layer 顺序合并到 `scene.overlay_*` /
     /// `overlay_hit_regions` / `overlay_close_handlers`，从而强制 z-order
     /// （Tooltip < Popover < Menu < Modal）。
     pub overlay_layers: [OverlayLayerBucket<VM>; OVERLAY_LAYER_COUNT],
-    pub scroll_regions: Vec<ScrollRegion>,
+    pub scroll_regions: SmallVec<[ScrollRegion; 1]>,
     pub ime_cursor_area: Option<Rect>,
-    pub virtual_state_updates: Vec<VirtualSceneStateUpdate>,
+    pub virtual_state_updates: SmallVec<[VirtualSceneStateUpdate; 1]>,
     pub(crate) dependencies: DependencyGraph,
 }
 
@@ -91,29 +92,29 @@ pub(crate) struct PortalOverlayCounts {
 
 /// 单个 `OverlayLayer` 的暂存桶。
 pub(crate) struct OverlayLayerBucket<VM> {
-    pub commands: Vec<RenderCommand>,
-    pub backdrop_blurs: Vec<BackdropBlurPrimitive>,
-    pub shapes: Vec<RenderPrimitive>,
-    pub textures: Vec<TexturePrimitive>,
-    pub meshes: Vec<MeshPrimitive>,
-    pub texts: Vec<TextPrimitive>,
-    pub hits: Vec<HitRegion<VM>>,
-    pub close_handlers: Vec<crate::runtime::overlay::OverlayCloseHandle<VM>>,
-    pub focus_scopes: Vec<FocusScopeState>,
+    pub commands: SmallVec<[RenderCommand; 1]>,
+    pub backdrop_blurs: SmallVec<[BackdropBlurPrimitive; 1]>,
+    pub shapes: SmallVec<[RenderPrimitive; 1]>,
+    pub textures: SmallVec<[TexturePrimitive; 1]>,
+    pub meshes: SmallVec<[MeshPrimitive; 1]>,
+    pub texts: SmallVec<[TextPrimitive; 1]>,
+    pub hits: SmallVec<[HitRegion<VM>; 1]>,
+    pub close_handlers: SmallVec<[crate::runtime::overlay::OverlayCloseHandle<VM>; 1]>,
+    pub focus_scopes: SmallVec<[FocusScopeState; 1]>,
 }
 
 impl<VM> Default for OverlayLayerBucket<VM> {
     fn default() -> Self {
         Self {
-            commands: Vec::new(),
-            backdrop_blurs: Vec::new(),
-            shapes: Vec::new(),
-            textures: Vec::new(),
-            meshes: Vec::new(),
-            texts: Vec::new(),
-            hits: Vec::new(),
-            close_handlers: Vec::new(),
-            focus_scopes: Vec::new(),
+            commands: SmallVec::new(),
+            backdrop_blurs: SmallVec::new(),
+            shapes: SmallVec::new(),
+            textures: SmallVec::new(),
+            meshes: SmallVec::new(),
+            texts: SmallVec::new(),
+            hits: SmallVec::new(),
+            close_handlers: SmallVec::new(),
+            focus_scopes: SmallVec::new(),
         }
     }
 }
@@ -191,17 +192,17 @@ impl<VM> Default for ComputedScene<VM> {
     fn default() -> Self {
         Self {
             scene: ScenePrimitives::default(),
-            hit_regions: Vec::new(),
-            overlay_hit_regions: Vec::new(),
-            overlay_close_handlers: Vec::new(),
+            hit_regions: SmallVec::new(),
+            overlay_hit_regions: SmallVec::new(),
+            overlay_close_handlers: SmallVec::new(),
             portal_overlay_counts: PortalOverlayCounts::default(),
-            focus_scopes: Vec::new(),
+            focus_scopes: SmallVec::new(),
             overlay_anchors: HashMap::new(),
-            portal_entries: Vec::new(),
+            portal_entries: SmallVec::new(),
             overlay_layers: std::array::from_fn(|_| OverlayLayerBucket::default()),
-            scroll_regions: Vec::new(),
+            scroll_regions: SmallVec::new(),
             ime_cursor_area: None,
-            virtual_state_updates: Vec::new(),
+            virtual_state_updates: SmallVec::new(),
             dependencies: DependencyGraph::default(),
         }
     }
@@ -370,7 +371,7 @@ impl<VM> ComputedScene<VM> {
     pub(crate) fn rendered(&self) -> RenderedWidgetScene {
         RenderedWidgetScene {
             primitives: self.scene.clone(),
-            scroll_regions: self.scroll_regions.clone(),
+            scroll_regions: self.scroll_regions.to_vec(),
             ime_cursor_area: self.ime_cursor_area,
         }
     }

@@ -192,10 +192,11 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             DependencyGraph,
         ) = with_widget_stack(|| {
             with_dependency_collection(|| {
-                let mut lifecycle_states = HashMap::new();
-                let mut chunks = HashMap::new();
-                let mut chunk_parts = HashMap::new();
-                let mut visual_contexts = HashMap::new();
+                let cap = self.resolved_root.estimated_node_count();
+                let mut lifecycle_states = HashMap::with_capacity(cap / 4);
+                let mut chunks = HashMap::with_capacity(cap);
+                let mut chunk_parts = HashMap::with_capacity(cap / 2);
+                let mut visual_contexts = HashMap::with_capacity(cap);
                 let mut context = CollectContext {
                     taffy: &self.taffy,
                     font_manager,

@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(feature = "video")]
 use crate::video::VideoController;
+use smallvec::SmallVec;
 
 /// A primitive whose bounding `rect` lies entirely outside its own `clip_rect`
 /// is scissored to zero pixels by the renderer (see `Renderer::scissor_rect`),
@@ -158,23 +159,23 @@ pub(crate) enum RenderCommand {
 
 #[derive(Clone, Default)]
 pub struct ScenePrimitives {
-    pub backdrop_blurs: Vec<BackdropBlurPrimitive>,
-    pub brushes: Vec<BrushPrimitive>,
-    pub canvas_composites: Vec<CanvasCompositePrimitive>,
-    pub shapes: Vec<RenderPrimitive>,
-    pub meshes: Vec<MeshPrimitive>,
-    pub textures: Vec<TexturePrimitive>,
+    pub backdrop_blurs: SmallVec<[BackdropBlurPrimitive; 1]>,
+    pub brushes: SmallVec<[BrushPrimitive; 1]>,
+    pub canvas_composites: SmallVec<[CanvasCompositePrimitive; 1]>,
+    pub shapes: SmallVec<[RenderPrimitive; 1]>,
+    pub meshes: SmallVec<[MeshPrimitive; 1]>,
+    pub textures: SmallVec<[TexturePrimitive; 1]>,
     #[cfg(feature = "video")]
-    pub video_textures: Vec<VideoTexturePrimitive>,
-    pub texts: Vec<TextPrimitive>,
-    pub overlay_shapes: Vec<RenderPrimitive>,
-    pub overlay_textures: Vec<TexturePrimitive>,
+    pub video_textures: SmallVec<[VideoTexturePrimitive; 1]>,
+    pub texts: SmallVec<[TextPrimitive; 1]>,
+    pub overlay_shapes: SmallVec<[RenderPrimitive; 1]>,
+    pub overlay_textures: SmallVec<[TexturePrimitive; 1]>,
     #[allow(dead_code)]
-    pub overlay_meshes: Vec<MeshPrimitive>,
+    pub overlay_meshes: SmallVec<[MeshPrimitive; 1]>,
     #[allow(dead_code)]
-    pub overlay_texts: Vec<TextPrimitive>,
-    pub(crate) commands: Vec<RenderCommand>,
-    pub(crate) overlay_commands: Vec<RenderCommand>,
+    pub overlay_texts: SmallVec<[TextPrimitive; 1]>,
+    pub(crate) commands: SmallVec<[RenderCommand; 1]>,
+    pub(crate) overlay_commands: SmallVec<[RenderCommand; 1]>,
 }
 
 impl ScenePrimitives {

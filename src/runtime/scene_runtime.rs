@@ -576,7 +576,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn scroll_regions(&mut self) -> Vec<ScrollRegion> {
-        self.computed_scene().scroll_regions.clone()
+        self.computed_scene().scroll_regions.to_vec()
     }
 
     pub(in crate::runtime) fn ime_cursor_area(&mut self) -> Option<Rect> {
