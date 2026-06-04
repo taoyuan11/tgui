@@ -717,9 +717,11 @@ cargo check --features video
 
 ## License
 
-本项目采用双协议授权，可在以下两种协议中任选其一：
+本项目源代码采用双协议授权，可在以下两种协议中任选其一：
 
 - [MIT 协议](./LICENSE-MIT)
 - [Apache License, Version 2.0](./LICENSE-APACHE)
+
+发布包内置了 Google 的 Material Symbols Outlined 字体资源 `src/assets/iconfont.ttf`，该字体按 Apache License, Version 2.0 分发。因此 `Cargo.toml` 的包级 license metadata 标记为 `Apache-2.0`；第三方字体说明见 [`NOTICE`](./NOTICE)。
 
 除非你明确声明，否则你提交到本项目的任何贡献都将按 Apache-2.0 的定义同时以上述两个协议授权，无附加条款。详见 [`NOTICE`](./NOTICE)。

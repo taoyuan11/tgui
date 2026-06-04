@@ -1,12 +1,23 @@
 tgui
 Copyright 2026 haowentao
 
-This product is dual-licensed under either of
+The tgui source code is dual-licensed under either of
 
   * Apache License, Version 2.0 (see LICENSE-APACHE)
   * MIT license (see LICENSE-MIT)
 
 at your option.
+
+The distributed crate package includes the following third-party font asset:
+
+  * src/assets/iconfont.ttf
+    Material Symbols Outlined
+    Copyright Google LLC
+    Licensed under the Apache License, Version 2.0
+    Source: https://github.com/google/material-design-icons
+
+The package-level license metadata is Apache-2.0 because this Apache-2.0
+font asset is included in the published crate and embedded by default.
 
 Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in this work by you, as defined in the Apache-2.0
