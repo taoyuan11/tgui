@@ -160,14 +160,17 @@ fn focused_select_opens_upward_and_hits_enabled_and_disabled_options() {
             _ => None,
         })
         .expect("enabled option hit region should be present");
-    let disabled_point = computed
+    let (disabled_point, disabled_rect, disabled_clip) = computed
         .overlay_hit_regions
         .iter()
         .find_map(|hit| match &hit.interaction {
-            super::HitInteraction::Disabled { .. } => Some(overlay_hit_point(hit)),
+            super::HitInteraction::Disabled { .. } => {
+                Some((overlay_hit_point(hit), hit.rect, hit.clip_rect))
+            }
             _ => None,
         })
         .expect("disabled option hit region should be present");
+    let _ = (disabled_rect, disabled_clip);
 
     let enabled_hit = tree.hit_test_with_widget_state(
         &font_manager,
@@ -210,8 +213,12 @@ fn focused_select_opens_upward_and_hits_enabled_and_disabled_options() {
         Some(disabled_point),
         None,
     );
-    assert!(matches!(
-        disabled_hit,
-        Some(super::HitInteraction::Disabled { .. })
-    ));
+    match disabled_hit {
+        Some(super::HitInteraction::Disabled { .. }) => {}
+        Some(super::HitInteraction::SelectOption { option_index, .. }) => {
+            panic!("disabled option point hit enabled option {option_index}")
+        }
+        Some(_) => panic!("disabled option point hit a non-disabled interaction"),
+        None => panic!("disabled option point should hit disabled interaction"),
+    }
 }

@@ -3,11 +3,298 @@ use std::borrow::Cow;
 use super::*;
 use crate::ui::widget::common;
 use crate::ui::widget::overlay::{
-    collect::emit_overlay, Anchor, AnchorKey, Overlay, OverlayId, OverlayLayer,
+    collect::emit_overlay, Anchor, AnchorKey, Overlay, OverlayContent, OverlayId, OverlayLayer,
+    OverlayPrimitive,
 };
 use crate::ui::widget::FocusScopeState;
 
-impl<VM> ResolvedElement<VM> {
+const SELECT_VIRTUAL_LIST_TAG: u64 = 0x5E1E_C7A1_5157_0001;
+
+struct SelectOverlayOption<VM> {
+    index: usize,
+    option: SelectOptionState<VM>,
+}
+
+impl<VM> Clone for SelectOverlayOption<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            index: self.index,
+            option: self.option.clone(),
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_virtual_select_menu_overlay<VM: 'static>(
+    widget_id: WidgetId,
+    trigger_frame: Rect,
+    viewport: Rect,
+    options: &[SelectOptionState<VM>],
+    on_open_change: Option<&ValueCommand<VM, bool>>,
+    select_style: &ResolvedSelectStyle,
+    context: &mut CollectContext<'_, '_>,
+    opacity: f32,
+    active: bool,
+    open_progress: f32,
+) -> Option<(OverlayContent<VM>, (Dp, Dp), bool)> {
+    if options.is_empty() || (!active && open_progress <= f32::EPSILON) {
+        return None;
+    }
+
+    let option_height = Dp::new(context.units.resolve_dp(select_style.option_height));
+    let menu_height = option_height * options.len() as f32;
+    let menu_gap = context.units.resolve_dp(select_style.menu_gap);
+    let below_space =
+        Dp::new((viewport.bottom().get() - trigger_frame.bottom().get() - menu_gap).max(0.0));
+    let above_space = Dp::new((trigger_frame.y.get() - viewport.y.get() - menu_gap).max(0.0));
+    let open_down = below_space >= menu_height || below_space >= above_space;
+    let available_height = if open_down { below_space } else { above_space };
+    let full_height = menu_height.min(available_height).max(Dp::ZERO);
+    let visible_height = (full_height * open_progress).max(Dp::ZERO);
+    if full_height <= Dp::ZERO {
+        return None;
+    }
+
+    let menu_width = trigger_frame.width;
+    let menu_corner_radius = context.units.resolve_dp(select_style.radius);
+    if open_progress <= f32::EPSILON {
+        return Some((
+            OverlayContent::Batch {
+                primitives: Vec::new(),
+                hits: Vec::new(),
+                clip_rect: Some(Rect::new(Dp::ZERO, Dp::ZERO, menu_width, Dp::ZERO)),
+            },
+            (menu_width, Dp::ZERO),
+            open_down,
+        ));
+    }
+
+    if open_progress < 1.0 - f32::EPSILON {
+        let menu_clip_rect = if open_down {
+            Some(Rect::new(0.0, 0.0, menu_width, visible_height))
+        } else {
+            Some(Rect::new(
+                0.0,
+                full_height - visible_height,
+                menu_width,
+                visible_height,
+            ))
+        };
+        let menu_clip_mask = Some(ClipMask {
+            rect: Rect::new(0.0, 0.0, menu_width, full_height),
+            corner_radius: menu_corner_radius,
+        });
+        return Some((
+            OverlayContent::Batch {
+                primitives: vec![OverlayPrimitive::Shape(RenderPrimitive {
+                    rect: menu_clip_rect.unwrap_or(Rect::new(0.0, 0.0, menu_width, full_height)),
+                    color: select_style.menu_background.with_alpha_factor(opacity),
+                    corner_radius: menu_corner_radius,
+                    stroke_width: 0.0,
+                    clip_rect: None,
+                    clip_mask: menu_clip_mask,
+                })],
+                hits: Vec::new(),
+                clip_rect: menu_clip_rect,
+            },
+            (menu_width, full_height),
+            open_down,
+        ));
+    }
+
+    let menu_clip_mask = Some(ClipMask {
+        rect: Rect::new(Dp::ZERO, Dp::ZERO, menu_width, full_height),
+        corner_radius: menu_corner_radius,
+    });
+    let row_style = common::SelectOptionRowStyle {
+        text: select_style.text,
+        disabled_text: default_select_disabled_text_color(context.theme),
+        selected_background: select_style.selected_option_background,
+        option_height,
+        padding_x: select_style.padding_x,
+        text_style: select_style.text_style.clone(),
+        clip_mask: menu_clip_mask,
+    };
+    let rows = options
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(index, option)| SelectOverlayOption { index, option })
+        .collect::<Vec<_>>();
+    let on_open_change = on_open_change.cloned();
+    let virtual_list_id = WidgetId::from_raw(widget_id.raw() ^ SELECT_VIRTUAL_LIST_TAG);
+    let mut root: Element<VM> = crate::ui::widget::VirtualList::new(
+        rows,
+        move |_visible_index, row: &SelectOverlayOption<VM>| {
+            select_option_row_element(
+                widget_id,
+                row.index,
+                row.option.clone(),
+                on_open_change.clone(),
+                row_style.clone(),
+            )
+        },
+    )
+    .widget_id(virtual_list_id)
+    .item_layout(crate::ui::widget::ItemLayout::Fixed {
+        item_extent: option_height,
+        spacing: Dp::ZERO,
+        overscan: 2,
+    })
+    .size(menu_width, full_height)
+    .border_radius(select_style.radius)
+    .into();
+    super::super::super::prepare_nested_scene_root(
+        &mut root,
+        context,
+        Rect::new(Dp::ZERO, Dp::ZERO, menu_width, full_height),
+    );
+
+    let resolved = root.resolve(context.theme);
+    let mut taffy = TaffyTree::new();
+    let layout_root = resolved
+        .build_layout_tree(
+            &mut taffy,
+            context.animations,
+            context.theme,
+            context.units,
+            None,
+            Rect::new(Dp::ZERO, Dp::ZERO, menu_width, full_height),
+            false,
+            context.now,
+        )
+        .ok()?;
+    taffy
+        .compute_layout_with_measure(
+            layout_root.node,
+            TaffySize {
+                width: AvailableSpace::Definite(menu_width.get()),
+                height: AvailableSpace::Definite(full_height.get()),
+            },
+            |known_dimensions, _, _, node_context, _| {
+                measure_node(
+                    node_context,
+                    known_dimensions,
+                    context.font_manager,
+                    context.theme,
+                    context.media,
+                    context.units,
+                )
+            },
+        )
+        .ok()?;
+
+    let mut lifecycle_states = std::collections::HashMap::new();
+    let mut chunks = std::collections::HashMap::new();
+    let mut chunk_parts = std::collections::HashMap::new();
+    let mut visual_contexts = std::collections::HashMap::new();
+    let mut local_context = CollectContext {
+        taffy: &taffy,
+        font_manager: context.font_manager,
+        theme: context.theme,
+        media: context.media,
+        focused_input: context.focused_input,
+        focused_text_state: context.focused_text_state,
+        focused_text_value: context.focused_text_value,
+        focused_text_layout: context.focused_text_layout,
+        text_layout_overrides: context.text_layout_overrides,
+        active_slider_value: context.active_slider_value,
+        caret_visible: context.caret_visible,
+        selected_text: context.selected_text,
+        selected_text_state: context.selected_text_state,
+        hovered_scrollbar: context.hovered_scrollbar,
+        active_scrollbar: context.active_scrollbar,
+        widget_states: context.widget_states,
+        select_open_states: context.select_open_states,
+        scroll_offsets: context.scroll_offsets,
+        virtual_states: context.virtual_states,
+        viewport: context.viewport,
+        units: context.units,
+        animations: context.animations,
+        reduced_motion: context.reduced_motion,
+        now: context.now,
+        focus: context.focus.clone(),
+        tooltip_hover_started_at: context.tooltip_hover_started_at,
+        next_tooltip_wakeup: context.next_tooltip_wakeup,
+        next_toast_wakeup: context.next_toast_wakeup,
+        active_tooltip: context.active_tooltip,
+        active_hover_popover: context.active_hover_popover,
+    };
+    let root_id = resolved.collect_subtree_cache(
+        &layout_root,
+        VisualContext {
+            origin: Point::ZERO,
+            opacity,
+            clip_rect: Rect::new(Dp::ZERO, Dp::ZERO, menu_width, full_height),
+            clip_mask: None,
+        },
+        &mut local_context,
+        &mut lifecycle_states,
+        &mut chunks,
+        &mut chunk_parts,
+        &mut visual_contexts,
+    );
+    let mut scene = chunks.get(&root_id).cloned().unwrap_or_default();
+    let menu_background = RenderPrimitive {
+        rect: Rect::new(Dp::ZERO, Dp::ZERO, menu_width, full_height),
+        color: select_style.menu_background.with_alpha_factor(opacity),
+        corner_radius: menu_corner_radius,
+        stroke_width: 0.0,
+        clip_rect: None,
+        clip_mask: menu_clip_mask,
+    };
+    scene.scene.shapes.insert(0, menu_background);
+    scene
+        .scene
+        .commands
+        .insert(0, common::RenderCommand::Shape(menu_background));
+    Some((
+        OverlayContent::Scene(Box::new(scene)),
+        (menu_width, full_height),
+        open_down,
+    ))
+}
+
+fn select_option_row_element<VM>(
+    owner_id: WidgetId,
+    option_index: usize,
+    option: SelectOptionState<VM>,
+    on_open_change: Option<ValueCommand<VM, bool>>,
+    style: common::SelectOptionRowStyle,
+) -> Element<VM> {
+    let mut interactions = InteractionHandlers::default();
+    interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+    Element {
+        id: WidgetId::next(),
+        key: Some(WidgetKey::from(option_index)),
+        layout: LayoutStyle {
+            height: Some(Value::Static(Length::Px(style.option_height))),
+            ..Default::default()
+        },
+        focus: Default::default(),
+        visual: VisualStyle::default(),
+        interactions,
+        lifecycle_events: LifecycleEventHandlers::default(),
+        media_events: MediaEventHandlers::default(),
+        background: None,
+        tooltip: None,
+        popover: None,
+        menu: None,
+        context_menu: None,
+        modal: None,
+        drawer: None,
+        tab_trigger: None,
+        kind: WidgetKind::SelectOptionRow {
+            owner_id,
+            option_index,
+            option,
+            on_open_change,
+            style,
+        },
+    }
+}
+
+impl<VM: 'static> ResolvedElement<VM> {
     pub(super) fn collect_progress_bar_control(
         &self,
         context: &mut CollectContext<'_, '_>,
@@ -351,9 +638,9 @@ impl<VM> ResolvedElement<VM> {
             visual.primitive_clip,
             visual.primitive_clip_mask,
         );
-        if menu_progress > f32::EPSILON && !visual.disabled {
+        if (active || menu_progress > f32::EPSILON) && !visual.disabled {
             computed.register_widget_overlay_anchor(self.id, visual.frame);
-            if let Some((content, content_size)) = build_select_menu_overlay(
+            if let Some((content, content_size, open_down)) = build_virtual_select_menu_overlay(
                 self.id,
                 visual.frame,
                 context.viewport,
@@ -362,6 +649,7 @@ impl<VM> ResolvedElement<VM> {
                 select_style,
                 context,
                 visual.opacity,
+                active,
                 menu_progress,
             ) {
                 let overlay = Overlay::<VM>::new(
@@ -369,7 +657,11 @@ impl<VM> ResolvedElement<VM> {
                     Anchor::Key(AnchorKey::widget(self.id)),
                 )
                 .source_widget(self.id)
-                .placement(crate::ui::widget::OverlayPlacement::bottom())
+                .placement(if open_down {
+                    crate::ui::widget::OverlayPlacement::bottom()
+                } else {
+                    crate::ui::widget::OverlayPlacement::top()
+                })
                 .offset(select_style.menu_gap)
                 .match_anchor_width(true)
                 .layer(OverlayLayer::Menu)
@@ -410,6 +702,105 @@ impl<VM> ResolvedElement<VM> {
                 },
             });
         }
+        true
+    }
+
+    pub(super) fn collect_select_option_row(
+        &self,
+        context: &mut CollectContext<'_, '_>,
+        computed: &mut ComputedScene<VM>,
+        visual: &CollectVisualState,
+    ) -> bool {
+        let ResolvedWidgetKind::SelectOptionRow {
+            owner_id,
+            option_index,
+            option,
+            on_open_change,
+            style,
+        } = &self.kind
+        else {
+            return false;
+        };
+
+        let selected = option.selected.resolve();
+        let option_disabled = option.disabled.resolve();
+        let mut option_state = context
+            .widget_states
+            .get_select_option(*owner_id, *option_index);
+        option_state.disabled = option_disabled;
+        let hovered_option_color = default_select_menu_option_color(context.theme, option_state);
+        let option_color = if option_state.hovered || option_state.pressed {
+            hovered_option_color
+        } else if selected {
+            style.selected_background
+        } else {
+            hovered_option_color
+        };
+        let option_clip_mask = visual.primitive_clip_mask.or(style.clip_mask);
+        if selected || option_color.a > 0 {
+            computed.scene.push_shape(RenderPrimitive {
+                rect: visual.frame,
+                color: option_color.with_alpha_factor(visual.opacity),
+                corner_radius: 0.0,
+                stroke_width: 0.0,
+                clip_rect: visual.primitive_clip,
+                clip_mask: option_clip_mask,
+            });
+        }
+
+        let mut text = text_from_content(option.label.clone());
+        if text.font_family.is_none() {
+            text.font_family = style.text_style.font_family.clone();
+        }
+        if text.font_size.is_none() {
+            text.font_size = Some(style.text_style.size);
+        }
+        if text.font_weight.is_none() {
+            text.font_weight = Some(style.text_style.weight);
+        }
+        if text.letter_spacing.is_none() {
+            text.letter_spacing = style.text_style.letter_spacing;
+        }
+        computed.scene.push_text(build_select_text_primitive(
+            &text,
+            visual.frame,
+            context.font_manager,
+            context.theme,
+            context.units,
+            context.animations,
+            context.now,
+            Insets::symmetric(style.padding_x, Dp::ZERO),
+            if option_disabled {
+                style.disabled_text
+            } else {
+                style.text
+            },
+            visual.opacity,
+            *owner_id,
+            visual.primitive_clip,
+            option_clip_mask,
+        ));
+
+        let mut option_interactions = InteractionHandlers::default();
+        option_interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+        computed.hit_regions.push(HitRegion {
+            rect: visual.frame,
+            clip_rect: visual.primitive_clip,
+            geometry: HitGeometry::Rect,
+            scope_path: context.focus_scope_path(),
+            focus: None,
+            interaction: if option_disabled {
+                HitInteraction::Disabled { id: self.id }
+            } else {
+                HitInteraction::SelectOption {
+                    id: *owner_id,
+                    option_index: *option_index,
+                    interactions: option_interactions,
+                    on_select: option.on_select.clone(),
+                    on_open_change: on_open_change.clone(),
+                }
+            },
+        });
         true
     }
 

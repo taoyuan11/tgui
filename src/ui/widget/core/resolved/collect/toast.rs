@@ -310,7 +310,8 @@ fn collect_toast_card_scene<VM: 'static>(
     context: &mut CollectContext<'_, '_>,
 ) -> Option<(ComputedScene<VM>, (Dp, Dp))> {
     let root = toast_card_root(queue, entry, style, placement, card_width);
-    let resolved: Element<VM> = root.into();
+    let mut resolved: Element<VM> = root.into();
+    super::prepare_nested_scene_root(&mut resolved, context, context.viewport);
     let resolved = resolved.resolve(context.theme);
     let mut taffy = TaffyTree::new();
     let layout_root = resolved
@@ -370,6 +371,7 @@ fn collect_toast_card_scene<VM: 'static>(
         widget_states: context.widget_states,
         select_open_states: context.select_open_states,
         scroll_offsets: context.scroll_offsets,
+        virtual_states: context.virtual_states,
         viewport: context.viewport,
         units: context.units,
         animations: context.animations,
@@ -430,7 +432,8 @@ fn measure_toast_card_size<VM: 'static>(
     context: &mut CollectContext<'_, '_>,
 ) -> Option<(Dp, Dp)> {
     let root = toast_card_root(queue, entry, style, placement, card_width);
-    let resolved: Element<VM> = root.into();
+    let mut resolved: Element<VM> = root.into();
+    super::prepare_nested_scene_root(&mut resolved, context, context.viewport);
     let resolved = resolved.resolve(context.theme);
     let mut taffy = TaffyTree::new();
     let layout_root = resolved
@@ -487,7 +490,8 @@ fn collect_toast_card_shell_scene<VM: 'static>(
         container
     });
 
-    let resolved: Element<VM> = shell.into();
+    let mut resolved: Element<VM> = shell.into();
+    super::prepare_nested_scene_root(&mut resolved, context, context.viewport);
     let resolved = resolved.resolve(context.theme);
     let mut taffy = TaffyTree::new();
     let layout_root = resolved
@@ -545,6 +549,7 @@ fn collect_toast_card_shell_scene<VM: 'static>(
         widget_states: context.widget_states,
         select_open_states: context.select_open_states,
         scroll_offsets: context.scroll_offsets,
+        virtual_states: context.virtual_states,
         viewport: context.viewport,
         units: context.units,
         animations: context.animations,

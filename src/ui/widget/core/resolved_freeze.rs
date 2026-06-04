@@ -430,6 +430,28 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
                 style,
             }
         }
+        ResolvedWidgetKind::SelectOptionRow {
+            owner_id,
+            option_index,
+            option,
+            style,
+            ..
+        } => {
+            let mut option = LifecycleSelectOption {
+                label: option.label.clone(),
+                selected: option.selected.clone(),
+                disabled: option.disabled.clone(),
+            };
+            freeze_value(&mut option.label);
+            freeze_value(&mut option.selected);
+            freeze_value(&mut option.disabled);
+            LifecycleWidgetKind::SelectOptionRow {
+                owner_id: *owner_id,
+                option_index: *option_index,
+                option,
+                style: style.clone(),
+            }
+        }
         ResolvedWidgetKind::Slider {
             value,
             min,

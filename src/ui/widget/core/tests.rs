@@ -30,7 +30,7 @@ use crate::ui::widget::{
     ContainerStyle, Element, Image, Input, InputStyle, Point, Radio, RadioGroup, RadioOption,
     ScrollView, ScrollbarAxis, ScrollbarHandle, Select, SelectOption, Slider, SliderStyle, Stack,
     Switch, SwitchStyle, Text, TextEditState, TextWidgetStyle, Textarea, TextareaStyle,
-    VirtualArrangement, VirtualDirection, VirtualViewport, WidgetStateMap, WidgetTree,
+    VirtualArrangement, VirtualDirection, VirtualList, VirtualViewport, WidgetStateMap, WidgetTree,
 };
 use crate::ui::widget::{Drawer, DrawerPlacement};
 #[cfg(feature = "video")]

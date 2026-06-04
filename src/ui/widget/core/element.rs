@@ -156,6 +156,26 @@ impl<VM> Element<VM> {
                 disabled,
                 style,
             },
+            WidgetKind::SelectOptionRow {
+                owner_id,
+                option_index,
+                option,
+                on_open_change,
+                style,
+            } => WidgetKind::SelectOptionRow {
+                owner_id,
+                option_index,
+                option: SelectOptionState {
+                    label: option.label,
+                    selected: option.selected,
+                    disabled: option.disabled,
+                    on_select: option
+                        .on_select
+                        .map(|command| command.scope(selector.clone())),
+                },
+                on_open_change: on_open_change.map(|command| command.scope(selector.clone())),
+                style,
+            },
             WidgetKind::Slider {
                 value,
                 min,

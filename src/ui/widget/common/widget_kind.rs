@@ -213,6 +213,13 @@ pub(crate) enum WidgetKind<VM> {
         disabled: Value<bool>,
         style: Option<StyleResolver<WidgetSelectStyle>>,
     },
+    SelectOptionRow {
+        owner_id: WidgetId,
+        option_index: usize,
+        option: SelectOptionState<VM>,
+        on_open_change: Option<ValueCommand<VM, bool>>,
+        style: SelectOptionRowStyle,
+    },
     Slider {
         value: Value<f32>,
         min: f32,
@@ -273,6 +280,17 @@ pub(crate) struct SelectOptionState<VM> {
     pub selected: Value<bool>,
     pub disabled: Value<bool>,
     pub on_select: Option<Command<VM>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct SelectOptionRowStyle {
+    pub text: Color,
+    pub disabled_text: Color,
+    pub selected_background: Color,
+    pub option_height: Dp,
+    pub padding_x: Dp,
+    pub text_style: crate::ui::theme::TextStyle,
+    pub clip_mask: Option<ClipMask>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -493,6 +511,19 @@ impl<VM> Clone for WidgetKind<VM> {
                 open: open.clone(),
                 on_open_change: on_open_change.clone(),
                 disabled: disabled.clone(),
+                style: style.clone(),
+            },
+            Self::SelectOptionRow {
+                owner_id,
+                option_index,
+                option,
+                on_open_change,
+                style,
+            } => Self::SelectOptionRow {
+                owner_id: *owner_id,
+                option_index: *option_index,
+                option: option.clone(),
+                on_open_change: on_open_change.clone(),
                 style: style.clone(),
             },
             Self::Slider {

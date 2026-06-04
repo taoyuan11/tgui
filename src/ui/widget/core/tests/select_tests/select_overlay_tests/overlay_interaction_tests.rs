@@ -1,4 +1,16 @@
 use super::*;
+use crate::ui::widget::r#virtual::{VirtualCacheState, VirtualViewportHint};
+
+fn select_option_indices<VM>(scene: &crate::ui::widget::ComputedScene<VM>) -> Vec<usize> {
+    scene
+        .overlay_hit_regions
+        .iter()
+        .filter_map(|hit| match &hit.interaction {
+            super::HitInteraction::SelectOption { option_index, .. } => Some(*option_index),
+            _ => None,
+        })
+        .collect()
+}
 
 #[test]
 fn select_dropdown_highlights_pressed_option() {
@@ -62,6 +74,186 @@ fn select_dropdown_highlights_pressed_option() {
         .collect::<Vec<_>>();
 
     assert_eq!(hovered_options.len(), 1);
+}
+
+#[test]
+fn long_select_dropdown_virtualizes_visible_options() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let options = (0..1_000)
+        .map(|index| SelectOption::new(index, format!("Option {index}")))
+        .collect::<Vec<_>>();
+    let select: Element<ScopeChildVm> = Select::new(options, None::<usize>)
+        .open(true)
+        .size(dp(180.0), dp(32.0))
+        .into();
+    let tree = WidgetTree::new(Stack::new().child(select));
+    let viewport = Rect::new(0.0, 0.0, 180.0, 180.0);
+
+    let computed = tree.compute_scene_with_units_and_widget_state_at(
+        &font_manager,
+        &theme,
+        &media,
+        UnitContext::default(),
+        &mut animations,
+        false,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+        Instant::now(),
+    );
+    let option_hits = computed
+        .overlay_hit_regions
+        .iter()
+        .filter(|hit| matches!(hit.interaction, super::HitInteraction::SelectOption { .. }))
+        .count();
+
+    assert!(option_hits > 0);
+    assert!(
+        option_hits < 32,
+        "long Select should expose only virtualized visible option hits"
+    );
+    assert!(
+        computed
+            .scroll_regions
+            .iter()
+            .any(|region| region.content_bounds.height > region.content_viewport.height),
+        "virtualized Select menu should register a scroll region"
+    );
+}
+
+#[test]
+fn long_select_dropdown_uses_overlay_scroll_offset_for_visible_range() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let options = (0..1_000)
+        .map(|index| SelectOption::new(index, format!("Option {index}")))
+        .collect::<Vec<_>>();
+    let select: Element<ScopeChildVm> = Select::new(options, None::<usize>)
+        .open(true)
+        .size(dp(180.0), dp(32.0))
+        .into();
+    let tree = WidgetTree::new(Stack::new().child(select));
+    let viewport = Rect::new(0.0, 0.0, 180.0, 180.0);
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let empty_widget_states = WidgetStateMap::default();
+    let empty_select_open_states = HashMap::new();
+    let empty_scroll_offsets = HashMap::new();
+    let empty_virtual_states = HashMap::new();
+    let empty_tooltip_hover_started_at = HashMap::new();
+    let first = tree
+        .collect_scene_cache_from_layout_with_focus_value_at_with_virtual_state(
+            &font_manager,
+            &layout,
+            &theme,
+            &media,
+            &mut animations,
+            false,
+            None,
+            None,
+            &empty_widget_states,
+            &empty_select_open_states,
+            &empty_scroll_offsets,
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            Instant::now(),
+            &empty_tooltip_hover_started_at,
+            &empty_virtual_states,
+            None,
+            None,
+        )
+        .computed;
+    let baseline_min = select_option_indices(&first)
+        .into_iter()
+        .min()
+        .expect("baseline select options should be visible");
+    let region = first
+        .scroll_regions
+        .iter()
+        .find(|region| region.content_bounds.height > region.content_viewport.height)
+        .copied()
+        .expect("virtualized Select menu should register a scroll region");
+    let scroll_offsets = HashMap::from([(region.id, Point::new(Dp::ZERO, dp(240.0)))]);
+    let virtual_states = HashMap::from([(
+        region.id,
+        VirtualCacheState {
+            viewport_hint: Some(VirtualViewportHint {
+                width: region.content_viewport.width,
+                height: region.content_viewport.height,
+            }),
+            ..Default::default()
+        },
+    )]);
+
+    let scrolled = tree
+        .collect_scene_cache_from_layout_with_focus_value_at_with_virtual_state(
+            &font_manager,
+            &layout,
+            &theme,
+            &media,
+            &mut animations,
+            false,
+            None,
+            None,
+            &empty_widget_states,
+            &empty_select_open_states,
+            &scroll_offsets,
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            Instant::now(),
+            &empty_tooltip_hover_started_at,
+            &virtual_states,
+            None,
+            None,
+        )
+        .computed;
+    let scrolled_min = select_option_indices(&scrolled)
+        .into_iter()
+        .min()
+        .expect("scrolled select options should be visible");
+
+    assert_eq!(baseline_min, 0);
+    assert!(
+        scrolled_min > baseline_min,
+        "scroll offset should advance the virtualized Select visible range"
+    );
 }
 
 #[test]

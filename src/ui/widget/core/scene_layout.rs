@@ -7,6 +7,7 @@ use self::patch::{
 };
 use super::scene::ActiveTooltipState;
 use super::*;
+use crate::ui::widget::VirtualCacheState;
 
 #[derive(Clone)]
 pub(crate) struct ResolvedSceneLayout<VM> {
@@ -178,6 +179,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         widget_states: &WidgetStateMap,
         select_open_states: &HashMap<WidgetId, bool>,
         scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
         viewport: Rect,
         focused_input: Option<WidgetId>,
         focused_text_state: Option<&TextEditState>,
@@ -232,6 +234,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     widget_states,
                     select_open_states,
                     scroll_offsets,
+                    virtual_states,
                     viewport,
                     units: self.units,
                     animations,

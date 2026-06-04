@@ -14,6 +14,7 @@ use crate::ui::widget::common::{
     ClipMask, ComputedScene, FocusScopeState, FocusTargetMeta, LifecycleEventState, MeasureContext,
     Point, Rect, ScrollbarHandle, TextEditState, WidgetId, WidgetStateMap,
 };
+use crate::ui::widget::VirtualCacheState;
 
 #[derive(Clone, Default)]
 pub(crate) struct FocusCollectState {
@@ -42,6 +43,7 @@ pub(crate) struct CollectContext<'a, 'b> {
     pub(crate) widget_states: &'a WidgetStateMap,
     pub(crate) select_open_states: &'a HashMap<WidgetId, bool>,
     pub(crate) scroll_offsets: &'a HashMap<WidgetId, Point>,
+    pub(crate) virtual_states: &'a HashMap<WidgetId, VirtualCacheState>,
     pub(crate) viewport: Rect,
     pub(crate) units: UnitContext,
     pub(crate) animations: &'b mut AnimationEngine,

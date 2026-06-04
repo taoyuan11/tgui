@@ -164,6 +164,13 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         style: WidgetSelectStyle,
     },
+    SelectOptionRow {
+        owner_id: WidgetId,
+        option_index: usize,
+        option: SelectOptionState<VM>,
+        on_open_change: Option<ValueCommand<VM, bool>>,
+        style: common::SelectOptionRowStyle,
+    },
     Slider {
         value: Value<f32>,
         min: f32,
@@ -367,6 +374,19 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 open: open.clone(),
                 on_open_change: on_open_change.clone(),
                 disabled: disabled.clone(),
+                style: style.clone(),
+            },
+            Self::SelectOptionRow {
+                owner_id,
+                option_index,
+                option,
+                on_open_change,
+                style,
+            } => Self::SelectOptionRow {
+                owner_id: *owner_id,
+                option_index: *option_index,
+                option: option.clone(),
+                on_open_change: on_open_change.clone(),
                 style: style.clone(),
             },
             Self::Slider {

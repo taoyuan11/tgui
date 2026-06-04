@@ -1,5 +1,6 @@
 use super::resolved_freeze::lifecycle_snapshot;
 use super::*;
+use crate::ui::widget::r#virtual::{apply_virtual_runtime_state_to_element, VirtualViewportHint};
 use crate::ui::widget::FocusScopeState;
 
 mod chrome;
@@ -45,6 +46,22 @@ struct CollectCaches<'a, VM> {
     chunks: &'a mut HashMap<WidgetId, ComputedScene<VM>>,
     chunk_parts: &'a mut HashMap<WidgetId, SceneChunkParts<VM>>,
     visual_contexts: &'a mut HashMap<WidgetId, VisualContextSnapshot>,
+}
+
+pub(super) fn prepare_nested_scene_root<VM>(
+    root: &mut Element<VM>,
+    context: &CollectContext<'_, '_>,
+    fallback_viewport: Rect,
+) {
+    apply_virtual_runtime_state_to_element(
+        root,
+        context.scroll_offsets,
+        context.virtual_states,
+        VirtualViewportHint {
+            width: fallback_viewport.width,
+            height: fallback_viewport.height,
+        },
+    );
 }
 
 impl<VM: 'static> ResolvedElement<VM> {

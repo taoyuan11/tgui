@@ -527,6 +527,54 @@ fn virtual_viewport_resolves_only_visible_window_children() {
 }
 
 #[test]
+fn virtual_list_defaults_to_bounded_vertical_window_children() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 160.0);
+    let source: Vec<usize> = (0..100_000).collect();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        VirtualList::new(source, |index, item| {
+            Text::new(format!("row-{index}-{item}"))
+                .height(dp(40.0))
+                .into()
+        })
+        .size(dp(240.0), dp(160.0)),
+    );
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+
+    let ResolvedWidgetKind::Virtual {
+        children,
+        window_plan,
+        ..
+    } = &layout.resolved_root.kind
+    else {
+        panic!("root should resolve to virtual widget");
+    };
+
+    assert!(
+        children.len() < 24,
+        "VirtualList should resolve only visible rows plus overscan"
+    );
+    assert_eq!(children.len(), window_plan.placements.len());
+    assert_eq!(
+        window_plan.visible_range.start, 0,
+        "initial VirtualList window should start at the first row"
+    );
+}
+
+#[test]
 fn horizontal_virtual_viewport_uses_scroll_offset_for_visible_range() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -685,4 +733,78 @@ fn measured_virtual_viewport_updates_total_extent_after_collect_feedback() {
         _ => panic!("root should resolve to virtual widget"),
     };
     assert!(second_extent > first_extent);
+}
+
+#[test]
+fn measured_virtual_viewport_ignores_subpixel_extent_jitter() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 200.0, 80.0);
+    let element: Element<()> = VirtualViewport::new(
+        (0..3).collect::<Vec<_>>(),
+        VirtualArrangement::Linear(VirtualDirection::Vertical),
+        crate::ui::widget::ItemLayout::Measured {
+            estimate: dp(30.0),
+            spacing: Dp::ZERO,
+            overscan: 0,
+        },
+        |index, _| Text::new(format!("row-{index}")).height(dp(30.25)).into(),
+    )
+    .size(dp(200.0), dp(80.0))
+    .into();
+    let widget_id = element.id;
+    let tree: WidgetTree<()> = WidgetTree::new(element);
+    let virtual_states = HashMap::from([(
+        widget_id,
+        VirtualCacheState {
+            viewport_hint: Some(VirtualViewportHint {
+                width: dp(200.0),
+                height: dp(80.0),
+            }),
+            measured_extents: HashMap::from([(0, dp(30.0)), (1, dp(30.0)), (2, dp(30.0))]),
+            ..Default::default()
+        },
+    )]);
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &virtual_states,
+        viewport,
+    );
+    let computed = tree.collect_scene_from_layout(
+        &font_manager,
+        &layout,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let update = computed
+        .virtual_state_updates
+        .iter()
+        .find(|entry| entry.widget_id == widget_id)
+        .expect("virtual collect should emit state update");
+
+    assert!(
+        !update.invalidate_layout,
+        "subpixel measured extent jitter should not invalidate layout"
+    );
 }

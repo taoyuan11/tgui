@@ -212,6 +212,7 @@ fn role_for_widget<VM>(resolved: &ResolvedElement<VM>) -> Role {
         ResolvedWidgetKind::Radio { .. } => Role::RadioButton,
         ResolvedWidgetKind::Switch { .. } => Role::Switch,
         ResolvedWidgetKind::Select { .. } => Role::ComboBox,
+        ResolvedWidgetKind::SelectOptionRow { .. } => Role::ListBoxOption,
         ResolvedWidgetKind::Slider { .. } => Role::Slider,
         ResolvedWidgetKind::ProgressBar { .. } => Role::ProgressIndicator,
         ResolvedWidgetKind::Spinner { .. } => Role::ProgressIndicator,

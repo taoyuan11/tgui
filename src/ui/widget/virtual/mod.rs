@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, Overflow, Value};
-use crate::ui::unit::Dp;
+use crate::ui::unit::{dp, Dp};
 
 use super::background::{BackgroundBrush, BackgroundImage};
 use super::common::{
@@ -135,7 +135,65 @@ impl ItemLayout {
     pub(crate) fn is_fixed(self) -> bool {
         matches!(self, Self::Fixed { .. })
     }
+
+    fn with_spacing(self, spacing: Dp) -> Self {
+        match self {
+            Self::Fixed {
+                item_extent,
+                overscan,
+                ..
+            } => Self::Fixed {
+                item_extent,
+                spacing,
+                overscan,
+            },
+            Self::Estimated {
+                estimate, overscan, ..
+            } => Self::Estimated {
+                estimate,
+                spacing,
+                overscan,
+            },
+            Self::Measured {
+                estimate, overscan, ..
+            } => Self::Measured {
+                estimate,
+                spacing,
+                overscan,
+            },
+        }
+    }
+
+    fn with_overscan(self, overscan: usize) -> Self {
+        match self {
+            Self::Fixed {
+                item_extent,
+                spacing,
+                ..
+            } => Self::Fixed {
+                item_extent,
+                spacing,
+                overscan,
+            },
+            Self::Estimated {
+                estimate, spacing, ..
+            } => Self::Estimated {
+                estimate,
+                spacing,
+                overscan,
+            },
+            Self::Measured {
+                estimate, spacing, ..
+            } => Self::Measured {
+                estimate,
+                spacing,
+                overscan,
+            },
+        }
+    }
 }
+
+pub(crate) const MEASURED_EXTENT_INVALIDATION_EPSILON: f32 = 0.5;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct VirtualViewportHint {
@@ -176,20 +234,11 @@ impl Default for VirtualRuntimeState {
 #[derive(Clone, Debug)]
 pub(crate) struct VirtualResolvedItemMeta {
     pub(crate) item_index: usize,
-    pub(crate) stripe_index: usize,
-    pub(crate) lane_index: usize,
-    pub(crate) main_extent: Dp,
-    pub(crate) main_offset: Dp,
-    pub(crate) cross_offset: Dp,
-    pub(crate) cross_extent: Dp,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct VirtualItemPlacement {
     pub(crate) item_index: usize,
-    pub(crate) stripe_index: usize,
-    pub(crate) lane_index: usize,
-    pub(crate) main_extent: Dp,
     pub(crate) main_offset: Dp,
     pub(crate) cross_offset: Dp,
     pub(crate) cross_extent: Dp,
@@ -327,24 +376,21 @@ pub(crate) fn resolve_virtual_window_plan(
         }
     }
 
-    let overscan_span = viewport_main.max(item_layout.estimate().max(Dp::ZERO));
-    let start_target = if bootstrap {
-        (scroll_main - overscan_span).max(Dp::ZERO)
-    } else {
-        scroll_main
-    };
-    let end_target = scroll_main + viewport_main + overscan_span * (overscan as f32 + 1.0);
-
-    let mut first_stripe = 0usize;
-    while first_stripe + 1 < stripe_count {
-        let start = first_stripe * lanes;
-        let end = ((first_stripe + 1) * lanes).min(total_items);
+    let stripe_extent = |stripe_index: usize| -> Dp {
+        let start = stripe_index * lanes;
+        let end = ((stripe_index + 1) * lanes).min(total_items);
         let mut extent = item_layout.estimate().max(Dp::ZERO);
         for item_index in start..end {
             extent = extent.max(item_main_extent(item_index));
         }
-        let end = stripe_offsets[first_stripe] + extent + spacing;
-        if end > start_target {
+        extent
+    };
+    let viewport_end = scroll_main + viewport_main;
+
+    let mut first_stripe = 0usize;
+    while first_stripe + 1 < stripe_count {
+        let end = stripe_offsets[first_stripe] + stripe_extent(first_stripe) + spacing;
+        if end > scroll_main {
             break;
         }
         first_stripe += 1;
@@ -352,8 +398,8 @@ pub(crate) fn resolve_virtual_window_plan(
 
     let mut last_stripe = first_stripe;
     while last_stripe + 1 < stripe_count {
-        let start = stripe_offsets[last_stripe];
-        if start > end_target {
+        let next_start = stripe_offsets[last_stripe + 1];
+        if next_start >= viewport_end {
             break;
         }
         last_stripe += 1;
@@ -383,9 +429,6 @@ pub(crate) fn resolve_virtual_window_plan(
         let lane_index = item_index % lanes;
         placements.push(VirtualItemPlacement {
             item_index,
-            stripe_index,
-            lane_index,
-            main_extent: item_main_extent(item_index),
             main_offset: stripe_offsets
                 .get(stripe_index)
                 .copied()
@@ -535,6 +578,69 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
 
     pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
         self.element.key = Some(key.into());
+        self
+    }
+
+    pub(crate) fn widget_id(mut self, id: WidgetId) -> Self {
+        self.element.id = id;
+        self
+    }
+
+    pub fn arrangement(mut self, arrangement: VirtualArrangement) -> Self {
+        if let WidgetKind::Virtual {
+            arrangement: current,
+            overflow_x,
+            overflow_y,
+            ..
+        } = &mut self.element.kind
+        {
+            *current = arrangement;
+            let (next_x, next_y) = virtual_default_overflow(arrangement);
+            *overflow_x = next_x;
+            *overflow_y = next_y;
+        }
+        self
+    }
+
+    pub fn direction(mut self, direction: VirtualDirection) -> Self {
+        if let WidgetKind::Virtual {
+            arrangement,
+            overflow_x,
+            overflow_y,
+            ..
+        } = &mut self.element.kind
+        {
+            *arrangement = match *arrangement {
+                VirtualArrangement::Linear(_) => VirtualArrangement::Linear(direction),
+                VirtualArrangement::Grid { lanes, .. } => {
+                    VirtualArrangement::Grid { direction, lanes }
+                }
+            };
+            let (next_x, next_y) = virtual_default_overflow(*arrangement);
+            *overflow_x = next_x;
+            *overflow_y = next_y;
+        }
+        self
+    }
+
+    pub fn item_layout(mut self, layout: ItemLayout) -> Self {
+        if let WidgetKind::Virtual { item_layout, .. } = &mut self.element.kind {
+            *item_layout = layout;
+        }
+        self
+    }
+
+    pub fn spacing(mut self, spacing: Dp) -> Self {
+        if let WidgetKind::Virtual { item_layout, .. } = &mut self.element.kind {
+            *item_layout = item_layout.with_spacing(spacing);
+        }
+        self
+    }
+
+    pub fn overscan(mut self, overscan: usize) -> Self {
+        if let WidgetKind::Virtual { item_layout, .. } = &mut self.element.kind {
+            *item_layout = item_layout.with_overscan(overscan);
+        }
         self
     }
 
@@ -791,5 +897,310 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
 impl<T, VM> From<VirtualViewport<T, VM>> for Element<VM> {
     fn from(value: VirtualViewport<T, VM>) -> Self {
         value.element
+    }
+}
+
+pub struct VirtualList<T, VM> {
+    viewport: VirtualViewport<T, VM>,
+}
+
+impl<T, VM: 'static> VirtualList<T, VM> {
+    pub fn new<S>(
+        source: S,
+        render: impl Fn(usize, &T) -> Element<VM> + Send + Sync + 'static,
+    ) -> Self
+    where
+        T: Send + Sync + 'static,
+        S: ItemSource<T>,
+    {
+        Self {
+            viewport: VirtualViewport::new(
+                source,
+                VirtualArrangement::Linear(VirtualDirection::Vertical),
+                ItemLayout::Fixed {
+                    item_extent: dp(40.0),
+                    spacing: Dp::ZERO,
+                    overscan: 2,
+                },
+                render,
+            ),
+        }
+    }
+
+    pub fn arrangement(mut self, arrangement: VirtualArrangement) -> Self {
+        self.viewport = self.viewport.arrangement(arrangement);
+        self
+    }
+
+    pub fn direction(mut self, direction: VirtualDirection) -> Self {
+        self.viewport = self.viewport.direction(direction);
+        self
+    }
+
+    pub fn item_layout(mut self, layout: ItemLayout) -> Self {
+        self.viewport = self.viewport.item_layout(layout);
+        self
+    }
+
+    pub fn spacing(mut self, spacing: Dp) -> Self {
+        self.viewport = self.viewport.spacing(spacing);
+        self
+    }
+
+    pub fn overscan(mut self, overscan: usize) -> Self {
+        self.viewport = self.viewport.overscan(overscan);
+        self
+    }
+
+    pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
+        self.viewport = self.viewport.key(key);
+        self
+    }
+
+    pub(crate) fn widget_id(mut self, id: WidgetId) -> Self {
+        self.viewport = self.viewport.widget_id(id);
+        self
+    }
+
+    pub fn style(
+        mut self,
+        resolver: impl Fn(ResolvedThemeMode) -> ContainerStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.viewport = self.viewport.style(resolver);
+        self
+    }
+
+    pub fn on_click(mut self, command: Command<VM>) -> Self {
+        self.viewport = self.viewport.on_click(command);
+        self
+    }
+
+    pub fn on_double_click(mut self, command: Command<VM>) -> Self {
+        self.viewport = self.viewport.on_double_click(command);
+        self
+    }
+
+    pub fn on_mouse_enter(mut self, command: Command<VM>) -> Self {
+        self.viewport = self.viewport.on_mouse_enter(command);
+        self
+    }
+
+    pub fn on_mouse_leave(mut self, command: Command<VM>) -> Self {
+        self.viewport = self.viewport.on_mouse_leave(command);
+        self
+    }
+
+    pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
+        self.viewport = self.viewport.on_mouse_move(command);
+        self
+    }
+
+    pub fn on_mount(mut self, command: Command<VM>) -> Self {
+        self.viewport = self.viewport.on_mount(command);
+        self
+    }
+
+    pub fn on_unmount(mut self, command: Command<VM>) -> Self {
+        self.viewport = self.viewport.on_unmount(command);
+        self
+    }
+
+    pub fn on_update(mut self, command: Command<VM>) -> Self {
+        self.viewport = self.viewport.on_update(command);
+        self
+    }
+
+    pub fn cursor(mut self, cursor: impl Into<Value<CursorStyle>>) -> Self {
+        self.viewport = self.viewport.cursor(cursor);
+        self
+    }
+
+    pub fn focusable(mut self, focusable: bool) -> Self {
+        self.viewport = self.viewport.focusable(focusable);
+        self
+    }
+
+    pub fn tab_index(mut self, tab_index: i32) -> Self {
+        self.viewport = self.viewport.tab_index(tab_index);
+        self
+    }
+
+    pub fn focus_scope(mut self, options: FocusScopeOptions) -> Self {
+        self.viewport = self.viewport.focus_scope(options);
+        self
+    }
+
+    pub fn auto_focus_first(mut self, auto_focus_first: bool) -> Self {
+        self.viewport = self.viewport.auto_focus_first(auto_focus_first);
+        self
+    }
+
+    pub fn overflow(mut self, overflow: Overflow) -> Self {
+        self.viewport = self.viewport.overflow(overflow);
+        self
+    }
+
+    pub fn overflow_x(mut self, overflow: Overflow) -> Self {
+        self.viewport = self.viewport.overflow_x(overflow);
+        self
+    }
+
+    pub fn overflow_y(mut self, overflow: Overflow) -> Self {
+        self.viewport = self.viewport.overflow_y(overflow);
+        self
+    }
+
+    pub fn opacity(mut self, opacity: impl Into<Value<f32>>) -> Self {
+        self.viewport = self.viewport.opacity(opacity);
+        self
+    }
+
+    pub fn offset(mut self, offset: impl Into<Value<Point>>) -> Self {
+        self.viewport = self.viewport.offset(offset);
+        self
+    }
+
+    pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
+        self.viewport = self.viewport.border_radius(radius);
+        self
+    }
+
+    pub fn size(mut self, width: impl IntoLengthValue, height: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.size(width, height);
+        self
+    }
+
+    pub fn width(mut self, width: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.width(width);
+        self
+    }
+
+    pub fn height(mut self, height: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.height(height);
+        self
+    }
+
+    pub fn min_width(mut self, width: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.min_width(width);
+        self
+    }
+
+    pub fn min_height(mut self, height: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.min_height(height);
+        self
+    }
+
+    pub fn max_width(mut self, width: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.max_width(width);
+        self
+    }
+
+    pub fn max_height(mut self, height: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.max_height(height);
+        self
+    }
+
+    pub fn aspect_ratio(mut self, aspect_ratio: impl Into<Value<f32>>) -> Self {
+        self.viewport = self.viewport.aspect_ratio(aspect_ratio);
+        self
+    }
+
+    pub fn margin(mut self, margin: impl Into<Value<Insets>>) -> Self {
+        self.viewport = self.viewport.margin(margin);
+        self
+    }
+
+    pub fn grow(mut self, grow: impl Into<Value<f32>>) -> Self {
+        self.viewport = self.viewport.grow(grow);
+        self
+    }
+
+    pub fn shrink(mut self, shrink: impl Into<Value<f32>>) -> Self {
+        self.viewport = self.viewport.shrink(shrink);
+        self
+    }
+
+    pub fn basis(mut self, basis: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.basis(basis);
+        self
+    }
+
+    pub fn align_self(mut self, align: Align) -> Self {
+        self.viewport = self.viewport.align_self(align);
+        self
+    }
+
+    pub fn justify_self(mut self, align: Align) -> Self {
+        self.viewport = self.viewport.justify_self(align);
+        self
+    }
+
+    pub fn position_absolute(mut self) -> Self {
+        self.viewport = self.viewport.position_absolute();
+        self
+    }
+
+    pub fn left(mut self, value: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.left(value);
+        self
+    }
+
+    pub fn top(mut self, value: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.top(value);
+        self
+    }
+
+    pub fn right(mut self, value: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.right(value);
+        self
+    }
+
+    pub fn bottom(mut self, value: impl IntoLengthValue) -> Self {
+        self.viewport = self.viewport.bottom(value);
+        self
+    }
+
+    pub fn inset(
+        mut self,
+        left: impl IntoLengthValue,
+        top: impl IntoLengthValue,
+        right: impl IntoLengthValue,
+        bottom: impl IntoLengthValue,
+    ) -> Self {
+        self.viewport = self.viewport.inset(left, top, right, bottom);
+        self
+    }
+
+    pub fn background(mut self, color: impl Into<Value<crate::foundation::color::Color>>) -> Self {
+        self.viewport = self.viewport.background(color);
+        self
+    }
+
+    pub fn background_brush(mut self, brush: impl Into<Value<BackgroundBrush>>) -> Self {
+        self.viewport = self.viewport.background_brush(brush);
+        self
+    }
+
+    pub fn background_image(mut self, image: impl Into<Value<BackgroundImage>>) -> Self {
+        self.viewport = self.viewport.background_image(image);
+        self
+    }
+
+    pub fn background_blur(mut self, blur: impl Into<Value<Dp>>) -> Self {
+        self.viewport = self.viewport.background_blur(blur);
+        self
+    }
+}
+
+impl<T, VM> From<VirtualList<T, VM>> for Element<VM> {
+    fn from(value: VirtualList<T, VM>) -> Self {
+        value.viewport.into()
+    }
+}
+
+fn virtual_default_overflow(arrangement: VirtualArrangement) -> (Overflow, Overflow) {
+    match arrangement.direction() {
+        VirtualDirection::Vertical => (Overflow::Hidden, Overflow::Scroll),
+        VirtualDirection::Horizontal => (Overflow::Scroll, Overflow::Hidden),
     }
 }

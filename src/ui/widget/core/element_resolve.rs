@@ -73,13 +73,12 @@ impl<VM: 'static> Element<VM> {
             } => {
                 let resolved_style = resolved_container_style(style.as_ref(), theme);
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
-                let viewport_hint = runtime_state.viewport_hint.clone().unwrap_or_default();
                 let window_plan = resolve_virtual_window_plan(
                     *arrangement,
                     *item_layout,
                     runtime_state,
                     source.len(),
-                    viewport_hint,
+                    runtime_state.fallback_viewport_hint.clone(),
                 );
                 let previous_children = previous
                     .and_then(|previous| match &previous.kind {
@@ -151,12 +150,6 @@ impl<VM: 'static> Element<VM> {
                     }
                     child_meta.push(VirtualResolvedItemMeta {
                         item_index: placement.item_index,
-                        stripe_index: placement.stripe_index,
-                        lane_index: placement.lane_index,
-                        main_extent: placement.main_extent,
-                        main_offset: placement.main_offset,
-                        cross_offset: placement.cross_offset,
-                        cross_extent: placement.cross_extent,
                     });
                     children.push(child.resolve_with_previous(theme, previous_child));
                 }
@@ -286,6 +279,19 @@ impl<VM: 'static> Element<VM> {
                 on_open_change: on_open_change.clone(),
                 disabled: disabled.clone(),
                 style: resolved_select_style(style.as_ref(), theme),
+            },
+            WidgetKind::SelectOptionRow {
+                owner_id,
+                option_index,
+                option,
+                on_open_change,
+                style,
+            } => ResolvedWidgetKind::SelectOptionRow {
+                owner_id: *owner_id,
+                option_index: *option_index,
+                option: option.clone(),
+                on_open_change: on_open_change.clone(),
+                style: style.clone(),
             },
             WidgetKind::Slider {
                 value,

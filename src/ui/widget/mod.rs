@@ -104,11 +104,11 @@ pub use overlay::{
 };
 pub use popover::{Popover, PopoverTriggerMode};
 pub use progress_bar::ProgressBar;
-pub(crate) use r#virtual::VirtualCacheState;
 pub(crate) use r#virtual::VirtualSceneStateUpdate;
 pub use r#virtual::{
-    ItemLayout, ItemSource, VirtualArrangement, VirtualDirection, VirtualViewport,
+    ItemLayout, ItemSource, VirtualArrangement, VirtualDirection, VirtualList, VirtualViewport,
 };
+pub(crate) use r#virtual::{VirtualCacheState, MEASURED_EXTENT_INVALIDATION_EPSILON};
 pub use radio::{Radio, RadioGroup, RadioOption};
 pub use scroll_view::ScrollView;
 pub use select::{Select, SelectOption};

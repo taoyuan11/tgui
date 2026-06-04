@@ -1,5 +1,18 @@
 use super::*;
 
+fn overlay_select_option_indices<VM>(
+    computed: &crate::ui::widget::ComputedScene<VM>,
+) -> Vec<usize> {
+    computed
+        .overlay_hit_regions
+        .iter()
+        .filter_map(|hit| match &hit.interaction {
+            HitInteraction::SelectOption { option_index, .. } => Some(*option_index),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn textarea_mouse_wheel_scrolls_vertical_overflow() {
     let invalidation = InvalidationSignal::new();
@@ -36,6 +49,79 @@ fn textarea_mouse_wheel_scrolls_vertical_overflow() {
             .unwrap_or(Dp::ZERO)
             > Dp::ZERO
             || handler.smooth_scroll_states.contains_key(&text_id)
+    );
+}
+
+#[test]
+fn mouse_wheel_scrolls_virtual_select_overlay_region() {
+    let invalidation = InvalidationSignal::new();
+    let options = (0..1_000)
+        .map(|index| SelectOption::new(index, format!("Option {index}")))
+        .collect::<Vec<_>>();
+    let select: Element<TestVm> = Select::new(options, None::<usize>)
+        .open(true)
+        .size(dp(180.0), dp(32.0))
+        .into();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(WidgetTree::new(Stack::new().child(select))),
+        invalidation,
+        test_config_with_size(220.0, 180.0),
+    );
+
+    let (region_id, target, baseline_min) = {
+        let computed = handler.computed_scene();
+        let baseline_min = overlay_select_option_indices(computed)
+            .into_iter()
+            .min()
+            .unwrap_or_else(|| {
+                panic!(
+                    "open Select overlay should render visible options: overlay_hits={} hits={} scroll_regions={} overlay_shapes={} portal_entries={}",
+                    computed.overlay_hit_regions.len(),
+                    computed.hit_regions.len(),
+                    computed.scroll_regions.len(),
+                    computed.scene.overlay_shapes.len(),
+                    computed.portal_entries.len()
+                )
+            });
+        let region = computed
+            .scroll_regions
+            .iter()
+            .find(|region| region.content_bounds.height > region.content_viewport.height)
+            .copied()
+            .expect("virtual Select overlay should register a scroll region");
+        (
+            region.id,
+            Point {
+                x: region.visible_frame.x + dp(8.0),
+                y: region.visible_frame.y + dp(8.0),
+            },
+            baseline_min,
+        )
+    };
+    assert_eq!(baseline_min, 0);
+    assert!(handler.virtual_states.contains_key(&region_id));
+
+    handler.cursor_position = Some(target);
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -4.0)));
+    assert!(
+        handler
+            .scroll_states
+            .get(&region_id)
+            .map(|offset| offset.y > Dp::ZERO)
+            .unwrap_or(false)
+            || handler.smooth_scroll_states.contains_key(&region_id),
+        "overlay VirtualList scroll region should consume wheel input"
+    );
+
+    while handler.advance_smooth_scroll() {}
+    let scrolled_min = overlay_select_option_indices(handler.computed_scene())
+        .into_iter()
+        .min()
+        .expect("scrolled Select overlay should still render visible options");
+    assert!(
+        scrolled_min > baseline_min,
+        "visible Select options should advance after wheel scrolling"
     );
 }
 

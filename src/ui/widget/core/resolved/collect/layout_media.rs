@@ -228,22 +228,12 @@ impl<VM: 'static> ResolvedElement<VM> {
                     .zip(layout_node.children.iter())
                     .zip(child_meta.iter())
                 {
-                    let child_origin = match arrangement.direction() {
-                        crate::ui::widget::VirtualDirection::Vertical => Point::new(
-                            visual.background_frame.x + meta.cross_offset,
-                            visual.background_frame.y + meta.main_offset,
-                        ),
-                        crate::ui::widget::VirtualDirection::Horizontal => Point::new(
-                            visual.background_frame.x + meta.main_offset,
-                            visual.background_frame.y + meta.cross_offset,
-                        ),
-                    };
                     let child_id = child.collect_subtree_cache(
                         child_layout,
                         VisualContext {
                             origin: Point::new(
-                                child_origin.x - scroll_offset.x,
-                                child_origin.y - scroll_offset.y,
+                                visual.background_frame.x - scroll_offset.x,
+                                visual.background_frame.y - scroll_offset.y,
                             ),
                             opacity: visual.opacity,
                             clip_rect: child_clip_rect,
@@ -269,12 +259,16 @@ impl<VM: 'static> ResolvedElement<VM> {
                             }
                         }
                         .max(Dp::ZERO);
-                        if runtime_state
+                        let measured_changed = runtime_state
                             .measured_extents
                             .get(&meta.item_index)
                             .copied()
-                            != Some(measured_extent)
-                        {
+                            .map(|previous| {
+                                (previous - measured_extent).abs()
+                                    > crate::ui::widget::MEASURED_EXTENT_INVALIDATION_EPSILON
+                            })
+                            .unwrap_or(true);
+                        if measured_changed {
                             invalidate_layout = true;
                         }
                         measured_extents.push((meta.item_index, measured_extent));

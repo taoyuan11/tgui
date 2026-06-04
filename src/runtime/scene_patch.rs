@@ -190,6 +190,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 &widget_states,
                 &self.select_open_states,
                 &self.scroll_states,
+                &self.virtual_states,
                 viewport,
                 focused_input,
                 focused_text_state.as_ref(),

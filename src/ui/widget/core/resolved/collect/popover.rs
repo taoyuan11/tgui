@@ -119,6 +119,7 @@ fn build_popover_scene<VM: 'static>(
                     root.layout.width = Some(crate::ui::layout::Value::Static(Length::Px(width)));
                 }
 
+                super::prepare_nested_scene_root(&mut root, context, context.viewport);
                 let resolved = root.resolve(context.theme);
                 let mut taffy = TaffyTree::new();
                 let layout_root = resolved
@@ -187,6 +188,7 @@ fn build_popover_scene<VM: 'static>(
                     widget_states: context.widget_states,
                     select_open_states: context.select_open_states,
                     scroll_offsets: context.scroll_offsets,
+                    virtual_states: context.virtual_states,
                     viewport: context.viewport,
                     units: context.units,
                     animations: context.animations,

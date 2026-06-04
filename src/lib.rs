@@ -291,8 +291,8 @@ pub mod prelude {
         SliderStyle, Spinner, SpinnerStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch,
         SwitchStyle, TabItem, TabPlacement, TabView, Tabs, TabsStyle, Text, TextWidgetStyle,
         Textarea, TextareaStyle, ToastHost, ToastStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
-        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
-        WidgetSurfaceStyle, WidgetTree,
+        VirtualArrangement, VirtualDirection, VirtualList, VirtualViewport, WidgetCommand,
+        WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
     };
 }
 
@@ -334,8 +334,8 @@ pub mod widgets {
         SliderStyle, Spinner, SpinnerStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch,
         SwitchStyle, TabItem, TabPlacement, TabView, Tabs, TabsStyle, Text, TextWidgetStyle,
         Textarea, TextareaStyle, ToastHost, ToastStyle, Tooltip, TooltipStyle, VideoSurfaceStyle,
-        VirtualArrangement, VirtualDirection, VirtualViewport, WidgetCommand, WidgetEventResult,
-        WidgetSurfaceStyle, WidgetTree,
+        VirtualArrangement, VirtualDirection, VirtualList, VirtualViewport, WidgetCommand,
+        WidgetEventResult, WidgetSurfaceStyle, WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

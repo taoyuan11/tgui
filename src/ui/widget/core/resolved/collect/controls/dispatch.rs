@@ -3,7 +3,7 @@ use super::*;
 mod basic;
 mod value;
 
-impl<VM> ResolvedElement<VM> {
+impl<VM: 'static> ResolvedElement<VM> {
     pub(in super::super) fn collect_control_kind(
         &self,
         context: &mut CollectContext<'_, '_>,
@@ -37,6 +37,9 @@ impl<VM> ResolvedElement<VM> {
             }
             ResolvedWidgetKind::Select { .. } => {
                 self.collect_select_control(context, computed, visual)
+            }
+            ResolvedWidgetKind::SelectOptionRow { .. } => {
+                self.collect_select_option_row(context, computed, visual)
             }
             ResolvedWidgetKind::TextEditor { .. } => {
                 self.collect_text_editor_control(context, computed, visual)

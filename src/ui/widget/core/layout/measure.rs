@@ -121,6 +121,7 @@ pub(crate) fn default_layout_padding<VM>(element: &ResolvedElement<VM>, _theme: 
         ResolvedWidgetKind::Select { style, .. } => {
             Insets::symmetric(style.padding_x, style.padding_y)
         }
+        ResolvedWidgetKind::SelectOptionRow { .. } => Insets::ZERO,
         ResolvedWidgetKind::TextEditor { style, .. } => {
             Insets::symmetric(style.padding_x, style.padding_y)
         }

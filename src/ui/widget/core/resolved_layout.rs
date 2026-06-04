@@ -54,6 +54,7 @@ impl<VM> ResolvedElement<VM> {
                 placeholder: placeholder.clone(),
                 style: style.clone(),
             },
+            ResolvedWidgetKind::SelectOptionRow { .. } => MeasureContext::None,
             ResolvedWidgetKind::Slider { style, .. } => MeasureContext::Slider {
                 id: self.id,
                 style: style.clone(),

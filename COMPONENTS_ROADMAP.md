@@ -43,13 +43,16 @@
 - **作用**：按可见视口仅实例化部分子节点；行高可定（固定 / 估算 / 测量）；支持横向、纵向、网格三种排布。
 - **被依赖组件**：List、Table / DataGrid、Tree、长选项的 Select / Combobox、Calendar 月视图（年范围）。
 - **要点**：新增 `src/ui/widget/virtual/`；先抽象 `ItemSource<T>` + `ItemLayout`（fixed/estimated/measured）；接入现有 `ScrollRegion`，但只让可见范围进入 widget tree 解析，否则 100k 行会击穿 layout。
-- **进度**：[基础完成]
-  - ✅ `src/ui/widget/virtual/` 已提供 `ItemSource<T>`、`ItemLayout::{Fixed, Estimated, Measured}`、`VirtualArrangement::{Linear, Grid}`、`VirtualDirection`、`VirtualViewport`；
+- **进度**：[功能完整]
+  - ✅ `src/ui/widget/virtual/` 已提供 `ItemSource<T>`、`ItemLayout::{Fixed, Estimated, Measured}`、`VirtualArrangement::{Linear, Grid}`、`VirtualDirection`、`VirtualViewport`、`VirtualList`；
   - ✅ `Vec<T>` / `Arc<[T]>` 默认实现 `ItemSource`，支持稳定 key、render closure 按可见 index 构建子树；
   - ✅ 接入 runtime `VirtualCacheState`，缓存 viewport hint、scroll offset、measured extents、key -> widget id 映射；
-  - ✅ 纵向 / 横向 overflow 与 scroll region 协作，只解析 visible_range + overscan；
-  - ✅ 单元测试覆盖依赖失效、横向/纵向可见范围、估算/测量高度、总 extent 更新。
-  - ⏳ 待补：公开更高层 `VirtualList` 语义组件；长选项 Select / Combobox 尚未迁移到虚拟列表；measured 模式的滚动抖动策略仍可继续优化。
+  - ✅ `VirtualList` 作为 `VirtualViewport` 的语义薄封装公开导出，默认垂直固定 40dp 行高、overscan 2，并保留 layout / visual / interaction / lifecycle builder；
+  - ✅ nested scene / overlay collect 路径会注入 virtual runtime state，Select / Popover / Toast / Drawer 等浮层内的虚拟组件可复用同一滚动状态；
+  - ✅ 长选项 `Select` 下拉菜单已迁移到 `VirtualList`，短列表视觉与命中行为保持兼容，长列表只解析 visible range + overscan；
+  - ✅ measured extent 回写加入小阈值，避免亚像素测量差异导致连续 layout invalidation；
+  - ✅ 单元与 runtime 测试覆盖依赖失效、横向/纵向/网格可见范围、估算/测量高度、总 extent 更新、Select overlay 虚拟滚动与 removed widget state cleanup。
+  - ℹ️ 不阻塞框架完整性的长尾：Combobox / AutoComplete 尚未存在；P2 §17 的 List / VirtualList selection、多选、分组、键盘导航、empty/loading 等产品能力另行推进。
 
 ### 4. ScrollView（独立可滚动容器）
 - **作用**：把目前散在 Input / Textarea 内部的滚动逻辑抽成通用容器；支持 overflow x/y 独立控制、滚动条样式、惯性滚动、键盘 PgUp/PgDn/Home/End。
@@ -389,7 +392,7 @@
 
 ## 下一步实施建议
 
-1. **批 1（P0 收尾）**：Overlay / Portal / Focus / Virtual / ScrollView / Gesture / Form 都已进入基础完成状态，其中 Overlay / Focus 已功能完整；下一步优先补剩余 public API 长尾与窄窗口策略。
+1. **批 1（P0 收尾）**：Overlay / Portal / Focus / Virtual / ScrollView / Gesture / Form 都已进入基础完成状态，其中 Overlay / Focus / Virtual 已功能完整；下一步优先补剩余 public API 长尾与窄窗口策略。
 2. **批 2（P1 收尾）**：Tooltip / Menu / Modal / Popover / Toast / ProgressBar / Spinner / Tabs / Drawer / Divider 已铺开，建议集中补 Drawer push 模式、触控手势接入、Popover 指针渲染、Modal scale 动画、Menu SVG 图标。
 3. **批 3（P2 开工）**：数据类组件成本最高，但基础设施已可支撑；建议先做 List / VirtualList，把 selection、keyboard nav、empty/loading 状态跑通，再推进 Table / DataGrid 与 Tree。
 4. **批 4（P2 录入扩展）**：NumberInput、DatePicker、ColorPicker、Upload 依赖 Form + Overlay + Popover + Gesture，适合在 List 基础交互稳定后并行推进。

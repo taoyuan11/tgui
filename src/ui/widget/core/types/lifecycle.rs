@@ -86,6 +86,12 @@ pub(crate) enum LifecycleWidgetKind {
         disabled: Value<bool>,
         style: WidgetSelectStyle,
     },
+    SelectOptionRow {
+        owner_id: WidgetId,
+        option_index: usize,
+        option: LifecycleSelectOption,
+        style: common::SelectOptionRowStyle,
+    },
     Slider {
         value: Value<f32>,
         min: f32,
@@ -257,6 +263,17 @@ impl Clone for LifecycleWidgetKind {
                 options: options.clone(),
                 open: open.clone(),
                 disabled: disabled.clone(),
+                style: style.clone(),
+            },
+            Self::SelectOptionRow {
+                owner_id,
+                option_index,
+                option,
+                style,
+            } => Self::SelectOptionRow {
+                owner_id: *owner_id,
+                option_index: *option_index,
+                option: option.clone(),
                 style: style.clone(),
             },
             Self::Slider {

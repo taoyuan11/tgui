@@ -73,7 +73,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let state = self.virtual_states.entry(update.widget_id).or_default();
             state.viewport_hint = Some(update.viewport_hint.clone());
             for (index, extent) in &update.measured_extents {
-                if state.measured_extents.get(index).copied() != Some(*extent) {
+                let measured_changed = state
+                    .measured_extents
+                    .get(index)
+                    .copied()
+                    .map(|previous| {
+                        (previous - *extent).abs()
+                            > crate::ui::widget::MEASURED_EXTENT_INVALIDATION_EPSILON
+                    })
+                    .unwrap_or(true);
+                if measured_changed {
                     layout_invalidated = layout_invalidated || update.invalidate_layout;
                     state.measured_extents.insert(*index, *extent);
                 }
@@ -209,32 +218,34 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         let mut collected = {
                             let collect_started_at = Instant::now();
                             let active_slider_value = self.active_slider_value_override();
-                            let collected = tree.collect_scene_cache_from_layout_with_focus_value(
-                                &self.font_manager,
-                                layout,
-                                &theme,
-                                &self.media_manager,
-                                &mut self.animation_engine,
-                                self.reduced_motion,
-                                self.hovered_scrollbar,
-                                active_scrollbar,
-                                &widget_states,
-                                &self.select_open_states,
-                                &self.scroll_states,
-                                viewport,
-                                focused_input,
-                                focused_text_state.as_ref(),
-                                focused_text_value,
-                                focused_text_layout,
-                                Some(&text_layout_overrides),
-                                active_slider_value,
-                                self.selected_text,
-                                selected_text_state.as_ref(),
-                                caret_visible,
-                                &self.tooltip_hover_started_at,
-                                active_tooltip,
-                                active_hover_popover,
-                            );
+                            let collected = tree
+                                .collect_scene_cache_from_layout_with_focus_value_and_virtual_state(
+                                    &self.font_manager,
+                                    layout,
+                                    &theme,
+                                    &self.media_manager,
+                                    &mut self.animation_engine,
+                                    self.reduced_motion,
+                                    self.hovered_scrollbar,
+                                    active_scrollbar,
+                                    &widget_states,
+                                    &self.select_open_states,
+                                    &self.scroll_states,
+                                    &self.virtual_states,
+                                    viewport,
+                                    focused_input,
+                                    focused_text_state.as_ref(),
+                                    focused_text_value,
+                                    focused_text_layout,
+                                    Some(&text_layout_overrides),
+                                    active_slider_value,
+                                    self.selected_text,
+                                    selected_text_state.as_ref(),
+                                    caret_visible,
+                                    &self.tooltip_hover_started_at,
+                                    active_tooltip,
+                                    active_hover_popover,
+                                );
                             collect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
                             collected
@@ -260,7 +271,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 let collect_started_at = Instant::now();
                                 let active_slider_value = self.active_slider_value_override();
                                 let collected = tree
-                                    .collect_scene_cache_from_layout_with_focus_value(
+                                    .collect_scene_cache_from_layout_with_focus_value_and_virtual_state(
                                         &self.font_manager,
                                         layout,
                                         &theme,
@@ -272,6 +283,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                         &widget_states,
                                         &self.select_open_states,
                                         &self.scroll_states,
+                                        &self.virtual_states,
                                         viewport,
                                         actual_focused_input,
                                         actual_focused_text_state.as_ref(),
@@ -320,32 +332,34 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         let collected = {
                             let collect_started_at = Instant::now();
                             let active_slider_value = self.active_slider_value_override();
-                            let collected = tree.collect_scene_cache_from_layout_with_focus_value(
-                                &self.font_manager,
-                                &layout,
-                                &theme,
-                                &self.media_manager,
-                                &mut self.animation_engine,
-                                self.reduced_motion,
-                                self.hovered_scrollbar,
-                                active_scrollbar,
-                                &widget_states,
-                                &self.select_open_states,
-                                &self.scroll_states,
-                                viewport,
-                                focused_input,
-                                focused_text_state.as_ref(),
-                                focused_text_value,
-                                focused_text_layout,
-                                Some(&text_layout_overrides),
-                                active_slider_value,
-                                self.selected_text,
-                                selected_text_state.as_ref(),
-                                caret_visible,
-                                &self.tooltip_hover_started_at,
-                                active_tooltip,
-                                active_hover_popover,
-                            );
+                            let collected = tree
+                                .collect_scene_cache_from_layout_with_focus_value_and_virtual_state(
+                                    &self.font_manager,
+                                    &layout,
+                                    &theme,
+                                    &self.media_manager,
+                                    &mut self.animation_engine,
+                                    self.reduced_motion,
+                                    self.hovered_scrollbar,
+                                    active_scrollbar,
+                                    &widget_states,
+                                    &self.select_open_states,
+                                    &self.scroll_states,
+                                    &self.virtual_states,
+                                    viewport,
+                                    focused_input,
+                                    focused_text_state.as_ref(),
+                                    focused_text_value,
+                                    focused_text_layout,
+                                    Some(&text_layout_overrides),
+                                    active_slider_value,
+                                    self.selected_text,
+                                    selected_text_state.as_ref(),
+                                    caret_visible,
+                                    &self.tooltip_hover_started_at,
+                                    active_tooltip,
+                                    active_hover_popover,
+                                );
                             collect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
                             collected
@@ -369,32 +383,34 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 Self::stable_text_layout_overrides(&self.text_input_buffers);
                             let collect_started_at = Instant::now();
                             let active_slider_value = self.active_slider_value_override();
-                            let collected = tree.collect_scene_cache_from_layout_with_focus_value(
-                                &self.font_manager,
-                                &layout,
-                                &theme,
-                                &self.media_manager,
-                                &mut self.animation_engine,
-                                self.reduced_motion,
-                                self.hovered_scrollbar,
-                                active_scrollbar,
-                                &widget_states,
-                                &self.select_open_states,
-                                &self.scroll_states,
-                                viewport,
-                                actual_focused_input,
-                                actual_focused_text_state.as_ref(),
-                                actual_focused_text_value,
-                                actual_focused_text_layout,
-                                Some(&text_layout_overrides),
-                                active_slider_value,
-                                self.selected_text,
-                                selected_text_state.as_ref(),
-                                actual_caret_visible,
-                                &self.tooltip_hover_started_at,
-                                active_tooltip,
-                                active_hover_popover,
-                            );
+                            let collected = tree
+                                .collect_scene_cache_from_layout_with_focus_value_and_virtual_state(
+                                    &self.font_manager,
+                                    &layout,
+                                    &theme,
+                                    &self.media_manager,
+                                    &mut self.animation_engine,
+                                    self.reduced_motion,
+                                    self.hovered_scrollbar,
+                                    active_scrollbar,
+                                    &widget_states,
+                                    &self.select_open_states,
+                                    &self.scroll_states,
+                                    &self.virtual_states,
+                                    viewport,
+                                    actual_focused_input,
+                                    actual_focused_text_state.as_ref(),
+                                    actual_focused_text_value,
+                                    actual_focused_text_layout,
+                                    Some(&text_layout_overrides),
+                                    active_slider_value,
+                                    self.selected_text,
+                                    selected_text_state.as_ref(),
+                                    actual_caret_visible,
+                                    &self.tooltip_hover_started_at,
+                                    active_tooltip,
+                                    active_hover_popover,
+                                );
                             recollect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
                             collected

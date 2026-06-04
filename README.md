@@ -56,7 +56,7 @@
 
 ### 布局与组件
 
-- 布局：`Stack`、`Grid`、`Flex`
+- 布局与滚动容器：`Stack`、`Grid`、`Flex`、`ScrollView`、`VirtualViewport`、`VirtualList`
 - 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Switch`、`Tabs` / `TabView`、`ProgressBar`、`Spinner`、`Image`
 - 浮层基础设施：统一的 runtime overlay anchoring 引擎，当前已为 `Tooltip`、`Popover`、`Select` 与 `Menu` / `ContextMenu` / `MenuBar` 提供锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力
 - `Popover`：支持 click 固定打开、hover 预览、外部点击 / `Esc` 关闭的锚定轻量浮层，可承载任意 widget 子树
@@ -222,8 +222,9 @@ NotificationOptions
 NotificationAction
 Notifications
 
-Stack / Grid / Flex
+Stack / Grid / Flex / ScrollView / VirtualViewport / VirtualList
 Text / Button / Image / Canvas
+ItemSource<T> / ItemLayout / VirtualArrangement / VirtualDirection
 
 Theme / ThemeMode / ThemeSet / ThemeStore / ResolvedThemeMode / Color / FocusRingStyle
 dp / sp / Dp / Sp
@@ -235,6 +236,31 @@ Keyframes<T>
 Form
 FormField<T>
 TextFormField
+```
+
+## 虚拟列表
+
+`VirtualList` 是 `VirtualViewport` 的语义薄封装，默认垂直列表、固定 40dp 行高、overscan 为 2。适合长列表或下拉候选项，只会把可见范围附近的行实例化进 widget tree。
+
+```rust
+use tgui::prelude::*;
+
+fn rows_view<VM: 'static>() -> Element<VM> {
+    let rows = (0..100_000).collect::<Vec<_>>();
+
+    VirtualList::new(rows, |_visible_index, row| {
+        Text::new(format!("Row {row}"))
+            .height(dp(40.0))
+            .into()
+    })
+    .height(dp(360.0))
+    .item_layout(ItemLayout::Fixed {
+        item_extent: dp(40.0),
+        spacing: dp(4.0),
+        overscan: 4,
+    })
+    .into()
+}
 ```
 
 ## 表单校验
