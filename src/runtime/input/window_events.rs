@@ -141,6 +141,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 return self.close_policy() == super::super::WindowClosePolicy::Close
             }
             WindowEvent::Focused(false) => {
+                self.update_accessibility_window_focus_state(false);
                 self.deferred_mouse_click = None;
                 let _ = self.end_gesture_session(None, true);
                 self.end_scrollbar_drag();
@@ -152,6 +153,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
+            }
+            WindowEvent::Focused(true) => {
+                self.update_accessibility_window_focus_state(true);
             }
             WindowEvent::ThemeChanged(theme) => {
                 self.apply_window_theme(Some(theme));
@@ -310,6 +314,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) -> bool {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let now = Instant::now();
+        let accessibility_actions_handled = self.drain_accessibility_actions();
+        if accessibility_actions_handled {
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
         let repeated_key_handled = self.drive_key_repeat(now);
         if repeated_key_handled {
             if let Some(window) = self.window.as_ref() {

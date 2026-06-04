@@ -24,4 +24,5 @@ pub mod window {
     pub use winit_core::window::*;
 }
 
+pub(crate) mod accessibility;
 pub(crate) mod backend;

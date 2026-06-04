@@ -19,6 +19,7 @@ use crate::ui::widget::common::{
 pub(crate) struct FocusCollectState {
     pub(crate) scope_path: Vec<WidgetId>,
     pub(crate) next_order: usize,
+    pub(crate) disabled_depth: usize,
 }
 
 pub(crate) struct CollectContext<'a, 'b> {
@@ -71,10 +72,12 @@ impl<'a, 'b> CollectContext<'a, 'b> {
     ) -> Vec<WidgetId> {
         let mut path = self.focus.scope_path.clone();
         path.push(scope_id);
+        let active = options.is_active();
         computed.register_focus_scope(FocusScopeState {
             scope_id,
             path: path.clone(),
             options,
+            active,
         });
         path
     }
@@ -93,7 +96,7 @@ impl<'a, 'b> CollectContext<'a, 'b> {
         fallback_focusable: bool,
     ) -> Option<FocusTargetMeta<VM>> {
         let focusable = focus_state.focusable.unwrap_or(fallback_focusable);
-        if !focusable {
+        if !focusable || self.focus.disabled_depth > 0 {
             return None;
         }
         Some(FocusTargetMeta {

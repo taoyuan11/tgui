@@ -93,11 +93,13 @@ impl<VM: 'static> ResolvedElement<VM> {
         chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
         visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
     ) -> WidgetId {
-        let previous_scope_path = context.focus.scope_path.clone();
-        if self.focus.scope.is_some() {
-            let mut path = previous_scope_path.clone();
-            path.push(self.id);
-            context.focus.scope_path = path;
+        let previous_focus = context.focus.clone();
+        if let Some(scope) = self.focus.scope.as_ref() {
+            let active = scope.is_active();
+            context.focus.scope_path.push(self.id);
+            if !active {
+                context.focus.disabled_depth += 1;
+            }
         }
         let mut caches = CollectCaches {
             lifecycle_states,
@@ -108,11 +110,12 @@ impl<VM: 'static> ResolvedElement<VM> {
         self.collect_runtime_lifecycle_state(caches.lifecycle_states);
 
         let mut computed = ComputedScene::default();
-        if let Some(scope) = self.focus.scope {
+        if let Some(scope) = self.focus.scope.as_ref() {
             computed.register_focus_scope(FocusScopeState {
                 scope_id: self.id,
                 path: context.focus.scope_path.clone(),
-                options: scope,
+                options: scope.clone(),
+                active: scope.is_active(),
             });
         }
         use super::super::collect_profile::{record_node, timed, Phase};
@@ -176,7 +179,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             caches
                 .visual_contexts
                 .insert(self.id, visual_context.into());
-            context.focus.scope_path = previous_scope_path;
+            context.focus = previous_focus;
             // 把合并后的子树移动进 chunks(此前是 `clone` + 返回 owned 的双份拷贝)。
             // 父节点改为 `chunks.get(&child.id)` 只读引用来 extend。
             caches.chunks.insert(self.id, computed);

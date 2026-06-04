@@ -44,12 +44,15 @@
 
 ## 五、可访问性（a11y）
 
-仓库内 `accesskit` / a11y 零引用，这是企业向用户的硬指标：
+AccessKit baseline 已默认接入，当前已具备系统 a11y 树与 runtime 焦点同源的基础能力：
 
-- 集成 `accesskit` + `accesskit_winit`，把 `WidgetTree` 的角色、名称、值、命中区暴露成 a11y 树。
-- 键盘焦点链：tab 顺序、focus ring 默认样式、`Esc` 关闭 overlay/dialog、`Enter`/`Space` 触发 button。
+- `accesskit` 已接入；平台 adapter 分别走 Windows HWND、macOS NSView、Unix backend，不依赖 `accesskit_winit`。
+- 从 resolved layout + computed scene 暴露 root/window、containers、text、button、checkbox/radio/switch/select/slider/input/textarea/image/canvas/scrollview/modal/drawer 等基础 role、名称、值、状态与 bounds。
+- 键盘焦点链已与 a11y focus 同源：tab 顺序、focus trap、`auto_focus_first`、`return_focus_to`、`Esc` 关闭 overlay/dialog、`Enter`/`Space` 默认激活均走 runtime 同一路径。
+- AccessKit `Focus` / `Click` / Slider `SetValue` / TextInput `SetValue` action 已回到 runtime 线程并复用既有命令与文本同步路径。
+- 后续重点是屏幕阅读器实测：NVDA（Windows）、VoiceOver（macOS）、Orca（Linux）至少 smoke test，并补充真实设备兼容性记录。
+- 高级组件语义增强：DataGrid / Tree / Menu / Tabs 等组件落地时继续补行列、层级、选区、快捷键、描述关系等更细粒度语义。
 - 颜色对比度：`Theme` token 标注 WCAG AA 等级；提供高对比度主题。
-- 屏幕阅读器实测：NVDA（Windows）、VoiceOver（macOS）、Orca（Linux）至少 smoke test。
 - `prefers-reduced-motion`：动画系统响应系统设置，关闭时禁用 `Signal::animated`。
 
 ## 六、文本与国际化
@@ -124,7 +127,7 @@
 
 ## 优先级建议（个人判断）
 
-1. **现在就该做**：CI 矩阵 + clippy/fmt/audit、CHANGELOG/CONTRIBUTING/SECURITY、`unsafe` SAFETY 注释、`todo!()` 清理、API 文档覆盖率、`accesskit` 接入草案。
+1. **现在就该做**：CI 矩阵 + clippy/fmt/audit、CHANGELOG/CONTRIBUTING/SECURITY、`unsafe` SAFETY 注释、`todo!()` 清理、API 文档覆盖率、AccessKit baseline 的屏幕阅读器 smoke test。
 2. **0.2 之前**：winit 稳定版升级、macOS 通知后端、Linux 通知兼容性、错误类型对外固化、`cargo public-api` 守门。
 3. **0.3 ~ 0.5**：a11y 屏幕阅读器实测、复杂脚本/IME 回归、Tabs/Tooltip/Menu/Table 等 widget、视觉回归测试、桌面打包样例。
 4. **1.0 之前**：API 冻结、性能基线、安全审计、官方站点、多平台 release 工作流。

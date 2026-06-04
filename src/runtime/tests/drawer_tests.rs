@@ -109,3 +109,83 @@ fn assert_backdrop_click_closes_after_signal_opens(placement: DrawerPlacement, c
         "{placement:?} drawer backdrop click should not fall through to underlying widgets"
     );
 }
+
+#[test]
+fn drawer_signal_open_auto_focuses_first_control() {
+    let context = ViewModelContext::for_benchmarks();
+    let invalidation = context.invalidation().clone();
+    let open = context.state(false);
+    let inside: Element<RuntimeDrawerVm> = Button::new("inside").size(dp(80.0), dp(30.0)).into();
+    let inside_id = inside.id;
+    let tree = WidgetTree::new(
+        Drawer::new(open.signal())
+            .placement(DrawerPlacement::Left)
+            .on_open_change(ValueCommand::new(|_: &mut RuntimeDrawerVm, _: bool| {}))
+            .content(inside),
+    );
+    let vm = RuntimeDrawerVm { open: open.clone() };
+    let mut handler = test_handler_with_config(
+        vm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(400.0, 300.0),
+    );
+
+    let _ = handler.computed_scene();
+    assert_eq!(handler.focused_widget_id(), None);
+
+    open.set(true);
+    handler.invalidate_computed_scene();
+    let _ = handler.computed_scene();
+
+    assert_eq!(handler.focused_widget_id(), Some(inside_id));
+}
+
+#[test]
+fn drawer_backdrop_click_return_focus_to_declared_target() {
+    let context = ViewModelContext::for_benchmarks();
+    let invalidation = context.invalidation().clone();
+    let open = context.state(true);
+    let trigger: Element<RuntimeDrawerVm> = Button::new("open").size(dp(80.0), dp(30.0)).into();
+    let trigger_id = trigger.id;
+    let open_for_close = open.clone();
+    let tree = WidgetTree::new(
+        Stack::<RuntimeDrawerVm>::new()
+            .size(dp(400.0), dp(300.0))
+            .child(trigger)
+            .child(
+                Drawer::new(open.signal())
+                    .placement(DrawerPlacement::Left)
+                    .return_focus_to(trigger_id)
+                    .on_open_change(ValueCommand::new(move |vm: &mut RuntimeDrawerVm, value| {
+                        open_for_close.set(value);
+                        vm.open.set(value);
+                    }))
+                    .content(Button::new("inside").size(dp(80.0), dp(30.0))),
+            ),
+    );
+    let vm = RuntimeDrawerVm { open: open.clone() };
+    let mut handler = test_handler_with_config(
+        vm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(400.0, 300.0),
+    );
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: trigger_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+    let _ = handler.computed_scene();
+    assert_ne!(handler.focused_widget_id(), Some(trigger_id));
+
+    handler.cursor_position = Some(Point::new(dp(350.0), dp(150.0)));
+    handler.handle_mouse_press(
+        Rect::new(0.0, 0.0, 400.0, 300.0),
+        Instant::now(),
+        CanvasMouseButton::Left,
+    );
+
+    assert_eq!(handler.focused_widget_id(), Some(trigger_id));
+    assert!(!open.get());
+}

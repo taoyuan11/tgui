@@ -54,7 +54,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let hit_path = self.hit_path(viewport);
         let active_trap = self.active_focus_trap_scope();
-        let focus_restore = self
+        let mut focus_restore = self
             .cursor_position
             .and_then(|point| self.consume_overlay_close_handlers_outside_click(point));
         let Some(hit) = hit_path.last().cloned() else {
@@ -179,6 +179,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             HitInteraction::SelectTrigger { .. } | HitInteraction::SelectOption { .. }
         );
         let hit_target_id = hit.target_id();
+        if focus_restore.is_none() {
+            if let HitInteraction::Widget { id, .. } = &hit {
+                focus_restore = self.backdrop_focus_restore_target(*id);
+            }
+        }
         let text_input_hit = matches!(&hit, HitInteraction::TextInput { .. });
         let (
             widget_id,

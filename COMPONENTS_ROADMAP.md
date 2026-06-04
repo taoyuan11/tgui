@@ -28,13 +28,16 @@
 - **作用**：定义 Tab 顺序（DOM-like 树序 + `tab_index` 覆盖）、可聚焦集合、`Esc`/`Enter`/`Space` 默认行为、模态浮层中的 focus trap、跨浮层焦点回归。
 - **被依赖组件**：Modal、Drawer、Menu、Popover、Form、Tabs、DataGrid、Tree、所有需要键盘可用的录入类组件。
 - **要点**：扩展 `src/runtime/input/` 现有 focus state；新增 `FocusScope`（可嵌套，模态作用域压栈）；与 a11y（PRODUCTION_READINESS §五）同源实现，避免重复。
-- **进度**：[基础完成]
+- **进度**：[功能完整]
   - ✅ `tab_index` 已支持正数优先级、0/默认树序、负数跳过；
-  - ✅ `FocusScopeOptions::trap(true)` 已接入容器、Modal、Drawer、Menu / Select overlay，Tab 在 active trap 内循环；
+  - ✅ `FocusScopeOptions::{trap, auto_focus_first, active}` 已接入容器、ScrollView、Virtual、Modal、Drawer、Menu / Select overlay，关闭态 scope descendants 不进入焦点候选；
+  - ✅ `FocusNavigationSnapshot` 统一服务 Tab 顺序、active trap 过滤、scope 激活 autofocus 与 a11y focus，同一套候选数据不再重复派生；
+  - ✅ `auto_focus_first` 仅在 scope 初次激活或 topmost auto-focus scope 切换时触发，且当前焦点已在 scope 内时不抢焦点；
+  - ✅ Modal / Drawer 默认 `auto_focus_first(true)`，公开 `.return_focus_to(widget_id)` 与 `.auto_focus_first(bool)` 声明式 builder；
   - ✅ pointer focus escape 会被 active trap 拦截，overlay close 后可按 `return_focus_to` 回焦；
   - ✅ `DefaultActivation` 已让 Button / Checkbox / Switch / Select 等响应 Enter / Space，Esc 走 overlay close；
-  - ✅ runtime 测试覆盖 tab 顺序、focus trap、默认激活、Esc 关闭与焦点回归。
-  - ⏳ 待补：`auto_focus_first` / declarative `return_focus_to` builder 仍未全面公开；a11y 树还需与同一焦点源进一步打通。
+  - ✅ AccessKit baseline 已默认接入：从 resolved layout + computed scene 生成 a11y tree，focus、trap filtering、Focus/Click/SetValue action 均复用 runtime 焦点和命令路径；
+  - ✅ runtime / accessibility 测试覆盖 tab 顺序、focus trap、autofocus、默认激活、Esc / backdrop 关闭、焦点回归、a11y role/value/focus/trap/action。
 
 ### 3. Virtual Scrolling 框架
 - **作用**：按可见视口仅实例化部分子节点；行高可定（固定 / 估算 / 测量）；支持横向、纵向、网格三种排布。
@@ -141,15 +144,16 @@
 - **进度**：[基本完成]
   - ✅ `Modal` / `ModalAction` / `ModalStyle` 公开 builder API + 主题样式 token；
   - ✅ Modal in-tree 子树渲染（任意 widget 内容支持）：semi-transparent backdrop + 居中 card（title / content / actions 三段）；
-  - ✅ Card 自动启用 `FocusScopeOptions::trap(true)`：Tab 在 modal 内循环；
-  - ✅ 主按钮（`ModalAction::primary`）`tab_index=0`，配合 Button 自带 `DefaultActivation::EnterAndSpace`，Tab 一次后 Enter 自动触发；
+  - ✅ Card 自动启用 `FocusScopeOptions::{trap(true), auto_focus_first(true)}`：打开后聚焦主按钮 / 首个控件，Tab 在 modal 内循环；
+  - ✅ 主按钮（`ModalAction::primary`）`tab_index=1`，正 `tab_index` 优先于默认树序，配合 Button 自带 `DefaultActivation::EnterAndSpace` 可直接 Enter 触发；
   - ✅ Esc 关闭：collect 阶段额外 emit 空内容 sentinel overlay 到 `OverlayLayer::Modal`，piggyback runtime overlay close 机制；可通过 `.close_on_escape(false)` 禁用；
   - ✅ 点击 backdrop 关闭：backdrop Stack 自带 `on_click` → on_open_change(false)；可通过 `.close_on_backdrop_click(false)` 禁用；
+  - ✅ `.return_focus_to(widget_id)` 与默认 autofocus 已接入 runtime，关闭后可声明式回焦触发控件；
   - ✅ Fade 动画：backdrop + card 的 `opacity` 由 `open: Signal<bool>` 派生 + `.animated(Transition::ease_in_out(160ms))` 自动过渡；
   - ✅ `WidgetProperty::ModalVisibility` 注册到动画引擎，复用 tooltip 同源 `AnimationKey::Widget` 通道；
-  - ✅ 单元测试覆盖（5 个 widget core 测试 + 3 个 runtime 测试）：descriptor 挂载、open/close 渲染对比、focus trap、Esc 关闭、close_on_escape=false 抑制；
+  - ✅ 单元测试覆盖（widget core + runtime）：descriptor 挂载、open/close 渲染对比、focus trap、autofocus、Esc / backdrop 关闭、声明式回焦、close_on_escape=false 抑制；
   - ✅ `examples/modal_demo/` 独立示例：alert / confirm / 自定义内容（带 Input）三种用法。
-  - ⏳ 待补（独立 PR 价值低、可按需补）：scale 动画（VisualStyle 暂无 scale 字段，需要框架基础设施扩展）、`Modal::return_focus_to(widget_id)` builder API、`FocusScopeOptions::auto_focus_first`（打开时自动 focus primary，省去用户按一次 Tab）、触控"向下滑动关闭"（依赖 P0 §6 Gesture）。
+  - ⏳ 待补（独立 PR 价值低、可按需补）：scale 动画（VisualStyle 暂无 scale 字段，需要框架基础设施扩展）、触控"向下滑动关闭"（依赖 P0 §6 Gesture）。
 
 
 ### 11. Popover
@@ -385,8 +389,8 @@
 
 ## 下一步实施建议
 
-1. **批 1（P0 收尾）**：Overlay / Portal / Focus / Virtual / ScrollView / Gesture / Form 都已进入基础完成状态，下一步优先补 public API 长尾、窄窗口策略、a11y 同源焦点与 texture/SVG overlay 管线。
-2. **批 2（P1 收尾）**：Tooltip / Menu / Modal / Popover / Toast / ProgressBar / Spinner / Tabs / Drawer / Divider 已铺开，建议集中补 Drawer push 模式、触控手势接入、Popover 指针渲染、Modal autofocus/scale 动画、Menu SVG 图标。
+1. **批 1（P0 收尾）**：Overlay / Portal / Focus / Virtual / ScrollView / Gesture / Form 都已进入基础完成状态，其中 Overlay / Focus 已功能完整；下一步优先补剩余 public API 长尾与窄窗口策略。
+2. **批 2（P1 收尾）**：Tooltip / Menu / Modal / Popover / Toast / ProgressBar / Spinner / Tabs / Drawer / Divider 已铺开，建议集中补 Drawer push 模式、触控手势接入、Popover 指针渲染、Modal scale 动画、Menu SVG 图标。
 3. **批 3（P2 开工）**：数据类组件成本最高，但基础设施已可支撑；建议先做 List / VirtualList，把 selection、keyboard nav、empty/loading 状态跑通，再推进 Table / DataGrid 与 Tree。
 4. **批 4（P2 录入扩展）**：NumberInput、DatePicker、ColorPicker、Upload 依赖 Form + Overlay + Popover + Gesture，适合在 List 基础交互稳定后并行推进。
 5. **批 5（P3）**：视觉完善类，按用户呼声排队；Badge / Avatar / Skeleton / Card / Breadcrumb 可以先作为低风险组件快速补齐。

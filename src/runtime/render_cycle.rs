@@ -111,6 +111,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             status
         };
         self.renderer = Some(renderer);
+        self.sync_accessibility_tree();
         if !self.first_frame_logged {
             if matches!(&status, Ok(RenderStatus::Rendered)) {
                 self.first_frame_logged = true;
@@ -173,6 +174,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             Ok(renderer) => {
                 self.renderer = Some(renderer);
                 self.last_synced_clear_color = Some(clear_color);
+                self.initialize_accessibility_adapter();
             }
             Err(error) => {
                 self.fail(event_loop, error);

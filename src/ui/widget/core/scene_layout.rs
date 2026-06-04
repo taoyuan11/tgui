@@ -58,6 +58,22 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         Some(self.resolved_at_path(path))
     }
 
+    pub(crate) fn widget_bounds(&self, widget_id: WidgetId) -> Option<Rect> {
+        let path = self.path_for(widget_id)?;
+        let mut node = &self.layout_root;
+        let mut x = 0.0;
+        let mut y = 0.0;
+        for child_index in path {
+            let child = node.children.get(*child_index)?;
+            let layout = self.taffy.layout(child.node).ok()?;
+            x += layout.location.x;
+            y += layout.location.y;
+            node = child;
+        }
+        let layout = self.taffy.layout(node.node).ok()?;
+        Some(Rect::new(x, y, layout.size.width, layout.size.height))
+    }
+
     /// 所有 widget id 的迭代器，用于全局扫描（例如全局快捷键派发）。
     pub(crate) fn all_widget_ids(&self) -> impl Iterator<Item = WidgetId> + '_ {
         self.paths.keys().copied()

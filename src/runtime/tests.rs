@@ -31,7 +31,7 @@ use crate::ui::widget::{
     Button, Canvas, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent, CanvasRecorder,
     CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Checkbox,
     ContainerStyle, CursorStyle, Flex, FocusScopeOptions, HitInteraction, Input, Point, Rect,
-    ScrollView, Select, SelectOption, Switch, Text, TextEditState, Textarea, Tooltip,
+    ScrollView, Select, SelectOption, Slider, Switch, Text, TextEditState, Textarea, Tooltip,
     VirtualCacheState, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
@@ -478,6 +478,7 @@ impl crate::foundation::view_model::ViewModel for CanvasEventVm {
     }
 }
 
+mod accessibility_tests;
 mod audio_video_tests;
 mod cache_lifecycle_tests;
 mod canvas_tests;

@@ -1,7 +1,7 @@
 pub(super) use super::*;
 
 use crate::foundation::view_model::ValueCommand;
-use crate::ui::widget::{Modal, ModalAction, WidgetId};
+use crate::ui::widget::{Modal, ModalAction};
 
 #[test]
 fn modal_builder_attaches_descriptor() {
@@ -117,41 +117,20 @@ fn modal_open_renders_title_and_action_labels() {
 }
 
 #[test]
-fn modal_open_registers_focus_trap_on_card() {
-    // 直接断言 card element 的 focus.scope.options.is_trap == true。
+fn modal_open_registers_focus_trap_on_outer_scope() {
     let modal_element: Element<()> = Modal::new(true)
         .title("X")
         .action(ModalAction::primary("OK"))
         .into();
 
-    // outer.children[1] (centered Stack) -> children[0] (card Flex).
-    fn find_card_focus_trap<VM>(element: &Element<VM>, target: WidgetId) -> bool {
-        if element.id == target {
-            return element
-                .focus
-                .scope
-                .as_ref()
-                .map(|s| s.is_trap())
-                .unwrap_or(false);
-        }
-        if let crate::ui::widget::common::WidgetKind::Container { children, .. } = &element.kind {
-            for src in children {
-                if let crate::ui::widget::common::ChildSource::Static(items) = src {
-                    for child in items {
-                        if find_card_focus_trap(child, target) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    let card_id = Modal::<()>::_card_id_of(&modal_element).expect("card id present");
     assert!(
-        find_card_focus_trap(&modal_element, card_id),
-        "card widget must have FocusScopeOptions::trap(true)"
+        modal_element
+            .focus
+            .scope
+            .as_ref()
+            .map(|scope| scope.is_trap() && scope.is_auto_focus_first())
+            .unwrap_or(false),
+        "outer modal widget must have active trap/autofocus focus scope"
     );
 }
 

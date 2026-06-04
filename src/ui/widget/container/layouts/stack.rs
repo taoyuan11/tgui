@@ -26,6 +26,11 @@ impl<VM> Stack<VM> {
         self.0 = self.0.focus_scope(options);
         self
     }
+
+    pub fn auto_focus_first(mut self, auto_focus_first: bool) -> Self {
+        self.0 = self.0.auto_focus_first(auto_focus_first);
+        self
+    }
 }
 
 impl<VM> Default for Stack<VM> {

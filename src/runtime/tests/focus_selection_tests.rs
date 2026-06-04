@@ -87,6 +87,110 @@ fn focus_trap_loops_tab_order_and_blocks_pointer_focus_escape() {
 }
 
 #[test]
+fn auto_focus_first_focuses_first_candidate_in_tab_order_on_activation() {
+    let invalidation = InvalidationSignal::new();
+    let default_first: Element<TestVm> = Button::new("Default").size(dp(80.0), dp(30.0)).into();
+    let positive: Element<TestVm> = Button::new("Positive").size(dp(80.0), dp(30.0)).into();
+    let positive_id = positive.id;
+    let tree = WidgetTree::new(
+        Flex::new(Axis::Vertical)
+            .auto_focus_first(true)
+            .child([default_first, positive.tab_index(1)]),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+
+    assert_eq!(handler.focused_widget_id(), Some(positive_id));
+}
+
+#[test]
+fn auto_focus_first_does_not_steal_focus_already_inside_scope() {
+    let invalidation = InvalidationSignal::new();
+    let first: Element<TestVm> = Button::new("First").size(dp(80.0), dp(30.0)).into();
+    let second: Element<TestVm> = Button::new("Second").size(dp(80.0), dp(30.0)).into();
+    let second_id = second.id;
+    let scope: Element<TestVm> = Flex::new(Axis::Vertical)
+        .auto_focus_first(true)
+        .child([first, second])
+        .into();
+    let scope_id = scope.id;
+    let tree = WidgetTree::new(scope);
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: second_id,
+        scope_path: vec![scope_id],
+        on_blur: None,
+    });
+
+    let _ = handler.computed_scene();
+
+    assert_eq!(handler.focused_widget_id(), Some(second_id));
+}
+
+#[test]
+fn auto_focus_first_only_runs_when_topmost_scope_changes() {
+    let invalidation = InvalidationSignal::new();
+    let first: Element<TestVm> = Button::new("First").size(dp(80.0), dp(30.0)).into();
+    let first_id = first.id;
+    let outside: Element<TestVm> = Button::new("Outside")
+        .size(dp(80.0), dp(30.0))
+        .position_absolute()
+        .top(dp(60.0))
+        .into();
+    let outside_id = outside.id;
+    let tree = WidgetTree::new(
+        Stack::new().child([
+            Flex::new(Axis::Vertical)
+                .auto_focus_first(true)
+                .child(first)
+                .into(),
+            outside,
+        ]),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    assert_eq!(handler.focused_widget_id(), Some(first_id));
+
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: outside_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+    handler.invalidate_computed_scene();
+    let _ = handler.computed_scene();
+
+    assert_eq!(handler.focused_widget_id(), Some(outside_id));
+}
+
+#[test]
+fn inactive_focus_scope_descendants_are_removed_from_tab_order() {
+    let invalidation = InvalidationSignal::new();
+    let hidden: Element<TestVm> = Button::new("Hidden").size(dp(80.0), dp(30.0)).into();
+    let outside: Element<TestVm> = Button::new("Outside").size(dp(80.0), dp(30.0)).into();
+    let outside_id = outside.id;
+    let tree = WidgetTree::new(
+        Flex::new(Axis::Vertical).child([
+            Flex::new(Axis::Vertical)
+                .focus_scope(
+                    FocusScopeOptions::new()
+                        .active(false)
+                        .auto_focus_first(true),
+                )
+                .child(hidden)
+                .into(),
+            outside,
+        ]),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+
+    assert_eq!(handler.focused_widget_id(), Some(outside_id));
+}
+
+#[test]
 fn enter_space_and_escape_drive_default_focus_actions() {
     let invalidation = InvalidationSignal::new();
     let button_clicks = Arc::new(AtomicUsize::new(0));

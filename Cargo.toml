@@ -45,6 +45,7 @@ mimalloc = ["dep:mimalloc"]
 collect-profile = ["bench-support"]
 
 [dependencies]
+accesskit = "0.24"
 bytemuck = { version = "1.24", features = ["derive"] }
 cosmic-text = "0.19"
 crossbeam-channel = "0.5"
@@ -71,6 +72,7 @@ wgpu = { version = "29", features = ["wgsl"] }
 ffmpeg-next = { version = "8.0.0", optional = true, default-features = false, features = ["codec", "format", "software-resampling", "software-scaling"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+accesskit_windows = "0.33"
 arboard = "3.6"
 cpal = { version = "0.17.3", optional = true }
 log = "0.4.30"
@@ -81,6 +83,7 @@ windows = { version = "0.62.2", features = ["Data_Xml_Dom", "Foundation", "UI_No
 winit-win32 = "0.31.0-beta.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+accesskit_macos = "0.26.1"
 arboard = "3.6"
 block2 = "0.6.2"
 cpal = { version = "0.17.3", optional = true }
@@ -94,6 +97,7 @@ stacker = "0.1.24"
 winit-appkit = "0.31.0-beta.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+accesskit_unix = "0.21.1"
 arboard = "3.6"
 cpal = { version = "0.17.3", optional = true }
 log = "0.4.30"

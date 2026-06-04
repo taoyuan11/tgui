@@ -42,6 +42,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
+    pub(super) fn backdrop_focus_restore_target(
+        &self,
+        widget_id: crate::ui::widget::WidgetId,
+    ) -> Option<crate::ui::widget::WidgetId> {
+        let cached = self.cached_scene.as_ref()?;
+        let layout = cached.layout.as_ref()?;
+        layout.all_widget_ids().find_map(|id| {
+            let resolved = layout.resolved_widget(id)?;
+            if let Some(modal) = resolved.modal.as_ref() {
+                if modal.open.resolve() && modal.backdrop_widget_id == widget_id {
+                    return modal.return_focus_to;
+                }
+            }
+            if let Some(drawer) = resolved.drawer.as_ref() {
+                if drawer.open.resolve() && drawer.backdrop_widget_id == widget_id {
+                    return drawer.return_focus_to;
+                }
+            }
+            None
+        })
+    }
+
     /// 在指针按下时调用：所有 `close_on_outside_click=true` 的浮层，若 click_point 不在
     /// 浮层 rect 内，则触发其 `on_close`。
     ///

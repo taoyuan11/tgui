@@ -303,6 +303,17 @@ impl<VM> Element<VM> {
         self
     }
 
+    pub fn auto_focus_first(mut self, auto_focus_first: bool) -> Self {
+        self.focus.scope = Some(
+            self.focus
+                .scope
+                .take()
+                .unwrap_or_default()
+                .auto_focus_first(auto_focus_first),
+        );
+        self
+    }
+
     /// 给 Element 挂上 Tooltip。任何 widget 通过 `.into()` 转 Element 后都可以链式调用。
     /// 各 widget 的 builder 通常也会暴露同名 `.tooltip()` 方法，调用本方法的简写形式。
     pub fn with_tooltip(mut self, tooltip: crate::ui::widget::Tooltip) -> Self {

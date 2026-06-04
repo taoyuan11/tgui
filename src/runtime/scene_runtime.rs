@@ -488,6 +488,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 let _ = self.apply_scroll_view_controller_state(bindings);
             }
 
+            if self.reconcile_auto_focus_after_scene_update() {
+                self.invalidate_scene_with_reason("auto_focus_first");
+                return self.computed_scene();
+            }
+
             if let Some(started_at) = started_at {
                 let computed = &self
                     .cached_scene

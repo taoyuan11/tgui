@@ -79,8 +79,9 @@ pub(crate) use core::LifecycleSnapshot;
 pub(crate) use core::LifecycleWidgetKind;
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub(crate) use core::{
-    ActiveTooltipState, CollectedSceneCache, ResolvedSceneLayout, ResolvedWidgetKind,
-    SceneChunkParts, TextInputLayoutOverride, TooltipTrigger, VisualContextSnapshot,
+    ActiveTooltipState, CollectedSceneCache, ResolvedElement, ResolvedSceneLayout,
+    ResolvedWidgetKind, SceneChunkParts, TextInputLayoutOverride, TooltipTrigger,
+    VisualContextSnapshot,
 };
 pub use divider::Divider;
 pub use drawer::{Drawer, DrawerPlacement};

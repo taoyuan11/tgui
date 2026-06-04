@@ -194,6 +194,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.renderer = Some(renderer);
         self.last_synced_clear_color = Some(clear_color);
         self.window = Some(window);
+        self.initialize_accessibility_adapter();
 
         if !self.render_hidden_frame(event_loop) {
             return;

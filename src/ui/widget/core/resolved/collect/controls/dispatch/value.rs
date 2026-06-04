@@ -381,6 +381,7 @@ impl<VM> ResolvedElement<VM> {
                         path
                     },
                     options: crate::ui::widget::FocusScopeOptions::new().trap(true),
+                    active: true,
                 })
                 .return_focus_to(self.id)
                 .close_on_outside_click(true)

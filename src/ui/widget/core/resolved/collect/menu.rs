@@ -569,7 +569,8 @@ pub(crate) fn emit_menu_layer<VM>(
             path.push(menu_id);
             path
         },
-        options: FocusScopeOptions { trap: true },
+        options: FocusScopeOptions::new().trap(true),
+        active: true,
     };
     let mut overlay = Overlay::<VM>::new(overlay_id, anchor)
         .source_widget(menu_id)

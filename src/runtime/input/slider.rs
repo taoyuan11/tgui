@@ -32,7 +32,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         crate::ui::widget::slider_value_from_normalized(normalized, min, max, step)
     }
 
-    pub(super) fn apply_slider_value(
+    pub(in crate::runtime) fn apply_slider_value(
         &mut self,
         command: Option<&ValueCommand<VM, f32>>,
         value: f32,

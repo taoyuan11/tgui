@@ -1,23 +1,53 @@
 use super::*;
 use crate::ui::widget::style::{DividerStyle, ProgressBarStyle, SpinnerStyle};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FocusScopeOptions {
     pub(crate) trap: bool,
+    pub(crate) auto_focus_first: bool,
+    pub(crate) active: Value<bool>,
 }
 
 impl FocusScopeOptions {
-    pub const fn new() -> Self {
-        Self { trap: false }
+    pub fn new() -> Self {
+        Self {
+            trap: false,
+            auto_focus_first: false,
+            active: Value::Static(true),
+        }
     }
 
-    pub const fn trap(mut self, trap: bool) -> Self {
+    pub fn trap(mut self, trap: bool) -> Self {
         self.trap = trap;
         self
     }
 
-    pub const fn is_trap(self) -> bool {
+    pub fn auto_focus_first(mut self, auto_focus_first: bool) -> Self {
+        self.auto_focus_first = auto_focus_first;
+        self
+    }
+
+    pub fn active(mut self, active: impl Into<Value<bool>>) -> Self {
+        self.active = active.into();
+        self
+    }
+
+    pub fn is_trap(&self) -> bool {
         self.trap
+    }
+
+    pub fn is_auto_focus_first(&self) -> bool {
+        self.auto_focus_first
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.active.resolve()
+    }
+}
+
+impl Default for FocusScopeOptions {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -61,11 +91,12 @@ impl<VM> Clone for FocusTargetMeta<VM> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FocusScopeState {
     pub(crate) scope_id: WidgetId,
     pub(crate) path: Vec<WidgetId>,
     pub(crate) options: FocusScopeOptions,
+    pub(crate) active: bool,
 }
 
 #[derive(Clone)]

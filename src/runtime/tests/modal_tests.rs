@@ -107,3 +107,70 @@ fn closed_modal_does_not_register_close_handler() {
         "closed modal should not register Esc close handler"
     );
 }
+
+#[test]
+fn modal_signal_open_auto_focuses_primary_action() {
+    let context = ViewModelContext::for_benchmarks();
+    let invalidation = context.invalidation().clone();
+    let open = context.state(false);
+    let tree = WidgetTree::new(
+        Modal::<ModalVm>::new(open.signal())
+            .on_open_change(ValueCommand::new(|_: &mut ModalVm, _: bool| {}))
+            .title("Test")
+            .action(ModalAction::new("Cancel"))
+            .action(ModalAction::primary("OK")),
+    );
+    let mut handler = test_handler_with_vm(ModalVm::default(), Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    assert_eq!(handler.focused_widget_id(), None);
+
+    open.set(true);
+    handler.invalidate_computed_scene();
+    let computed = handler.computed_scene().clone();
+    let focused = handler
+        .focused_widget_id()
+        .expect("open modal should auto-focus an action");
+    let focused_tab_index = computed.hit_regions.iter().find_map(|region| {
+        let focus = region.focus.as_ref()?;
+        (focus.widget_id == focused).then_some(focus.tab_index)
+    });
+
+    assert_eq!(focused_tab_index, Some(Some(1)));
+}
+
+#[test]
+fn modal_escape_return_focus_to_declared_target() {
+    let context = ViewModelContext::for_benchmarks();
+    let invalidation = context.invalidation().clone();
+    let open = context.state(true);
+    let trigger: Element<ModalVm> = Button::new("Open").size(dp(80.0), dp(30.0)).into();
+    let trigger_id = trigger.id;
+    let open_for_close = open.clone();
+    let tree = WidgetTree::new(
+        Stack::<ModalVm>::new().child([
+            trigger,
+            Modal::new(open.signal())
+                .return_focus_to(trigger_id)
+                .on_open_change(ValueCommand::new(move |_: &mut ModalVm, value| {
+                    open_for_close.set(value);
+                }))
+                .title("Test")
+                .action(ModalAction::primary("OK"))
+                .into(),
+        ]),
+    );
+    let mut handler = test_handler_with_vm(ModalVm::default(), Some(tree), invalidation);
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: trigger_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+    let _ = handler.computed_scene();
+
+    assert_ne!(handler.focused_widget_id(), Some(trigger_id));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape,))));
+
+    assert_eq!(handler.focused_widget_id(), Some(trigger_id));
+    assert!(!open.get());
+}

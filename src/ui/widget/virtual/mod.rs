@@ -608,6 +608,18 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
         self
     }
 
+    pub fn auto_focus_first(mut self, auto_focus_first: bool) -> Self {
+        self.element.focus.scope = Some(
+            self.element
+                .focus
+                .scope
+                .take()
+                .unwrap_or_default()
+                .auto_focus_first(auto_focus_first),
+        );
+        self
+    }
+
     pub fn overflow(mut self, overflow: Overflow) -> Self {
         if let WidgetKind::Virtual {
             overflow_x,

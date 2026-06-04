@@ -1,3 +1,4 @@
+mod accessibility;
 mod application_handler;
 mod binding_sync;
 mod bootstrap;
@@ -71,6 +72,7 @@ use crate::media::MediaManager;
 use crate::notification::{
     async_notification_channel, AsyncNotificationDispatcher, AsyncNotificationReceiver,
 };
+use crate::platform::accessibility::PlatformAccessibilityAdapter;
 use crate::platform::backend::application::ApplicationHandler;
 use crate::platform::backend::event_loop::{ActiveEventLoop, ControlFlow};
 use crate::platform::backend::window::Window;
@@ -95,6 +97,7 @@ use crate::ui::widget::{
     CollectedSceneCache, ComputedScene, Point, Rect, ResolvedSceneLayout, ScrollRegion,
     ScrollbarHandle, TextEditState, VirtualCacheState, WidgetId, WidgetStateMap, WidgetTree,
 };
+use crossbeam_channel::{Receiver, Sender};
 use image::GenericImageView;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -292,6 +295,7 @@ pub struct BoundRuntimeHandler<VM> {
     pressed_widget: Option<WidgetId>,
     focused_widget: Option<FocusedWidget<VM>>,
     focus_visible: bool,
+    active_auto_focus_scope: Option<Vec<WidgetId>>,
     selected_text: Option<WidgetId>,
     text_edit_states: HashMap<WidgetId, TextEditState>,
     text_input_buffers: HashMap<WidgetId, TextInputBufferState>,
@@ -315,6 +319,9 @@ pub struct BoundRuntimeHandler<VM> {
     first_frame_logged: bool,
     window_requests: WindowRequestQueue,
     window: Option<Arc<dyn Window>>,
+    accessibility_adapter: Option<PlatformAccessibilityAdapter>,
+    accessibility_action_sender: Sender<accesskit::ActionRequest>,
+    accessibility_action_receiver: Receiver<accesskit::ActionRequest>,
     renderer: Option<Renderer>,
     last_synced_clear_color: Option<Color>,
     window_id: Option<WindowId>,
@@ -350,6 +357,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let theme_store = ThemeStore::new(config.theme_set.clone(), ThemeMode::System, None);
         let resource_budget = config.resource_budget;
         let reduced_motion = config.reduced_motion;
+        let (accessibility_action_sender, accessibility_action_receiver) =
+            crossbeam_channel::unbounded();
 
         Self {
             window_key,
@@ -402,6 +411,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             pressed_widget: None,
             focused_widget: None,
             focus_visible: false,
+            active_auto_focus_scope: None,
             selected_text: None,
             text_edit_states: HashMap::new(),
             text_input_buffers: HashMap::new(),
@@ -425,6 +435,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             first_frame_logged: false,
             window_requests: WindowRequestQueue::default(),
             window: None,
+            accessibility_adapter: None,
+            accessibility_action_sender,
+            accessibility_action_receiver,
             renderer: None,
             last_synced_clear_color: None,
             window_id: None,

@@ -188,7 +188,7 @@ fn closed_signal_drawer_does_not_register_focus_trap() {
         computed
             .focus_scopes
             .iter()
-            .all(|scope| !scope.options.is_trap()),
+            .all(|scope| !scope.active || !scope.options.is_trap()),
         "closed drawer must not install an active focus trap"
     );
 }
@@ -234,7 +234,7 @@ fn open_signal_drawer_registers_focus_trap() {
         computed
             .focus_scopes
             .iter()
-            .any(|scope| scope.options.is_trap()),
+            .any(|scope| scope.active && scope.options.is_trap()),
         "open drawer should trap focus inside the panel"
     );
 }

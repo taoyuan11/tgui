@@ -13,7 +13,8 @@
 //! - backdrop（半透明遮罩）+ drawer panel（从边缘滑出）；
 //! - panel 通过 `position_absolute` + 方向对应的边距实现定位；
 //! - 动画：backdrop fade + panel slide（通过 `left`/`right`/`top`/`bottom` 的 animated 值）；
-//! - 使用 `FocusScopeOptions::trap(true)` 实现 focus trap；
+//! - 使用动态 active 的 `FocusScopeOptions::{trap, auto_focus_first}` 实现 focus trap
+//!   与打开后首控件 autofocus；
 //! - Esc 关闭、focus return、关闭命令派发通过 `DrawerDescriptor` + collect 阶段 sentinel overlay 完成；
 //! - backdrop 点击关闭在 collect 阶段按当前 open 状态注入命中区。
 

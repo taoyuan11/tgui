@@ -138,6 +138,10 @@ impl<VM> ScrollView<VM> {
         Self(self.0.focus_scope(options))
     }
 
+    pub fn auto_focus_first(self, auto_focus_first: bool) -> Self {
+        Self(self.0.auto_focus_first(auto_focus_first))
+    }
+
     pub fn on_click(self, command: Command<VM>) -> Self {
         Self(self.0.on_click(command))
     }

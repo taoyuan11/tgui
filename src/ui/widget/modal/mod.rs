@@ -5,9 +5,9 @@
 //!
 //! Modal 与 [`tgui::dialog`](crate::dialog) 区分——后者是系统原生对话框。
 //! Modal 由 builder 构造出一个绝对定位、全屏覆盖的 Stack 子树：semi-transparent
-//! backdrop + 居中 card。card 上自动启用 `FocusScopeOptions::trap(true)`。
-//! Esc 关闭、focus return、关闭命令派发通过 collect 阶段额外 emit 的 sentinel
-//! overlay piggyback runtime overlay close 机制。
+//! backdrop + 居中 card。外层 scope 在 open 态自动启用 focus trap 与
+//! `auto_focus_first`。Esc 关闭、focus return、关闭命令派发通过 collect 阶段
+//! 额外 emit 的 sentinel overlay piggyback runtime overlay close 机制。
 
 mod action;
 mod descriptor;

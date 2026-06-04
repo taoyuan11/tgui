@@ -1,7 +1,6 @@
 use super::*;
 use crate::ui::widget::ScrollRegion;
 
-#[derive(Clone)]
 struct FocusCandidate<VM> {
     widget_id: WidgetId,
     tab_index: Option<i32>,
@@ -11,8 +10,99 @@ struct FocusCandidate<VM> {
     on_blur: Option<Command<VM>>,
 }
 
+impl<VM> Clone for FocusCandidate<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            widget_id: self.widget_id,
+            tab_index: self.tab_index,
+            order: self.order,
+            scope_path: self.scope_path.clone(),
+            on_focus: self.on_focus.clone(),
+            on_blur: self.on_blur.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct FocusNavigationSnapshot<VM> {
+    active_trap_scope: Option<Vec<WidgetId>>,
+    active_auto_focus_scope: Option<Vec<WidgetId>>,
+    candidates: Vec<FocusCandidate<VM>>,
+}
+
 fn scope_path_within(path: &[WidgetId], scope: &[WidgetId]) -> bool {
     path.starts_with(scope)
+}
+
+impl<VM> FocusNavigationSnapshot<VM> {
+    fn from_scene(computed: &crate::ui::widget::ComputedScene<VM>) -> Self {
+        let active_trap_scope = computed
+            .focus_scopes
+            .iter()
+            .rev()
+            .find(|scope| scope.active && scope.options.is_trap())
+            .map(|scope| scope.path.clone());
+        let active_auto_focus_scope = computed
+            .focus_scopes
+            .iter()
+            .rev()
+            .find(|scope| scope.active && scope.options.is_auto_focus_first())
+            .map(|scope| scope.path.clone());
+        let mut candidates = Vec::new();
+        let mut seen = HashSet::new();
+        for region in computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+        {
+            let Some(focus) = region.focus.as_ref() else {
+                continue;
+            };
+            if focus.tab_index.unwrap_or(0) < 0 {
+                continue;
+            }
+            if let Some(trap) = active_trap_scope.as_ref() {
+                if !scope_path_within(&focus.scope_path, trap) {
+                    continue;
+                }
+            }
+            if !seen.insert(focus.widget_id) {
+                continue;
+            }
+            candidates.push(FocusCandidate {
+                widget_id: focus.widget_id,
+                tab_index: focus.tab_index,
+                order: focus.order,
+                scope_path: focus.scope_path.clone(),
+                on_focus: focus.on_focus.clone(),
+                on_blur: focus.on_blur.clone(),
+            });
+        }
+        candidates.sort_by(|left, right| {
+            let left_bucket = left.tab_index.unwrap_or(0);
+            let right_bucket = right.tab_index.unwrap_or(0);
+            match (left_bucket > 0, right_bucket > 0) {
+                (true, true) => left_bucket
+                    .cmp(&right_bucket)
+                    .then_with(|| left.order.cmp(&right.order)),
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                (false, false) => left.order.cmp(&right.order),
+            }
+        });
+        Self {
+            active_trap_scope,
+            active_auto_focus_scope,
+            candidates,
+        }
+    }
+
+    fn first_candidate_in_scope(&self, scope: &[WidgetId]) -> Option<FocusCandidate<VM>> {
+        self.candidates
+            .iter()
+            .find(|candidate| scope_path_within(&candidate.scope_path, scope))
+            .cloned()
+    }
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
@@ -84,63 +174,57 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn active_focus_trap_scope(&mut self) -> Option<Vec<WidgetId>> {
-        self.computed_scene()
-            .focus_scopes
-            .iter()
-            .rev()
-            .find(|scope| scope.options.is_trap())
-            .map(|scope| scope.path.clone())
+        FocusNavigationSnapshot::from_scene(self.computed_scene()).active_trap_scope
     }
 
     fn focus_candidates(&mut self) -> Vec<FocusCandidate<VM>> {
-        let active_trap = self.active_focus_trap_scope();
-        let mut candidates = Vec::new();
-        let mut seen = HashSet::new();
-        let computed = self.computed_scene();
-        for region in computed
-            .hit_regions
-            .iter()
-            .chain(computed.overlay_hit_regions.iter())
-        {
-            let Some(focus) = region.focus.as_ref() else {
-                continue;
-            };
-            if focus.tab_index.unwrap_or(0) < 0 {
-                continue;
-            }
-            if let Some(trap) = active_trap.as_ref() {
-                if !scope_path_within(&focus.scope_path, trap) {
-                    continue;
-                }
-            }
-            if !seen.insert(focus.widget_id) {
-                continue;
-            }
-            candidates.push(FocusCandidate {
-                widget_id: focus.widget_id,
-                tab_index: focus.tab_index,
-                order: focus.order,
-                scope_path: focus.scope_path.clone(),
-                on_focus: focus.on_focus.clone(),
-                on_blur: focus.on_blur.clone(),
-            });
-        }
-        candidates.sort_by(|left, right| {
-            let left_bucket = left.tab_index.unwrap_or(0);
-            let right_bucket = right.tab_index.unwrap_or(0);
-            match (left_bucket > 0, right_bucket > 0) {
-                (true, true) => left_bucket
-                    .cmp(&right_bucket)
-                    .then_with(|| left.order.cmp(&right.order)),
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                (false, false) => left.order.cmp(&right.order),
-            }
-        });
-        candidates
+        FocusNavigationSnapshot::from_scene(self.computed_scene()).candidates
     }
 
-    pub(super) fn activate_focused_widget(&mut self, enter: bool, space: bool) -> bool {
+    pub(in crate::runtime) fn reconcile_auto_focus_after_scene_update(&mut self) -> bool {
+        let Some(cached) = self.cached_scene.as_ref() else {
+            self.active_auto_focus_scope = None;
+            return false;
+        };
+        let snapshot = FocusNavigationSnapshot::from_scene(&cached.computed);
+        let next_scope = snapshot.active_auto_focus_scope.clone();
+        if self.active_auto_focus_scope == next_scope {
+            return false;
+        }
+        self.active_auto_focus_scope = next_scope.clone();
+
+        let Some(scope) = next_scope else {
+            return false;
+        };
+        let current_focus_in_scope = self
+            .focused_widget
+            .as_ref()
+            .map(|focused| {
+                snapshot.candidates.iter().any(|candidate| {
+                    candidate.widget_id == focused.widget_id
+                        && scope_path_within(&candidate.scope_path, &scope)
+                })
+            })
+            .unwrap_or(false);
+        if current_focus_in_scope {
+            return false;
+        }
+        let Some(next) = snapshot.first_candidate_in_scope(&scope) else {
+            return false;
+        };
+        self.update_focus(
+            Some(FocusedWidget {
+                widget_id: next.widget_id,
+                scope_path: next.scope_path,
+                on_blur: next.on_blur,
+            }),
+            next.on_focus,
+            true,
+        );
+        true
+    }
+
+    pub(in crate::runtime) fn activate_focused_widget(&mut self, enter: bool, space: bool) -> bool {
         let Some(focused_id) = self.focused_widget_id() else {
             return false;
         };

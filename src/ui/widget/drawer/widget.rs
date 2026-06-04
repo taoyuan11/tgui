@@ -17,8 +17,9 @@
 //! - `Drawer::From<Element>` 把自身展开为一个 `position_absolute + 全屏 fill`
 //!   的 Stack，里面放两个常驻 child：backdrop（半透明遮罩）+ panel（侧边栏面板）；
 //! - panel 根据 placement 决定从哪个边缘滑出，使用 `position_absolute` 定位；
-//! - 外层 Stack 在打开时挂 `FocusScopeOptions::trap(true)`，使 Tab 在 drawer 内循环，
-//!   同时让 backdrop 点击留在 trap scope 内；
+//! - 外层 Stack 在打开时挂动态 active 的
+//!   `FocusScopeOptions::{trap, auto_focus_first}`，使 Tab 在 drawer 内循环，并让
+//!   backdrop 点击留在 trap scope 内；
 //! - backdrop + panel 的动画：backdrop 走 `opacity` fade，panel 走对应方向的位移
 //!   （left/right/top/bottom）+ `opacity` 组合实现 slide + fade；
 //! - Esc 关闭 / on_close 派发 / focus return 由挂在外层 Stack 上的
@@ -52,6 +53,8 @@ pub struct Drawer<VM> {
     content: Option<Element<VM>>,
     close_on_escape: bool,
     close_on_backdrop_click: bool,
+    return_focus_to: Option<WidgetId>,
+    auto_focus_first: bool,
     style: Option<DrawerStyle>,
 }
 
@@ -65,6 +68,8 @@ impl<VM: 'static> Drawer<VM> {
             content: None,
             close_on_escape: true,
             close_on_backdrop_click: true,
+            return_focus_to: None,
+            auto_focus_first: true,
             style: None,
         }
     }
@@ -100,6 +105,18 @@ impl<VM: 'static> Drawer<VM> {
         self
     }
 
+    /// 关闭后把焦点还给指定 widget。
+    pub fn return_focus_to(mut self, widget_id: WidgetId) -> Self {
+        self.return_focus_to = Some(widget_id);
+        self
+    }
+
+    /// 打开时是否自动聚焦 drawer 内第一个可聚焦控件（默认 `true`）。
+    pub fn auto_focus_first(mut self, auto_focus_first: bool) -> Self {
+        self.auto_focus_first = auto_focus_first;
+        self
+    }
+
     /// 覆盖默认主题样式。
     pub fn style(mut self, style: DrawerStyle) -> Self {
         self.style = Some(style);
@@ -116,6 +133,8 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
             content,
             close_on_escape,
             close_on_backdrop_click,
+            return_focus_to,
+            auto_focus_first,
             style,
         } = drawer;
 
@@ -200,7 +219,6 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
                 s.surface.border_radius = Some(Dp::ZERO.into());
                 s
             });
-        let is_open = open.resolve();
         let backdrop_element: Element<VM> = backdrop.into();
         let backdrop_widget_id = backdrop_element.id;
 
@@ -325,16 +343,19 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
         // -----------------------------------------------------------------
         // 外层 Stack：全屏绝对定位容器，backdrop 仅在打开时捕获点击。
         // -----------------------------------------------------------------
-        let mut outer: Stack<VM> = Stack::<VM>::new()
+        let outer: Stack<VM> = Stack::<VM>::new()
             .size(pct(100.0), pct(100.0))
             .position_absolute()
             .left(Dp::ZERO)
             .top(Dp::ZERO)
+            .focus_scope(
+                FocusScopeOptions::new()
+                    .trap(true)
+                    .auto_focus_first(auto_focus_first)
+                    .active(open.clone()),
+            )
             .child(backdrop_element)
             .child(panel_element);
-        if is_open {
-            outer = outer.focus_scope(FocusScopeOptions::new().trap(true));
-        }
 
         let mut outer_element: Element<VM> = outer.into();
         outer_element.drawer = Some(Box::new(DrawerDescriptor {
@@ -343,7 +364,7 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
             placement,
             close_on_escape,
             close_on_backdrop_click,
-            return_focus_to: None,
+            return_focus_to,
             backdrop_widget_id,
             panel_widget_id,
             style,

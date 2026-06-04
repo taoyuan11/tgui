@@ -373,6 +373,7 @@ fn emit_overlay_registers_focus_scope_and_rebases_hit_scope_path() {
         scope_id,
         path: vec![scope_id],
         options: FocusScopeOptions::new().trap(true),
+        active: true,
     };
     let focus_target_id = WidgetId::from_raw(8);
     let overlay = Overlay::<()>::new(OverlayId::new(scope_id.raw()), Anchor::Rect(anchor))

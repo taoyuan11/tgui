@@ -13,7 +13,8 @@
 //! - `Modal::From<Element>` 把自身展开为一个 `position_absolute + 全屏 fill`
 //!   的 Stack，里面放两个常驻 child：backdrop（半透明遮罩）+ centered card；
 //! - card 走 Flex(vertical)，按 title / content / actions 三段排列；
-//! - card 上挂 `FocusScopeOptions::trap(true)`，使 Tab 在 modal 内循环；
+//! - 外层 Stack 挂动态 active 的 `FocusScopeOptions::{trap, auto_focus_first}`，
+//!   打开后聚焦主按钮 / 首个控件，并使 Tab 在 modal 内循环；
 //! - backdrop + card 的 `opacity` 由 `open` 派生 + `animated` 标记，渲染时
 //!   走 `AnimationEngine` 完成 fade in/out（160ms ease_in_out）；
 //! - Esc 关闭 / on_close 派发 / focus return 由挂在外层 Stack 上的
@@ -49,6 +50,8 @@ pub struct Modal<VM> {
     actions: Vec<ModalAction<VM>>,
     close_on_escape: bool,
     close_on_backdrop_click: bool,
+    return_focus_to: Option<WidgetId>,
+    auto_focus_first: bool,
     style: Option<ModalStyle>,
 }
 
@@ -63,6 +66,8 @@ impl<VM: 'static> Modal<VM> {
             actions: Vec::new(),
             close_on_escape: true,
             close_on_backdrop_click: true,
+            return_focus_to: None,
+            auto_focus_first: true,
             style: None,
         }
     }
@@ -110,6 +115,18 @@ impl<VM: 'static> Modal<VM> {
         self
     }
 
+    /// 关闭后把焦点还给指定 widget。
+    pub fn return_focus_to(mut self, widget_id: WidgetId) -> Self {
+        self.return_focus_to = Some(widget_id);
+        self
+    }
+
+    /// 打开时是否自动聚焦 modal 内第一个可聚焦控件（默认 `true`）。
+    pub fn auto_focus_first(mut self, auto_focus_first: bool) -> Self {
+        self.auto_focus_first = auto_focus_first;
+        self
+    }
+
     /// 覆盖默认主题样式。
     pub fn style(mut self, style: ModalStyle) -> Self {
         self.style = Some(style);
@@ -127,6 +144,8 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
             actions,
             close_on_escape,
             close_on_backdrop_click,
+            return_focus_to,
+            auto_focus_first,
             style,
         } = modal;
 
@@ -193,7 +212,6 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
         let modal_style_for_card = style.clone();
         let title_value_for_render = title.clone();
         let mut card: Flex<VM> = Flex::new(Axis::Vertical)
-            .focus_scope(FocusScopeOptions::new().trap(true))
             .opacity(visibility_value.clone())
             .style(move |mode| {
                 let resolved = modal_style_for_card
@@ -266,7 +284,8 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                 if let Some(cmd) = on_click {
                     button = button.on_click(cmd);
                 }
-                // 主按钮 tab_index=0 让 Tab 第一次落到它，使 Enter 自动触发。
+                // Positive tab_index values win over the default 0 bucket, so primary
+                // actions use 1 while secondary actions stay in tree order.
                 let _ = idx;
                 let _ = total;
                 let _ = action_style;
@@ -289,9 +308,9 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                 button = button.style(btn_style);
                 let mut button_element: Element<VM> = button.into();
                 if primary {
-                    button_element = button_element.tab_index(0);
-                } else {
                     button_element = button_element.tab_index(1);
+                } else {
+                    button_element = button_element.tab_index(0);
                 }
                 actions_row = actions_row.child(button_element);
             }
@@ -312,6 +331,12 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
             .size(pct(100.0), pct(100.0))
             .align(Align::Center)
             .justify(crate::ui::layout::Justify::Center)
+            .focus_scope(
+                FocusScopeOptions::new()
+                    .trap(true)
+                    .auto_focus_first(auto_focus_first)
+                    .active(open.clone()),
+            )
             .child(backdrop_element)
             .child(card_element);
 
@@ -321,7 +346,7 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
             on_open_change,
             close_on_escape,
             close_on_backdrop_click,
-            return_focus_to: None,
+            return_focus_to,
             backdrop_widget_id,
             card_widget_id,
             style,
