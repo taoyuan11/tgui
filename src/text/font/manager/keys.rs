@@ -23,11 +23,17 @@ pub(super) struct TextLayoutKey {
     pub(super) wrap_width_bits: Option<u32>,
 }
 
-/// `resolve_text` 的缓存键。解析结果由文本内容(脚本感知回退依赖它)、
-/// 优先字体族与字重共同决定,因此三者都必须进键。
+/// `resolve_text` 的缓存键。解析结果只依赖脚本类别(CJK-only 文本会优先走
+/// CJK 回退)、优先字体族与字重,不需要把整段文本复制进缓存键。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct TextResolveKey {
-    pub(super) text: Cow<'static, str>,
+    pub(super) script: TextResolveScript,
     pub(super) preferred_font: Option<Cow<'static, str>>,
     pub(super) weight: FontWeight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum TextResolveScript {
+    CjkOnly,
+    Other,
 }

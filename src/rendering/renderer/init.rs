@@ -6,7 +6,6 @@ impl Renderer {
         window: Arc<dyn Window>,
         clear_color: TguiColor,
         requested_msaa_mode: MsaaMode,
-        fonts: &FontCatalog,
     ) -> Result<Self, TguiError> {
         let size = window.surface_size();
         let instance = create_instance(clear_color);
@@ -19,7 +18,7 @@ impl Renderer {
                 label: Some("tgui-device"),
                 required_features: wgpu::Features::empty(),
                 required_limits,
-                memory_hints: wgpu::MemoryHints::Performance,
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
                 experimental_features: Default::default(),
                 trace: Default::default(),
             })
@@ -51,8 +50,6 @@ impl Renderer {
 
         let pipelines = create_renderer_pipelines(&device, format, msaa_sample_count);
 
-        let mut font_system = FontSystem::new();
-        let _ = fonts.configure_font_system(&mut font_system);
         let scale_factor = 1.0_f32.max(window.scale_factor() as f32);
 
         surface.configure(&device, &config);
@@ -89,7 +86,6 @@ impl Renderer {
             blur_scratch_target: targets.blur_scratch_target,
             clear_color,
             text_system: TextSystem {
-                font_system,
                 swash_cache: SwashCache::new(),
             },
             text_cache: HashMap::new(),

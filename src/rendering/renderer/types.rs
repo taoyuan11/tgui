@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
-use cosmic_text::{FontSystem, SwashCache};
+use cosmic_text::SwashCache;
 
 pub(super) struct TextSystem {
-    pub(super) font_system: FontSystem,
     pub(super) swash_cache: SwashCache,
 }
 

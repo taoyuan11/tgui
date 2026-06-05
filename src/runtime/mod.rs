@@ -251,7 +251,7 @@ pub struct BoundRuntimeHandler<VM> {
     window_instance_id: u64,
     role: WindowRole,
     config: ApplicationConfig,
-    font_manager: FontManager,
+    font_manager: Arc<FontManager>,
     theme: Theme,
     theme_store: ThemeStore,
     reduced_motion: bool,
@@ -379,7 +379,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         task_dispatcher: AsyncTaskDispatcher<VM>,
         task_receiver: Option<AsyncTaskReceiver<VM>>,
     ) -> Self {
-        let font_manager = FontManager::new(&config.fonts);
+        let font_manager = Arc::new(FontManager::new(&config.fonts));
         let theme = match &config.theme {
             ThemeSelection::Mode(mode) => config.theme_set.resolve(*mode, None).as_ref().clone(),
             ThemeSelection::System => config.theme_set.resolve_window_theme(None).as_ref().clone(),

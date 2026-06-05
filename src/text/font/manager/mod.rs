@@ -15,7 +15,7 @@ use super::platform::{
 mod keys;
 mod layout_ops;
 
-use keys::{TextLayoutKey, TextMeasureKey, TextResolveKey};
+use keys::{TextLayoutKey, TextMeasureKey, TextResolveKey, TextResolveScript};
 
 pub(crate) struct FontManager {
     pub(super) font_system: RefCell<FontSystem>,
@@ -50,9 +50,9 @@ impl FontManager {
     }
 
     pub(crate) fn resolve_text(&self, text: &str, request: TextFontRequest<'_>) -> ResolvedText {
-        // 解析结果依赖文本内容(脚本感知 CJK 回退)、优先字体与字重,三者作键。
+        // 解析结果依赖脚本类别(脚本感知 CJK 回退)、优先字体与字重。
         let cache_key = TextResolveKey {
-            text: Cow::Owned(text.to_owned()),
+            script: Self::resolve_script_key(text),
             preferred_font: request
                 .preferred_font
                 .map(|name| Cow::Owned(name.to_owned())),
@@ -72,6 +72,14 @@ impl FontManager {
         }
         cache.insert(cache_key, resolved.clone());
         resolved
+    }
+
+    fn resolve_script_key(text: &str) -> TextResolveScript {
+        if contains_cjk(text) && !contains_non_cjk_alphanumeric(text) {
+            TextResolveScript::CjkOnly
+        } else {
+            TextResolveScript::Other
+        }
     }
 
     fn resolve_text_with_database(

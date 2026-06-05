@@ -29,9 +29,9 @@ use crate::foundation::color::Color as TguiColor;
 use crate::foundation::error::TguiError;
 use crate::platform::backend::window::Window;
 use crate::platform::dpi::PhysicalSize;
-use crate::text::font::FontCatalog;
-use crate::ui::widget::ScenePrimitives;
-use cosmic_text::{FontSystem, SwashCache};
+use crate::text::font::FontManager;
+use crate::ui::widget::{RenderCommand, ScenePrimitives};
+use cosmic_text::SwashCache;
 
 pub enum RenderStatus {
     Rendered,
@@ -108,14 +108,8 @@ impl Renderer {
         window: Arc<dyn Window>,
         clear_color: TguiColor,
         requested_msaa_mode: MsaaMode,
-        fonts: &FontCatalog,
     ) -> Result<Self, TguiError> {
-        pollster::block_on(Self::new_async(
-            window,
-            clear_color,
-            requested_msaa_mode,
-            fonts,
-        ))
+        pollster::block_on(Self::new_async(window, clear_color, requested_msaa_mode))
     }
 
     pub fn resize(&mut self, new_size: PhysicalSize<u32>, scale_factor: f32) {
@@ -133,7 +127,11 @@ impl Renderer {
         self.recreate_offscreen_targets();
     }
 
-    pub fn render(&mut self, scene: &ScenePrimitives) -> Result<RenderStatus, TguiError> {
+    pub fn render(
+        &mut self,
+        scene: &ScenePrimitives,
+        font_manager: &FontManager,
+    ) -> Result<RenderStatus, TguiError> {
         if self.config.width == 0 || self.config.height == 0 {
             return Ok(RenderStatus::SkipFrame);
         }
@@ -142,6 +140,7 @@ impl Renderer {
         let active_texture_keys = active_texture_keys(scene);
         self.texture_cache
             .retain(|key, _| active_texture_keys.contains(key));
+        self.retain_active_text_cache(scene);
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
@@ -163,6 +162,7 @@ impl Renderer {
 
         let command_buffers = self.prepare_commands(
             &scene.commands,
+            font_manager,
             logical_width,
             logical_height,
             self.config.width as f32,
@@ -171,6 +171,7 @@ impl Renderer {
         )?;
         let overlay_buffers = self.prepare_commands(
             &scene.overlay_commands,
+            font_manager,
             logical_width,
             logical_height,
             self.config.width as f32,
@@ -213,8 +214,18 @@ impl Renderer {
         }
 
         let mut cleared_draw_target = false;
-        self.execute_prepared_commands(&mut encoder, &command_buffers.0, &mut cleared_draw_target)?;
-        self.execute_prepared_commands(&mut encoder, &overlay_buffers.0, &mut cleared_draw_target)?;
+        self.execute_prepared_commands(
+            &mut encoder,
+            &command_buffers.0,
+            font_manager,
+            &mut cleared_draw_target,
+        )?;
+        self.execute_prepared_commands(
+            &mut encoder,
+            &overlay_buffers.0,
+            font_manager,
+            &mut cleared_draw_target,
+        )?;
         let scene_target = self
             .scene_target
             .as_ref()
@@ -240,6 +251,46 @@ impl Renderer {
 
         self.surface.configure(&self.device, &self.config);
         self.recreate_offscreen_targets();
+    }
+
+    fn retain_active_text_cache(&mut self, scene: &ScenePrimitives) {
+        let mut active_text_keys = HashSet::new();
+        self.collect_text_cache_keys_from_commands(&scene.commands, &mut active_text_keys);
+        self.collect_text_cache_keys_from_commands(&scene.overlay_commands, &mut active_text_keys);
+        self.text_cache
+            .retain(|key, _| active_text_keys.contains(key));
+    }
+
+    fn collect_text_cache_keys_from_commands(
+        &self,
+        commands: &[RenderCommand],
+        active_text_keys: &mut HashSet<TextCacheKey>,
+    ) {
+        for command in commands {
+            match command {
+                RenderCommand::Text(text) => {
+                    if let Some(key) = self.text_cache_key(text) {
+                        active_text_keys.insert(key);
+                    }
+                }
+                RenderCommand::CanvasComposite(composite) => {
+                    self.collect_text_cache_keys_from_commands(
+                        &composite.content_commands,
+                        active_text_keys,
+                    );
+                    if let Some(mask_commands) = composite.mask_commands.as_ref() {
+                        self.collect_text_cache_keys_from_commands(mask_commands, active_text_keys);
+                    }
+                }
+                RenderCommand::BackdropBlur(_)
+                | RenderCommand::Brush(_)
+                | RenderCommand::Shape(_)
+                | RenderCommand::Texture(_)
+                | RenderCommand::Mesh(_) => {}
+                #[cfg(feature = "video")]
+                RenderCommand::VideoTexture(_) => {}
+            }
+        }
     }
 }
 

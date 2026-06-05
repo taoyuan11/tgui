@@ -4,7 +4,7 @@ use cosmic_text::{Attrs, Buffer, Color, Family, Metrics, Shaping, Weight};
 
 use crate::foundation::color::Color as TguiColor;
 use crate::foundation::error::TguiError;
-use crate::text::font::FontWeight;
+use crate::text::font::{FontManager, FontWeight};
 use crate::ui::widget::{Rect, TextPrimitive};
 
 use super::{Renderer, TextCacheEntry, TextCacheKey};
@@ -46,6 +46,7 @@ impl Renderer {
     pub(super) fn text_bind_group_for(
         &mut self,
         text: &TextPrimitive,
+        font_manager: &FontManager,
     ) -> Result<Option<wgpu::BindGroup>, TguiError> {
         let Some(key) = self.text_cache_key(text) else {
             return Ok(None);
@@ -55,7 +56,7 @@ impl Renderer {
             return Ok(Some(entry.bind_group.clone()));
         }
 
-        let bind_group = match self.rasterize_text(text)? {
+        let bind_group = match self.rasterize_text(text, font_manager)? {
             Some((texture, bind_group)) => {
                 self.text_cache.insert(
                     key,
@@ -75,6 +76,7 @@ impl Renderer {
     pub(super) fn rasterize_text(
         &mut self,
         text: &TextPrimitive,
+        font_manager: &FontManager,
     ) -> Result<Option<(wgpu::Texture, wgpu::BindGroup)>, TguiError> {
         let frame = self.snap_text_rect(text.frame);
         let width = self.logical_to_physical(frame.width.get()).round().max(1.0) as u32;
@@ -89,68 +91,67 @@ impl Renderer {
         let line_height = self.logical_to_physical(text.line_height);
         let letter_spacing = self.logical_to_physical(text.letter_spacing);
 
-        let mut buffer = Buffer::new(
-            &mut self.text_system.font_system,
-            Metrics::new(font_size, line_height),
-        );
-        buffer.set_size(Some(width as f32), Some(height as f32));
-        buffer.set_wrap(text_wrap(text));
-        let attrs = attrs_for_text(text, font_size, letter_spacing);
-        if let Some(rich_spans) = text.rich_spans.as_ref() {
-            buffer.set_rich_text(
-                rich_spans.iter().map(|span| {
-                    (
-                        span.content.as_ref(),
-                        attrs_for_span(span, font_size, line_height, letter_spacing),
-                    )
-                }),
-                &attrs,
-                Shaping::Advanced,
-                None,
-            );
-        } else {
-            let content =
-                overflow_content(text, &mut buffer, &mut self.text_system.font_system, &attrs);
-            buffer.set_text(&content, &attrs, Shaping::Advanced, None);
-        }
-        buffer.shape_until_scroll(&mut self.text_system.font_system, false);
+        let pixels = font_manager.with_font_system(|font_system| {
+            let mut buffer = Buffer::new(font_system, Metrics::new(font_size, line_height));
+            buffer.set_size(Some(width as f32), Some(height as f32));
+            buffer.set_wrap(text_wrap(text));
+            let attrs = attrs_for_text(text, font_size, letter_spacing);
+            if let Some(rich_spans) = text.rich_spans.as_ref() {
+                buffer.set_rich_text(
+                    rich_spans.iter().map(|span| {
+                        (
+                            span.content.as_ref(),
+                            attrs_for_span(span, font_size, line_height, letter_spacing),
+                        )
+                    }),
+                    &attrs,
+                    Shaping::Advanced,
+                    None,
+                );
+            } else {
+                let content = overflow_content(text, &mut buffer, font_system, &attrs);
+                buffer.set_text(&content, &attrs, Shaping::Advanced, None);
+            }
+            buffer.shape_until_scroll(font_system, false);
 
-        let (offset_x, offset_y) = text_offsets(text, &buffer, width as f32, height as f32);
+            let (offset_x, offset_y) = text_offsets(text, &buffer, width as f32, height as f32);
 
-        let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
-        let requested_rgba = text.color.to_rgba8();
-        buffer.draw(
-            &mut self.text_system.font_system,
-            &mut self.text_system.swash_cache,
-            color_to_text(text.color),
-            |x, y, w, h, color| {
-                let x = x + offset_x;
-                let y = y + offset_y;
-                let mut rgba = color.as_rgba();
-                if text.force_color {
-                    rgba[0] = requested_rgba[0];
-                    rgba[1] = requested_rgba[1];
-                    rgba[2] = requested_rgba[2];
-                    rgba[3] = ((rgba[3] as u16 * requested_rgba[3] as u16) / 255) as u8;
-                }
-                for dy in 0..h {
-                    for dx in 0..w {
-                        let px = x + dx as i32;
-                        let py = y + dy as i32;
-                        if px < 0 || py < 0 || px >= width as i32 || py >= height as i32 {
-                            continue;
-                        }
-                        blend_pixel(
-                            &mut pixels,
-                            width,
-                            px as u32,
-                            py as u32,
-                            [rgba[0], rgba[1], rgba[2], rgba[3]],
-                        );
+            let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
+            let requested_rgba = text.color.to_rgba8();
+            buffer.draw(
+                font_system,
+                &mut self.text_system.swash_cache,
+                color_to_text(text.color),
+                |x, y, w, h, color| {
+                    let x = x + offset_x;
+                    let y = y + offset_y;
+                    let mut rgba = color.as_rgba();
+                    if text.force_color {
+                        rgba[0] = requested_rgba[0];
+                        rgba[1] = requested_rgba[1];
+                        rgba[2] = requested_rgba[2];
+                        rgba[3] = ((rgba[3] as u16 * requested_rgba[3] as u16) / 255) as u8;
                     }
-                }
-            },
-        );
+                    for dy in 0..h {
+                        for dx in 0..w {
+                            let px = x + dx as i32;
+                            let py = y + dy as i32;
+                            if px < 0 || py < 0 || px >= width as i32 || py >= height as i32 {
+                                continue;
+                            }
+                            blend_pixel(
+                                &mut pixels,
+                                width,
+                                px as u32,
+                                py as u32,
+                                [rgba[0], rgba[1], rgba[2], rgba[3]],
+                            );
+                        }
+                    }
+                },
+            );
+            pixels
+        });
 
         if pixels.chunks_exact(4).all(|pixel| pixel[3] == 0) {
             return Ok(None);

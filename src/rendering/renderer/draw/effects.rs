@@ -1,6 +1,7 @@
 use wgpu::util::DeviceExt;
 
 use crate::foundation::error::TguiError;
+use crate::text::font::FontManager;
 use crate::ui::widget::{CanvasBlendMode, Rect};
 
 use super::super::prepare::{PreparedBackdropBlur, PreparedCanvasComposite};
@@ -222,6 +223,7 @@ impl Renderer {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         composite: &PreparedCanvasComposite,
+        font_manager: &FontManager,
         target: &OffscreenTarget,
         cleared_draw_target: &mut bool,
     ) -> Result<(), TguiError> {
@@ -246,6 +248,7 @@ impl Renderer {
         self.clear_offscreen_target(encoder, &composite_target);
         let content_prepared = self.prepare_commands(
             &composite.primitive.content_commands,
+            font_manager,
             self.config.width as f32 / self.scale_factor,
             self.config.height as f32 / self.scale_factor,
             self.config.width as f32,
@@ -256,6 +259,7 @@ impl Renderer {
         self.execute_prepared_commands_to_target(
             encoder,
             &content_prepared.0,
+            font_manager,
             &composite_target,
             &mut composite_cleared,
         )?;
@@ -264,6 +268,7 @@ impl Renderer {
             self.clear_offscreen_target(encoder, &composite_mask_target);
             let mask_prepared = self.prepare_commands(
                 mask_commands,
+                font_manager,
                 self.config.width as f32 / self.scale_factor,
                 self.config.height as f32 / self.scale_factor,
                 self.config.width as f32,
@@ -274,6 +279,7 @@ impl Renderer {
             self.execute_prepared_commands_to_target(
                 encoder,
                 &mask_prepared.0,
+                font_manager,
                 &composite_mask_target,
                 &mut mask_cleared,
             )?;

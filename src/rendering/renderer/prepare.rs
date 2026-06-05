@@ -1,6 +1,7 @@
 use wgpu::util::DeviceExt;
 
 use crate::foundation::error::TguiError;
+use crate::text::font::FontManager;
 use crate::ui::unit::Dp;
 use crate::ui::widget::{BrushPrimitiveData, CanvasCompositePrimitive, Rect, RenderCommand};
 
@@ -60,6 +61,7 @@ impl Renderer {
     pub(super) fn prepare_commands(
         &mut self,
         commands: &[RenderCommand],
+        font_manager: &FontManager,
         logical_width: f32,
         logical_height: f32,
         physical_width: f32,
@@ -262,7 +264,7 @@ impl Renderer {
                     }
                 }
                 RenderCommand::Text(text) => {
-                    if let Some(bind_group) = self.text_bind_group_for(text)? {
+                    if let Some(bind_group) = self.text_bind_group_for(text, font_manager)? {
                         let snapped_frame = self.snap_text_rect(text.frame);
                         let vertices = text.quad.map_or_else(
                             || {

@@ -180,12 +180,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.theme.colors.background
             };
 
-        let renderer = match Renderer::new(
-            window.clone(),
-            clear_color,
-            self.config.msaa,
-            &self.config.fonts,
-        ) {
+        let renderer = match Renderer::new(window.clone(), clear_color, self.config.msaa) {
             Ok(renderer) => renderer,
             Err(error) => {
                 self.fail(event_loop, error);

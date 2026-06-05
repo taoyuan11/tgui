@@ -15,7 +15,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         close_policy: WindowClosePolicy,
     ) {
         self.role = role;
-        let font_manager = FontManager::new(&config.fonts);
+        let font_manager = Arc::new(FontManager::new(&config.fonts));
         if let Some(window) = self.window.as_ref() {
             if window.is_decorated() != config.decorations {
                 window.set_decorations(config.decorations);

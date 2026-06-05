@@ -1,6 +1,7 @@
 mod effects;
 
 use crate::foundation::error::TguiError;
+use crate::text::font::FontManager;
 
 use super::prepare::PreparedCommand;
 use super::surface::surface_clear_color;
@@ -104,6 +105,7 @@ impl Renderer {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         commands: &[PreparedCommand],
+        font_manager: &FontManager,
         cleared_draw_target: &mut bool,
     ) -> Result<(), TguiError> {
         let scene_target = self
@@ -114,6 +116,7 @@ impl Renderer {
         self.execute_prepared_commands_to_target(
             encoder,
             commands,
+            font_manager,
             &scene_target,
             cleared_draw_target,
         )
@@ -123,6 +126,7 @@ impl Renderer {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         commands: &[PreparedCommand],
+        font_manager: &FontManager,
         target: &OffscreenTarget,
         cleared_draw_target: &mut bool,
     ) -> Result<(), TguiError> {
@@ -138,6 +142,7 @@ impl Renderer {
                     self.apply_canvas_composite_to_target(
                         encoder,
                         composite,
+                        font_manager,
                         target,
                         cleared_draw_target,
                     )?;
