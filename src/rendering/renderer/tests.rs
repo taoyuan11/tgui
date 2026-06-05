@@ -9,6 +9,7 @@ use crate::ui::widget::{
     TextPrimitive,
 };
 use crate::ui::widget::{Rect, ScenePrimitives, TexturePrimitive};
+use cosmic_text::{fontdb, CacheKey, CacheKeyFlags, SubpixelBin};
 
 #[cfg(target_os = "windows")]
 #[test]
@@ -104,6 +105,28 @@ fn active_texture_keys_include_overlay_textures() {
 
     assert!(keys.contains(&main_texture.id()));
     assert!(keys.contains(&overlay_texture.id()));
+}
+
+#[test]
+fn text_system_releases_swash_frame_cache() {
+    let mut text_system = TextSystem::new();
+    text_system.swash_cache.image_cache.insert(
+        CacheKey {
+            font_id: fontdb::ID::dummy(),
+            glyph_id: 1,
+            font_size_bits: 16.0_f32.to_bits(),
+            x_bin: SubpixelBin::Zero,
+            y_bin: SubpixelBin::Zero,
+            font_weight: fontdb::Weight::NORMAL,
+            flags: CacheKeyFlags::empty(),
+        },
+        None,
+    );
+
+    text_system.release_frame_raster_cache();
+
+    assert!(text_system.swash_cache.image_cache.is_empty());
+    assert!(text_system.swash_cache.outline_command_cache.is_empty());
 }
 
 fn texture_primitive(texture: std::sync::Arc<TextureFrame>) -> TexturePrimitive {

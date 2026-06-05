@@ -81,6 +81,15 @@ impl ImageEntry {
             error: self.error.clone(),
         }
     }
+
+    pub(in crate::media) fn has_pending_work(&self) -> bool {
+        self.loading
+            || self
+                .document
+                .as_ref()
+                .map(DocumentEntry::has_pending_work)
+                .unwrap_or(false)
+    }
 }
 
 pub(in crate::media) struct DocumentEntry {
@@ -107,6 +116,13 @@ impl DocumentEntry {
     pub(in crate::media) fn is_loading(&self, raster_request: RasterRequest) -> bool {
         match &self.content {
             DocumentContent::Raster(raster) => raster.is_loading(raster_request),
+            DocumentContent::Svg(_) => false,
+        }
+    }
+
+    pub(in crate::media) fn has_pending_work(&self) -> bool {
+        match &self.content {
+            DocumentContent::Raster(raster) => raster.has_pending_work(),
             DocumentContent::Svg(_) => false,
         }
     }

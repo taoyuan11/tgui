@@ -70,6 +70,10 @@ impl RasterDocument {
             .any(|entry| entry.request == raster_request)
     }
 
+    pub(in crate::media) fn has_pending_work(&self) -> bool {
+        !self.pending_rasters.is_empty()
+    }
+
     fn collect_finished_rasters(&mut self, budget: &ResourceBudget) -> Result<(), TguiError> {
         let mut completed = Vec::new();
         for (index, entry) in self.pending_rasters.iter().enumerate() {

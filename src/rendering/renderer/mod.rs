@@ -31,7 +31,6 @@ use crate::platform::backend::window::Window;
 use crate::platform::dpi::PhysicalSize;
 use crate::text::font::FontManager;
 use crate::ui::widget::{RenderCommand, ScenePrimitives};
-use cosmic_text::SwashCache;
 
 pub enum RenderStatus {
     Rendered,
@@ -256,6 +255,7 @@ impl Renderer {
         self.blit_scene_to_surface(&mut encoder, scene_view, &color_attachment_view, None);
 
         self.queue.submit(Some(encoder.finish()));
+        self.text_system.release_frame_raster_cache();
         self.window.pre_present_notify();
         frame.present();
 

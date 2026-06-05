@@ -87,9 +87,7 @@ impl Renderer {
             canvas_composite_targets: Vec::new(),
             canvas_composite_mask_targets: Vec::new(),
             clear_color,
-            text_system: TextSystem {
-                swash_cache: SwashCache::new(),
-            },
+            text_system: TextSystem::new(),
             text_cache: HashMap::new(),
             texture_cache: HashMap::new(),
             vertex_pool,

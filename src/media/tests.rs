@@ -251,6 +251,28 @@ fn embedded_raster_bytes_are_available_without_background_loader_delay() {
 }
 
 #[test]
+fn media_manager_evicts_old_image_sources_from_budget() {
+    let media = MediaManager::with_budget(
+        InvalidationSignal::new(),
+        ResourceBudget {
+            canvas_shadow_cache_entries: 1,
+            widget_shadow_cache_entries: 1,
+            image_raster_cache_entries: 1,
+            svg_raster_cache_entries: 1,
+        },
+    );
+
+    for _ in 0..12 {
+        let source = MediaSource::bytes(ONE_BY_ONE_GIF.to_vec());
+        let snapshot = media.image_snapshot(&source, None);
+        assert!(!snapshot.loading);
+        assert!(snapshot.error.is_none());
+    }
+
+    assert_eq!(media.cached_image_count(), 8);
+}
+
+#[test]
 fn raster_document_rasterizes_requested_size_and_reuses_cached_texture() {
     let media = MediaManager::new(InvalidationSignal::new());
     let source = MediaSource::bytes(ONE_BY_ONE_GIF);

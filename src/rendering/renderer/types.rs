@@ -7,6 +7,23 @@ pub(super) struct TextSystem {
     pub(super) swash_cache: SwashCache,
 }
 
+impl TextSystem {
+    pub(super) fn new() -> Self {
+        Self {
+            swash_cache: SwashCache::new(),
+        }
+    }
+
+    pub(super) fn release_frame_raster_cache(&mut self) {
+        if self.swash_cache.image_cache.is_empty()
+            && self.swash_cache.outline_command_cache.is_empty()
+        {
+            return;
+        }
+        self.swash_cache = SwashCache::new();
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct OffscreenTarget {
     pub(super) width: u32,
