@@ -40,10 +40,14 @@ pub(super) struct PreparedBackdropBlur {
     pub(super) primitive: crate::ui::widget::BackdropBlurPrimitive,
     pub(super) composite_offset: u64,
     pub(super) composite_vertex_count: u32,
+    pub(super) fullscreen_offset: u64,
+    pub(super) fullscreen_vertex_count: u32,
 }
 
 pub(super) struct PreparedCanvasComposite {
     pub(super) primitive: CanvasCompositePrimitive,
+    pub(super) composite_offset: u64,
+    pub(super) composite_vertex_count: u32,
 }
 
 pub(super) enum PreparedCommand {
@@ -76,6 +80,19 @@ impl Renderer {
                     if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
                         continue;
                     }
+                    let fullscreen = TextVertex::quad(
+                        Rect::new(0.0, 0.0, logical_width, logical_height),
+                        logical_width,
+                        logical_height,
+                        None,
+                        0.0,
+                        None,
+                        physical_width,
+                        physical_height,
+                        scale_factor,
+                    );
+                    let fullscreen_offset =
+                        self.vertex_pool.allocate(bytemuck::cast_slice(&fullscreen));
                     let vertices = CompositeVertex::quad(
                         primitive.rect,
                         logical_width,
@@ -89,6 +106,8 @@ impl Renderer {
                         primitive: *primitive,
                         composite_offset,
                         composite_vertex_count: vertices.len() as u32,
+                        fullscreen_offset,
+                        fullscreen_vertex_count: fullscreen.len() as u32,
                     }));
                 }
                 RenderCommand::Brush(primitive) => {
@@ -119,8 +138,19 @@ impl Renderer {
                     if primitive.bounds.width <= Dp::ZERO || primitive.bounds.height <= Dp::ZERO {
                         continue;
                     }
+                    let vertices = CompositeVertex::quad(
+                        primitive.bounds,
+                        logical_width,
+                        logical_height,
+                        0.0,
+                        primitive.clip_mask,
+                    );
+                    let composite_offset =
+                        self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     prepared.push(PreparedCommand::CanvasComposite(PreparedCanvasComposite {
                         primitive: (**primitive).clone(),
+                        composite_offset,
+                        composite_vertex_count: vertices.len() as u32,
                     }));
                 }
                 RenderCommand::Shape(primitive) => {

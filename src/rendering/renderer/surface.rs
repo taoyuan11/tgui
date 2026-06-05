@@ -67,15 +67,33 @@ pub(super) fn create_offscreen_target(
     label: &str,
     sample_count: u32,
 ) -> Option<OffscreenTarget> {
-    if config.width == 0 || config.height == 0 {
+    create_offscreen_target_with_size(
+        device,
+        config,
+        label,
+        sample_count,
+        config.width,
+        config.height,
+    )
+}
+
+pub(super) fn create_offscreen_target_with_size(
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+    label: &str,
+    sample_count: u32,
+    width: u32,
+    height: u32,
+) -> Option<OffscreenTarget> {
+    if width == 0 || height == 0 {
         return None;
     }
 
     let single_texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(&format!("{label}-single")),
         size: wgpu::Extent3d {
-            width: config.width,
-            height: config.height,
+            width,
+            height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -93,8 +111,8 @@ pub(super) fn create_offscreen_target(
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(&format!("{label}-msaa")),
             size: wgpu::Extent3d {
-                width: config.width,
-                height: config.height,
+                width,
+                height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -113,6 +131,8 @@ pub(super) fn create_offscreen_target(
     };
 
     Some(OffscreenTarget {
+        width,
+        height,
         single_view: single_texture.create_view(&wgpu::TextureViewDescriptor::default()),
         single_texture,
         _msaa_texture: msaa_texture,

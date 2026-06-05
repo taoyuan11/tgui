@@ -39,7 +39,6 @@ pub enum RenderStatus {
     SkipFrame,
 }
 
-#[cfg(feature = "video")]
 fn active_texture_keys(scene: &ScenePrimitives) -> HashSet<u64> {
     let mut keys: HashSet<_> = scene
         .textures
@@ -48,24 +47,45 @@ fn active_texture_keys(scene: &ScenePrimitives) -> HashSet<u64> {
         .map(|texture| texture.texture.id())
         .collect();
 
-    keys.extend(
-        scene
-            .video_textures
-            .iter()
-            .filter_map(|texture| texture.controller.current_frame().map(|frame| frame.id())),
-    );
-
+    #[cfg(feature = "video")]
+    {
+        keys.extend(
+            scene
+                .video_textures
+                .iter()
+                .filter_map(|texture| texture.controller.current_frame().map(|frame| frame.id())),
+        );
+    }
+    collect_texture_keys_from_commands(&scene.commands, &mut keys);
+    collect_texture_keys_from_commands(&scene.overlay_commands, &mut keys);
     keys
 }
 
-#[cfg(not(feature = "video"))]
-fn active_texture_keys(scene: &ScenePrimitives) -> HashSet<u64> {
-    scene
-        .textures
-        .iter()
-        .chain(scene.overlay_textures.iter())
-        .map(|texture| texture.texture.id())
-        .collect()
+fn collect_texture_keys_from_commands(commands: &[RenderCommand], keys: &mut HashSet<u64>) {
+    for command in commands {
+        match command {
+            RenderCommand::Texture(texture) => {
+                keys.insert(texture.texture.id());
+            }
+            RenderCommand::CanvasComposite(composite) => {
+                collect_texture_keys_from_commands(&composite.content_commands, keys);
+                if let Some(mask_commands) = composite.mask_commands.as_ref() {
+                    collect_texture_keys_from_commands(mask_commands, keys);
+                }
+            }
+            RenderCommand::BackdropBlur(_)
+            | RenderCommand::Brush(_)
+            | RenderCommand::Shape(_)
+            | RenderCommand::Text(_)
+            | RenderCommand::Mesh(_) => {}
+            #[cfg(feature = "video")]
+            RenderCommand::VideoTexture(texture) => {
+                if let Some(frame) = texture.controller.current_frame() {
+                    keys.insert(frame.id());
+                }
+            }
+        }
+    }
 }
 
 pub struct Renderer {
@@ -96,6 +116,8 @@ pub struct Renderer {
     snapshot_target: Option<OffscreenTarget>,
     blur_target: Option<OffscreenTarget>,
     blur_scratch_target: Option<OffscreenTarget>,
+    canvas_composite_targets: Vec<OffscreenTarget>,
+    canvas_composite_mask_targets: Vec<OffscreenTarget>,
     clear_color: TguiColor,
     text_system: TextSystem,
     text_cache: HashMap<TextCacheKey, TextCacheEntry>,
@@ -213,7 +235,7 @@ impl Renderer {
             let _ = &mut pass;
         }
 
-        let mut cleared_draw_target = false;
+        let mut cleared_draw_target = true;
         self.execute_prepared_commands(
             &mut encoder,
             &command_buffers.0,

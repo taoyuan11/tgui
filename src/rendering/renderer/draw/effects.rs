@@ -5,10 +5,8 @@ use crate::text::font::FontManager;
 use crate::ui::widget::{CanvasBlendMode, Rect};
 
 use super::super::prepare::{PreparedBackdropBlur, PreparedCanvasComposite};
-use super::super::surface::{create_offscreen_target, surface_clear_color};
-use super::super::{
-    BlurUniform, CompositeUniform, CompositeVertex, OffscreenTarget, Renderer, TextVertex,
-};
+use super::super::surface::surface_clear_color;
+use super::super::{BlurUniform, CompositeUniform, OffscreenTarget, Renderer, TextVertex};
 
 impl Renderer {
     pub(super) fn apply_backdrop_blur_to_target(
@@ -16,39 +14,19 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         blur: &PreparedBackdropBlur,
         target: &OffscreenTarget,
-        _cleared_draw_target: &mut bool,
+        cleared_draw_target: &mut bool,
     ) -> Result<(), TguiError> {
-        let blur_target = self.offscreen_target(self.blur_target.as_ref(), "blur target")?;
-        let blur_scratch_target =
-            self.offscreen_target(self.blur_scratch_target.as_ref(), "blur scratch target")?;
+        let (blur_target, blur_scratch_target) = self.ensure_blur_targets()?;
 
         let scene_snapshot_view = self.copy_target_to_snapshot(encoder, target)?;
 
-        let full_screen = TextVertex::quad(
-            Rect::new(
-                0.0,
-                0.0,
-                self.config.width as f32 / self.scale_factor,
-                self.config.height as f32 / self.scale_factor,
-            ),
-            self.config.width as f32 / self.scale_factor,
-            self.config.height as f32 / self.scale_factor,
-            None,
-            0.0,
-            None,
-            self.config.width as f32,
-            self.config.height as f32,
-            self.scale_factor,
-        );
-        let full_screen_buffer =
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tgui-backdrop-fullscreen-vertices"),
-                    contents: bytemuck::cast_slice(&full_screen),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-
-        let texel_size = backdrop_texel_size(self.config.width, self.config.height);
+        let texel_size = backdrop_texel_size(blur_scratch_target.width, blur_scratch_target.height);
+        let blur_scale_x =
+            self.config.width.max(1) as f32 / blur_scratch_target.width.max(1) as f32;
+        let blur_scale_y =
+            self.config.height.max(1) as f32 / blur_scratch_target.height.max(1) as f32;
+        let blur_scale = blur_scale_x.max(blur_scale_y).max(1.0);
+        let blur_radius = blur.primitive.blur_radius.max(0.0) / blur_scale;
         let horizontal_uniform =
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -56,7 +34,7 @@ impl Renderer {
                     contents: bytemuck::bytes_of(&BlurUniform {
                         direction: [1.0, 0.0],
                         texel_size,
-                        radius: blur.primitive.blur_radius.max(0.0),
+                        radius: blur_radius,
                         _pad: 0.0,
                     }),
                     usage: wgpu::BufferUsages::UNIFORM,
@@ -68,7 +46,7 @@ impl Renderer {
                 contents: bytemuck::bytes_of(&BlurUniform {
                     direction: [0.0, 1.0],
                     texel_size,
-                    radius: blur.primitive.blur_radius.max(0.0),
+                    radius: blur_radius,
                     _pad: 0.0,
                 }),
                 usage: wgpu::BufferUsages::UNIFORM,
@@ -98,7 +76,7 @@ impl Renderer {
             wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::TextureView(
-                    self.offscreen_sampled_view(blur_scratch_target),
+                    self.offscreen_sampled_view(&blur_scratch_target),
                 ),
             },
             wgpu::BindGroupEntry {
@@ -121,8 +99,8 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tgui-backdrop-horizontal-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: self.offscreen_attachment_view(blur_scratch_target),
-                    resolve_target: self.offscreen_resolve_target_for_draw(blur_scratch_target),
+                    view: self.offscreen_attachment_view(&blur_scratch_target),
+                    resolve_target: self.offscreen_resolve_target_for_draw(&blur_scratch_target),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -135,17 +113,22 @@ impl Renderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.backdrop_blur_pipeline);
-            pass.set_vertex_buffer(0, full_screen_buffer.slice(..));
+            pass.set_vertex_buffer(
+                0,
+                self.vertex_pool
+                    .current_buffer()
+                    .slice(blur.fullscreen_offset..),
+            );
             pass.set_bind_group(0, &horizontal_bind_group, &[]);
-            pass.draw(0..full_screen.len() as u32, 0..1);
+            pass.draw(0..blur.fullscreen_vertex_count, 0..1);
         }
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tgui-backdrop-vertical-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: self.offscreen_attachment_view(blur_target),
-                    resolve_target: self.offscreen_resolve_target_for_draw(blur_target),
+                    view: self.offscreen_attachment_view(&blur_target),
+                    resolve_target: self.offscreen_resolve_target_for_draw(&blur_target),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -158,16 +141,21 @@ impl Renderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.backdrop_blur_pipeline);
-            pass.set_vertex_buffer(0, full_screen_buffer.slice(..));
+            pass.set_vertex_buffer(
+                0,
+                self.vertex_pool
+                    .current_buffer()
+                    .slice(blur.fullscreen_offset..),
+            );
             pass.set_bind_group(0, &vertical_bind_group, &[]);
-            pass.draw(0..full_screen.len() as u32, 0..1);
+            pass.draw(0..blur.fullscreen_vertex_count, 0..1);
         }
 
         let composite_bind_group_entries = [
             wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::TextureView(
-                    self.offscreen_sampled_view(blur_target),
+                    self.offscreen_sampled_view(&blur_target),
                 ),
             },
             wgpu::BindGroupEntry {
@@ -216,6 +204,7 @@ impl Renderer {
             }
         }
 
+        *cleared_draw_target = true;
         Ok(())
     }
 
@@ -226,24 +215,10 @@ impl Renderer {
         font_manager: &FontManager,
         target: &OffscreenTarget,
         cleared_draw_target: &mut bool,
+        composite_depth: usize,
     ) -> Result<(), TguiError> {
-        // Composite content can recursively contain more isolated groups or masks.
-        // Using per-call scratch targets avoids sampling from a texture that the nested
-        // composite pass also wants to render into.
-        let composite_target = create_offscreen_target(
-            &self.device,
-            &self.config,
-            "tgui-composite-target",
-            self.msaa_sample_count,
-        )
-        .ok_or_else(|| TguiError::TextRender("composite target unavailable".into()))?;
-        let composite_mask_target = create_offscreen_target(
-            &self.device,
-            &self.config,
-            "tgui-composite-mask-target",
-            self.msaa_sample_count,
-        )
-        .ok_or_else(|| TguiError::TextRender("composite mask target unavailable".into()))?;
+        let (composite_target, composite_mask_target) =
+            self.ensure_canvas_composite_targets(composite_depth)?;
 
         self.clear_offscreen_target(encoder, &composite_target);
         let content_prepared = self.prepare_commands(
@@ -255,13 +230,15 @@ impl Renderer {
             self.config.height as f32,
             self.scale_factor,
         )?;
-        let mut composite_cleared = false;
+        self.vertex_pool.flush(&self.device, &self.queue);
+        let mut composite_cleared = true;
         self.execute_prepared_commands_to_target(
             encoder,
             &content_prepared.0,
             font_manager,
             &composite_target,
             &mut composite_cleared,
+            composite_depth + 1,
         )?;
 
         if let Some(mask_commands) = composite.primitive.mask_commands.as_ref() {
@@ -275,33 +252,21 @@ impl Renderer {
                 self.config.height as f32,
                 self.scale_factor,
             )?;
-            let mut mask_cleared = false;
+            self.vertex_pool.flush(&self.device, &self.queue);
+            let mut mask_cleared = true;
             self.execute_prepared_commands_to_target(
                 encoder,
                 &mask_prepared.0,
                 font_manager,
                 &composite_mask_target,
                 &mut mask_cleared,
+                composite_depth + 1,
             )?;
         } else {
             self.clear_offscreen_target(encoder, &composite_mask_target);
         }
 
         let scene_snapshot_view = self.copy_target_to_snapshot(encoder, target)?;
-        let quad = CompositeVertex::quad(
-            composite.primitive.bounds,
-            self.config.width as f32 / self.scale_factor,
-            self.config.height as f32 / self.scale_factor,
-            0.0,
-            composite.primitive.clip_mask,
-        );
-        let vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("tgui-canvas-composite-vertices"),
-                contents: bytemuck::cast_slice(&quad),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
         let inner_shadow_rgba = composite
             .primitive
             .inner_shadow_color
@@ -402,9 +367,14 @@ impl Renderer {
         });
         if self.apply_scissor(&mut pass, composite.primitive.clip_rect) {
             pass.set_pipeline(&self.canvas_composite_pipeline);
-            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            pass.set_vertex_buffer(
+                0,
+                self.vertex_pool
+                    .current_buffer()
+                    .slice(composite.composite_offset..),
+            );
             pass.set_bind_group(0, &bind_group, &[]);
-            pass.draw(0..quad.len() as u32, 0..1);
+            pass.draw(0..composite.composite_vertex_count, 0..1);
         }
 
         Ok(())

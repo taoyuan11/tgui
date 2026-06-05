@@ -9,6 +9,8 @@ pub(super) struct TextSystem {
 
 #[derive(Clone)]
 pub(super) struct OffscreenTarget {
+    pub(super) width: u32,
+    pub(super) height: u32,
     pub(super) single_texture: wgpu::Texture,
     pub(super) single_view: wgpu::TextureView,
     pub(super) _msaa_texture: Option<wgpu::Texture>,

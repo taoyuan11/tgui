@@ -37,14 +37,6 @@ impl Renderer {
         }
     }
 
-    fn offscreen_target<'a>(
-        &self,
-        target: Option<&'a OffscreenTarget>,
-        name: &str,
-    ) -> Result<&'a OffscreenTarget, TguiError> {
-        target.ok_or_else(|| TguiError::TextRender(format!("{name} unavailable")))
-    }
-
     pub(super) fn offscreen_sampled_view<'a>(
         &self,
         target: &'a OffscreenTarget,
@@ -73,12 +65,12 @@ impl Renderer {
         let _ = &mut pass;
     }
 
-    fn copy_target_to_snapshot<'a>(
-        &'a self,
+    fn copy_target_to_snapshot(
+        &mut self,
         encoder: &mut wgpu::CommandEncoder,
         source: &OffscreenTarget,
-    ) -> Result<&'a wgpu::TextureView, TguiError> {
-        let snapshot = self.offscreen_target(self.snapshot_target.as_ref(), "snapshot target")?;
+    ) -> Result<wgpu::TextureView, TguiError> {
+        let snapshot = self.ensure_snapshot_target()?;
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &source.single_texture,
@@ -93,12 +85,12 @@ impl Renderer {
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::Extent3d {
-                width: self.config.width,
-                height: self.config.height,
+                width: source.width,
+                height: source.height,
                 depth_or_array_layers: 1,
             },
         );
-        Ok(self.offscreen_sampled_view(snapshot))
+        Ok(snapshot.single_view.clone())
     }
 
     pub(super) fn execute_prepared_commands(
@@ -119,16 +111,18 @@ impl Renderer {
             font_manager,
             &scene_target,
             cleared_draw_target,
+            0,
         )
     }
 
-    fn execute_prepared_commands_to_target(
+    pub(super) fn execute_prepared_commands_to_target(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         commands: &[PreparedCommand],
         font_manager: &FontManager,
         target: &OffscreenTarget,
         cleared_draw_target: &mut bool,
+        composite_depth: usize,
     ) -> Result<(), TguiError> {
         let mut index = 0;
         while index < commands.len() {
@@ -145,6 +139,7 @@ impl Renderer {
                         font_manager,
                         target,
                         cleared_draw_target,
+                        composite_depth,
                     )?;
                     index += 1;
                     continue;

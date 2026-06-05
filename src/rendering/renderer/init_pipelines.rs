@@ -251,7 +251,7 @@ pub(super) fn create_renderer_pipelines(
             conservative: false,
         },
         depth_stencil: None,
-        multisample: pipeline_multisample_state(msaa_sample_count),
+        multisample: pipeline_multisample_state(1),
         fragment: Some(wgpu::FragmentState {
             module: &resources.backdrop_blur_shader,
             entry_point: Some("fs_main"),
