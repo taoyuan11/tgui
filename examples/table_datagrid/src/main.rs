@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use tgui::prelude::*;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct Employee {
     id: &'static str,
     name: String,
