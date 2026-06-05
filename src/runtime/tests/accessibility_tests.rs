@@ -79,6 +79,52 @@ fn accessibility_tree_maps_basic_roles_labels_values_and_bounds() {
 }
 
 #[test]
+fn accessibility_tree_maps_data_grid_roles_and_selection() {
+    let invalidation = InvalidationSignal::new();
+    let columns: Vec<DataGridColumn<&'static str, TestVm>> =
+        vec![DataGridColumn::new("name", "Name".to_string(), |ctx| {
+            Text::new(ctx.row).into()
+        })];
+    let grid: Element<TestVm> =
+        DataGrid::<&'static str, TestVm>::new(vec![DataGridRow::keyed("a", "Alpha")], columns)
+            .selected_keys(vec![WidgetKey::from("a")])
+            .size(dp(220.0), dp(120.0))
+            .into();
+    let grid_id = grid.id;
+    let tree = WidgetTree::new(grid);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let (header_id, cell_id) = {
+        let computed = handler.computed_scene();
+        let header_id = computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::DataGridHeader { id, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("DataGrid header should have a hit region");
+        let cell_id = computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::DataGridCell { id, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("DataGrid cell should have a hit region");
+        (header_id, cell_id)
+    };
+
+    let update = accessibility_update(&mut handler);
+    assert_eq!(node_for(&update, grid_id).role(), Role::Grid);
+    assert_eq!(node_for(&update, header_id).role(), Role::ColumnHeader);
+    assert_eq!(node_for(&update, header_id).label(), Some("Name"));
+    let cell_node = node_for(&update, cell_id);
+    assert_eq!(cell_node.role(), Role::GridCell);
+    assert_eq!(cell_node.is_selected(), Some(true));
+    assert!(cell_node.supports_action(Action::Click));
+}
+
+#[test]
 fn accessibility_tree_focus_matches_runtime_focus() {
     let invalidation = InvalidationSignal::new();
     let button: Element<TestVm> = Button::new("Focus").size(dp(80.0), dp(30.0)).into();

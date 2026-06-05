@@ -66,6 +66,7 @@ impl<VM: 'static> Element<VM> {
                 arrangement,
                 item_layout,
                 source,
+                content_cross_extent,
                 overflow_x,
                 overflow_y,
                 style,
@@ -79,6 +80,7 @@ impl<VM: 'static> Element<VM> {
                     runtime_state,
                     source.len(),
                     runtime_state.fallback_viewport_hint.clone(),
+                    content_cross_extent.as_ref().map(|value| value.resolve()),
                 );
                 let previous_children = previous
                     .and_then(|previous| match &previous.kind {
@@ -156,6 +158,7 @@ impl<VM: 'static> Element<VM> {
                 ResolvedWidgetKind::Virtual {
                     arrangement: *arrangement,
                     item_layout: *item_layout,
+                    content_cross_extent: content_cross_extent.clone(),
                     overflow_x: *overflow_x,
                     overflow_y: *overflow_y,
                     style: resolved_style,
@@ -489,6 +492,10 @@ impl<VM: 'static> Element<VM> {
             drawer: self.drawer.clone(),
             tab_trigger: self.tab_trigger.clone(),
             list_item: self.list_item.clone(),
+            data_grid_root: self.data_grid_root.clone(),
+            data_grid_cell: self.data_grid_cell.clone(),
+            data_grid_header: self.data_grid_header.clone(),
+            data_grid_resize_handle: self.data_grid_resize_handle.clone(),
             child_source_spans,
             kind,
         }

@@ -18,6 +18,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.focused_text_input_id().is_some()
                     || self.focused_slider_hit().is_some()
                     || self.focused_scroll_region().is_some()
+                    || self.focused_data_grid_cell_is_some()
                     || self.focused_list_item_is_some()
             }
             _ if !is_primary_shortcut_modifier(self.modifiers)

@@ -292,6 +292,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | HitInteraction::SelectTrigger { .. }
             | HitInteraction::TabTrigger { .. }
             | HitInteraction::ListItem { .. }
+            | HitInteraction::DataGridCell { .. }
+            | HitInteraction::DataGridHeader { .. }
+            | HitInteraction::DataGridResizeHandle { .. }
             | HitInteraction::SelectOption { .. } => false,
         }
     }

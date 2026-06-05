@@ -457,6 +457,25 @@ pub(super) struct ActiveTabReorder<VM> {
 }
 
 #[derive(Clone)]
+pub(super) struct ActiveDataGridColumnResize<VM> {
+    pub(super) column_key: crate::ui::widget::WidgetKey,
+    pub(super) start_position: Point,
+    pub(super) start_width: Dp,
+    pub(super) min_width: Dp,
+    pub(super) max_width: Option<Dp>,
+    pub(super) current_width: Dp,
+    pub(super) on_change: Option<ValueCommand<VM, crate::ui::widget::DataGridColumnWidthChange>>,
+}
+
+#[derive(Clone)]
+pub(super) struct ActiveDataGridColumnReorder<VM> {
+    pub(super) grid_id: WidgetId,
+    pub(super) from_index: usize,
+    pub(super) column_key: crate::ui::widget::WidgetKey,
+    pub(super) on_reorder: Option<ValueCommand<VM, crate::ui::widget::DataGridColumnReorderEvent>>,
+}
+
+#[derive(Clone)]
 pub(super) struct SliderDrag<VM> {
     pub(super) widget_id: WidgetId,
     pub(super) on_change: Option<ValueCommand<VM, f32>>,

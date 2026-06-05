@@ -288,6 +288,10 @@ fn select_option_row_element<VM>(
         drawer: None,
         tab_trigger: None,
         list_item: None,
+        data_grid_root: None,
+        data_grid_cell: None,
+        data_grid_header: None,
+        data_grid_resize_handle: None,
         kind: WidgetKind::SelectOptionRow {
             owner_id,
             option_index,

@@ -18,6 +18,7 @@ mod scrolling;
 mod select_state;
 mod session;
 mod slider;
+mod table;
 mod tabs;
 mod text_input;
 mod window_events;
@@ -309,17 +310,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
                 if self.focused_text_input_id().is_none() =>
             {
-                self.activate_focused_list_item(true, false)
+                self.activate_focused_data_grid_cell(true, false)
+                    || self.activate_focused_list_item(true, false)
                     || self.activate_focused_widget(true, false)
             }
             PhysicalKey::Code(KeyCode::Space) if self.focused_text_input_id().is_none() => {
-                self.activate_focused_list_item(false, true)
+                self.activate_focused_data_grid_cell(false, true)
+                    || self.activate_focused_list_item(false, true)
                     || self.activate_focused_widget(false, true)
             }
             PhysicalKey::Code(KeyCode::Backspace) => self.delete_backward_at_focused_input(),
             PhysicalKey::Code(KeyCode::Delete) => self.delete_forward_at_focused_input(),
             PhysicalKey::Code(KeyCode::ArrowLeft) => {
                 if self.focused_tab_is_horizontal() == Some(true) && self.move_focused_tab(-1) {
+                    true
+                } else if self.move_focused_data_grid_cell(0, -1, self.modifiers.shift_key()) {
                     true
                 } else if self.adjust_focused_slider(-1, None) {
                     true
@@ -344,6 +349,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             PhysicalKey::Code(KeyCode::ArrowRight) => {
                 if self.focused_tab_is_horizontal() == Some(true) && self.move_focused_tab(1) {
                     true
+                } else if self.move_focused_data_grid_cell(0, 1, self.modifiers.shift_key()) {
+                    true
                 } else if self.adjust_focused_slider(1, None) {
                     true
                 } else {
@@ -366,6 +373,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             PhysicalKey::Code(KeyCode::ArrowUp) => {
                 (self.focused_tab_is_horizontal() == Some(false) && self.move_focused_tab(-1))
+                    || self.move_focused_data_grid_cell(-1, 0, self.modifiers.shift_key())
                     || self.move_focused_list_item(-1, self.modifiers.shift_key())
                     || self.enter_focused_list_root(true, self.modifiers.shift_key())
                     || self.adjust_focused_slider(1, None)
@@ -373,6 +381,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             PhysicalKey::Code(KeyCode::ArrowDown) => {
                 (self.focused_tab_is_horizontal() == Some(false) && self.move_focused_tab(1))
+                    || self.move_focused_data_grid_cell(1, 0, self.modifiers.shift_key())
                     || self.move_focused_list_item(1, self.modifiers.shift_key())
                     || self.enter_focused_list_root(false, self.modifiers.shift_key())
                     || self.adjust_focused_slider(-1, None)
@@ -380,6 +389,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             PhysicalKey::Code(KeyCode::Home) => {
                 self.move_focused_tab_to_edge(false)
+                    || self.move_focused_data_grid_cell_to_edge(false, self.modifiers.shift_key())
                     || self.move_focused_list_item_to_edge(false, self.modifiers.shift_key())
                     || self.enter_focused_list_root(false, self.modifiers.shift_key())
                     || self.adjust_focused_slider(0, Some(false))
@@ -388,6 +398,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             PhysicalKey::Code(KeyCode::End) => {
                 self.move_focused_tab_to_edge(true)
+                    || self.move_focused_data_grid_cell_to_edge(true, self.modifiers.shift_key())
                     || self.move_focused_list_item_to_edge(true, self.modifiers.shift_key())
                     || self.enter_focused_list_root(true, self.modifiers.shift_key())
                     || self.adjust_focused_slider(0, Some(true))
@@ -398,12 +409,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     || self.scroll_focused_region_to_edge(true)
             }
             PhysicalKey::Code(KeyCode::PageUp) => {
-                self.page_focused_list_item(-1, self.modifiers.shift_key())
+                self.move_focused_data_grid_cell(-10, 0, self.modifiers.shift_key())
+                    || self.page_focused_list_item(-1, self.modifiers.shift_key())
                     || self.enter_focused_list_root(false, self.modifiers.shift_key())
                     || self.scroll_focused_region_by_pages(-1)
             }
             PhysicalKey::Code(KeyCode::PageDown) => {
-                self.page_focused_list_item(1, self.modifiers.shift_key())
+                self.move_focused_data_grid_cell(10, 0, self.modifiers.shift_key())
+                    || self.page_focused_list_item(1, self.modifiers.shift_key())
                     || self.enter_focused_list_root(false, self.modifiers.shift_key())
                     || self.scroll_focused_region_by_pages(1)
             }

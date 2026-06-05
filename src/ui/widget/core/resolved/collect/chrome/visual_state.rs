@@ -32,6 +32,7 @@ impl<VM> ResolvedElement<VM> {
             layout_frame.width,
             layout_frame.height,
         );
+        let frame = self.apply_data_grid_sticky_frame(frame, visual_context, context);
         let scale = if context.reduced_motion {
             self.visual.scale.resolve().clamp(0.01, 16.0)
         } else {
@@ -100,6 +101,52 @@ impl<VM> ResolvedElement<VM> {
             border_color,
             background,
             styles,
+        }
+    }
+
+    fn apply_data_grid_sticky_frame(
+        &self,
+        frame: Rect,
+        visual_context: VisualContext,
+        context: &CollectContext<'_, '_>,
+    ) -> Rect {
+        let Some((scroll_container_id, pin, pin_offset, is_header)) = self
+            .data_grid_cell
+            .as_ref()
+            .map(|cell| (cell.scroll_container_id, cell.pin, cell.pin_offset, false))
+            .or_else(|| {
+                self.data_grid_header.as_ref().map(|header| {
+                    (
+                        header.scroll_container_id,
+                        header.pin,
+                        header.pin_offset,
+                        true,
+                    )
+                })
+            })
+        else {
+            return frame;
+        };
+        let scroll_x = context
+            .scroll_offsets
+            .get(&scroll_container_id)
+            .copied()
+            .unwrap_or(Point::ZERO)
+            .x;
+        match pin {
+            crate::ui::widget::DataGridColumnPin::None if is_header => {
+                Rect::new(frame.x - scroll_x, frame.y, frame.width, frame.height)
+            }
+            crate::ui::widget::DataGridColumnPin::Start if !is_header => {
+                Rect::new(frame.x + scroll_x, frame.y, frame.width, frame.height)
+            }
+            crate::ui::widget::DataGridColumnPin::End => Rect::new(
+                visual_context.clip_rect.right() - pin_offset - frame.width,
+                frame.y,
+                frame.width,
+                frame.height,
+            ),
+            _ => frame,
         }
     }
 

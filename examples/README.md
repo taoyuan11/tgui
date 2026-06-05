@@ -28,7 +28,8 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 5. `demo`
 6. `toast_snackbar`
 7. `list_virtual_list`
-8. `text_area`
+8. `table_datagrid`
+9. `text_area`
 
 ## 桌面示例说明
 
@@ -151,6 +152,7 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 
 - `Button` / `Switch` / `Checkbox` / `Radio` / `Select`
 - `Tooltip` / `Popover` / `Tabs` / `Toast`
+- `List` / `DataGrid`
 - `Input` / `Textarea`
 - `CommandContext::notifications()`
 - `Image`
@@ -189,6 +191,24 @@ List / VirtualList 专项示例。演示：
 
 ```bash
 cargo run --manifest-path examples/list_virtual_list/Cargo.toml
+```
+
+### `table_datagrid`
+
+Table / DataGrid 专项示例。演示：
+
+- 受控多选 `DataGrid`
+- 受控排序与 Shift 多列排序
+- 列宽拖拽与 min / max clamp
+- 列重排事件与 VM 控制列序
+- pinned start / end 固定列
+- cell context menu
+- editable 文本提交事件
+
+运行方式：
+
+```bash
+cargo run --manifest-path examples/table_datagrid/Cargo.toml
 ```
 
 ### `text_area`

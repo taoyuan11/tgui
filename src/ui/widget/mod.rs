@@ -27,6 +27,7 @@ mod slider_shared;
 mod spinner;
 mod style;
 mod switch;
+mod table;
 mod tabs;
 mod text;
 mod textarea;
@@ -61,11 +62,12 @@ pub(crate) use common::{
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     BackdropBlurPrimitive, BrushPrimitiveData, CanvasCompositePrimitive,
     CanvasItemInteractionHandlers, CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask,
-    CompositionState, ComputedScene, DefaultActivation, FocusScopeState, FocusTargetMeta,
-    HitGeometry, HitInteraction, HitRegion, InteractionHandlers, LifecycleEventHandlers,
-    LifecycleEventState, ListItemState, MeasureContext, MediaEventPhase, MediaEventState,
-    MeshPrimitive, MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    TextEditState, TextInputContentGeometry, TexturePrimitive, WidgetStateMap,
+    CompositionState, ComputedScene, DataGridCellState, DataGridHeaderState,
+    DataGridResizeHandleState, DefaultActivation, FocusScopeState, FocusTargetMeta, HitGeometry,
+    HitInteraction, HitRegion, InteractionHandlers, LifecycleEventHandlers, LifecycleEventState,
+    ListItemState, MeasureContext, MediaEventPhase, MediaEventState, MeshPrimitive, MeshVertex,
+    RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextEditState,
+    TextInputContentGeometry, TexturePrimitive, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, DividerOrientation, FocusScopeOptions, Point, Rect, RenderPrimitive,
@@ -130,6 +132,13 @@ pub use style::{
     WidgetSurfaceStyle,
 };
 pub use switch::Switch;
+pub use table::{
+    DataGrid, DataGridCellAction, DataGridCellContext, DataGridCellEditCommit, DataGridColumn,
+    DataGridColumnPin, DataGridColumnReorderEvent, DataGridColumnWidthChange, DataGridDensity,
+    DataGridHeaderContext, DataGridRow, DataGridSection, DataGridSelectionChange,
+    DataGridSelectionMode, DataGridSelectionTrigger, DataGridSort, DataGridSortChange,
+    DataGridSortDirection, DataGridSortTrigger, DataGridStyle, Table,
+};
 pub use tabs::{TabItem, TabView, Tabs, TabsOverflowMode, TabsReorderEvent};
 pub use text::{IntoTextContent, Text};
 pub use textarea::Textarea;

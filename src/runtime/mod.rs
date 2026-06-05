@@ -43,8 +43,9 @@ use self::helpers::{
 use self::state::audio_lifecycle_state;
 use self::state::{collect_pending_lifecycle_events, collect_pending_media_event};
 use self::state::{
-    ActiveCanvasDrag, ActiveGestureSession, ActiveKeyRepeat, ActivePinchSession, ActiveTabReorder,
-    CachedScene, CanvasPointerContext, ClickHandler, ClipboardService, DeferredMouseClick,
+    ActiveCanvasDrag, ActiveDataGridColumnReorder, ActiveDataGridColumnResize,
+    ActiveGestureSession, ActiveKeyRepeat, ActivePinchSession, ActiveTabReorder, CachedScene,
+    CanvasPointerContext, ClickHandler, ClipboardService, DeferredMouseClick,
     DispatchedLifecycleState, DispatchedMediaState, FocusedWidget, HoverMoveHandler, HoverTargetId,
     HoverTransitionHandler, HoveredWidget, PendingClick, PendingLifecycleEvent, PendingMediaEvent,
     ScrollbarDrag, SliderDrag, SmoothScrollState, TextInputBufferState, TextInputSessionConfig,
@@ -304,6 +305,12 @@ pub struct BoundRuntimeHandler<VM> {
     /// 最近一次聚焦的 List row key。受控 selection 触发重建后 row WidgetId 可能更新，
     /// 键盘导航用它把焦点恢复到当前虚拟窗口中的同一行。
     list_focus_state: Option<(WidgetId, crate::ui::widget::WidgetKey)>,
+    data_grid_anchor_states: HashMap<WidgetId, crate::ui::widget::WidgetKey>,
+    data_grid_focus_state: Option<(
+        WidgetId,
+        crate::ui::widget::WidgetKey,
+        crate::ui::widget::WidgetKey,
+    )>,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
     active_touch_scroll: Option<TouchScrollDrag>,
@@ -312,6 +319,8 @@ pub struct BoundRuntimeHandler<VM> {
     active_slider_drag: Option<SliderDrag<VM>>,
     active_canvas_drag: Option<ActiveCanvasDrag<VM>>,
     active_tab_reorder: Option<ActiveTabReorder<VM>>,
+    active_data_grid_column_resize: Option<ActiveDataGridColumnResize<VM>>,
+    active_data_grid_column_reorder: Option<ActiveDataGridColumnReorder<VM>>,
     active_key_repeat: Option<ActiveKeyRepeat>,
     pending_click: Option<PendingClick<VM>>,
     deferred_mouse_click: Option<DeferredMouseClick<VM>>,
@@ -433,6 +442,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             menu_keyboard_cursor: HashMap::new(),
             list_anchor_states: HashMap::new(),
             list_focus_state: None,
+            data_grid_anchor_states: HashMap::new(),
+            data_grid_focus_state: None,
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
             active_touch_scroll: None,
@@ -441,6 +452,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             active_slider_drag: None,
             active_canvas_drag: None,
             active_tab_reorder: None,
+            active_data_grid_column_resize: None,
+            active_data_grid_column_reorder: None,
             active_key_repeat: None,
             pending_click: None,
             deferred_mouse_click: None,

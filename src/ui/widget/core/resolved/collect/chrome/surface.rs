@@ -180,14 +180,23 @@ impl<VM> ResolvedElement<VM> {
             ) || matches!(
                 &self.kind,
                 ResolvedWidgetKind::Container { layout, .. } if layout.scroll_view.is_some()
-            ) || self.list_item.is_some();
+            ) || self.list_item.is_some()
+                || self.data_grid_cell.is_some()
+                || self.data_grid_header.is_some()
+                || self.data_grid_resize_handle.is_some();
             let focus = context.build_focus_meta(
                 self.id,
                 &self.focus,
                 &self.interactions,
                 fallback_focusable,
             );
-            if self.interactions.has_any() || focus.is_some() || self.list_item.is_some() {
+            if self.interactions.has_any()
+                || focus.is_some()
+                || self.list_item.is_some()
+                || self.data_grid_cell.is_some()
+                || self.data_grid_header.is_some()
+                || self.data_grid_resize_handle.is_some()
+            {
                 let interaction = if let Some(trigger) = self.tab_trigger.as_ref() {
                     HitInteraction::TabTrigger {
                         id: self.id,
@@ -205,6 +214,24 @@ impl<VM> ResolvedElement<VM> {
                     HitInteraction::ListItem {
                         id: self.id,
                         state: list_item.clone(),
+                        interactions: self.interactions.clone(),
+                    }
+                } else if let Some(cell) = self.data_grid_cell.as_ref() {
+                    HitInteraction::DataGridCell {
+                        id: self.id,
+                        state: cell.clone(),
+                        interactions: self.interactions.clone(),
+                    }
+                } else if let Some(header) = self.data_grid_header.as_ref() {
+                    HitInteraction::DataGridHeader {
+                        id: self.id,
+                        state: header.clone(),
+                        interactions: self.interactions.clone(),
+                    }
+                } else if let Some(handle) = self.data_grid_resize_handle.as_ref() {
+                    HitInteraction::DataGridResizeHandle {
+                        id: self.id,
+                        state: handle.clone(),
                         interactions: self.interactions.clone(),
                     }
                 } else {

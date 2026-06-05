@@ -225,6 +225,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | HitInteraction::Radio { id, .. }
             | HitInteraction::SelectTrigger { id, .. }
             | HitInteraction::ListItem { id, .. }
+            | HitInteraction::DataGridCell { id, .. }
+            | HitInteraction::DataGridHeader { id, .. }
+            | HitInteraction::DataGridResizeHandle { id, .. }
             | HitInteraction::Slider { id, .. }
             | HitInteraction::TextInput { id, .. } => {
                 let has_context_menu = self
@@ -240,6 +243,102 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             _ => None,
         };
+
+        if let HitInteraction::DataGridCell {
+            id,
+            state,
+            interactions,
+        } = hit.clone()
+        {
+            self.clear_selected_text();
+            let hit_scope_path = {
+                let computed = self.computed_scene();
+                computed
+                    .hit_regions
+                    .iter()
+                    .chain(computed.overlay_hit_regions.iter())
+                    .find(|region| region.interaction.target_id() == hit_target_id)
+                    .map(|region| region.scope_path.clone())
+                    .unwrap_or_default()
+            };
+            if let Some(trap) = active_trap.as_ref() {
+                if !hit_scope_path.starts_with(trap) && focus_restore.is_none() {
+                    self.pending_click = None;
+                    self.pressed_widget = None;
+                    return;
+                }
+            }
+            self.close_all_open_selects_except(None);
+            let disabled = state.disabled.resolve();
+            self.update_focus(
+                (!disabled).then_some(FocusedWidget {
+                    widget_id: id,
+                    scope_path: hit_scope_path,
+                    on_blur: interactions.on_blur.clone(),
+                }),
+                (!disabled)
+                    .then_some(interactions.on_focus.clone())
+                    .flatten(),
+                false,
+            );
+            if let Some((context_menu_id, position)) = context_menu_open {
+                let _ = self.open_context_menu_at(context_menu_id, position);
+            } else {
+                let _ = self.dispatch_data_grid_cell_click(&state, id, now, button);
+            }
+            self.pressed_widget = Some(id);
+            return;
+        }
+
+        if let HitInteraction::DataGridHeader {
+            id,
+            state,
+            interactions,
+        } = hit.clone()
+        {
+            let hit_scope_path = {
+                let computed = self.computed_scene();
+                computed
+                    .hit_regions
+                    .iter()
+                    .chain(computed.overlay_hit_regions.iter())
+                    .find(|region| region.interaction.target_id() == hit_target_id)
+                    .map(|region| region.scope_path.clone())
+                    .unwrap_or_default()
+            };
+            self.update_focus(
+                Some(FocusedWidget {
+                    widget_id: id,
+                    scope_path: hit_scope_path,
+                    on_blur: interactions.on_blur.clone(),
+                }),
+                interactions.on_focus.clone(),
+                false,
+            );
+            if let Some((context_menu_id, position)) = context_menu_open {
+                let _ = self.open_context_menu_at(context_menu_id, position);
+            } else {
+                let _ = self.begin_data_grid_column_reorder(&state, button);
+                let _ = self.dispatch_data_grid_header_click(&state, button);
+            }
+            self.pressed_widget = Some(id);
+            return;
+        }
+
+        if let HitInteraction::DataGridResizeHandle {
+            id,
+            state,
+            interactions: _,
+        } = hit.clone()
+        {
+            if let Some((context_menu_id, position)) = context_menu_open {
+                let _ = self.open_context_menu_at(context_menu_id, position);
+            } else {
+                let _ = self.begin_data_grid_column_resize(&state, button);
+            }
+            self.pressed_widget = Some(id);
+            return;
+        }
 
         if let HitInteraction::ListItem {
             id,
@@ -557,6 +656,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             HitInteraction::Disabled { .. } => unreachable!("disabled hit handled above"),
             HitInteraction::CanvasItem { .. } => unreachable!("canvas item handled above"),
             HitInteraction::ListItem { .. } => unreachable!("list item handled above"),
+            HitInteraction::DataGridCell { .. }
+            | HitInteraction::DataGridHeader { .. }
+            | HitInteraction::DataGridResizeHandle { .. } => {
+                unreachable!("data grid hits handled above")
+            }
         };
 
         if selectable_text.is_none() {

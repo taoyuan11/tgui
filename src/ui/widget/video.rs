@@ -291,6 +291,10 @@ impl VideoSurface {
             drawer: None,
             tab_trigger: None,
             list_item: None,
+            data_grid_root: None,
+            data_grid_cell: None,
+            data_grid_header: None,
+            data_grid_resize_handle: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -323,6 +327,10 @@ impl VideoSurface {
             drawer: None,
             tab_trigger: None,
             list_item: None,
+            data_grid_root: None,
+            data_grid_cell: None,
+            data_grid_header: None,
+            data_grid_resize_handle: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -355,6 +363,10 @@ impl VideoSurface {
             drawer: None,
             tab_trigger: None,
             list_item: None,
+            data_grid_root: None,
+            data_grid_cell: None,
+            data_grid_header: None,
+            data_grid_resize_handle: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -386,6 +398,10 @@ impl<VM> From<VideoSurface> for Element<VM> {
             drawer: None,
             tab_trigger: None,
             list_item: None,
+            data_grid_root: None,
+            data_grid_cell: None,
+            data_grid_header: None,
+            data_grid_resize_handle: None,
             kind: WidgetKind::VideoSurface {
                 style: value.style.clone(),
                 video: value,

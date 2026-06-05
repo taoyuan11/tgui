@@ -27,6 +27,10 @@ pub struct Element<VM> {
     pub(crate) drawer: Option<Box<crate::ui::widget::drawer::DrawerDescriptor<VM>>>,
     pub(crate) tab_trigger: Option<common::TabTriggerState<VM>>,
     pub(crate) list_item: Option<common::ListItemState<VM>>,
+    pub(crate) data_grid_root: Option<common::DataGridRootState>,
+    pub(crate) data_grid_cell: Option<common::DataGridCellState<VM>>,
+    pub(crate) data_grid_header: Option<common::DataGridHeaderState<VM>>,
+    pub(crate) data_grid_resize_handle: Option<common::DataGridResizeHandleState<VM>>,
     pub(crate) kind: WidgetKind<VM>,
 }
 
@@ -50,6 +54,10 @@ impl<VM> Clone for Element<VM> {
             drawer: self.drawer.clone(),
             tab_trigger: self.tab_trigger.clone(),
             list_item: self.list_item.clone(),
+            data_grid_root: self.data_grid_root.clone(),
+            data_grid_cell: self.data_grid_cell.clone(),
+            data_grid_header: self.data_grid_header.clone(),
+            data_grid_resize_handle: self.data_grid_resize_handle.clone(),
             kind: self.kind.clone(),
         }
     }
@@ -73,6 +81,10 @@ pub(crate) struct ResolvedElement<VM> {
     pub(crate) drawer: Option<Box<crate::ui::widget::drawer::DrawerDescriptor<VM>>>,
     pub(crate) tab_trigger: Option<common::TabTriggerState<VM>>,
     pub(crate) list_item: Option<common::ListItemState<VM>>,
+    pub(crate) data_grid_root: Option<common::DataGridRootState>,
+    pub(crate) data_grid_cell: Option<common::DataGridCellState<VM>>,
+    pub(crate) data_grid_header: Option<common::DataGridHeaderState<VM>>,
+    pub(crate) data_grid_resize_handle: Option<common::DataGridResizeHandleState<VM>>,
     pub(crate) child_source_spans: Vec<usize>,
     pub(crate) kind: ResolvedWidgetKind<VM>,
 }
@@ -103,6 +115,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
     Virtual {
         arrangement: VirtualArrangement,
         item_layout: ItemLayout,
+        content_cross_extent: Option<Value<Dp>>,
         overflow_x: Overflow,
         overflow_y: Overflow,
         style: ContainerStyle,
@@ -268,6 +281,10 @@ impl<VM> Clone for ResolvedElement<VM> {
             drawer: self.drawer.clone(),
             tab_trigger: self.tab_trigger.clone(),
             list_item: self.list_item.clone(),
+            data_grid_root: self.data_grid_root.clone(),
+            data_grid_cell: self.data_grid_cell.clone(),
+            data_grid_header: self.data_grid_header.clone(),
+            data_grid_resize_handle: self.data_grid_resize_handle.clone(),
             child_source_spans: self.child_source_spans.clone(),
             kind: self.kind.clone(),
         }
@@ -291,6 +308,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
             Self::Virtual {
                 arrangement,
                 item_layout,
+                content_cross_extent,
                 overflow_x,
                 overflow_y,
                 style,
@@ -301,6 +319,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
             } => Self::Virtual {
                 arrangement: *arrangement,
                 item_layout: *item_layout,
+                content_cross_extent: content_cross_extent.clone(),
                 overflow_x: *overflow_x,
                 overflow_y: *overflow_y,
                 style: style.clone(),

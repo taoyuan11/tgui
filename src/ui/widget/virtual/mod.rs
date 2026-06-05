@@ -287,6 +287,7 @@ pub(crate) fn apply_virtual_runtime_state_to_element<VM>(
         WidgetKind::Virtual {
             runtime_state,
             arrangement,
+            content_cross_extent,
             ..
         } => {
             if let Some(cache) = virtual_states.get(&element.id) {
@@ -305,9 +306,13 @@ pub(crate) fn apply_virtual_runtime_state_to_element<VM>(
                 .get(&element.id)
                 .copied()
                 .unwrap_or(Point::ZERO);
-            if matches!(arrangement.direction(), VirtualDirection::Vertical) {
+            if matches!(arrangement.direction(), VirtualDirection::Vertical)
+                && content_cross_extent.is_none()
+            {
                 runtime_state.scroll_offset.x = Dp::ZERO;
-            } else {
+            } else if matches!(arrangement.direction(), VirtualDirection::Horizontal)
+                && content_cross_extent.is_none()
+            {
                 runtime_state.scroll_offset.y = Dp::ZERO;
             }
         }
@@ -321,6 +326,7 @@ pub(crate) fn resolve_virtual_window_plan(
     runtime_state: &VirtualRuntimeState,
     total_items: usize,
     fallback_viewport_hint: VirtualViewportHint,
+    content_cross_extent: Option<Dp>,
 ) -> VirtualWindowPlan {
     let viewport_hint = runtime_state
         .viewport_hint
@@ -334,6 +340,10 @@ pub(crate) fn resolve_virtual_window_plan(
         VirtualDirection::Vertical => viewport_hint.width.max(Dp::ZERO),
         VirtualDirection::Horizontal => viewport_hint.height.max(Dp::ZERO),
     };
+    let viewport_cross = content_cross_extent
+        .unwrap_or(viewport_cross)
+        .max(viewport_cross)
+        .max(Dp::ZERO);
     let scroll_main = match arrangement.direction() {
         VirtualDirection::Vertical => runtime_state.scroll_offset.y.max(Dp::ZERO),
         VirtualDirection::Horizontal => runtime_state.scroll_offset.x.max(Dp::ZERO),
@@ -594,10 +604,15 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
                 drawer: None,
                 tab_trigger: None,
                 list_item: None,
+                data_grid_root: None,
+                data_grid_cell: None,
+                data_grid_header: None,
+                data_grid_resize_handle: None,
                 kind: WidgetKind::Virtual {
                     arrangement,
                     item_layout,
                     source: ErasedVirtualItemSource::new::<T, S>(source, render),
+                    content_cross_extent: None,
                     overflow_x,
                     overflow_y,
                     style: None,
@@ -658,6 +673,17 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
     pub fn item_layout(mut self, layout: ItemLayout) -> Self {
         if let WidgetKind::Virtual { item_layout, .. } = &mut self.element.kind {
             *item_layout = layout;
+        }
+        self
+    }
+
+    pub fn content_cross_extent(mut self, extent: impl Into<Value<Dp>>) -> Self {
+        if let WidgetKind::Virtual {
+            content_cross_extent,
+            ..
+        } = &mut self.element.kind
+        {
+            *content_cross_extent = Some(extent.into());
         }
         self
     }
@@ -989,6 +1015,10 @@ impl<T, VM: 'static> VirtualList<T, VM> {
                     drawer: None,
                     tab_trigger: None,
                     list_item: None,
+                    data_grid_root: None,
+                    data_grid_cell: None,
+                    data_grid_header: None,
+                    data_grid_resize_handle: None,
                     kind: WidgetKind::Virtual {
                         arrangement: VirtualArrangement::Linear(VirtualDirection::Vertical),
                         item_layout: ItemLayout::Fixed {
@@ -997,6 +1027,7 @@ impl<T, VM: 'static> VirtualList<T, VM> {
                             overscan: 2,
                         },
                         source: ErasedVirtualItemSource::new_with_context::<T, S>(source, render),
+                        content_cross_extent: None,
                         overflow_x: Overflow::Hidden,
                         overflow_y: Overflow::Scroll,
                         style: None,
@@ -1020,6 +1051,11 @@ impl<T, VM: 'static> VirtualList<T, VM> {
 
     pub fn item_layout(mut self, layout: ItemLayout) -> Self {
         self.viewport = self.viewport.item_layout(layout);
+        self
+    }
+
+    pub fn content_cross_extent(mut self, extent: impl Into<Value<Dp>>) -> Self {
+        self.viewport = self.viewport.content_cross_extent(extent);
         self
     }
 

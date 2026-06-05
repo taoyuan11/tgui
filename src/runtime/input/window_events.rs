@@ -57,6 +57,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         needs_redraw |= self.handle_slider_drag();
                         needs_redraw |= self.handle_hover(viewport);
                         needs_redraw |= self.update_cursor_icon();
+                    } else if self.active_data_grid_column_resize.is_some() {
+                        needs_redraw |= self.handle_data_grid_column_resize();
+                        needs_redraw |= self.handle_hover(viewport);
+                        needs_redraw |= self.update_cursor_icon();
                     } else if self.active_canvas_drag.is_some() {
                         needs_redraw |= self.handle_canvas_drag();
                         needs_redraw |= self.handle_hover(viewport);
@@ -148,6 +152,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.end_touch_scroll_drag();
                 self.end_slider_drag();
                 self.end_canvas_drag();
+                self.end_data_grid_column_resize();
+                self.active_data_grid_column_reorder = None;
                 self.pressed_widget = None;
                 self.update_focus(None, None, false);
                 if let Some(window) = self.window.as_ref() {
@@ -258,12 +264,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     Some(CanvasMouseButton::Left)
                 ) {
                     let _ = self.finish_tab_reorder();
+                    let _ = self.finish_data_grid_column_reorder();
                 } else {
                     self.active_tab_reorder = None;
+                    self.active_data_grid_column_reorder = None;
                 }
                 self.end_scrollbar_drag();
                 self.end_touch_scroll_drag();
                 self.end_slider_drag();
+                self.end_data_grid_column_resize();
                 self.pressed_widget = None;
                 self.end_text_selection_drag();
                 self.handle_hover(self.viewport_rect());

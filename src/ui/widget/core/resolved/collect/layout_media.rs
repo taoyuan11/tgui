@@ -136,6 +136,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             ResolvedWidgetKind::Virtual {
                 arrangement,
                 item_layout,
+                content_cross_extent,
                 overflow_x,
                 overflow_y,
                 runtime_state,
@@ -151,7 +152,11 @@ impl<VM: 'static> ResolvedElement<VM> {
                     crate::ui::widget::VirtualDirection::Vertical => Rect::new(
                         visual.background_frame.x,
                         visual.background_frame.y,
-                        visual.background_frame.width,
+                        content_cross_extent
+                            .as_ref()
+                            .map(|value| value.resolve())
+                            .unwrap_or(visual.background_frame.width)
+                            .max(visual.background_frame.width),
                         window_plan
                             .total_main_extent
                             .max(visual.background_frame.height),
@@ -162,7 +167,11 @@ impl<VM: 'static> ResolvedElement<VM> {
                         window_plan
                             .total_main_extent
                             .max(visual.background_frame.width),
-                        visual.background_frame.height,
+                        content_cross_extent
+                            .as_ref()
+                            .map(|value| value.resolve())
+                            .unwrap_or(visual.background_frame.height)
+                            .max(visual.background_frame.height),
                     ),
                 };
                 let max_scroll = Point {

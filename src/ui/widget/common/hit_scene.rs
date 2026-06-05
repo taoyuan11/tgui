@@ -253,6 +253,21 @@ pub(crate) enum HitInteraction<VM> {
         state: crate::ui::widget::common::ListItemState<VM>,
         interactions: InteractionHandlers<VM>,
     },
+    DataGridCell {
+        id: WidgetId,
+        state: crate::ui::widget::common::DataGridCellState<VM>,
+        interactions: InteractionHandlers<VM>,
+    },
+    DataGridHeader {
+        id: WidgetId,
+        state: crate::ui::widget::common::DataGridHeaderState<VM>,
+        interactions: InteractionHandlers<VM>,
+    },
+    DataGridResizeHandle {
+        id: WidgetId,
+        state: crate::ui::widget::common::DataGridResizeHandleState<VM>,
+        interactions: InteractionHandlers<VM>,
+    },
     Slider {
         id: WidgetId,
         interactions: InteractionHandlers<VM>,
@@ -403,6 +418,33 @@ impl<VM> Clone for HitInteraction<VM> {
                 state: state.clone(),
                 interactions: interactions.clone(),
             },
+            Self::DataGridCell {
+                id,
+                state,
+                interactions,
+            } => Self::DataGridCell {
+                id: *id,
+                state: state.clone(),
+                interactions: interactions.clone(),
+            },
+            Self::DataGridHeader {
+                id,
+                state,
+                interactions,
+            } => Self::DataGridHeader {
+                id: *id,
+                state: state.clone(),
+                interactions: interactions.clone(),
+            },
+            Self::DataGridResizeHandle {
+                id,
+                state,
+                interactions,
+            } => Self::DataGridResizeHandle {
+                id: *id,
+                state: state.clone(),
+                interactions: interactions.clone(),
+            },
             Self::Slider {
                 id,
                 interactions,
@@ -498,6 +540,9 @@ impl<VM> HitInteraction<VM> {
             | Self::SelectTrigger { id, .. }
             | Self::TabTrigger { id, .. }
             | Self::ListItem { id, .. }
+            | Self::DataGridCell { id, .. }
+            | Self::DataGridHeader { id, .. }
+            | Self::DataGridResizeHandle { id, .. }
             | Self::Slider { id, .. }
             | Self::TextInput { id, .. } => HitTargetId::Widget(*id),
             Self::SelectOption {

@@ -82,6 +82,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 | HitInteraction::ListItem {
                     id, interactions, ..
                 }
+                | HitInteraction::DataGridCell {
+                    id, interactions, ..
+                }
+                | HitInteraction::DataGridHeader {
+                    id, interactions, ..
+                }
+                | HitInteraction::DataGridResizeHandle {
+                    id, interactions, ..
+                }
                 | HitInteraction::TabTrigger {
                     id, interactions, ..
                 } => HoveredWidget {

@@ -45,6 +45,7 @@ impl<VM> Element<VM> {
                 arrangement,
                 item_layout,
                 source,
+                content_cross_extent,
                 overflow_x,
                 overflow_y,
                 style,
@@ -53,6 +54,7 @@ impl<VM> Element<VM> {
                 arrangement,
                 item_layout,
                 source: source.scope(selector.clone()),
+                content_cross_extent,
                 overflow_x,
                 overflow_y,
                 style,
@@ -340,7 +342,19 @@ impl<VM> Element<VM> {
             tab_trigger: self
                 .tab_trigger
                 .map(|trigger| trigger.scope(selector.clone())),
-            list_item: self.list_item.map(|list_item| list_item.scope(selector)),
+            list_item: self
+                .list_item
+                .map(|list_item| list_item.scope(selector.clone())),
+            data_grid_root: self.data_grid_root,
+            data_grid_cell: self
+                .data_grid_cell
+                .map(|state| state.scope(selector.clone())),
+            data_grid_header: self
+                .data_grid_header
+                .map(|state| state.scope(selector.clone())),
+            data_grid_resize_handle: self
+                .data_grid_resize_handle
+                .map(|state| state.scope(selector)),
             kind,
         }
     }

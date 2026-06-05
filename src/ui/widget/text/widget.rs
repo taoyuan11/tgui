@@ -344,6 +344,10 @@ impl Text {
             drawer: None,
             tab_trigger: None,
             list_item: None,
+            data_grid_root: None,
+            data_grid_cell: None,
+            data_grid_header: None,
+            data_grid_resize_handle: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -376,6 +380,10 @@ impl Text {
             drawer: None,
             tab_trigger: None,
             list_item: None,
+            data_grid_root: None,
+            data_grid_cell: None,
+            data_grid_header: None,
+            data_grid_resize_handle: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -407,6 +415,10 @@ impl<VM> From<Text> for Element<VM> {
             drawer: None,
             tab_trigger: None,
             list_item: None,
+            data_grid_root: None,
+            data_grid_cell: None,
+            data_grid_header: None,
+            data_grid_resize_handle: None,
             kind: WidgetKind::Text { text: value },
         }
     }

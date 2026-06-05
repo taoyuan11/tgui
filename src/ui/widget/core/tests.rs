@@ -226,6 +226,7 @@ mod modal_tests;
 mod popover_tests;
 mod portal_tests;
 mod select_tests;
+mod table_tests;
 mod tabs_tests;
 mod text_and_background;
 mod text_input_tests;

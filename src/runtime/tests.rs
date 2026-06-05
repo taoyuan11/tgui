@@ -32,9 +32,9 @@ use crate::ui::unit::{dp, sp, Dp, UnitContext};
 use crate::ui::widget::{
     Button, Canvas, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent, CanvasRecorder,
     CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Checkbox,
-    ContainerStyle, CursorStyle, Flex, FocusScopeOptions, HitInteraction, Input, Point, Rect,
-    ScrollView, Select, SelectOption, Slider, Switch, Text, TextEditState, Textarea, Tooltip,
-    VirtualCacheState, WidgetTree,
+    ContainerStyle, CursorStyle, DataGrid, DataGridColumn, DataGridRow, Flex, FocusScopeOptions,
+    HitInteraction, Input, Point, Rect, ScrollView, Select, SelectOption, Slider, Switch, Text,
+    TextEditState, Textarea, Tooltip, VirtualCacheState, WidgetKey, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle};
@@ -500,6 +500,7 @@ mod modal_tests;
 mod popover_tests;
 mod portal_tests;
 mod scroll_tests;
+mod table_tests;
 mod tabs_tests;
 mod text_input_tests;
 mod toast_tests;

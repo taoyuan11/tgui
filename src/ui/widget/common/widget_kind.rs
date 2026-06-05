@@ -152,6 +152,7 @@ pub(crate) enum WidgetKind<VM> {
         arrangement: VirtualArrangement,
         item_layout: ItemLayout,
         source: ErasedVirtualItemSource<VM>,
+        content_cross_extent: Option<Value<Dp>>,
         overflow_x: Overflow,
         overflow_y: Overflow,
         style: Option<StyleResolver<ContainerStyle>>,
@@ -420,6 +421,231 @@ pub(crate) struct ListItemState<VM> {
     pub sibling_disabled: std::sync::Arc<[bool]>,
 }
 
+pub(crate) struct DataGridRootState {
+    pub grid_id: WidgetId,
+    pub row_count: usize,
+    pub column_count: usize,
+    pub selection_mode: crate::ui::widget::DataGridSelectionMode,
+    pub selected_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
+}
+
+impl Clone for DataGridRootState {
+    fn clone(&self) -> Self {
+        Self {
+            grid_id: self.grid_id,
+            row_count: self.row_count,
+            column_count: self.column_count,
+            selection_mode: self.selection_mode,
+            selected_keys: self.selected_keys.clone(),
+        }
+    }
+}
+
+pub(crate) struct DataGridCellState<VM> {
+    pub grid_id: WidgetId,
+    pub scroll_container_id: WidgetId,
+    pub virtual_row_index: usize,
+    pub row_index: usize,
+    pub column_index: usize,
+    pub row_key: WidgetKey,
+    pub column_key: WidgetKey,
+    pub pin: crate::ui::widget::DataGridColumnPin,
+    pub pin_offset: Dp,
+    pub selected_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
+    pub selection_mode: crate::ui::widget::DataGridSelectionMode,
+    pub disabled: crate::ui::layout::Value<bool>,
+    pub editable: bool,
+    pub edit_value: String,
+    pub on_selection_change: Option<ValueCommand<VM, crate::ui::widget::DataGridSelectionChange>>,
+    pub on_cell_action: Option<ValueCommand<VM, crate::ui::widget::DataGridCellAction>>,
+    pub on_cell_edit_commit: Option<ValueCommand<VM, crate::ui::widget::DataGridCellEditCommit>>,
+    pub sibling_keys: std::sync::Arc<[WidgetKey]>,
+    pub sibling_disabled: std::sync::Arc<[bool]>,
+}
+
+impl<VM> Clone for DataGridCellState<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            grid_id: self.grid_id,
+            scroll_container_id: self.scroll_container_id,
+            virtual_row_index: self.virtual_row_index,
+            row_index: self.row_index,
+            column_index: self.column_index,
+            row_key: self.row_key.clone(),
+            column_key: self.column_key.clone(),
+            pin: self.pin,
+            pin_offset: self.pin_offset,
+            selected_keys: self.selected_keys.clone(),
+            selection_mode: self.selection_mode,
+            disabled: self.disabled.clone(),
+            editable: self.editable,
+            edit_value: self.edit_value.clone(),
+            on_selection_change: self.on_selection_change.clone(),
+            on_cell_action: self.on_cell_action.clone(),
+            on_cell_edit_commit: self.on_cell_edit_commit.clone(),
+            sibling_keys: self.sibling_keys.clone(),
+            sibling_disabled: self.sibling_disabled.clone(),
+        }
+    }
+}
+
+impl<VM: 'static> DataGridCellState<VM> {
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> DataGridCellState<RootVm> {
+        DataGridCellState {
+            grid_id: self.grid_id,
+            scroll_container_id: self.scroll_container_id,
+            virtual_row_index: self.virtual_row_index,
+            row_index: self.row_index,
+            column_index: self.column_index,
+            row_key: self.row_key,
+            column_key: self.column_key,
+            pin: self.pin,
+            pin_offset: self.pin_offset,
+            selected_keys: self.selected_keys,
+            selection_mode: self.selection_mode,
+            disabled: self.disabled,
+            editable: self.editable,
+            edit_value: self.edit_value,
+            on_selection_change: self
+                .on_selection_change
+                .map(|command| command.scope(selector.clone())),
+            on_cell_action: self
+                .on_cell_action
+                .map(|command| command.scope(selector.clone())),
+            on_cell_edit_commit: self
+                .on_cell_edit_commit
+                .map(|command| command.scope(selector)),
+            sibling_keys: self.sibling_keys,
+            sibling_disabled: self.sibling_disabled,
+        }
+    }
+}
+
+pub(crate) struct DataGridHeaderState<VM> {
+    pub grid_id: WidgetId,
+    pub scroll_container_id: WidgetId,
+    pub column_index: usize,
+    pub column_key: WidgetKey,
+    pub label: String,
+    pub pin: crate::ui::widget::DataGridColumnPin,
+    pub pin_offset: Dp,
+    pub sortable: bool,
+    pub resizable: bool,
+    pub reorderable: bool,
+    pub sort: crate::ui::layout::Value<Vec<crate::ui::widget::DataGridSort>>,
+    pub width: Dp,
+    pub min_width: Dp,
+    pub max_width: Option<Dp>,
+    pub on_sort_change: Option<ValueCommand<VM, crate::ui::widget::DataGridSortChange>>,
+    pub on_column_width_change:
+        Option<ValueCommand<VM, crate::ui::widget::DataGridColumnWidthChange>>,
+    pub on_column_reorder: Option<ValueCommand<VM, crate::ui::widget::DataGridColumnReorderEvent>>,
+}
+
+impl<VM> Clone for DataGridHeaderState<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            grid_id: self.grid_id,
+            scroll_container_id: self.scroll_container_id,
+            column_index: self.column_index,
+            column_key: self.column_key.clone(),
+            label: self.label.clone(),
+            pin: self.pin,
+            pin_offset: self.pin_offset,
+            sortable: self.sortable,
+            resizable: self.resizable,
+            reorderable: self.reorderable,
+            sort: self.sort.clone(),
+            width: self.width,
+            min_width: self.min_width,
+            max_width: self.max_width,
+            on_sort_change: self.on_sort_change.clone(),
+            on_column_width_change: self.on_column_width_change.clone(),
+            on_column_reorder: self.on_column_reorder.clone(),
+        }
+    }
+}
+
+impl<VM: 'static> DataGridHeaderState<VM> {
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> DataGridHeaderState<RootVm> {
+        DataGridHeaderState {
+            grid_id: self.grid_id,
+            scroll_container_id: self.scroll_container_id,
+            column_index: self.column_index,
+            column_key: self.column_key,
+            label: self.label,
+            pin: self.pin,
+            pin_offset: self.pin_offset,
+            sortable: self.sortable,
+            resizable: self.resizable,
+            reorderable: self.reorderable,
+            sort: self.sort,
+            width: self.width,
+            min_width: self.min_width,
+            max_width: self.max_width,
+            on_sort_change: self
+                .on_sort_change
+                .map(|command| command.scope(selector.clone())),
+            on_column_width_change: self
+                .on_column_width_change
+                .map(|command| command.scope(selector.clone())),
+            on_column_reorder: self
+                .on_column_reorder
+                .map(|command| command.scope(selector)),
+        }
+    }
+}
+
+pub(crate) struct DataGridResizeHandleState<VM> {
+    pub grid_id: WidgetId,
+    pub column_index: usize,
+    pub column_key: WidgetKey,
+    pub width: Dp,
+    pub min_width: Dp,
+    pub max_width: Option<Dp>,
+    pub on_column_width_change:
+        Option<ValueCommand<VM, crate::ui::widget::DataGridColumnWidthChange>>,
+}
+
+impl<VM> Clone for DataGridResizeHandleState<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            grid_id: self.grid_id,
+            column_index: self.column_index,
+            column_key: self.column_key.clone(),
+            width: self.width,
+            min_width: self.min_width,
+            max_width: self.max_width,
+            on_column_width_change: self.on_column_width_change.clone(),
+        }
+    }
+}
+
+impl<VM: 'static> DataGridResizeHandleState<VM> {
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> DataGridResizeHandleState<RootVm> {
+        DataGridResizeHandleState {
+            grid_id: self.grid_id,
+            column_index: self.column_index,
+            column_key: self.column_key,
+            width: self.width,
+            min_width: self.min_width,
+            max_width: self.max_width,
+            on_column_width_change: self
+                .on_column_width_change
+                .map(|command| command.scope(selector)),
+        }
+    }
+}
+
 impl<VM> Clone for ListItemState<VM> {
     fn clone(&self) -> Self {
         Self {
@@ -508,6 +734,7 @@ impl<VM> Clone for WidgetKind<VM> {
                 arrangement,
                 item_layout,
                 source,
+                content_cross_extent,
                 overflow_x,
                 overflow_y,
                 style,
@@ -516,6 +743,7 @@ impl<VM> Clone for WidgetKind<VM> {
                 arrangement: *arrangement,
                 item_layout: *item_layout,
                 source: source.clone(),
+                content_cross_extent: content_cross_extent.clone(),
                 overflow_x: *overflow_x,
                 overflow_y: *overflow_y,
                 style: style.clone(),

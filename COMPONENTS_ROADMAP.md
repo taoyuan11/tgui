@@ -265,12 +265,21 @@
   - ✅ accessibility 将列表根标记为 listbox，行标记为 option，并暴露 selected / disabled / focused 状态；
   - ℹ️ Skeleton 仍属于 P3 §25；当前 loading 可通过 `.loading_view(Element<VM>)` 插槽接入自定义占位。
 
-### 17. Table / DataGrid
+### 17. Table / DataGrid ✅
 - **作用**：多列数据展示；支持排序、列宽拖拽、列固定、行选择、分组、单元格编辑。
 - **样式**：行高、斑马纹、悬停行、表头粘性、列分隔线；紧凑/普通/宽松三档密度。
 - **桌面操作**：列头点击排序、Shift 多列排序；列头拖拽改列宽 / 拖换列序；行点击/方向键选择；单元格双击编辑；右键 ContextMenu；横向滚动 + 列固定。
 - **键盘补充**：横向滚动与列固定保持键盘可达。
 - **依赖**：P0 §2、§3、§4；P1 §8。
+- **进度**：[功能完整]
+  - ✅ 新增 `src/ui/widget/table/`，公开 `DataGrid` / `Table`、`DataGridColumn`、`DataGridRow`、`DataGridSection`、cell/header context、selection/density/pin/sort 枚举、事件类型与 `DataGridStyle`；
+  - ✅ `DataGrid::new(rows, columns)` / `DataGrid::sections(...)` 采用列构建器 API，支持 width/min/max、sortable、resizable、reorderable、pin、text_value、editable、align、自定义 header；
+  - ✅ 默认渲染为 sticky header + `VirtualList` body，支持 empty/loading slot、sections、density row height、overscan、zebra/selected/focused/resize/sort 视觉 token 和横向 scroll extent；
+  - ✅ runtime 已接入 DataGrid cell/header/resize hit interaction、受控 selection、Ctrl/Cmd toggle、Shift range anchor、键盘方向/Home/End/PageUp/PageDown、Enter/Space、header sort、Shift 多列 sort、列宽拖拽、列重排、双击 editable 文本提交和 cell context menu；
+  - ✅ 固定列通过 DataGrid cell/header 元数据与 body scroll offset 在 collect 阶段抵消横向滚动，start/end pin 与 header 同步；
+  - ✅ accessibility 将 root/header/cell 映射为 grid / column header / grid cell，并暴露 selected/disabled、行列位置和 Click/Focus action；
+  - ✅ `README.md`、`examples/README.md` 与 `examples/table_datagrid/` 已同步，示例覆盖受控选择、排序、列宽、列重排、固定列、右键菜单和文本提交；
+  - ✅ widget core / runtime / accessibility 测试覆盖表头和 cell 渲染、虚拟化、横向滚动、固定列、selection、sort、resize、reorder、edit commit、context menu 与 a11y roles。
 
 ### 18. Tree
 - **作用**：层级数据展示，可展开/折叠、复选、拖拽。

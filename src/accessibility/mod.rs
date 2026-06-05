@@ -180,6 +180,15 @@ fn node_for_widget<VM: 'static>(
 }
 
 fn role_for_widget<VM>(resolved: &ResolvedElement<VM>) -> Role {
+    if resolved.data_grid_header.is_some() {
+        return Role::ColumnHeader;
+    }
+    if resolved.data_grid_cell.is_some() {
+        return Role::GridCell;
+    }
+    if resolved.data_grid_root.is_some() {
+        return Role::Grid;
+    }
     if resolved.list_item.is_some() {
         return Role::ListBoxOption;
     }
@@ -263,6 +272,31 @@ fn apply_widget_semantics<VM: 'static>(
         node.set_size_of_set(list_item.sibling_keys.len());
         node.add_action(Action::Click);
         if list_item.disabled.resolve() {
+            node.set_disabled();
+        }
+    }
+
+    if let Some(root) = resolved.data_grid_root.as_ref() {
+        node.set_row_count(root.row_count);
+        node.set_column_count(root.column_count);
+        if root.selection_mode == crate::ui::widget::DataGridSelectionMode::Multiple {
+            node.set_multiselectable();
+        }
+    }
+
+    if let Some(header) = resolved.data_grid_header.as_ref() {
+        node.set_label(header.label.clone());
+        node.set_column_index(header.column_index);
+        node.set_column_span(1);
+        node.add_action(Action::Click);
+    }
+
+    if let Some(cell) = resolved.data_grid_cell.as_ref() {
+        node.set_row_index(cell.row_index);
+        node.set_column_index(cell.column_index);
+        node.set_selected(cell.selected_keys.resolve().contains(&cell.row_key));
+        node.add_action(Action::Click);
+        if cell.disabled.resolve() {
             node.set_disabled();
         }
     }
@@ -510,6 +544,9 @@ fn hit_widget_id<VM>(interaction: &HitInteraction<VM>) -> Option<WidgetId> {
         | HitInteraction::SelectOption { id, .. }
         | HitInteraction::TabTrigger { id, .. }
         | HitInteraction::ListItem { id, .. }
+        | HitInteraction::DataGridCell { id, .. }
+        | HitInteraction::DataGridHeader { id, .. }
+        | HitInteraction::DataGridResizeHandle { id, .. }
         | HitInteraction::Slider { id, .. }
         | HitInteraction::TextInput { id, .. }
         | HitInteraction::CanvasItem { id, .. } => Some(*id),

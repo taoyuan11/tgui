@@ -56,7 +56,7 @@
 
 ### 布局与组件
 
-- 布局与滚动容器：`Stack`、`Grid`、`Flex`、`ScrollView`、`VirtualViewport`、`VirtualList`、`List`
+- 布局与滚动容器：`Stack`、`Grid`、`Flex`、`ScrollView`、`VirtualViewport`、`VirtualList`、`List`、`DataGrid` / `Table`
 - 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Switch`、`Tabs` / `TabView`、`ProgressBar`、`Spinner`、`Image`
 - 浮层基础设施：统一的 runtime overlay anchoring 引擎，当前已为 `Tooltip`、`Popover`、`Select` 与 `Menu` / `ContextMenu` / `MenuBar` 提供锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力
 - `Popover`：支持 click 固定打开、hover 预览、外部点击 / `Esc` 关闭的锚定轻量浮层，可承载任意 widget 子树
@@ -222,9 +222,10 @@ NotificationOptions
 NotificationAction
 Notifications
 
-Stack / Grid / Flex / ScrollView / VirtualViewport / VirtualList / List
+Stack / Grid / Flex / ScrollView / VirtualViewport / VirtualList / List / DataGrid / Table
 Text / Button / Image / Canvas
 ItemSource<T> / ItemLayout / VirtualArrangement / VirtualDirection
+DataGridColumn<T, VM> / DataGridRow<T> / DataGridSort
 
 Theme / ThemeMode / ThemeSet / ThemeStore / ResolvedThemeMode / Color / FocusRingStyle
 dp / sp / Dp / Sp
@@ -300,6 +301,72 @@ fn rows_view<VM: 'static>() -> Element<VM> {
         overscan: 4,
     })
     .into()
+}
+```
+
+## Table / DataGrid
+
+`DataGrid`（别名 `Table`）是受控多列表格组件。组件负责表头/单元格渲染、虚拟化、选择、排序交互、列宽拖拽、列重排、固定列、右键菜单和文本编辑提交事件；真实 rows、排序结果、列宽、列顺序和提交后的数据由 ViewModel 更新。
+
+```rust
+use tgui::prelude::*;
+
+#[derive(Clone)]
+struct Person {
+    id: &'static str,
+    name: String,
+    role: String,
+}
+
+struct PeopleVm {
+    rows: State<Vec<Person>>,
+    selected: State<Vec<WidgetKey>>,
+    sort: State<Vec<DataGridSort>>,
+}
+
+impl PeopleVm {
+    fn view(&self) -> Element<Self> {
+        let rows = self
+            .rows
+            .get()
+            .into_iter()
+            .map(|row| DataGridRow::keyed(row.id, row))
+            .collect::<Vec<_>>();
+        let columns = vec![
+            DataGridColumn::new("name", "Name".to_string(), |ctx: DataGridCellContext<Person>| {
+                Text::new(ctx.row.name).into()
+            })
+            .width(dp(180.0))
+            .sortable(true)
+            .text_value(|row| row.name.clone())
+            .editable(true),
+            DataGridColumn::new("role", "Role".to_string(), |ctx: DataGridCellContext<Person>| {
+                Text::new(ctx.row.role).into()
+            })
+            .width(dp(180.0))
+            .sortable(true),
+        ];
+
+        DataGrid::new(rows, columns)
+            .selected_keys(self.selected.signal())
+            .selection_mode(DataGridSelectionMode::Multiple)
+            .sort(self.sort.signal())
+            .on_selection_change(ValueCommand::new(|vm: &mut Self, change| {
+                vm.selected.set(change.selected_keys);
+            }))
+            .on_sort_change(ValueCommand::new(|vm: &mut Self, change| {
+                vm.sort.set(change.sort);
+            }))
+            .on_cell_edit_commit(ValueCommand::new(|vm: &mut Self, commit| {
+                vm.rows.update(|rows| {
+                    if let Some(row) = rows.iter_mut().find(|row| WidgetKey::from(row.id) == commit.row_key) {
+                        row.name = commit.value;
+                    }
+                });
+            }))
+            .height(dp(360.0))
+            .into()
+    }
 }
 ```
 
@@ -389,6 +456,7 @@ fn build_form_ui(ctx: &ViewModelContext) -> Element<()> {
 - `demo`：综合展示常用布局、组件、`Tooltip` / `Popover` / `Tabs` / `Toast`、通知和画布
 - `toast_snackbar`：`ToastHost` / `ToastQueue` 专项示例，覆盖语义提示、action、持久提示、短时提示和不同位置
 - `list_virtual_list`：`List` / `VirtualList` 专项示例，覆盖受控多选、分组、loading / empty slot、行主动作、右键菜单和大数据虚拟化
+- `table_datagrid`：`DataGrid` / `Table` 专项示例，覆盖受控选择、排序、列宽、列重排、固定列、右键菜单和文本提交
 - `text_area`：受控 `Textarea` 编辑示例，读取自身源码但不保存
 - `multiple_vm_examples`：多页面 / 多 ViewModel 示例
 
@@ -400,6 +468,7 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 cargo run --manifest-path examples/canvas/Cargo.toml
 cargo run --manifest-path examples/frameless_window/Cargo.toml
 cargo run --manifest-path examples/list_virtual_list/Cargo.toml
+cargo run --manifest-path examples/table_datagrid/Cargo.toml
 ```
 
 README 中的示例名称以当前 `examples/` 目录为准；如果新增或删除示例，应同步更新本节和 `examples/README.md`。

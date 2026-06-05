@@ -159,6 +159,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.dispatch_list_item_keyboard_selection(&state, false)
                     || self.dispatch_list_item_action(&state)
             }
+            Some(HitInteraction::DataGridCell { id, state, .. }) => self
+                .dispatch_data_grid_cell_click(
+                    &state,
+                    id,
+                    std::time::Instant::now(),
+                    crate::ui::widget::CanvasMouseButton::Left,
+                ),
+            Some(HitInteraction::DataGridHeader { state, .. }) => self
+                .dispatch_data_grid_header_click(
+                    &state,
+                    crate::ui::widget::CanvasMouseButton::Left,
+                ),
+            Some(HitInteraction::DataGridResizeHandle { state, .. }) => self
+                .dispatch_data_grid_resize_click(
+                    &state,
+                    crate::ui::widget::CanvasMouseButton::Left,
+                ),
             Some(HitInteraction::SelectOption {
                 on_select,
                 on_open_change,
@@ -303,6 +320,9 @@ fn hit_interaction_widget_id<VM>(interaction: &HitInteraction<VM>) -> Option<Wid
         | HitInteraction::SelectOption { id, .. }
         | HitInteraction::TabTrigger { id, .. }
         | HitInteraction::ListItem { id, .. }
+        | HitInteraction::DataGridCell { id, .. }
+        | HitInteraction::DataGridHeader { id, .. }
+        | HitInteraction::DataGridResizeHandle { id, .. }
         | HitInteraction::Slider { id, .. }
         | HitInteraction::TextInput { id, .. }
         | HitInteraction::CanvasItem { id, .. } => Some(*id),
