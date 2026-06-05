@@ -72,28 +72,12 @@ impl Renderer {
         let _ = &mut pass;
     }
 
-    fn snapshot_texture(
-        &self,
+    fn copy_target_to_snapshot<'a>(
+        &'a self,
         encoder: &mut wgpu::CommandEncoder,
         source: &OffscreenTarget,
-        label: &str,
-    ) -> wgpu::Texture {
-        let snapshot = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size: wgpu::Extent3d {
-                width: self.config.width,
-                height: self.config.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.config.format,
-            usage: wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+    ) -> Result<&'a wgpu::TextureView, TguiError> {
+        let snapshot = self.offscreen_target(self.snapshot_target.as_ref(), "snapshot target")?;
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &source.single_texture,
@@ -102,7 +86,7 @@ impl Renderer {
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::TexelCopyTextureInfo {
-                texture: &snapshot,
+                texture: &snapshot.single_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -113,7 +97,7 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
-        snapshot
+        Ok(self.offscreen_sampled_view(snapshot))
     }
 
     pub(super) fn execute_prepared_commands(

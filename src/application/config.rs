@@ -41,9 +41,9 @@ impl ThemeSelection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MsaaMode {
     /// 关闭多重采样。
+    #[default]
     Off,
     /// 自动选择当前平台支持的最佳模式。
-    #[default]
     Auto,
     /// 使用 2x MSAA。
     X2,
@@ -135,7 +135,7 @@ impl Application {
             close_children_with_main: true,
             decorations: true,
             viewport_insets: Insets::ZERO,
-            msaa: MsaaMode::Auto,
+            msaa: MsaaMode::default(),
             fonts: FontCatalog::default(),
             theme: ThemeSelection::System,
             theme_set: ThemeSet::default(),

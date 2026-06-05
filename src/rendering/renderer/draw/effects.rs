@@ -21,9 +21,7 @@ impl Renderer {
         let blur_scratch_target =
             self.offscreen_target(self.blur_scratch_target.as_ref(), "blur scratch target")?;
 
-        let scene_snapshot = self.snapshot_texture(encoder, target, "tgui-scene-snapshot");
-        let scene_snapshot_view =
-            scene_snapshot.create_view(&wgpu::TextureViewDescriptor::default());
+        let scene_snapshot_view = self.copy_target_to_snapshot(encoder, target)?;
 
         let full_screen = TextVertex::quad(
             Rect::new(
@@ -283,10 +281,7 @@ impl Renderer {
             self.clear_offscreen_target(encoder, &composite_mask_target);
         }
 
-        let scene_snapshot =
-            self.snapshot_texture(encoder, target, "tgui-composite-scene-snapshot");
-        let scene_snapshot_view =
-            scene_snapshot.create_view(&wgpu::TextureViewDescriptor::default());
+        let scene_snapshot_view = self.copy_target_to_snapshot(encoder, target)?;
         let quad = CompositeVertex::quad(
             composite.primitive.bounds,
             self.config.width as f32 / self.scale_factor,

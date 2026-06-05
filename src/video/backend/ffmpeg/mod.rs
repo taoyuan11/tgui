@@ -116,14 +116,40 @@ pub(super) fn video_debug_enabled() -> bool {
 }
 
 pub(crate) struct FfmpegVideoBackend {
-    command_tx: Sender<BackendCommand>,
+    shared: BackendSharedState,
     latest_frame: Arc<Mutex<Option<Arc<TextureFrame>>>>,
-    present_worker: Mutex<Option<JoinHandle<()>>>,
-    decode_worker: Mutex<Option<JoinHandle<()>>>,
+    runtime: Mutex<VideoBackendRuntime>,
+}
+
+struct VideoBackendRuntime {
+    workers: Option<VideoWorkerHandles>,
+    target_raster: Option<RasterRequest>,
+}
+
+struct VideoWorkerHandles {
+    command_tx: Sender<BackendCommand>,
+    present_worker: JoinHandle<()>,
+    decode_worker: JoinHandle<()>,
 }
 
 impl FfmpegVideoBackend {
     pub(crate) fn new(shared: BackendSharedState) -> Self {
+        Self {
+            shared,
+            latest_frame: Arc::new(Mutex::new(None)),
+            runtime: Mutex::new(VideoBackendRuntime {
+                workers: None,
+                target_raster: None,
+            }),
+        }
+    }
+
+    fn ensure_workers(&self) -> Sender<BackendCommand> {
+        let mut runtime = self.runtime.lock();
+        if let Some(workers) = runtime.workers.as_ref() {
+            return workers.command_tx.clone();
+        }
+
         FFMPEG_INIT.call_once(|| {
             let _ = ffmpeg::init();
         });
@@ -131,7 +157,6 @@ impl FfmpegVideoBackend {
         let (backend_tx, backend_rx) = unbounded();
         let (decode_tx, decode_rx) = unbounded();
         let (event_tx, event_rx) = unbounded();
-        let latest_frame = Arc::new(Mutex::new(None));
         let shared_queue = Arc::new(SharedVideoQueue::new());
         let playback_clock = SharedPlaybackClock::default();
 
@@ -141,9 +166,10 @@ impl FfmpegVideoBackend {
             decode_main(decode_rx, event_tx, decode_queue, decode_clock);
         });
 
-        let present_latest = latest_frame.clone();
+        let present_latest = self.latest_frame.clone();
         let present_queue = shared_queue;
         let present_clock = playback_clock;
+        let shared = self.shared.clone();
         let present_worker = thread::spawn(move || {
             present_main(
                 backend_rx,
@@ -156,11 +182,36 @@ impl FfmpegVideoBackend {
             );
         });
 
-        Self {
+        let command_tx = backend_tx.clone();
+        let _ = command_tx.send(BackendCommand::SetVolume(self.shared.volume.get()));
+        let _ = command_tx.send(BackendCommand::SetMuted(self.shared.muted.get()));
+        let _ = command_tx.send(BackendCommand::SetBufferMemoryLimitBytes(
+            self.shared.buffer_memory_limit_bytes.get(),
+        ));
+        if runtime.target_raster.is_some() {
+            let _ = command_tx.send(BackendCommand::SetTargetRaster(runtime.target_raster));
+        }
+
+        runtime.workers = Some(VideoWorkerHandles {
             command_tx: backend_tx,
-            latest_frame,
-            present_worker: Mutex::new(Some(present_worker)),
-            decode_worker: Mutex::new(Some(decode_worker)),
+            present_worker,
+            decode_worker,
+        });
+
+        command_tx
+    }
+
+    fn active_command_tx(&self) -> Option<Sender<BackendCommand>> {
+        self.runtime
+            .lock()
+            .workers
+            .as_ref()
+            .map(|workers| workers.command_tx.clone())
+    }
+
+    fn send_if_active(&self, command: BackendCommand) {
+        if let Some(command_tx) = self.active_command_tx() {
+            let _ = command_tx.send(command);
         }
     }
 }
@@ -174,41 +225,43 @@ impl Drop for FfmpegVideoBackend {
 impl VideoBackend for FfmpegVideoBackend {
     fn load(&self, source: VideoSource) -> Result<(), TguiError> {
         validate_video_source(&source)?;
-        self.command_tx
+        self.ensure_workers()
             .send(BackendCommand::Load(source))
             .map_err(|_| TguiError::Media("video backend is unavailable".to_string()))
     }
 
     fn play(&self) {
-        let _ = self.command_tx.send(BackendCommand::Play);
+        self.send_if_active(BackendCommand::Play);
     }
 
     fn pause(&self) {
-        let _ = self.command_tx.send(BackendCommand::Pause);
+        self.send_if_active(BackendCommand::Pause);
     }
 
     fn seek(&self, position: Duration) {
-        let _ = self.command_tx.send(BackendCommand::Seek(position));
+        self.send_if_active(BackendCommand::Seek(position));
     }
 
     fn set_volume(&self, volume: f32) {
-        let _ = self.command_tx.send(BackendCommand::SetVolume(volume));
+        self.send_if_active(BackendCommand::SetVolume(volume));
     }
 
     fn set_muted(&self, muted: bool) {
-        let _ = self.command_tx.send(BackendCommand::SetMuted(muted));
+        self.send_if_active(BackendCommand::SetMuted(muted));
     }
 
     fn set_buffer_memory_limit_bytes(&self, bytes: u64) {
-        let _ = self
-            .command_tx
-            .send(BackendCommand::SetBufferMemoryLimitBytes(bytes));
+        self.send_if_active(BackendCommand::SetBufferMemoryLimitBytes(bytes));
     }
 
     fn set_target_raster(&self, raster: Option<RasterRequest>) {
-        let _ = self
-            .command_tx
-            .send(BackendCommand::SetTargetRaster(raster));
+        let mut runtime = self.runtime.lock();
+        runtime.target_raster = raster;
+        if let Some(workers) = runtime.workers.as_ref() {
+            let _ = workers
+                .command_tx
+                .send(BackendCommand::SetTargetRaster(raster));
+        }
     }
 
     fn current_frame(&self) -> Option<Arc<TextureFrame>> {
@@ -216,15 +269,13 @@ impl VideoBackend for FfmpegVideoBackend {
     }
 
     fn shutdown(&self) {
-        let _ = self.command_tx.send(BackendCommand::Shutdown);
+        let Some(workers) = self.runtime.lock().workers.take() else {
+            return;
+        };
 
-        if let Some(worker) = self.present_worker.lock().take() {
-            let _ = worker.join();
-        }
-
-        if let Some(worker) = self.decode_worker.lock().take() {
-            let _ = worker.join();
-        }
+        let _ = workers.command_tx.send(BackendCommand::Shutdown);
+        let _ = workers.present_worker.join();
+        let _ = workers.decode_worker.join();
     }
 }
 
@@ -361,7 +412,53 @@ struct OpenedVideoDecoder {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicBool;
+
+    use crate::animation::AnimationCoordinator;
+    use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
+    use crate::video::backend::DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES;
+    use crate::video::VideoMetrics;
+
     use super::*;
+
+    fn test_context() -> ViewModelContext {
+        ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
+    }
+
+    fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
+        BackendSharedState {
+            playback_state: ctx.state(VideoPlaybackState::Idle),
+            metrics: ctx.state(VideoMetrics::default()),
+            volume: ctx.state(1.0),
+            muted: ctx.state(false),
+            metrics_observed: Arc::new(AtomicBool::new(false)),
+            buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+            video_size: ctx.state(VideoSize::default()),
+            error: ctx.state(None),
+            surface: ctx.state(VideoSurfaceSnapshot::default()),
+        }
+    }
+
+    #[test]
+    fn backend_creation_and_target_updates_do_not_start_workers() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        let backend = FfmpegVideoBackend::new(shared);
+
+        assert!(backend.runtime.lock().workers.is_none());
+
+        VideoBackend::set_volume(&backend, 0.5);
+        VideoBackend::set_muted(&backend, true);
+        VideoBackend::set_buffer_memory_limit_bytes(&backend, 16 * 1024 * 1024);
+        VideoBackend::set_target_raster(&backend, Some(RasterRequest::new_clamped(320, 180)));
+
+        let runtime = backend.runtime.lock();
+        assert!(runtime.workers.is_none());
+        assert_eq!(
+            runtime.target_raster,
+            Some(RasterRequest::new_clamped(320, 180))
+        );
+    }
 
     #[test]
     fn rational_frame_duration_converts_fps_to_frame_span() {

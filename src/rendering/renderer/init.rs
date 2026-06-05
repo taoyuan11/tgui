@@ -84,10 +84,9 @@ impl Renderer {
             scale_factor,
             msaa_sample_count,
             scene_target: targets.scene_target,
+            snapshot_target: targets.snapshot_target,
             blur_target: targets.blur_target,
             blur_scratch_target: targets.blur_scratch_target,
-            composite_target: targets.composite_target,
-            composite_mask_target: targets.composite_mask_target,
             clear_color,
             text_system: TextSystem {
                 font_system,

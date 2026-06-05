@@ -2,10 +2,9 @@ use super::{surface, OffscreenTarget, Renderer};
 
 pub(super) struct RendererTargets {
     pub(super) scene_target: Option<OffscreenTarget>,
+    pub(super) snapshot_target: Option<OffscreenTarget>,
     pub(super) blur_target: Option<OffscreenTarget>,
     pub(super) blur_scratch_target: Option<OffscreenTarget>,
-    pub(super) composite_target: Option<OffscreenTarget>,
-    pub(super) composite_mask_target: Option<OffscreenTarget>,
 }
 
 impl RendererTargets {
@@ -21,6 +20,12 @@ impl RendererTargets {
                 "tgui-scene-target",
                 msaa_sample_count,
             ),
+            snapshot_target: surface::create_offscreen_target(
+                device,
+                config,
+                "tgui-snapshot-target",
+                1,
+            ),
             blur_target: surface::create_offscreen_target(
                 device,
                 config,
@@ -31,18 +36,6 @@ impl RendererTargets {
                 device,
                 config,
                 "tgui-blur-scratch-target",
-                msaa_sample_count,
-            ),
-            composite_target: surface::create_offscreen_target(
-                device,
-                config,
-                "tgui-composite-target",
-                msaa_sample_count,
-            ),
-            composite_mask_target: surface::create_offscreen_target(
-                device,
-                config,
-                "tgui-composite-mask-target",
                 msaa_sample_count,
             ),
         }
@@ -57,6 +50,8 @@ impl Renderer {
             "tgui-scene-target",
             self.msaa_sample_count,
         );
+        self.snapshot_target =
+            surface::create_offscreen_target(&self.device, &self.config, "tgui-snapshot-target", 1);
         self.blur_target = surface::create_offscreen_target(
             &self.device,
             &self.config,
@@ -67,18 +62,6 @@ impl Renderer {
             &self.device,
             &self.config,
             "tgui-blur-scratch-target",
-            self.msaa_sample_count,
-        );
-        self.composite_target = surface::create_offscreen_target(
-            &self.device,
-            &self.config,
-            "tgui-composite-target",
-            self.msaa_sample_count,
-        );
-        self.composite_mask_target = surface::create_offscreen_target(
-            &self.device,
-            &self.config,
-            "tgui-composite-mask-target",
             self.msaa_sample_count,
         );
     }

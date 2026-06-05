@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use crossbeam_channel::unbounded;
 
-use super::super::{BackendSharedState, DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES};
+use super::super::{AudioBackend, BackendSharedState, DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES};
 use super::worker::AudioWorker;
-use super::BackendCommand;
+use super::{BackendCommand, FfmpegAudioBackend};
 use crate::animation::AnimationCoordinator;
 use crate::audio::{AudioMetrics, AudioPlaybackState, AudioSource};
 use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
@@ -27,6 +27,30 @@ fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
         error: ctx.state(None),
         snapshot: ctx.state(crate::audio::AudioSnapshot::default()),
     }
+}
+
+#[test]
+fn backend_creation_and_preload_settings_do_not_start_worker() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let backend = FfmpegAudioBackend::new(shared);
+
+    assert!(backend
+        .worker
+        .lock()
+        .expect("audio worker lock poisoned")
+        .is_none());
+
+    AudioBackend::set_volume(&backend, 0.5);
+    AudioBackend::set_muted(&backend, true);
+    AudioBackend::set_looping(&backend, true);
+    AudioBackend::set_buffer_memory_limit_bytes(&backend, 16 * 1024 * 1024);
+
+    assert!(backend
+        .worker
+        .lock()
+        .expect("audio worker lock poisoned")
+        .is_none());
 }
 
 #[test]

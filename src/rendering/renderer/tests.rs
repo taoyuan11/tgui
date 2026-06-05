@@ -35,8 +35,8 @@ fn pipeline_multisample_state_uses_requested_count() {
 }
 
 #[test]
-fn msaa_mode_default_is_auto() {
-    assert_eq!(MsaaMode::default(), MsaaMode::Auto);
+fn msaa_mode_default_is_off() {
+    assert_eq!(MsaaMode::default(), MsaaMode::Off);
 }
 
 #[test]

@@ -5,7 +5,7 @@ use crossbeam_channel::{after, select, Receiver};
 
 use crate::audio::{AudioMetrics, AudioPlaybackState, AudioSource};
 
-use super::super::{BackendSharedState, DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES};
+use super::super::BackendSharedState;
 use super::session::{AudioSession, SessionStep};
 use super::{BackendCommand, COMMAND_POLL_INTERVAL, METRICS_SYNC_INTERVAL, STEP_IDLE_SLEEP};
 
@@ -37,7 +37,7 @@ impl AudioWorker {
             looping: shared.looping.get(),
             volume: shared.volume.get(),
             muted: shared.muted.get(),
-            buffer_memory_limit_bytes: DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES,
+            buffer_memory_limit_bytes: shared.buffer_memory_limit_bytes.get(),
             shared,
             current_source: None,
             current_duration: None,

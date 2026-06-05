@@ -28,10 +28,10 @@ fn window_spec_decorations_inherit_application_default() {
 }
 
 #[test]
-fn application_defaults_to_auto_msaa() {
+fn application_defaults_to_off_msaa() {
     let config = Application::new().config();
 
-    assert_eq!(config.msaa, MsaaMode::Auto);
+    assert_eq!(config.msaa, MsaaMode::Off);
 }
 
 #[test]
