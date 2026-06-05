@@ -13,13 +13,13 @@
 //! ```
 
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
-use crate::ui::layout::{Align, Axis, Value};
+use crate::ui::layout::Axis;
+use crate::ui::layout::Value;
 use crate::ui::widget::button::Button;
 use crate::ui::widget::container::Flex;
 use crate::ui::widget::core::Element;
 use crate::ui::widget::overlay::{Alignment, Placement};
 
-use super::descriptor::{MenuDescriptor, MenuItemState};
 use super::types::{MenuBarGroupId, MenuItem};
 use super::widget::Menu;
 
@@ -202,9 +202,6 @@ where
             children.push(menu.into());
         }
 
-        Flex::new(Axis::Horizontal)
-            .align(Align::Center)
-            .child(children)
-            .into()
+        Flex::new(Axis::Horizontal).child(children).into()
     }
 }

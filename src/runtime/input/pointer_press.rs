@@ -224,6 +224,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | HitInteraction::Checkbox { id, .. }
             | HitInteraction::Radio { id, .. }
             | HitInteraction::SelectTrigger { id, .. }
+            | HitInteraction::ListItem { id, .. }
             | HitInteraction::Slider { id, .. }
             | HitInteraction::TextInput { id, .. } => {
                 let has_context_menu = self
@@ -239,6 +240,60 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             _ => None,
         };
+
+        if let HitInteraction::ListItem {
+            id,
+            state,
+            interactions,
+        } = hit
+        {
+            self.clear_selected_text();
+            let hit_scope_path = {
+                let computed = self.computed_scene();
+                computed
+                    .hit_regions
+                    .iter()
+                    .chain(computed.overlay_hit_regions.iter())
+                    .find(|region| region.interaction.target_id() == hit_target_id)
+                    .map(|region| region.scope_path.clone())
+                    .unwrap_or_default()
+            };
+
+            if let Some(trap) = active_trap.as_ref() {
+                if !hit_scope_path.starts_with(trap) && focus_restore.is_none() {
+                    self.pending_click = None;
+                    self.pressed_widget = None;
+                    return;
+                }
+            }
+
+            self.close_all_open_selects_except(None);
+            let disabled = state.disabled.resolve();
+            self.update_focus(
+                (!disabled).then_some(FocusedWidget {
+                    widget_id: id,
+                    scope_path: hit_scope_path,
+                    on_blur: interactions.on_blur.clone(),
+                }),
+                (!disabled)
+                    .then_some(interactions.on_focus.clone())
+                    .flatten(),
+                false,
+            );
+            if disabled {
+                if let Some(widget_id) = focus_restore {
+                    let _ = self.restore_overlay_focus_if_needed(widget_id);
+                }
+            }
+            if let Some((context_menu_id, position)) = context_menu_open {
+                let _ = self.open_context_menu_at(context_menu_id, position);
+            } else {
+                let _ = self.dispatch_list_item_click(&state, id, now, button);
+            }
+            self.pressed_widget = Some(id);
+            return;
+        }
+
         let (
             widget_id,
             interactions,
@@ -420,20 +475,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 id,
                 interactions,
                 on_open_change,
-                is_open: _,
-            } => {
-                let is_open = self.resolved_select_open_state(id).unwrap_or(false);
-                (
-                    id,
-                    interactions.clone(),
-                    Some(id),
-                    interactions.on_focus.clone(),
-                    interactions.on_click.clone().map(ClickHandler::Command),
-                    Some((id, !is_open, on_open_change.clone())),
-                    None,
-                    None,
-                )
-            }
+                is_open,
+            } => (
+                id,
+                interactions.clone(),
+                Some(id),
+                interactions.on_focus.clone(),
+                interactions.on_click.clone().map(ClickHandler::Command),
+                Some((id, !is_open, on_open_change.clone())),
+                None,
+                None,
+            ),
             HitInteraction::TextInput {
                 id,
                 interactions,
@@ -504,6 +556,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             HitInteraction::Occluder { .. } => unreachable!("occluder hit handled above"),
             HitInteraction::Disabled { .. } => unreachable!("disabled hit handled above"),
             HitInteraction::CanvasItem { .. } => unreachable!("canvas item handled above"),
+            HitInteraction::ListItem { .. } => unreachable!("list item handled above"),
         };
 
         if selectable_text.is_none() {

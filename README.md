@@ -56,7 +56,7 @@
 
 ### 布局与组件
 
-- 布局与滚动容器：`Stack`、`Grid`、`Flex`、`ScrollView`、`VirtualViewport`、`VirtualList`
+- 布局与滚动容器：`Stack`、`Grid`、`Flex`、`ScrollView`、`VirtualViewport`、`VirtualList`、`List`
 - 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Switch`、`Tabs` / `TabView`、`ProgressBar`、`Spinner`、`Image`
 - 浮层基础设施：统一的 runtime overlay anchoring 引擎，当前已为 `Tooltip`、`Popover`、`Select` 与 `Menu` / `ContextMenu` / `MenuBar` 提供锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力
 - `Popover`：支持 click 固定打开、hover 预览、外部点击 / `Esc` 关闭的锚定轻量浮层，可承载任意 widget 子树
@@ -222,7 +222,7 @@ NotificationOptions
 NotificationAction
 Notifications
 
-Stack / Grid / Flex / ScrollView / VirtualViewport / VirtualList
+Stack / Grid / Flex / ScrollView / VirtualViewport / VirtualList / List
 Text / Button / Image / Canvas
 ItemSource<T> / ItemLayout / VirtualArrangement / VirtualDirection
 
@@ -238,7 +238,47 @@ FormField<T>
 TextFormField
 ```
 
-## 虚拟列表
+## 列表与虚拟列表
+
+`List` 是面向产品界面的受控列表组件，基于 `VirtualList` 渲染。它支持单选 / 多选、分组、空态、加载态、键盘导航、双击 / `Enter` 主动作以及行右键菜单；选择态由 ViewModel 持有，组件通过 `on_selection_change` 发出下一状态。
+
+```rust
+use tgui::prelude::*;
+
+struct MailVm {
+    selected: State<Vec<WidgetKey>>,
+}
+
+impl ViewModel for MailVm {
+    fn new(ctx: &ViewModelContext) -> Self {
+        Self {
+            selected: ctx.state(vec![WidgetKey::from("inbox")]),
+        }
+    }
+
+    fn view(&self) -> Element<Self> {
+        let folders = vec![
+            ListItem::keyed("inbox", "Inbox"),
+            ListItem::keyed("sent", "Sent"),
+            ListItem::keyed("archive", "Archive"),
+        ];
+
+        List::new(folders, |ctx| Text::new(ctx.item).into())
+            .selected_keys(self.selected.signal())
+            .on_selection_change(ValueCommand::new(|vm: &mut Self, change| {
+                vm.selected.set(change.selected_keys);
+            }))
+            .on_item_action(ValueCommand::new(|_vm: &mut Self, action| {
+                println!("open row {}", action.index);
+            }))
+            .empty(Text::new("No folders").into())
+            .loading(false)
+            .loading_view(Text::new("Loading...").into())
+            .height(dp(240.0))
+            .into()
+    }
+}
+```
 
 `VirtualList` 是 `VirtualViewport` 的语义薄封装，默认垂直列表、固定 40dp 行高、overscan 为 2。适合长列表或下拉候选项，只会把可见范围附近的行实例化进 widget tree。
 
@@ -348,6 +388,7 @@ fn build_form_ui(ctx: &ViewModelContext) -> Element<()> {
 - `frameless_window`：关闭系统装饰后的自绘标题栏、拖拽、拉伸和窗口按钮
 - `demo`：综合展示常用布局、组件、`Tooltip` / `Popover` / `Tabs` / `Toast`、通知和画布
 - `toast_snackbar`：`ToastHost` / `ToastQueue` 专项示例，覆盖语义提示、action、持久提示、短时提示和不同位置
+- `list_virtual_list`：`List` / `VirtualList` 专项示例，覆盖受控多选、分组、loading / empty slot、行主动作、右键菜单和大数据虚拟化
 - `text_area`：受控 `Textarea` 编辑示例，读取自身源码但不保存
 - `multiple_vm_examples`：多页面 / 多 ViewModel 示例
 
@@ -358,6 +399,7 @@ cargo run --manifest-path examples/basic_window/Cargo.toml
 cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 cargo run --manifest-path examples/canvas/Cargo.toml
 cargo run --manifest-path examples/frameless_window/Cargo.toml
+cargo run --manifest-path examples/list_virtual_list/Cargo.toml
 ```
 
 README 中的示例名称以当前 `examples/` 目录为准；如果新增或删除示例，应同步更新本节和 `examples/README.md`。

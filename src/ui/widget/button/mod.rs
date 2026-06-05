@@ -201,6 +201,7 @@ impl<VM> Button<VM> {
                 modal: None,
                 drawer: None,
                 tab_trigger: None,
+                list_item: None,
                 kind: WidgetKind::Button {
                     label: label.into(),
                     disabled: Value::Static(false),

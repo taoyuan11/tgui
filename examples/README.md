@@ -27,7 +27,8 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 4. `multi_window`
 5. `demo`
 6. `toast_snackbar`
-7. `text_area`
+7. `list_virtual_list`
+8. `text_area`
 
 ## 桌面示例说明
 
@@ -170,6 +171,24 @@ Toast / Snackbar 专项示例。演示：
 
 ```bash
 cargo run --manifest-path examples/toast_snackbar/Cargo.toml
+```
+
+### `list_virtual_list`
+
+List / VirtualList 专项示例。演示：
+
+- 受控多选 `List`
+- 分组 header
+- disabled 行
+- loading / empty slot
+- Enter / 双击主动作
+- row context menu
+- `VirtualList::new_with_context` 大数据虚拟化
+
+运行方式：
+
+```bash
+cargo run --manifest-path examples/list_virtual_list/Cargo.toml
 ```
 
 ### `text_area`

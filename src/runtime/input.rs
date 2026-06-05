@@ -8,6 +8,7 @@ mod gesture;
 mod hovering;
 mod interaction;
 mod key_repeat;
+mod list;
 mod navigation;
 mod overlay_close;
 mod platform_keys;
@@ -308,10 +309,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
                 if self.focused_text_input_id().is_none() =>
             {
-                self.activate_focused_widget(true, false)
+                self.activate_focused_list_item(true, false)
+                    || self.activate_focused_widget(true, false)
             }
             PhysicalKey::Code(KeyCode::Space) if self.focused_text_input_id().is_none() => {
-                self.activate_focused_widget(false, true)
+                self.activate_focused_list_item(false, true)
+                    || self.activate_focused_widget(false, true)
             }
             PhysicalKey::Code(KeyCode::Backspace) => self.delete_backward_at_focused_input(),
             PhysicalKey::Code(KeyCode::Delete) => self.delete_forward_at_focused_input(),
@@ -363,31 +366,47 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             PhysicalKey::Code(KeyCode::ArrowUp) => {
                 (self.focused_tab_is_horizontal() == Some(false) && self.move_focused_tab(-1))
+                    || self.move_focused_list_item(-1, self.modifiers.shift_key())
+                    || self.enter_focused_list_root(true, self.modifiers.shift_key())
                     || self.adjust_focused_slider(1, None)
                     || self.move_focused_input_cursor_vertically(-1, self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::ArrowDown) => {
                 (self.focused_tab_is_horizontal() == Some(false) && self.move_focused_tab(1))
+                    || self.move_focused_list_item(1, self.modifiers.shift_key())
+                    || self.enter_focused_list_root(false, self.modifiers.shift_key())
                     || self.adjust_focused_slider(-1, None)
                     || self.move_focused_input_cursor_vertically(1, self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::Home) => {
                 self.move_focused_tab_to_edge(false)
+                    || self.move_focused_list_item_to_edge(false, self.modifiers.shift_key())
+                    || self.enter_focused_list_root(false, self.modifiers.shift_key())
                     || self.adjust_focused_slider(0, Some(false))
-                    || self.scroll_focused_region_to_edge(false)
                     || self.move_focused_input_cursor(|_, _| 0, self.modifiers.shift_key())
+                    || self.scroll_focused_region_to_edge(false)
             }
             PhysicalKey::Code(KeyCode::End) => {
                 self.move_focused_tab_to_edge(true)
+                    || self.move_focused_list_item_to_edge(true, self.modifiers.shift_key())
+                    || self.enter_focused_list_root(true, self.modifiers.shift_key())
                     || self.adjust_focused_slider(0, Some(true))
-                    || self.scroll_focused_region_to_edge(true)
                     || self.move_focused_input_cursor(
                         |buffer: &RopeBuffer, _state: &TextEditState| buffer.len_bytes(),
                         self.modifiers.shift_key(),
                     )
+                    || self.scroll_focused_region_to_edge(true)
             }
-            PhysicalKey::Code(KeyCode::PageUp) => self.scroll_focused_region_by_pages(-1),
-            PhysicalKey::Code(KeyCode::PageDown) => self.scroll_focused_region_by_pages(1),
+            PhysicalKey::Code(KeyCode::PageUp) => {
+                self.page_focused_list_item(-1, self.modifiers.shift_key())
+                    || self.enter_focused_list_root(false, self.modifiers.shift_key())
+                    || self.scroll_focused_region_by_pages(-1)
+            }
+            PhysicalKey::Code(KeyCode::PageDown) => {
+                self.page_focused_list_item(1, self.modifiers.shift_key())
+                    || self.enter_focused_list_root(false, self.modifiers.shift_key())
+                    || self.scroll_focused_region_by_pages(1)
+            }
             PhysicalKey::Code(KeyCode::KeyA) if is_primary_shortcut_modifier(self.modifiers) => {
                 self.select_all_focused_input()
             }

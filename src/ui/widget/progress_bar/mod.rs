@@ -169,6 +169,7 @@ impl<VM> ProgressBar<VM> {
                 modal: None,
                 drawer: None,
                 tab_trigger: None,
+                list_item: None,
                 kind: WidgetKind::ProgressBar {
                     value: value.into(),
                     indeterminate: Value::Static(false),
@@ -202,6 +203,7 @@ impl<VM> ProgressBar<VM> {
                 modal: None,
                 drawer: None,
                 tab_trigger: None,
+                list_item: None,
                 kind: WidgetKind::ProgressBar {
                     value: Value::Static(0.0),
                     indeterminate: open.into(),

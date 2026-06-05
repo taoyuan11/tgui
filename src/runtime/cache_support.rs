@@ -35,10 +35,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         viewport: Rect,
         units: UnitContext,
     ) -> bool {
+        let virtual_scroll_matches = !self
+            .widget_tree
+            .as_ref()
+            .map(|tree| tree.has_virtual())
+            .unwrap_or(false)
+            || cached.scroll_epoch == self.scroll_epoch;
         cached.viewport == viewport
             && cached.units == units
             && cached.theme_epoch == self.theme_store.version()
             && cached.layout_animation_epoch == self.layout_animation_epoch
+            && virtual_scroll_matches
     }
 
     pub(in crate::runtime) fn scene_cache_mismatch_summary(
@@ -97,6 +104,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         if cached.active_scrollbar != active_scrollbar {
             reasons.push("active_scrollbar");
+        }
+        if self
+            .widget_tree
+            .as_ref()
+            .map(|tree| tree.has_virtual())
+            .unwrap_or(false)
+            && cached.scroll_epoch != self.scroll_epoch
+        {
+            reasons.push("virtual_scroll_epoch");
         }
         if reasons.is_empty() {
             "none".to_string()

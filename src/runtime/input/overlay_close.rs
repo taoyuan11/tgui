@@ -2,8 +2,55 @@ use crate::ui::widget::Point;
 
 use super::BoundRuntimeHandler;
 use crate::runtime::state::{FocusedWidget, TooltipDismissReason};
+use crate::ui::widget::{HitInteraction, ResolvedWidgetKind, WidgetId};
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    fn close_menu_layer_source(&mut self, source_widget_id: WidgetId) -> bool {
+        if self.close_context_menu(source_widget_id) {
+            return true;
+        }
+
+        if self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .and_then(|layout| layout.resolved_widget(source_widget_id))
+            .and_then(|resolved| resolved.menu.as_ref())
+            .is_some()
+        {
+            let _ = self.set_menu_open_state(source_widget_id, false);
+            return true;
+        }
+
+        let select_on_open_change = self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .and_then(|layout| layout.resolved_widget(source_widget_id))
+            .and_then(|resolved| match &resolved.kind {
+                ResolvedWidgetKind::Select { on_open_change, .. } => on_open_change.clone(),
+                _ => None,
+            });
+        let computed = self.computed_scene();
+        let has_select_trigger = computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .any(|region| {
+                matches!(
+                    &region.interaction,
+                    HitInteraction::SelectTrigger { id, .. } if *id == source_widget_id
+                )
+            });
+        if select_on_open_change.is_some() || has_select_trigger {
+            let _ =
+                self.set_select_open_state(source_widget_id, false, select_on_open_change.as_ref());
+            return true;
+        }
+
+        false
+    }
+
     fn close_overlay_handle(&mut self, handle: &crate::runtime::overlay::OverlayCloseHandle<VM>) {
         if let Some(command) = &handle.on_close {
             self.execute_value_command(command, handle.close_value);
@@ -12,11 +59,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         if handle.layer == crate::runtime::overlay::OverlayLayer::Menu {
             if let Some(source_widget_id) = handle.source_widget_id {
-                if self.close_context_menu(source_widget_id) {
+                if self.close_menu_layer_source(source_widget_id) {
                     return;
                 }
-                let _ = self.set_menu_open_state(source_widget_id, false);
-                return;
             }
         }
 

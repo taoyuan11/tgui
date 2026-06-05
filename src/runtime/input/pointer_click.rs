@@ -1,7 +1,11 @@
 use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
-    fn pending_click_matches_target(&self, target_id: HoverTargetId, now: Instant) -> bool {
+    pub(in crate::runtime::input) fn pending_click_matches_target(
+        &self,
+        target_id: HoverTargetId,
+        now: Instant,
+    ) -> bool {
         let Some(pending) = self.pending_click.as_ref() else {
             return false;
         };

@@ -337,7 +337,10 @@ impl<VM> Element<VM> {
             drawer: self
                 .drawer
                 .map(|drawer| Box::new((*drawer).scope(selector.clone()))),
-            tab_trigger: self.tab_trigger.map(|trigger| trigger.scope(selector)),
+            tab_trigger: self
+                .tab_trigger
+                .map(|trigger| trigger.scope(selector.clone())),
+            list_item: self.list_item.map(|list_item| list_item.scope(selector)),
             kind,
         }
     }

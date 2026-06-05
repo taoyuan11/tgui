@@ -52,7 +52,7 @@
   - ✅ 长选项 `Select` 下拉菜单已迁移到 `VirtualList`，短列表视觉与命中行为保持兼容，长列表只解析 visible range + overscan；
   - ✅ measured extent 回写加入小阈值，避免亚像素测量差异导致连续 layout invalidation；
   - ✅ 单元与 runtime 测试覆盖依赖失效、横向/纵向/网格可见范围、估算/测量高度、总 extent 更新、Select overlay 虚拟滚动与 removed widget state cleanup。
-  - ℹ️ 不阻塞框架完整性的长尾：Combobox / AutoComplete 尚未存在；P2 §16 的 List / VirtualList selection、多选、分组、键盘导航、empty/loading 等产品能力另行推进。
+  - ✅ P2 §16 的 `List` / `VirtualList` 产品能力已接上 selection、多选、分组、键盘导航、empty/loading 与行级 ContextMenu；Combobox / AutoComplete 尚未存在，不阻塞当前 Virtual Scrolling 框架完整性。
 
 ### 4. ScrollView（独立可滚动容器）
 - **作用**：把目前散在 Input / Textarea 内部的滚动逻辑抽成通用容器；支持 overflow x/y 独立控制、滚动条样式、惯性滚动、键盘 PgUp/PgDn/Home/End。
@@ -251,12 +251,19 @@
 
 ## 优先级 P2 —— 数据展示与录入扩展
 
-### 16. List / VirtualList
+### 16. List / VirtualList ✅
 - **作用**：通用列表，支持选中、多选、分组、行内操作。
-- **样式**：item 高度（固定/动态）、分组头、空状态、加载占位（配合 Skeleton）。
+- **样式**：item 高度（固定/动态）、分组头、空状态、加载插槽。
 - **桌面操作**：方向键导航、`Shift+↑/↓` 范围选、`Ctrl+Click` 多选、`Enter` 触发主动作；右键 ContextMenu。
 - **键盘补充**：方向键导航选中项；多选和主动作保持键盘可达。
 - **依赖**：P0 §2、§3、§4；可选 P1 §8 配 ContextMenu。
+- **进度**：[功能完整]
+  - ✅ 新增 `src/ui/widget/list/`，公开 `List`、`ListItem`、`ListSection`、`ListItemContext`、`ListSelectionMode`、`ListSelectionChange`、`ListItemAction` 与 `ListStyle`；
+  - ✅ `List` 默认复用垂直 `VirtualList`，固定 40dp 行高、overscan 2，并提供 selection、empty/loading slot、item action、context menu 与常用 layout / visual / focus builder；
+  - ✅ `VirtualList` 保持 `new(source, render)` 兼容，并新增 `new_with_context(source, render)` 以便行渲染读取 `ListItemContext`；
+  - ✅ runtime 已接入行级命中、受控选择变更、单选 / 多选、Ctrl/Cmd toggle、Shift range、Home / End / PageUp / PageDown、`Enter` 主动作、禁用行跳过与保持 focused row 可见；
+  - ✅ accessibility 将列表根标记为 listbox，行标记为 option，并暴露 selected / disabled / focused 状态；
+  - ℹ️ Skeleton 仍属于 P3 §25；当前 loading 可通过 `.loading_view(Element<VM>)` 插槽接入自定义占位。
 
 ### 17. Table / DataGrid
 - **作用**：多列数据展示；支持排序、列宽拖拽、列固定、行选择、分组、单元格编辑。

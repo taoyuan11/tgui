@@ -118,6 +118,26 @@ impl<VM> ResolvedElement<VM> {
         styles: &CollectResolvedStyles,
         context: &mut CollectContext<'_, '_>,
     ) -> Color {
+        if let Some(list_item) = self.list_item.as_ref() {
+            let color = if list_item.disabled.resolve() {
+                list_item.item_disabled_background.resolve()
+            } else if list_item.selected_keys.resolve().contains(&list_item.key) {
+                list_item.item_selected_background.resolve()
+            } else if widget_state.hovered || widget_state.pressed || widget_state.focused {
+                list_item.item_hover_background.resolve()
+            } else {
+                list_item.item_background.resolve()
+            };
+            return context.animations.resolve_color(
+                crate::animation::AnimationKey::Widget {
+                    id: self.id.raw(),
+                    property: WidgetProperty::Background,
+                },
+                color,
+                Some(Transition::default()),
+                context.now,
+            );
+        }
         match &self.kind {
             ResolvedWidgetKind::Button { .. } => {
                 let button_style = styles

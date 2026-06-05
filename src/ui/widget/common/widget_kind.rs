@@ -400,6 +400,79 @@ impl<VM: 'static> TabTriggerState<VM> {
     }
 }
 
+pub(crate) struct ListItemState<VM> {
+    pub list_id: WidgetId,
+    pub row_index: usize,
+    pub item_index: usize,
+    pub key: WidgetKey,
+    pub selected_keys: Value<Vec<WidgetKey>>,
+    pub selection_mode: crate::ui::widget::ListSelectionMode,
+    pub disabled: Value<bool>,
+    pub item_extent: Dp,
+    pub item_spacing: Dp,
+    pub item_background: Value<Color>,
+    pub item_hover_background: Value<Color>,
+    pub item_selected_background: Value<Color>,
+    pub item_disabled_background: Value<Color>,
+    pub on_selection_change: Option<ValueCommand<VM, crate::ui::widget::ListSelectionChange>>,
+    pub on_item_action: Option<ValueCommand<VM, crate::ui::widget::ListItemAction>>,
+    pub sibling_keys: std::sync::Arc<[WidgetKey]>,
+    pub sibling_disabled: std::sync::Arc<[bool]>,
+}
+
+impl<VM> Clone for ListItemState<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            list_id: self.list_id,
+            row_index: self.row_index,
+            item_index: self.item_index,
+            key: self.key.clone(),
+            selected_keys: self.selected_keys.clone(),
+            selection_mode: self.selection_mode,
+            disabled: self.disabled.clone(),
+            item_extent: self.item_extent,
+            item_spacing: self.item_spacing,
+            item_background: self.item_background.clone(),
+            item_hover_background: self.item_hover_background.clone(),
+            item_selected_background: self.item_selected_background.clone(),
+            item_disabled_background: self.item_disabled_background.clone(),
+            on_selection_change: self.on_selection_change.clone(),
+            on_item_action: self.on_item_action.clone(),
+            sibling_keys: self.sibling_keys.clone(),
+            sibling_disabled: self.sibling_disabled.clone(),
+        }
+    }
+}
+
+impl<VM: 'static> ListItemState<VM> {
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> ListItemState<RootVm> {
+        ListItemState {
+            list_id: self.list_id,
+            row_index: self.row_index,
+            item_index: self.item_index,
+            key: self.key,
+            selected_keys: self.selected_keys,
+            selection_mode: self.selection_mode,
+            disabled: self.disabled,
+            item_extent: self.item_extent,
+            item_spacing: self.item_spacing,
+            item_background: self.item_background,
+            item_hover_background: self.item_hover_background,
+            item_selected_background: self.item_selected_background,
+            item_disabled_background: self.item_disabled_background,
+            on_selection_change: self
+                .on_selection_change
+                .map(|command| command.scope(selector.clone())),
+            on_item_action: self.on_item_action.map(|command| command.scope(selector)),
+            sibling_keys: self.sibling_keys,
+            sibling_disabled: self.sibling_disabled,
+        }
+    }
+}
+
 impl<VM> Clone for SelectOptionState<VM> {
     fn clone(&self) -> Self {
         Self {

@@ -48,6 +48,7 @@ impl<VM> Container<VM> {
                 modal: None,
                 drawer: None,
                 tab_trigger: None,
+                list_item: None,
                 kind: WidgetKind::Container {
                     layout,
                     children: Vec::new(),

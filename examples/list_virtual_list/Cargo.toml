@@ -1,0 +1,8 @@
+[package]
+name = "list_virtual_list"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+tgui = { path = "../.." }

@@ -130,16 +130,14 @@ impl<VM: 'static> Element<VM> {
                             ));
                         }
                     }
+                    let previous_id = runtime_state.widget_ids_by_key.get(&item_key).copied();
                     let previous_child = previous_by_index
                         .get(&placement.item_index)
                         .copied()
                         .or_else(|| {
-                            runtime_state
-                                .widget_ids_by_key
-                                .get(&item_key)
-                                .and_then(|id| {
-                                    previous_children.iter().find(|child| child.id == *id)
-                                })
+                            previous_id.and_then(|id| {
+                                previous_children.iter().find(|child| child.id == id)
+                            })
                         })
                         .or_else(|| previous_children.get(children.len()));
                     if child.key.is_none() {
@@ -147,6 +145,8 @@ impl<VM: 'static> Element<VM> {
                     }
                     if let Some(previous_child) = previous_child {
                         child.id = previous_child.id;
+                    } else if let Some(previous_id) = previous_id {
+                        child.id = previous_id;
                     }
                     child_meta.push(VirtualResolvedItemMeta {
                         item_index: placement.item_index,
@@ -488,6 +488,7 @@ impl<VM: 'static> Element<VM> {
             modal: self.modal.clone(),
             drawer: self.drawer.clone(),
             tab_trigger: self.tab_trigger.clone(),
+            list_item: self.list_item.clone(),
             child_source_spans,
             kind,
         }

@@ -248,6 +248,11 @@ pub(crate) enum HitInteraction<VM> {
         reorderable: bool,
         on_reorder: Option<ValueCommand<VM, crate::ui::widget::TabsReorderEvent>>,
     },
+    ListItem {
+        id: WidgetId,
+        state: crate::ui::widget::common::ListItemState<VM>,
+        interactions: InteractionHandlers<VM>,
+    },
     Slider {
         id: WidgetId,
         interactions: InteractionHandlers<VM>,
@@ -389,6 +394,15 @@ impl<VM> Clone for HitInteraction<VM> {
                 reorderable: *reorderable,
                 on_reorder: on_reorder.clone(),
             },
+            Self::ListItem {
+                id,
+                state,
+                interactions,
+            } => Self::ListItem {
+                id: *id,
+                state: state.clone(),
+                interactions: interactions.clone(),
+            },
             Self::Slider {
                 id,
                 interactions,
@@ -483,6 +497,7 @@ impl<VM> HitInteraction<VM> {
             | Self::Radio { id, .. }
             | Self::SelectTrigger { id, .. }
             | Self::TabTrigger { id, .. }
+            | Self::ListItem { id, .. }
             | Self::Slider { id, .. }
             | Self::TextInput { id, .. } => HitTargetId::Widget(*id),
             Self::SelectOption {

@@ -233,33 +233,35 @@ impl<VM> ResolvedElement<VM> {
             }
             _ => Dimension::AUTO,
         };
+        let width = self.layout.width.as_ref().map(|value| {
+            resolve_dimension(
+                value,
+                animations,
+                self.id,
+                WidgetProperty::Width,
+                now,
+                units,
+            )
+        });
         let width = if is_root {
-            Some(Dimension::from_length(viewport.width))
+            width.or(Some(Dimension::from_length(viewport.width)))
         } else {
-            self.layout.width.as_ref().map(|value| {
-                resolve_dimension(
-                    value,
-                    animations,
-                    self.id,
-                    WidgetProperty::Width,
-                    now,
-                    units,
-                )
-            })
+            width
         };
+        let height = self.layout.height.as_ref().map(|value| {
+            resolve_dimension(
+                value,
+                animations,
+                self.id,
+                WidgetProperty::Height,
+                now,
+                units,
+            )
+        });
         let height = if is_root {
-            Some(Dimension::from_length(viewport.height))
+            height.or(Some(Dimension::from_length(viewport.height)))
         } else {
-            self.layout.height.as_ref().map(|value| {
-                resolve_dimension(
-                    value,
-                    animations,
-                    self.id,
-                    WidgetProperty::Height,
-                    now,
-                    units,
-                )
-            })
+            height
         };
         let mut style = TaffyStyle {
             size: TaffySize {

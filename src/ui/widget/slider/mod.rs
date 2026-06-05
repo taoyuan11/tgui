@@ -206,6 +206,7 @@ impl<VM> Slider<VM> {
                 modal: None,
                 drawer: None,
                 tab_trigger: None,
+                list_item: None,
                 kind: WidgetKind::Slider {
                     value: value.into(),
                     min,

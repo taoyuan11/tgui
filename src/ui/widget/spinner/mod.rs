@@ -169,6 +169,7 @@ impl<VM> Spinner<VM> {
                 modal: None,
                 drawer: None,
                 tab_trigger: None,
+                list_item: None,
                 kind: WidgetKind::Spinner {
                     style: None,
                     size_override: None,

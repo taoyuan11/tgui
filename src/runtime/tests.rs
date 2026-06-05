@@ -494,6 +494,7 @@ mod canvas_tests;
 mod drawer_tests;
 mod focus_selection_tests;
 mod gesture_tests;
+mod list_tests;
 mod menu_tests;
 mod modal_tests;
 mod popover_tests;

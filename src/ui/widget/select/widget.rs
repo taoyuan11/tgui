@@ -410,6 +410,7 @@ where
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::Select {
                 selected_label,
                 placeholder: select.placeholder,

@@ -343,6 +343,7 @@ impl Text {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -374,6 +375,7 @@ impl Text {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::Text { text: self },
         }
     }
@@ -404,6 +406,7 @@ impl<VM> From<Text> for Element<VM> {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::Text { text: value },
         }
     }

@@ -126,6 +126,7 @@ impl Audio {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::Audio { audio: self },
         }
     }
@@ -151,6 +152,7 @@ impl Audio {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::Audio { audio: self },
         }
     }
@@ -175,6 +177,7 @@ impl<VM> From<Audio> for Element<VM> {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::Audio { audio: value },
         }
     }

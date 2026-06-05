@@ -76,6 +76,10 @@ impl<VM: 'static> WidgetTree<VM> {
         }
     }
 
+    pub(crate) fn has_virtual(&self) -> bool {
+        self.has_virtual
+    }
+
     pub(crate) fn compute_scene_with_units_and_widget_state_at(
         &self,
         font_manager: &FontManager,

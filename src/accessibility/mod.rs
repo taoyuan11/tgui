@@ -180,6 +180,9 @@ fn node_for_widget<VM: 'static>(
 }
 
 fn role_for_widget<VM>(resolved: &ResolvedElement<VM>) -> Role {
+    if resolved.list_item.is_some() {
+        return Role::ListBoxOption;
+    }
     if resolved
         .modal
         .as_ref()
@@ -200,6 +203,11 @@ fn role_for_widget<VM>(resolved: &ResolvedElement<VM>) -> Role {
     match &resolved.kind {
         ResolvedWidgetKind::Container { layout, .. } if layout.scroll_view.is_some() => {
             Role::ScrollView
+        }
+        ResolvedWidgetKind::Virtual { children, .. }
+            if children.iter().any(|child| child.list_item.is_some()) =>
+        {
+            Role::ListBox
         }
         ResolvedWidgetKind::Container { .. }
         | ResolvedWidgetKind::Virtual { .. }
@@ -249,9 +257,27 @@ fn apply_widget_semantics<VM: 'static>(
         node.set_modal();
     }
 
+    if let Some(list_item) = resolved.list_item.as_ref() {
+        node.set_selected(list_item.selected_keys.resolve().contains(&list_item.key));
+        node.set_position_in_set(list_item.item_index + 1);
+        node.set_size_of_set(list_item.sibling_keys.len());
+        node.add_action(Action::Click);
+        if list_item.disabled.resolve() {
+            node.set_disabled();
+        }
+    }
+
     match &resolved.kind {
         ResolvedWidgetKind::Container { layout, .. } if layout.scroll_view.is_some() => {
             apply_scroll_region(node, computed, resolved.id);
+        }
+        ResolvedWidgetKind::Virtual { children, .. } => {
+            if let Some(list_item) = children.iter().find_map(|child| child.list_item.as_ref()) {
+                node.set_size_of_set(list_item.sibling_keys.len());
+                if list_item.selection_mode == crate::ui::widget::ListSelectionMode::Multiple {
+                    node.set_multiselectable();
+                }
+            }
         }
         ResolvedWidgetKind::Text { text } => {
             node.set_value(text.content.resolve());
@@ -396,7 +422,8 @@ fn apply_hit_actions<VM>(node: &mut Node, regions: Option<&[&HitRegion<VM>]>) {
             | HitInteraction::Radio { .. }
             | HitInteraction::Switch { .. }
             | HitInteraction::SelectTrigger { .. }
-            | HitInteraction::TabTrigger { .. } => {
+            | HitInteraction::TabTrigger { .. }
+            | HitInteraction::ListItem { .. } => {
                 node.add_action(Action::Click);
             }
             HitInteraction::Slider { .. } => {
@@ -482,6 +509,7 @@ fn hit_widget_id<VM>(interaction: &HitInteraction<VM>) -> Option<WidgetId> {
         | HitInteraction::SelectTrigger { id, .. }
         | HitInteraction::SelectOption { id, .. }
         | HitInteraction::TabTrigger { id, .. }
+        | HitInteraction::ListItem { id, .. }
         | HitInteraction::Slider { id, .. }
         | HitInteraction::TextInput { id, .. }
         | HitInteraction::CanvasItem { id, .. } => Some(*id),

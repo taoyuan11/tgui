@@ -68,6 +68,7 @@ impl<VM> From<ToastHost<VM>> for Element<VM> {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::ToastHost {
                 queue: value.queue,
                 placement: value.placement,

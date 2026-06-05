@@ -290,6 +290,7 @@ impl VideoSurface {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -321,6 +322,7 @@ impl VideoSurface {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -352,6 +354,7 @@ impl VideoSurface {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -382,6 +385,7 @@ impl<VM> From<VideoSurface> for Element<VM> {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::VideoSurface {
                 style: value.style.clone(),
                 video: value,

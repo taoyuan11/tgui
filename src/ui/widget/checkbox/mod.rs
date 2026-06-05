@@ -203,6 +203,7 @@ impl<VM> Checkbox<VM> {
                 modal: None,
                 drawer: None,
                 tab_trigger: None,
+                list_item: None,
                 kind: WidgetKind::Checkbox {
                     checked: checked.into(),
                     label: None,

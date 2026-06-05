@@ -298,6 +298,12 @@ pub struct BoundRuntimeHandler<VM> {
     /// Up/Down 调整最末元素；Right 把当前 cursor（必须是 Submenu 项）的首项 push；
     /// Left 弹栈直到深度=1，再交给 MenuBar Left/Right。
     menu_keyboard_cursor: HashMap<WidgetId, Vec<usize>>,
+    /// List / VirtualList 的范围选择锚点。真实 selected keys 仍由 ViewModel 受控持有；
+    /// runtime 只保存 Shift+Click / Shift+Arrow 的临时 anchor。
+    list_anchor_states: HashMap<WidgetId, crate::ui::widget::WidgetKey>,
+    /// 最近一次聚焦的 List row key。受控 selection 触发重建后 row WidgetId 可能更新，
+    /// 键盘导航用它把焦点恢复到当前虚拟窗口中的同一行。
+    list_focus_state: Option<(WidgetId, crate::ui::widget::WidgetKey)>,
     hovered_scrollbar: Option<ScrollbarHandle>,
     active_scrollbar_drag: Option<ScrollbarDrag>,
     active_touch_scroll: Option<TouchScrollDrag>,
@@ -425,6 +431,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             menubar_active_states: HashMap::new(),
             context_menu_anchor_states: HashMap::new(),
             menu_keyboard_cursor: HashMap::new(),
+            list_anchor_states: HashMap::new(),
+            list_focus_state: None,
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
             active_touch_scroll: None,

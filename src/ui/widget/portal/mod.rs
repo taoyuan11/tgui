@@ -238,6 +238,7 @@ impl<VM: 'static> From<Portal<VM>> for Element<VM> {
             modal: None,
             drawer: None,
             tab_trigger: None,
+            list_item: None,
             kind: WidgetKind::Portal {
                 content: Box::new(portal.content),
                 open: portal.open,

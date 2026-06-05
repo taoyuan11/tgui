@@ -171,6 +171,7 @@ impl<VM> Divider<VM> {
                 modal: None,
                 drawer: None,
                 tab_trigger: None,
+                list_item: None,
                 kind: WidgetKind::Divider {
                     orientation: DividerOrientation::Horizontal,
                     dashed: Value::Static(false),

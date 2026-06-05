@@ -291,6 +291,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | HitInteraction::Radio { .. }
             | HitInteraction::SelectTrigger { .. }
             | HitInteraction::TabTrigger { .. }
+            | HitInteraction::ListItem { .. }
             | HitInteraction::SelectOption { .. } => false,
         }
     }

@@ -287,6 +287,7 @@ fn select_option_row_element<VM>(
         modal: None,
         drawer: None,
         tab_trigger: None,
+        list_item: None,
         kind: WidgetKind::SelectOptionRow {
             owner_id,
             option_index,

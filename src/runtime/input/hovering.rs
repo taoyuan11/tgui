@@ -79,6 +79,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 | HitInteraction::SelectTrigger {
                     id, interactions, ..
                 }
+                | HitInteraction::ListItem {
+                    id, interactions, ..
+                }
                 | HitInteraction::TabTrigger {
                     id, interactions, ..
                 } => HoveredWidget {

@@ -162,6 +162,7 @@ impl<VM> Canvas<VM> {
                 modal: None,
                 drawer: None,
                 tab_trigger: None,
+                list_item: None,
                 kind: WidgetKind::Canvas {
                     scene: scene.into(),
                     item_interactions: CanvasItemInteractionHandlers::default(),

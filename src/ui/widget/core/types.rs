@@ -26,6 +26,7 @@ pub struct Element<VM> {
     pub(crate) modal: Option<Box<crate::ui::widget::modal::ModalDescriptor<VM>>>,
     pub(crate) drawer: Option<Box<crate::ui::widget::drawer::DrawerDescriptor<VM>>>,
     pub(crate) tab_trigger: Option<common::TabTriggerState<VM>>,
+    pub(crate) list_item: Option<common::ListItemState<VM>>,
     pub(crate) kind: WidgetKind<VM>,
 }
 
@@ -48,6 +49,7 @@ impl<VM> Clone for Element<VM> {
             modal: self.modal.clone(),
             drawer: self.drawer.clone(),
             tab_trigger: self.tab_trigger.clone(),
+            list_item: self.list_item.clone(),
             kind: self.kind.clone(),
         }
     }
@@ -70,6 +72,7 @@ pub(crate) struct ResolvedElement<VM> {
     pub(crate) modal: Option<Box<crate::ui::widget::modal::ModalDescriptor<VM>>>,
     pub(crate) drawer: Option<Box<crate::ui::widget::drawer::DrawerDescriptor<VM>>>,
     pub(crate) tab_trigger: Option<common::TabTriggerState<VM>>,
+    pub(crate) list_item: Option<common::ListItemState<VM>>,
     pub(crate) child_source_spans: Vec<usize>,
     pub(crate) kind: ResolvedWidgetKind<VM>,
 }
@@ -264,6 +267,7 @@ impl<VM> Clone for ResolvedElement<VM> {
             modal: self.modal.clone(),
             drawer: self.drawer.clone(),
             tab_trigger: self.tab_trigger.clone(),
+            list_item: self.list_item.clone(),
             child_source_spans: self.child_source_spans.clone(),
             kind: self.kind.clone(),
         }

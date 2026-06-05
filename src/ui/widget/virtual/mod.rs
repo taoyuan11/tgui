@@ -489,6 +489,37 @@ impl<VM: 'static> ErasedVirtualItemSource<VM> {
         }
     }
 
+    pub(crate) fn new_with_context<T, S>(
+        source: Arc<S>,
+        render: Arc<dyn Fn(crate::ui::widget::ListItemContext<T>) -> Element<VM> + Send + Sync>,
+    ) -> Self
+    where
+        T: Clone + Send + Sync + 'static,
+        S: ItemSource<T>,
+    {
+        Self {
+            len_fn: {
+                let source = source.clone();
+                Arc::new(move || source.len())
+            },
+            key_fn: {
+                let source = source.clone();
+                Arc::new(move |index| source.key(index))
+            },
+            build_fn: Arc::new(move |index| {
+                let item = source.item(index)?;
+                let key = source.key(index).unwrap_or_else(|| WidgetKey::from(index));
+                Some(render(crate::ui::widget::ListItemContext {
+                    index,
+                    key,
+                    item,
+                    selected: false,
+                    disabled: false,
+                }))
+            }),
+        }
+    }
+
     pub(crate) fn len(&self) -> usize {
         (self.len_fn)()
     }
@@ -562,6 +593,7 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
                 modal: None,
                 drawer: None,
                 tab_trigger: None,
+                list_item: None,
                 kind: WidgetKind::Virtual {
                     arrangement,
                     item_layout,
@@ -924,6 +956,55 @@ impl<T, VM: 'static> VirtualList<T, VM> {
                 },
                 render,
             ),
+        }
+    }
+
+    pub fn new_with_context<S>(
+        source: S,
+        render: impl Fn(crate::ui::widget::ListItemContext<T>) -> Element<VM> + Send + Sync + 'static,
+    ) -> Self
+    where
+        T: Clone + Send + Sync + 'static,
+        S: ItemSource<T>,
+    {
+        let source = Arc::new(source);
+        let render = Arc::new(render);
+        Self {
+            viewport: VirtualViewport {
+                element: Element {
+                    id: WidgetId::next(),
+                    key: None,
+                    layout: crate::ui::layout::LayoutStyle::default(),
+                    focus: Default::default(),
+                    visual: VisualStyle::default(),
+                    interactions: InteractionHandlers::default(),
+                    lifecycle_events: LifecycleEventHandlers::default(),
+                    media_events: MediaEventHandlers::default(),
+                    background: None,
+                    tooltip: None,
+                    popover: None,
+                    menu: None,
+                    context_menu: None,
+                    modal: None,
+                    drawer: None,
+                    tab_trigger: None,
+                    list_item: None,
+                    kind: WidgetKind::Virtual {
+                        arrangement: VirtualArrangement::Linear(VirtualDirection::Vertical),
+                        item_layout: ItemLayout::Fixed {
+                            item_extent: dp(40.0),
+                            spacing: Dp::ZERO,
+                            overscan: 2,
+                        },
+                        source: ErasedVirtualItemSource::new_with_context::<T, S>(source, render),
+                        overflow_x: Overflow::Hidden,
+                        overflow_y: Overflow::Scroll,
+                        style: None,
+                        runtime_state: VirtualRuntimeState::default(),
+                    },
+                },
+                marker: PhantomData,
+            },
         }
     }
 

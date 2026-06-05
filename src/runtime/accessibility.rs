@@ -155,6 +155,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     false
                 }
             }
+            Some(HitInteraction::ListItem { state, .. }) => {
+                self.dispatch_list_item_keyboard_selection(&state, false)
+                    || self.dispatch_list_item_action(&state)
+            }
             Some(HitInteraction::SelectOption {
                 on_select,
                 on_open_change,
@@ -298,6 +302,7 @@ fn hit_interaction_widget_id<VM>(interaction: &HitInteraction<VM>) -> Option<Wid
         | HitInteraction::SelectTrigger { id, .. }
         | HitInteraction::SelectOption { id, .. }
         | HitInteraction::TabTrigger { id, .. }
+        | HitInteraction::ListItem { id, .. }
         | HitInteraction::Slider { id, .. }
         | HitInteraction::TextInput { id, .. }
         | HitInteraction::CanvasItem { id, .. } => Some(*id),

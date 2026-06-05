@@ -1,4 +1,6 @@
 use super::*;
+use crate::platform::event::MouseButton;
+use crate::ui::widget::{ItemLayout, VirtualList};
 
 fn overlay_select_option_indices<VM>(
     computed: &crate::ui::widget::ComputedScene<VM>,
@@ -11,6 +13,39 @@ fn overlay_select_option_indices<VM>(
             _ => None,
         })
         .collect()
+}
+
+fn visible_virtual_row_indices<VM>(computed: &crate::ui::widget::ComputedScene<VM>) -> Vec<usize> {
+    computed
+        .scene
+        .texts
+        .iter()
+        .filter_map(|text| {
+            text.content
+                .as_ref()
+                .strip_prefix("Virtual row ")
+                .and_then(|value| value.parse::<usize>().ok())
+        })
+        .collect()
+}
+
+fn virtual_scroll_test_tree() -> (WidgetId, WidgetTree<TestVm>) {
+    let rows = (0..1_000).collect::<Vec<_>>();
+    let list: Element<TestVm> = VirtualList::new(rows, |_index, item| {
+        Stack::new()
+            .height(dp(20.0))
+            .child(Text::new(format!("Virtual row {item}")))
+            .into()
+    })
+    .item_layout(ItemLayout::Fixed {
+        item_extent: dp(20.0),
+        spacing: Dp::ZERO,
+        overscan: 0,
+    })
+    .size(dp(180.0), dp(100.0))
+    .into();
+    let list_id = list.id;
+    (list_id, WidgetTree::new(list))
 }
 
 #[test]
@@ -49,6 +84,139 @@ fn textarea_mouse_wheel_scrolls_vertical_overflow() {
             .unwrap_or(Dp::ZERO)
             > Dp::ZERO
             || handler.smooth_scroll_states.contains_key(&text_id)
+    );
+}
+
+#[test]
+fn mouse_wheel_updates_virtual_list_window_immediately() {
+    let invalidation = InvalidationSignal::new();
+    let (list_id, tree) = virtual_scroll_test_tree();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(180.0, 100.0),
+    );
+
+    let (target, baseline_min) = {
+        let computed = handler.computed_scene();
+        let baseline_min = visible_virtual_row_indices(computed)
+            .into_iter()
+            .min()
+            .expect("initial VirtualList rows should render");
+        let region = computed
+            .scroll_regions
+            .iter()
+            .find(|region| region.id == list_id)
+            .copied()
+            .expect("VirtualList should register a scroll region");
+        (
+            Point {
+                x: region.visible_frame.x + dp(8.0),
+                y: region.visible_frame.y + dp(8.0),
+            },
+            baseline_min,
+        )
+    };
+    assert_eq!(baseline_min, 0);
+
+    handler.cursor_position = Some(target);
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -8.0)));
+
+    let scrolled_min = visible_virtual_row_indices(handler.computed_scene())
+        .into_iter()
+        .min()
+        .expect("scrolled VirtualList rows should render");
+    assert!(
+        scrolled_min > baseline_min,
+        "VirtualList should rebuild its visible window as soon as wheel scrolling updates offset"
+    );
+}
+
+#[test]
+fn scrollbar_drag_updates_virtual_list_window_while_dragging() {
+    let invalidation = InvalidationSignal::new();
+    let (list_id, tree) = virtual_scroll_test_tree();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(180.0, 100.0),
+    );
+    let event_loop = TestEventLoop;
+
+    let (start, target, baseline_min) = {
+        let computed = handler.computed_scene();
+        let baseline_min = visible_virtual_row_indices(computed)
+            .into_iter()
+            .min()
+            .expect("initial VirtualList rows should render");
+        let region = computed
+            .scroll_regions
+            .iter()
+            .find(|region| region.id == list_id)
+            .copied()
+            .expect("VirtualList should register a scroll region");
+        let thumb = region
+            .vertical_thumb
+            .expect("VirtualList should render a vertical scrollbar thumb");
+        let track = region
+            .vertical_track
+            .expect("VirtualList should render a vertical scrollbar track");
+        let start = Point {
+            x: thumb.x + dp(thumb.width.get() * 0.5),
+            y: thumb.y + dp(thumb.height.get() * 0.5),
+        };
+        let travel = (track.height - thumb.height).max(0.0);
+        let target = Point {
+            x: start.x,
+            y: start.y + travel * 0.45,
+        };
+        (start, target, baseline_min)
+    };
+    assert_eq!(baseline_min, 0);
+
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerMoved {
+            device_id: None,
+            position: PhysicalPosition::new(f64::from(start.x.get()), f64::from(start.y.get())),
+            primary: true,
+            source: PointerSource::Mouse,
+        },
+    );
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerButton {
+            device_id: None,
+            position: PhysicalPosition::new(f64::from(start.x.get()), f64::from(start.y.get())),
+            state: ElementState::Pressed,
+            button: ButtonSource::Mouse(MouseButton::Left),
+            primary: true,
+        },
+    );
+    assert!(
+        handler.active_scrollbar_drag.is_some(),
+        "pressing the VirtualList thumb should start scrollbar drag"
+    );
+
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerMoved {
+            device_id: None,
+            position: PhysicalPosition::new(f64::from(target.x.get()), f64::from(target.y.get())),
+            primary: true,
+            source: PointerSource::Mouse,
+        },
+    );
+
+    let dragged_min = visible_virtual_row_indices(handler.computed_scene())
+        .into_iter()
+        .min()
+        .expect("dragged VirtualList rows should render");
+    assert!(
+        dragged_min > baseline_min,
+        "VirtualList should update visible rows while the scrollbar thumb is being dragged"
     );
 }
 

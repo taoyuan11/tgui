@@ -135,6 +135,9 @@ impl<VM> ResolvedElement<VM> {
                 style.focus_ring.as_ref(),
                 visual.widget_state,
             ),
+            _ if self.list_item.is_some() && visual.widget_state.focused => {
+                Some(context.theme.focus_ring.clone())
+            }
             _ => None,
         };
         push_focus_ring_primitives(
@@ -177,14 +180,14 @@ impl<VM> ResolvedElement<VM> {
             ) || matches!(
                 &self.kind,
                 ResolvedWidgetKind::Container { layout, .. } if layout.scroll_view.is_some()
-            );
+            ) || self.list_item.is_some();
             let focus = context.build_focus_meta(
                 self.id,
                 &self.focus,
                 &self.interactions,
                 fallback_focusable,
             );
-            if self.interactions.has_any() || focus.is_some() {
+            if self.interactions.has_any() || focus.is_some() || self.list_item.is_some() {
                 let interaction = if let Some(trigger) = self.tab_trigger.as_ref() {
                     HitInteraction::TabTrigger {
                         id: self.id,
@@ -197,6 +200,12 @@ impl<VM> ResolvedElement<VM> {
                         on_change: trigger.on_change.clone(),
                         reorderable: trigger.reorderable.resolve(),
                         on_reorder: trigger.on_reorder.clone(),
+                    }
+                } else if let Some(list_item) = self.list_item.as_ref() {
+                    HitInteraction::ListItem {
+                        id: self.id,
+                        state: list_item.clone(),
+                        interactions: self.interactions.clone(),
                     }
                 } else {
                     HitInteraction::Widget {
