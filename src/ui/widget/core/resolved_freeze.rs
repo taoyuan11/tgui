@@ -75,6 +75,7 @@ fn freeze_visual_style(style: &mut VisualStyle) {
     freeze_option_value(&mut style.shadow);
     freeze_value(&mut style.opacity);
     freeze_value(&mut style.offset);
+    freeze_value(&mut style.scale);
 }
 
 fn freeze_container_layout(layout: &mut ContainerLayout) {
@@ -315,21 +316,25 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             checked,
             label,
             disabled,
+            validation,
             style,
             ..
         } => {
             let mut checked = checked.clone();
             let mut label = label.clone();
             let mut disabled = disabled.clone();
+            let mut validation = validation.clone();
             let mut style = style.clone();
             freeze_value(&mut checked);
             freeze_option_value(&mut label);
             freeze_value(&mut disabled);
+            freeze_value(&mut validation);
             freeze_checkbox_style(&mut style);
             LifecycleWidgetKind::Checkbox {
                 checked,
                 label,
                 disabled,
+                validation,
                 style,
             }
         }
@@ -337,21 +342,25 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             checked,
             label,
             disabled,
+            validation,
             style,
             ..
         } => {
             let mut checked = checked.clone();
             let mut label = label.clone();
             let mut disabled = disabled.clone();
+            let mut validation = validation.clone();
             let mut style = style.clone();
             freeze_value(&mut checked);
             freeze_option_value(&mut label);
             freeze_value(&mut disabled);
+            freeze_value(&mut validation);
             freeze_radio_style(&mut style);
             LifecycleWidgetKind::Radio {
                 checked,
                 label,
                 disabled,
+                validation,
                 style,
             }
         }
@@ -362,6 +371,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             active_thumb_color,
             inactive_thumb_color,
             disabled,
+            validation,
             style,
             ..
         } => {
@@ -371,6 +381,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             let mut active_thumb_color = active_thumb_color.clone();
             let mut inactive_thumb_color = inactive_thumb_color.clone();
             let mut disabled = disabled.clone();
+            let mut validation = validation.clone();
             let mut style = style.clone();
             freeze_value(&mut checked);
             freeze_option_value(&mut active_background);
@@ -378,6 +389,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             freeze_option_value(&mut active_thumb_color);
             freeze_option_value(&mut inactive_thumb_color);
             freeze_value(&mut disabled);
+            freeze_value(&mut validation);
             freeze_switch_style(&mut style);
             LifecycleWidgetKind::Switch {
                 checked,
@@ -386,6 +398,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
                 active_thumb_color,
                 inactive_thumb_color,
                 disabled,
+                validation,
                 style,
             }
         }
@@ -395,6 +408,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             options,
             open,
             disabled,
+            validation,
             style,
             ..
         } => {
@@ -410,6 +424,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
                 .collect::<Vec<_>>();
             let mut open = open.clone();
             let mut disabled = disabled.clone();
+            let mut validation = validation.clone();
             let mut style = style.clone();
             freeze_value(&mut selected_label);
             freeze_value(&mut placeholder);
@@ -420,6 +435,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             }
             freeze_option_value(&mut open);
             freeze_value(&mut disabled);
+            freeze_value(&mut validation);
             freeze_select_style(&mut style);
             LifecycleWidgetKind::Select {
                 selected_label,
@@ -427,6 +443,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
                 options,
                 open,
                 disabled,
+                validation,
                 style,
             }
         }
@@ -462,14 +479,17 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             tick_count,
             value_formatter,
             disabled,
+            validation,
             style,
             ..
         } => {
             let mut value = value.clone();
             let mut disabled = disabled.clone();
+            let mut validation = validation.clone();
             let mut style = style.clone();
             freeze_value(&mut value);
             freeze_value(&mut disabled);
+            freeze_value(&mut validation);
             freeze_slider_style(&mut style);
             LifecycleWidgetKind::Slider {
                 value,
@@ -481,6 +501,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
                 tick_count: *tick_count,
                 value_formatter: value_formatter.clone(),
                 disabled,
+                validation,
                 style,
             }
         }
@@ -565,6 +586,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             multiline,
             show_scrollbar,
             auto_wrap,
+            validation,
             ..
         } => {
             let mut placeholder = placeholder.clone();
@@ -572,11 +594,13 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             let mut style = style.clone();
             let mut show_scrollbar = show_scrollbar.clone();
             let mut auto_wrap = auto_wrap.clone();
+            let mut validation = validation.clone();
             freeze_value(&mut placeholder);
             freeze_value(&mut disabled);
             freeze_input_style(&mut style);
             freeze_value(&mut show_scrollbar);
             freeze_value(&mut auto_wrap);
+            freeze_value(&mut validation);
             LifecycleWidgetKind::TextEditor {
                 placeholder,
                 disabled,
@@ -584,6 +608,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
                 multiline: *multiline,
                 show_scrollbar,
                 auto_wrap,
+                validation,
             }
         }
         ResolvedWidgetKind::ToastHost { .. } => LifecycleWidgetKind::ToastHost,

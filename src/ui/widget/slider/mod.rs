@@ -1,3 +1,4 @@
+use crate::foundation::form::ValidationVisualState;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
@@ -216,6 +217,7 @@ impl<VM> Slider<VM> {
                     value_formatter: None,
                     on_change: None,
                     disabled: Value::Static(false),
+                    validation: Value::Static(ValidationVisualState::default()),
                     style: None,
                 },
             },
@@ -369,6 +371,17 @@ impl<VM> Slider<VM> {
     pub fn disable(mut self, disable: impl Into<Value<bool>>) -> Self {
         if let WidgetKind::Slider { disabled, .. } = &mut self.element.kind {
             *disabled = disable.into();
+        }
+        self
+    }
+
+    /// 设置校验视觉状态。
+    pub fn validation(mut self, validation: impl Into<Value<ValidationVisualState>>) -> Self {
+        if let WidgetKind::Slider {
+            validation: target, ..
+        } = &mut self.element.kind
+        {
+            *target = validation.into();
         }
         self
     }

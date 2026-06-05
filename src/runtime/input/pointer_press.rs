@@ -185,6 +185,60 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
         let text_input_hit = matches!(&hit, HitInteraction::TextInput { .. });
+        if button == CanvasMouseButton::Left {
+            if let HitInteraction::TabTrigger {
+                group_id,
+                index,
+                placement,
+                key,
+                reorderable,
+                on_reorder,
+                ..
+            } = &hit
+            {
+                if *reorderable {
+                    self.active_tab_reorder = Some(super::super::ActiveTabReorder {
+                        group_id: *group_id,
+                        from_index: *index,
+                        key: key.clone(),
+                        placement: *placement,
+                        on_reorder: on_reorder.clone(),
+                    });
+                }
+            }
+        }
+        let menu_toggle = match &hit {
+            HitInteraction::Widget { id, .. } | HitInteraction::TabTrigger { id, .. } => self
+                .cached_scene
+                .as_ref()
+                .and_then(|cached| cached.layout.as_ref())
+                .and_then(|layout| layout.resolved_widget(*id))
+                .and_then(|resolved| resolved.menu.as_ref().map(|_| *id)),
+            _ => None,
+        };
+        let context_menu_open = match &hit {
+            HitInteraction::Widget { id, .. }
+            | HitInteraction::TabTrigger { id, .. }
+            | HitInteraction::SelectableText { id, .. }
+            | HitInteraction::Switch { id, .. }
+            | HitInteraction::Checkbox { id, .. }
+            | HitInteraction::Radio { id, .. }
+            | HitInteraction::SelectTrigger { id, .. }
+            | HitInteraction::Slider { id, .. }
+            | HitInteraction::TextInput { id, .. } => {
+                let has_context_menu = self
+                    .cached_scene
+                    .as_ref()
+                    .and_then(|cached| cached.layout.as_ref())
+                    .and_then(|layout| layout.resolved_widget(*id))
+                    .and_then(|resolved| resolved.context_menu.as_ref())
+                    .map(|menu| !menu.disabled.resolve())
+                    .unwrap_or(false);
+                (button == CanvasMouseButton::Right && has_context_menu)
+                    .then_some((*id, pointer_position.unwrap_or(Point::ZERO)))
+            }
+            _ => None,
+        };
         let (
             widget_id,
             interactions,
@@ -501,6 +555,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if let Some((select_id, next_open, on_open_change)) = select_toggle {
             self.close_all_open_selects_except(next_open.then_some(select_id));
             let _ = self.set_select_open_state(select_id, next_open, on_open_change.as_ref());
+        }
+        if let Some((context_menu_id, position)) = context_menu_open {
+            self.close_all_open_selects_except(None);
+            let _ = self.open_context_menu_at(context_menu_id, position);
+        } else if button == CanvasMouseButton::Left {
+            if let Some(menu_id) = menu_toggle {
+                self.close_all_open_selects_except(None);
+                let _ = self.toggle_menu_open_state(menu_id);
+            }
         }
         self.pressed_widget = Some(widget_id);
 

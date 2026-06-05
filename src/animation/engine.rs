@@ -23,6 +23,7 @@ pub(crate) enum WidgetProperty {
     TextColor,
     Opacity,
     Offset,
+    Scale,
     TooltipVisibility,
     ModalVisibility,
     DrawerVisibility,

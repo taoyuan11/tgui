@@ -15,12 +15,14 @@ use crate::ui::widget::style::DrawerStyle;
 use crate::ui::widget::WidgetId;
 
 use super::placement::DrawerPlacement;
+use super::widget::DrawerMode;
 
 /// 挂在 `Element::drawer` 上的 Drawer 状态描述符。
 pub(crate) struct DrawerDescriptor<VM> {
     pub(crate) open: Value<bool>,
     pub(crate) on_open_change: Option<ValueCommand<VM, bool>>,
     pub(crate) placement: DrawerPlacement,
+    pub(crate) mode: DrawerMode,
     pub(crate) close_on_escape: bool,
     pub(crate) close_on_backdrop_click: bool,
     pub(crate) return_focus_to: Option<WidgetId>,
@@ -35,6 +37,7 @@ impl<VM> Clone for DrawerDescriptor<VM> {
             open: self.open.clone(),
             on_open_change: self.on_open_change.clone(),
             placement: self.placement,
+            mode: self.mode,
             close_on_escape: self.close_on_escape,
             close_on_backdrop_click: self.close_on_backdrop_click,
             return_focus_to: self.return_focus_to,
@@ -58,6 +61,7 @@ impl<VM> DrawerDescriptor<VM> {
             open: self.open,
             on_open_change: self.on_open_change.map(|cmd| cmd.scope(selector)),
             placement: self.placement,
+            mode: self.mode,
             close_on_escape: self.close_on_escape,
             close_on_backdrop_click: self.close_on_backdrop_click,
             return_focus_to: self.return_focus_to,

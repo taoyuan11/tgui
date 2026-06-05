@@ -80,8 +80,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let is_right_mouse = matches!(button.clone().mouse_button(), Some(MouseButton::Right));
         if is_right_mouse && session.recognizer.on_long_press.is_some() {
+            let event = session.long_press_event(GesturePhase::Recognized);
+            self.open_context_menu_from_long_press_event(&event);
             if let Some(command) = session.recognizer.on_long_press.clone() {
-                let event = session.long_press_event(GesturePhase::Recognized);
                 self.execute_value_command(&command, event);
             }
             session.long_press_triggered = true;
@@ -232,14 +233,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.tooltip_state.long_press_candidate = Some(session.widget_id);
             self.tooltip_state.long_press_release_deadline = None;
         }
+        let event = session.long_press_event(GesturePhase::Recognized);
+        let opened_context_menu = self.open_context_menu_from_long_press_event(&event);
         let changed = if let Some(command) = session.recognizer.on_long_press.clone() {
-            self.execute_value_command(
-                &command,
-                session.long_press_event(GesturePhase::Recognized),
-            );
+            self.execute_value_command(&command, event);
             true
         } else {
-            false
+            opened_context_menu
         };
         self.active_gesture = Some(session);
         changed
@@ -543,6 +543,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         recognizer
             .filter(|gesture| gesture.has_any())
             .map(|recognizer| (widget_id, target_id, recognizer))
+    }
+
+    fn open_context_menu_from_long_press_event(
+        &mut self,
+        event: &crate::ui::widget::LongPressEvent,
+    ) -> bool {
+        let Some(has_context_menu) = self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .and_then(|layout| layout.resolved_widget(event.widget_id))
+            .and_then(|resolved| resolved.context_menu.as_ref())
+            .map(|menu| !menu.disabled.resolve())
+        else {
+            return false;
+        };
+        if !has_context_menu {
+            return false;
+        }
+        self.open_context_menu_at(event.widget_id, event.position)
     }
 
     fn detect_gesture_edge(

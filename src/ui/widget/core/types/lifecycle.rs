@@ -61,12 +61,14 @@ pub(crate) enum LifecycleWidgetKind {
         checked: Value<bool>,
         label: Option<Value<String>>,
         disabled: Value<bool>,
+        validation: Value<ValidationVisualState>,
         style: WidgetCheckboxStyle,
     },
     Radio {
         checked: Value<bool>,
         label: Option<Value<String>>,
         disabled: Value<bool>,
+        validation: Value<ValidationVisualState>,
         style: WidgetRadioStyle,
     },
     Switch {
@@ -76,6 +78,7 @@ pub(crate) enum LifecycleWidgetKind {
         active_thumb_color: Option<Value<Color>>,
         inactive_thumb_color: Option<Value<Color>>,
         disabled: Value<bool>,
+        validation: Value<ValidationVisualState>,
         style: WidgetSwitchStyle,
     },
     Select {
@@ -84,6 +87,7 @@ pub(crate) enum LifecycleWidgetKind {
         options: Vec<LifecycleSelectOption>,
         open: Option<Value<bool>>,
         disabled: Value<bool>,
+        validation: Value<ValidationVisualState>,
         style: WidgetSelectStyle,
     },
     SelectOptionRow {
@@ -102,6 +106,7 @@ pub(crate) enum LifecycleWidgetKind {
         tick_count: Option<usize>,
         value_formatter: Option<SliderValueFormatter>,
         disabled: Value<bool>,
+        validation: Value<ValidationVisualState>,
         style: WidgetSliderStyle,
     },
     ProgressBar {
@@ -133,6 +138,7 @@ pub(crate) enum LifecycleWidgetKind {
         multiline: bool,
         show_scrollbar: Value<bool>,
         auto_wrap: Value<bool>,
+        validation: Value<ValidationVisualState>,
     },
     ToastHost,
     Portal,
@@ -216,22 +222,26 @@ impl Clone for LifecycleWidgetKind {
                 checked,
                 label,
                 disabled,
+                validation,
                 style,
             } => Self::Checkbox {
                 checked: checked.clone(),
                 label: label.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: style.clone(),
             },
             Self::Radio {
                 checked,
                 label,
                 disabled,
+                validation,
                 style,
             } => Self::Radio {
                 checked: checked.clone(),
                 label: label.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: style.clone(),
             },
             Self::Switch {
@@ -241,6 +251,7 @@ impl Clone for LifecycleWidgetKind {
                 active_thumb_color,
                 inactive_thumb_color,
                 disabled,
+                validation,
                 style,
             } => Self::Switch {
                 checked: checked.clone(),
@@ -249,6 +260,7 @@ impl Clone for LifecycleWidgetKind {
                 active_thumb_color: active_thumb_color.clone(),
                 inactive_thumb_color: inactive_thumb_color.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: style.clone(),
             },
             Self::Select {
@@ -257,6 +269,7 @@ impl Clone for LifecycleWidgetKind {
                 options,
                 open,
                 disabled,
+                validation,
                 style,
             } => Self::Select {
                 selected_label: selected_label.clone(),
@@ -264,6 +277,7 @@ impl Clone for LifecycleWidgetKind {
                 options: options.clone(),
                 open: open.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: style.clone(),
             },
             Self::SelectOptionRow {
@@ -287,6 +301,7 @@ impl Clone for LifecycleWidgetKind {
                 tick_count,
                 value_formatter,
                 disabled,
+                validation,
                 style,
             } => Self::Slider {
                 value: value.clone(),
@@ -298,6 +313,7 @@ impl Clone for LifecycleWidgetKind {
                 tick_count: *tick_count,
                 value_formatter: value_formatter.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: style.clone(),
             },
             Self::ProgressBar {
@@ -348,6 +364,7 @@ impl Clone for LifecycleWidgetKind {
                 multiline,
                 show_scrollbar,
                 auto_wrap,
+                validation,
             } => Self::TextEditor {
                 placeholder: placeholder.clone(),
                 disabled: disabled.clone(),
@@ -355,6 +372,7 @@ impl Clone for LifecycleWidgetKind {
                 multiline: *multiline,
                 show_scrollbar: show_scrollbar.clone(),
                 auto_wrap: auto_wrap.clone(),
+                validation: validation.clone(),
             },
             Self::ToastHost => Self::ToastHost,
             Self::Portal => Self::Portal,

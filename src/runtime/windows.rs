@@ -4,6 +4,7 @@ use super::{
     WindowRole, WindowSetFactory,
 };
 use crate::dialog::{async_dialog_channel, AsyncDialogDispatcher, AsyncDialogReceiver};
+use crate::foundation::task::{async_task_channel, AsyncTaskDispatcher, AsyncTaskReceiver};
 use crate::foundation::view_model::ViewModel;
 use crate::notification::{
     async_notification_channel, AsyncNotificationDispatcher, AsyncNotificationReceiver,
@@ -40,6 +41,8 @@ pub(super) struct MultiWindowHandler<VM> {
     pub(super) dialog_receiver: AsyncDialogReceiver<VM>,
     pub(super) notification_dispatcher: AsyncNotificationDispatcher<VM>,
     pub(super) notification_receiver: AsyncNotificationReceiver<VM>,
+    pub(super) task_dispatcher: AsyncTaskDispatcher<VM>,
+    pub(super) task_receiver: AsyncTaskReceiver<VM>,
     next_window_instance_id: u64,
     pub(super) windows_by_key: HashMap<String, BoundRuntimeHandler<VM>>,
     window_keys_by_id: HashMap<WindowId, String>,
@@ -63,6 +66,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
     ) -> Self {
         let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
         let (notification_dispatcher, notification_receiver) = async_notification_channel();
+        let (task_dispatcher, task_receiver) = async_task_channel();
         Self {
             config,
             view_model,
@@ -73,6 +77,8 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
             dialog_receiver,
             notification_dispatcher,
             notification_receiver,
+            task_dispatcher,
+            task_receiver,
             next_window_instance_id: 1,
             windows_by_key: HashMap::new(),
             window_keys_by_id: HashMap::new(),
@@ -277,6 +283,8 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
                     None,
                     self.notification_dispatcher.clone(),
                     None,
+                    self.task_dispatcher.clone(),
+                    None,
                 );
                 window.close_policy = resolved_window.close_policy;
                 window.create_or_resume_surface(event_loop, modal_parent.as_ref());
@@ -358,6 +366,7 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
     fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.drain_dialog_completions();
         self.drain_notification_completions();
+        self.drain_task_completions();
         if self.invalidation.take_redraw_request() {
             for window in self.windows_by_key.values() {
                 if let Some(native_window) = window.window.as_ref() {
@@ -429,6 +438,7 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
 
         self.drain_dialog_completions();
         self.drain_notification_completions();
+        self.drain_task_completions();
         self.sync_windows(event_loop, false);
         if self.error.is_some() {
             return;

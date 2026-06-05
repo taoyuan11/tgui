@@ -24,4 +24,4 @@ mod widget;
 
 pub(crate) use descriptor::DrawerDescriptor;
 pub use placement::DrawerPlacement;
-pub use widget::Drawer;
+pub use widget::{Drawer, DrawerHost, DrawerMode};

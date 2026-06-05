@@ -5,6 +5,7 @@ impl<VM> ResolvedElement<VM> {
         &self,
         widget_state: WidgetState,
         _opacity: f32,
+        validation_color: Option<Color>,
         styles: &CollectResolvedStyles,
         context: &mut CollectContext<'_, '_>,
     ) -> Color {
@@ -19,7 +20,11 @@ impl<VM> ResolvedElement<VM> {
                     context.now,
                 )
             })
-            .unwrap_or_else(|| self.default_collect_border_color(widget_state, styles, context))
+            .unwrap_or_else(|| {
+                validation_color.unwrap_or_else(|| {
+                    self.default_collect_border_color(widget_state, styles, context)
+                })
+            })
     }
 
     pub(super) fn resolve_collect_background(
@@ -156,6 +161,9 @@ impl<VM> ResolvedElement<VM> {
                 },
                 {
                     let visual_state = base_interaction_state(widget_state);
+                    if let Some(color) = self.collect_validation_color(context.theme) {
+                        return color;
+                    }
                     if checked.resolve() {
                         active_background.as_ref().map(Value::resolve).unwrap_or(
                             resolve_stateful_widget_color(&style.track_checked, visual_state),

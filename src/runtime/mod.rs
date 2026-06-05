@@ -43,8 +43,8 @@ use self::helpers::{
 use self::state::audio_lifecycle_state;
 use self::state::{collect_pending_lifecycle_events, collect_pending_media_event};
 use self::state::{
-    ActiveCanvasDrag, ActiveGestureSession, ActiveKeyRepeat, ActivePinchSession, CachedScene,
-    CanvasPointerContext, ClickHandler, ClipboardService, DeferredMouseClick,
+    ActiveCanvasDrag, ActiveGestureSession, ActiveKeyRepeat, ActivePinchSession, ActiveTabReorder,
+    CachedScene, CanvasPointerContext, ClickHandler, ClipboardService, DeferredMouseClick,
     DispatchedLifecycleState, DispatchedMediaState, FocusedWidget, HoverMoveHandler, HoverTargetId,
     HoverTransitionHandler, HoveredWidget, PendingClick, PendingLifecycleEvent, PendingMediaEvent,
     ScrollbarDrag, SliderDrag, SmoothScrollState, TextInputBufferState, TextInputSessionConfig,
@@ -66,6 +66,7 @@ use crate::foundation::binding::{
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 use crate::foundation::event::InputTrigger;
+use crate::foundation::task::{async_task_channel, AsyncTaskDispatcher, AsyncTaskReceiver};
 use crate::foundation::view_model::{Command, ViewModel};
 use crate::foundation::window_control::WindowRequestQueue;
 use crate::log::{log_startup_phase, log_text_profile, text_profile_enabled, Log};
@@ -198,6 +199,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             .expect("single-window runtime requires a window definition");
         let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
         let (notification_dispatcher, notification_receiver) = async_notification_channel();
+        let (task_dispatcher, task_receiver) = async_task_channel();
         let handler = BoundRuntimeHandler::new(
             single_window.key,
             1,
@@ -213,6 +215,8 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             Some(dialog_receiver),
             notification_dispatcher,
             Some(notification_receiver),
+            task_dispatcher,
+            Some(task_receiver),
         );
         (self.event_loop, handler)
     }
@@ -283,6 +287,12 @@ pub struct BoundRuntimeHandler<VM> {
     /// `cached_scene` 硬清空，导致本帧无法推断，浮层会误关闭。点击不移动光标，故这里缓存上一次结果，
     /// 在 cache 缺失的重建帧里复用，重建后新 cache 会恢复正常解析。光标离开窗口时清空。
     hover_popover_anchor: Option<WidgetId>,
+    /// 未受控 Menu 的内部开闭状态。受控 Menu 仍以 descriptor.open 为准。
+    menu_open_states: HashMap<WidgetId, bool>,
+    /// 未受控 MenuBar 的内部 active entry。key 为 MenuBarGroupId 的 raw 值。
+    menubar_active_states: HashMap<u64, Option<usize>>,
+    /// ContextMenu 由右键/长按自动打开时记录触发锚点。
+    context_menu_anchor_states: HashMap<WidgetId, Point>,
     /// 每个打开的 Menu overlay 的键盘 cursor 路径（每层一个 option_index）。
     /// 长度=1 表示 cursor 在最外层；>1 表示已进入嵌套 submenu。
     /// Up/Down 调整最末元素；Right 把当前 cursor（必须是 Submenu 项）的首项 push；
@@ -295,6 +305,7 @@ pub struct BoundRuntimeHandler<VM> {
     active_pinch: Option<ActivePinchSession<VM>>,
     active_slider_drag: Option<SliderDrag<VM>>,
     active_canvas_drag: Option<ActiveCanvasDrag<VM>>,
+    active_tab_reorder: Option<ActiveTabReorder<VM>>,
     active_key_repeat: Option<ActiveKeyRepeat>,
     pending_click: Option<PendingClick<VM>>,
     deferred_mouse_click: Option<DeferredMouseClick<VM>>,
@@ -339,6 +350,8 @@ pub struct BoundRuntimeHandler<VM> {
     dialog_receiver: Option<AsyncDialogReceiver<VM>>,
     notification_dispatcher: AsyncNotificationDispatcher<VM>,
     notification_receiver: Option<AsyncNotificationReceiver<VM>>,
+    task_dispatcher: AsyncTaskDispatcher<VM>,
+    task_receiver: Option<AsyncTaskReceiver<VM>>,
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
@@ -357,6 +370,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         dialog_receiver: Option<AsyncDialogReceiver<VM>>,
         notification_dispatcher: AsyncNotificationDispatcher<VM>,
         notification_receiver: Option<AsyncNotificationReceiver<VM>>,
+        task_dispatcher: AsyncTaskDispatcher<VM>,
+        task_receiver: Option<AsyncTaskReceiver<VM>>,
     ) -> Self {
         let font_manager = FontManager::new(&config.fonts);
         let theme = match &config.theme {
@@ -406,6 +421,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 long_press_release_deadline: None,
             },
             hover_popover_anchor: None,
+            menu_open_states: HashMap::new(),
+            menubar_active_states: HashMap::new(),
+            context_menu_anchor_states: HashMap::new(),
             menu_keyboard_cursor: HashMap::new(),
             hovered_scrollbar: None,
             active_scrollbar_drag: None,
@@ -414,6 +432,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             active_pinch: None,
             active_slider_drag: None,
             active_canvas_drag: None,
+            active_tab_reorder: None,
             active_key_repeat: None,
             pending_click: None,
             deferred_mouse_click: None,
@@ -458,6 +477,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             dialog_receiver,
             notification_dispatcher,
             notification_receiver,
+            task_dispatcher,
+            task_receiver,
         }
     }
 }

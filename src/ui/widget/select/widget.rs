@@ -1,4 +1,5 @@
 use crate::foundation::color::Color;
+use crate::foundation::form::ValidationVisualState;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
@@ -22,6 +23,7 @@ pub struct Select<VM, K, V> {
     placeholder: Value<String>,
     open: Option<Value<bool>>,
     disabled: Value<bool>,
+    validation: Value<ValidationVisualState>,
     on_change: Option<ValueCommand<VM, (K, V)>>,
     on_open_change: Option<ValueCommand<VM, bool>>,
     layout: LayoutStyle,
@@ -213,6 +215,7 @@ impl<VM, K, V> Select<VM, K, V> {
             placeholder: Value::Static(String::new()),
             open: None,
             disabled: Value::Static(false),
+            validation: Value::Static(ValidationVisualState::default()),
             on_change: None,
             on_open_change: None,
             layout: LayoutStyle::default(),
@@ -236,6 +239,12 @@ impl<VM, K, V> Select<VM, K, V> {
     /// 设置禁用状态。
     pub fn disable(mut self, disable: impl Into<Value<bool>>) -> Self {
         self.disabled = disable.into();
+        self
+    }
+
+    /// 设置校验视觉状态。
+    pub fn validation(mut self, validation: impl Into<Value<ValidationVisualState>>) -> Self {
+        self.validation = validation.into();
         self
     }
 
@@ -408,6 +417,7 @@ where
                 open: select.open,
                 on_open_change: select.on_open_change,
                 disabled: select.disabled,
+                validation: select.validation,
                 style: select.style,
             },
         }

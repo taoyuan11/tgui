@@ -1,6 +1,6 @@
 use super::*;
 use crate::theme::ResolvedThemeMode;
-use crate::widgets::{TabItem, Tabs, TabsStyle};
+use crate::widgets::{TabItem, Tabs, TabsOverflowMode, TabsStyle};
 
 fn tabs_tree(selected: &str) -> WidgetTree<()> {
     WidgetTree::new(
@@ -100,4 +100,60 @@ fn tabs_style_defaults_resolve_for_light_and_dark() {
     );
     assert!(light.indicator_thickness > dp(0.0));
     assert!(dark.tab_min_height > dp(0.0));
+}
+
+#[test]
+fn tabs_more_overflow_keeps_selected_trigger_visible_and_uses_menu_for_rest() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Tabs::new(
+            vec![
+                TabItem::new("one", "One", Text::new("Panel one")),
+                TabItem::new("two", "Two", Text::new("Panel two")),
+                TabItem::new("three", "Three", Text::new("Panel three")),
+                TabItem::new("four", "Four", Text::new("Panel four")),
+                TabItem::new("five", "Five", Text::new("Panel five")),
+            ],
+            "five".to_string(),
+        )
+        .overflow_mode(TabsOverflowMode::More)
+        .width(dp(260.0)),
+    );
+
+    let computed = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 320.0, 180.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let visible_keys: Vec<_> = computed
+        .hit_regions
+        .iter()
+        .filter_map(|hit| match &hit.interaction {
+            HitInteraction::TabTrigger { key, .. } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(visible_keys.contains(&"five"));
+    assert!(visible_keys.len() < 5);
+    assert!(
+        computed
+            .hit_regions
+            .iter()
+            .any(|hit| matches!(hit.interaction, HitInteraction::Widget { .. })),
+        "More trigger should render as a menu trigger widget"
+    );
 }

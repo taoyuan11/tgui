@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::dialog::Dialogs;
+use crate::foundation::task::Tasks;
 use crate::foundation::window_control::WindowControl;
 use crate::log::Log;
 use crate::notification::Notifications;
@@ -11,6 +12,7 @@ use crate::notification::Notifications;
 pub struct CommandContext<T> {
     dialogs: Dialogs<T>,
     notifications: Notifications<T>,
+    tasks: Tasks<T>,
     window: WindowControl,
     log: Log,
 }
@@ -20,6 +22,7 @@ impl<T> Clone for CommandContext<T> {
         Self {
             dialogs: self.dialogs.clone(),
             notifications: self.notifications.clone(),
+            tasks: self.tasks.clone(),
             window: self.window.clone(),
             log: self.log.clone(),
         }
@@ -43,6 +46,14 @@ impl<T: 'static> CommandContext<T> {
         self.notifications.clone()
     }
 
+    /// 返回后台任务服务。
+    ///
+    /// `Tasks::spawn_blocking` 会在后台线程运行阻塞工作，并把完成回调回投到
+    /// runtime 线程后再访问 `&mut ViewModel`。
+    pub fn tasks(&self) -> Tasks<T> {
+        self.tasks.clone()
+    }
+
     /// 返回窗口控制服务。
     ///
     /// 返回值：
@@ -62,12 +73,14 @@ impl<T: 'static> CommandContext<T> {
     pub(crate) fn new(
         dialogs: Dialogs<T>,
         notifications: Notifications<T>,
+        tasks: Tasks<T>,
         window: WindowControl,
         log: Log,
     ) -> Self {
         Self {
             dialogs,
             notifications,
+            tasks,
             window,
             log,
         }
@@ -77,6 +90,7 @@ impl<T: 'static> CommandContext<T> {
         Self::new(
             Dialogs::detached(),
             Notifications::detached(),
+            Tasks::detached(),
             WindowControl::default(),
             Log::default(),
         )
@@ -87,9 +101,11 @@ impl<T: 'static> CommandContext<T> {
         selector: Arc<dyn for<'a> Fn(&'a mut T) -> &'a mut ChildVm + Send + Sync>,
     ) -> CommandContext<ChildVm> {
         let notification_selector = selector.clone();
+        let task_selector = selector.clone();
         CommandContext::new(
             self.dialogs.scope(selector),
             self.notifications.scope(notification_selector),
+            self.tasks.scope(task_selector),
             self.window.clone(),
             self.log.clone(),
         )

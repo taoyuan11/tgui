@@ -17,9 +17,12 @@ use crate::ui::widget::common::{
     ComputedScene, FocusScopeState, HitGeometry, HitInteraction, HitRegion, Rect, RenderPrimitive,
     TextPrimitive, TexturePrimitive,
 };
-use crate::ui::widget::menu::{MenuDescriptor, MenuIcon, MenuItemKind, MenuItemState};
+use crate::ui::widget::menu::{
+    ContextMenuDescriptor, MenuDescriptor, MenuIcon, MenuItemKind, MenuItemState,
+};
 use crate::ui::widget::overlay::{
-    collect::emit_overlay, Anchor, AnchorKey, Overlay, OverlayContent, OverlayId, OverlayLayer,
+    collect::emit_overlay, Alignment, Anchor, AnchorKey, FlipPolicy, Overlay, OverlayContent,
+    OverlayId, OverlayLayer, Placement,
 };
 use crate::ui::widget::style::MenuStyle;
 use crate::ui::widget::{CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextVerticalAlign};
@@ -36,27 +39,90 @@ impl<VM> ResolvedElement<VM> {
         computed: &mut ComputedScene<VM>,
         visual: &CollectVisualState,
     ) {
-        let Some(menu) = &self.menu else {
+        if let Some(menu) = &self.menu {
+            if resolved_menu_open(self.id, menu, context) && !menu.disabled.resolve() {
+                let theme_mode = crate::ui::widget::style::infer_theme_mode(context.theme);
+                let style = Box::new(menu.resolved_style(theme_mode));
+                emit_menu_layer(
+                    self,
+                    context,
+                    computed,
+                    visual,
+                    menu,
+                    &style,
+                    Anchor::Key(AnchorKey::widget(self.id)),
+                    None,
+                );
+            }
+        }
+
+        self.emit_context_menu_overlay_if_open(context, computed, visual);
+    }
+
+    fn emit_context_menu_overlay_if_open(
+        &self,
+        context: &mut CollectContext<'_, '_>,
+        computed: &mut ComputedScene<VM>,
+        visual: &CollectVisualState,
+    ) {
+        let Some(menu) = &self.context_menu else {
             return;
         };
-        if !menu.open.resolve() {
-            return;
-        }
         if menu.disabled.resolve() {
             return;
         }
+        let Some(anchor) = context.context_menu_anchor_states.get(&self.id).copied() else {
+            return;
+        };
         let theme_mode = crate::ui::widget::style::infer_theme_mode(context.theme);
         let style = Box::new(menu.resolved_style(theme_mode));
+        let descriptor = context_menu_as_menu_descriptor(menu);
         emit_menu_layer(
             self,
             context,
             computed,
             visual,
-            menu,
+            &descriptor,
             &style,
-            Anchor::Key(AnchorKey::widget(self.id)),
-            None,
+            Anchor::Point(anchor),
+            Some(OverlayId::new(self.id.raw() ^ CONTEXT_MENU_OVERLAY_TAG)),
         );
+    }
+}
+
+const CONTEXT_MENU_OVERLAY_TAG: u64 = 0x4354584D454E5531; // "CTXMENU1"
+
+fn resolved_menu_open<VM>(
+    id: crate::ui::widget::WidgetId,
+    menu: &MenuDescriptor<VM>,
+    context: &CollectContext<'_, '_>,
+) -> bool {
+    if let Some(open) = &menu.open {
+        return open.resolve();
+    }
+    if let (Some(group), Some(index)) = (menu.menubar_group, menu.menubar_index) {
+        return context
+            .menubar_active_states
+            .get(&group.raw())
+            .copied()
+            .flatten()
+            == Some(index);
+    }
+    context.menu_open_states.get(&id).copied().unwrap_or(false)
+}
+
+fn context_menu_as_menu_descriptor<VM>(menu: &ContextMenuDescriptor<VM>) -> MenuDescriptor<VM> {
+    MenuDescriptor {
+        items: menu.items.clone(),
+        open: Some(crate::ui::layout::Value::Static(true)),
+        on_open_change: menu.on_open_change.clone(),
+        placement: Placement::bottom().align(Alignment::Start),
+        flip_policy: FlipPolicy::FlipAndShift,
+        disabled: menu.disabled.clone(),
+        style: menu.style.clone(),
+        menubar_group: None,
+        menubar_index: None,
+        menubar_set_active: None,
     }
 }
 
@@ -614,7 +680,7 @@ pub(crate) fn emit_menu_layer<VM>(
             // 但 menubar_group / set_active 清空（submenu 不参与 MenuBar 切换）。
             let nested_descriptor = MenuDescriptor {
                 items: menu.items[sub_idx].submenu.clone(),
-                open: crate::ui::layout::Value::Static(true),
+                open: Some(crate::ui::layout::Value::Static(true)),
                 on_open_change: on_open_change.clone(),
                 placement: crate::ui::widget::overlay::Placement::right()
                     .align(crate::ui::widget::overlay::Alignment::Start),

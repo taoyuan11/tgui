@@ -265,6 +265,7 @@ pub struct VisualStyle {
     pub shadow: Option<Value<Shadow>>,
     pub opacity: Value<f32>,
     pub offset: Value<Point>,
+    pub scale: Value<f32>,
 }
 
 impl Default for VisualStyle {
@@ -279,6 +280,7 @@ impl Default for VisualStyle {
             shadow: None,
             opacity: Value::Static(1.0),
             offset: Value::Static(Point::ZERO),
+            scale: Value::Static(1.0),
         }
     }
 }

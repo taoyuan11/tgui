@@ -58,7 +58,7 @@ fn toast_deadline_invalidates_scene_and_recollect_clears_expired_entry() {
     std::thread::sleep(Duration::from_millis(400));
 
     // 第二次drive_animations应该清理完成退场的Toast
-    let did_invalidate = handler.drive_animations(&event_loop, Instant::now());
+    let _did_invalidate = handler.drive_animations(&event_loop, Instant::now());
 
     let final_scene = handler.computed_scene().clone();
     assert!(

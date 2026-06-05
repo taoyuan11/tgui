@@ -3,7 +3,7 @@ use super::*;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use crate::ui::widget::{Button, KeyChord, Menu, MenuItem};
+use crate::ui::widget::{Button, ContextMenu, KeyChord, Menu, MenuBar, MenuItem};
 
 #[test]
 fn arrow_keys_advance_menu_cursor_and_enter_dispatches_select() {
@@ -154,6 +154,79 @@ fn keyboard_does_not_interfere_when_menu_closed() {
     // 这里只验证不 panic 并且返回不一定为 true；即菜单导航没被错误激活。
     let _ =
         handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown)));
+}
+
+#[test]
+fn uncontrolled_menu_opens_when_trigger_clicked() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Menu::new(Button::new("File").size(dp(80.0), dp(28.0))).items(vec![MenuItem::new("New")]),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    handler.cursor_position = Some(Point::new(dp(24.0), dp(14.0)));
+    let _ = handler.handle_hover(viewport);
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.invalidate_computed_scene();
+    let labels: Vec<_> = handler
+        .computed_scene()
+        .scene
+        .overlay_texts
+        .iter()
+        .map(|text| text.content.as_ref())
+        .collect();
+    assert!(labels.iter().any(|label| *label == "New"));
+}
+
+#[test]
+fn context_menu_opens_on_right_click_without_on_show() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        ContextMenu::new(Button::new("Photo").size(dp(90.0), dp(30.0)))
+            .items(vec![MenuItem::new("Copy"), MenuItem::new("Delete")]),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    handler.cursor_position = Some(Point::new(dp(24.0), dp(14.0)));
+    let _ = handler.handle_hover(viewport);
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Right);
+    handler.invalidate_computed_scene();
+    let labels: Vec<_> = handler
+        .computed_scene()
+        .scene
+        .overlay_texts
+        .iter()
+        .map(|text| text.content.as_ref())
+        .collect();
+    assert!(labels.iter().any(|label| *label == "Copy"));
+    assert!(labels.iter().any(|label| *label == "Delete"));
+}
+
+#[test]
+fn uncontrolled_menubar_opens_entry_when_clicked() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        MenuBar::<TestVm>::uncontrolled()
+            .entry("File", vec![MenuItem::new("New")])
+            .entry("Edit", vec![MenuItem::new("Undo")]),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    handler.cursor_position = Some(Point::new(dp(24.0), dp(14.0)));
+    let _ = handler.handle_hover(viewport);
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.invalidate_computed_scene();
+    let labels: Vec<_> = handler
+        .computed_scene()
+        .scene
+        .overlay_texts
+        .iter()
+        .map(|text| text.content.as_ref())
+        .collect();
+    assert!(labels.iter().any(|label| *label == "New"));
 }
 
 #[test]

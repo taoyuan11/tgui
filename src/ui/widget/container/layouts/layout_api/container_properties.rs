@@ -124,6 +124,11 @@ macro_rules! impl_container_properties {
                 Self(self.0.offset(offset))
             }
 
+            /// 设置容器视觉缩放（围绕自身中心，默认 1.0）。
+            pub fn scale(self, scale: impl Into<Value<f32>>) -> Self {
+                Self(self.0.scale(scale))
+            }
+
             /// 追加一个子节点来源。
             ///
             /// # 参数

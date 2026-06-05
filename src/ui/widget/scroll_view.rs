@@ -186,6 +186,10 @@ impl<VM> ScrollView<VM> {
         Self(self.0.offset(offset))
     }
 
+    pub fn scale(self, scale: impl Into<Value<f32>>) -> Self {
+        Self(self.0.scale(scale))
+    }
+
     pub fn border_radius(self, radius: impl Into<Value<crate::ui::unit::Dp>>) -> Self {
         Self(self.0.border_radius(radius))
     }

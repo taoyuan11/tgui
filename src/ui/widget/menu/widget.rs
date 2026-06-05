@@ -71,7 +71,7 @@ impl<VM> Menu<VM> {
     }
 
     /// 绑定外部 `Signal<bool>` 控制菜单的展开/收起。
-    /// 若未提供，runtime 会维护内部开闭状态（step 6 落地）。
+    /// 若未提供，runtime 会维护内部开闭状态。
     pub fn open(mut self, open: impl Into<Value<bool>>) -> Self {
         self.open = Some(open.into());
         self
@@ -143,7 +143,7 @@ impl<VM> From<Menu<VM>> for Element<VM> {
 
         let descriptor = MenuDescriptor {
             items: items.into_iter().map(MenuItemState::from_public).collect(),
-            open: open.unwrap_or(Value::Static(false)),
+            open,
             on_open_change,
             placement,
             flip_policy,

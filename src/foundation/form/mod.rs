@@ -1,17 +1,19 @@
 use std::any::Any;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
 
 use crate::foundation::binding::{Signal, State, TextController, ViewModelContext};
-use crate::foundation::view_model::ValueCommand;
+use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 
 #[cfg(test)]
 mod tests;
 
 type SharedValue = Box<dyn Any>;
 type FieldMap = BTreeMap<String, Arc<dyn RegisteredField>>;
+type FieldAsyncJob = Box<dyn FnOnce() -> (String, Vec<String>) + Send>;
 
 #[derive(Clone)]
 struct FormShared {
@@ -21,6 +23,8 @@ struct FormShared {
 struct FormSharedInner {
     fields: Mutex<FieldMap>,
     errors: State<BTreeMap<String, Vec<String>>>,
+    status: State<FormStatus>,
+    generation: AtomicU64,
 }
 
 impl FormShared {
@@ -29,6 +33,8 @@ impl FormShared {
             inner: Arc::new(FormSharedInner {
                 fields: Mutex::new(BTreeMap::new()),
                 errors: ctx.state(BTreeMap::new()),
+                status: ctx.state(FormStatus::default()),
+                generation: AtomicU64::new(0),
             }),
         }
     }
@@ -57,6 +63,34 @@ impl FormShared {
         self.inner.errors.project(BTreeMap::is_empty)
     }
 
+    fn is_valid_now(&self) -> bool {
+        self.inner.errors.get().is_empty()
+    }
+
+    fn status(&self) -> Signal<FormStatus> {
+        self.inner.status.signal()
+    }
+
+    fn set_validating(&self, validating: bool) {
+        self.inner.status.update(|status| {
+            status.validating = validating;
+        });
+    }
+
+    fn set_submitting(&self, submitting: bool) {
+        self.inner.status.update(|status| {
+            status.submitting = submitting;
+        });
+    }
+
+    fn next_generation(&self) -> u64 {
+        self.inner.generation.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    fn is_current_generation(&self, generation: u64) -> bool {
+        self.inner.generation.load(Ordering::Relaxed) == generation
+    }
+
     fn set_errors(&self, errors: BTreeMap<String, Vec<String>>) {
         self.inner.errors.set(errors);
     }
@@ -76,11 +110,29 @@ fn report_field_errors(form: &Weak<FormSharedInner>, name: &str, errors: Vec<Str
 
 trait RegisteredField: Send + Sync {
     fn validate_and_collect(&self) -> Vec<String>;
+    fn async_job(&self) -> Option<FieldAsyncJob>;
+    fn set_pending_local(&self, pending: bool);
+    fn apply_async_errors(&self, errors: Vec<String>);
     fn reset_local(&self);
     fn clear_errors_local(&self);
     fn snapshot_value(&self) -> SharedValue;
     fn snapshot_errors(&self) -> Vec<String>;
     fn name(&self) -> &str;
+}
+
+/// 表单整体异步生命周期状态。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FormStatus {
+    pub validating: bool,
+    pub submitting: bool,
+}
+
+/// 录入组件可直接绑定的校验视觉状态。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ValidationVisualState {
+    pub invalid: bool,
+    pub pending: bool,
+    pub first_error: Option<String>,
 }
 
 /// 表示一组校验错误消息。
@@ -162,7 +214,10 @@ impl Form {
             state: self.context.state(initial.clone()),
             initial,
             validators: Mutex::new(Vec::new()),
+            async_validators: Mutex::new(Vec::new()),
             errors: self.context.state(Vec::new()),
+            pending: self.context.state(false),
+            validation: self.context.state(ValidationVisualState::default()),
             form: self.shared.downgrade(),
         });
         self.shared.register(name, inner.clone());
@@ -193,7 +248,10 @@ impl Form {
             controller: self.context.text_controller(initial.clone()),
             initial,
             validators: Mutex::new(Vec::new()),
+            async_validators: Mutex::new(Vec::new()),
             errors: self.context.state(Vec::new()),
+            pending: self.context.state(false),
+            validation: self.context.state(ValidationVisualState::default()),
             form: self.shared.downgrade(),
         });
         self.shared.register(name, inner.clone());
@@ -218,6 +276,25 @@ impl Form {
     pub fn submit(&self) -> FormSnapshot {
         self.validate();
         self.snapshot()
+    }
+
+    /// 返回一个命令：执行同步校验后，在后台运行所有异步字段校验器。
+    pub fn validate_async_command<VM: 'static>(&self) -> Command<VM> {
+        let form = self.clone();
+        Command::new_with_context(move |vm, context| {
+            form.start_async_validation(vm, context, false, None);
+        })
+    }
+
+    /// 返回一个命令：完成同步 + 异步校验后，如表单有效则执行 `on_submit`。
+    pub fn submit_async_command<VM: 'static>(
+        &self,
+        on_submit: ValueCommand<VM, FormSnapshot>,
+    ) -> Command<VM> {
+        let form = self.clone();
+        Command::new_with_context(move |vm, context| {
+            form.start_async_validation(vm, context, true, Some(on_submit.clone()));
+        })
     }
 
     /// 返回当前字段值和错误信息快照，不会主动触发校验。
@@ -260,16 +337,104 @@ impl Form {
     pub fn errors(&self) -> Signal<BTreeMap<String, Vec<String>>> {
         self.shared.errors()
     }
+
+    /// 返回表单异步生命周期状态。
+    pub fn status(&self) -> Signal<FormStatus> {
+        self.shared.status()
+    }
+
+    /// 返回当前是否正在执行异步校验。
+    pub fn is_validating(&self) -> Signal<bool> {
+        self.shared.status().project(|status| status.validating)
+    }
+
+    /// 返回当前是否正在执行异步提交。
+    pub fn is_submitting(&self) -> Signal<bool> {
+        self.shared.status().project(|status| status.submitting)
+    }
+
+    fn start_async_validation<VM: 'static>(
+        &self,
+        view_model: &mut VM,
+        context: &CommandContext<VM>,
+        submitting: bool,
+        on_submit: Option<ValueCommand<VM, FormSnapshot>>,
+    ) {
+        let generation = self.shared.next_generation();
+        self.shared.set_validating(true);
+        self.shared.set_submitting(submitting);
+
+        let mut jobs = Vec::new();
+        for field in self.shared.fields() {
+            let sync_errors = field.validate_and_collect();
+            if sync_errors.is_empty() {
+                if let Some(job) = field.async_job() {
+                    field.set_pending_local(true);
+                    jobs.push(job);
+                } else {
+                    field.set_pending_local(false);
+                }
+            } else {
+                field.set_pending_local(false);
+            }
+        }
+
+        if jobs.is_empty() {
+            self.shared.set_validating(false);
+            self.shared.set_submitting(false);
+            if submitting && self.shared.is_valid_now() {
+                if let Some(command) = on_submit {
+                    command.execute_with_context(view_model, self.snapshot(), context);
+                }
+            }
+            return;
+        }
+
+        let form = self.clone();
+        let tasks = context.tasks();
+        tasks.spawn_blocking(
+            move || {
+                jobs.into_iter()
+                    .map(|job| job())
+                    .collect::<Vec<(String, Vec<String>)>>()
+            },
+            move |vm, results, context| {
+                if !form.shared.is_current_generation(generation) {
+                    return;
+                }
+                for field in form.shared.fields() {
+                    field.set_pending_local(false);
+                }
+                let by_name: BTreeMap<_, _> = results.into_iter().collect();
+                for field in form.shared.fields() {
+                    if let Some(errors) = by_name.get(field.name()) {
+                        field.apply_async_errors(errors.clone());
+                    }
+                }
+                form.shared.set_validating(false);
+                form.shared.set_submitting(false);
+                if submitting && form.shared.is_valid_now() {
+                    if let Some(command) = on_submit {
+                        command.execute_with_context(vm, form.snapshot(), context);
+                    }
+                }
+            },
+        );
+    }
 }
 
 type FieldValidator<T> = Arc<dyn Fn(&T) -> ValidationErrors + Send + Sync>;
+type AsyncFieldValidator<T> = Arc<dyn Fn(T) -> ValidationErrors + Send + Sync>;
 
 struct FormFieldInner<T> {
     name: String,
     state: State<T>,
     initial: T,
     validators: Mutex<Vec<FieldValidator<T>>>,
+    async_validators: Mutex<Vec<AsyncFieldValidator<T>>>,
     errors: State<Vec<String>>,
+    pending: State<bool>,
+    validation: State<ValidationVisualState>,
     form: Weak<FormSharedInner>,
 }
 
@@ -285,8 +450,29 @@ where
             errors.extend(validator(&value).into_vec());
         }
         self.errors.set(errors.clone());
+        self.refresh_validation_state();
         report_field_errors(&self.form, &self.name, errors.clone());
         errors
+    }
+
+    fn set_errors(&self, errors: Vec<String>) {
+        self.errors.set(errors.clone());
+        self.refresh_validation_state();
+        report_field_errors(&self.form, &self.name, errors);
+    }
+
+    fn set_pending(&self, pending: bool) {
+        self.pending.set(pending);
+        self.refresh_validation_state();
+    }
+
+    fn refresh_validation_state(&self) {
+        let errors = self.errors.get();
+        self.validation.set(ValidationVisualState {
+            invalid: !errors.is_empty(),
+            pending: self.pending.get(),
+            first_error: errors.first().cloned(),
+        });
     }
 }
 
@@ -298,15 +484,38 @@ where
         self.run_validation()
     }
 
+    fn async_job(&self) -> Option<FieldAsyncJob> {
+        let validators = self.async_validators.lock().clone();
+        if validators.is_empty() {
+            return None;
+        }
+        let name = self.name.clone();
+        let value = self.state.get();
+        Some(Box::new(move || {
+            let mut errors = Vec::new();
+            for validator in validators {
+                errors.extend(validator(value.clone()).into_vec());
+            }
+            (name, errors)
+        }))
+    }
+
+    fn set_pending_local(&self, pending: bool) {
+        self.set_pending(pending);
+    }
+
+    fn apply_async_errors(&self, errors: Vec<String>) {
+        self.set_errors(errors);
+    }
+
     fn reset_local(&self) {
         self.state.set(self.initial.clone());
-        self.errors.set(Vec::new());
-        report_field_errors(&self.form, &self.name, Vec::new());
+        self.set_pending(false);
+        self.set_errors(Vec::new());
     }
 
     fn clear_errors_local(&self) {
-        self.errors.set(Vec::new());
-        report_field_errors(&self.form, &self.name, Vec::new());
+        self.set_errors(Vec::new());
     }
 
     fn snapshot_value(&self) -> SharedValue {
@@ -369,6 +578,16 @@ where
         self
     }
 
+    /// 追加一个后台异步校验器。它会在 `Form::validate_async_command` 或
+    /// `Form::submit_async_command` 中运行。
+    pub fn async_validator(
+        self,
+        validator: impl Fn(T) -> ValidationErrors + Send + Sync + 'static,
+    ) -> Self {
+        self.inner.async_validators.lock().push(Arc::new(validator));
+        self
+    }
+
     /// 执行当前字段校验。
     pub fn validate(&self) -> bool {
         self.inner.run_validation().is_empty()
@@ -394,6 +613,16 @@ where
         self.inner.errors.project(Vec::is_empty)
     }
 
+    /// 返回字段当前是否有后台校验正在运行。
+    pub fn is_validating(&self) -> Signal<bool> {
+        self.inner.pending.signal()
+    }
+
+    /// 返回可绑定给录入组件的校验视觉状态。
+    pub fn validation_state(&self) -> Signal<ValidationVisualState> {
+        self.inner.validation.signal()
+    }
+
     /// 生成一个可直接绑定到 `on_change(...)` 的命令。
     pub fn bind_change<VM: 'static>(&self) -> ValueCommand<VM, T> {
         let state = self.inner.state.clone();
@@ -404,13 +633,17 @@ where
 }
 
 type TextFieldValidator = Arc<dyn Fn(&str) -> ValidationErrors + Send + Sync>;
+type AsyncTextFieldValidator = Arc<dyn Fn(String) -> ValidationErrors + Send + Sync>;
 
 struct TextFormFieldInner {
     name: String,
     controller: TextController,
     initial: String,
     validators: Mutex<Vec<TextFieldValidator>>,
+    async_validators: Mutex<Vec<AsyncTextFieldValidator>>,
     errors: State<Vec<String>>,
+    pending: State<bool>,
+    validation: State<ValidationVisualState>,
     form: Weak<FormSharedInner>,
 }
 
@@ -423,8 +656,29 @@ impl TextFormFieldInner {
             errors.extend(validator(&text).into_vec());
         }
         self.errors.set(errors.clone());
+        self.refresh_validation_state();
         report_field_errors(&self.form, &self.name, errors.clone());
         errors
+    }
+
+    fn set_errors(&self, errors: Vec<String>) {
+        self.errors.set(errors.clone());
+        self.refresh_validation_state();
+        report_field_errors(&self.form, &self.name, errors);
+    }
+
+    fn set_pending(&self, pending: bool) {
+        self.pending.set(pending);
+        self.refresh_validation_state();
+    }
+
+    fn refresh_validation_state(&self) {
+        let errors = self.errors.get();
+        self.validation.set(ValidationVisualState {
+            invalid: !errors.is_empty(),
+            pending: self.pending.get(),
+            first_error: errors.first().cloned(),
+        });
     }
 }
 
@@ -433,15 +687,38 @@ impl RegisteredField for TextFormFieldInner {
         self.run_validation()
     }
 
+    fn async_job(&self) -> Option<FieldAsyncJob> {
+        let validators = self.async_validators.lock().clone();
+        if validators.is_empty() {
+            return None;
+        }
+        let name = self.name.clone();
+        let text = self.controller.text();
+        Some(Box::new(move || {
+            let mut errors = Vec::new();
+            for validator in validators {
+                errors.extend(validator(text.clone()).into_vec());
+            }
+            (name, errors)
+        }))
+    }
+
+    fn set_pending_local(&self, pending: bool) {
+        self.set_pending(pending);
+    }
+
+    fn apply_async_errors(&self, errors: Vec<String>) {
+        self.set_errors(errors);
+    }
+
     fn reset_local(&self) {
         self.controller.set_text(self.initial.clone());
-        self.errors.set(Vec::new());
-        report_field_errors(&self.form, &self.name, Vec::new());
+        self.set_pending(false);
+        self.set_errors(Vec::new());
     }
 
     fn clear_errors_local(&self) {
-        self.errors.set(Vec::new());
-        report_field_errors(&self.form, &self.name, Vec::new());
+        self.set_errors(Vec::new());
     }
 
     fn snapshot_value(&self) -> SharedValue {
@@ -493,6 +770,16 @@ impl TextFormField {
         self
     }
 
+    /// 追加一个后台异步文本校验器。它会在 `Form::validate_async_command`
+    /// 或 `Form::submit_async_command` 中运行。
+    pub fn async_validator(
+        self,
+        validator: impl Fn(String) -> ValidationErrors + Send + Sync + 'static,
+    ) -> Self {
+        self.inner.async_validators.lock().push(Arc::new(validator));
+        self
+    }
+
     /// 执行当前字段校验。
     pub fn validate(&self) -> bool {
         self.inner.run_validation().is_empty()
@@ -527,6 +814,16 @@ impl TextFormField {
     /// 返回字段当前是否有效。
     pub fn is_valid(&self) -> Signal<bool> {
         self.inner.errors.project(Vec::is_empty)
+    }
+
+    /// 返回字段当前是否有后台校验正在运行。
+    pub fn is_validating(&self) -> Signal<bool> {
+        self.inner.pending.signal()
+    }
+
+    /// 返回可绑定给录入组件的校验视觉状态。
+    pub fn validation_state(&self) -> Signal<ValidationVisualState> {
+        self.inner.validation.signal()
     }
 }
 

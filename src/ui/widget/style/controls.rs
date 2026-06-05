@@ -768,6 +768,8 @@ pub struct ModalStyle {
     pub actions_gap: Dp,
     /// 动作区独立 padding。
     pub actions_padding: Insets,
+    /// Card 进入动画的起始缩放值。
+    pub enter_scale: f32,
 }
 
 impl ModalStyle {
@@ -804,6 +806,7 @@ impl ModalStyle {
             content_padding: Insets::symmetric(dp(20.0), dp(12.0)),
             actions_gap: dp(8.0),
             actions_padding: Insets::symmetric(dp(20.0), dp(16.0)),
+            enter_scale: 0.96,
         }
     }
 }

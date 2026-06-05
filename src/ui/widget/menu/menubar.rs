@@ -62,7 +62,7 @@ impl<VM> MenuBarEntry<VM> {
 /// 会调用 `on_active_change(Some(index) 或 None)` 切换。
 pub struct MenuBar<VM> {
     entries: Vec<MenuBarEntry<VM>>,
-    active_index: Value<Option<usize>>,
+    active_index: Option<Value<Option<usize>>>,
     on_active_change: Option<ValueCommand<VM, Option<usize>>>,
     group: MenuBarGroupId,
     // 主题样式预留位（暂未在 Flex 包装中应用——step 9 一起接 README/examples 时打磨）。
@@ -75,7 +75,19 @@ impl<VM> MenuBar<VM> {
     pub fn new(active_index: impl Into<Value<Option<usize>>>) -> Self {
         Self {
             entries: Vec::new(),
-            active_index: active_index.into(),
+            active_index: Some(active_index.into()),
+            on_active_change: None,
+            group: MenuBarGroupId::next(),
+            _style: None,
+            _menu_style: None,
+        }
+    }
+
+    /// 创建由 runtime 自动维护 active entry 的 MenuBar。
+    pub fn uncontrolled() -> Self {
+        Self {
+            entries: Vec::new(),
+            active_index: None,
             on_active_change: None,
             group: MenuBarGroupId::next(),
             _style: None,
@@ -137,36 +149,40 @@ where
                 disabled,
             } = entry;
 
-            // 每个 entry 的下拉是否展开 = active_index == Some(index)
-            let entry_open = match active_index.clone() {
+            // 每个 entry 的下拉是否展开 = active_index == Some(index)；uncontrolled
+            // 模式下不写 open，让 runtime 通过 MenuBarGroupId 维护 active entry。
+            let entry_open = active_index.clone().map(|active_index| match active_index {
                 Value::Static(value) => Value::Static(value == Some(index)),
                 Value::Signal(signal) => Value::Signal(signal.map(move |idx| idx == Some(index))),
-            };
+            });
 
             // 点击事件：toggle 我这一项
             let mut button = Button::new(label).disable(disabled.clone());
             if let Some(on_change) = on_active_change.clone() {
-                let active_signal = active_index.clone();
-                let click_cmd =
-                    Command::new_with_context(move |vm: &mut VM, ctx: &CommandContext<VM>| {
-                        let current = active_signal.resolve();
-                        let next = if current == Some(index) {
-                            None
-                        } else {
-                            Some(index)
-                        };
-                        on_change.execute_with_context(vm, next, ctx);
-                    });
-                button = button.on_click(click_cmd);
+                if let Some(active_signal) = active_index.clone() {
+                    let click_cmd =
+                        Command::new_with_context(move |vm: &mut VM, ctx: &CommandContext<VM>| {
+                            let current = active_signal.resolve();
+                            let next = if current == Some(index) {
+                                None
+                            } else {
+                                Some(index)
+                            };
+                            on_change.execute_with_context(vm, next, ctx);
+                        });
+                    button = button.on_click(click_cmd);
+                }
             }
 
             // 菜单 entry 切换关闭回调：用户从菜单内部触发 close（外部点击 / Esc / item 选中）时，
             // 重置 active_index 到 None。
             let mut menu = Menu::new(button)
                 .items(items)
-                .open(entry_open)
                 .placement(Placement::bottom().align(Alignment::Start))
                 .menubar_binding(group, index);
+            if let Some(entry_open) = entry_open {
+                menu = menu.open(entry_open);
+            }
             if let Some(on_change) = on_active_change.clone() {
                 menu = menu.menubar_set_active_command(on_change);
             }

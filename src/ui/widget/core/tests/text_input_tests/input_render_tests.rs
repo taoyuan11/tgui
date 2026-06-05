@@ -157,6 +157,42 @@ fn input_uses_custom_selection_and_caret_colors() {
 }
 
 #[test]
+fn input_validation_invalid_uses_theme_error_border() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(Input::new("bad").validation(
+        crate::foundation::form::ValidationVisualState {
+            invalid: true,
+            ..Default::default()
+        },
+    ));
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 60.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered
+        .primitives
+        .shapes
+        .iter()
+        .any(|primitive| primitive.stroke_width > 0.0 && primitive.color == theme.colors.error));
+}
+
+#[test]
 fn single_line_input_scroll_clips_text_to_inner_content_rect() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

@@ -32,6 +32,30 @@ impl<VM> ResolvedElement<VM> {
             layout_frame.width,
             layout_frame.height,
         );
+        let scale = if context.reduced_motion {
+            self.visual.scale.resolve().clamp(0.01, 16.0)
+        } else {
+            self.visual.scale.resolve_widget_clamped(
+                context.animations,
+                self.id,
+                WidgetProperty::Scale,
+                context.now,
+                0.01,
+                16.0,
+            )
+        };
+        let frame = if (scale - 1.0).abs() > f32::EPSILON {
+            let width = frame.width * scale;
+            let height = frame.height * scale;
+            Rect::new(
+                frame.x + (frame.width - width) * 0.5,
+                frame.y + (frame.height - height) * 0.5,
+                width,
+                height,
+            )
+        } else {
+            frame
+        };
         let disabled = self.collect_visual_disabled_state();
         let widget_state = self.collect_widget_state(disabled, context);
         let opacity = visual_context.opacity
@@ -49,8 +73,9 @@ impl<VM> ResolvedElement<VM> {
         let border_radius = self
             .resolve_collect_border_radius(&styles, context)
             .max(0.0);
+        let validation_color = self.collect_validation_color(context.theme);
         let border_color = self
-            .resolve_collect_border_color(widget_state, opacity, &styles, context)
+            .resolve_collect_border_color(widget_state, opacity, validation_color, &styles, context)
             .with_alpha_factor(opacity);
         let background = self
             .resolve_collect_background(widget_state, opacity, &styles, context)
@@ -91,6 +116,19 @@ impl<VM> ResolvedElement<VM> {
         }
     }
 
+    fn collect_validation_color(&self, theme: &Theme) -> Option<Color> {
+        let state = match &self.kind {
+            ResolvedWidgetKind::Checkbox { validation, .. }
+            | ResolvedWidgetKind::Radio { validation, .. }
+            | ResolvedWidgetKind::Switch { validation, .. }
+            | ResolvedWidgetKind::Select { validation, .. }
+            | ResolvedWidgetKind::Slider { validation, .. }
+            | ResolvedWidgetKind::TextEditor { validation, .. } => validation.resolve(),
+            _ => return None,
+        };
+        validation_state_color(&state, theme)
+    }
+
     fn collect_widget_state(
         &self,
         disabled: bool,
@@ -104,5 +142,27 @@ impl<VM> ResolvedElement<VM> {
         } else {
             context.widget_states.get(self.id)
         }
+    }
+}
+
+fn validation_state_color(
+    state: &crate::foundation::form::ValidationVisualState,
+    theme: &Theme,
+) -> Option<Color> {
+    if state.invalid {
+        Some(theme.colors.error)
+    } else if state.pending {
+        Some(theme.colors.primary)
+    } else {
+        None
+    }
+}
+
+fn apply_validation_focus_ring(
+    focus_ring: &mut Option<crate::theme::FocusRingStyle>,
+    color: Color,
+) {
+    if let Some(ring) = focus_ring.as_mut() {
+        ring.color = color;
     }
 }

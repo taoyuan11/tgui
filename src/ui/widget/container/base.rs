@@ -233,6 +233,12 @@ impl<VM> Container<VM> {
         self
     }
 
+    /// 设置容器视觉缩放（围绕自身中心，默认 1.0）。
+    pub fn scale(mut self, scale: impl Into<Value<f32>>) -> Self {
+        self.element.visual.scale = scale.into();
+        self
+    }
+
     /// 设置容器圆角。
     pub fn border_radius(mut self, radius: impl Into<Value<Dp>>) -> Self {
         self.element.visual.border_radius = Some(radius.into());

@@ -189,6 +189,42 @@ fn hovered_checkbox_uses_primary_border_without_changing_background() {
 }
 
 #[test]
+fn checkbox_validation_invalid_uses_theme_error_border() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(Checkbox::new(false).validation(
+        crate::foundation::form::ValidationVisualState {
+            invalid: true,
+            ..Default::default()
+        },
+    ));
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 80.0, 40.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered
+        .primitives
+        .shapes
+        .iter()
+        .any(|shape| shape.stroke_width > 0.0 && shape.color == theme.colors.error));
+}
+
+#[test]
 fn checkbox_checked_content_switches_without_animation() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

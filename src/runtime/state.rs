@@ -448,6 +448,15 @@ pub(super) struct ActiveCanvasDrag<VM> {
 }
 
 #[derive(Clone)]
+pub(super) struct ActiveTabReorder<VM> {
+    pub(super) group_id: WidgetId,
+    pub(super) from_index: usize,
+    pub(super) key: String,
+    pub(super) placement: crate::ui::widget::TabPlacement,
+    pub(super) on_reorder: Option<ValueCommand<VM, crate::ui::widget::TabsReorderEvent>>,
+}
+
+#[derive(Clone)]
 pub(super) struct SliderDrag<VM> {
     pub(super) widget_id: WidgetId,
     pub(super) on_change: Option<ValueCommand<VM, f32>>,

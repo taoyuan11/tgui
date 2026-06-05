@@ -75,18 +75,21 @@ impl PartialEq for LifecycleWidgetKind {
                     checked: left_checked,
                     label: left_label,
                     disabled: left_disabled,
+                    validation: left_validation,
                     style: left_style,
                 },
                 Self::Checkbox {
                     checked: right_checked,
                     label: right_label,
                     disabled: right_disabled,
+                    validation: right_validation,
                     style: right_style,
                 },
             ) => {
                 left_checked == right_checked
                     && left_label == right_label
                     && left_disabled == right_disabled
+                    && left_validation == right_validation
                     && left_style == right_style
             }
             (
@@ -94,18 +97,21 @@ impl PartialEq for LifecycleWidgetKind {
                     checked: left_checked,
                     label: left_label,
                     disabled: left_disabled,
+                    validation: left_validation,
                     style: left_style,
                 },
                 Self::Radio {
                     checked: right_checked,
                     label: right_label,
                     disabled: right_disabled,
+                    validation: right_validation,
                     style: right_style,
                 },
             ) => {
                 left_checked == right_checked
                     && left_label == right_label
                     && left_disabled == right_disabled
+                    && left_validation == right_validation
                     && left_style == right_style
             }
             (
@@ -116,6 +122,7 @@ impl PartialEq for LifecycleWidgetKind {
                     active_thumb_color: left_active_thumb_color,
                     inactive_thumb_color: left_inactive_thumb_color,
                     disabled: left_disabled,
+                    validation: left_validation,
                     style: left_style,
                 },
                 Self::Switch {
@@ -125,6 +132,7 @@ impl PartialEq for LifecycleWidgetKind {
                     active_thumb_color: right_active_thumb_color,
                     inactive_thumb_color: right_inactive_thumb_color,
                     disabled: right_disabled,
+                    validation: right_validation,
                     style: right_style,
                 },
             ) => {
@@ -134,6 +142,7 @@ impl PartialEq for LifecycleWidgetKind {
                     && left_active_thumb_color == right_active_thumb_color
                     && left_inactive_thumb_color == right_inactive_thumb_color
                     && left_disabled == right_disabled
+                    && left_validation == right_validation
                     && left_style == right_style
             }
             (
@@ -143,6 +152,7 @@ impl PartialEq for LifecycleWidgetKind {
                     options: left_options,
                     open: left_open,
                     disabled: left_disabled,
+                    validation: left_validation,
                     style: left_style,
                 },
                 Self::Select {
@@ -151,6 +161,7 @@ impl PartialEq for LifecycleWidgetKind {
                     options: right_options,
                     open: right_open,
                     disabled: right_disabled,
+                    validation: right_validation,
                     style: right_style,
                 },
             ) => {
@@ -158,6 +169,7 @@ impl PartialEq for LifecycleWidgetKind {
                     && left_placeholder == right_placeholder
                     && left_open == right_open
                     && left_disabled == right_disabled
+                    && left_validation == right_validation
                     && left_style == right_style
                     && left_options.len() == right_options.len()
                     && left_options.iter().zip(right_options.iter()).all(
@@ -179,6 +191,7 @@ impl PartialEq for LifecycleWidgetKind {
                     tick_count: left_tick_count,
                     value_formatter: left_value_formatter,
                     disabled: left_disabled,
+                    validation: left_validation,
                     style: left_style,
                 },
                 Self::Slider {
@@ -191,6 +204,7 @@ impl PartialEq for LifecycleWidgetKind {
                     tick_count: right_tick_count,
                     value_formatter: right_value_formatter,
                     disabled: right_disabled,
+                    validation: right_validation,
                     style: right_style,
                 },
             ) => {
@@ -202,6 +216,7 @@ impl PartialEq for LifecycleWidgetKind {
                     && left_show_value_label == right_show_value_label
                     && left_tick_count == right_tick_count
                     && left_disabled == right_disabled
+                    && left_validation == right_validation
                     && left_style == right_style
                     && left_value_formatter.is_some() == right_value_formatter.is_some()
             }
@@ -213,6 +228,7 @@ impl PartialEq for LifecycleWidgetKind {
                     multiline: left_multiline,
                     show_scrollbar: left_show_scrollbar,
                     auto_wrap: left_auto_wrap,
+                    validation: left_validation,
                 },
                 Self::TextEditor {
                     placeholder: right_placeholder,
@@ -221,6 +237,7 @@ impl PartialEq for LifecycleWidgetKind {
                     multiline: right_multiline,
                     show_scrollbar: right_show_scrollbar,
                     auto_wrap: right_auto_wrap,
+                    validation: right_validation,
                 },
             ) => {
                 left_placeholder == right_placeholder
@@ -229,6 +246,7 @@ impl PartialEq for LifecycleWidgetKind {
                     && left_multiline == right_multiline
                     && left_show_scrollbar == right_show_scrollbar
                     && left_auto_wrap == right_auto_wrap
+                    && left_validation == right_validation
             }
             _ => false,
         }

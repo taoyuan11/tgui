@@ -127,14 +127,15 @@ where
             style,
         } = ctx_menu;
 
-        // 接长按手势：长按 / 右键命中时调用 on_show，把触发坐标传出去。
-        if let Some(on_show) = on_show {
-            let recognizer = match child.interactions.gesture.take() {
-                Some(existing) => existing.on_long_press(on_show),
-                None => GestureRecognizer::new().on_long_press(on_show),
-            };
-            child.interactions.gesture = Some(recognizer);
-        }
+        // 始终接长按手势：runtime 会据此自动打开内部 ContextMenu。
+        // 若调用方提供 on_show，自动打开后仍会收到触发事件。
+        let on_show =
+            on_show.unwrap_or_else(|| ValueCommand::new(|_: &mut VM, _: LongPressEvent| {}));
+        let recognizer = match child.interactions.gesture.take() {
+            Some(existing) => existing.on_long_press(on_show),
+            None => GestureRecognizer::new().on_long_press(on_show),
+        };
+        child.interactions.gesture = Some(recognizer);
 
         let descriptor = ContextMenuDescriptor {
             items: items.into_iter().map(MenuItemState::from_public).collect(),

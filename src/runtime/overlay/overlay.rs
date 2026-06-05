@@ -184,6 +184,11 @@ pub(crate) enum OverlayContent<VM> {
         clip_rect: Option<crate::ui::widget::Rect>,
     },
     Scene(Box<ComputedScene<VM>>),
+    SceneWithPrimitives {
+        scene: Box<ComputedScene<VM>>,
+        scene_offset: crate::ui::widget::Point,
+        primitives: Vec<OverlayPrimitive>,
+    },
 }
 
 impl<VM> Clone for OverlayContent<VM> {
@@ -201,6 +206,15 @@ impl<VM> Clone for OverlayContent<VM> {
                 clip_rect: *clip_rect,
             },
             Self::Scene(scene) => Self::Scene(Box::new((**scene).clone())),
+            Self::SceneWithPrimitives {
+                scene,
+                scene_offset,
+                primitives,
+            } => Self::SceneWithPrimitives {
+                scene: Box::new((**scene).clone()),
+                scene_offset: *scene_offset,
+                primitives: primitives.clone(),
+            },
         }
     }
 }

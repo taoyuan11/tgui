@@ -164,6 +164,18 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                     .animated(fade_transition),
             ),
         };
+        let resolved_style_for_layout = style
+            .clone()
+            .unwrap_or_else(|| ModalStyle::default_for(ResolvedThemeMode::Light));
+        let enter_scale = resolved_style_for_layout.enter_scale.clamp(0.01, 16.0);
+        let scale_value: Value<f32> = match open.clone() {
+            Value::Static(open_now) => Value::Static(if open_now { 1.0 } else { enter_scale }),
+            Value::Signal(signal) => Value::Signal(
+                signal
+                    .map(move |o| if o { 1.0 } else { enter_scale })
+                    .animated(fade_transition),
+            ),
+        };
 
         // -----------------------------------------------------------------
         // close 命令：把 on_open_change(false) 包成 Command<VM>，用于 backdrop
@@ -213,6 +225,7 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
         let title_value_for_render = title.clone();
         let mut card: Flex<VM> = Flex::new(Axis::Vertical)
             .opacity(visibility_value.clone())
+            .scale(scale_value)
             .style(move |mode| {
                 let resolved = modal_style_for_card
                     .clone()
@@ -226,9 +239,6 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                 s
             });
         // 计算尺寸 / margin / padding：style 在 builder 阶段一次性解析。
-        let resolved_style_for_layout = style
-            .clone()
-            .unwrap_or_else(|| ModalStyle::default_for(ResolvedThemeMode::Light));
         card = card
             .min_width(resolved_style_for_layout.min_width)
             .max_width(resolved_style_for_layout.max_width)

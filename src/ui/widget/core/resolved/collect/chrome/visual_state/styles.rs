@@ -14,14 +14,29 @@ impl<VM> ResolvedElement<VM> {
                 _ => None,
             },
             select_style: match &self.kind {
-                ResolvedWidgetKind::Select { style, .. } => {
-                    Some(resolve_select_style(style, widget_state, theme))
+                ResolvedWidgetKind::Select {
+                    style, validation, ..
+                } => {
+                    let mut style = resolve_select_style(style, widget_state, theme);
+                    if let Some(color) = validation_state_color(&validation.resolve(), theme) {
+                        style.border = color;
+                        apply_validation_focus_ring(&mut style.focus_ring, color);
+                    }
+                    Some(style)
                 }
                 _ => None,
             },
             slider_style: match &self.kind {
-                ResolvedWidgetKind::Slider { style, .. } => {
-                    Some(resolve_slider_style(style, widget_state, theme))
+                ResolvedWidgetKind::Slider {
+                    style, validation, ..
+                } => {
+                    let mut style = resolve_slider_style(style, widget_state, theme);
+                    if let Some(color) = validation_state_color(&validation.resolve(), theme) {
+                        style.active_track = color;
+                        style.tick = color.with_alpha_factor(0.55);
+                        apply_validation_focus_ring(&mut style.focus_ring, color);
+                    }
+                    Some(style)
                 }
                 _ => None,
             },
@@ -38,24 +53,56 @@ impl<VM> ResolvedElement<VM> {
                 _ => None,
             },
             input_style: match &self.kind {
-                ResolvedWidgetKind::TextEditor { style, .. } => {
-                    Some(resolve_input_style(style, widget_state))
+                ResolvedWidgetKind::TextEditor {
+                    style, validation, ..
+                } => {
+                    let mut style = resolve_input_style(style, widget_state);
+                    if let Some(color) = validation_state_color(&validation.resolve(), theme) {
+                        style.border = color;
+                    }
+                    Some(style)
                 }
                 _ => None,
             },
             checkbox_style: match &self.kind {
-                ResolvedWidgetKind::Checkbox { checked, style, .. } => Some(
-                    resolve_checkbox_style(style, widget_state, checked.resolve(), theme),
-                ),
+                ResolvedWidgetKind::Checkbox {
+                    checked,
+                    style,
+                    validation,
+                    ..
+                } => {
+                    let mut style =
+                        resolve_checkbox_style(style, widget_state, checked.resolve(), theme);
+                    if let Some(color) = validation_state_color(&validation.resolve(), theme) {
+                        style.border = color;
+                        if checked.resolve() {
+                            style.background = color;
+                            style.checkmark = theme.colors.on_error;
+                        }
+                        apply_validation_focus_ring(&mut style.focus_ring, color);
+                    }
+                    Some(style)
+                }
                 _ => None,
             },
             radio_style: match &self.kind {
-                ResolvedWidgetKind::Radio { checked, style, .. } => Some(resolve_radio_style(
+                ResolvedWidgetKind::Radio {
+                    checked,
                     style,
-                    widget_state,
-                    checked.resolve(),
-                    theme,
-                )),
+                    validation,
+                    ..
+                } => {
+                    let mut style =
+                        resolve_radio_style(style, widget_state, checked.resolve(), theme);
+                    if let Some(color) = validation_state_color(&validation.resolve(), theme) {
+                        style.border = color;
+                        if checked.resolve() {
+                            style.indicator = color;
+                        }
+                        apply_validation_focus_ring(&mut style.focus_ring, color);
+                    }
+                    Some(style)
+                }
                 _ => None,
             },
         }

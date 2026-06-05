@@ -6,9 +6,37 @@ use crate::ui::widget::common::{TabPlacement, TabTriggerState, WidgetId};
 use crate::ui::widget::container::{set_layout_inset, set_layout_length, set_layout_lengths};
 use crate::ui::widget::container::{Flex, IntoLengthValue};
 use crate::ui::widget::core::Element;
+use crate::ui::widget::menu::{Menu, MenuItem};
 use crate::ui::widget::scroll_view::ScrollView;
 use crate::ui::widget::style::{ButtonStyle, ContainerStyle, StyleResolver, TabsStyle};
 use crate::ui::widget::Stack;
+
+const TABS_MORE_VISIBLE_BUDGET: usize = 4;
+
+/// Tab strip overflow behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabsOverflowMode {
+    /// Keep the strip scrollable when tab triggers exceed the available space.
+    Scroll,
+    /// Move lower-priority triggers into an uncontrolled More menu.
+    More,
+}
+
+impl Default for TabsOverflowMode {
+    fn default() -> Self {
+        Self::Scroll
+    }
+}
+
+/// Payload emitted when a reorderable tab trigger is dragged onto another tab.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TabsReorderEvent {
+    pub from_index: usize,
+    pub to_index: usize,
+    pub key: String,
+    pub target_key: String,
+    pub placement: TabPlacement,
+}
 
 /// 单个 tab 声明。
 #[derive(Clone)]
@@ -46,8 +74,11 @@ pub struct Tabs<VM> {
     items: Vec<TabItem<VM>>,
     selected: Value<String>,
     placement: TabPlacement,
+    overflow_mode: TabsOverflowMode,
+    reorderable: Value<bool>,
     style: Option<StyleResolver<TabsStyle>>,
     on_change: Option<ValueCommand<VM, (String, String)>>,
+    on_reorder: Option<ValueCommand<VM, TabsReorderEvent>>,
     layout: LayoutStyle,
 }
 
@@ -168,8 +199,11 @@ impl<VM> Tabs<VM> {
             items,
             selected: selected.into(),
             placement: TabPlacement::Top,
+            overflow_mode: TabsOverflowMode::Scroll,
+            reorderable: Value::Static(false),
             style: None,
             on_change: None,
+            on_reorder: None,
             layout: LayoutStyle::default(),
         }
     }
@@ -189,6 +223,16 @@ impl<VM> Tabs<VM> {
         self
     }
 
+    pub fn overflow_mode(mut self, mode: TabsOverflowMode) -> Self {
+        self.overflow_mode = mode;
+        self
+    }
+
+    pub fn reorderable(mut self, reorderable: impl Into<Value<bool>>) -> Self {
+        self.reorderable = reorderable.into();
+        self
+    }
+
     pub fn style(
         mut self,
         resolver: impl Fn(ResolvedThemeMode) -> TabsStyle + Send + Sync + 'static,
@@ -199,6 +243,11 @@ impl<VM> Tabs<VM> {
 
     pub fn on_change(mut self, command: ValueCommand<VM, (String, String)>) -> Self {
         self.on_change = Some(command);
+        self
+    }
+
+    pub fn on_reorder(mut self, command: ValueCommand<VM, TabsReorderEvent>) -> Self {
+        self.on_reorder = Some(command);
         self
     }
 
@@ -218,8 +267,11 @@ impl<VM: 'static> From<Tabs<VM>> for Element<VM> {
             items,
             selected,
             placement,
+            overflow_mode,
+            reorderable,
             style,
             on_change,
+            on_reorder,
             layout,
         } = tabs;
         let strip = build_tab_strip(
@@ -227,8 +279,11 @@ impl<VM: 'static> From<Tabs<VM>> for Element<VM> {
             &items,
             selected.clone(),
             placement,
+            overflow_mode,
+            reorderable,
             style.clone(),
             on_change,
+            on_reorder,
         );
         let panel = build_panel(items, selected, style.clone());
 
@@ -253,8 +308,11 @@ fn build_tab_strip<VM: 'static>(
     items: &[TabItem<VM>],
     selected: Value<String>,
     placement: TabPlacement,
+    overflow_mode: TabsOverflowMode,
+    reorderable: Value<bool>,
     style: Option<StyleResolver<TabsStyle>>,
     on_change: Option<ValueCommand<VM, (String, String)>>,
+    on_reorder: Option<ValueCommand<VM, TabsReorderEvent>>,
 ) -> Element<VM> {
     let axis = if placement.is_horizontal() {
         Axis::Horizontal
@@ -265,7 +323,9 @@ fn build_tab_strip<VM: 'static>(
     // 仅保留构建触发按钮所需的轻量信息，便于在选中信号变化时整体重建。
     let specs: Vec<TabTriggerSpec> = items
         .iter()
-        .map(|item| TabTriggerSpec {
+        .enumerate()
+        .map(|(index, item)| TabTriggerSpec {
+            index,
             key: item.key.clone(),
             label: item.label.clone(),
             disabled: item.disabled.clone(),
@@ -283,8 +343,11 @@ fn build_tab_strip<VM: 'static>(
             &specs,
             &selected,
             placement,
+            overflow_mode,
+            reorderable.clone(),
             style.clone(),
             on_change,
+            on_reorder,
         )),
         Value::Signal(signal) => {
             let strip_style = style.clone();
@@ -294,36 +357,49 @@ fn build_tab_strip<VM: 'static>(
                     &specs,
                     &selected,
                     placement,
+                    overflow_mode,
+                    reorderable.clone(),
                     strip_style.clone(),
                     on_change.clone(),
+                    on_reorder.clone(),
                 )
             }))
         }
     };
-    ScrollView::new()
-        .focusable(false)
-        .overflow_x(if placement.is_horizontal() {
-            Overflow::Scroll
-        } else {
-            Overflow::Hidden
-        })
-        .overflow_y(if placement.is_horizontal() {
-            Overflow::Hidden
-        } else {
-            Overflow::Scroll
-        })
-        .show_scrollbar(false)
-        .style({
-            let style = style.clone();
-            move |mode| tab_bar_container_style(resolve_tabs_style(style.as_ref(), mode))
-        })
-        .child(list)
-        .into()
+    match overflow_mode {
+        TabsOverflowMode::Scroll => ScrollView::new()
+            .focusable(false)
+            .overflow_x(if placement.is_horizontal() {
+                Overflow::Scroll
+            } else {
+                Overflow::Hidden
+            })
+            .overflow_y(if placement.is_horizontal() {
+                Overflow::Hidden
+            } else {
+                Overflow::Scroll
+            })
+            .show_scrollbar(false)
+            .style({
+                let style = style.clone();
+                move |mode| tab_bar_container_style(resolve_tabs_style(style.as_ref(), mode))
+            })
+            .child(list)
+            .into(),
+        TabsOverflowMode::More => Flex::new(axis)
+            .style({
+                let style = style.clone();
+                move |mode| tab_bar_container_style(resolve_tabs_style(style.as_ref(), mode))
+            })
+            .child(list)
+            .into(),
+    }
 }
 
 /// 构建 tab 触发按钮所需的轻量信息（不含 panel 内容）。
 #[derive(Clone)]
 struct TabTriggerSpec {
+    index: usize,
     key: String,
     label: String,
     disabled: Value<bool>,
@@ -334,12 +410,17 @@ fn build_triggers<VM: 'static>(
     specs: &[TabTriggerSpec],
     selected: &str,
     placement: TabPlacement,
+    overflow_mode: TabsOverflowMode,
+    reorderable: Value<bool>,
     style: Option<StyleResolver<TabsStyle>>,
     on_change: Option<ValueCommand<VM, (String, String)>>,
+    on_reorder: Option<ValueCommand<VM, TabsReorderEvent>>,
 ) -> Vec<Element<VM>> {
     let layout_style = resolve_tabs_style_for_layout(style.as_ref());
-    let mut triggers = Vec::with_capacity(specs.len());
-    for (index, item) in specs.iter().enumerate() {
+    let (visible_specs, overflow_specs) = split_tabs_for_overflow(specs, selected, overflow_mode);
+    let mut triggers =
+        Vec::with_capacity(visible_specs.len() + usize::from(!overflow_specs.is_empty()));
+    for item in visible_specs {
         let active = item.key == selected;
         let disabled_now = item.disabled.resolve();
         let mut button = Button::new(item.label.clone())
@@ -367,15 +448,103 @@ fn build_triggers<VM: 'static>(
         element.focus.tab_index = Some(if active { 0 } else { -1 });
         element = element.with_tab_trigger_state(TabTriggerState {
             group_id,
-            index,
+            index: item.index,
             placement,
             key: item.key.clone(),
             label: item.label.clone(),
             on_change: on_change.clone(),
+            reorderable: reorderable.clone(),
+            on_reorder: on_reorder.clone(),
         });
         triggers.push(element);
     }
+    if !overflow_specs.is_empty() {
+        triggers.push(build_more_trigger(
+            overflow_specs,
+            placement,
+            style,
+            on_change,
+        ));
+    }
     triggers
+}
+
+fn split_tabs_for_overflow<'a>(
+    specs: &'a [TabTriggerSpec],
+    selected: &str,
+    overflow_mode: TabsOverflowMode,
+) -> (Vec<&'a TabTriggerSpec>, Vec<&'a TabTriggerSpec>) {
+    if overflow_mode == TabsOverflowMode::Scroll || specs.len() <= TABS_MORE_VISIBLE_BUDGET {
+        return (specs.iter().collect(), Vec::new());
+    }
+
+    let visible_budget = TABS_MORE_VISIBLE_BUDGET.saturating_sub(1).max(1);
+    let mut visible_indexes = Vec::new();
+    for spec in specs.iter().take(visible_budget) {
+        visible_indexes.push(spec.index);
+    }
+    if let Some(selected_spec) = specs.iter().find(|spec| spec.key == selected) {
+        if !visible_indexes.contains(&selected_spec.index) {
+            if visible_indexes.len() >= visible_budget {
+                visible_indexes.pop();
+            }
+            visible_indexes.push(selected_spec.index);
+        }
+    }
+    visible_indexes.sort_unstable();
+
+    let mut visible = Vec::new();
+    let mut overflow = Vec::new();
+    for spec in specs {
+        if visible_indexes.contains(&spec.index) {
+            visible.push(spec);
+        } else {
+            overflow.push(spec);
+        }
+    }
+    (visible, overflow)
+}
+
+fn build_more_trigger<VM: 'static>(
+    overflow_specs: Vec<&TabTriggerSpec>,
+    placement: TabPlacement,
+    style: Option<StyleResolver<TabsStyle>>,
+    on_change: Option<ValueCommand<VM, (String, String)>>,
+) -> Element<VM> {
+    let layout_style = resolve_tabs_style_for_layout(style.as_ref());
+    let mut more_items = Vec::new();
+    for item in overflow_specs {
+        let disabled_now = item.disabled.resolve();
+        let mut menu_item = MenuItem::new(item.label.clone()).disable(item.disabled.clone());
+        if !disabled_now {
+            if let Some(command) = on_change.clone() {
+                let key = item.key.clone();
+                let label = item.label.clone();
+                menu_item = menu_item.on_select(Command::new_with_context(
+                    move |vm: &mut VM, ctx: &CommandContext<VM>| {
+                        command.execute_with_context(vm, (key.clone(), label.clone()), ctx);
+                    },
+                ));
+            }
+        }
+        more_items.push(menu_item);
+    }
+
+    let trigger = Button::new("More")
+        .ghost()
+        .min_width(layout_style.tab_min_width)
+        .style({
+            let style = style.clone();
+            move |mode| tab_button_style(resolve_tabs_style(style.as_ref(), mode), mode, false)
+        });
+    Menu::new(trigger)
+        .items(more_items)
+        .placement(if placement.is_horizontal() {
+            crate::ui::widget::overlay::Placement::bottom()
+        } else {
+            crate::ui::widget::overlay::Placement::right()
+        })
+        .into()
 }
 
 fn build_panel<VM: 'static>(

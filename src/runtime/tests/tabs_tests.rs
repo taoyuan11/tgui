@@ -3,7 +3,8 @@ use super::*;
 use std::sync::{Arc, Mutex};
 
 use crate::foundation::binding::State;
-use crate::ui::widget::{TabItem, Tabs};
+use crate::platform::event::MouseButton;
+use crate::ui::widget::{TabItem, Tabs, TabsReorderEvent};
 
 fn tabs_tree(log: Arc<Mutex<Vec<String>>>) -> WidgetTree<TestVm> {
     let log_for_cmd = log;
@@ -149,4 +150,49 @@ fn changing_selected_state_moves_active_tab_indicator() {
     handler.request_redraw_if_dirty(Instant::now());
 
     assert_eq!(active_tab_key(&mut handler).as_deref(), Some("three"));
+}
+
+#[test]
+fn dragging_reorderable_tab_dispatches_reorder_event() {
+    let invalidation = InvalidationSignal::new();
+    let events = Arc::new(Mutex::new(Vec::<TabsReorderEvent>::new()));
+    let events_for_cmd = events.clone();
+    let tree = WidgetTree::new(
+        Tabs::new(
+            vec![
+                TabItem::new("one", "One", Text::new("Panel one")),
+                TabItem::new("two", "Two", Text::new("Panel two")),
+                TabItem::new("three", "Three", Text::new("Panel three")),
+            ],
+            "one".to_string(),
+        )
+        .reorderable(true)
+        .on_reorder(ValueCommand::new(move |_: &mut TestVm, event| {
+            events_for_cmd.lock().unwrap().push(event);
+        })),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let from = tab_center(&mut handler, "one");
+    let to = tab_center(&mut handler, "three");
+
+    handler.cursor_position = Some(from);
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.cursor_position = Some(to);
+    let event = WindowEvent::PointerButton {
+        device_id: None,
+        position: PhysicalPosition::new(to.x.get() as f64, to.y.get() as f64),
+        state: ElementState::Released,
+        button: ButtonSource::Mouse(MouseButton::Left),
+        primary: true,
+    };
+    let event_loop = TestEventLoop;
+    let _ = handler.handle_bound_window_event(&event_loop, event);
+
+    let recorded = events.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].from_index, 0);
+    assert_eq!(recorded[0].to_index, 2);
+    assert_eq!(recorded[0].key, "one");
+    assert_eq!(recorded[0].target_key, "three");
 }

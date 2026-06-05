@@ -195,6 +195,8 @@ impl<VM> ResolvedElement<VM> {
                         label: trigger.label.clone(),
                         interactions: self.interactions.clone(),
                         on_change: trigger.on_change.clone(),
+                        reorderable: trigger.reorderable.resolve(),
+                        on_reorder: trigger.on_reorder.clone(),
                     }
                 } else {
                     HitInteraction::Widget {

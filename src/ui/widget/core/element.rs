@@ -89,12 +89,14 @@ impl<VM> Element<VM> {
                 label,
                 on_change,
                 disabled,
+                validation,
                 style,
             } => WidgetKind::Checkbox {
                 checked,
                 label,
                 on_change: on_change.map(|command| command.scope(selector.clone())),
                 disabled,
+                validation,
                 style,
             },
             WidgetKind::Radio {
@@ -102,12 +104,14 @@ impl<VM> Element<VM> {
                 label,
                 on_change,
                 disabled,
+                validation,
                 style,
             } => WidgetKind::Radio {
                 checked,
                 label,
                 on_change: on_change.map(|command| command.scope(selector.clone())),
                 disabled,
+                validation,
                 style,
             },
             WidgetKind::Switch {
@@ -118,6 +122,7 @@ impl<VM> Element<VM> {
                 active_thumb_color,
                 inactive_thumb_color,
                 disabled,
+                validation,
                 style,
             } => WidgetKind::Switch {
                 checked,
@@ -127,6 +132,7 @@ impl<VM> Element<VM> {
                 active_thumb_color,
                 inactive_thumb_color,
                 disabled,
+                validation,
                 style,
             },
             WidgetKind::Select {
@@ -136,6 +142,7 @@ impl<VM> Element<VM> {
                 open,
                 on_open_change,
                 disabled,
+                validation,
                 style,
             } => WidgetKind::Select {
                 selected_label,
@@ -154,6 +161,7 @@ impl<VM> Element<VM> {
                 open,
                 on_open_change: on_open_change.map(|command| command.scope(selector.clone())),
                 disabled,
+                validation,
                 style,
             },
             WidgetKind::SelectOptionRow {
@@ -187,6 +195,7 @@ impl<VM> Element<VM> {
                 value_formatter,
                 on_change,
                 disabled,
+                validation,
                 style,
             } => WidgetKind::Slider {
                 value,
@@ -199,6 +208,7 @@ impl<VM> Element<VM> {
                 value_formatter,
                 on_change: on_change.map(|command| command.scope(selector.clone())),
                 disabled,
+                validation,
                 style,
             },
             WidgetKind::ProgressBar {
@@ -253,6 +263,7 @@ impl<VM> Element<VM> {
                 multiline,
                 show_scrollbar,
                 auto_wrap,
+                validation,
             } => WidgetKind::TextEditor {
                 controller,
                 placeholder,
@@ -264,6 +275,7 @@ impl<VM> Element<VM> {
                 multiline,
                 show_scrollbar,
                 auto_wrap,
+                validation,
             },
             WidgetKind::Portal {
                 content,
@@ -307,7 +319,9 @@ impl<VM> Element<VM> {
             lifecycle_events: self.lifecycle_events.scope(selector.clone()),
             media_events: self.media_events.scope(selector.clone()),
             background: self.background,
-            tooltip: self.tooltip,
+            tooltip: self
+                .tooltip
+                .map(|tooltip| Box::new((*tooltip).scope(selector.clone()))),
             popover: self
                 .popover
                 .map(|popover| Box::new((*popover).scope(selector.clone()))),
@@ -361,7 +375,7 @@ impl<VM> Element<VM> {
 
     /// 给 Element 挂上 Tooltip。任何 widget 通过 `.into()` 转 Element 后都可以链式调用。
     /// 各 widget 的 builder 通常也会暴露同名 `.tooltip()` 方法，调用本方法的简写形式。
-    pub fn with_tooltip(mut self, tooltip: crate::ui::widget::Tooltip) -> Self {
+    pub fn with_tooltip(mut self, tooltip: crate::ui::widget::Tooltip<VM>) -> Self {
         self.tooltip = Some(Box::new(tooltip));
         self
     }

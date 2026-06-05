@@ -6,13 +6,15 @@ use crate::ui::layout::Length;
 use crate::ui::widget::container::Stack;
 use crate::ui::widget::core::measure_node;
 use crate::ui::widget::overlay::{
-    collect::emit_overlay, Anchor, AnchorKey, Overlay, OverlayContent, OverlayId, OverlayLayer,
+    collect::emit_overlay, solve_placement, Anchor, AnchorKey, Overlay, OverlayContent, OverlayId,
+    OverlayLayer, OverlayPrimitive, PlacementOptions,
 };
 use crate::ui::widget::style::PopoverStyle;
-use crate::ui::widget::{ComputedScene, Element, Rect};
+use crate::ui::widget::{ComputedScene, Element, Point, Rect};
 
 use super::super::scene::{CollectContext, VisualContext};
 use super::super::types::ResolvedElement;
+use super::tooltip::{bubble_origin, overlay_pointer_mesh};
 use super::CollectVisualState;
 
 const POPOVER_OVERLAY_TAG: u64 = 0x504F504F56455231; // "POPOVER1"
@@ -73,12 +75,72 @@ impl<VM: 'static> ResolvedElement<VM> {
             }
         }
 
+        let pointer = style
+            .pointer_size
+            .unwrap_or(crate::ui::unit::Dp::ZERO)
+            .max(crate::ui::unit::Dp::ZERO);
+        if pointer.get() <= 0.0 {
+            let _ = emit_overlay(
+                computed,
+                context.viewport,
+                overlay,
+                content_size,
+                OverlayContent::Scene(Box::new(content_scene)),
+            );
+            return;
+        }
+
+        let overlay_w = if popover.placement.side.is_vertical() {
+            content_size.0
+        } else {
+            content_size.0 + pointer
+        };
+        let overlay_h = if popover.placement.side.is_vertical() {
+            content_size.1 + pointer
+        } else {
+            content_size.1
+        };
+        let placement_options = PlacementOptions {
+            placement: popover.placement,
+            offset: style.offset,
+            cross_offset: crate::ui::unit::Dp::ZERO,
+            flip: popover.flip_policy,
+            viewport_padding: insets_max(style.padding),
+            clamp_to_viewport: true,
+            match_anchor_width: popover.match_anchor_width,
+        };
+        let solved = solve_placement(
+            Anchor::Rect(visual.frame),
+            (overlay_w, overlay_h),
+            context.viewport,
+            &placement_options,
+        );
+        let bubble_origin = bubble_origin(solved.resolved_placement.side, pointer);
+        let mut primitives = Vec::new();
+        if let Some(pointer_mesh) = overlay_pointer_mesh(
+            style.background.resolve(),
+            pointer,
+            style.pointer_inset,
+            &solved,
+            bubble_origin,
+            content_size.0,
+            content_size.1,
+            overlay_w,
+            overlay_h,
+        ) {
+            primitives.push(OverlayPrimitive::Mesh(pointer_mesh));
+        }
+
         let _ = emit_overlay(
             computed,
             context.viewport,
             overlay,
-            content_size,
-            OverlayContent::Scene(Box::new(content_scene)),
+            (overlay_w, overlay_h),
+            OverlayContent::SceneWithPrimitives {
+                scene: Box::new(content_scene),
+                scene_offset: Point::new(bubble_origin.0, bubble_origin.1),
+                primitives,
+            },
         );
     }
 }
@@ -187,6 +249,9 @@ fn build_popover_scene<VM: 'static>(
                     active_scrollbar: context.active_scrollbar,
                     widget_states: context.widget_states,
                     select_open_states: context.select_open_states,
+                    menu_open_states: context.menu_open_states,
+                    menubar_active_states: context.menubar_active_states,
+                    context_menu_anchor_states: context.context_menu_anchor_states,
                     scroll_offsets: context.scroll_offsets,
                     virtual_states: context.virtual_states,
                     viewport: context.viewport,

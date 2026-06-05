@@ -83,13 +83,16 @@
 - **作用**：统一录入类组件的值绑定、校验规则、错误展示、提交/重置；不强加 schema，仅约定"字段 ↔ State ↔ Validator ↔ 错误信息"四元组。
 - **被依赖组件**：Input、Textarea、Select、Checkbox、Radio、Switch、Slider、NumberInput、DatePicker、ColorPicker、Upload。
 - **要点**：纯 ViewModel 层抽象，不引入新 widget；可放 `src/foundation/form/`。
-- **进度**：[基础完成]
+- **进度**：[功能完整]
   - ✅ `src/foundation/form/` 已提供 `Form`、`FormField<T>`、`TextFormField`、`ValidationErrors`、`FormSnapshot`；
   - ✅ 支持字段注册、重复字段名检测、字段级 validator、全表 validate / submit / snapshot / reset / clear_errors；
   - ✅ `FormField<T>::bind_change()` 可直接接 Checkbox / Radio / Switch / Slider 等 `on_change`，`TextFormField::controller()` 可接 Input / Textarea；
   - ✅ 表单级 `errors()` / `is_valid()` 与字段级 `errors()` / `first_error()` / `is_valid()` 均为 Signal；
-  - ✅ 单元测试覆盖聚合校验、快照取值、reset、clear_errors、文本字段与重复注册。
-  - ⏳ 待补：录入组件的错误态视觉约定尚未统一绑定到 Form；异步 validator / submit lifecycle 仍未抽象。
+  - ✅ `FormStatus`、`ValidationVisualState`、`validate_async_command()`、`submit_async_command(...)`、字段级 `async_validator(...)`、`validation_state()`、`is_validating()`、`is_submitting()` 已公开；
+  - ✅ `CommandContext::tasks()` / `Tasks::spawn_blocking(...)` 已作为无外部 async runtime 的后台任务模型接入，完成回调回投 UI/runtime 命令上下文；
+  - ✅ 同步 validator 优先，异步 validator 仅在无同步错误时运行；generation id 会忽略过期异步结果；
+  - ✅ Input / Textarea / Select / Checkbox / Radio / Switch / Slider 均支持 `.validation(...)`，invalid / pending 视觉状态统一走主题错误色与 pending token；
+  - ✅ 单元测试覆盖聚合校验、快照取值、reset、clear_errors、文本字段、重复注册、异步 pending / errors / submit callback 与录入错误态渲染。
 
 ---
 
@@ -101,13 +104,14 @@
 - **桌面操作**：鼠标进入 anchor 延迟（默认 ~500ms）显示、离开立即隐藏；键盘 focus 也触发；`Esc` 隐藏。
 - **键盘补充**：键盘 focus 触发；`Esc` 隐藏。
 - **依赖**：P0 §1、§5。
-- **进度**：[基础完成]
+- **进度**：[功能完整]
   - ✅ `Tooltip` 已公开导出，作为任意 widget 的 `Element::tooltip(...)` 修饰符使用；
   - ✅ 支持纯文本 `Value<String>`、默认 500ms hover delay、自定义 `placement` / `flip_policy` / `delay` / `TooltipStyle`；
   - ✅ collect 阶段通过 Overlay 引擎渲染背景、文本与三角指针，使用 `OverlayLayer::Tooltip`；
   - ✅ runtime 已支持 hover 延迟、离开 fade-out、focus 触发、Esc 隐藏、下一次 wakeup deadline；
-  - ✅ runtime 测试覆盖 hover 显示/隐藏、默认 delay、延迟唤醒、focus 显示、Esc 关闭、无 descriptor 不渲染。
-  - ⏳ 待补：Tooltip 内容仍是纯文本，暂不支持任意 Element 子树。
+  - ✅ `Tooltip<VM>` 支持 `Tooltip::new(text)` 轻量文本 path 和 `Tooltip::content(element)` nested scene path，可承载任意 Element 子树；
+  - ✅ Overlay content 支持 nested scene + primitives 混合，富内容 tooltip 与原有 pointer / close handler / focus 行为共用一套路径；
+  - ✅ runtime 测试覆盖 hover 显示/隐藏、默认 delay、延迟唤醒、focus 显示、Esc 关闭、无 descriptor 不渲染和富内容 tooltip。
 
 ### 8. Menu / ContextMenu / MenuBar
 - **作用**：层级化的操作命令列表；支持图标、快捷键提示、子菜单、分隔线、勾选项、禁用项。
@@ -125,9 +129,10 @@
   - ✅ submenu 嵌套：collect 阶段父项 hovered（鼠标或键盘 cursor）时递归 emit 子菜单 overlay；键盘 cursor 表示为 `Vec<usize>` 路径，Right 入栈进入 submenu / Left 弹栈退出，与 MenuBar 切换自然衔接；
   - ✅ 全局 `KeyChord` 派发：扫 cached resolved 树里所有 menu / context_menu 含 submenu 递归的 shortcut chord，命中即执行 on_select 并吞键（无需 widget 打开）；`format_chord` 把 chord 渲染成 "Ctrl+N" 风格的 hint 文本；
   - ✅ `MenuIcon::glyph(char)` / `MenuIcon::svg(...)`：在 item label 左侧、checked 列右侧加固定宽度图标列，glyph 走文本渲染，SVG 走 overlay texture 管线；
-  - ✅ `menu_tests` + `runtime::tests::menu_tests`：覆盖 descriptor / 渲染 / hover / 键盘 / 全局快捷键 / submenu 嵌套渲染 + 键盘 cursor 进出 / type-ahead / glyph 与 SVG 图标。
-  - ⏳ 长尾（独立 PR、不影响功能完整性）：
-    - ContextMenu / MenuBar 自动 active 状态接管——需要在 `CollectContext` 加 `internal_context_menu_anchor` / `internal_menubar_active` 字段贯穿调用链，在 runtime 派发里直接写入 runtime state，绕开用户 State 绑定。当前 API 通过 `.on_show(cmd)` / `MenuBar::new(active_signal).on_active_change(cmd)` 与 `State<bool>`/`State<Point>`/`State<Option<usize>>` 绑定，工作良好且可控。
+  - ✅ `Menu` 未传 `.open(...)` 时由 runtime 内部维护开闭；outside click / Esc / item select 均能关闭内部状态；
+  - ✅ `ContextMenu` 无需 `.on_show(...)` 也可右键 / 长按自动打开，anchor 由 runtime 状态维护；
+  - ✅ `MenuBar::uncontrolled()` 已公开，MenuBar active entry 可由 runtime 接管；
+  - ✅ `menu_tests` + `runtime::tests::menu_tests`：覆盖 descriptor / 渲染 / hover / 键盘 / 全局快捷键 / submenu 嵌套渲染 + 键盘 cursor 进出 / type-ahead / glyph 与 SVG 图标、uncontrolled menu / context menu / menubar。
 
 
 ### 9. Modal / Dialog（应用内）
@@ -136,7 +141,7 @@
 - **桌面操作**：`Esc` 关闭（可禁用）；`Enter` 触发主动作；Tab 在内部循环（focus trap）；点击 backdrop 关闭（可禁用）。
 - **键盘补充**：`Esc` 作为统一关闭入口；Tab 在内部循环。
 - **依赖**：P0 §1、§2、§5。
-- **进度**：[基本完成]
+- **进度**：[功能完整]
   - ✅ `Modal` / `ModalAction` / `ModalStyle` 公开 builder API + 主题样式 token；
   - ✅ Modal in-tree 子树渲染（任意 widget 内容支持）：semi-transparent backdrop + 居中 card（title / content / actions 三段）；
   - ✅ Card 自动启用 `FocusScopeOptions::{trap(true), auto_focus_first(true)}`：打开后聚焦主按钮 / 首个控件，Tab 在 modal 内循环；
@@ -146,9 +151,10 @@
   - ✅ `.return_focus_to(widget_id)` 与默认 autofocus 已接入 runtime，关闭后可声明式回焦触发控件；
   - ✅ Fade 动画：backdrop + card 的 `opacity` 由 `open: Signal<bool>` 派生 + `.animated(Transition::ease_in_out(160ms))` 自动过渡；
   - ✅ `WidgetProperty::ModalVisibility` 注册到动画引擎，复用 tooltip 同源 `AnimationKey::Widget` 通道；
-  - ✅ 单元测试覆盖（widget core + runtime）：descriptor 挂载、open/close 渲染对比、focus trap、autofocus、Esc / backdrop 关闭、声明式回焦、close_on_escape=false 抑制；
+  - ✅ `VisualStyle::scale` 与容器 `.scale(...)` 已接入 collect、hit region、focus rect 与 scene patch；`ModalStyle::enter_scale` 默认 `0.96`；
+  - ✅ Modal card 进入使用 fade + scale，reduced-motion 下 scale 直接采用目标值；
+  - ✅ 单元测试覆盖（widget core + runtime）：descriptor 挂载、open/close 渲染对比、focus trap、autofocus、Esc / backdrop 关闭、声明式回焦、close_on_escape=false 抑制、scale 与 reduced-motion；
   - ✅ `examples/modal_demo/` 独立示例：alert / confirm / 自定义内容（带 Input）三种用法。
-  - ⏳ 待补（独立 PR 价值低、可按需补）：scale 动画（VisualStyle 暂无 scale 字段，需要框架基础设施扩展）。
 
 
 ### 10. Popover
@@ -157,16 +163,16 @@
 - **桌面操作**：点击 anchor 触发；点击外部关闭；`Esc` 关闭；可设置 hover 触发模式。
 - **键盘补充**：`Esc` 关闭；浮层内控件按正常焦点顺序导航。
 - **依赖**：P0 §1、§2、§5。
-- **进度**：[基础完成]
+- **进度**：[功能完整]
   - ✅ `Popover`、`PopoverStyle`、`PopoverTriggerMode` 已公开导出（`prelude` / `widgets`）；
   - ✅ Popover 作为任意 widget 的可选修饰（`Element::popover`）而非独立 `WidgetKind`，内容支持任意子树；
   - ✅ 通过 overlay / portal 机制锚定到 trigger（`Anchor::Key` + `OverlayLayer::Popover`），带阴影圆角面板，支持 `placement` / `flip_policy` / `match_anchor_width`；
   - ✅ 桌面端点击 anchor 触发（toggle 注入 trigger 的 `on_click`）、`close_on_outside_click`、`close_on_escape`（均默认开启）、`return_focus_to` 还原焦点；
   - ✅ `PopoverTriggerMode::{Click, Hover, ClickAndHoverPreview}` 三种触发模式，runtime 解析 active hover popover，cursor 移入浮层 rect 后保持可见；
   - ✅ 浮层内交互元素可正常获得焦点 / 输入 / 点击（覆盖 Input caret、内部点击不关闭）；
-  - ✅ `examples/demo` 已新增 Popover 展示卡片，覆盖 click 固定打开 + hover 预览，浮层内含 Input / Switch / Checkbox / Button。
-  - ✅ 单元测试覆盖 builder 挂载 descriptor、open 态 overlay 收集、click+hover 包装、外部点击 / `Esc` 关闭、hover 预览可见性、浮层内焦点与 caret。
-  - ⏳ 待补（独立 PR）：可选指针 / 箭头渲染（`PopoverStyle::pointer_size` / `pointer_inset` 字段已存在但尚未接入渲染，目前为占位）。
+  - ✅ `PopoverStyle::pointer_size` / `pointer_inset` 已接入 overlay content size 与 pointer mesh 渲染，复用 Tooltip 指针 helper；
+  - ✅ `examples/demo` 已新增 Popover 展示卡片，覆盖 click 固定打开 + hover 预览、可选 pointer，浮层内含 Input / Switch / Checkbox / Button。
+  - ✅ 单元测试覆盖 builder 挂载 descriptor、open 态 overlay 收集、click+hover 包装、外部点击 / `Esc` 关闭、hover 预览可见性、浮层内焦点与 caret、pointer mesh。
 
 ### 11. Toast / Snackbar
 - **作用**：临时通知（区别于系统级 `tgui::notification`），用于 app 内成功/错误/警告/信息提示。
@@ -174,12 +180,13 @@
 - **桌面操作**：右上 / 右下角；鼠标悬停时暂停计时；点 × 关闭。
 - **键盘补充**：关闭按钮和 action 按钮保持可聚焦。
 - **依赖**：P0 §1、§5。
-- **进度**：[基础完成]
+- **进度**：[功能完整]
   - ✅ `ToastHost`、`ToastQueue`、`Toast`、`ToastAction`、`ToastKind`、`ToastPlacement`、`ToastStyle` 已公开导出；
   - ✅ 通过 overlay / portal 机制在顶层渲染 app 内 toast 队列，支持 success / error / warning / info 四种语义样式；
   - ✅ 默认自动消失（5s）、`.duration(...)` 自定义时长、`.persistent(true)` 持久提示、关闭按钮、action 按钮；
   - ✅ 桌面端 hover 暂停 / 恢复倒计时，支持点击关闭；
   - ✅ runtime 接入 toast deadline 唤醒，到点后自动触发 scene invalidate 并在下一轮 collect 清理过期项；
+  - ✅ 测试覆盖队列渲染、deadline、hover pause / resume、action、close button、过期清理与 runtime invalidation；
   - ✅ `examples/demo` 已新增 Toast / Snackbar 展示卡片，覆盖 4 种语义提示、撤销 action、持久提示和最近操作状态文本。
 
 ### 12. ProgressBar / Spinner
@@ -187,12 +194,13 @@
 - **样式**：高度 / 直径 / 轨道色 / 进度色 / 圆角；不确定态用循环动画；可选百分比文字。
 - **操作**：纯展示。`Signal<f32>` 驱动进度值；`prefers-reduced-motion` 关闭循环动画。
 - **依赖**：无新基础设施。
-- **进度**：[基础完成]
+- **进度**：[功能完整]
   - ✅ `ProgressBar`、`Spinner`、`ProgressBarStyle`、`SpinnerStyle` 已公开导出，并加入 `prelude` / `widgets`；
   - ✅ `ProgressBar` 支持确定态数值、非确定态循环高亮段、可选文本标签与样式覆盖；
   - ✅ `Spinner` 支持尺寸、厚度、轨道显示开关与颜色样式覆盖，复用现有 mesh primitive 提交链路；
   - ✅ 应用级 `reduced_motion` 默认值与 `bind_reduced_motion(...)` 绑定链路已接入 runtime，窗口级 binding 优先于应用默认值；
   - ✅ reduced-motion 开启时，`ProgressBar` 非确定态退化为静态居中高亮段，`Spinner` 退化为静态弧段；
+  - ✅ 测试覆盖确定态 / 不确定态渲染、label、custom style、reduced-motion 静态退化；
   - ✅ `examples/demo` 已新增 ProgressBar / Spinner 展示卡片，覆盖确定态、不确定态、自定义 spinner 与 reduced-motion 开关演示。
 
 ### 13. Tabs / TabView
@@ -201,14 +209,15 @@
 - **桌面操作**：点击切换；`←/→` 在标签间导航、`Home/End` 跳首尾、`Enter`/`Space` 激活；可拖拽重排（可选）。
 - **键盘补充**：标签条横滚；方向键切换焦点后 `Enter` / `Space` 激活。
 - **依赖**：P0 §2、§4。
-- **进度**：[基础完成]
+- **进度**：[功能完整]
   - ✅ `Tabs` / `TabView` / `TabItem` / `TabPlacement` / `TabsStyle` 已公开导出，并加入 `prelude` / `widgets`；
   - ✅ 支持 top / bottom / left / right 标签条布局，panel 按当前 selected key 动态切换；
   - ✅ tab trigger 复用 Button + ScrollView 组合实现，标签条溢出可滚动，禁用 tab 不进入 tab trigger 命中与焦点导航；
   - ✅ runtime 键盘导航：方向键在同组 tab trigger 中循环导航并跳过禁用项，`Home` / `End` 跳首尾，`Enter` / `Space` 激活；
-  - ✅ `examples/demo` 已新增 Tabs / TabView 展示卡片，覆盖受控切换、不同 panel 内容与禁用 tab；
-  - ✅ 单元测试覆盖渲染、禁用命中、样式默认值、点击派发、方向键、`Home` / `End`。
-  - ⏳ 待补（独立 PR）：more 折叠菜单、拖拽重排。
+  - ✅ 新增 `TabsOverflowMode::{Scroll, More}` 与 `.overflow_mode(...)`；More 模式保留 selected tab 可见，并把溢出项折叠到 runtime-uncontrolled More 菜单；
+  - ✅ 新增 `.reorderable(...)`、`.on_reorder(...)`、`TabsReorderEvent`，拖拽释放到同组 tab 后派发 reorder event，由调用方更新 items 顺序；
+  - ✅ `examples/demo` 已新增 Tabs / TabView 展示卡片，覆盖受控切换、More 菜单、拖拽重排与状态回显；
+  - ✅ 单元测试覆盖渲染、禁用命中、样式默认值、点击派发、方向键、`Home` / `End`、More overflow、拖拽 reorder 派发。
 
 ### 14. Drawer / Sidebar
 - **作用**：从屏幕边缘滑出的容器，用于导航、过滤、详情。
@@ -216,14 +225,15 @@
 - **桌面操作**：按钮触发；`Esc` 关闭；focus trap；点遮罩关闭。
 - **键盘补充**：`Esc` 关闭；focus trap 保持在 Drawer 内。
 - **依赖**：P0 §1、§2、§5。
-- **进度**：[基础完成]
+- **进度**：[功能完整]
   - ✅ `Drawer` / `DrawerPlacement` / `DrawerStyle` 已公开导出，并加入 `prelude` / `widgets`；
   - ✅ 支持 Left / Right / Top / Bottom 四方向，内容区接受任意 widget 子树；
   - ✅ overlay 模式已落地：全屏 Stack + backdrop + panel，backdrop fade、panel slide + fade，打开时启用 focus trap；
-  - ✅ 支持 `on_open_change`、`close_on_escape`、`close_on_backdrop_click`、主题样式覆盖；
+  - ✅ 支持 `on_open_change`、`close_on_escape`、`close_on_backdrop_click`、`return_focus_to`、主题样式覆盖；
   - ✅ collect 阶段通过 sentinel overlay 处理 Esc / close handler / backdrop hit，关闭状态不拦截底层 hit，也不注册 focus trap；
-  - ✅ `examples/drawer_demo/` 独立示例覆盖四方向 Drawer；widget core / runtime 测试覆盖 hit 穿透、focus trap、backdrop 点击关闭。
-  - ⏳ 待补：Push 模式暂未实现；`return_focus_to` builder 尚未公开。
+  - ✅ 新增 `DrawerMode::{Overlay, Push}`、`Drawer::mode(...)`、`DrawerHost`；Push 模式在 host 内通过 wrapper layout 推动主内容让位；
+  - ✅ 单独 `Drawer::mode(Push)` 会回退 Overlay 并记录 debug log，避免无 host 时产生不可预期布局；
+  - ✅ `examples/drawer_demo/` 独立示例覆盖四方向 Drawer 与 Push 模式；widget core / runtime 测试覆盖 hit 穿透、focus trap、backdrop 点击关闭、Push sentinel Esc 关闭。
 
 ### 15. Divider
 - **作用**：水平/垂直分隔线，带可选标签。
@@ -384,11 +394,9 @@
 
 ## 下一步实施建议
 
-1. **批 1（P0 收尾）**：Overlay / Portal / Focus / Virtual / ScrollView / Form 均已功能完整；下一步优先补剩余 public API 长尾。
-2. **批 2（P1 收尾）**：Tooltip / Menu / Modal / Popover / Toast / ProgressBar / Spinner / Tabs / Drawer / Divider 已铺开，建议集中补 Drawer push 模式、Popover 指针渲染、Modal scale 动画、Menu SVG 图标。
-3. **批 3（P2 开工）**：数据类组件成本最高，但基础设施已可支撑；建议先做 List / VirtualList，把 selection、keyboard nav、empty/loading 状态跑通，再推进 Table / DataGrid 与 Tree。
-4. **批 4（P2 录入扩展）**：NumberInput、DatePicker、ColorPicker、Upload 依赖 Form + Overlay + Popover，适合在 List 基础交互稳定后并行推进。
-5. **批 5（P3）**：视觉完善类，按用户呼声排队；Badge / Avatar / Skeleton / Card / Breadcrumb 可以先作为低风险组件快速补齐。
+1. **批 1（P2 数据组件）**：数据类组件成本最高，但基础设施已可支撑；建议先做 List / VirtualList，把 selection、keyboard nav、empty/loading 状态跑通，再推进 Table / DataGrid 与 Tree。
+2. **批 2（P2 录入扩展）**：NumberInput、DatePicker、ColorPicker、Upload 依赖 Form + Overlay + Popover，适合在 List 基础交互稳定后并行推进。
+3. **批 3（P3 视觉完善）**：视觉完善类，按用户呼声排队；Badge / Avatar / Skeleton / Card / Breadcrumb 可以先作为低风险组件快速补齐。
 
 每批结束都要：
 - 更新 `src/lib.rs` re-export 与 `README.md` 组件清单

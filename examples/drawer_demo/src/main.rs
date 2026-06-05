@@ -3,13 +3,14 @@ use tgui::layout::{Axis, Insets};
 use tgui::logging::{tgui_log, LogLevel};
 use tgui::mvvm::{Command, State, ValueCommand, ViewModel, ViewModelContext};
 use tgui::prelude::Dp;
-use tgui::widgets::{Button, Drawer, DrawerPlacement, Element, Flex, Text};
+use tgui::widgets::{Button, Drawer, DrawerHost, DrawerMode, DrawerPlacement, Element, Flex, Text};
 
 struct DrawerDemoVm {
     left_drawer_open: State<bool>,
     right_drawer_open: State<bool>,
     top_drawer_open: State<bool>,
     bottom_drawer_open: State<bool>,
+    push_drawer_open: State<bool>,
 }
 
 impl DrawerDemoVm {
@@ -19,6 +20,7 @@ impl DrawerDemoVm {
             right_drawer_open: ctx.state(false),
             top_drawer_open: ctx.state(false),
             bottom_drawer_open: ctx.state(false),
+            push_drawer_open: ctx.state(false),
         }
     }
 
@@ -40,6 +42,11 @@ impl DrawerDemoVm {
     fn toggle_bottom_drawer(&mut self) {
         tgui_log(LogLevel::Info, "toggle_bottom_drawer");
         self.bottom_drawer_open.update(|open| *open = !*open);
+    }
+
+    fn toggle_push_drawer(&mut self) {
+        tgui_log(LogLevel::Info, "toggle_push_drawer");
+        self.push_drawer_open.update(|open| *open = !*open);
     }
 
     fn view(&self) -> Element<Self> {
@@ -65,12 +72,45 @@ impl DrawerDemoVm {
                     .child(
                         Button::new("打开底部抽屉")
                             .on_click(Command::new(Self::toggle_bottom_drawer)),
+                    )
+                    .child(
+                        Button::new("Push 模式")
+                            .on_click(Command::new(Self::toggle_push_drawer)),
                     ),
             )
             .child(Text::new("提示："))
             .child(Text::new("• 按 Esc 键关闭抽屉"))
             .child(Text::new("• 点击遮罩层关闭抽屉"))
             .child(Text::new("• Tab 键在抽屉内循环聚焦"))
+            .child(Text::new("• Push 模式通过 DrawerHost 推动主内容让位"))
+            .child(
+                DrawerHost::new(
+                    Flex::new(Axis::Vertical)
+                        .gap(8.0)
+                        .padding(Insets::all(Dp(16.0)))
+                        .child(Text::new("主内容区域"))
+                        .child(Text::new("打开 Push 模式时，这块内容会被侧栏同步推开。")),
+                    Drawer::new(self.push_drawer_open.signal())
+                        .mode(DrawerMode::Push)
+                        .placement(DrawerPlacement::Left)
+                        .on_open_change(ValueCommand::new(|vm: &mut Self, open| {
+                            vm.push_drawer_open.set(open);
+                        }))
+                        .content({
+                            let content: Element<Self> = Flex::new(Axis::Vertical)
+                                .gap(16.0)
+                                .child(Text::new("Push Sidebar"))
+                                .child(Text::new("此抽屉不覆盖主内容，而是参与布局。"))
+                                .child(
+                                    Button::new("关闭")
+                                        .on_click(Command::new(Self::toggle_push_drawer)),
+                                )
+                                .into();
+                            content
+                        }),
+                )
+                .height(Dp(180.0)),
+            )
             // Left Drawer
             .child(
                 Drawer::new(self.left_drawer_open.signal())

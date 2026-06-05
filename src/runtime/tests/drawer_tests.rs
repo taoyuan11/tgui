@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui::widget::{Drawer, DrawerPlacement};
+use crate::ui::widget::{Drawer, DrawerHost, DrawerMode, DrawerPlacement};
 
 struct RuntimeDrawerVm {
     open: State<bool>,
@@ -187,5 +187,38 @@ fn drawer_backdrop_click_return_focus_to_declared_target() {
     );
 
     assert_eq!(handler.focused_widget_id(), Some(trigger_id));
+    assert!(!open.get());
+}
+
+#[test]
+fn drawer_host_push_escape_closes_via_overlay_sentinel() {
+    let context = ViewModelContext::for_benchmarks();
+    let invalidation = context.invalidation().clone();
+    let open = context.state(true);
+    let open_for_close = open.clone();
+    let tree = WidgetTree::new(
+        DrawerHost::new(
+            Text::new("main"),
+            Drawer::new(open.signal())
+                .mode(DrawerMode::Push)
+                .placement(DrawerPlacement::Left)
+                .on_open_change(ValueCommand::new(move |vm: &mut RuntimeDrawerVm, value| {
+                    open_for_close.set(value);
+                    vm.open.set(value);
+                }))
+                .content(Button::new("inside").size(dp(80.0), dp(30.0))),
+        )
+        .size(dp(400.0), dp(300.0)),
+    );
+    let vm = RuntimeDrawerVm { open: open.clone() };
+    let mut handler = test_handler_with_config(
+        vm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(400.0, 300.0),
+    );
+    let _ = handler.computed_scene();
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape))));
     assert!(!open.get());
 }

@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::path::PathBuf;
 use std::time::Duration;
+use tgui::mvvm::ValidationErrors;
 use tgui::prelude::*;
 
 fn text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
@@ -205,7 +206,6 @@ struct App {
     checkbox: State<bool>,
     radio: State<bool>,
     slider_value: State<f32>,
-    active_tab: State<String>,
     contact_method: State<String>,
     select_action: State<Option<String>>,
     notification_status: State<String>,
@@ -223,12 +223,60 @@ struct App {
     toast_top_end: ToastQueue<App>,
     toast_bottom_start: ToastQueue<App>,
     toast_bottom_center: ToastQueue<App>,
+    profile_form: Form,
+    profile_name: TextFormField,
+    profile_email: TextFormField,
+    profile_newsletter: FormField<bool>,
+    profile_status: State<String>,
+    tabs_selected: State<String>,
+    tabs_order: State<Vec<String>>,
+    tabs_reorder_status: State<String>,
 }
 
 impl ViewModel for App {
     fn new(context: &ViewModelContext) -> Self {
         let audio = AudioController::new(context);
         audio.set_volume(0.8);
+        let profile_form = Form::new(context);
+        let profile_name = profile_form
+            .text_field("name", "Alice Wonderland")
+            .validator(|value| {
+                if value.trim().is_empty() {
+                    ValidationErrors::single("名称不能为空")
+                } else {
+                    ValidationErrors::none()
+                }
+            })
+            .async_validator(|value| {
+                if value.eq_ignore_ascii_case("admin") {
+                    ValidationErrors::single("该名称已被保留")
+                } else {
+                    ValidationErrors::none()
+                }
+            });
+        let profile_email = profile_form
+            .text_field("email", "alice@example.com")
+            .validator(|value| {
+                if value.contains('@') {
+                    ValidationErrors::none()
+                } else {
+                    ValidationErrors::single("请输入有效邮箱")
+                }
+            })
+            .async_validator(|value| {
+                if value.ends_with("@example.com") {
+                    ValidationErrors::none()
+                } else {
+                    ValidationErrors::single("仅示例邮箱域名可通过异步校验")
+                }
+            });
+        let profile_newsletter = profile_form.field("newsletter", true).validator(|enabled| {
+            if *enabled {
+                ValidationErrors::none()
+            } else {
+                ValidationErrors::single("建议至少订阅一项")
+            }
+        });
         Self {
             theme: context.state(ThemeMode::System),
             reduced_motion: context.state(false),
@@ -236,7 +284,6 @@ impl ViewModel for App {
             checkbox: context.state(false),
             radio: context.state(false),
             slider_value: context.state(80.0),
-            active_tab: context.state(String::from("overview")),
             contact_method: context.state(String::from("system")),
             select_action: context.state(None),
             notification_status: context.state(String::from("尚未发送通知")),
@@ -256,6 +303,20 @@ impl ViewModel for App {
             toast_top_end: ToastQueue::new(context),
             toast_bottom_start: ToastQueue::new(context),
             toast_bottom_center: ToastQueue::new(context),
+            profile_form,
+            profile_name,
+            profile_email,
+            profile_newsletter,
+            profile_status: context.state("表单尚未提交".to_string()),
+            tabs_selected: context.state("overview".to_string()),
+            tabs_order: context.state(vec![
+                "overview".to_string(),
+                "settings".to_string(),
+                "logs".to_string(),
+                "metrics".to_string(),
+                "advanced".to_string(),
+            ]),
+            tabs_reorder_status: context.state("尚未重排".to_string()),
         }
     }
 
@@ -315,6 +376,14 @@ impl ViewModel for App {
                                 Tooltip::new("自定义 background / radius 即可换风格")
                                     .style(accent_tooltip_style(ResolvedThemeMode::Dark)),
                             ),
+                            Button::new("富内容")
+                                .tooltip(Tooltip::content(
+                                    Flex::new(Axis::Vertical)
+                                        .gap(dp(8.0))
+                                        .padding(Insets::all(dp(10.0)))
+                                        .child(Text::new("Tooltip 也能承载任意子树"))
+                                        .child(Button::new("浮层里按钮").ghost()),
+                                )),
                             Button::new("键盘聚焦")
                                 .tooltip(Tooltip::new("按 Tab 聚焦后也会显示 Tooltip，按 Esc 可隐藏。")),
                         ]),
@@ -323,6 +392,8 @@ impl ViewModel for App {
                     ]),
                 ),
                 component_card("Popover", self.build_popover_component()),
+                component_card("Form", self.build_form_component()),
+                component_card("Menu", self.build_menu_component()),
                 component_card(
                     "Switch",
                     Switch::new(self.switch.signal()).on_change(ValueCommand::new(
@@ -536,64 +607,210 @@ fn demo_shadow_card() -> Element<App> {
         .into()
 }
 
+fn demo_tab_items(
+    order: Vec<String>,
+    slider_value: Signal<f32>,
+    switch_value: Signal<bool>,
+    checkbox_value: Signal<bool>,
+    selected: Signal<String>,
+) -> Vec<TabItem<App>> {
+    order
+        .into_iter()
+        .map(|key| match key.as_str() {
+            "overview" => TabItem::new(
+                "overview",
+                "概览",
+                Flex::vertical().gap(dp(8.0)).child(el![
+                    Text::new("Tabs 会根据选中 key 只渲染当前 panel。").style(status_style),
+                    ProgressBar::new(slider_value.clone().map(|value| value / 100.0))
+                        .width(dp(240.0))
+                        .show_label(true)
+                        .label(slider_value.clone().map(|value| format!("当前音量 {:.0}%", value))),
+                ]),
+            ),
+            "settings" => TabItem::new(
+                "settings",
+                "设置",
+                Flex::vertical().gap(dp(8.0)).child(el![
+                    Text::new("这里放置可交互内容，切换 tab 不需要额外容器代码。")
+                        .style(status_style),
+                    Switch::new(switch_value.clone()).on_change(ValueCommand::new(
+                        |app: &mut App, enabled| app.switch.set(enabled),
+                    )),
+                    Checkbox::new(checkbox_value.clone())
+                        .label("同步到偏好设置")
+                        .on_change(ValueCommand::new(|app: &mut App, checked| {
+                            app.checkbox.set(checked)
+                        })),
+                ]),
+            ),
+            "logs" => TabItem::new(
+                "logs",
+                "日志",
+                Flex::vertical().gap(dp(8.0)).child(el![
+                    Text::new("日志面板展示当前 tab 状态。").style(status_style),
+                    Text::new(selected.clone().map(|key| format!("active tab: {key}")))
+                        .style(status_style),
+                ]),
+            ),
+            "metrics" => TabItem::new(
+                "metrics",
+                "指标",
+                Text::new("More 模式下会被收进更多菜单。").style(status_style),
+            ),
+            _ => TabItem::new(
+                "advanced",
+                "高级",
+                Text::new("支持拖拽重排的 tab。").style(status_style),
+            ),
+        })
+        .collect()
+}
+
 impl App {
     fn build_tabs_component(&self) -> Element<Self> {
-        Tabs::new(
-            vec![
-                TabItem::new(
-                    "overview",
-                    "概览",
-                    Flex::vertical().gap(dp(8.0)).child(el![
-                        Text::new("Tabs 会根据选中 key 只渲染当前 panel。").style(status_style),
-                        ProgressBar::new(self.slider_value.signal().map(|value| value / 100.0))
-                            .width(dp(240.0))
-                            .show_label(true)
-                            .label(
-                                self.slider_value
-                                    .signal()
-                                    .map(|value| format!("当前音量 {:.0}%", value)),
-                            ),
-                    ]),
-                ),
-                TabItem::new(
-                    "settings",
-                    "设置",
-                    Flex::vertical().gap(dp(8.0)).child(el![
-                        Text::new("这里放置可交互内容，切换 tab 不需要额外容器代码。")
-                            .style(status_style),
-                        Switch::new(self.switch.signal()).on_change(ValueCommand::new(
-                            |app: &mut App, enabled| app.switch.set(enabled),
-                        )),
-                        Checkbox::new(self.checkbox.signal())
-                            .label("同步到偏好设置")
-                            .on_change(ValueCommand::new(|app: &mut App, checked| {
-                                app.checkbox.set(checked)
-                            })),
-                    ]),
-                ),
-                TabItem::new(
-                    "logs",
-                    "日志",
-                    Flex::vertical().gap(dp(8.0)).child(el![
-                        Text::new("日志面板展示当前 tab 状态。").style(status_style),
-                        Text::new(self.active_tab.signal().map(|key| format!("active tab: {key}")))
-                            .style(status_style),
-                    ]),
-                ),
-                TabItem::new(
-                    "archived",
-                    "归档",
-                    Text::new("这个 panel 不会显示，因为 tab 被禁用。").style(status_style),
+        let slider_value = self.slider_value.signal();
+        let switch_value = self.switch.signal();
+        let checkbox_value = self.checkbox.signal();
+        let selected = self.tabs_selected.signal();
+        let selected_for_items = selected.clone();
+        let selected_for_tabs = selected.clone();
+        Flex::vertical()
+            .gap(dp(10.0))
+            .child(self.tabs_order.signal().map(move |order| {
+                let tabs: Element<App> = Tabs::new(
+                    demo_tab_items(
+                        order,
+                        slider_value.clone(),
+                        switch_value.clone(),
+                        checkbox_value.clone(),
+                        selected_for_items.clone(),
+                    ),
+                    selected_for_tabs.clone(),
                 )
-                .disabled(true),
-            ],
-            self.active_tab.signal(),
-        )
-        .width(dp(340.0))
-        .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
-            app.active_tab.set(key);
-        }))
-        .into()
+                .overflow_mode(TabsOverflowMode::More)
+                .reorderable(true)
+                .width(dp(360.0))
+                .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
+                    app.tabs_selected.set(key);
+                }))
+                .on_reorder(ValueCommand::new(|app: &mut App, event: TabsReorderEvent| {
+                    let mut order = app.tabs_order.get();
+                    if event.from_index < order.len() && event.to_index < order.len() {
+                        let item = order.remove(event.from_index);
+                        order.insert(event.to_index, item);
+                        app.tabs_order.set(order);
+                        app.tabs_selected.set(event.key.clone());
+                        app.tabs_reorder_status.set(format!(
+                            "重排 {} -> {}",
+                            event.key, event.target_key
+                        ));
+                    }
+                }))
+                .into();
+                tabs
+            }))
+            .child(Text::new(
+                self.tabs_reorder_status
+                    .signal()
+                    .map(|value| format!("Tabs 状态：{value}")),
+            ).style(status_style))
+            .into()
+    }
+
+    fn build_form_component(&self) -> Element<Self> {
+        let name_validation = self.profile_name.validation_state();
+        let email_validation = self.profile_email.validation_state();
+        let newsletter_validation = self.profile_newsletter.validation_state();
+        Flex::vertical()
+            .gap(dp(10.0))
+            .child(el![
+                Text::new("Form 统一管理值、校验和异步提交。字段错误态会同步到输入控件样式。")
+                    .style(status_style),
+                Input::new(self.profile_name.controller())
+                    .placeholder("请输入名称")
+                    .width(dp(260.0))
+                    .validation(name_validation),
+                Text::new(self.profile_name.first_error().map(|v| v.unwrap_or_default()))
+                    .style(status_style),
+                Input::new(self.profile_email.controller())
+                    .placeholder("name@example.com")
+                    .width(dp(260.0))
+                    .validation(email_validation),
+                Text::new(self.profile_email.first_error().map(|v| v.unwrap_or_default()))
+                    .style(status_style),
+                Checkbox::new(self.profile_newsletter.signal())
+                    .label("订阅每周邮件")
+                    .validation(newsletter_validation)
+                    .on_change(self.profile_newsletter.bind_change()),
+                Flex::horizontal().gap(dp(8.0)).child(el![
+                    Button::new("验证").on_click(Command::new_with_context(|app: &mut App, ctx| {
+                        let command = app.profile_form.validate_async_command::<App>();
+                        command.execute_with_context(app, ctx);
+                    })),
+                    Button::new("提交").primary().on_click(Command::new_with_context(|app: &mut App, ctx| {
+                        let form = app.profile_form.clone();
+                        let command = form.submit_async_command(ValueCommand::new(|app: &mut App, snapshot: FormSnapshot| {
+                            let name = snapshot.get::<String>("name").unwrap_or_default();
+                            let email = snapshot.get::<String>("email").unwrap_or_default();
+                            app.profile_status.set(format!("已提交: {name} / {email}"));
+                        }));
+                        command.execute_with_context(app, ctx);
+                    })),
+                    Button::new("重置").ghost().on_click(Command::new(|app: &mut App| {
+                        app.profile_form.reset();
+                        app.profile_status.set("表单已重置".to_string());
+                    })),
+                ]),
+                Text::new(self.profile_form.status().map(|status| {
+                    format!(
+                        "validating={}, submitting={}",
+                        status.validating,
+                        status.submitting
+                    )
+                })).style(status_style),
+                Text::new(self.profile_form.is_valid().map(|valid| {
+                    if valid {
+                        "表单当前无错误".to_string()
+                    } else {
+                        "表单当前存在错误".to_string()
+                    }
+                })).style(status_style),
+                Text::new(self.profile_status.signal()).style(status_style),
+            ])
+            .into()
+    }
+
+    fn build_menu_component(&self) -> Element<Self> {
+        let uncontrolled = MenuBar::uncontrolled()
+            .entry(
+                "文件",
+                vec![
+                    MenuItem::new("新建"),
+                    MenuItem::separator(),
+                    MenuItem::new("退出"),
+                ],
+            )
+            .entry(
+                "编辑",
+                vec![
+                    MenuItem::new("撤销"),
+                    MenuItem::new("重做"),
+                ],
+            )
+            .entry(
+                "视图",
+                vec![
+                    MenuItem::new("缩放"),
+                    MenuItem::new("全屏"),
+                ],
+            );
+
+        Flex::vertical()
+            .gap(dp(8.0))
+            .child(Text::new("MenuBar.uncontrolled() 由 runtime 接管展开状态。").style(status_style))
+            .child(uncontrolled)
+            .into()
     }
 
     fn build_progress_component(&self) -> Element<Self> {
@@ -896,6 +1113,11 @@ impl App {
                 .on_open_change(ValueCommand::new(|app: &mut App, open| {
                     app.popover_open.set(open)
                 }))
+                .style({
+                    let mut style = PopoverStyle::default_for(ResolvedThemeMode::Light);
+                    style.pointer_size = Some(dp(10.0));
+                    style
+                })
                 .trigger_mode(PopoverTriggerMode::ClickAndHoverPreview),
                 Text::new(
                     self.popover_switch

@@ -32,9 +32,11 @@ use std::time::Duration;
 use crate::animation::Transition;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::ValueCommand;
+use crate::log::Log;
 use crate::theme::ResolvedThemeMode;
-use crate::ui::layout::{pct, Axis, Insets, Value};
+use crate::ui::layout::{pct, Axis, Insets, LayoutStyle, Value};
 use crate::ui::unit::Dp;
+use crate::ui::widget::container::{set_layout_length, set_layout_lengths, IntoLengthValue};
 use crate::ui::widget::container::{Flex, Stack};
 use crate::ui::widget::core::Element;
 use crate::ui::widget::style::{ContainerStyle, DrawerStyle};
@@ -45,11 +47,25 @@ use super::placement::DrawerPlacement;
 
 const DRAWER_SLIDE_DURATION_MS: u64 = 250;
 
+/// Drawer presentation mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DrawerMode {
+    Overlay,
+    Push,
+}
+
+impl Default for DrawerMode {
+    fn default() -> Self {
+        Self::Overlay
+    }
+}
+
 /// 从屏幕边缘滑出的侧边栏 builder。
 pub struct Drawer<VM> {
     open: Value<bool>,
     on_open_change: Option<ValueCommand<VM, bool>>,
     placement: DrawerPlacement,
+    mode: DrawerMode,
     content: Option<Element<VM>>,
     close_on_escape: bool,
     close_on_backdrop_click: bool,
@@ -65,6 +81,7 @@ impl<VM: 'static> Drawer<VM> {
             open: open.into(),
             on_open_change: None,
             placement: DrawerPlacement::default(),
+            mode: DrawerMode::Overlay,
             content: None,
             close_on_escape: true,
             close_on_backdrop_click: true,
@@ -84,6 +101,12 @@ impl<VM: 'static> Drawer<VM> {
     /// 设置 Drawer 从哪个边缘滑出（默认 Left）。
     pub fn placement(mut self, placement: DrawerPlacement) -> Self {
         self.placement = placement;
+        self
+    }
+
+    /// 设置 Drawer 模式。`Push` 只有放在 [`DrawerHost`] 中才会启用。
+    pub fn mode(mut self, mode: DrawerMode) -> Self {
+        self.mode = mode;
         self
     }
 
@@ -130,6 +153,7 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
             open,
             on_open_change,
             placement,
+            mode,
             content,
             close_on_escape,
             close_on_backdrop_click,
@@ -137,6 +161,12 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
             auto_focus_first,
             style,
         } = drawer;
+
+        if mode == DrawerMode::Push {
+            Log::with_tag("tgui-drawer").debug(format_args!(
+                "Drawer::mode(Push) requires DrawerHost; falling back to Overlay"
+            ));
+        }
 
         // -----------------------------------------------------------------
         // 如果是静态 false，直接返回空元素，避免渲染蒙层
@@ -362,6 +392,7 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
             open,
             on_open_change,
             placement,
+            mode: DrawerMode::Overlay,
             close_on_escape,
             close_on_backdrop_click,
             return_focus_to,
@@ -371,6 +402,166 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
         }));
         outer_element
     }
+}
+
+/// Host that enables [`DrawerMode::Push`] by laying out content and drawer panel as siblings.
+pub struct DrawerHost<VM> {
+    content: Element<VM>,
+    drawer: Drawer<VM>,
+    layout: LayoutStyle,
+}
+
+impl<VM: 'static> DrawerHost<VM> {
+    pub fn new(content: impl Into<Element<VM>>, drawer: Drawer<VM>) -> Self {
+        Self {
+            content: content.into(),
+            drawer,
+            layout: LayoutStyle::default(),
+        }
+    }
+
+    pub fn size(mut self, width: impl IntoLengthValue, height: impl IntoLengthValue) -> Self {
+        set_layout_lengths(&mut self.layout, width, height);
+        self
+    }
+
+    pub fn width(mut self, width: impl IntoLengthValue) -> Self {
+        set_layout_length(&mut self.layout.width, width);
+        self
+    }
+
+    pub fn height(mut self, height: impl IntoLengthValue) -> Self {
+        set_layout_length(&mut self.layout.height, height);
+        self
+    }
+
+    pub fn grow(mut self, grow: impl Into<Value<f32>>) -> Self {
+        self.layout.grow = grow.into();
+        self
+    }
+
+    pub fn shrink(mut self, shrink: impl Into<Value<f32>>) -> Self {
+        self.layout.shrink = shrink.into();
+        self
+    }
+}
+
+impl<VM: 'static> From<DrawerHost<VM>> for Element<VM> {
+    fn from(host: DrawerHost<VM>) -> Element<VM> {
+        let DrawerHost {
+            content,
+            drawer,
+            layout,
+        } = host;
+        let mut element = match drawer.mode {
+            DrawerMode::Overlay => Stack::<VM>::new()
+                .size(pct(100.0), pct(100.0))
+                .child(content)
+                .child(Element::from(drawer))
+                .into(),
+            DrawerMode::Push => build_push_drawer_host(content, drawer),
+        };
+        element.layout = layout;
+        element
+    }
+}
+
+fn build_push_drawer_host<VM: 'static>(content: Element<VM>, drawer: Drawer<VM>) -> Element<VM> {
+    let Drawer {
+        open,
+        on_open_change,
+        placement,
+        mode: _,
+        content: drawer_content,
+        close_on_escape,
+        close_on_backdrop_click: _,
+        return_focus_to,
+        auto_focus_first,
+        style,
+    } = drawer;
+
+    let slide_transition = Transition::ease_in_out(Duration::from_millis(DRAWER_SLIDE_DURATION_MS));
+    let drawer_style_for_panel = style.clone();
+    let resolved_style_for_layout = style
+        .clone()
+        .unwrap_or_else(|| DrawerStyle::default_for(ResolvedThemeMode::Light));
+    let target_extent = match placement {
+        DrawerPlacement::Left | DrawerPlacement::Right => resolved_style_for_layout.width,
+        DrawerPlacement::Top | DrawerPlacement::Bottom => resolved_style_for_layout.height,
+    };
+    let panel_extent: Value<Dp> = match open.clone() {
+        Value::Static(open_now) => Value::Static(if open_now { target_extent } else { Dp::ZERO }),
+        Value::Signal(signal) => Value::Signal(
+            signal
+                .map(move |open| if open { target_extent } else { Dp::ZERO })
+                .animated(slide_transition),
+        ),
+    };
+
+    let mut panel: Flex<VM> = Flex::new(Axis::Vertical)
+        .cursor(CursorStyle::Default)
+        .overflow(crate::ui::layout::Overflow::Hidden)
+        .focus_scope(
+            FocusScopeOptions::new()
+                .trap(true)
+                .auto_focus_first(auto_focus_first)
+                .active(open.clone()),
+        )
+        .style(move |mode| {
+            let resolved = drawer_style_for_panel
+                .clone()
+                .unwrap_or_else(|| DrawerStyle::default_for(mode));
+            let mut s = ContainerStyle::default_for(mode);
+            s.surface.background = Some(resolved.background.clone());
+            s.surface.border_color = Some(resolved.border.clone());
+            s.surface.border_width = Some(resolved.border_width.clone());
+            s.surface.border_radius = Some(resolved.radius.clone());
+            s.surface.shadow = Some(resolved.shadow.into());
+            s
+        });
+
+    match placement {
+        DrawerPlacement::Left | DrawerPlacement::Right => {
+            panel = panel.width(panel_extent).height(pct(100.0));
+        }
+        DrawerPlacement::Top | DrawerPlacement::Bottom => {
+            panel = panel.width(pct(100.0)).height(panel_extent);
+        }
+    }
+    if resolved_style_for_layout.padding != Insets::ZERO {
+        panel = panel.padding(resolved_style_for_layout.padding);
+    }
+    if let Some(content) = drawer_content {
+        panel = panel.child(content);
+    }
+    let panel_element: Element<VM> = panel.into();
+    let panel_widget_id = panel_element.id;
+    let main_content: Element<VM> = Stack::<VM>::new()
+        .grow(1.0)
+        .shrink(1.0)
+        .child(content)
+        .into();
+
+    let root = match placement {
+        DrawerPlacement::Left => Flex::horizontal().child(panel_element).child(main_content),
+        DrawerPlacement::Right => Flex::horizontal().child(main_content).child(panel_element),
+        DrawerPlacement::Top => Flex::vertical().child(panel_element).child(main_content),
+        DrawerPlacement::Bottom => Flex::vertical().child(main_content).child(panel_element),
+    };
+    let mut root_element: Element<VM> = root.into();
+    root_element.drawer = Some(Box::new(DrawerDescriptor {
+        open,
+        on_open_change,
+        placement,
+        mode: DrawerMode::Push,
+        close_on_escape,
+        close_on_backdrop_click: false,
+        return_focus_to,
+        backdrop_widget_id: root_element.id,
+        panel_widget_id,
+        style,
+    }));
+    root_element
 }
 
 impl<VM> Drawer<VM> {

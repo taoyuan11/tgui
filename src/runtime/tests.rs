@@ -10,6 +10,7 @@ use crate::foundation::binding::ScrollViewController;
 use crate::foundation::binding::{DependencyGraph, State, ViewModelContext};
 use crate::foundation::binding::{InvalidationSignal, Signal, TextController};
 use crate::foundation::color::Color;
+use crate::foundation::task::async_task_channel;
 use crate::foundation::view_model::{Command, ValueCommand, ViewModel};
 use crate::platform::backend::event_loop::{
     ActiveEventLoop, ControlFlow, DeviceEvents, EventLoopProxy, OwnedDisplayHandle,
@@ -154,6 +155,7 @@ fn test_handler_with_config<VM: crate::foundation::view_model::ViewModel>(
 ) -> BoundRuntimeHandler<VM> {
     let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
     let (notification_dispatcher, notification_receiver) = async_notification_channel();
+    let (task_dispatcher, task_receiver) = async_task_channel();
     BoundRuntimeHandler::new(
         "test".to_string(),
         1,
@@ -169,6 +171,8 @@ fn test_handler_with_config<VM: crate::foundation::view_model::ViewModel>(
         Some(dialog_receiver),
         notification_dispatcher,
         Some(notification_receiver),
+        task_dispatcher,
+        Some(task_receiver),
     )
 }
 
@@ -363,6 +367,7 @@ fn reduced_motion_defaults_and_window_binding_override() {
 
     let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
     let (notification_dispatcher, notification_receiver) = async_notification_channel();
+    let (task_dispatcher, task_receiver) = async_task_channel();
     let handler = BoundRuntimeHandler::new(
         "test".to_string(),
         1,
@@ -378,6 +383,8 @@ fn reduced_motion_defaults_and_window_binding_override() {
         Some(dialog_receiver),
         notification_dispatcher,
         Some(notification_receiver),
+        task_dispatcher,
+        Some(task_receiver),
     );
     assert!(handler.active_reduced_motion());
 

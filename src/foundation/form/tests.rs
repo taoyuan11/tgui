@@ -1,5 +1,9 @@
 use crate::foundation::binding::ViewModelContext;
-use crate::foundation::form::{Form, ValidationErrors};
+use crate::foundation::form::{Form, FormSnapshot, ValidationErrors};
+use crate::foundation::task::{async_task_channel, Tasks};
+use crate::foundation::view_model::{CommandContext, ValueCommand};
+use crate::{dialog::Dialogs, log::Log, notification::Notifications};
+use std::time::{Duration, Instant};
 
 fn context() -> ViewModelContext {
     ViewModelContext::for_benchmarks()
@@ -151,4 +155,110 @@ fn duplicate_field_names_panic() {
 
     let _ = form.text_field("email", "");
     let _ = form.field("email", false);
+}
+
+fn task_context_and_receiver<VM: 'static>() -> (
+    CommandContext<VM>,
+    crate::foundation::task::AsyncTaskReceiver<VM>,
+) {
+    let (dispatcher, receiver) = async_task_channel();
+    (
+        CommandContext::new(
+            Dialogs::detached(),
+            Notifications::detached(),
+            Tasks::from_runtime("main".to_string(), 1, dispatcher),
+            Default::default(),
+            Log::default(),
+        ),
+        receiver,
+    )
+}
+
+fn drain_task_receiver_until<VM: 'static>(
+    receiver: &crate::foundation::task::AsyncTaskReceiver<VM>,
+    vm: &mut VM,
+    context: &CommandContext<VM>,
+    done: impl Fn() -> bool,
+) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        for completion in receiver.try_iter() {
+            (completion.callback)(vm, context);
+        }
+        if done() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("timed out waiting for form async task");
+}
+
+#[test]
+fn async_validation_marks_pending_and_applies_errors() {
+    let ctx = context();
+    let form = Form::new(&ctx);
+    let username = form
+        .text_field("username", "taken")
+        .async_validator(|value| {
+            if value == "taken" {
+                ValidationErrors::single("already taken")
+            } else {
+                ValidationErrors::none()
+            }
+        });
+    let command = form.validate_async_command::<()>();
+    let (context, receiver) = task_context_and_receiver();
+    let mut vm = ();
+
+    command.execute_with_context(&mut vm, &context);
+
+    assert!(form.is_validating().get());
+    assert!(username.is_validating().get());
+    assert!(username.validation_state().get().pending);
+
+    drain_task_receiver_until(&receiver, &mut vm, &context, || !form.is_validating().get());
+
+    assert!(!username.is_validating().get());
+    assert_eq!(
+        username.first_error().get(),
+        Some("already taken".to_string())
+    );
+    assert!(username.validation_state().get().invalid);
+    assert_eq!(
+        form.errors().get().get("username"),
+        Some(&vec!["already taken".to_string()])
+    );
+}
+
+#[derive(Default)]
+struct SubmitVm {
+    submitted_name: Option<String>,
+}
+
+#[test]
+fn async_submit_runs_callback_only_when_valid() {
+    let ctx = context();
+    let form = Form::new(&ctx);
+    let name = form.text_field("name", "alice").async_validator(|value| {
+        if value == "alice" {
+            ValidationErrors::none()
+        } else {
+            ValidationErrors::single("not alice")
+        }
+    });
+    let on_submit = ValueCommand::new(|vm: &mut SubmitVm, snapshot: FormSnapshot| {
+        vm.submitted_name = snapshot.get::<String>("name");
+    });
+    let command = form.submit_async_command(on_submit);
+    let (context, receiver) = task_context_and_receiver();
+    let mut vm = SubmitVm::default();
+
+    command.execute_with_context(&mut vm, &context);
+    assert!(form.is_submitting().get());
+
+    drain_task_receiver_until(&receiver, &mut vm, &context, || !form.is_submitting().get());
+
+    assert_eq!(vm.submitted_name, Some("alice".to_string()));
+    assert!(form.errors().get().is_empty());
+    assert!(!name.validation_state().get().invalid);
 }

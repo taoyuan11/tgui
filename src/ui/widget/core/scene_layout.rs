@@ -100,6 +100,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     && node.visual.shadow.is_none()
                     && node.visual.opacity.resolve() == 1.0
                     && node.visual.offset.resolve() == Point::ZERO
+                    && node.visual.scale.resolve() == 1.0
             }
             _ => false,
         }
@@ -215,6 +216,9 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                 let mut chunks = HashMap::with_capacity(cap);
                 let mut chunk_parts = HashMap::with_capacity(cap / 2);
                 let mut visual_contexts = HashMap::with_capacity(cap);
+                let empty_menu_open_states = HashMap::<WidgetId, bool>::new();
+                let empty_menubar_active_states = HashMap::<u64, Option<usize>>::new();
+                let empty_context_menu_anchor_states = HashMap::<WidgetId, Point>::new();
                 let mut context = CollectContext {
                     taffy: &self.taffy,
                     font_manager,
@@ -233,6 +237,9 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     active_scrollbar,
                     widget_states,
                     select_open_states,
+                    menu_open_states: &empty_menu_open_states,
+                    menubar_active_states: &empty_menubar_active_states,
+                    context_menu_anchor_states: &empty_context_menu_anchor_states,
                     scroll_offsets,
                     virtual_states,
                     viewport,

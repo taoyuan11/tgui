@@ -34,6 +34,141 @@ pub(super) struct MenuKeyboardItem<VM> {
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(in crate::runtime) fn resolved_menu_open_state(&self, menu_id: WidgetId) -> bool {
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return self
+                .menu_open_states
+                .get(&menu_id)
+                .copied()
+                .unwrap_or(false);
+        };
+        let Some(layout) = cached.layout.as_ref() else {
+            return self
+                .menu_open_states
+                .get(&menu_id)
+                .copied()
+                .unwrap_or(false);
+        };
+        let Some(resolved) = layout.resolved_widget(menu_id) else {
+            return self
+                .menu_open_states
+                .get(&menu_id)
+                .copied()
+                .unwrap_or(false);
+        };
+        let Some(menu) = resolved.menu.as_ref() else {
+            return self
+                .menu_open_states
+                .get(&menu_id)
+                .copied()
+                .unwrap_or(false);
+        };
+        if let Some(open) = &menu.open {
+            return open.resolve();
+        }
+        if let (Some(group), Some(index)) = (menu.menubar_group, menu.menubar_index) {
+            return self
+                .menubar_active_states
+                .get(&group.raw())
+                .copied()
+                .flatten()
+                == Some(index);
+        }
+        self.menu_open_states
+            .get(&menu_id)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub(in crate::runtime) fn set_menu_open_state(
+        &mut self,
+        menu_id: WidgetId,
+        open: bool,
+    ) -> bool {
+        let Some((is_controlled, group_index, on_open_change)) = self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .and_then(|layout| layout.resolved_widget(menu_id))
+            .and_then(|resolved| resolved.menu.as_ref())
+            .map(|menu| {
+                (
+                    menu.open.is_some(),
+                    menu.menubar_group
+                        .zip(menu.menubar_index)
+                        .map(|(group, index)| (group.raw(), index)),
+                    menu.on_open_change.clone(),
+                )
+            })
+        else {
+            return false;
+        };
+        let previous = self.resolved_menu_open_state(menu_id);
+        if previous == open {
+            return false;
+        }
+
+        if is_controlled {
+            if let Some(command) = on_open_change.as_ref() {
+                self.execute_value_command(command, open);
+            }
+        } else if let Some((group, index)) = group_index {
+            self.menubar_active_states
+                .insert(group, open.then_some(index));
+        } else {
+            self.menu_open_states.insert(menu_id, open);
+        }
+        if !open {
+            self.menu_keyboard_cursor.remove(&menu_id);
+        }
+        self.invalidate_scene_with_reason("menu_open_state");
+        true
+    }
+
+    pub(in crate::runtime) fn toggle_menu_open_state(&mut self, menu_id: WidgetId) -> bool {
+        let next = !self.resolved_menu_open_state(menu_id);
+        self.set_menu_open_state(menu_id, next)
+    }
+
+    pub(in crate::runtime) fn open_context_menu_at(
+        &mut self,
+        widget_id: WidgetId,
+        position: crate::ui::widget::Point,
+    ) -> bool {
+        self.context_menu_anchor_states.insert(widget_id, position);
+        if let Some(command) = self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .and_then(|layout| layout.resolved_widget(widget_id))
+            .and_then(|resolved| resolved.context_menu.as_ref())
+            .and_then(|menu| menu.on_open_change.clone())
+        {
+            self.execute_value_command(&command, true);
+        }
+        self.invalidate_scene_with_reason("context_menu_open_state");
+        true
+    }
+
+    pub(in crate::runtime) fn close_context_menu(&mut self, widget_id: WidgetId) -> bool {
+        if self.context_menu_anchor_states.remove(&widget_id).is_none() {
+            return false;
+        }
+        if let Some(command) = self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .and_then(|layout| layout.resolved_widget(widget_id))
+            .and_then(|resolved| resolved.context_menu.as_ref())
+            .and_then(|menu| menu.on_open_change.clone())
+        {
+            self.execute_value_command(&command, false);
+        }
+        self.menu_keyboard_cursor.remove(&widget_id);
+        self.invalidate_scene_with_reason("context_menu_open_state");
+        true
+    }
+
     /// 在当前 cached scene 上找最顶层的 Menu overlay；返回它对应的 widget_id。
     /// 当 submenu 嵌套打开时 overlay_close_handlers 会含有合成 overlay_id（不
     /// 对应任何真实 widget），筛选时优先取 `return_focus_to` —— 那是真实的
@@ -275,9 +410,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         else {
             return false;
         };
-        let Some(set_active) = current_menu.menubar_set_active.clone() else {
-            return false;
-        };
         // 扫所有同 group 的 menu，按 menubar_index 排序，取相邻 entry。
         let ids: Vec<WidgetId> = layout.all_widget_ids().collect();
         let mut peers: Vec<usize> = ids
@@ -301,8 +433,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let mut np = pos as i32 + dir;
         np = ((np % n) + n) % n;
         let target = peers[np as usize];
-        // 切换 active_index → user state 改 → 下帧 entry_open 切换。
-        self.execute_value_command(&set_active, Some(target));
+        // 切换 active_index → 受控 MenuBar 调用用户命令，未受控 MenuBar 写 runtime state。
+        if let Some(set_active) = current_menu.menubar_set_active.clone() {
+            self.execute_value_command(&set_active, Some(target));
+        } else {
+            self.menubar_active_states.insert(group.raw(), Some(target));
+        }
         // cursor 清掉，避免下次打开继承上次位置
         self.menu_keyboard_cursor.remove(&menu_id);
         self.invalidate_computed_scene();
@@ -423,6 +559,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .and_then(|m| m.on_open_change.clone());
         if let Some(close) = close_cmd {
             self.execute_value_command(&close, false);
+        } else {
+            let _ = self.set_menu_open_state(menu_id, false);
         }
         self.menu_keyboard_cursor.remove(&menu_id);
         self.invalidate_computed_scene();

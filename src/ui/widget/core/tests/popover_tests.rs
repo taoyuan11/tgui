@@ -92,6 +92,45 @@ fn popover_open_true_emits_overlay_content() {
 }
 
 #[test]
+fn popover_pointer_style_emits_overlay_mesh() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let mut style = PopoverStyle::default_for(ResolvedThemeMode::Light);
+    style.pointer_size = Some(dp(8.0));
+
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Popover::new(Button::new("More").size(dp(90.0), dp(36.0)))
+            .content(Text::new("popover body"))
+            .style(style)
+            .open(true),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 480.0, 320.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(rendered
+        .primitives
+        .overlay_texts
+        .iter()
+        .any(|text| text.content.as_ref() == "popover body"));
+    assert!(!rendered.primitives.overlay_meshes.is_empty());
+}
+
+#[test]
 fn popover_style_defaults_match_expected_baseline() {
     let light = PopoverStyle::default_for(ResolvedThemeMode::Light);
     assert_eq!(light.padding, Insets::all(dp(12.0)));

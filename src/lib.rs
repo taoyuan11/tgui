@@ -207,8 +207,10 @@ pub mod mvvm {
         ToastPlacement, ToastQueue, ViewModelContext,
     };
     pub use crate::foundation::form::{
-        Form, FormField, FormSnapshot, TextFormField, ValidationErrors,
+        Form, FormField, FormSnapshot, FormStatus, TextFormField, ValidationErrors,
+        ValidationVisualState,
     };
+    pub use crate::foundation::task::Tasks;
     pub use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
     pub use crate::foundation::window_control::{WindowControl, WindowResizeDirection};
 }
@@ -253,11 +255,11 @@ pub mod prelude {
     pub use crate::logging::{tgui_log, Log, LogConfig, LogConfigError, LogFileConfig, LogLevel};
     pub use crate::media::{ContentFit, MediaBytes, MediaSource};
     pub use crate::mvvm::{
-        Command, CommandContext, Form, FormField, FormSnapshot, ScrollRequest, ScrollRequestMode,
-        ScrollViewController, Signal, State, TextChange, TextChangeSet, TextController,
-        TextFormField, TextSnapshot, Toast, ToastAction, ToastId, ToastKind, ToastPlacement,
-        ToastQueue, ValidationErrors, ValueCommand, ViewModel, ViewModelContext, WindowControl,
-        WindowResizeDirection,
+        Command, CommandContext, Form, FormField, FormSnapshot, FormStatus, ScrollRequest,
+        ScrollRequestMode, ScrollViewController, Signal, State, Tasks, TextChange, TextChangeSet,
+        TextController, TextFormField, TextSnapshot, Toast, ToastAction, ToastId, ToastKind,
+        ToastPlacement, ToastQueue, ValidationErrors, ValidationVisualState, ValueCommand,
+        ViewModel, ViewModelContext, WindowControl, WindowResizeDirection,
     };
     pub use crate::notification::{
         NotificationAction, NotificationActionEvent, NotificationError, NotificationOptions,
@@ -280,20 +282,21 @@ pub mod prelude {
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
         ChordKey, ContainerStyle, ContextMenu, CursorStyle, Divider, DividerOrientation,
-        DividerStyle, DoubleTapEvent, Drawer, DrawerPlacement, DrawerStyle, EdgeSwipeEvent,
-        Element, FocusRingOverride, FocusScopeOptions, GestureEdge, GestureEdgeSet, GesturePhase,
-        GestureRecognizer, GestureSource, Image, ImageStyle, Input, InputStyle, IntoTextContent,
-        ItemLayout, ItemSource, KeyChord, LayerStack, LongPressEvent, Menu, MenuBar, MenuBarEntry,
-        MenuBarStyle, MenuIcon, MenuItem, MenuItemKind, MenuStyle, Modal, ModalAction, ModalStyle,
-        OverlayAlignment, OverlayAnchorKey, OverlayFlipPolicy, OverlayLayer, OverlayPlacement,
-        OverlaySide, PinchGestureEvent, Popover, PopoverStyle, PopoverTriggerMode, Portal,
-        PortalAnchor, PortalTarget, ProgressBar, ProgressBarStyle, Radio, RadioGroup, RadioOption,
-        RadioStyle, ScrollView, Select, SelectOption, SelectStyle, Slider, SliderStyle, Spinner,
-        SpinnerStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle, TabItem,
-        TabPlacement, TabView, Tabs, TabsStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
-        ToastHost, ToastStyle, Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement,
-        VirtualDirection, VirtualList, VirtualViewport, WidgetCommand, WidgetEventResult,
-        WidgetSurfaceStyle, WidgetTree,
+        DividerStyle, DoubleTapEvent, Drawer, DrawerHost, DrawerMode, DrawerPlacement, DrawerStyle,
+        EdgeSwipeEvent, Element, FocusRingOverride, FocusScopeOptions, GestureEdge, GestureEdgeSet,
+        GesturePhase, GestureRecognizer, GestureSource, Image, ImageStyle, Input, InputStyle,
+        IntoTextContent, ItemLayout, ItemSource, KeyChord, LayerStack, LongPressEvent, Menu,
+        MenuBar, MenuBarEntry, MenuBarStyle, MenuIcon, MenuItem, MenuItemKind, MenuStyle, Modal,
+        ModalAction, ModalStyle, OverlayAlignment, OverlayAnchorKey, OverlayFlipPolicy,
+        OverlayLayer, OverlayPlacement, OverlaySide, PinchGestureEvent, Popover, PopoverStyle,
+        PopoverTriggerMode, Portal, PortalAnchor, PortalTarget, ProgressBar, ProgressBarStyle,
+        Radio, RadioGroup, RadioOption, RadioStyle, ScrollView, Select, SelectOption, SelectStyle,
+        Slider, SliderStyle, Spinner, SpinnerStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent,
+        Switch, SwitchStyle, TabItem, TabPlacement, TabView, Tabs, TabsOverflowMode,
+        TabsReorderEvent, TabsStyle, Text, TextWidgetStyle, Textarea, TextareaStyle, ToastHost,
+        ToastStyle, Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection,
+        VirtualList, VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle,
+        WidgetTree,
     };
 }
 
@@ -324,20 +327,21 @@ pub mod widgets {
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
         BackgroundRadialGradient, Button, ButtonStyle, CanvasStyle, Checkbox, CheckboxStyle,
         ChordKey, ContainerStyle, ContextMenu, CursorStyle, Divider, DividerOrientation,
-        DividerStyle, DoubleTapEvent, Drawer, DrawerPlacement, DrawerStyle, EdgeSwipeEvent,
-        Element, FocusRingOverride, FocusScopeOptions, GestureEdge, GestureEdgeSet, GesturePhase,
-        GestureRecognizer, GestureSource, Image, ImageStyle, Input, InputStyle, IntoTextContent,
-        ItemLayout, ItemSource, KeyChord, LayerStack, LongPressEvent, Menu, MenuBar, MenuBarEntry,
-        MenuBarStyle, MenuIcon, MenuItem, MenuItemKind, MenuStyle, Modal, ModalAction, ModalStyle,
-        OverlayAlignment, OverlayAnchorKey, OverlayFlipPolicy, OverlayLayer, OverlayPlacement,
-        OverlaySide, PinchGestureEvent, Popover, PopoverStyle, PopoverTriggerMode, Portal,
-        PortalAnchor, PortalTarget, ProgressBar, ProgressBarStyle, Radio, RadioGroup, RadioOption,
-        RadioStyle, ScrollView, Select, SelectOption, SelectStyle, Slider, SliderStyle, Spinner,
-        SpinnerStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle, TabItem,
-        TabPlacement, TabView, Tabs, TabsStyle, Text, TextWidgetStyle, Textarea, TextareaStyle,
-        ToastHost, ToastStyle, Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement,
-        VirtualDirection, VirtualList, VirtualViewport, WidgetCommand, WidgetEventResult,
-        WidgetSurfaceStyle, WidgetTree,
+        DividerStyle, DoubleTapEvent, Drawer, DrawerHost, DrawerMode, DrawerPlacement, DrawerStyle,
+        EdgeSwipeEvent, Element, FocusRingOverride, FocusScopeOptions, GestureEdge, GestureEdgeSet,
+        GesturePhase, GestureRecognizer, GestureSource, Image, ImageStyle, Input, InputStyle,
+        IntoTextContent, ItemLayout, ItemSource, KeyChord, LayerStack, LongPressEvent, Menu,
+        MenuBar, MenuBarEntry, MenuBarStyle, MenuIcon, MenuItem, MenuItemKind, MenuStyle, Modal,
+        ModalAction, ModalStyle, OverlayAlignment, OverlayAnchorKey, OverlayFlipPolicy,
+        OverlayLayer, OverlayPlacement, OverlaySide, PinchGestureEvent, Popover, PopoverStyle,
+        PopoverTriggerMode, Portal, PortalAnchor, PortalTarget, ProgressBar, ProgressBarStyle,
+        Radio, RadioGroup, RadioOption, RadioStyle, ScrollView, Select, SelectOption, SelectStyle,
+        Slider, SliderStyle, Spinner, SpinnerStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent,
+        Switch, SwitchStyle, TabItem, TabPlacement, TabView, Tabs, TabsOverflowMode,
+        TabsReorderEvent, TabsStyle, Text, TextWidgetStyle, Textarea, TextareaStyle, ToastHost,
+        ToastStyle, Tooltip, TooltipStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection,
+        VirtualList, VirtualViewport, WidgetCommand, WidgetEventResult, WidgetSurfaceStyle,
+        WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

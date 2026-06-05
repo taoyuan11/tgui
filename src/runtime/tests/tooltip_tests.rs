@@ -39,6 +39,43 @@ fn tooltip_emits_overlay_primitives_when_hovered() {
 }
 
 #[test]
+fn tooltip_rich_content_renders_nested_scene_and_pointer() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Button::new("Inspect").size(dp(120.0), dp(40.0)).tooltip(
+            Tooltip::content(
+                Flex::vertical()
+                    .gap(dp(4.0))
+                    .child(Text::new("Rich title"))
+                    .child(Button::new("Nested action")),
+            )
+            .delay(Duration::ZERO),
+        ),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.cursor_position = Some(Point::new(dp(40.0), dp(20.0)));
+
+    let viewport = handler.viewport_rect();
+    assert!(handler.handle_hover(viewport));
+    tooltip_transition_wait();
+    handler.invalidate_computed_scene();
+
+    let computed = handler.computed_scene();
+    let labels: Vec<_> = computed
+        .scene
+        .overlay_texts
+        .iter()
+        .map(|text| text.content.as_ref())
+        .collect();
+    assert!(labels.iter().any(|text| *text == "Rich title"));
+    assert!(labels.iter().any(|text| *text == "Nested action"));
+    assert!(
+        !computed.scene.overlay_meshes.is_empty(),
+        "rich tooltip should keep pointer mesh"
+    );
+}
+
+#[test]
 fn tooltip_absent_without_hover() {
     let invalidation = InvalidationSignal::new();
     let tree = WidgetTree::new(

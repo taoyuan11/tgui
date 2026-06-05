@@ -1,3 +1,4 @@
+use crate::foundation::task::Tasks;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
 use crate::foundation::window_control::{WindowControl, WindowRequest};
 use crate::log::{log_text_profile, text_profile_enabled, Log};
@@ -30,6 +31,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.config.app_id.clone(),
                 self.notification_dispatcher.clone(),
             ),
+            Tasks::from_runtime(
+                self.window_key.clone(),
+                self.window_instance_id,
+                self.task_dispatcher.clone(),
+            ),
             WindowControl::new(self.window_requests.clone(), move || {
                 window
                     .as_ref()
@@ -44,6 +50,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.dialog_dispatcher.set_proxy(event_loop.create_proxy());
         self.notification_dispatcher
             .set_proxy(event_loop.create_proxy());
+        self.task_dispatcher.set_proxy(event_loop.create_proxy());
         self.invalidation.set_proxy(event_loop.create_proxy());
     }
 
@@ -216,7 +223,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 if let Some(command) = command {
                     self.execute_command(command);
                 }
-                let _ = self.set_select_open_state(*widget_id, false, on_open_change.as_ref());
+                if self.close_context_menu(*widget_id) {
+                    return;
+                }
+                let is_menu = self
+                    .cached_scene
+                    .as_ref()
+                    .and_then(|cached| cached.layout.as_ref())
+                    .and_then(|layout| layout.resolved_widget(*widget_id))
+                    .and_then(|resolved| resolved.menu.as_ref())
+                    .is_some();
+                if is_menu {
+                    let _ = self.set_menu_open_state(*widget_id, false);
+                } else {
+                    let _ = self.set_select_open_state(*widget_id, false, on_open_change.as_ref());
+                }
             }
             ClickHandler::Canvas(command, context, button) => {
                 if let Some(position) = position {
@@ -315,6 +336,34 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         true
     }
+
+    pub(super) fn drain_task_completions(&mut self) -> bool {
+        let completions: Vec<_> = self
+            .task_receiver
+            .as_ref()
+            .map(|receiver| receiver.try_iter().collect())
+            .unwrap_or_default();
+
+        if completions.is_empty() {
+            return false;
+        }
+
+        for completion in completions {
+            if completion.window_instance_id != self.window_instance_id {
+                continue;
+            }
+            let context = self.command_context();
+            self.with_view_model(|view_model| (completion.callback)(view_model, &context));
+            self.invalidate_scene_with_reason("task_completion");
+            self.invalidation.mark_dirty();
+        }
+
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+
+        true
+    }
 }
 
 impl<VM: ViewModel> MultiWindowHandler<VM> {
@@ -322,6 +371,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
         self.dialog_dispatcher.set_proxy(event_loop.create_proxy());
         self.notification_dispatcher
             .set_proxy(event_loop.create_proxy());
+        self.task_dispatcher.set_proxy(event_loop.create_proxy());
         self.invalidation.set_proxy(event_loop.create_proxy());
     }
 
@@ -358,6 +408,26 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
             let context = window.command_context();
             window.with_view_model(|view_model| (completion.callback)(view_model, &context));
             window.invalidate_scene_with_reason("multi_notification_completion");
+            self.invalidation.mark_dirty();
+            if let Some(native_window) = window.window.as_ref() {
+                native_window.request_redraw();
+            }
+        }
+    }
+
+    pub(super) fn drain_task_completions(&mut self) {
+        let completions: Vec<_> = self.task_receiver.try_iter().collect();
+        for completion in completions {
+            let Some(window) = self.windows_by_key.get_mut(&completion.window_key) else {
+                continue;
+            };
+            if completion.window_instance_id != window.window_instance_id {
+                continue;
+            }
+
+            let context = window.command_context();
+            window.with_view_model(|view_model| (completion.callback)(view_model, &context));
+            window.invalidate_scene_with_reason("multi_task_completion");
             self.invalidation.mark_dirty();
             if let Some(native_window) = window.window.as_ref() {
                 native_window.request_redraw();

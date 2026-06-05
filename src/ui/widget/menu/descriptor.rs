@@ -97,7 +97,7 @@ impl<VM> MenuItemState<VM> {
 /// `pub(crate)` 字段以便 runtime / collect 访问。
 pub struct MenuDescriptor<VM> {
     pub(crate) items: Vec<MenuItemState<VM>>,
-    pub(crate) open: Value<bool>,
+    pub(crate) open: Option<Value<bool>>,
     pub(crate) on_open_change: Option<ValueCommand<VM, bool>>,
     pub(crate) placement: Placement,
     pub(crate) flip_policy: FlipPolicy,
@@ -133,7 +133,7 @@ impl<VM> MenuDescriptor<VM> {
     pub(crate) fn new(items: Vec<MenuItem<VM>>) -> Self {
         Self {
             items: items.into_iter().map(MenuItemState::from_public).collect(),
-            open: Value::Static(false),
+            open: Some(Value::Static(false)),
             on_open_change: None,
             placement: Placement::bottom().align(Alignment::Start),
             flip_policy: FlipPolicy::FlipSide,

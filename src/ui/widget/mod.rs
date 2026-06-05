@@ -86,7 +86,7 @@ pub(crate) use core::{
 };
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use divider::Divider;
-pub use drawer::{Drawer, DrawerPlacement};
+pub use drawer::{Drawer, DrawerHost, DrawerMode, DrawerPlacement};
 pub use gesture::{
     DoubleTapEvent, EdgeSwipeEvent, GestureEdge, GestureEdgeSet, GesturePhase, GestureRecognizer,
     GestureSource, LongPressEvent, PinchGestureEvent, SwipeAxis, SwipeDirection, SwipeGestureEvent,
@@ -125,7 +125,7 @@ pub use style::{
     WidgetSurfaceStyle,
 };
 pub use switch::Switch;
-pub use tabs::{TabItem, TabView, Tabs};
+pub use tabs::{TabItem, TabView, Tabs, TabsOverflowMode, TabsReorderEvent};
 pub use text::{IntoTextContent, Text};
 pub use textarea::Textarea;
 pub use toast::ToastHost;

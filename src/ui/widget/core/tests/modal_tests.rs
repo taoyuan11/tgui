@@ -1,7 +1,10 @@
 pub(super) use super::*;
 
+use std::time::Duration;
+
+use crate::animation::Transition;
 use crate::foundation::view_model::ValueCommand;
-use crate::ui::widget::{Modal, ModalAction};
+use crate::ui::widget::{Modal, ModalAction, ModalStyle};
 
 #[test]
 fn modal_builder_attaches_descriptor() {
@@ -143,4 +146,143 @@ fn modal_with_on_open_change_keeps_descriptor_attached() {
     let descriptor = element.modal.as_ref().expect("descriptor exists");
     assert!(descriptor.on_open_change.is_some());
     assert!(!descriptor.close_on_backdrop_click);
+}
+
+#[test]
+fn modal_style_defaults_include_enter_scale() {
+    let style = ModalStyle::default_for(crate::theme::ResolvedThemeMode::Light);
+    assert!((style.enter_scale - 0.96).abs() < f32::EPSILON);
+}
+
+#[test]
+fn visual_scale_changes_hit_rect_about_center() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Stack::<()>::new()
+            .size(dp(100.0), dp(50.0))
+            .scale(0.5)
+            .on_click(Command::new(|_: &mut ()| {})),
+    );
+
+    let computed = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let rect = computed
+        .hit_regions
+        .iter()
+        .find_map(|hit| match hit.interaction {
+            HitInteraction::Widget { .. } => Some(hit.rect),
+            _ => None,
+        })
+        .expect("scaled widget should remain hittable");
+
+    assert_eq!(rect.x, dp(25.0));
+    assert_eq!(rect.y, dp(12.5));
+    assert_eq!(rect.width, dp(50.0));
+    assert_eq!(rect.height, dp(25.0));
+}
+
+#[test]
+fn visual_scale_reduced_motion_uses_target_without_transition() {
+    let invalidation = InvalidationSignal::new();
+    let scale = crate::foundation::binding::State::new(0.5_f32, invalidation.clone());
+    let animated_scale = scale
+        .signal()
+        .animated(Transition::ease_in_out(Duration::from_millis(160)));
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Stack::<()>::new()
+            .size(dp(100.0), dp(50.0))
+            .scale(animated_scale)
+            .on_click(Command::new(|_: &mut ()| {})),
+    );
+
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 200.0, 120.0);
+
+    let mut animations = AnimationEngine::default();
+    let _seed = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    scale.set(1.0);
+
+    let normal = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let normal_rect = normal
+        .hit_regions
+        .iter()
+        .find_map(|hit| match hit.interaction {
+            HitInteraction::Widget { .. } => Some(hit.rect),
+            _ => None,
+        })
+        .expect("scaled widget should remain hittable");
+    assert_eq!(normal_rect.width, dp(50.0));
+
+    let mut animations = AnimationEngine::default();
+    let reduced = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        true,
+    );
+    let reduced_rect = reduced
+        .hit_regions
+        .iter()
+        .find_map(|hit| match hit.interaction {
+            HitInteraction::Widget { .. } => Some(hit.rect),
+            _ => None,
+        })
+        .expect("scaled widget should remain hittable");
+    assert_eq!(reduced_rect.width, dp(100.0));
+    assert_eq!(reduced_rect.height, dp(50.0));
 }

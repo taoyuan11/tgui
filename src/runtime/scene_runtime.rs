@@ -219,7 +219,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             let collect_started_at = Instant::now();
                             let active_slider_value = self.active_slider_value_override();
                             let collected = tree
-                                .collect_scene_cache_from_layout_with_focus_value_and_virtual_state(
+                                .collect_scene_cache_from_layout_with_focus_value_virtual_and_menu_state(
                                     &self.font_manager,
                                     layout,
                                     &theme,
@@ -230,6 +230,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     active_scrollbar,
                                     &widget_states,
                                     &self.select_open_states,
+                                    &self.menu_open_states,
+                                    &self.menubar_active_states,
+                                    &self.context_menu_anchor_states,
                                     &self.scroll_states,
                                     &self.virtual_states,
                                     viewport,
@@ -271,7 +274,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 let collect_started_at = Instant::now();
                                 let active_slider_value = self.active_slider_value_override();
                                 let collected = tree
-                                    .collect_scene_cache_from_layout_with_focus_value_and_virtual_state(
+                                    .collect_scene_cache_from_layout_with_focus_value_virtual_and_menu_state(
                                         &self.font_manager,
                                         layout,
                                         &theme,
@@ -282,6 +285,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                         active_scrollbar,
                                         &widget_states,
                                         &self.select_open_states,
+                                        &self.menu_open_states,
+                                        &self.menubar_active_states,
+                                        &self.context_menu_anchor_states,
                                         &self.scroll_states,
                                         &self.virtual_states,
                                         viewport,
@@ -333,7 +339,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             let collect_started_at = Instant::now();
                             let active_slider_value = self.active_slider_value_override();
                             let collected = tree
-                                .collect_scene_cache_from_layout_with_focus_value_and_virtual_state(
+                                .collect_scene_cache_from_layout_with_focus_value_virtual_and_menu_state(
                                     &self.font_manager,
                                     &layout,
                                     &theme,
@@ -344,6 +350,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     active_scrollbar,
                                     &widget_states,
                                     &self.select_open_states,
+                                    &self.menu_open_states,
+                                    &self.menubar_active_states,
+                                    &self.context_menu_anchor_states,
                                     &self.scroll_states,
                                     &self.virtual_states,
                                     viewport,
@@ -384,7 +393,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             let collect_started_at = Instant::now();
                             let active_slider_value = self.active_slider_value_override();
                             let collected = tree
-                                .collect_scene_cache_from_layout_with_focus_value_and_virtual_state(
+                                .collect_scene_cache_from_layout_with_focus_value_virtual_and_menu_state(
                                     &self.font_manager,
                                     &layout,
                                     &theme,
@@ -395,6 +404,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     active_scrollbar,
                                     &widget_states,
                                     &self.select_open_states,
+                                    &self.menu_open_states,
+                                    &self.menubar_active_states,
+                                    &self.context_menu_anchor_states,
                                     &self.scroll_states,
                                     &self.virtual_states,
                                     viewport,

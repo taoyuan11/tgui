@@ -149,4 +149,43 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         );
         true
     }
+
+    pub(super) fn finish_tab_reorder(&mut self) -> bool {
+        let Some(active) = self.active_tab_reorder.take() else {
+            return false;
+        };
+        let target = self
+            .hit_path(self.viewport_rect())
+            .into_iter()
+            .rev()
+            .find_map(|interaction| match interaction {
+                HitInteraction::TabTrigger {
+                    group_id,
+                    index,
+                    key,
+                    ..
+                } if group_id == active.group_id => Some((index, key)),
+                _ => None,
+            });
+        let Some((to_index, target_key)) = target else {
+            return false;
+        };
+        if to_index == active.from_index {
+            return false;
+        }
+        let Some(command) = active.on_reorder else {
+            return false;
+        };
+        self.execute_value_command(
+            &command,
+            crate::ui::widget::TabsReorderEvent {
+                from_index: active.from_index,
+                to_index,
+                key: active.key,
+                target_key,
+                placement: active.placement,
+            },
+        );
+        true
+    }
 }

@@ -4,15 +4,15 @@
 //! 任何 widget 的 builder 通过 `.tooltip("text")` 给底层 `Element` 挂上 tooltip 描述符，
 //! collect 阶段统一在 widget 的 trigger frame 之上调用 Overlay 引擎渲染。
 //!
-//! 本轮约束：
-//! - 仅支持纯文本内容（`Value<String>`）；Element 子树作为内容留下一轮；
-//! - `delay` 仅作用于 hover（默认 500ms）；focus / 长按不走 hover delay；
-//! - 内容仍为纯文本，浮层渲染支持主题默认样式与三角指针。
+//! `Tooltip::new(text)` 走轻量文本 primitive 路径；`Tooltip::content(element)` 走
+//! nested scene 路径，可承载任意 Element 子树。
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::Value;
+use crate::ui::widget::core::Element;
 use crate::ui::widget::overlay::{FlipPolicy, Placement};
 use crate::ui::widget::style::TooltipStyle;
 
@@ -20,20 +20,56 @@ use crate::ui::widget::style::TooltipStyle;
 pub const TOOLTIP_DEFAULT_DELAY: Duration = Duration::from_millis(500);
 
 /// Tooltip 描述符。挂在 `Element::tooltip` 上，由 collect 阶段渲染。
-#[derive(Clone)]
-pub struct Tooltip {
-    pub(crate) text: Value<String>,
+pub struct Tooltip<VM = ()> {
+    pub(crate) content: TooltipContent<VM>,
     pub(crate) placement: Placement,
     pub(crate) flip_policy: FlipPolicy,
     pub(crate) delay: Duration,
     pub(crate) style: Option<TooltipStyle>,
 }
 
-impl Tooltip {
+pub(crate) enum TooltipContent<VM = ()> {
+    Text(Value<String>),
+    Element(Box<Element<VM>>),
+}
+
+impl<VM> Clone for TooltipContent<VM> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Text(text) => Self::Text(text.clone()),
+            Self::Element(element) => Self::Element(element.clone()),
+        }
+    }
+}
+
+impl<VM> Clone for Tooltip<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            content: self.content.clone(),
+            placement: self.placement,
+            flip_policy: self.flip_policy,
+            delay: self.delay,
+            style: self.style.clone(),
+        }
+    }
+}
+
+impl<VM> Tooltip<VM> {
     /// 构造 Tooltip，使用主题默认样式与 500ms hover 延迟。
     pub fn new(text: impl Into<Value<String>>) -> Self {
         Self {
-            text: text.into(),
+            content: TooltipContent::Text(text.into()),
+            placement: Placement::top(),
+            flip_policy: FlipPolicy::FlipSide,
+            delay: TOOLTIP_DEFAULT_DELAY,
+            style: None,
+        }
+    }
+
+    /// 使用任意 Element 子树作为 Tooltip 内容。
+    pub fn content(content: impl Into<Element<VM>>) -> Self {
+        Self {
+            content: TooltipContent::Element(Box::new(content.into())),
             placement: Placement::top(),
             flip_policy: FlipPolicy::FlipSide,
             delay: TOOLTIP_DEFAULT_DELAY,
@@ -71,5 +107,26 @@ impl Tooltip {
         self.style
             .clone()
             .unwrap_or_else(|| TooltipStyle::default_for(mode))
+    }
+
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> Tooltip<RootVm>
+    where
+        VM: 'static,
+    {
+        Tooltip {
+            content: match self.content {
+                TooltipContent::Text(text) => TooltipContent::Text(text),
+                TooltipContent::Element(content) => {
+                    TooltipContent::Element(Box::new(content.scope_with_selector(selector)))
+                }
+            },
+            placement: self.placement,
+            flip_policy: self.flip_policy,
+            delay: self.delay,
+            style: self.style,
+        }
     }
 }

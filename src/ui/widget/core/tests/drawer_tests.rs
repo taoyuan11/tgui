@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui::widget::Flex;
+use crate::ui::widget::{DrawerHost, DrawerMode, Flex};
 
 #[test]
 fn closed_signal_drawer_does_not_intercept_underlying_button_hits() {
@@ -237,4 +237,49 @@ fn open_signal_drawer_registers_focus_trap() {
             .any(|scope| scope.active && scope.options.is_trap()),
         "open drawer should trap focus inside the panel"
     );
+}
+
+#[test]
+fn drawer_host_push_attaches_push_descriptor_without_backdrop_hits() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let element: Element<()> = DrawerHost::new(
+        Text::new("main"),
+        Drawer::new(true)
+            .mode(DrawerMode::Push)
+            .placement(DrawerPlacement::Left)
+            .on_open_change(ValueCommand::new(|_: &mut (), _: bool| {}))
+            .content(Text::new("drawer")),
+    )
+    .size(dp(400.0), dp(240.0))
+    .into();
+    let descriptor = element.drawer.as_ref().expect("push host descriptor");
+    assert_eq!(descriptor.mode, DrawerMode::Push);
+    assert!(!descriptor.close_on_backdrop_click);
+    let root_id = element.id;
+
+    let tree = WidgetTree::new(element);
+    let computed = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 400.0, 240.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(computed.overlay_hit_regions.is_empty());
+    assert!(computed
+        .overlay_close_handlers
+        .iter()
+        .any(|handler| handler.source_widget_id == Some(root_id)));
 }

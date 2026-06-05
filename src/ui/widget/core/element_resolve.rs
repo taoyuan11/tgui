@@ -223,12 +223,14 @@ impl<VM: 'static> Element<VM> {
                 label,
                 on_change,
                 disabled,
+                validation,
                 style,
             } => ResolvedWidgetKind::Checkbox {
                 checked: checked.clone(),
                 label: label.clone(),
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: resolved_checkbox_style(style.as_ref(), theme),
             },
             WidgetKind::Radio {
@@ -236,12 +238,14 @@ impl<VM: 'static> Element<VM> {
                 label,
                 on_change,
                 disabled,
+                validation,
                 style,
             } => ResolvedWidgetKind::Radio {
                 checked: checked.clone(),
                 label: label.clone(),
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: resolved_radio_style(style.as_ref(), theme),
             },
             WidgetKind::Switch {
@@ -252,6 +256,7 @@ impl<VM: 'static> Element<VM> {
                 active_thumb_color,
                 inactive_thumb_color,
                 disabled,
+                validation,
                 style,
             } => ResolvedWidgetKind::Switch {
                 checked: checked.clone(),
@@ -261,6 +266,7 @@ impl<VM: 'static> Element<VM> {
                 active_thumb_color: active_thumb_color.clone(),
                 inactive_thumb_color: inactive_thumb_color.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: resolved_switch_style(style.as_ref(), theme),
             },
             WidgetKind::Select {
@@ -270,6 +276,7 @@ impl<VM: 'static> Element<VM> {
                 open,
                 on_open_change,
                 disabled,
+                validation,
                 style,
             } => ResolvedWidgetKind::Select {
                 selected_label: selected_label.clone(),
@@ -278,6 +285,7 @@ impl<VM: 'static> Element<VM> {
                 open: open.clone(),
                 on_open_change: on_open_change.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: resolved_select_style(style.as_ref(), theme),
             },
             WidgetKind::SelectOptionRow {
@@ -304,6 +312,7 @@ impl<VM: 'static> Element<VM> {
                 value_formatter,
                 on_change,
                 disabled,
+                validation,
                 style,
             } => ResolvedWidgetKind::Slider {
                 value: value.clone(),
@@ -316,6 +325,7 @@ impl<VM: 'static> Element<VM> {
                 value_formatter: value_formatter.clone(),
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: resolved_slider_style(style.as_ref(), theme),
             },
             WidgetKind::ProgressBar {
@@ -382,6 +392,7 @@ impl<VM: 'static> Element<VM> {
                 multiline,
                 show_scrollbar,
                 auto_wrap,
+                validation,
             } => ResolvedWidgetKind::TextEditor {
                 controller: controller.clone(),
                 placeholder: placeholder.clone(),
@@ -411,6 +422,7 @@ impl<VM: 'static> Element<VM> {
                 multiline: *multiline,
                 show_scrollbar: show_scrollbar.clone(),
                 auto_wrap: auto_wrap.clone(),
+                validation: validation.clone(),
             },
             WidgetKind::ToastHost {
                 queue,

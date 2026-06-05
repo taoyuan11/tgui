@@ -10,6 +10,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         }
 
+        if handle.layer == crate::runtime::overlay::OverlayLayer::Menu {
+            if let Some(source_widget_id) = handle.source_widget_id {
+                if self.close_context_menu(source_widget_id) {
+                    return;
+                }
+                let _ = self.set_menu_open_state(source_widget_id, false);
+                return;
+            }
+        }
+
         let _ = self.set_select_open_state(
             crate::ui::widget::WidgetId::from_raw(handle.overlay_id.0),
             false,

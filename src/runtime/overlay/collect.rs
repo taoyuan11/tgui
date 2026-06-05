@@ -380,7 +380,9 @@ fn finalize_portal_entry<VM>(
         OverlayContent::Batch { clip_rect, .. } => clip_rect
             .map(|clip| translate_rect(clip, origin))
             .or(Some(solved.clip_rect)),
-        OverlayContent::Scene(_) => Some(solved.clip_rect),
+        OverlayContent::Scene(_) | OverlayContent::SceneWithPrimitives { .. } => {
+            Some(solved.clip_rect)
+        }
         _ => Some(solved.clip_rect),
     };
     let bucket = &mut computed.overlay_layers[entry.layer.index()];
@@ -404,15 +406,20 @@ fn finalize_portal_entry<VM>(
         }
     }
 
-    let (primitives, hits, nested_scene) = match entry.content {
-        OverlayContent::Primitives(primitives) => (primitives, Vec::new(), None),
-        OverlayContent::Hits(hits) => (Vec::new(), hits, None),
+    let (primitives, hits, nested_scene, nested_scene_offset) = match entry.content {
+        OverlayContent::Primitives(primitives) => (primitives, Vec::new(), None, Point::ZERO),
+        OverlayContent::Hits(hits) => (Vec::new(), hits, None, Point::ZERO),
         OverlayContent::Batch {
             primitives,
             hits,
             clip_rect: _,
-        } => (primitives, hits, None),
-        OverlayContent::Scene(scene) => (Vec::new(), Vec::new(), Some(scene)),
+        } => (primitives, hits, None, Point::ZERO),
+        OverlayContent::Scene(scene) => (Vec::new(), Vec::new(), Some(scene), Point::ZERO),
+        OverlayContent::SceneWithPrimitives {
+            scene,
+            scene_offset,
+            primitives,
+        } => (primitives, Vec::new(), Some(scene), scene_offset),
     };
 
     for prim in primitives {
@@ -491,6 +498,10 @@ fn finalize_portal_entry<VM>(
 
     if let Some(scene) = nested_scene {
         let scene = *scene;
+        let origin = Point::new(
+            origin.x + nested_scene_offset.x,
+            origin.y + nested_scene_offset.y,
+        );
         let translated_overlay_anchors: std::collections::HashMap<_, _> = scene
             .overlay_anchors
             .iter()

@@ -253,6 +253,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 } else {
                     self.deferred_mouse_click = None;
                 }
+                if matches!(
+                    canvas_mouse_button(button.clone().mouse_button()),
+                    Some(CanvasMouseButton::Left)
+                ) {
+                    let _ = self.finish_tab_reorder();
+                } else {
+                    self.active_tab_reorder = None;
+                }
                 self.end_scrollbar_drag();
                 self.end_touch_scroll_drag();
                 self.end_slider_drag();

@@ -2,6 +2,7 @@ mod lifecycle;
 
 pub(crate) use self::lifecycle::{LifecycleSelectOption, LifecycleSnapshot, LifecycleWidgetKind};
 use super::*;
+use crate::foundation::form::ValidationVisualState;
 use crate::ui::widget::r#virtual::{
     ItemLayout, VirtualArrangement, VirtualResolvedItemMeta, VirtualRuntimeState, VirtualWindowPlan,
 };
@@ -18,7 +19,7 @@ pub struct Element<VM> {
     pub(crate) lifecycle_events: LifecycleEventHandlers<VM>,
     pub(crate) media_events: MediaEventHandlers<VM>,
     pub(crate) background: Option<Value<Color>>,
-    pub(crate) tooltip: Option<Box<crate::ui::widget::tooltip::Tooltip>>,
+    pub(crate) tooltip: Option<Box<crate::ui::widget::tooltip::Tooltip<VM>>>,
     pub(crate) popover: Option<Box<crate::ui::widget::popover::PopoverDescriptor<VM>>>,
     pub(crate) menu: Option<Box<crate::ui::widget::menu::MenuDescriptor<VM>>>,
     pub(crate) context_menu: Option<Box<crate::ui::widget::menu::ContextMenuDescriptor<VM>>>,
@@ -62,7 +63,7 @@ pub(crate) struct ResolvedElement<VM> {
     pub(crate) lifecycle_events: LifecycleEventHandlers<VM>,
     pub(crate) media_events: MediaEventHandlers<VM>,
     pub(crate) background: Option<Value<Color>>,
-    pub(crate) tooltip: Option<Box<crate::ui::widget::tooltip::Tooltip>>,
+    pub(crate) tooltip: Option<Box<crate::ui::widget::tooltip::Tooltip<VM>>>,
     pub(crate) popover: Option<Box<crate::ui::widget::popover::PopoverDescriptor<VM>>>,
     pub(crate) menu: Option<Box<crate::ui::widget::menu::MenuDescriptor<VM>>>,
     pub(crate) context_menu: Option<Box<crate::ui::widget::menu::ContextMenuDescriptor<VM>>>,
@@ -136,6 +137,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         label: Option<Value<String>>,
         on_change: Option<ValueCommand<VM, bool>>,
         disabled: Value<bool>,
+        validation: Value<ValidationVisualState>,
         style: WidgetCheckboxStyle,
     },
     Radio {
@@ -143,6 +145,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         label: Option<Value<String>>,
         on_change: Option<ValueCommand<VM, bool>>,
         disabled: Value<bool>,
+        validation: Value<ValidationVisualState>,
         style: WidgetRadioStyle,
     },
     Switch {
@@ -153,6 +156,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         active_thumb_color: Option<Value<Color>>,
         inactive_thumb_color: Option<Value<Color>>,
         disabled: Value<bool>,
+        validation: Value<ValidationVisualState>,
         style: WidgetSwitchStyle,
     },
     Select {
@@ -162,6 +166,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         open: Option<Value<bool>>,
         on_open_change: Option<ValueCommand<VM, bool>>,
         disabled: Value<bool>,
+        validation: Value<ValidationVisualState>,
         style: WidgetSelectStyle,
     },
     SelectOptionRow {
@@ -182,6 +187,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         value_formatter: Option<SliderValueFormatter>,
         on_change: Option<ValueCommand<VM, f32>>,
         disabled: Value<bool>,
+        validation: Value<ValidationVisualState>,
         style: WidgetSliderStyle,
     },
     ProgressBar {
@@ -216,6 +222,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         multiline: bool,
         show_scrollbar: Value<bool>,
         auto_wrap: Value<bool>,
+        validation: Value<ValidationVisualState>,
     },
     ToastHost {
         queue: crate::foundation::binding::ToastQueue<VM>,
@@ -332,12 +339,14 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 label,
                 on_change,
                 disabled,
+                validation,
                 style,
             } => Self::Checkbox {
                 checked: checked.clone(),
                 label: label.clone(),
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: style.clone(),
             },
             Self::Radio {
@@ -345,12 +354,14 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 label,
                 on_change,
                 disabled,
+                validation,
                 style,
             } => Self::Radio {
                 checked: checked.clone(),
                 label: label.clone(),
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: style.clone(),
             },
             Self::Switch {
@@ -361,6 +372,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 active_thumb_color,
                 inactive_thumb_color,
                 disabled,
+                validation,
                 style,
             } => Self::Switch {
                 checked: checked.clone(),
@@ -370,6 +382,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 active_thumb_color: active_thumb_color.clone(),
                 inactive_thumb_color: inactive_thumb_color.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: style.clone(),
             },
             Self::Select {
@@ -379,6 +392,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 open,
                 on_open_change,
                 disabled,
+                validation,
                 style,
             } => Self::Select {
                 selected_label: selected_label.clone(),
@@ -387,6 +401,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 open: open.clone(),
                 on_open_change: on_open_change.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: style.clone(),
             },
             Self::SelectOptionRow {
@@ -413,6 +428,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 value_formatter,
                 on_change,
                 disabled,
+                validation,
                 style,
             } => Self::Slider {
                 value: value.clone(),
@@ -425,6 +441,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 value_formatter: value_formatter.clone(),
                 on_change: on_change.clone(),
                 disabled: disabled.clone(),
+                validation: validation.clone(),
                 style: style.clone(),
             },
             Self::ProgressBar {
@@ -478,6 +495,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 multiline,
                 show_scrollbar,
                 auto_wrap,
+                validation,
             } => Self::TextEditor {
                 controller: controller.clone(),
                 placeholder: placeholder.clone(),
@@ -488,6 +506,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 multiline: *multiline,
                 show_scrollbar: show_scrollbar.clone(),
                 auto_wrap: auto_wrap.clone(),
+                validation: validation.clone(),
             },
             Self::ToastHost {
                 queue,
