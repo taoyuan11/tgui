@@ -13,6 +13,13 @@ fn resolved_children<'a, VM>(kind: &'a ResolvedWidgetKind<VM>) -> &'a [ResolvedE
     }
 }
 
+fn subtree_has_data_grid_header<VM>(element: &ResolvedElement<VM>) -> bool {
+    element.data_grid_header.is_some()
+        || resolved_children(&element.kind)
+            .iter()
+            .any(subtree_has_data_grid_header)
+}
+
 fn columns<VM: 'static>() -> Vec<DataGridColumn<String, VM>> {
     vec![
         DataGridColumn::new("name", "Name".to_string(), |ctx| Text::new(ctx.row).into())
@@ -81,8 +88,7 @@ fn data_grid_resolves_header_and_virtualized_rows() {
     assert!(
         resolved_children(&children[0].kind)
             .iter()
-            .flat_map(|child| resolved_children(&child.kind))
-            .any(|child| child.data_grid_header.is_some()),
+            .any(subtree_has_data_grid_header),
         "header cells should carry DataGrid header state"
     );
     let ResolvedWidgetKind::Virtual { children, .. } = &children[1].kind else {
@@ -136,6 +142,63 @@ fn data_grid_exposes_horizontal_scroll_bounds_for_wide_columns() {
             .any(|region| region.content_bounds.width > region.content_viewport.width),
         "wide DataGrid columns should create horizontal scrollable content"
     );
+}
+
+#[test]
+fn data_grid_defaults_render_readably_in_dark_theme() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::dark();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::new(
+            vec![DataGridRow::keyed("a", "Alpha".to_string())],
+            columns(),
+        )
+        .size(dp(240.0), dp(120.0)),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(
+        rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.color == Color::hexa(0x111827FF)),
+        "DataGrid surface should follow dark theme defaults"
+    );
+    assert!(
+        rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.color == Color::hexa(0x1E293BFF)),
+        "DataGrid header should follow dark theme defaults"
+    );
+    for label in ["Name", "Alpha"] {
+        let text = rendered
+            .primitives
+            .texts
+            .iter()
+            .find(|text| text.content.as_ref() == label)
+            .unwrap_or_else(|| panic!("expected DataGrid text {label:?} to render"));
+        assert_eq!(text.color, Color::hexa(0xE2E8F0FF));
+    }
 }
 
 #[test]
@@ -299,6 +362,7 @@ fn data_grid_pinned_columns_counteract_horizontal_scroll() {
     let mut middle_cell = None;
     let mut end_cell = None;
     let mut middle_header = None;
+    let mut end_header = None;
     for region in &computed.hit_regions {
         match &region.interaction {
             HitInteraction::DataGridCell { state, .. }
@@ -321,6 +385,11 @@ fn data_grid_pinned_columns_counteract_horizontal_scroll() {
             {
                 middle_header = Some(region.rect);
             }
+            HitInteraction::DataGridHeader { state, .. }
+                if state.column_key == WidgetKey::from("actions") =>
+            {
+                end_header = Some(region.rect);
+            }
             _ => {}
         }
     }
@@ -329,9 +398,158 @@ fn data_grid_pinned_columns_counteract_horizontal_scroll() {
         middle_cell.expect("middle cell should exist").x < dp(0.0),
         "unpinned body cells should move left with horizontal scroll"
     );
-    assert_eq!(end_cell.expect("end cell should exist").x, dp(240.0 - 84.0));
+    let end_cell = end_cell.expect("end cell should exist");
+    let end_header = end_header.expect("end header should exist");
+    assert_eq!(end_cell.x, dp(240.0 - 84.0));
+    assert_eq!(end_header.x, end_cell.x);
+    assert_eq!(end_header.width, end_cell.width);
     assert!(
         middle_header.expect("middle header should exist").x < dp(72.0),
         "header cells should synchronize with body horizontal scroll"
     );
+}
+
+#[test]
+fn data_grid_end_pinned_columns_keep_natural_position_without_overflow() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::new(
+            vec![DataGridRow::keyed("a", "Alpha".to_string())],
+            pinned_columns(),
+        )
+        .size(dp(560.0), dp(120.0)),
+    );
+    let viewport = Rect::new(0.0, 0.0, 560.0, 120.0);
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let rendered = tree.collect_scene_from_layout(
+        &font_manager,
+        &layout,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let mut end_cell = None;
+    let mut end_header = None;
+    for region in &rendered.hit_regions {
+        match &region.interaction {
+            HitInteraction::DataGridCell { state, .. }
+                if state.column_key == WidgetKey::from("actions") =>
+            {
+                end_cell = Some(region.rect);
+            }
+            HitInteraction::DataGridHeader { state, .. }
+                if state.column_key == WidgetKey::from("actions") =>
+            {
+                end_header = Some(region.rect);
+            }
+            _ => {}
+        }
+    }
+
+    let expected_x = dp(72.0 + 180.0 + 180.0);
+    let end_cell = end_cell.expect("end cell should exist");
+    let end_header = end_header.expect("end header should exist");
+    assert_eq!(end_cell.x, expected_x);
+    assert_eq!(end_header.x, expected_x);
+    assert_eq!(end_header.width, end_cell.width);
+    assert!(
+        end_cell.x < viewport.right() - end_cell.width,
+        "end-pinned columns should not be forced to the viewport edge when the grid does not overflow"
+    );
+}
+
+#[test]
+fn data_grid_does_not_paint_trailing_space_as_an_extra_column() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::new(
+            vec![DataGridRow::keyed("a", "Alpha".to_string())],
+            pinned_columns(),
+        )
+        .selected_keys(vec![WidgetKey::from("a")])
+        .size(dp(560.0), dp(120.0)),
+    );
+
+    let viewport = Rect::new(0.0, 0.0, 560.0, 120.0);
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container { children, .. } = &layout.resolved_root.kind else {
+        panic!("DataGrid root should resolve to a container");
+    };
+    let ResolvedWidgetKind::Virtual { children: rows, .. } = &children[1].kind else {
+        panic!("DataGrid body should use VirtualList");
+    };
+    let row = rows
+        .iter()
+        .find(|row| {
+            resolved_children(&row.kind)
+                .iter()
+                .any(|cell| cell.data_grid_cell.is_some())
+        })
+        .expect("data row should resolve");
+    let expected_width = dp(72.0 + 180.0 + 180.0 + 84.0);
+    assert_eq!(
+        row.layout.width.as_ref().map(|value| value.resolve()),
+        Some(crate::ui::layout::Length::Px(expected_width))
+    );
+
+    let rendered = tree.collect_scene_from_layout(
+        &font_manager,
+        &layout,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(rendered.hit_regions.iter().all(|region| {
+        !matches!(region.interaction, HitInteraction::DataGridCell { .. })
+            || region.rect.right() <= expected_width
+    }));
 }

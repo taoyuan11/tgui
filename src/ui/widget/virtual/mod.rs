@@ -340,10 +340,7 @@ pub(crate) fn resolve_virtual_window_plan(
         VirtualDirection::Vertical => viewport_hint.width.max(Dp::ZERO),
         VirtualDirection::Horizontal => viewport_hint.height.max(Dp::ZERO),
     };
-    let viewport_cross = content_cross_extent
-        .unwrap_or(viewport_cross)
-        .max(viewport_cross)
-        .max(Dp::ZERO);
+    let viewport_cross = content_cross_extent.unwrap_or(viewport_cross).max(Dp::ZERO);
     let scroll_main = match arrangement.direction() {
         VirtualDirection::Vertical => runtime_state.scroll_offset.y.max(Dp::ZERO),
         VirtualDirection::Horizontal => runtime_state.scroll_offset.x.max(Dp::ZERO),

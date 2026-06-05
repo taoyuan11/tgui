@@ -140,12 +140,19 @@ impl<VM> ResolvedElement<VM> {
             crate::ui::widget::DataGridColumnPin::Start if !is_header => {
                 Rect::new(frame.x + scroll_x, frame.y, frame.width, frame.height)
             }
-            crate::ui::widget::DataGridColumnPin::End => Rect::new(
-                visual_context.clip_rect.right() - pin_offset - frame.width,
-                frame.y,
-                frame.width,
-                frame.height,
-            ),
+            crate::ui::widget::DataGridColumnPin::End => {
+                let natural_frame = if is_header {
+                    Rect::new(frame.x - scroll_x, frame.y, frame.width, frame.height)
+                } else {
+                    frame
+                };
+                let sticky_x = visual_context.clip_rect.right() - pin_offset - frame.width;
+                if natural_frame.x > sticky_x {
+                    Rect::new(sticky_x, frame.y, frame.width, frame.height)
+                } else {
+                    natural_frame
+                }
+            }
             _ => frame,
         }
     }

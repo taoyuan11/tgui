@@ -7,17 +7,17 @@ use crate::ui::layout::{pct, Align, Insets, LayoutStyle, Overflow, ScrollbarStyl
 use crate::ui::unit::{dp, Dp};
 
 use super::common::{
-    CursorStyle, DataGridCellState, DataGridHeaderState, DataGridResizeHandleState,
+    ChildSource, CursorStyle, DataGridCellState, DataGridHeaderState, DataGridResizeHandleState,
     DataGridRootState, FocusScopeOptions, InteractionHandlers, LifecycleEventHandlers,
-    MediaEventHandlers, VisualStyle, WidgetId, WidgetKey,
+    MediaEventHandlers, VisualStyle, WidgetId, WidgetKey, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
 use super::r#virtual::{ItemLayout, ItemSource, VirtualList};
 use super::style::{StyleResolver, WidgetSurfaceStyle};
 use super::{
-    ContextMenuDescriptor, Flex, GestureRecognizer, LongPressEvent, MenuItem, MenuItemState, Stack,
-    Text,
+    ContainerStyle, ContextMenuDescriptor, Flex, GestureRecognizer, LongPressEvent, MenuItem,
+    MenuItemState, Stack, Text, TextWidgetStyle,
 };
 
 pub type Table<T, VM> = DataGrid<T, VM>;
@@ -875,11 +875,8 @@ where
         }
 
         let grid_id = WidgetId::next();
-        let style = self
-            .style
-            .as_ref()
-            .map(|resolver| resolver.resolve(ResolvedThemeMode::Light))
-            .unwrap_or_else(|| DataGridStyle::default_for(ResolvedThemeMode::Light));
+        let style_resolver = self.style.clone();
+        let style = resolve_data_grid_style(style_resolver.as_ref(), ResolvedThemeMode::Light);
         let row_height = self
             .row_height
             .unwrap_or_else(|| style.row_height(self.density));
@@ -925,6 +922,7 @@ where
             columns.clone(),
             sort.clone(),
             style.clone(),
+            style_resolver.clone(),
             self.on_sort_change.clone(),
             self.on_column_width_change.clone(),
             self.on_column_reorder.clone(),
@@ -938,6 +936,8 @@ where
         let row_style = style.clone();
         let row_columns = columns.clone();
         let row_selected_keys = selected_keys.clone();
+        let row_style_resolver = style_resolver.clone();
+        let body_style_resolver = style_resolver.clone();
         let mut virtual_rows: Element<VM> =
             VirtualList::new(source, move |_visible, row| match row {
                 DataGridVirtualRow::Section(header) => {
@@ -967,6 +967,7 @@ where
                     row_keys.clone(),
                     row_disabled.clone(),
                     row_style.clone(),
+                    row_style_resolver.clone(),
                     row_height,
                     on_selection_change.clone(),
                     on_cell_action.clone(),
@@ -982,10 +983,10 @@ where
             .overflow_y(Overflow::Scroll)
             .grow(1.0)
             .style({
-                let style = style.clone();
-                move |_mode| {
-                    let mut container =
-                        super::ContainerStyle::default_for(ResolvedThemeMode::Light);
+                let style_resolver = body_style_resolver;
+                move |mode| {
+                    let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
+                    let mut container = ContainerStyle::default_for(mode);
                     container.scrollbar = style.scrollbar;
                     container.surface.background = style.surface.background.clone();
                     container
@@ -1028,6 +1029,7 @@ where
         root.visual.border_width = style.surface.border_width.clone();
         root.visual.opacity = style.surface.opacity.clone();
         root.visual.offset = style.surface.offset.clone();
+        apply_data_grid_root_style(&mut root, style_resolver);
         root
     }
 }
@@ -1038,6 +1040,7 @@ fn build_header<T, VM: 'static>(
     columns: Arc<Vec<DataGridColumn<T, VM>>>,
     sort: Value<Vec<DataGridSort>>,
     style: Arc<DataGridStyle>,
+    style_resolver: Option<StyleResolver<DataGridStyle>>,
     on_sort_change: Option<ValueCommand<VM, DataGridSortChange>>,
     on_column_width_change: Option<ValueCommand<VM, DataGridColumnWidthChange>>,
     on_column_reorder: Option<ValueCommand<VM, DataGridColumnReorderEvent>>,
@@ -1065,7 +1068,7 @@ where
             sort_direction,
             sort_priority: sort_position.map(|index| index + 1),
         };
-        let child = column
+        let mut child = column
             .header
             .as_ref()
             .map(|render| render(context))
@@ -1077,22 +1080,25 @@ where
                 };
                 Text::new(format!("{label}{suffix}")).into()
             });
+        apply_default_data_grid_text_style(
+            &mut child,
+            style_resolver.clone(),
+            DataGridTextRole::Header,
+        );
         let mut cell: Element<VM> = Stack::new()
             .child(child)
             .width(width)
             .height(style.header_height)
             .padding(style.cell_padding)
             .into();
-        cell.visual.border_color = Some(style.grid_line.clone());
-        cell.visual.border_width = Some(Value::Static(dp(0.5)));
-        cell.focus.focusable = Some(column.sortable || column.reorderable);
-        cell.focus.tab_index = Some(if column_index == 0 { 0 } else { -1 });
-        cell.interactions.cursor_style = Some(Value::Static(if column.sortable {
+        let header_focusable = Some(column.sortable || column.reorderable);
+        let header_tab_index = Some(if column_index == 0 { 0 } else { -1 });
+        let header_cursor = Some(Value::Static(if column.sortable {
             CursorStyle::Pointer
         } else {
             CursorStyle::Default
         }));
-        cell.data_grid_header = Some(DataGridHeaderState {
+        let header_state = DataGridHeaderState {
             grid_id,
             scroll_container_id,
             column_index,
@@ -1110,7 +1116,7 @@ where
             on_sort_change: on_sort_change.clone(),
             on_column_width_change: on_column_width_change.clone(),
             on_column_reorder: on_column_reorder.clone(),
-        });
+        };
         if column.resizable {
             let mut handle: Element<VM> = Stack::new()
                 .width(dp(6.0))
@@ -1135,11 +1141,27 @@ where
                 .width(width)
                 .height(style.header_height)
                 .into();
+            cell.visual.border_color = Some(style.grid_line.clone());
+            cell.visual.border_width = Some(Value::Static(dp(0.5)));
+            apply_data_grid_cell_container_style(&mut cell, style_resolver.clone());
+            cell.focus.focusable = header_focusable;
+            cell.focus.tab_index = header_tab_index;
+            cell.interactions.cursor_style = header_cursor;
+            cell.data_grid_header = Some(header_state);
+        } else {
+            cell.visual.border_color = Some(style.grid_line.clone());
+            cell.visual.border_width = Some(Value::Static(dp(0.5)));
+            apply_data_grid_cell_container_style(&mut cell, style_resolver.clone());
+            cell.focus.focusable = header_focusable;
+            cell.focus.tab_index = header_tab_index;
+            cell.interactions.cursor_style = header_cursor;
+            cell.data_grid_header = Some(header_state);
         }
         header = header.child(cell);
     }
     let mut header: Element<VM> = header.into();
     header.background = Some(style.header_background.clone());
+    apply_data_grid_header_container_style(&mut header, style_resolver);
     header
 }
 
@@ -1158,6 +1180,7 @@ fn build_data_row<T, VM: 'static>(
     sibling_keys: Arc<[WidgetKey]>,
     sibling_disabled: Arc<[bool]>,
     style: Arc<DataGridStyle>,
+    style_resolver: Option<StyleResolver<DataGridStyle>>,
     row_height: Dp,
     on_selection_change: Option<ValueCommand<VM, DataGridSelectionChange>>,
     on_cell_action: Option<ValueCommand<VM, DataGridCellAction>>,
@@ -1196,7 +1219,12 @@ where
             disabled: disabled_now,
             editing: false,
         };
-        let child = (column.render)(context);
+        let mut child = (column.render)(context);
+        apply_default_data_grid_text_style(
+            &mut child,
+            style_resolver.clone(),
+            DataGridTextRole::Cell,
+        );
         let mut cell: Element<VM> = Stack::new()
             .child(child)
             .width(column_width)
@@ -1206,6 +1234,7 @@ where
             .into();
         cell.visual.border_color = Some(style.grid_line.clone());
         cell.visual.border_width = Some(Value::Static(dp(0.5)));
+        apply_data_grid_cell_container_style(&mut cell, style_resolver.clone());
         cell.key = Some(WidgetKey::from(format!("{row_key:?}:{:?}", column.key)));
         cell.focus.focusable = Some(!disabled_now);
         cell.focus.tab_index = Some(if row_index == 0 && column_index == 0 {
@@ -1256,7 +1285,126 @@ where
     }
     let mut row_element: Element<VM> = row_element.into();
     row_element.background = Some(row_background);
+    apply_data_grid_row_container_style(&mut row_element, style_resolver, selected, row_index);
     row_element
+}
+
+#[derive(Clone, Copy)]
+enum DataGridTextRole {
+    Header,
+    Cell,
+}
+
+fn resolve_data_grid_style(
+    style: Option<&StyleResolver<DataGridStyle>>,
+    mode: ResolvedThemeMode,
+) -> DataGridStyle {
+    style
+        .map(|resolver| resolver.resolve(mode))
+        .unwrap_or_else(|| DataGridStyle::default_for(mode))
+}
+
+fn apply_container_style<VM>(
+    element: &mut Element<VM>,
+    resolver: impl Fn(ResolvedThemeMode) -> ContainerStyle + Send + Sync + 'static,
+) {
+    if let WidgetKind::Container { style, .. } = &mut element.kind {
+        *style = Some(StyleResolver::new(resolver));
+    }
+}
+
+fn apply_data_grid_root_style<VM>(
+    element: &mut Element<VM>,
+    style_resolver: Option<StyleResolver<DataGridStyle>>,
+) {
+    apply_container_style(element, move |mode| {
+        let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
+        let mut container = ContainerStyle::default_for(mode);
+        container.scrollbar = style.scrollbar;
+        container.surface.background = style.surface.background;
+        container.surface.background_brush = style.surface.background_brush;
+        container.surface.background_image = style.surface.background_image;
+        container.surface.background_blur = style.surface.background_blur;
+        container.surface.shadow = style.surface.shadow;
+        container.surface.opacity = style.surface.opacity;
+        container.surface.offset = style.surface.offset;
+        container
+    });
+}
+
+fn apply_data_grid_header_container_style<VM>(
+    element: &mut Element<VM>,
+    style_resolver: Option<StyleResolver<DataGridStyle>>,
+) {
+    apply_container_style(element, move |mode| {
+        let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
+        let mut container = ContainerStyle::default_for(mode);
+        container.surface.background = Some(style.header_background);
+        container
+    });
+}
+
+fn apply_data_grid_row_container_style<VM>(
+    element: &mut Element<VM>,
+    style_resolver: Option<StyleResolver<DataGridStyle>>,
+    selected: bool,
+    row_index: usize,
+) {
+    apply_container_style(element, move |mode| {
+        let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
+        let background = if selected {
+            style.row_selected_background
+        } else if row_index % 2 == 1 {
+            style.zebra_background
+        } else {
+            style.row_background
+        };
+        let mut container = ContainerStyle::default_for(mode);
+        container.surface.background = Some(background);
+        container
+    });
+}
+
+fn apply_data_grid_cell_container_style<VM>(
+    element: &mut Element<VM>,
+    style_resolver: Option<StyleResolver<DataGridStyle>>,
+) {
+    apply_container_style(element, move |mode| {
+        let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
+        let mut container = ContainerStyle::default_for(mode);
+        container.surface.border_color = Some(style.grid_line);
+        container.surface.border_width = Some(Value::Static(dp(0.5)));
+        container
+    });
+}
+
+fn apply_default_data_grid_text_style<VM>(
+    element: &mut Element<VM>,
+    style_resolver: Option<StyleResolver<DataGridStyle>>,
+    role: DataGridTextRole,
+) {
+    match &mut element.kind {
+        WidgetKind::Text { text } if text.style.is_none() => {
+            text.style = Some(StyleResolver::new(move |mode| {
+                let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
+                let mut text_style = TextWidgetStyle::default_for(mode);
+                text_style.color = match role {
+                    DataGridTextRole::Header | DataGridTextRole::Cell => style.header_text,
+                };
+                text_style
+            }));
+        }
+        WidgetKind::Container { children, .. } => {
+            for child_source in children {
+                if let ChildSource::Static(children) = child_source {
+                    for child in children {
+                        apply_default_data_grid_text_style(child, style_resolver.clone(), role);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn ordered_columns<T, VM>(columns: Vec<DataGridColumn<T, VM>>) -> Vec<DataGridColumn<T, VM>> {
