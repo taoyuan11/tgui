@@ -82,6 +82,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 | HitInteraction::ListItem {
                     id, interactions, ..
                 }
+                | HitInteraction::TreeNode {
+                    id, interactions, ..
+                }
+                | HitInteraction::TreeDisclosure {
+                    id, interactions, ..
+                }
+                | HitInteraction::TreeCheckbox {
+                    id, interactions, ..
+                }
                 | HitInteraction::DataGridCell {
                     id, interactions, ..
                 }

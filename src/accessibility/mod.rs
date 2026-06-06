@@ -189,6 +189,12 @@ fn role_for_widget<VM>(resolved: &ResolvedElement<VM>) -> Role {
     if resolved.data_grid_root.is_some() {
         return Role::Grid;
     }
+    if resolved.tree_node.is_some() {
+        return Role::TreeItem;
+    }
+    if resolved.tree_root.is_some() {
+        return Role::Tree;
+    }
     if resolved.list_item.is_some() {
         return Role::ListBoxOption;
     }
@@ -276,6 +282,34 @@ fn apply_widget_semantics<VM: 'static>(
         }
     }
 
+    if let Some(tree_node) = resolved.tree_node.as_ref() {
+        node.set_selected(tree_node.selected_keys.resolve().contains(&tree_node.key));
+        node.set_level(tree_node.depth + 1);
+        node.set_position_in_set(tree_node.position_in_set);
+        node.set_size_of_set(tree_node.set_size);
+        if tree_node.has_children {
+            node.set_expanded(tree_node.expanded);
+        }
+        if tree_node.checkable.resolve() {
+            node.set_toggled(match tree_node.check_state {
+                crate::ui::widget::TreeCheckState::Unchecked => Toggled::False,
+                crate::ui::widget::TreeCheckState::Checked => Toggled::True,
+                crate::ui::widget::TreeCheckState::Indeterminate => Toggled::Mixed,
+            });
+        }
+        node.add_action(Action::Click);
+        if tree_node.disabled.resolve() {
+            node.set_disabled();
+        }
+    }
+
+    if let Some(root) = resolved.tree_root.as_ref() {
+        node.set_size_of_set(root.node_count);
+        if root.selection_mode == crate::ui::widget::TreeSelectionMode::Multiple {
+            node.set_multiselectable();
+        }
+    }
+
     if let Some(root) = resolved.data_grid_root.as_ref() {
         node.set_row_count(root.row_count);
         node.set_column_count(root.column_count);
@@ -306,7 +340,14 @@ fn apply_widget_semantics<VM: 'static>(
             apply_scroll_region(node, computed, resolved.id);
         }
         ResolvedWidgetKind::Virtual { children, .. } => {
-            if let Some(list_item) = children.iter().find_map(|child| child.list_item.as_ref()) {
+            if let Some(tree_node) = children.iter().find_map(|child| child.tree_node.as_ref()) {
+                node.set_size_of_set(tree_node.visible_keys.len());
+                if tree_node.selection_mode == crate::ui::widget::TreeSelectionMode::Multiple {
+                    node.set_multiselectable();
+                }
+            } else if let Some(list_item) =
+                children.iter().find_map(|child| child.list_item.as_ref())
+            {
                 node.set_size_of_set(list_item.sibling_keys.len());
                 if list_item.selection_mode == crate::ui::widget::ListSelectionMode::Multiple {
                     node.set_multiselectable();
@@ -457,7 +498,10 @@ fn apply_hit_actions<VM>(node: &mut Node, regions: Option<&[&HitRegion<VM>]>) {
             | HitInteraction::Switch { .. }
             | HitInteraction::SelectTrigger { .. }
             | HitInteraction::TabTrigger { .. }
-            | HitInteraction::ListItem { .. } => {
+            | HitInteraction::ListItem { .. }
+            | HitInteraction::TreeNode { .. }
+            | HitInteraction::TreeDisclosure { .. }
+            | HitInteraction::TreeCheckbox { .. } => {
                 node.add_action(Action::Click);
             }
             HitInteraction::Slider { .. } => {
@@ -544,6 +588,9 @@ fn hit_widget_id<VM>(interaction: &HitInteraction<VM>) -> Option<WidgetId> {
         | HitInteraction::SelectOption { id, .. }
         | HitInteraction::TabTrigger { id, .. }
         | HitInteraction::ListItem { id, .. }
+        | HitInteraction::TreeNode { id, .. }
+        | HitInteraction::TreeDisclosure { id, .. }
+        | HitInteraction::TreeCheckbox { id, .. }
         | HitInteraction::DataGridCell { id, .. }
         | HitInteraction::DataGridHeader { id, .. }
         | HitInteraction::DataGridResizeHandle { id, .. }

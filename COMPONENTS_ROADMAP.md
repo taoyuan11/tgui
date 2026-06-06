@@ -281,12 +281,21 @@
   - ✅ `README.md`、`examples/README.md` 与 `examples/table_datagrid/` 已同步，示例覆盖受控选择、排序、列宽、列重排、固定列、右键菜单和文本提交；
   - ✅ widget core / runtime / accessibility 测试覆盖表头和 cell 渲染、虚拟化、横向滚动、固定列、selection、sort、resize、reorder、edit commit、context menu 与 a11y roles。
 
-### 18. Tree
+### 18. Tree ✅
 - **作用**：层级数据展示，可展开/折叠、复选、拖拽。
 - **样式**：缩进线、展开箭头、复选框（三态：选中/未选/半选）、当前节点高亮。
 - **桌面操作**：`←/→` 收/展、`↑/↓` 上下导航、`Enter` 触发主动作、`Space` 切换复选；右键 ContextMenu；拖拽节点改父级。
 - **键盘补充**：展开、选择、复选与主动作保持键盘可达。
 - **依赖**：P0 §2、§3、§4；P1 §8。
+- **进度**：[功能完整]
+  - ✅ 新增 `src/ui/widget/tree/`，公开 `Tree`、`TreeNode`、`TreeNodeContext`、`TreeStyle`、selection / expand / check / action / drop 事件类型；
+  - ✅ `Tree::new(nodes, render)` 接收递归 `TreeNode<T>`，按受控 `expanded_keys` 深度优先扁平化可见节点，并复用 `VirtualList` 支持固定 / 估算 / 测量行高、overscan、empty / loading slot；
+  - ✅ 支持受控展开、单选 / 多选、三态 cascade 复选、行主动作、行右键菜单、可拖拽节点和 `TreeDropEvent { dragged_key, target_key, position }`；
+  - ✅ Tree 行由框架负责缩进、展开箭头、checkbox、hover / selected / disabled 背景、pointer / grab cursor；业务 render 只负责节点内容；
+  - ✅ runtime 已接入 Tree node hit interaction、点击展开 / 复选 / 选择、Shift range、Ctrl/Cmd toggle、`Left` / `Right`、`Up` / `Down`、`Home` / `End`、`PageUp` / `PageDown`、`Enter`、`Space`、右键菜单和同树拖放，并拒绝拖到自身或自身后代；
+  - ✅ accessibility 将 root/node 映射为 tree / tree item，并暴露 selected、disabled、expanded、checked/mixed、level、position/size、multiselectable 与 Click/Focus action；
+  - ✅ `README.md`、`examples/README.md` 与 `examples/tree/` 已同步，示例覆盖受控展开、选择、复选、empty/loading、右键菜单和拖拽改父级；
+  - ✅ widget core / runtime / accessibility 测试覆盖扁平化、展开过滤、行 wrapper 状态、empty/loading、虚拟化、禁用节点、三态计算、键鼠操作、右键菜单、拖拽和 a11y metadata。
 
 ### 19. DatePicker / TimePicker / Calendar
 - **作用**：日期/时间录入；Calendar 可独立用于日历视图。

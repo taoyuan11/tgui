@@ -29,7 +29,8 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 6. `toast_snackbar`
 7. `list_virtual_list`
 8. `table_datagrid`
-9. `text_area`
+9. `tree`
+10. `text_area`
 
 ## 桌面示例说明
 
@@ -152,7 +153,7 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 
 - `Button` / `Switch` / `Checkbox` / `Radio` / `Select`
 - `Tooltip` / `Popover` / `Tabs` / `Toast`
-- `List` / `DataGrid`
+- `List` / `DataGrid` / `Tree`
 - `Input` / `Textarea`
 - `CommandContext::notifications()`
 - `Image`
@@ -209,6 +210,23 @@ Table / DataGrid 专项示例。演示：
 
 ```bash
 cargo run --manifest-path examples/table_datagrid/Cargo.toml
+```
+
+### `tree`
+
+Tree 专项示例。演示：
+
+- 受控展开 / 折叠
+- 受控多选
+- 三态 cascade 复选
+- loading / empty slot
+- row context menu
+- 拖拽节点发出 drop 事件，并由 ViewModel 改父级
+
+运行方式：
+
+```bash
+cargo run --manifest-path examples/tree/Cargo.toml
 ```
 
 ### `text_area`

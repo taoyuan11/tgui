@@ -589,6 +589,8 @@ impl<VM: 'static> Element<VM> {
             drawer: self.drawer.clone(),
             tab_trigger: self.tab_trigger.clone(),
             list_item: self.list_item.clone(),
+            tree_root: self.tree_root.clone(),
+            tree_node: self.tree_node.clone(),
             data_grid_root: self.data_grid_root.clone(),
             data_grid_cell: self.data_grid_cell.clone(),
             data_grid_header: self.data_grid_header.clone(),

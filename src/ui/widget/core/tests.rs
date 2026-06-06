@@ -231,6 +231,7 @@ mod tabs_tests;
 mod text_and_background;
 mod text_input_tests;
 mod toast_tests;
+mod tree_tests;
 
 fn test_media() -> MediaManager {
     MediaManager::new(InvalidationSignal::new())

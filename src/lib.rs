@@ -301,8 +301,11 @@ pub mod prelude {
         SpinnerStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle, TabItem,
         TabPlacement, TabView, Table, Tabs, TabsOverflowMode, TabsReorderEvent, TabsStyle, Text,
         TextWidgetStyle, Textarea, TextareaStyle, ToastHost, ToastStyle, Tooltip, TooltipStyle,
-        VideoSurfaceStyle, VirtualArrangement, VirtualDirection, VirtualList, VirtualViewport,
-        WidgetCommand, WidgetEventResult, WidgetKey, WidgetSurfaceStyle, WidgetTree,
+        Tree, TreeCheckChange, TreeCheckState, TreeCheckTrigger, TreeDropEvent, TreeDropPosition,
+        TreeExpandChange, TreeExpandTrigger, TreeNode, TreeNodeAction, TreeNodeContext,
+        TreeSelectionChange, TreeSelectionMode, TreeSelectionTrigger, TreeStyle, VideoSurfaceStyle,
+        VirtualArrangement, VirtualDirection, VirtualList, VirtualViewport, WidgetCommand,
+        WidgetEventResult, WidgetKey, WidgetSurfaceStyle, WidgetTree,
     };
 }
 
@@ -352,8 +355,11 @@ pub mod widgets {
         SpinnerStyle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Switch, SwitchStyle, TabItem,
         TabPlacement, TabView, Table, Tabs, TabsOverflowMode, TabsReorderEvent, TabsStyle, Text,
         TextWidgetStyle, Textarea, TextareaStyle, ToastHost, ToastStyle, Tooltip, TooltipStyle,
-        VideoSurfaceStyle, VirtualArrangement, VirtualDirection, VirtualList, VirtualViewport,
-        WidgetCommand, WidgetEventResult, WidgetKey, WidgetSurfaceStyle, WidgetTree,
+        Tree, TreeCheckChange, TreeCheckState, TreeCheckTrigger, TreeDropEvent, TreeDropPosition,
+        TreeExpandChange, TreeExpandTrigger, TreeNode, TreeNodeAction, TreeNodeContext,
+        TreeSelectionChange, TreeSelectionMode, TreeSelectionTrigger, TreeStyle, VideoSurfaceStyle,
+        VirtualArrangement, VirtualDirection, VirtualList, VirtualViewport, WidgetCommand,
+        WidgetEventResult, WidgetKey, WidgetSurfaceStyle, WidgetTree,
     };
     #[cfg(feature = "video")]
     pub use crate::video::VideoSurface;

@@ -159,6 +159,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.dispatch_list_item_keyboard_selection(&state, false)
                     || self.dispatch_list_item_action(&state)
             }
+            Some(HitInteraction::TreeNode { id, state, .. }) => self.dispatch_tree_node_click(
+                &state,
+                id,
+                std::time::Instant::now(),
+                crate::ui::widget::CanvasMouseButton::Left,
+                None,
+            ),
             Some(HitInteraction::DataGridCell { id, state, .. }) => self
                 .dispatch_data_grid_cell_click(
                     &state,
@@ -320,6 +327,9 @@ fn hit_interaction_widget_id<VM>(interaction: &HitInteraction<VM>) -> Option<Wid
         | HitInteraction::SelectOption { id, .. }
         | HitInteraction::TabTrigger { id, .. }
         | HitInteraction::ListItem { id, .. }
+        | HitInteraction::TreeNode { id, .. }
+        | HitInteraction::TreeDisclosure { id, .. }
+        | HitInteraction::TreeCheckbox { id, .. }
         | HitInteraction::DataGridCell { id, .. }
         | HitInteraction::DataGridHeader { id, .. }
         | HitInteraction::DataGridResizeHandle { id, .. }

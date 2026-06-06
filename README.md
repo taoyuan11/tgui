@@ -56,7 +56,7 @@
 
 ### 布局与组件
 
-- 布局与滚动容器：`Stack`、`Grid`、`Flex`、`ScrollView`、`VirtualViewport`、`VirtualList`、`List`、`DataGrid` / `Table`
+- 布局与滚动容器：`Stack`、`Grid`、`Flex`、`ScrollView`、`VirtualViewport`、`VirtualList`、`List`、`DataGrid` / `Table`、`Tree`
 - 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Switch`、`Tabs` / `TabView`、`ProgressBar`、`Spinner`、`Image`
 - 浮层基础设施：统一的 runtime overlay anchoring 引擎，当前已为 `Tooltip`、`Popover`、`Select` 与 `Menu` / `ContextMenu` / `MenuBar` 提供锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力
 - `Popover`：支持 click 固定打开、hover 预览、外部点击 / `Esc` 关闭的锚定轻量浮层，可承载任意 widget 子树
@@ -222,10 +222,11 @@ NotificationOptions
 NotificationAction
 Notifications
 
-Stack / Grid / Flex / ScrollView / VirtualViewport / VirtualList / List / DataGrid / Table
+Stack / Grid / Flex / ScrollView / VirtualViewport / VirtualList / List / DataGrid / Table / Tree
 Text / Button / Image / Canvas
 ItemSource<T> / ItemLayout / VirtualArrangement / VirtualDirection
 DataGridColumn<T, VM> / DataGridRow<T> / DataGridSort
+Tree<T, VM> / TreeNode<T> / TreeNodeContext<T> / TreeCheckState
 
 Theme / ThemeMode / ThemeSet / ThemeStore / ResolvedThemeMode / Color / FocusRingStyle
 dp / sp / Dp / Sp
@@ -370,6 +371,50 @@ impl PeopleVm {
 }
 ```
 
+## Tree
+
+`Tree` 是受控层级数据组件，基于 `VirtualList` 渲染可见节点。组件负责展开箭头、缩进、三态 checkbox、选择高亮、键盘导航、右键菜单和拖放命中；真实树数据、展开集合、选择集合、勾选集合和拖放后的改父级由 ViewModel 更新。
+
+```rust
+use tgui::prelude::*;
+
+struct FilesVm {
+    expanded: State<Vec<WidgetKey>>,
+    selected: State<Vec<WidgetKey>>,
+    checked: State<Vec<WidgetKey>>,
+}
+
+impl FilesVm {
+    fn view(&self) -> Element<Self> {
+        let nodes = vec![
+            TreeNode::keyed("src", "src").children([
+                TreeNode::keyed("widgets", "ui/widget")
+                    .child(TreeNode::keyed("tree", "tree/mod.rs")),
+                TreeNode::keyed("runtime", "runtime/input"),
+            ]),
+        ];
+
+        Tree::new(nodes, |ctx| Text::new(ctx.item).into())
+            .expanded_keys(self.expanded.signal())
+            .selected_keys(self.selected.signal())
+            .selection_mode(TreeSelectionMode::Multiple)
+            .checkable(true)
+            .checked_keys(self.checked.signal())
+            .on_expand_change(ValueCommand::new(|vm: &mut Self, change| {
+                vm.expanded.set(change.expanded_keys);
+            }))
+            .on_selection_change(ValueCommand::new(|vm: &mut Self, change| {
+                vm.selected.set(change.selected_keys);
+            }))
+            .on_check_change(ValueCommand::new(|vm: &mut Self, change| {
+                vm.checked.set(change.checked_keys);
+            }))
+            .height(dp(360.0))
+            .into()
+    }
+}
+```
+
 ## 表单校验
 
 `tgui` 的表单抽象位于 `tgui::mvvm`，是纯 ViewModel 层能力，不引入新的 widget。文本类输入使用 `TextFormField`，其他录入控件通常使用 `FormField<T>` 配合现有 `on_change(...)`。
@@ -457,6 +502,7 @@ fn build_form_ui(ctx: &ViewModelContext) -> Element<()> {
 - `toast_snackbar`：`ToastHost` / `ToastQueue` 专项示例，覆盖语义提示、action、持久提示、短时提示和不同位置
 - `list_virtual_list`：`List` / `VirtualList` 专项示例，覆盖受控多选、分组、loading / empty slot、行主动作、右键菜单和大数据虚拟化
 - `table_datagrid`：`DataGrid` / `Table` 专项示例，覆盖受控选择、排序、列宽、列重排、固定列、右键菜单和文本提交
+- `tree`：`Tree` 专项示例，覆盖受控展开、选择、三态复选、empty / loading slot、右键菜单和拖拽改父级
 - `text_area`：受控 `Textarea` 编辑示例，读取自身源码但不保存
 - `multiple_vm_examples`：多页面 / 多 ViewModel 示例
 
@@ -469,6 +515,7 @@ cargo run --manifest-path examples/canvas/Cargo.toml
 cargo run --manifest-path examples/frameless_window/Cargo.toml
 cargo run --manifest-path examples/list_virtual_list/Cargo.toml
 cargo run --manifest-path examples/table_datagrid/Cargo.toml
+cargo run --manifest-path examples/tree/Cargo.toml
 ```
 
 README 中的示例名称以当前 `examples/` 目录为准；如果新增或删除示例，应同步更新本节和 `examples/README.md`。

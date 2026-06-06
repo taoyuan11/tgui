@@ -292,6 +292,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | HitInteraction::SelectTrigger { .. }
             | HitInteraction::TabTrigger { .. }
             | HitInteraction::ListItem { .. }
+            | HitInteraction::TreeNode { .. }
+            | HitInteraction::TreeDisclosure { .. }
+            | HitInteraction::TreeCheckbox { .. }
             | HitInteraction::DataGridCell { .. }
             | HitInteraction::DataGridHeader { .. }
             | HitInteraction::DataGridResizeHandle { .. }

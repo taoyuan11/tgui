@@ -505,4 +505,5 @@ mod tabs_tests;
 mod text_input_tests;
 mod toast_tests;
 mod tooltip_tests;
+mod tree_tests;
 mod window_theme_tests;

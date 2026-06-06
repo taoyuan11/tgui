@@ -411,6 +411,8 @@ where
             drawer: None,
             tab_trigger: None,
             list_item: None,
+            tree_root: None,
+            tree_node: None,
             data_grid_root: None,
             data_grid_cell: None,
             data_grid_header: None,

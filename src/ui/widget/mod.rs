@@ -33,6 +33,7 @@ mod text;
 mod textarea;
 mod toast;
 mod tooltip;
+mod tree;
 #[cfg(feature = "video")]
 mod video;
 mod r#virtual;
@@ -64,10 +65,10 @@ pub(crate) use common::{
     CanvasItemInteractionHandlers, CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask,
     CompositionState, ComputedScene, DataGridCellState, DataGridHeaderState,
     DataGridResizeHandleState, DefaultActivation, FocusScopeState, FocusTargetMeta, HitGeometry,
-    HitInteraction, HitRegion, InteractionHandlers, LifecycleEventHandlers, LifecycleEventState,
-    ListItemState, MeasureContext, MediaEventPhase, MediaEventState, MeshPrimitive, MeshVertex,
-    RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle, TextEditState,
-    TextInputContentGeometry, TexturePrimitive, WidgetStateMap,
+    HitInteraction, HitRegion, HitTargetId, InteractionHandlers, LifecycleEventHandlers,
+    LifecycleEventState, ListItemState, MeasureContext, MediaEventPhase, MediaEventState,
+    MeshPrimitive, MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
+    TextEditState, TextInputContentGeometry, TexturePrimitive, TreeNodeState, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, DividerOrientation, FocusScopeOptions, Point, Rect, RenderPrimitive,
@@ -144,5 +145,11 @@ pub use text::{IntoTextContent, Text};
 pub use textarea::Textarea;
 pub use toast::ToastHost;
 pub use tooltip::Tooltip;
+pub(crate) use tree::tree_check_state;
+pub use tree::{
+    Tree, TreeCheckChange, TreeCheckState, TreeCheckTrigger, TreeDropEvent, TreeDropPosition,
+    TreeExpandChange, TreeExpandTrigger, TreeNode, TreeNodeAction, TreeNodeContext,
+    TreeSelectionChange, TreeSelectionMode, TreeSelectionTrigger, TreeStyle,
+};
 #[cfg(feature = "video")]
 pub use video::VideoSurface;

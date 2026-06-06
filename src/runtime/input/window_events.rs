@@ -153,6 +153,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.end_slider_drag();
                 self.end_canvas_drag();
                 self.end_data_grid_column_resize();
+                self.active_tree_drag = None;
                 self.active_data_grid_column_reorder = None;
                 self.pressed_widget = None;
                 self.update_focus(None, None, false);
@@ -263,9 +264,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     canvas_mouse_button(button.clone().mouse_button()),
                     Some(CanvasMouseButton::Left)
                 ) {
+                    let _ = self.finish_tree_drop();
                     let _ = self.finish_tab_reorder();
                     let _ = self.finish_data_grid_column_reorder();
                 } else {
+                    self.active_tree_drag = None;
                     self.active_tab_reorder = None;
                     self.active_data_grid_column_reorder = None;
                 }

@@ -39,6 +39,8 @@ pub(crate) enum WidgetProperty {
     ProgressIndeterminatePhase,
     SpinnerPhase,
     ToastStackExpand,
+    TreeDisclosureRotation,
+    TreeCheckboxState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -42,6 +42,18 @@ const CODE_VIRTUAL_MEASURED: &str = r#"List::sections(contact_sections(), contac
         overscan: 3,
     })"#;
 
+const CODE_TREE_BASIC: &str = r#"Tree::new(demo_tree_nodes(), tree_row)
+    .expanded_keys(app.tree_expanded_keys.signal())
+    .selected_keys(app.tree_selected_keys.signal())
+    .selection_mode(TreeSelectionMode::Multiple)
+    .checkable(true)
+    .checked_keys(app.tree_checked_keys.signal())
+    .draggable(true)
+    .on_expand_change(ValueCommand::new(App::set_tree_expanded))
+    .on_selection_change(ValueCommand::new(App::set_tree_selection))
+    .on_check_change(ValueCommand::new(App::set_tree_checked))
+    .on_drop(ValueCommand::new(App::drop_tree_node))"#;
+
 const CODE_DATAGRID_BASIC: &str = r#"DataGrid::new(sorted_rows(app), columns(app))
     .selection_mode(DataGridSelectionMode::Multiple)
     .selected_keys(app.data_selected.signal())
@@ -63,11 +75,12 @@ const CODE_TABLE_ALIAS: &str = r#"Table::new(sorted_rows(app), columns(app))
 pub(crate) fn page(app: &App) -> Element<App> {
     demo_section::page(
         "Data",
-        "数据页面展示 tabs、列表、虚拟滚动和表格型数据控件。",
+        "数据页面展示 tabs、列表、虚拟滚动、树和表格型数据控件。",
         vec![
             tabs_component(app),
             list_component(app),
             virtual_list_component(app),
+            tree_component(app),
             data_grid_component(app),
         ],
     )
@@ -435,6 +448,101 @@ fn virtual_row(ctx: ListItemContext<String>) -> Element<App> {
                 .width(pct(100.0))
                 .style(styles::status_style),
         )
+        .into()
+}
+
+fn tree_component(app: &App) -> Element<App> {
+    demo_section::component_doc_stacked(
+        app,
+        "Tree",
+        "Tree 展示层级数据，支持展开、选择、三态复选、右键菜单和拖拽 drop 事件。",
+        vec![UsageDemo::new(
+            "tree/basic",
+            "层级节点",
+            "受控 keys 保持展开、选择和复选状态，拖拽只派发 drop 事件。",
+            Flex::vertical().gap(dp(8.0)).child(el![
+                Text::new(tree_summary(app)).style(styles::status_style),
+                Flex::horizontal().gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
+                    Button::new("Toggle loading").on_click(Command::new(App::toggle_tree_loading)),
+                    Button::new("Toggle empty").on_click(Command::new(App::toggle_tree_empty)),
+                    Button::new("Clear")
+                        .ghost()
+                        .on_click(Command::new(App::clear_tree_selection)),
+                ]),
+                Tree::<&'static str, App>::new(
+                    if app.tree_show_empty.get() {
+                        Vec::new()
+                    } else {
+                        demo_tree_nodes()
+                    },
+                    tree_row,
+                )
+                .width(pct(100.0))
+                .height(dp(320.0))
+                .expanded_keys(app.tree_expanded_keys.signal())
+                .selected_keys(app.tree_selected_keys.signal())
+                .selection_mode(TreeSelectionMode::Multiple)
+                .checkable(true)
+                .checked_keys(app.tree_checked_keys.signal())
+                .loading(app.tree_loading.signal())
+                .loading_view(state_view("Loading tree nodes..."))
+                .empty(state_view("No tree nodes"))
+                .draggable(true)
+                .context_menu(vec![
+                    MenuItem::new("Mark node").on_select(Command::new(App::tree_context_action)),
+                    MenuItem::new("Clear selection")
+                        .on_select(Command::new(App::clear_tree_selection)),
+                ])
+                .on_expand_change(ValueCommand::new(App::set_tree_expanded))
+                .on_selection_change(ValueCommand::new(App::set_tree_selection))
+                .on_check_change(ValueCommand::new(App::set_tree_checked))
+                .on_node_action(ValueCommand::new(App::open_tree_node))
+                .on_drop(ValueCommand::new(App::drop_tree_node)),
+                Text::new(app.tree_status.signal()).style(styles::status_style),
+            ]),
+            CODE_TREE_BASIC,
+        )],
+    )
+}
+
+fn tree_summary(app: &App) -> String {
+    format!(
+        "{} selected, {} checked, {} expanded",
+        app.tree_selected_keys.get().len(),
+        app.tree_checked_keys.get().len(),
+        app.tree_expanded_keys.get().len()
+    )
+}
+
+fn demo_tree_nodes() -> Vec<TreeNode<&'static str>> {
+    vec![TreeNode::keyed("workspace", "workspace").children([
+        TreeNode::keyed("src", "src").children([
+            TreeNode::keyed("widgets", "ui/widget").children([
+                TreeNode::keyed("tree", "tree/mod.rs"),
+                TreeNode::keyed("list", "list/mod.rs"),
+                TreeNode::keyed("table", "table/mod.rs"),
+            ]),
+            TreeNode::keyed("runtime", "runtime/input")
+                .children([TreeNode::keyed("tree-runtime", "tree.rs")]),
+        ]),
+        TreeNode::keyed("docs", "docs").children([
+            TreeNode::keyed("readme", "README.md"),
+            TreeNode::keyed("roadmap", "COMPONENTS_ROADMAP.md").disable(true),
+        ]),
+    ])]
+}
+
+fn tree_row(ctx: TreeNodeContext<&'static str>) -> Element<App> {
+    let label = if ctx.selected {
+        format!("{} (selected)", ctx.item)
+    } else if ctx.disabled {
+        format!("{} (disabled)", ctx.item)
+    } else {
+        ctx.item.to_string()
+    };
+    Text::new(label)
+        .width(pct(100.0))
+        .style(styles::status_style)
         .into()
 }
 

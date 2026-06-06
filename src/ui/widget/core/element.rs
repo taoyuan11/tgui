@@ -345,6 +345,8 @@ impl<VM> Element<VM> {
             list_item: self
                 .list_item
                 .map(|list_item| list_item.scope(selector.clone())),
+            tree_root: self.tree_root,
+            tree_node: self.tree_node.map(|state| state.scope(selector.clone())),
             data_grid_root: self.data_grid_root,
             data_grid_cell: self
                 .data_grid_cell

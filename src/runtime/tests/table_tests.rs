@@ -152,8 +152,12 @@ fn table_header_click_dispatches_controlled_sort() {
         ))
         .size(dp(240.0), dp(140.0)),
     );
-    let mut handler =
-        test_handler_with_config(TestVm, Some(tree), invalidation, test_config_with_size(240.0, 220.0));
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(240.0, 220.0),
+    );
     let viewport = handler.viewport_rect();
 
     let name = header_center(&mut handler, "name");
@@ -209,8 +213,12 @@ fn table_multiple_selection_uses_toggle_and_shift_anchor() {
         ))
         .size(dp(240.0), dp(220.0)),
     );
-    let mut handler =
-        test_handler_with_config(TestVm, Some(tree), invalidation, test_config_with_size(240.0, 220.0));
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(240.0, 220.0),
+    );
     let viewport = handler.viewport_rect();
     let (_, a) = cell_center(&mut handler, "a", "name");
 

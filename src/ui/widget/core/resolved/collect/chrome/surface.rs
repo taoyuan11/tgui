@@ -1,5 +1,16 @@
 use super::*;
+use crate::ui::widget::common::TreeNodeState;
 use crate::ui::widget::DefaultActivation;
+use crate::ui::widget::TreeCheckState;
+use std::sync::Arc;
+use std::time::Duration;
+
+const TREE_DISCLOSURE_ICON: &str = "keyboard_arrow_right";
+const TREE_CHECKED_ICON: &str = "check_box";
+const TREE_UNCHECKED_ICON: &str = "check_box_outline_blank";
+const TREE_INDETERMINATE_ICON: &str = "indeterminate_check_box";
+const TREE_DISCLOSURE_TRANSITION_MS: u64 = 160;
+const TREE_CHECKBOX_TRANSITION_MS: u64 = 140;
 
 impl<VM> ResolvedElement<VM> {
     pub(in super::super) fn push_surface_primitives_and_base_hit_regions(
@@ -135,7 +146,9 @@ impl<VM> ResolvedElement<VM> {
                 style.focus_ring.as_ref(),
                 visual.widget_state,
             ),
-            _ if self.list_item.is_some() && visual.widget_state.focused => {
+            _ if (self.list_item.is_some() || self.tree_node.is_some())
+                && visual.widget_state.focused =>
+            {
                 Some(context.theme.focus_ring.clone())
             }
             _ => None,
@@ -147,6 +160,16 @@ impl<VM> ResolvedElement<VM> {
             focus_ring.as_ref(),
             visual.opacity,
         );
+
+        if let Some(tree_node) = self.tree_node.as_ref() {
+            push_tree_node_chrome_primitives(
+                tree_node,
+                self.id,
+                visual,
+                context,
+                &mut computed.scene,
+            );
+        }
 
         let paints_surface = visual.opacity > 0.0
             && (background_blur > 0.0
@@ -181,6 +204,7 @@ impl<VM> ResolvedElement<VM> {
                 &self.kind,
                 ResolvedWidgetKind::Container { layout, .. } if layout.scroll_view.is_some()
             ) || self.list_item.is_some()
+                || self.tree_node.is_some()
                 || self.data_grid_cell.is_some()
                 || self.data_grid_header.is_some()
                 || self.data_grid_resize_handle.is_some();
@@ -193,6 +217,7 @@ impl<VM> ResolvedElement<VM> {
             if self.interactions.has_any()
                 || focus.is_some()
                 || self.list_item.is_some()
+                || self.tree_node.is_some()
                 || self.data_grid_cell.is_some()
                 || self.data_grid_header.is_some()
                 || self.data_grid_resize_handle.is_some()
@@ -214,6 +239,12 @@ impl<VM> ResolvedElement<VM> {
                     HitInteraction::ListItem {
                         id: self.id,
                         state: list_item.clone(),
+                        interactions: self.interactions.clone(),
+                    }
+                } else if let Some(tree_node) = self.tree_node.as_ref() {
+                    HitInteraction::TreeNode {
+                        id: self.id,
+                        state: tree_node.clone(),
                         interactions: self.interactions.clone(),
                     }
                 } else if let Some(cell) = self.data_grid_cell.as_ref() {
@@ -253,6 +284,16 @@ impl<VM> ResolvedElement<VM> {
                     focus,
                     interaction,
                 });
+                if let Some(tree_node) = self.tree_node.as_ref() {
+                    push_tree_node_control_hit_regions(
+                        tree_node,
+                        self.id,
+                        &self.interactions,
+                        visual,
+                        context,
+                        &mut computed.hit_regions,
+                    );
+                }
             } else if matches!(self.kind, ResolvedWidgetKind::Container { .. }) && paints_surface {
                 computed.hit_regions.push(HitRegion {
                     rect: visual.frame,
@@ -264,5 +305,353 @@ impl<VM> ResolvedElement<VM> {
                 });
             }
         }
+    }
+}
+
+fn push_tree_node_control_hit_regions<VM>(
+    tree_node: &TreeNodeState<VM>,
+    widget_id: WidgetId,
+    interactions: &InteractionHandlers<VM>,
+    visual: &CollectVisualState,
+    context: &CollectContext<'_, '_>,
+    hit_regions: &mut smallvec::SmallVec<[HitRegion<VM>; 1]>,
+) {
+    if tree_node.disabled.resolve() {
+        return;
+    }
+    let content_frame = visual.frame.inset(tree_node.item_padding);
+    if content_frame.is_empty() {
+        return;
+    }
+
+    let disclosure_x = content_frame.x + tree_node.indent_width * tree_node.depth as f32;
+    let disclosure_slot = Rect::new(
+        disclosure_x,
+        content_frame.y,
+        tree_node.disclosure_width,
+        content_frame.height,
+    );
+    let scope_path = context.focus_scope_path();
+    if tree_node.has_children && !disclosure_slot.is_empty() {
+        hit_regions.push(HitRegion {
+            rect: disclosure_slot,
+            clip_rect: visual.primitive_clip,
+            geometry: HitGeometry::Rect,
+            scope_path: scope_path.clone(),
+            focus: None,
+            interaction: HitInteraction::TreeDisclosure {
+                id: widget_id,
+                state: tree_node.clone(),
+                interactions: interactions.clone(),
+            },
+        });
+    }
+
+    if tree_node.checkable.resolve() {
+        let checkbox_slot = Rect::new(
+            disclosure_slot.right(),
+            content_frame.y,
+            tree_node.checkbox_width,
+            content_frame.height,
+        );
+        if !checkbox_slot.is_empty() {
+            hit_regions.push(HitRegion {
+                rect: checkbox_slot,
+                clip_rect: visual.primitive_clip,
+                geometry: HitGeometry::Rect,
+                scope_path,
+                focus: None,
+                interaction: HitInteraction::TreeCheckbox {
+                    id: widget_id,
+                    state: tree_node.clone(),
+                    interactions: interactions.clone(),
+                },
+            });
+        }
+    }
+}
+
+fn push_tree_node_chrome_primitives<VM>(
+    tree_node: &TreeNodeState<VM>,
+    widget_id: WidgetId,
+    visual: &CollectVisualState,
+    context: &mut CollectContext<'_, '_>,
+    scene: &mut ScenePrimitives,
+) {
+    let content_frame = visual.frame.inset(tree_node.item_padding);
+    if content_frame.is_empty() || visual.opacity <= 0.0 {
+        return;
+    }
+
+    let disabled = tree_node.disabled.resolve();
+    push_tree_indent_guides(tree_node, content_frame, visual, scene);
+
+    let disclosure_x = content_frame.x + tree_node.indent_width * tree_node.depth as f32;
+    let disclosure_slot = Rect::new(
+        disclosure_x,
+        content_frame.y,
+        tree_node.disclosure_width,
+        content_frame.height,
+    );
+    if tree_node.has_children {
+        let icon_color = if disabled {
+            tree_node.checkbox_disabled_color.resolve()
+        } else {
+            tree_node.disclosure_icon_color.resolve()
+        };
+        if visual.widget_state.hovered && !disabled {
+            push_tree_icon_hover_background(
+                disclosure_slot,
+                tree_node.disclosure_hover_background.resolve(),
+                visual,
+                scene,
+            );
+        }
+        let target_rotation = if tree_node.expanded {
+            std::f32::consts::FRAC_PI_2
+        } else {
+            0.0
+        };
+        let rotation = resolve_tree_icon_f32(
+            context,
+            widget_id,
+            WidgetProperty::TreeDisclosureRotation,
+            target_rotation,
+            TREE_DISCLOSURE_TRANSITION_MS,
+        );
+        push_tree_icon_text(
+            TREE_DISCLOSURE_ICON,
+            disclosure_slot,
+            context.units.resolve_sp(tree_node.disclosure_icon_size),
+            icon_color,
+            visual.opacity,
+            rotation,
+            1.0,
+            visual,
+            context,
+            scene,
+        );
+    }
+
+    if tree_node.checkable.resolve() {
+        let checkbox_x = disclosure_slot.right();
+        let checkbox_slot = Rect::new(
+            checkbox_x,
+            content_frame.y,
+            tree_node.checkbox_width,
+            content_frame.height,
+        );
+        if visual.widget_state.hovered && !disabled {
+            push_tree_icon_hover_background(
+                checkbox_slot,
+                tree_node.disclosure_hover_background.resolve(),
+                visual,
+                scene,
+            );
+        }
+        let (glyph, target_state, color) = match tree_node.check_state {
+            TreeCheckState::Checked => (
+                TREE_CHECKED_ICON,
+                1.0,
+                tree_node.checkbox_checked_color.resolve(),
+            ),
+            TreeCheckState::Indeterminate => (
+                TREE_INDETERMINATE_ICON,
+                0.5,
+                tree_node.checkbox_indeterminate_color.resolve(),
+            ),
+            TreeCheckState::Unchecked => (
+                TREE_UNCHECKED_ICON,
+                0.0,
+                tree_node.checkbox_unchecked_color.resolve(),
+            ),
+        };
+        let checkbox_state = resolve_tree_icon_f32(
+            context,
+            widget_id,
+            WidgetProperty::TreeCheckboxState,
+            target_state,
+            TREE_CHECKBOX_TRANSITION_MS,
+        )
+        .clamp(0.0, 1.0);
+        let scale = match tree_node.check_state {
+            TreeCheckState::Checked => 0.94 + checkbox_state * 0.06,
+            TreeCheckState::Indeterminate => 0.97 + (0.5 - (checkbox_state - 0.5).abs()) * 0.06,
+            TreeCheckState::Unchecked => 0.96 + (1.0 - checkbox_state) * 0.04,
+        };
+        let color = if disabled {
+            tree_node.checkbox_disabled_color.resolve()
+        } else {
+            color
+        };
+        push_tree_icon_text(
+            glyph,
+            checkbox_slot,
+            context.units.resolve_sp(tree_node.checkbox_icon_size),
+            color,
+            if disabled {
+                visual.opacity * 0.72
+            } else {
+                visual.opacity
+            },
+            0.0,
+            scale,
+            visual,
+            context,
+            scene,
+        );
+    }
+}
+
+fn push_tree_indent_guides<VM>(
+    tree_node: &TreeNodeState<VM>,
+    content_frame: Rect,
+    visual: &CollectVisualState,
+    scene: &mut ScenePrimitives,
+) {
+    if tree_node.depth == 0 {
+        return;
+    }
+    let color = tree_node.indent_line_color.resolve();
+    if color.a == 0 {
+        return;
+    }
+    for depth in 0..tree_node.depth {
+        let x =
+            content_frame.x + tree_node.indent_width * depth as f32 + tree_node.indent_width * 0.5;
+        scene.push_shape(RenderPrimitive {
+            rect: Rect::new(x, content_frame.y, dp(1.0), content_frame.height),
+            color: color.with_alpha_factor(visual.opacity),
+            corner_radius: 1.0,
+            stroke_width: 0.0,
+            clip_rect: visual.primitive_clip,
+            clip_mask: visual.primitive_clip_mask,
+        });
+    }
+}
+
+fn push_tree_icon_hover_background(
+    slot: Rect,
+    color: Color,
+    visual: &CollectVisualState,
+    scene: &mut ScenePrimitives,
+) {
+    if color.a == 0 {
+        return;
+    }
+    let side = slot.width.min(slot.height).min(dp(24.0)).max(dp(1.0));
+    let frame = Rect::new(
+        slot.x + ((slot.width - side).max(Dp::ZERO) * 0.5),
+        slot.y + ((slot.height - side).max(Dp::ZERO) * 0.5),
+        side,
+        side,
+    );
+    scene.push_shape(RenderPrimitive {
+        rect: frame,
+        color: color.with_alpha_factor(visual.opacity),
+        corner_radius: side.get() * 0.5,
+        stroke_width: 0.0,
+        clip_rect: visual.primitive_clip,
+        clip_mask: visual.primitive_clip_mask,
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_tree_icon_text(
+    content: &'static str,
+    slot: Rect,
+    requested_font_size: f32,
+    color: Color,
+    opacity: f32,
+    rotation: f32,
+    scale: f32,
+    visual: &CollectVisualState,
+    context: &CollectContext<'_, '_>,
+    scene: &mut ScenePrimitives,
+) {
+    if color.a == 0 || opacity <= 0.0 || slot.is_empty() {
+        return;
+    }
+    let font_size = requested_font_size
+        .min(slot.width.get())
+        .min(slot.height.get())
+        .max(1.0);
+    let frame_size = Dp::new(font_size);
+    let frame = Rect::new(
+        slot.x + ((slot.width - frame_size).max(Dp::ZERO) * 0.5),
+        slot.y + ((slot.height - frame_size).max(Dp::ZERO) * 0.5),
+        frame_size,
+        frame_size,
+    );
+    let request = TextFontRequest {
+        preferred_font: Some(ICON_FONT_FAMILY),
+        weight: crate::text::font::FontWeight::Regular,
+    };
+    let resolved = context.font_manager.resolve_text(content, request);
+    let transformed = rotation.abs() > f32::EPSILON || (scale - 1.0).abs() > f32::EPSILON;
+    scene.push_text(TextPrimitive {
+        content: Arc::from(content.to_string()),
+        rich_spans: None,
+        frame,
+        quad: transformed.then(|| tree_icon_quad(frame, rotation, scale)),
+        color: color.with_alpha_factor(opacity),
+        force_color: true,
+        font_family: Some(Arc::from(resolved.primary_font)),
+        font_size,
+        font_weight: crate::text::font::FontWeight::Regular,
+        line_height: font_size,
+        letter_spacing: 0.0,
+        wrap: crate::ui::widget::CanvasTextWrap::None,
+        overflow: crate::ui::widget::CanvasTextOverflow::Clip,
+        horizontal_align: crate::ui::widget::CanvasTextHorizontalAlign::Center,
+        vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Center,
+        clip_rect: visual.primitive_clip,
+        clip_mask: visual.primitive_clip_mask,
+    });
+}
+
+fn tree_icon_quad(frame: Rect, rotation: f32, scale: f32) -> [Point; 4] {
+    let center_x = frame.x.get() + frame.width.get() * 0.5;
+    let center_y = frame.y.get() + frame.height.get() * 0.5;
+    let (sin, cos) = rotation.sin_cos();
+    let scale = scale.max(0.0);
+    let transform = |x: f32, y: f32| {
+        let dx = (x - center_x) * scale;
+        let dy = (y - center_y) * scale;
+        Point::new(
+            center_x + dx * cos - dy * sin,
+            center_y + dx * sin + dy * cos,
+        )
+    };
+    [
+        transform(frame.x.get(), frame.y.get()),
+        transform(frame.right().get(), frame.y.get()),
+        transform(frame.right().get(), frame.bottom().get()),
+        transform(frame.x.get(), frame.bottom().get()),
+    ]
+}
+
+fn resolve_tree_icon_f32(
+    context: &mut CollectContext<'_, '_>,
+    widget_id: WidgetId,
+    property: WidgetProperty,
+    target: f32,
+    duration_ms: u64,
+) -> f32 {
+    let key = crate::animation::AnimationKey::Widget {
+        id: widget_id.raw(),
+        property,
+    };
+    if context.reduced_motion {
+        context
+            .animations
+            .resolve_f32(key, target, None, context.now)
+    } else {
+        context.animations.resolve_f32(
+            key,
+            target,
+            Some(Transition::ease_out(Duration::from_millis(duration_ms))),
+            context.now,
+        )
     }
 }

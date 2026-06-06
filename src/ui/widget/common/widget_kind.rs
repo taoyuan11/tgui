@@ -421,6 +421,78 @@ pub(crate) struct ListItemState<VM> {
     pub sibling_disabled: std::sync::Arc<[bool]>,
 }
 
+pub(crate) struct TreeRootState {
+    pub tree_id: WidgetId,
+    pub node_count: usize,
+    pub selection_mode: crate::ui::widget::TreeSelectionMode,
+    pub selected_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
+    pub checkable: crate::ui::layout::Value<bool>,
+}
+
+impl Clone for TreeRootState {
+    fn clone(&self) -> Self {
+        Self {
+            tree_id: self.tree_id,
+            node_count: self.node_count,
+            selection_mode: self.selection_mode,
+            selected_keys: self.selected_keys.clone(),
+            checkable: self.checkable.clone(),
+        }
+    }
+}
+
+pub(crate) struct TreeNodeState<VM> {
+    pub tree_id: WidgetId,
+    pub row_index: usize,
+    pub node_index: usize,
+    pub key: WidgetKey,
+    pub parent_key: Option<WidgetKey>,
+    pub depth: usize,
+    pub position_in_set: usize,
+    pub set_size: usize,
+    pub has_children: bool,
+    pub expanded: bool,
+    pub check_state: crate::ui::widget::TreeCheckState,
+    pub selected_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
+    pub expanded_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
+    pub checked_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
+    pub selection_mode: crate::ui::widget::TreeSelectionMode,
+    pub checkable: crate::ui::layout::Value<bool>,
+    pub disabled: crate::ui::layout::Value<bool>,
+    pub item_extent: Dp,
+    pub item_spacing: Dp,
+    pub item_padding: crate::ui::layout::Insets,
+    pub indent_width: Dp,
+    pub disclosure_width: Dp,
+    pub checkbox_width: Dp,
+    pub disclosure_icon_size: Sp,
+    pub checkbox_icon_size: Sp,
+    pub indent_line_color: crate::ui::layout::Value<Color>,
+    pub disclosure_icon_color: crate::ui::layout::Value<Color>,
+    pub disclosure_hover_background: crate::ui::layout::Value<Color>,
+    pub checkbox_unchecked_color: crate::ui::layout::Value<Color>,
+    pub checkbox_checked_color: crate::ui::layout::Value<Color>,
+    pub checkbox_indeterminate_color: crate::ui::layout::Value<Color>,
+    pub checkbox_disabled_color: crate::ui::layout::Value<Color>,
+    pub item_background: crate::ui::layout::Value<Color>,
+    pub item_hover_background: crate::ui::layout::Value<Color>,
+    pub item_selected_background: crate::ui::layout::Value<Color>,
+    pub item_disabled_background: crate::ui::layout::Value<Color>,
+    pub on_selection_change: Option<ValueCommand<VM, crate::ui::widget::TreeSelectionChange>>,
+    pub on_expand_change: Option<ValueCommand<VM, crate::ui::widget::TreeExpandChange>>,
+    pub on_check_change: Option<ValueCommand<VM, crate::ui::widget::TreeCheckChange>>,
+    pub on_node_action: Option<ValueCommand<VM, crate::ui::widget::TreeNodeAction>>,
+    pub on_drop: Option<ValueCommand<VM, crate::ui::widget::TreeDropEvent>>,
+    pub sibling_keys: std::sync::Arc<[WidgetKey]>,
+    pub sibling_disabled: std::sync::Arc<[bool]>,
+    pub visible_keys: std::sync::Arc<[WidgetKey]>,
+    pub visible_disabled: std::sync::Arc<[bool]>,
+    pub child_keys: std::sync::Arc<[WidgetKey]>,
+    pub descendant_keys: std::sync::Arc<[WidgetKey]>,
+    pub check_target_keys: std::sync::Arc<[WidgetKey]>,
+    pub draggable: bool,
+}
+
 pub(crate) struct DataGridRootState {
     pub grid_id: WidgetId,
     pub row_count: usize,
@@ -666,6 +738,129 @@ impl<VM> Clone for ListItemState<VM> {
             on_item_action: self.on_item_action.clone(),
             sibling_keys: self.sibling_keys.clone(),
             sibling_disabled: self.sibling_disabled.clone(),
+        }
+    }
+}
+
+impl<VM> Clone for TreeNodeState<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            tree_id: self.tree_id,
+            row_index: self.row_index,
+            node_index: self.node_index,
+            key: self.key.clone(),
+            parent_key: self.parent_key.clone(),
+            depth: self.depth,
+            position_in_set: self.position_in_set,
+            set_size: self.set_size,
+            has_children: self.has_children,
+            expanded: self.expanded,
+            check_state: self.check_state,
+            selected_keys: self.selected_keys.clone(),
+            expanded_keys: self.expanded_keys.clone(),
+            checked_keys: self.checked_keys.clone(),
+            selection_mode: self.selection_mode,
+            checkable: self.checkable.clone(),
+            disabled: self.disabled.clone(),
+            item_extent: self.item_extent,
+            item_spacing: self.item_spacing,
+            item_padding: self.item_padding,
+            indent_width: self.indent_width,
+            disclosure_width: self.disclosure_width,
+            checkbox_width: self.checkbox_width,
+            disclosure_icon_size: self.disclosure_icon_size,
+            checkbox_icon_size: self.checkbox_icon_size,
+            indent_line_color: self.indent_line_color.clone(),
+            disclosure_icon_color: self.disclosure_icon_color.clone(),
+            disclosure_hover_background: self.disclosure_hover_background.clone(),
+            checkbox_unchecked_color: self.checkbox_unchecked_color.clone(),
+            checkbox_checked_color: self.checkbox_checked_color.clone(),
+            checkbox_indeterminate_color: self.checkbox_indeterminate_color.clone(),
+            checkbox_disabled_color: self.checkbox_disabled_color.clone(),
+            item_background: self.item_background.clone(),
+            item_hover_background: self.item_hover_background.clone(),
+            item_selected_background: self.item_selected_background.clone(),
+            item_disabled_background: self.item_disabled_background.clone(),
+            on_selection_change: self.on_selection_change.clone(),
+            on_expand_change: self.on_expand_change.clone(),
+            on_check_change: self.on_check_change.clone(),
+            on_node_action: self.on_node_action.clone(),
+            on_drop: self.on_drop.clone(),
+            sibling_keys: self.sibling_keys.clone(),
+            sibling_disabled: self.sibling_disabled.clone(),
+            visible_keys: self.visible_keys.clone(),
+            visible_disabled: self.visible_disabled.clone(),
+            child_keys: self.child_keys.clone(),
+            descendant_keys: self.descendant_keys.clone(),
+            check_target_keys: self.check_target_keys.clone(),
+            draggable: self.draggable,
+        }
+    }
+}
+
+impl<VM: 'static> TreeNodeState<VM> {
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> TreeNodeState<RootVm> {
+        TreeNodeState {
+            tree_id: self.tree_id,
+            row_index: self.row_index,
+            node_index: self.node_index,
+            key: self.key,
+            parent_key: self.parent_key,
+            depth: self.depth,
+            position_in_set: self.position_in_set,
+            set_size: self.set_size,
+            has_children: self.has_children,
+            expanded: self.expanded,
+            check_state: self.check_state,
+            selected_keys: self.selected_keys,
+            expanded_keys: self.expanded_keys,
+            checked_keys: self.checked_keys,
+            selection_mode: self.selection_mode,
+            checkable: self.checkable,
+            disabled: self.disabled,
+            item_extent: self.item_extent,
+            item_spacing: self.item_spacing,
+            item_padding: self.item_padding,
+            indent_width: self.indent_width,
+            disclosure_width: self.disclosure_width,
+            checkbox_width: self.checkbox_width,
+            disclosure_icon_size: self.disclosure_icon_size,
+            checkbox_icon_size: self.checkbox_icon_size,
+            indent_line_color: self.indent_line_color,
+            disclosure_icon_color: self.disclosure_icon_color,
+            disclosure_hover_background: self.disclosure_hover_background,
+            checkbox_unchecked_color: self.checkbox_unchecked_color,
+            checkbox_checked_color: self.checkbox_checked_color,
+            checkbox_indeterminate_color: self.checkbox_indeterminate_color,
+            checkbox_disabled_color: self.checkbox_disabled_color,
+            item_background: self.item_background,
+            item_hover_background: self.item_hover_background,
+            item_selected_background: self.item_selected_background,
+            item_disabled_background: self.item_disabled_background,
+            on_selection_change: self
+                .on_selection_change
+                .map(|command| command.scope(selector.clone())),
+            on_expand_change: self
+                .on_expand_change
+                .map(|command| command.scope(selector.clone())),
+            on_check_change: self
+                .on_check_change
+                .map(|command| command.scope(selector.clone())),
+            on_node_action: self
+                .on_node_action
+                .map(|command| command.scope(selector.clone())),
+            on_drop: self.on_drop.map(|command| command.scope(selector)),
+            sibling_keys: self.sibling_keys,
+            sibling_disabled: self.sibling_disabled,
+            visible_keys: self.visible_keys,
+            visible_disabled: self.visible_disabled,
+            child_keys: self.child_keys,
+            descendant_keys: self.descendant_keys,
+            check_target_keys: self.check_target_keys,
+            draggable: self.draggable,
         }
     }
 }

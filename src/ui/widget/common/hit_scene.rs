@@ -253,6 +253,21 @@ pub(crate) enum HitInteraction<VM> {
         state: crate::ui::widget::common::ListItemState<VM>,
         interactions: InteractionHandlers<VM>,
     },
+    TreeNode {
+        id: WidgetId,
+        state: crate::ui::widget::common::TreeNodeState<VM>,
+        interactions: InteractionHandlers<VM>,
+    },
+    TreeDisclosure {
+        id: WidgetId,
+        state: crate::ui::widget::common::TreeNodeState<VM>,
+        interactions: InteractionHandlers<VM>,
+    },
+    TreeCheckbox {
+        id: WidgetId,
+        state: crate::ui::widget::common::TreeNodeState<VM>,
+        interactions: InteractionHandlers<VM>,
+    },
     DataGridCell {
         id: WidgetId,
         state: crate::ui::widget::common::DataGridCellState<VM>,
@@ -418,6 +433,33 @@ impl<VM> Clone for HitInteraction<VM> {
                 state: state.clone(),
                 interactions: interactions.clone(),
             },
+            Self::TreeNode {
+                id,
+                state,
+                interactions,
+            } => Self::TreeNode {
+                id: *id,
+                state: state.clone(),
+                interactions: interactions.clone(),
+            },
+            Self::TreeDisclosure {
+                id,
+                state,
+                interactions,
+            } => Self::TreeDisclosure {
+                id: *id,
+                state: state.clone(),
+                interactions: interactions.clone(),
+            },
+            Self::TreeCheckbox {
+                id,
+                state,
+                interactions,
+            } => Self::TreeCheckbox {
+                id: *id,
+                state: state.clone(),
+                interactions: interactions.clone(),
+            },
             Self::DataGridCell {
                 id,
                 state,
@@ -540,6 +582,9 @@ impl<VM> HitInteraction<VM> {
             | Self::SelectTrigger { id, .. }
             | Self::TabTrigger { id, .. }
             | Self::ListItem { id, .. }
+            | Self::TreeNode { id, .. }
+            | Self::TreeDisclosure { id, .. }
+            | Self::TreeCheckbox { id, .. }
             | Self::DataGridCell { id, .. }
             | Self::DataGridHeader { id, .. }
             | Self::DataGridResizeHandle { id, .. }

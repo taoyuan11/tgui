@@ -1,4 +1,11 @@
 use super::*;
+use crate::ui::widget::{HitTargetId, TreeNodeState};
+
+#[derive(Clone, Copy)]
+enum TreeControlPress {
+    Disclosure,
+    Checkbox,
+}
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn should_defer_mouse_click(
@@ -42,6 +49,72 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             .is_some()
                 })
                 .unwrap_or(false)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn handle_tree_control_press(
+        &mut self,
+        id: WidgetId,
+        state: &TreeNodeState<VM>,
+        interactions: &InteractionHandlers<VM>,
+        hit_target_id: HitTargetId,
+        active_trap: Option<&Vec<WidgetId>>,
+        focus_restore: Option<WidgetId>,
+        context_menu_open: Option<(WidgetId, Point)>,
+        button: CanvasMouseButton,
+        control: TreeControlPress,
+    ) {
+        self.clear_selected_text();
+        let hit_scope_path = {
+            let computed = self.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .chain(computed.overlay_hit_regions.iter())
+                .find(|region| region.interaction.target_id() == hit_target_id)
+                .map(|region| region.scope_path.clone())
+                .unwrap_or_default()
+        };
+
+        if let Some(trap) = active_trap {
+            if !hit_scope_path.starts_with(trap) && focus_restore.is_none() {
+                self.pending_click = None;
+                self.pressed_widget = None;
+                return;
+            }
+        }
+
+        self.close_all_open_selects_except(None);
+        let disabled = state.disabled.resolve();
+        self.update_focus(
+            (!disabled).then_some(FocusedWidget {
+                widget_id: id,
+                scope_path: hit_scope_path,
+                on_blur: interactions.on_blur.clone(),
+            }),
+            (!disabled)
+                .then_some(interactions.on_focus.clone())
+                .flatten(),
+            false,
+        );
+        if disabled {
+            if let Some(widget_id) = focus_restore {
+                let _ = self.restore_overlay_focus_if_needed(widget_id);
+            }
+        }
+        if let Some((context_menu_id, position)) = context_menu_open {
+            let _ = self.open_context_menu_at(context_menu_id, position);
+        } else {
+            match control {
+                TreeControlPress::Disclosure => {
+                    let _ = self.dispatch_tree_disclosure_click(state, button);
+                }
+                TreeControlPress::Checkbox => {
+                    let _ = self.dispatch_tree_checkbox_click(state, button);
+                }
+            }
+        }
+        self.pressed_widget = Some(id);
     }
 
     pub(in crate::runtime) fn handle_mouse_press(
@@ -225,6 +298,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | HitInteraction::Radio { id, .. }
             | HitInteraction::SelectTrigger { id, .. }
             | HitInteraction::ListItem { id, .. }
+            | HitInteraction::TreeNode { id, .. }
+            | HitInteraction::TreeDisclosure { id, .. }
+            | HitInteraction::TreeCheckbox { id, .. }
             | HitInteraction::DataGridCell { id, .. }
             | HitInteraction::DataGridHeader { id, .. }
             | HitInteraction::DataGridResizeHandle { id, .. }
@@ -335,6 +411,99 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 let _ = self.open_context_menu_at(context_menu_id, position);
             } else {
                 let _ = self.begin_data_grid_column_resize(&state, button);
+            }
+            self.pressed_widget = Some(id);
+            return;
+        }
+
+        if let HitInteraction::TreeDisclosure {
+            id,
+            state,
+            interactions,
+        } = hit.clone()
+        {
+            self.handle_tree_control_press(
+                id,
+                &state,
+                &interactions,
+                hit_target_id,
+                active_trap.as_ref(),
+                focus_restore,
+                context_menu_open,
+                button,
+                TreeControlPress::Disclosure,
+            );
+            return;
+        }
+
+        if let HitInteraction::TreeCheckbox {
+            id,
+            state,
+            interactions,
+        } = hit.clone()
+        {
+            self.handle_tree_control_press(
+                id,
+                &state,
+                &interactions,
+                hit_target_id,
+                active_trap.as_ref(),
+                focus_restore,
+                context_menu_open,
+                button,
+                TreeControlPress::Checkbox,
+            );
+            return;
+        }
+
+        if let HitInteraction::TreeNode {
+            id,
+            state,
+            interactions,
+        } = hit.clone()
+        {
+            self.clear_selected_text();
+            let hit_scope_path = {
+                let computed = self.computed_scene();
+                computed
+                    .hit_regions
+                    .iter()
+                    .chain(computed.overlay_hit_regions.iter())
+                    .find(|region| region.interaction.target_id() == hit_target_id)
+                    .map(|region| region.scope_path.clone())
+                    .unwrap_or_default()
+            };
+
+            if let Some(trap) = active_trap.as_ref() {
+                if !hit_scope_path.starts_with(trap) && focus_restore.is_none() {
+                    self.pending_click = None;
+                    self.pressed_widget = None;
+                    return;
+                }
+            }
+
+            self.close_all_open_selects_except(None);
+            let disabled = state.disabled.resolve();
+            self.update_focus(
+                (!disabled).then_some(FocusedWidget {
+                    widget_id: id,
+                    scope_path: hit_scope_path,
+                    on_blur: interactions.on_blur.clone(),
+                }),
+                (!disabled)
+                    .then_some(interactions.on_focus.clone())
+                    .flatten(),
+                false,
+            );
+            if disabled {
+                if let Some(widget_id) = focus_restore {
+                    let _ = self.restore_overlay_focus_if_needed(widget_id);
+                }
+            }
+            if let Some((context_menu_id, position)) = context_menu_open {
+                let _ = self.open_context_menu_at(context_menu_id, position);
+            } else {
+                let _ = self.dispatch_tree_node_click(&state, id, now, button, pointer_position);
             }
             self.pressed_widget = Some(id);
             return;
@@ -657,6 +826,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             HitInteraction::Disabled { .. } => unreachable!("disabled hit handled above"),
             HitInteraction::CanvasItem { .. } => unreachable!("canvas item handled above"),
             HitInteraction::ListItem { .. } => unreachable!("list item handled above"),
+            HitInteraction::TreeNode { .. } => unreachable!("tree node handled above"),
+            HitInteraction::TreeDisclosure { .. } | HitInteraction::TreeCheckbox { .. } => {
+                unreachable!("tree control hits handled above")
+            }
             HitInteraction::DataGridCell { .. }
             | HitInteraction::DataGridHeader { .. }
             | HitInteraction::DataGridResizeHandle { .. } => {

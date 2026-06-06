@@ -138,6 +138,26 @@ impl<VM> ResolvedElement<VM> {
                 context.now,
             );
         }
+        if let Some(tree_node) = self.tree_node.as_ref() {
+            let color = if tree_node.disabled.resolve() {
+                tree_node.item_disabled_background.resolve()
+            } else if tree_node.selected_keys.resolve().contains(&tree_node.key) {
+                tree_node.item_selected_background.resolve()
+            } else if widget_state.hovered || widget_state.pressed || widget_state.focused {
+                tree_node.item_hover_background.resolve()
+            } else {
+                tree_node.item_background.resolve()
+            };
+            return context.animations.resolve_color(
+                crate::animation::AnimationKey::Widget {
+                    id: self.id.raw(),
+                    property: WidgetProperty::Background,
+                },
+                color,
+                Some(Transition::default()),
+                context.now,
+            );
+        }
         match &self.kind {
             ResolvedWidgetKind::Button { .. } => {
                 let button_style = styles

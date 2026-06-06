@@ -157,6 +157,13 @@ pub(crate) struct App {
     pub list_status: State<String>,
     pub virtual_rows: Vec<String>,
 
+    pub tree_expanded_keys: State<Vec<WidgetKey>>,
+    pub tree_selected_keys: State<Vec<WidgetKey>>,
+    pub tree_checked_keys: State<Vec<WidgetKey>>,
+    pub tree_loading: State<bool>,
+    pub tree_show_empty: State<bool>,
+    pub tree_status: State<String>,
+
     pub data_rows: State<Vec<Employee>>,
     pub data_selected: State<Vec<WidgetKey>>,
     pub data_sort: State<Vec<DataGridSort>>,
@@ -276,6 +283,16 @@ impl ViewModel for App {
             virtual_rows: (0..10_000)
                 .map(|index| format!("Log row #{index:04} - virtualized data item"))
                 .collect(),
+            tree_expanded_keys: context.state(vec![
+                WidgetKey::from("workspace"),
+                WidgetKey::from("src"),
+                WidgetKey::from("widgets"),
+            ]),
+            tree_selected_keys: context.state(vec![WidgetKey::from("tree")]),
+            tree_checked_keys: context.state(vec![WidgetKey::from("tree")]),
+            tree_loading: context.state(false),
+            tree_show_empty: context.state(false),
+            tree_status: context.state("Tree ready".to_string()),
             data_rows: context.state(vec![
                 Employee::new(
                     "e-001",
@@ -601,6 +618,66 @@ impl App {
     pub(crate) fn toggle_list_empty(&mut self) {
         self.list_show_empty.update(|empty| *empty = !*empty);
         self.list_status.set("Empty slot toggled".to_string());
+    }
+
+    pub(crate) fn set_tree_expanded(&mut self, change: TreeExpandChange) {
+        self.tree_expanded_keys.set(change.expanded_keys);
+        self.tree_status
+            .set(format!("Expand {:?}: {}", change.key, change.expanded));
+    }
+
+    pub(crate) fn set_tree_selection(&mut self, change: TreeSelectionChange) {
+        let count = change.selected_keys.len();
+        self.tree_selected_keys.set(change.selected_keys);
+        self.tree_status.set(format!(
+            "Selection via {:?}; focused={:?}; selected={count}",
+            change.trigger, change.focused_key
+        ));
+    }
+
+    pub(crate) fn set_tree_checked(&mut self, change: TreeCheckChange) {
+        let count = change.checked_keys.len();
+        self.tree_checked_keys.set(change.checked_keys);
+        self.tree_status.set(format!(
+            "Check {:?}: {:?}; affected={}, checked={count}",
+            change.key,
+            change.check_state,
+            change.affected_keys.len()
+        ));
+    }
+
+    pub(crate) fn open_tree_node(&mut self, action: TreeNodeAction) {
+        self.tree_status.set(format!(
+            "Primary action fired for node {} ({:?})",
+            action.index, action.key
+        ));
+    }
+
+    pub(crate) fn tree_context_action(&mut self) {
+        self.tree_status
+            .set("Context menu command selected for the current node".to_string());
+    }
+
+    pub(crate) fn drop_tree_node(&mut self, event: TreeDropEvent) {
+        self.tree_status.set(format!(
+            "Drop event: {:?} {:?} {:?}",
+            event.dragged_key, event.position, event.target_key
+        ));
+    }
+
+    pub(crate) fn clear_tree_selection(&mut self) {
+        self.tree_selected_keys.set(Vec::new());
+        self.tree_status.set("Tree selection cleared".to_string());
+    }
+
+    pub(crate) fn toggle_tree_loading(&mut self) {
+        self.tree_loading.update(|loading| *loading = !*loading);
+        self.tree_status.set("Tree loading slot toggled".to_string());
+    }
+
+    pub(crate) fn toggle_tree_empty(&mut self) {
+        self.tree_show_empty.update(|empty| *empty = !*empty);
+        self.tree_status.set("Tree empty slot toggled".to_string());
     }
 
     pub(crate) fn select_data_rows(&mut self, change: DataGridSelectionChange) {

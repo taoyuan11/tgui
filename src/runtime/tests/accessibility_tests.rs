@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widget::{Tree, TreeNode, TreeSelectionMode};
 use accesskit::{Action, ActionData, ActionRequest, Node, Role, Toggled, TreeId};
 
 fn accessibility_update(handler: &mut BoundRuntimeHandler<TestVm>) -> accesskit::TreeUpdate {
@@ -122,6 +123,74 @@ fn accessibility_tree_maps_data_grid_roles_and_selection() {
     assert_eq!(cell_node.role(), Role::GridCell);
     assert_eq!(cell_node.is_selected(), Some(true));
     assert!(cell_node.supports_action(Action::Click));
+}
+
+#[test]
+fn accessibility_tree_maps_tree_roles_state_and_set_metadata() {
+    let invalidation = InvalidationSignal::new();
+    let tree_element: Element<TestVm> = Tree::<&'static str, TestVm>::new(
+        vec![TreeNode::keyed("root", "Root").children([
+            TreeNode::keyed("child-a", "Child A"),
+            TreeNode::keyed("child-b", "Child B").disable(true),
+        ])],
+        |ctx| Text::new(ctx.item).into(),
+    )
+    .expanded_keys(vec![WidgetKey::from("root")])
+    .selected_keys(vec![WidgetKey::from("child-a")])
+    .selection_mode(TreeSelectionMode::Multiple)
+    .checkable(true)
+    .checked_keys(vec![WidgetKey::from("child-a")])
+    .size(dp(260.0), dp(180.0))
+    .into();
+    let tree_id = tree_element.id;
+    let tree = WidgetTree::new(tree_element);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let (root_row_id, child_row_id, disabled_row_id) = {
+        let computed = handler.computed_scene();
+        let find_row = |key: &str| {
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::TreeNode { id, state, .. }
+                        if state.key == WidgetKey::from(key) =>
+                    {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .expect("Tree node should have a hit region")
+        };
+        (find_row("root"), find_row("child-a"), find_row("child-b"))
+    };
+
+    let update = accessibility_update(&mut handler);
+    let tree_node = node_for(&update, tree_id);
+    assert_eq!(tree_node.role(), Role::Tree);
+    assert_eq!(tree_node.size_of_set(), Some(3));
+    assert!(tree_node.is_multiselectable());
+
+    let root_node = node_for(&update, root_row_id);
+    assert_eq!(root_node.role(), Role::TreeItem);
+    assert_eq!(root_node.is_expanded(), Some(true));
+    assert_eq!(root_node.toggled(), Some(Toggled::Mixed));
+    assert_eq!(root_node.level(), Some(1));
+    assert_eq!(root_node.position_in_set(), Some(1));
+    assert_eq!(root_node.size_of_set(), Some(1));
+    assert!(root_node.supports_action(Action::Click));
+
+    let child_node = node_for(&update, child_row_id);
+    assert_eq!(child_node.role(), Role::TreeItem);
+    assert_eq!(child_node.is_selected(), Some(true));
+    assert_eq!(child_node.toggled(), Some(Toggled::True));
+    assert_eq!(child_node.level(), Some(2));
+    assert_eq!(child_node.position_in_set(), Some(1));
+    assert_eq!(child_node.size_of_set(), Some(2));
+
+    let disabled_node = node_for(&update, disabled_row_id);
+    assert_eq!(disabled_node.role(), Role::TreeItem);
+    assert!(disabled_node.is_disabled());
+    assert_eq!(disabled_node.toggled(), Some(Toggled::False));
 }
 
 #[test]

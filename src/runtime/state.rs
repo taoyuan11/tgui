@@ -457,6 +457,14 @@ pub(super) struct ActiveTabReorder<VM> {
 }
 
 #[derive(Clone)]
+pub(super) struct ActiveTreeDrag<VM> {
+    pub(super) tree_id: WidgetId,
+    pub(super) dragged_key: crate::ui::widget::WidgetKey,
+    pub(super) descendant_keys: Arc<[crate::ui::widget::WidgetKey]>,
+    pub(super) on_drop: Option<ValueCommand<VM, crate::ui::widget::TreeDropEvent>>,
+}
+
+#[derive(Clone)]
 pub(super) struct ActiveDataGridColumnResize<VM> {
     pub(super) column_key: crate::ui::widget::WidgetKey,
     pub(super) start_position: Point,
