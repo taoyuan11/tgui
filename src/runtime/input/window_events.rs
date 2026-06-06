@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widget::FileDropEvent;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn handle_bound_window_event(
@@ -109,6 +110,29 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
                     needs_redraw |= self.handle_platform_keyboard_input(event);
+                }
+                WindowEvent::DragDropped { paths, position } => {
+                    self.set_pointer_position(*position);
+                    let drop_position = self.cursor_position.unwrap_or(Point::ZERO);
+                    let command =
+                        self.hit_path(viewport)
+                            .into_iter()
+                            .rev()
+                            .find_map(|interaction| {
+                                interaction
+                                    .interactions()
+                                    .and_then(|handlers| handlers.on_file_drop.clone())
+                            });
+                    if let Some(command) = command {
+                        self.execute_value_command(
+                            &command,
+                            FileDropEvent {
+                                position: drop_position,
+                                paths: paths.clone(),
+                            },
+                        );
+                        needs_redraw = true;
+                    }
                 }
                 _ => {}
             }

@@ -73,6 +73,34 @@ const CODE_SLIDER_CONTROLLED: &str = r#"Slider::new(app.slider_value.signal(), 0
         app.audio_controller.set_volume(value / 100.0);
     }))"#;
 
+const CODE_DATE_PICKER: &str = r#"DatePicker::new(app.demo_date_text.clone(), app.demo_date.signal(), app.demo_date_month.signal())
+    .open(app.demo_date_open.signal())
+    .on_open_change(ValueCommand::new(App::set_demo_date_open))
+    .on_month_change(ValueCommand::new(App::set_demo_date_month))
+    .on_change(ValueCommand::new(App::set_demo_date))"#;
+
+const CODE_TIME_PICKER: &str = r#"TimePicker::new(app.demo_time_text.clone(), app.demo_time.signal())
+    .open(app.demo_time_open.signal())
+    .minute_step(30)
+    .on_open_change(ValueCommand::new(App::set_demo_time_open))
+    .on_change(ValueCommand::new(App::set_demo_time))"#;
+
+const CODE_NUMBER_INPUT: &str = r#"NumberInput::new(app.demo_number_text.clone(), app.demo_number.signal())
+    .range(0.0, 99.0)
+    .step(1.0)
+    .on_change(ValueCommand::new(App::set_demo_number))"#;
+
+const CODE_COLOR_PICKER: &str = r#"ColorPicker::new(app.demo_color.signal())
+    .open(app.demo_color_open.signal())
+    .on_open_change(ValueCommand::new(App::set_demo_color_open))
+    .on_change(ValueCommand::new(App::set_demo_color))"#;
+
+const CODE_UPLOAD: &str = r#"Upload::new(app.upload_files.signal())
+    .accept_extensions(&["png", "jpg", "pdf", "txt"])
+    .max_files(8)
+    .on_select(ValueCommand::new(App::add_upload_files))
+    .on_remove(ValueCommand::new(App::remove_upload_file))"#;
+
 const CODE_FORM_FIELDS: &str = r#"Input::new(app.profile_name.controller())
     .validation(app.profile_name.validation_state())
 
@@ -100,6 +128,11 @@ pub(crate) fn page(app: &App) -> Element<App> {
             radio_component(app),
             select_component(app),
             slider_component(app),
+            date_picker_component(app),
+            time_picker_component(app),
+            number_input_component(app),
+            color_picker_component(app),
+            upload_component(app),
             form_component(app),
         ],
     )
@@ -381,6 +414,123 @@ fn slider_component(app: &App) -> Element<App> {
                 CODE_SLIDER_CONTROLLED,
             ),
         ],
+    )
+}
+
+fn date_picker_component(app: &App) -> Element<App> {
+    demo_section::component_doc(
+        app,
+        "DatePicker",
+        "DatePicker 复用 TextController 与 Popover，支持直接输入和日历选择。",
+        vec![UsageDemo::new(
+            "date-picker/basic",
+            "日期选择",
+            "输入框和日历网格共享同一个受控日期状态。",
+            Flex::vertical().gap(dp(8.0)).child(el![
+                DatePicker::new(
+                    app.demo_date_text.clone(),
+                    app.demo_date.signal(),
+                    app.demo_date_month.signal(),
+                )
+                .open(app.demo_date_open.signal())
+                .on_open_change(ValueCommand::new(App::set_demo_date_open))
+                .on_month_change(ValueCommand::new(App::set_demo_date_month))
+                .on_change(ValueCommand::new(App::set_demo_date)),
+                Text::new(app.profile_status.signal()).style(styles::status_style),
+            ]),
+            CODE_DATE_PICKER,
+        )],
+    )
+}
+
+fn time_picker_component(app: &App) -> Element<App> {
+    demo_section::component_doc(
+        app,
+        "TimePicker",
+        "TimePicker 提供可输入文本框和时间选项弹层，适合固定步进的时间选择。",
+        vec![UsageDemo::new(
+            "time-picker/basic",
+            "时间选择",
+            "示例使用 30 分钟步进，选中项会回写 ViewModel。",
+            Flex::vertical().gap(dp(8.0)).child(el![
+                TimePicker::new(app.demo_time_text.clone(), app.demo_time.signal())
+                    .open(app.demo_time_open.signal())
+                    .minute_step(30)
+                    .on_open_change(ValueCommand::new(App::set_demo_time_open))
+                    .on_change(ValueCommand::new(App::set_demo_time)),
+                Text::new(app.profile_status.signal()).style(styles::status_style),
+            ]),
+            CODE_TIME_PICKER,
+        )],
+    )
+}
+
+fn number_input_component(app: &App) -> Element<App> {
+    demo_section::component_doc(
+        app,
+        "NumberInput",
+        "NumberInput 组合文本输入和步进按钮，支持范围限制和解析状态。",
+        vec![UsageDemo::new(
+            "number-input/basic",
+            "数字输入",
+            "可直接输入数字，也可以用两侧按钮按步进调整。",
+            Flex::vertical().gap(dp(8.0)).child(el![
+                NumberInput::new(app.demo_number_text.clone(), app.demo_number.signal())
+                    .range(0.0, 99.0)
+                    .step(1.0)
+                    .on_change(ValueCommand::new(App::set_demo_number)),
+                Text::new(app.profile_status.signal()).style(styles::status_style),
+            ]),
+            CODE_NUMBER_INPUT,
+        )],
+    )
+}
+
+fn color_picker_component(app: &App) -> Element<App> {
+    demo_section::component_doc(
+        app,
+        "ColorPicker",
+        "ColorPicker 用输入控件风格的触发器展示当前颜色，并在 Popover 中调整色板和通道。",
+        vec![UsageDemo::new(
+            "color-picker/basic",
+            "颜色选择",
+            "点击色块打开颜色面板，选择预设色或拖动 RGBA 通道。",
+            Flex::vertical().gap(dp(8.0)).child(el![
+                ColorPicker::new(app.demo_color.signal())
+                    .open(app.demo_color_open.signal())
+                    .on_open_change(ValueCommand::new(App::set_demo_color_open))
+                    .on_change(ValueCommand::new(App::set_demo_color)),
+                Text::new(app.profile_status.signal()).style(styles::status_style),
+            ]),
+            CODE_COLOR_PICKER,
+        )],
+    )
+}
+
+fn upload_component(app: &App) -> Element<App> {
+    demo_section::component_doc(
+        app,
+        "Upload",
+        "Upload 管理受控文件队列；选择、拖放、删除、错误和进度状态都由组件展示。",
+        vec![UsageDemo::new(
+            "upload/queue",
+            "文件队列",
+            "点击选择文件，或把文件拖入 drop zone；示例只模拟队列，不执行 HTTP 上传。",
+            Flex::vertical().gap(dp(8.0)).child(el![
+                Upload::new(app.upload_files.signal())
+                    .accept_extensions(&["png", "jpg", "pdf", "txt"])
+                    .max_files(8)
+                    .on_select(ValueCommand::new(App::add_upload_files))
+                    .on_remove(ValueCommand::new(App::remove_upload_file)),
+                Flex::horizontal().gap(dp(8.0)).child(el![
+                    Button::new("推进进度")
+                        .secondary()
+                        .on_click(Command::new(App::advance_uploads)),
+                    Text::new(app.upload_status.signal()).style(styles::status_style),
+                ]),
+            ]),
+            CODE_UPLOAD,
+        )],
     )
 }
 

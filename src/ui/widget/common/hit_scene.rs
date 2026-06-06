@@ -570,6 +570,29 @@ impl<VM> Clone for HitInteraction<VM> {
 }
 
 impl<VM> HitInteraction<VM> {
+    pub(crate) fn interactions(&self) -> Option<&InteractionHandlers<VM>> {
+        match self {
+            Self::Widget { interactions, .. }
+            | Self::SelectableText { interactions, .. }
+            | Self::Switch { interactions, .. }
+            | Self::Checkbox { interactions, .. }
+            | Self::Radio { interactions, .. }
+            | Self::SelectTrigger { interactions, .. }
+            | Self::TabTrigger { interactions, .. }
+            | Self::ListItem { interactions, .. }
+            | Self::TreeNode { interactions, .. }
+            | Self::TreeDisclosure { interactions, .. }
+            | Self::TreeCheckbox { interactions, .. }
+            | Self::DataGridCell { interactions, .. }
+            | Self::DataGridHeader { interactions, .. }
+            | Self::DataGridResizeHandle { interactions, .. }
+            | Self::Slider { interactions, .. }
+            | Self::TextInput { interactions, .. }
+            | Self::SelectOption { interactions, .. } => Some(interactions),
+            Self::Occluder { .. } | Self::Disabled { .. } | Self::CanvasItem { .. } => None,
+        }
+    }
+
     pub(crate) fn target_id(&self) -> HitTargetId {
         match self {
             Self::Occluder { id }

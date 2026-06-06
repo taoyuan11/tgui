@@ -8,6 +8,7 @@ pub(crate) struct InteractionHandlers<VM> {
     pub on_mouse_enter: Option<Command<VM>>,
     pub on_mouse_leave: Option<Command<VM>>,
     pub on_mouse_move: Option<ValueCommand<VM, Point>>,
+    pub on_file_drop: Option<ValueCommand<VM, FileDropEvent>>,
     pub gesture: Option<crate::ui::widget::GestureRecognizer<VM>>,
     pub cursor_style: Option<Value<CursorStyle>>,
 }
@@ -164,6 +165,7 @@ impl<VM> Clone for InteractionHandlers<VM> {
             on_mouse_enter: self.on_mouse_enter.clone(),
             on_mouse_leave: self.on_mouse_leave.clone(),
             on_mouse_move: self.on_mouse_move.clone(),
+            on_file_drop: self.on_file_drop.clone(),
             gesture: self.gesture.clone(),
             cursor_style: self.cursor_style.clone(),
         }
@@ -198,6 +200,7 @@ impl<VM> Default for InteractionHandlers<VM> {
             on_mouse_enter: None,
             on_mouse_leave: None,
             on_mouse_move: None,
+            on_file_drop: None,
             gesture: None,
             cursor_style: None,
         }
@@ -231,6 +234,7 @@ impl<VM> InteractionHandlers<VM> {
             || self.on_mouse_enter.is_some()
             || self.on_mouse_leave.is_some()
             || self.on_mouse_move.is_some()
+            || self.on_file_drop.is_some()
             || self
                 .gesture
                 .as_ref()
@@ -261,6 +265,9 @@ impl<VM> InteractionHandlers<VM> {
                 .map(|command| command.scope(selector.clone())),
             on_mouse_move: self
                 .on_mouse_move
+                .map(|command| command.scope(selector.clone())),
+            on_file_drop: self
+                .on_file_drop
                 .map(|command| command.scope(selector.clone())),
             gesture: self.gesture.map(|gesture| gesture.scope(selector.clone())),
             cursor_style: self.cursor_style,

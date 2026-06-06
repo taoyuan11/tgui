@@ -219,6 +219,7 @@ mod command_video_tests;
 mod controls_tests;
 mod dependency_tests;
 mod drawer_tests;
+mod input_controls_tests;
 mod layout_scroll_tests;
 mod list_tests;
 mod menu_tests;

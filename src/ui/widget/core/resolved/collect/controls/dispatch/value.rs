@@ -150,7 +150,17 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         Rect::new(Dp::ZERO, Dp::ZERO, menu_width, full_height),
     );
 
-    let resolved = root.resolve(context.theme);
+    let viewport_hint = crate::ui::widget::r#virtual::VirtualViewportHint {
+        width: menu_width,
+        height: full_height,
+    };
+    let resolved = root.resolve_with_runtime_state(
+        context.theme,
+        None,
+        context.scroll_offsets,
+        context.virtual_states,
+        viewport_hint,
+    );
     let mut taffy = TaffyTree::new();
     let layout_root = resolved
         .build_layout_tree(

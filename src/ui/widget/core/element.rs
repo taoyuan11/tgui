@@ -455,6 +455,11 @@ impl<VM> Element<VM> {
         self
     }
 
+    pub fn on_file_drop(mut self, command: ValueCommand<VM, FileDropEvent>) -> Self {
+        self.interactions.on_file_drop = Some(command);
+        self
+    }
+
     pub fn gesture(mut self, recognizer: crate::ui::widget::GestureRecognizer<VM>) -> Self {
         self.interactions.gesture = recognizer.has_any().then_some(recognizer);
         self

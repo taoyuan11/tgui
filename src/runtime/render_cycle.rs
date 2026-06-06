@@ -59,6 +59,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 ..
             } => true,
             WindowEvent::KeyboardInput { .. } => true,
+            WindowEvent::DragDropped { .. } => true,
             _ => false,
         }
     }

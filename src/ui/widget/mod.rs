@@ -2,19 +2,24 @@
 mod audio;
 mod background;
 mod button;
+mod calendar;
 mod canvas;
 mod checkbox;
+mod color_picker;
 mod common;
 mod container;
 mod core;
+mod date_picker;
 mod divider;
 mod drawer;
 mod gesture;
 mod image;
 mod input;
+mod input_controls;
 mod list;
 mod menu;
 mod modal;
+mod number_input;
 mod overlay;
 mod popover;
 mod portal;
@@ -31,9 +36,11 @@ mod table;
 mod tabs;
 mod text;
 mod textarea;
+mod time_picker;
 mod toast;
 mod tooltip;
 mod tree;
+mod upload;
 #[cfg(feature = "video")]
 mod video;
 mod r#virtual;
@@ -45,6 +52,7 @@ pub use background::{
     BackgroundRadialGradient,
 };
 pub use button::Button;
+pub use calendar::{Calendar, CalendarChangeTrigger, CalendarSelectionChange, CalendarStyle};
 pub use canvas::{
     Canvas, CanvasBlendMode, CanvasBrush, CanvasColorFilter, CanvasDragEvent, CanvasEffect,
     CanvasFillRule, CanvasGradientStop, CanvasGroup, CanvasGroupMode, CanvasGroupShape,
@@ -58,6 +66,9 @@ pub use canvas::{
     CanvasTextVerticalAlign, CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent, PathBuilder,
 };
 pub use checkbox::Checkbox;
+pub use color_picker::{
+    ColorPicker, ColorPickerChange, ColorPickerChangeTrigger, ColorPickerStyle,
+};
 pub(crate) use common::{
     slider_effective_step, slider_resolve_value, slider_value_from_normalized,
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
@@ -71,8 +82,8 @@ pub(crate) use common::{
     TextEditState, TextInputContentGeometry, TexturePrimitive, TreeNodeState, WidgetStateMap,
 };
 pub use common::{
-    CursorStyle, DividerOrientation, FocusScopeOptions, Point, Rect, RenderPrimitive,
-    ScenePrimitives, TabPlacement, TextPrimitive, WidgetId, WidgetKey,
+    CursorStyle, DividerOrientation, FileDropEvent, FocusScopeOptions, Point, Rect,
+    RenderPrimitive, ScenePrimitives, TabPlacement, TextPrimitive, WidgetId, WidgetKey,
 };
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
 #[cfg(feature = "bench-support")]
@@ -89,6 +100,7 @@ pub(crate) use core::{
     TooltipTrigger, VisualContextSnapshot,
 };
 pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
+pub use date_picker::{DatePicker, DatePickerChange, DatePickerStyle};
 pub use divider::Divider;
 pub use drawer::{Drawer, DrawerHost, DrawerMode, DrawerPlacement};
 pub use gesture::{
@@ -106,6 +118,9 @@ pub use menu::{
 };
 pub(crate) use menu::{ContextMenuDescriptor, MenuDescriptor, MenuItemState};
 pub use modal::{Modal, ModalAction};
+pub use number_input::{
+    NumberInput, NumberInputChange, NumberInputChangeTrigger, NumberInputStyle,
+};
 pub use overlay::{
     Alignment as OverlayAlignment, Anchor as OverlayAnchor, AnchorKey as OverlayAnchorKey,
     AnchorSource as OverlayAnchorSource, FlipPolicy as OverlayFlipPolicy, OverlayId, OverlayLayer,
@@ -143,6 +158,7 @@ pub use table::{
 pub use tabs::{TabItem, TabView, Tabs, TabsOverflowMode, TabsReorderEvent};
 pub use text::{IntoTextContent, Text};
 pub use textarea::Textarea;
+pub use time_picker::{TimePicker, TimePickerChange, TimePickerStyle};
 pub use toast::ToastHost;
 pub use tooltip::Tooltip;
 pub(crate) use tree::tree_check_state;
@@ -150,6 +166,10 @@ pub use tree::{
     Tree, TreeCheckChange, TreeCheckState, TreeCheckTrigger, TreeDropEvent, TreeDropPosition,
     TreeExpandChange, TreeExpandTrigger, TreeNode, TreeNodeAction, TreeNodeContext,
     TreeSelectionChange, TreeSelectionMode, TreeSelectionTrigger, TreeStyle,
+};
+pub use upload::{
+    Upload, UploadFile, UploadFileId, UploadRejection, UploadRemove, UploadSelection, UploadStatus,
+    UploadStyle,
 };
 #[cfg(feature = "video")]
 pub use video::VideoSurface;

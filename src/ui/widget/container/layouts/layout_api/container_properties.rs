@@ -70,6 +70,11 @@ macro_rules! impl_container_properties {
                 Self(self.0.on_mouse_move(command))
             }
 
+            /// 注册本地文件拖放命令。
+            pub fn on_file_drop(self, command: ValueCommand<VM, FileDropEvent>) -> Self {
+                Self(self.0.on_file_drop(command))
+            }
+
             /// 注册挂载完成命令。
             ///
             /// # 参数

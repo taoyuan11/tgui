@@ -4,8 +4,8 @@ use crate::ui::layout::{Align, Insets, Justify, LayoutStyle, Overflow, Scrollbar
 use crate::ui::unit::Dp;
 
 use super::super::common::{
-    ContainerLayout, CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers,
-    Point, ScrollViewConfig, VisualStyle, WidgetId, WidgetKind,
+    ContainerLayout, CursorStyle, FileDropEvent, InteractionHandlers, LifecycleEventHandlers,
+    MediaEventHandlers, Point, ScrollViewConfig, VisualStyle, WidgetId, WidgetKind,
 };
 use super::super::core::Element;
 use super::super::style::ContainerStyle;
@@ -177,6 +177,12 @@ impl<VM> Container<VM> {
     /// 返回更新后的容器实例。
     pub fn on_mouse_move(mut self, command: ValueCommand<VM, Point>) -> Self {
         self.element.interactions.on_mouse_move = Some(command);
+        self
+    }
+
+    /// 注册本地文件拖放命令。
+    pub fn on_file_drop(mut self, command: ValueCommand<VM, FileDropEvent>) -> Self {
+        self.element.interactions.on_file_drop = Some(command);
         self
     }
 

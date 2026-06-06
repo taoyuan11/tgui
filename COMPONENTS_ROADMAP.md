@@ -303,6 +303,11 @@
 - **桌面操作**：键盘录入 + 弹出选；方向键定位焦点日；`PgUp/PgDn` 切月、`Shift+PgUp/PgDn` 切年；`Enter` 选定；`Esc` 关闭。
 - **键盘补充**：日期网格、月份切换和范围选择保持键盘可达。
 - **依赖**：P0 §1、§2、§5；P1 §10；Form 抽象。
+- **进度**：[功能完整]
+  - ✅ 新增 `Calendar`、`DatePicker`、`TimePicker` 及 `CalendarStyle` / `DatePickerStyle` / `TimePickerStyle`，统一公开到 `tgui::widgets` 和 `prelude`；
+  - ✅ 日期/时间值使用 `chrono::NaiveDate` / `NaiveTime`，输入文本复用 `TextController`，手输解析和弹层选择都会回调受控 ViewModel；
+  - ✅ `DatePicker` / `TimePicker` 复用 `Popover`，支持受控 open、禁用、校验视觉、placeholder、日期月份切换、today 快捷入口和时间步长选项；
+  - ✅ demo 表单页已接入可交互日期、时间示例，覆盖输入框、弹层、选中回写、月份切换和关闭状态。
 
 ### 20. NumberInput
 - **作用**：数字录入，带步进按钮、最小/最大、精度、单位后缀。
@@ -310,6 +315,11 @@
 - **桌面操作**：`↑/↓` 步进、`Shift+↑/↓` 大步、`PgUp/PgDn` 跳页；滚轮调值（可禁用）；粘贴自动清洗非数字。
 - **键盘补充**：步进按钮可聚焦，`Enter` / `Space` 触发。
 - **依赖**：Form 抽象。
+- **进度**：[功能完整]
+  - ✅ 新增 `NumberInput`、`NumberInputStyle`、`NumberInputChange` 与 `NumberInputChangeTrigger`，公开到 `widgets` / `prelude`；
+  - ✅ 复用 `Input` 与可聚焦步进按钮，支持受控值、手输解析、min/max/range、step、禁用、placeholder 和 Form validation 视觉；
+  - ✅ 步进按钮通过既有 Button access / focus / Enter / Space 路径触发，手输与步进都会向 ViewModel 回传 value、text 和 trigger；
+  - ✅ demo 表单页已接入可交互数字输入和状态回写。
 
 ### 21. ColorPicker
 - **作用**：颜色选择，支持 HSV/HSL/RGB/HEX、透明度、最近用色、预设调色板。
@@ -317,6 +327,11 @@
 - **桌面操作**：拖拽方形/滑条；文本框输入 HEX 或 RGB；方向键微调；`Enter` 提交。
 - **键盘补充**：色块和滑条保持键盘可达。
 - **依赖**：P0 §1、§5；Form 抽象。
+- **进度**：[功能完整]
+  - ✅ 新增 `ColorPicker`、`ColorPickerStyle`、`ColorPickerChange` 与 `ColorPickerChangeTrigger`，公开到 `widgets` / `prelude`；
+  - ✅ 复用 `Popover`、`Slider` 和 swatch 容器，支持受控 open、禁用、自定义 swatches、RGBA 通道调节、透明度和 HEX 标签展示；
+  - ✅ 滑条拖拽、键盘微调和 AccessKit numeric actions 由既有 Slider 运行时路径覆盖，色块通过可点击 hit region 回调 ViewModel；
+  - ✅ demo 表单页已接入可交互颜色选择器，颜色通道和 swatch 选择会实时回写状态。
 
 ### 22. Upload
 - **作用**：文件选择与拖放上传；支持多文件、类型过滤、进度展示、错误处理。
@@ -324,6 +339,11 @@
 - **桌面操作**：点击触发系统文件选择器（走 `tgui::dialog`）；拖拽文件进入触发；剪贴板粘贴图片可选。
 - **键盘补充**：按钮入口保持可聚焦并可通过 `Enter` / `Space` 触发。
 - **依赖**：Form 抽象；P1 §12（进度展示）。
+- **进度**：[功能完整]
+  - ✅ 新增 `Upload`、`UploadStyle`、`UploadFile`、`UploadFileId`、`UploadStatus`、`UploadSelection`、`UploadRemove` 与 `UploadRejection`，公开到 `widgets` / `prelude`；
+  - ✅ Upload 做受控文件队列：组件负责系统文件选择、拖放接入、扩展名/数量/大小校验、文件列表、进度条、错误态和删除事件；真实上传由 ViewModel 处理并回填状态；
+  - ✅ runtime 新增通用 `FileDropEvent` 与 `.on_file_drop(...)`，`WindowEvent::DragDropped` 会派发给命中路径上最上层的文件拖放 handler；
+  - ✅ demo 表单页已接入 Upload，示例包含选择、拖放、进度推进、错误态和删除。
 
 ---
 

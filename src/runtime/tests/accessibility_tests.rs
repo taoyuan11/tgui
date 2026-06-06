@@ -1,6 +1,10 @@
 use super::*;
-use crate::ui::widget::{Tree, TreeNode, TreeSelectionMode};
+use crate::ui::widget::{
+    ColorPicker, DatePicker, NumberInput, TimePicker, Tree, TreeNode, TreeSelectionMode, Upload,
+    UploadFile, UploadFileId, UploadStatus,
+};
 use accesskit::{Action, ActionData, ActionRequest, Node, Role, Toggled, TreeId};
+use chrono::{NaiveDate, NaiveTime};
 
 fn accessibility_update(handler: &mut BoundRuntimeHandler<TestVm>) -> accesskit::TreeUpdate {
     let _ = handler.computed_scene();
@@ -77,6 +81,66 @@ fn accessibility_tree_maps_basic_roles_labels_values_and_bounds() {
     assert_eq!(slider_node.min_numeric_value(), Some(0.0));
     assert_eq!(slider_node.max_numeric_value(), Some(10.0));
     assert!(slider_node.supports_action(Action::SetValue));
+}
+
+#[test]
+fn accessibility_tree_maps_input_controls_to_base_interactive_roles() {
+    let invalidation = InvalidationSignal::new();
+    let date_controller = TextController::new_legacy("2026-06-06");
+    let time_controller = TextController::new_legacy("09:30");
+    let number_controller = TextController::new_legacy("24");
+    let upload_files = vec![UploadFile {
+        id: UploadFileId::new("demo:report"),
+        path: "report.pdf".into(),
+        name: "report.pdf".to_string(),
+        size_bytes: Some(512_000),
+        status: UploadStatus::Uploading { progress: 0.5 },
+    }];
+    let date: Element<TestVm> = DatePicker::new(
+        date_controller,
+        Some(NaiveDate::from_ymd_opt(2026, 6, 6).unwrap()),
+        NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+    )
+    .into();
+    let time: Element<TestVm> =
+        TimePicker::new(time_controller, NaiveTime::from_hms_opt(9, 30, 0)).into();
+    let number: Element<TestVm> = NumberInput::new(number_controller, Some(24.0)).into();
+    let color: Element<TestVm> = ColorPicker::new(Color::hexa(0x3366CCFF)).into();
+    let upload: Element<TestVm> = Upload::new(upload_files).into();
+    let tree =
+        WidgetTree::new(Flex::new(Axis::Vertical).child([date, time, number, color, upload]));
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let update = accessibility_update(&mut handler);
+
+    let text_input_count = update
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.role() == Role::TextInput)
+        .count();
+    assert!(
+        text_input_count >= 3,
+        "DatePicker, TimePicker and NumberInput should expose editable text inputs"
+    );
+    let color_button = update
+        .nodes
+        .iter()
+        .find_map(|(_, node)| {
+            (node.role() == Role::Button && node.label() == Some("#3366CCFF")).then_some(node)
+        })
+        .expect("ColorPicker trigger should be a labeled button");
+    assert!(color_button.supports_action(Action::Click));
+    let choose_button = update
+        .nodes
+        .iter()
+        .find_map(|(_, node)| {
+            (node.role() == Role::Button && node.label() == Some("Choose files")).then_some(node)
+        })
+        .expect("Upload should expose its file chooser button");
+    assert!(choose_button.supports_action(Action::Click));
+    assert!(update.nodes.iter().any(|(_, node)| {
+        node.role() == Role::ProgressIndicator && node.numeric_value() == Some(0.5)
+    }));
 }
 
 #[test]

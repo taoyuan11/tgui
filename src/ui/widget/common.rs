@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -80,6 +81,15 @@ pub enum CursorStyle {
     NsResize,
     NeswResize,
     NwseResize,
+}
+
+/// 文件拖放到组件上时派发的事件。
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileDropEvent {
+    /// 拖放位置，使用窗口逻辑坐标。
+    pub position: Point,
+    /// 本次拖放携带的本地文件路径。
+    pub paths: Vec<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

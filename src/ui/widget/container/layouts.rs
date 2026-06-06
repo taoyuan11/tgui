@@ -3,7 +3,9 @@ use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Axis, Insets, Overflow, Track, Value, Wrap};
 
 use self::layout_api::impl_layout_api;
-use super::super::common::{ContainerKind, ContainerLayout, CursorStyle, Point, WidgetKind};
+use super::super::common::{
+    ContainerKind, ContainerLayout, CursorStyle, FileDropEvent, Point, WidgetKind,
+};
 use super::super::core::Element;
 use super::super::style::ContainerStyle;
 use super::base::{apply_layout_api, Container};

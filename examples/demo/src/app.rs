@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::navigation::DemoPage;
 use crate::{navigation, pages, styles};
+use chrono::{Datelike, NaiveDate, NaiveTime};
 use tgui::prelude::*;
 
 const DEFAULT_MEDIA_VOLUME: f32 = 0.8;
@@ -117,6 +118,19 @@ pub(crate) struct App {
 
     pub input_text: TextController,
     pub textarea_text: TextController,
+    pub demo_date_text: TextController,
+    pub demo_time_text: TextController,
+    pub demo_number_text: TextController,
+    pub demo_date: State<Option<NaiveDate>>,
+    pub demo_date_month: State<NaiveDate>,
+    pub demo_date_open: State<bool>,
+    pub demo_time: State<Option<NaiveTime>>,
+    pub demo_time_open: State<bool>,
+    pub demo_number: State<Option<f64>>,
+    pub demo_color: State<Color>,
+    pub demo_color_open: State<bool>,
+    pub upload_files: State<Vec<UploadFile>>,
+    pub upload_status: State<String>,
     pub audio_status: State<String>,
     pub audio_controller: AudioController,
     pub video_player: VideoPlayer,
@@ -241,6 +255,19 @@ impl ViewModel for App {
             textarea_text: context.text_controller(
                 "这是一个受控 Textarea。\n你可以在这里输入多行内容，示例不会保存修改。",
             ),
+            demo_date_text: context.text_controller("2026-06-06"),
+            demo_time_text: context.text_controller("09:30"),
+            demo_number_text: context.text_controller("24"),
+            demo_date: context.state(Some(NaiveDate::from_ymd_opt(2026, 6, 6).unwrap())),
+            demo_date_month: context.state(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
+            demo_date_open: context.state(false),
+            demo_time: context.state(NaiveTime::from_hms_opt(9, 30, 0)),
+            demo_time_open: context.state(false),
+            demo_number: context.state(Some(24.0)),
+            demo_color: context.state(Color::hexa(0x3B82F6FF)),
+            demo_color_open: context.state(false),
+            upload_files: context.state(seed_upload_files()),
+            upload_status: context.state("Upload queue ready".to_string()),
             audio_status: context.state("尚未加载音频。请输入文件路径或 URL。".to_string()),
             audio_controller: audio,
             video_player: VideoPlayer::new(context),
@@ -775,6 +802,103 @@ impl App {
         self.data_status.set("Selection cleared".to_string());
     }
 
+    pub(crate) fn set_demo_date(&mut self, change: DatePickerChange) {
+        self.demo_date.set(change.date);
+        self.demo_date_text.set_text(change.text.clone());
+        if let Some(date) = change.date {
+            self.demo_date_month
+                .set(NaiveDate::from_ymd_opt(date.year(), date.month(), 1).unwrap_or(date));
+            self.profile_status
+                .set(format!("日期已选择: {}", change.text));
+        } else {
+            self.profile_status.set("日期输入无法解析".to_string());
+        }
+    }
+
+    pub(crate) fn set_demo_date_month(&mut self, month: NaiveDate) {
+        self.demo_date_month
+            .set(NaiveDate::from_ymd_opt(month.year(), month.month(), 1).unwrap_or(month));
+    }
+
+    pub(crate) fn set_demo_date_open(&mut self, open: bool) {
+        self.demo_date_open.set(open);
+    }
+
+    pub(crate) fn set_demo_time(&mut self, change: TimePickerChange) {
+        self.demo_time.set(change.time);
+        self.demo_time_text.set_text(change.text.clone());
+        self.profile_status.set(match change.time {
+            Some(_) => format!("时间已选择: {}", change.text),
+            None => "时间输入无法解析".to_string(),
+        });
+    }
+
+    pub(crate) fn set_demo_time_open(&mut self, open: bool) {
+        self.demo_time_open.set(open);
+    }
+
+    pub(crate) fn set_demo_number(&mut self, change: NumberInputChange) {
+        self.demo_number.set(change.value);
+        self.demo_number_text.set_text(change.text.clone());
+        self.profile_status
+            .set(format!("数字输入 {:?}: {}", change.trigger, change.text));
+    }
+
+    pub(crate) fn set_demo_color(&mut self, change: ColorPickerChange) {
+        self.demo_color.set(change.color);
+        self.profile_status
+            .set(format!("颜色 {:?}: {}", change.trigger, change.color));
+    }
+
+    pub(crate) fn set_demo_color_open(&mut self, open: bool) {
+        self.demo_color_open.set(open);
+    }
+
+    pub(crate) fn add_upload_files(&mut self, selection: UploadSelection) {
+        let added = selection.files.len();
+        let rejected = selection.rejected.len();
+        self.upload_files.update(|files| {
+            for mut file in selection.files {
+                file.status = UploadStatus::Uploading { progress: 0.35 };
+                files.push(file);
+            }
+            for rejection in selection.rejected {
+                files.push(UploadFile {
+                    id: UploadFileId::new(format!(
+                        "rejected:{}",
+                        rejection.path.to_string_lossy()
+                    )),
+                    path: rejection.path,
+                    name: "Rejected file".to_string(),
+                    size_bytes: None,
+                    status: UploadStatus::Error(rejection.reason),
+                });
+            }
+        });
+        self.upload_status
+            .set(format!("已添加 {added} 个文件，拒绝 {rejected} 个文件"));
+    }
+
+    pub(crate) fn remove_upload_file(&mut self, event: UploadRemove) {
+        self.upload_files
+            .update(|files| files.retain(|file| file.id != event.id));
+        self.upload_status.set("文件已从队列移除".to_string());
+    }
+
+    pub(crate) fn advance_uploads(&mut self) {
+        self.upload_files.update(|files| {
+            for file in files {
+                if let UploadStatus::Uploading { progress } = &mut file.status {
+                    *progress = (*progress + 0.25).min(1.0);
+                    if *progress >= 1.0 {
+                        file.status = UploadStatus::Complete;
+                    }
+                }
+            }
+        });
+        self.upload_status.set("上传进度已推进".to_string());
+    }
+
     fn theme_binding(&self) -> Signal<ThemeMode> {
         self.theme.signal()
     }
@@ -820,4 +944,30 @@ fn video_status_text(state: VideoPlaybackState) -> String {
         VideoPlaybackState::Ended => "视频状态: 播放结束".to_string(),
         VideoPlaybackState::Error(error) => format!("视频状态: 出错: {error}"),
     }
+}
+
+fn seed_upload_files() -> Vec<UploadFile> {
+    vec![
+        UploadFile {
+            id: UploadFileId::new("demo:brief"),
+            path: PathBuf::from("design-brief.pdf"),
+            name: "design-brief.pdf".to_string(),
+            size_bytes: Some(384_000),
+            status: UploadStatus::Queued,
+        },
+        UploadFile {
+            id: UploadFileId::new("demo:screenshot"),
+            path: PathBuf::from("screenshot.png"),
+            name: "screenshot.png".to_string(),
+            size_bytes: Some(1_240_000),
+            status: UploadStatus::Uploading { progress: 0.62 },
+        },
+        UploadFile {
+            id: UploadFileId::new("demo:archive"),
+            path: PathBuf::from("archive.zip"),
+            name: "archive.zip".to_string(),
+            size_bytes: Some(8_500_000),
+            status: UploadStatus::Error("文件类型不在允许列表中".to_string()),
+        },
+    ]
 }
