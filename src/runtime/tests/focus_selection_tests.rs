@@ -586,3 +586,39 @@ fn selectable_text_can_provide_selected_content_for_copy() {
 
     assert_eq!(handler.selected_text_for_copy().as_deref(), Some("world"));
 }
+
+#[test]
+fn dragging_multiline_selectable_text_can_copy_across_lines() {
+    let invalidation = InvalidationSignal::new();
+    let content = "alpha\nbeta\ngamma";
+    let tree = WidgetTree::new(Text::new(content).user_select(true));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+
+    let text_id = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::SelectableText { id, frame, .. } => Some((*id, *frame)),
+                _ => None,
+            })
+            .expect("selectable text hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: text_id.1.x + 1.0,
+        y: text_id.1.y + 1.0,
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    handler.cursor_position = Some(Point {
+        x: text_id.1.x + text_id.1.width - 1.0,
+        y: text_id.1.y + text_id.1.height - 1.0,
+    });
+    assert!(handler.handle_text_selection_drag());
+
+    assert_eq!(handler.selected_text, Some(text_id.0));
+    assert_eq!(handler.selected_text_for_copy().as_deref(), Some(content));
+}

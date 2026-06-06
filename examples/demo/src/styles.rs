@@ -1,5 +1,10 @@
 use tgui::prelude::*;
 
+fn with_alpha(color: Color, factor: f32) -> Color {
+    let alpha = ((color.a as f32) * factor.clamp(0.0, 1.0)).round() as u8;
+    Color::rgba(color.r, color.g, color.b, alpha)
+}
+
 pub(crate) fn text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
     let mut style = TextWidgetStyle::default_for(mode);
     style.typography.size = size;
@@ -75,6 +80,120 @@ pub(crate) fn sidebar_style(mode: ResolvedThemeMode) -> ContainerStyle {
         .into(),
     );
     style.surface.border_width = Some(dp(1.0).into());
+    style
+}
+
+pub(crate) fn nav_item_style(mode: ResolvedThemeMode, active: bool, accent: u32) -> ContainerStyle {
+    let accent = Color::hexa(accent);
+    let mut style = ContainerStyle::default_for(mode);
+    style.surface.background = Some(
+        match (mode, active) {
+            (ResolvedThemeMode::Light, true) => with_alpha(accent, 0.12),
+            (ResolvedThemeMode::Dark, true) => with_alpha(accent, 0.18),
+            (ResolvedThemeMode::Light, false) => Color::hexa(0xF8FAFC00),
+            (ResolvedThemeMode::Dark, false) => Color::hexa(0x11182700),
+        }
+        .into(),
+    );
+    style.surface.border_color = Some(
+        match (mode, active) {
+            (ResolvedThemeMode::Light, true) => with_alpha(accent, 0.38),
+            (ResolvedThemeMode::Dark, true) => with_alpha(accent, 0.52),
+            (ResolvedThemeMode::Light, false) => Color::hexa(0xE2E8F000),
+            (ResolvedThemeMode::Dark, false) => Color::hexa(0x33415500),
+        }
+        .into(),
+    );
+    style.surface.border_width = Some(dp(1.0).into());
+    style.surface.border_radius = Some(dp(8.0).into());
+    if active {
+        style.surface.shadow = Some(
+            Shadow {
+                offset_x: dp(0.0),
+                offset_y: dp(8.0),
+                blur: dp(18.0),
+                spread: dp(-12.0),
+                color: with_alpha(
+                    accent,
+                    match mode {
+                        ResolvedThemeMode::Light => 0.30,
+                        ResolvedThemeMode::Dark => 0.42,
+                    },
+                ),
+            }
+            .into(),
+        );
+    }
+    style
+}
+
+pub(crate) fn nav_badge_style(
+    mode: ResolvedThemeMode,
+    active: bool,
+    accent: u32,
+) -> ContainerStyle {
+    let accent = Color::hexa(accent);
+    let mut style = ContainerStyle::default_for(mode);
+    style.surface.background = Some(
+        if active {
+            accent
+        } else {
+            match mode {
+                ResolvedThemeMode::Light => with_alpha(accent, 0.14),
+                ResolvedThemeMode::Dark => with_alpha(accent, 0.22),
+            }
+        }
+        .into(),
+    );
+    style.surface.border_color = Some(
+        match mode {
+            ResolvedThemeMode::Light => with_alpha(accent, if active { 0.0 } else { 0.24 }),
+            ResolvedThemeMode::Dark => with_alpha(accent, if active { 0.0 } else { 0.36 }),
+        }
+        .into(),
+    );
+    style.surface.border_width = Some(dp(1.0).into());
+    style.surface.border_radius = Some(dp(8.0).into());
+    style
+}
+
+pub(crate) fn nav_badge_text_style(mode: ResolvedThemeMode, active: bool) -> TextWidgetStyle {
+    let mut style = text_style(mode, sp(13.0));
+    style.typography.weight = FontWeight::SemiBold;
+    style.color = if active {
+        Color::hexa(0xFFFFFFFF).into()
+    } else {
+        match mode {
+            ResolvedThemeMode::Light => Color::hexa(0x334155FF),
+            ResolvedThemeMode::Dark => Color::hexa(0xE2E8F0FF),
+        }
+        .into()
+    };
+    style
+}
+
+pub(crate) fn nav_title_style(mode: ResolvedThemeMode, active: bool) -> TextWidgetStyle {
+    let mut style = text_style(mode, sp(14.0));
+    style.typography.weight = FontWeight::SemiBold;
+    style.color = match (mode, active) {
+        (ResolvedThemeMode::Light, true) => Color::hexa(0x0F172AFF),
+        (ResolvedThemeMode::Light, false) => Color::hexa(0x334155FF),
+        (ResolvedThemeMode::Dark, true) => Color::hexa(0xF8FAFCFF),
+        (ResolvedThemeMode::Dark, false) => Color::hexa(0xCBD5E1FF),
+    }
+    .into();
+    style
+}
+
+pub(crate) fn nav_description_style(mode: ResolvedThemeMode, active: bool) -> TextWidgetStyle {
+    let mut style = text_style(mode, sp(12.0));
+    style.color = match (mode, active) {
+        (ResolvedThemeMode::Light, true) => Color::hexa(0x475569FF),
+        (ResolvedThemeMode::Light, false) => Color::hexa(0x64748BFF),
+        (ResolvedThemeMode::Dark, true) => Color::hexa(0xD7DEE8FF),
+        (ResolvedThemeMode::Dark, false) => Color::hexa(0x94A3B8FF),
+    }
+    .into();
     style
 }
 

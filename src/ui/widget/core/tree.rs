@@ -1,8 +1,6 @@
 use super::scene::ActiveTooltipState;
 use super::*;
-use crate::ui::widget::r#virtual::{
-    apply_virtual_runtime_state_to_element, VirtualCacheState, VirtualViewportHint,
-};
+use crate::ui::widget::r#virtual::{VirtualCacheState, VirtualViewportHint};
 use std::time::Instant;
 
 pub struct WidgetTree<VM> {
@@ -46,11 +44,8 @@ pub(crate) fn with_widget_stack_frame<R>(f: impl FnOnce() -> R) -> R {
     }
 }
 
-/// 检测树内是否存在「会被运行时状态注入触及」的 Virtual 节点。遍历方式与
-/// [`apply_virtual_runtime_state_to_element`] 完全一致：仅下钻 Container 的静态
-/// 子节点。动态子节点在该注入阶段尚为未展开的闭包，apply 从不会进入，因此其内部
-/// 的虚拟节点在新旧实现下都拿不到滚动/视口状态——故此处同样不将其计入，保持行为一致
-/// 的同时让含动态子节点的常规树仍能走 Arc 共享的快路径。
+/// 检测树内是否存在 Virtual 节点。动态子节点需要保守视为可能包含 Virtual，
+/// 因为它们会在 resolve 阶段展开，滚动时也需要让 layout cache 失效以重算可见窗口。
 fn element_contains_virtual<VM>(element: &Element<VM>) -> bool {
     match &element.kind {
         WidgetKind::Virtual { .. } => true,
@@ -59,7 +54,7 @@ fn element_contains_virtual<VM>(element: &Element<VM>) -> bool {
                 crate::ui::widget::common::ChildSource::Static(children) => {
                     children.iter().any(element_contains_virtual)
                 }
-                crate::ui::widget::common::ChildSource::Dynamic(_) => false,
+                crate::ui::widget::common::ChildSource::Dynamic(_) => true,
             })
         }
         _ => false,
@@ -170,29 +165,47 @@ impl<VM: 'static> WidgetTree<VM> {
         viewport: Rect,
         now: Instant,
     ) -> ResolvedSceneLayout<VM> {
+        self.build_scene_layout_at_with_previous(
+            font_manager,
+            theme,
+            media,
+            animations,
+            units,
+            scroll_offsets,
+            virtual_states,
+            viewport,
+            now,
+            None,
+        )
+    }
+
+    pub(crate) fn build_scene_layout_at_with_previous(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        units: UnitContext,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+        viewport: Rect,
+        now: Instant,
+        previous: Option<&ResolvedSceneLayout<VM>>,
+    ) -> ResolvedSceneLayout<VM> {
         let (mut layout, dependencies) = with_widget_stack(|| {
             with_dependency_collection(|| {
                 let mut taffy = TaffyTree::new();
-                // Without Virtual nodes there is no per-frame runtime state to
-                // apply, so the source tree is shared via Arc instead of deep
-                // cloned. Virtual trees clone-on-write to inject scroll/viewport
-                // state before resolving.
-                let root: std::sync::Arc<Element<VM>> = if self.has_virtual {
-                    let mut root = (*self.root).clone();
-                    apply_virtual_runtime_state_to_element(
-                        &mut root,
-                        scroll_offsets,
-                        virtual_states,
-                        VirtualViewportHint {
-                            width: viewport.width,
-                            height: viewport.height,
-                        },
-                    );
-                    std::sync::Arc::new(root)
-                } else {
-                    std::sync::Arc::clone(&self.root)
-                };
-                let resolved_root = root.resolve(theme);
+                let root = std::sync::Arc::clone(&self.root);
+                let resolved_root = root.resolve_with_runtime_state(
+                    theme,
+                    previous.map(|layout| &layout.resolved_root),
+                    scroll_offsets,
+                    virtual_states,
+                    VirtualViewportHint {
+                        width: viewport.width,
+                        height: viewport.height,
+                    },
+                );
                 let root_layout = resolved_root
                     .build_layout_tree(
                         &mut taffy, animations, theme, units, None, viewport, true, now,

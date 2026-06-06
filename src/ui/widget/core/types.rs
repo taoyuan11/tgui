@@ -90,6 +90,16 @@ pub(crate) struct ResolvedElement<VM> {
 }
 
 impl<VM> ResolvedElement<VM> {
+    pub(crate) fn contains_virtual(&self) -> bool {
+        match &self.kind {
+            ResolvedWidgetKind::Virtual { .. } => true,
+            ResolvedWidgetKind::Container { children, .. } => {
+                children.iter().any(ResolvedElement::contains_virtual)
+            }
+            _ => false,
+        }
+    }
+
     /// 递归估算子树中的节点总数。
     /// 在 `collect_scene_cache` 开始时调用，用于预分配 HashMap 容量，
     /// 避免 `HashMap::new()` 的多次 reallocation。

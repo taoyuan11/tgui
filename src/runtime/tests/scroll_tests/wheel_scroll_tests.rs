@@ -48,6 +48,115 @@ fn virtual_scroll_test_tree() -> (WidgetId, WidgetTree<TestVm>) {
     (list_id, WidgetTree::new(list))
 }
 
+fn nested_virtual_scroll_test_tree() -> (WidgetId, WidgetTree<TestVm>) {
+    let rows = (0..1_000).collect::<Vec<_>>();
+    let list: Element<TestVm> = VirtualList::new(rows, |_index, item| {
+        Stack::new()
+            .height(dp(20.0))
+            .child(Text::new(format!("Virtual row {item}")))
+            .into()
+    })
+    .item_layout(ItemLayout::Fixed {
+        item_extent: dp(20.0),
+        spacing: Dp::ZERO,
+        overscan: 0,
+    })
+    .size(dp(180.0), dp(100.0))
+    .into();
+    let list_id = list.id;
+    let tree = WidgetTree::new(
+        ScrollView::new().size(dp(220.0), dp(160.0)).child(
+            Flex::vertical()
+                .gap(dp(12.0))
+                .child(Stack::new().height(dp(80.0)).child(Text::new("Above")))
+                .child(list)
+                .child(Stack::new().height(dp(260.0)).child(Text::new("Below"))),
+        ),
+    );
+    (list_id, tree)
+}
+
+fn demo_like_virtual_scroll_test_tree() -> (WidgetId, WidgetId, WidgetTree<TestVm>) {
+    let rows = (0..1_000).collect::<Vec<_>>();
+    let list: Element<TestVm> = VirtualList::new(rows, |_index, item| {
+        Stack::new()
+            .height(dp(32.0))
+            .padding(Insets::symmetric(dp(12.0), dp(6.0)))
+            .child(Text::new(format!("Virtual row {item}")))
+            .into()
+    })
+    .item_layout(ItemLayout::Fixed {
+        item_extent: dp(32.0),
+        spacing: dp(2.0),
+        overscan: 1,
+    })
+    .width(dp(520.0))
+    .height(dp(240.0))
+    .into();
+    let list_id = list.id;
+    let outer: Element<TestVm> = ScrollView::new()
+        .size(dp(640.0), dp(420.0))
+        .child(
+            Flex::vertical()
+                .width(dp(600.0))
+                .gap(dp(18.0))
+                .padding(Insets::all(dp(24.0)))
+                .child(Stack::new().height(dp(260.0)).child(Text::new("Tabs card")))
+                .child(
+                    Flex::vertical()
+                        .width(dp(560.0))
+                        .gap(dp(10.0))
+                        .padding(Insets::all(dp(12.0)))
+                        .child(Text::new("VirtualList"))
+                        .child(
+                            Flex::vertical()
+                                .width(dp(536.0))
+                                .padding(Insets::all(dp(14.0)))
+                                .child(list),
+                        ),
+                )
+                .child(
+                    Stack::new()
+                        .height(dp(320.0))
+                        .child(Text::new("DataGrid card")),
+                ),
+        )
+        .into();
+    let outer_id = outer.id;
+    (outer_id, list_id, WidgetTree::new(outer))
+}
+
+fn dynamic_virtual_scroll_test_tree(visible: Signal<bool>) -> (WidgetId, WidgetTree<TestVm>) {
+    let rows = (0..1_000).collect::<Vec<_>>();
+    let list: Element<TestVm> = VirtualList::new(rows, |_index, item| {
+        Stack::new()
+            .height(dp(20.0))
+            .child(Text::new(format!("Virtual row {item}")))
+            .into()
+    })
+    .item_layout(ItemLayout::Fixed {
+        item_extent: dp(20.0),
+        spacing: Dp::ZERO,
+        overscan: 0,
+    })
+    .size(dp(180.0), dp(100.0))
+    .into();
+    let list_id = list.id;
+    let tree = WidgetTree::new(Stack::new().size(dp(220.0), dp(140.0)).child(visible.map(
+        move |visible| {
+            if visible {
+                list.clone()
+            } else {
+                Stack::new()
+                    .height(dp(40.0))
+                    .child(Text::new("Hidden"))
+                    .into()
+            }
+        },
+    )));
+    (list_id, tree)
+}
+
 #[test]
 fn textarea_mouse_wheel_scrolls_vertical_overflow() {
     let invalidation = InvalidationSignal::new();
@@ -130,6 +239,165 @@ fn mouse_wheel_updates_virtual_list_window_immediately() {
     assert!(
         scrolled_min > baseline_min,
         "VirtualList should rebuild its visible window as soon as wheel scrolling updates offset"
+    );
+}
+
+#[test]
+fn nested_mouse_wheel_scrolls_inner_virtual_list_before_parent_scroll_view() {
+    let invalidation = InvalidationSignal::new();
+    let (list_id, tree) = nested_virtual_scroll_test_tree();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(220.0, 160.0),
+    );
+
+    let (target, baseline_min) = {
+        let computed = handler.computed_scene();
+        let baseline_min = visible_virtual_row_indices(computed)
+            .into_iter()
+            .min()
+            .expect("initial nested VirtualList rows should render");
+        let region = computed
+            .scroll_regions
+            .iter()
+            .find(|region| region.id == list_id)
+            .copied()
+            .expect("nested VirtualList should register a scroll region");
+        (
+            Point {
+                x: region.visible_frame.x + dp(8.0),
+                y: region.visible_frame.y + dp(8.0),
+            },
+            baseline_min,
+        )
+    };
+    assert_eq!(baseline_min, 0);
+
+    handler.cursor_position = Some(target);
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -8.0)));
+
+    let scrolled_min = visible_virtual_row_indices(handler.computed_scene())
+        .into_iter()
+        .min()
+        .expect("nested scrolled VirtualList rows should render");
+    assert!(
+        scrolled_min > baseline_min,
+        "nested VirtualList should consume wheel input before the parent ScrollView"
+    );
+}
+
+#[test]
+fn demo_like_nested_virtual_list_scrolls_after_parent_scroll() {
+    let invalidation = InvalidationSignal::new();
+    let (outer_id, list_id, tree) = demo_like_virtual_scroll_test_tree();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(640.0, 420.0),
+    );
+
+    handler.set_scroll_offset(outer_id, Point::new(Dp::ZERO, dp(220.0)));
+
+    let (target, baseline_min) = {
+        let computed = handler.computed_scene();
+        let region = computed
+            .scroll_regions
+            .iter()
+            .find(|region| region.id == list_id)
+            .copied()
+            .expect("demo-like VirtualList should register a scroll region");
+        assert!(
+            region.visible_frame.height > dp(120.0),
+            "demo-like VirtualList should be visible after parent scroll, got {:?}",
+            region.visible_frame
+        );
+        assert!(
+            region.max_offset().y > dp(1000.0),
+            "demo-like VirtualList should have vertical overflow, got {:?}",
+            region
+        );
+        let baseline_min = visible_virtual_row_indices(computed)
+            .into_iter()
+            .min()
+            .expect("initial demo-like VirtualList rows should render");
+        (
+            Point {
+                x: region.visible_frame.x + dp(24.0),
+                y: region.visible_frame.y + dp(24.0),
+            },
+            baseline_min,
+        )
+    };
+
+    handler.cursor_position = Some(target);
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -8.0)));
+
+    let scrolled_min = visible_virtual_row_indices(handler.computed_scene())
+        .into_iter()
+        .min()
+        .expect("demo-like scrolled VirtualList rows should render");
+    assert!(
+        scrolled_min > baseline_min,
+        "demo-like VirtualList should consume wheel input even inside a scrolled page"
+    );
+}
+
+#[test]
+fn mouse_wheel_scrolls_virtual_list_inside_dynamic_child() {
+    let invalidation = InvalidationSignal::new();
+    let visible_state = State::new(true, invalidation.clone());
+    let (_source_list_id, tree) = dynamic_virtual_scroll_test_tree(visible_state.signal());
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(220.0, 140.0),
+    );
+
+    let (list_id, target, baseline_min) = {
+        let computed = handler.computed_scene();
+        let baseline_min = visible_virtual_row_indices(computed)
+            .into_iter()
+            .min()
+            .expect("initial dynamic VirtualList rows should render");
+        let region = computed
+            .scroll_regions
+            .iter()
+            .find(|region| region.max_offset().y > Dp::ZERO)
+            .copied()
+            .expect("dynamic VirtualList should register a scroll region");
+        (
+            region.id,
+            Point {
+                x: region.visible_frame.x + dp(8.0),
+                y: region.visible_frame.y + dp(8.0),
+            },
+            baseline_min,
+        )
+    };
+    assert_eq!(baseline_min, 0);
+
+    handler.cursor_position = Some(target);
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -8.0)));
+
+    let scrolled_min = visible_virtual_row_indices(handler.computed_scene())
+        .into_iter()
+        .min()
+        .expect("dynamic scrolled VirtualList rows should render");
+    assert!(
+        scrolled_min > baseline_min,
+        "dynamic VirtualList should rebuild its visible window from the stored scroll offset"
+    );
+    assert!(
+        handler
+            .scroll_states
+            .get(&list_id)
+            .map(|offset| offset.y > Dp::ZERO)
+            .unwrap_or(false),
+        "scroll state should stay attached to the resolved dynamic VirtualList id"
     );
 }
 

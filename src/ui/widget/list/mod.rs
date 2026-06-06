@@ -15,7 +15,8 @@ use super::core::Element;
 use super::r#virtual::{ItemLayout, ItemSource, VirtualList};
 use super::style::StyleResolver;
 use super::{
-    ContextMenuDescriptor, GestureRecognizer, LongPressEvent, MenuItem, MenuItemState, Stack, Text,
+    ContextMenuDescriptor, Flex, GestureRecognizer, LongPressEvent, MenuItem, MenuItemState, Stack,
+    Text,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -634,6 +635,7 @@ where
         let row_style = Arc::clone(&list_style);
         let render = self.render.clone();
         let context_menu = Arc::new(self.context_menu);
+        let item_layout = self.item_layout;
         let mut list: Element<VM> = VirtualList::new(source, move |_visible, row| match row {
             ListRow::Header(header) => header.clone(),
             ListRow::Item {
@@ -652,11 +654,16 @@ where
                     disabled: disabled_now,
                 };
                 let child = render(context.clone());
-                let mut row: Element<VM> = Stack::new()
+                let row_container = Flex::vertical()
+                    .align(Align::Stretch)
                     .child(child)
-                    .padding(row_style.item_padding)
-                    .height(row_style.item_height)
-                    .into();
+                    .padding(row_style.item_padding);
+                let row_container = match item_layout {
+                    ItemLayout::Fixed { item_extent, .. } => row_container.height(item_extent),
+                    ItemLayout::Estimated { estimate, .. } => row_container.height(estimate),
+                    ItemLayout::Measured { .. } => row_container.min_height(row_style.item_height),
+                };
+                let mut row: Element<VM> = row_container.into();
                 row.key = Some(key.clone());
                 row.interactions.cursor_style = Some(Value::Static(if disabled_now {
                     CursorStyle::Default

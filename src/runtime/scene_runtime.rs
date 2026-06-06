@@ -314,7 +314,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     } else {
                         let layout = {
                             let layout_started_at = Instant::now();
-                            let layout = tree.build_scene_layout(
+                            let previous_layout = previous_cached
+                                .as_ref()
+                                .and_then(|cached| cached.layout.as_ref());
+                            let layout = tree.build_scene_layout_at_with_previous(
                                 &self.font_manager,
                                 &theme,
                                 &self.media_manager,
@@ -323,6 +326,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 &self.scroll_states,
                                 &self.virtual_states,
                                 viewport,
+                                now,
+                                previous_layout,
                             );
                             layout_duration += layout_started_at.elapsed();
                             layout

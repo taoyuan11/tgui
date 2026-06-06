@@ -224,7 +224,7 @@ fn demo_tab_items(
 }
 
 fn list_component(app: &App) -> Element<App> {
-    demo_section::component_doc(
+    demo_section::component_doc_stacked(
         app,
         "List",
         "List 构建在虚拟滚动基础上，支持分组、选择、loading/empty 和上下文菜单。",
@@ -346,9 +346,14 @@ fn contact_sections() -> Vec<ListSection<DemoContact, App>> {
 
 fn section_header(text: &'static str) -> Element<App> {
     Stack::new()
+        .width(pct(100.0))
         .height(dp(30.0))
         .padding(Insets::symmetric(dp(12.0), dp(6.0)))
-        .child(Text::new(text).style(styles::status_style))
+        .child(
+            Text::new(text)
+                .width(pct(100.0))
+                .style(styles::status_style),
+        )
         .into()
 }
 
@@ -359,10 +364,17 @@ fn contact_row(ctx: ListItemContext<DemoContact>) -> Element<App> {
         ctx.item.name.to_string()
     };
     Flex::vertical()
+        .width(pct(100.0))
+        .align(Align::Stretch)
         .gap(dp(2.0))
-        .child(Text::new(title).style(styles::usage_title_style))
+        .child(
+            Text::new(title)
+                .width(pct(100.0))
+                .style(styles::usage_title_style),
+        )
         .child(
             Text::new(format!("{} - {}", ctx.item.role, ctx.item.status))
+                .width(pct(100.0))
                 .style(styles::status_style),
         )
         .into()
@@ -377,7 +389,7 @@ fn state_view(text: &'static str) -> Element<App> {
 }
 
 fn virtual_list_component(app: &App) -> Element<App> {
-    demo_section::component_doc(
+    demo_section::component_doc_stacked(
         app,
         "VirtualList",
         "VirtualList 只构建可见行，适合大数据量滚动列表。",
@@ -416,13 +428,18 @@ fn virtual_list_component(app: &App) -> Element<App> {
 
 fn virtual_row(ctx: ListItemContext<String>) -> Element<App> {
     Stack::new()
+        .width(pct(100.0))
         .padding(Insets::symmetric(dp(12.0), dp(6.0)))
-        .child(Text::new(ctx.item).style(styles::status_style))
+        .child(
+            Text::new(ctx.item)
+                .width(pct(100.0))
+                .style(styles::status_style),
+        )
         .into()
 }
 
 fn data_grid_component(app: &App) -> Element<App> {
-    demo_section::component_doc(
+    demo_section::component_doc_stacked(
         app,
         "DataGrid / Table",
         "DataGrid 展示表格型数据；Table 是同一组件的公开别名。",

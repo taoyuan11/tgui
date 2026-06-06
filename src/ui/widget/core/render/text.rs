@@ -51,7 +51,8 @@ pub(crate) fn push_text_primitives(
         .unwrap_or(fallback_color);
     let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
     let inner = frame.inset(padding);
-    let requires_precise_layout = selection_state.is_some() || show_caret || center_horizontally;
+    let requires_precise_layout =
+        selection_state.is_some() || show_caret || center_horizontally || content.contains('\n');
     let layout_started_at = crate::log::text_profile_enabled().then_some(std::time::Instant::now());
     let current_layout = requires_precise_layout.then(|| {
         font_manager.measure_text_layout(
@@ -87,23 +88,32 @@ pub(crate) fn push_text_primitives(
         {
             let selection_start = selection_start.min(content.len());
             let selection_end = selection_end.min(content.len());
-            let selection_start_x = current_layout.x_for_index(selection_start);
-            let selection_end_x = current_layout.x_for_index(selection_end);
-            let selection_width = (selection_end_x - selection_start_x).max(0.0);
-            if selection_width > 0.0 {
-                scene.push_shape(RenderPrimitive {
-                    rect: Rect::new(
-                        content_frame.x + selection_start_x,
-                        content_frame.y,
-                        selection_width,
-                        content_frame.height.max(Dp::new(line_height)),
-                    ),
-                    color: theme.colors.selection.with_alpha_factor(opacity),
-                    corner_radius: 4.0,
-                    stroke_width: 0.0,
-                    clip_rect,
-                    clip_mask,
-                });
+            let start_line = current_layout.line_index_for_index(selection_start);
+            let end_line = current_layout.line_index_for_index(selection_end);
+            for line_index in start_line..=end_line {
+                let line_start = selection_start.max(current_layout.line_start(line_index));
+                let line_end = selection_end.min(current_layout.line_end(line_index));
+                if line_end < line_start {
+                    continue;
+                }
+                let selection_start_x = current_layout.x_for_index(line_start);
+                let selection_end_x = current_layout.x_for_index(line_end);
+                let selection_width = (selection_end_x - selection_start_x).max(0.0);
+                if selection_width > 0.0 {
+                    scene.push_shape(RenderPrimitive {
+                        rect: Rect::new(
+                            content_frame.x + selection_start_x,
+                            content_frame.y + Dp::new(current_layout.line_top(line_index)),
+                            selection_width,
+                            current_layout.line_height(line_index).max(line_height),
+                        ),
+                        color: theme.colors.selection.with_alpha_factor(opacity),
+                        corner_radius: 4.0,
+                        stroke_width: 0.0,
+                        clip_rect,
+                        clip_mask,
+                    });
+                }
             }
         }
     }

@@ -465,6 +465,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 text_style,
                 text,
             } => {
+                let multiline = text.contains('\n');
                 let cursor = pointer_position.map(|point| {
                     text_cursor_index_at_point(
                         &self.font_manager,
@@ -474,7 +475,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         padding,
                         &text_style,
                         &text,
-                        false,
+                        multiline,
                         false,
                         false,
                         Point::ZERO,
@@ -490,7 +491,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     None,
                     cursor.map(|cursor| {
                         (
-                            id, frame, padding, text_style, text, false, false, false, cursor,
+                            id, frame, padding, text_style, text, multiline, false, false, cursor,
                         )
                     }),
                     None,

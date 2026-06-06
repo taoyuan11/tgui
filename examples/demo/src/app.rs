@@ -4,6 +4,8 @@ use crate::navigation::DemoPage;
 use crate::{navigation, pages, styles};
 use tgui::prelude::*;
 
+const DEFAULT_MEDIA_VOLUME: f32 = 0.8;
+
 #[derive(Clone)]
 pub(crate) struct DemoContact {
     pub name: &'static str,
@@ -54,7 +56,7 @@ pub(crate) struct VideoPlayer {
 impl VideoPlayer {
     fn new(context: &ViewModelContext) -> Self {
         let controller = VideoController::new(context);
-        controller.set_volume(0.0);
+        controller.set_volume(DEFAULT_MEDIA_VOLUME);
         Self {
             controller,
             source: context.text_controller(""),
@@ -169,7 +171,7 @@ pub(crate) struct App {
 impl ViewModel for App {
     fn new(context: &ViewModelContext) -> Self {
         let audio = AudioController::new(context);
-        audio.set_volume(0.8);
+        audio.set_volume(DEFAULT_MEDIA_VOLUME);
 
         let profile_form = Form::new(context);
         let profile_name = profile_form

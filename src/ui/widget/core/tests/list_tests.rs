@@ -1,6 +1,9 @@
 use super::*;
 
-use crate::ui::widget::{List, ListItem, ListSection, ListSelectionMode, ListStyle, WidgetKey};
+use crate::ui::widget::{
+    ItemLayout, List, ListItem, ListSection, ListSelectionMode, ListStyle, VirtualCacheState,
+    WidgetKey,
+};
 
 #[test]
 fn list_loading_slot_takes_priority_over_empty_slot() {
@@ -214,4 +217,164 @@ fn list_section_headers_render_but_do_not_become_list_items() {
     assert!(children[1].list_item.is_some());
     assert!(children[2].list_item.is_none());
     assert!(children[3].list_item.is_some());
+}
+
+#[test]
+fn list_rows_stretch_content_to_viewport_width() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let items = vec![ListItem::keyed("a", "Alpha contact")];
+    let tree: WidgetTree<()> = WidgetTree::new(
+        List::<&'static str, ()>::new(items, |ctx| {
+            Flex::vertical()
+                .gap(dp(2.0))
+                .child(Text::new(ctx.item).width(pct(100.0)))
+                .child(Text::new("Role - status").width(pct(100.0)))
+                .into()
+        })
+        .height(dp(80.0))
+        .width(dp(240.0)),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 80.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let row_title = rendered
+        .primitives
+        .texts
+        .iter()
+        .find(|text| text.content.as_ref() == "Alpha contact")
+        .expect("row title should render");
+    assert!(
+        row_title.frame.width > dp(180.0),
+        "row title should stretch across the list viewport, got {:?}",
+        row_title.frame
+    );
+}
+
+#[test]
+fn virtual_list_items_use_current_viewport_width_when_cached_hint_is_narrow() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        List::<&'static str, ()>::new(vec![ListItem::keyed("a", "Alpha contact")], |ctx| {
+            Text::new(ctx.item).width(pct(100.0)).into()
+        })
+        .height(dp(80.0))
+        .width(dp(240.0)),
+    );
+
+    let initial_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 80.0),
+    );
+    let list_id = initial_layout.root_id();
+    let mut virtual_states = HashMap::new();
+    virtual_states.insert(
+        list_id,
+        VirtualCacheState {
+            viewport_hint: Some(crate::ui::widget::r#virtual::VirtualViewportHint {
+                width: dp(24.0),
+                height: dp(80.0),
+            }),
+            ..Default::default()
+        },
+    );
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &virtual_states,
+        Rect::new(0.0, 0.0, 240.0, 80.0),
+    );
+    let first_row = layout
+        .layout_root
+        .children
+        .first()
+        .expect("virtual list should lay out a visible row");
+    let first_row_layout = layout
+        .taffy
+        .layout(first_row.node)
+        .expect("row layout should be available");
+    assert!(
+        first_row_layout.size.width > 180.0,
+        "row width should follow the current viewport, got {}",
+        first_row_layout.size.width
+    );
+}
+
+#[test]
+fn measured_list_rows_expand_to_fit_multiline_content() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        List::<&'static str, ()>::new(vec![ListItem::keyed("a", "Alpha contact")], |ctx| {
+            Flex::vertical()
+                .gap(dp(2.0))
+                .child(Text::new(ctx.item).width(pct(100.0)))
+                .child(Text::new("Product lead - Planning Q3 roadmap").width(pct(100.0)))
+                .into()
+        })
+        .item_layout(ItemLayout::Measured {
+            estimate: dp(64.0),
+            spacing: dp(4.0),
+            overscan: 1,
+        })
+        .height(dp(120.0))
+        .width(dp(240.0)),
+    );
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 120.0),
+    );
+    let first_row = layout
+        .layout_root
+        .children
+        .first()
+        .expect("measured List should lay out the visible row");
+    let row_layout = layout
+        .taffy
+        .layout(first_row.node)
+        .expect("row layout should be available");
+    assert!(
+        row_layout.size.height > 50.0,
+        "measured row should expand past the default 40dp item height, got {}",
+        row_layout.size.height
+    );
 }

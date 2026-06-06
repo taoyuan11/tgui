@@ -204,7 +204,7 @@ fn toast_component(app: &App) -> Element<App> {
                 "toast/action",
                 "Snackbar action",
                 "Toast 可以附加一个短动作，适合撤销类操作。",
-                Flex::vertical().gap(dp(8.0)).child(el![
+                Flex::horizontal().gap(dp(8.0)).child(el![
                     Button::new("弹出撤销提示").on_click(Command::new(|app: &mut App| {
                         app.toast_queue.push(
                             Toast::new("文件已移入回收站")

@@ -32,6 +32,10 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         self.root_id
     }
 
+    pub(crate) fn contains_virtual(&self) -> bool {
+        self.resolved_root.contains_virtual()
+    }
+
     pub(crate) fn path_for(&self, widget_id: WidgetId) -> Option<&[usize]> {
         self.paths.get(&widget_id).map(Vec::as_slice)
     }

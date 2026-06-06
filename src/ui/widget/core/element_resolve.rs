@@ -1,6 +1,8 @@
 use super::element_path::resolved_child_elements_with_previous;
 use super::*;
-use crate::ui::widget::r#virtual::{resolve_virtual_window_plan, VirtualResolvedItemMeta};
+use crate::ui::widget::r#virtual::{
+    resolve_virtual_window_plan, VirtualCacheState, VirtualResolvedItemMeta, VirtualViewportHint,
+};
 
 impl<VM: 'static> Element<VM> {
     pub(super) fn resolve(&self, theme: &Theme) -> ResolvedElement<VM> {
@@ -12,13 +14,60 @@ impl<VM: 'static> Element<VM> {
         theme: &Theme,
         previous: Option<&ResolvedElement<VM>>,
     ) -> ResolvedElement<VM> {
-        super::tree::with_widget_stack_frame(|| self.resolve_with_previous_inner(theme, previous))
+        let empty_scroll_offsets = HashMap::new();
+        let empty_virtual_states = HashMap::new();
+        self.resolve_with_previous_and_runtime_state(
+            theme,
+            previous,
+            &empty_scroll_offsets,
+            &empty_virtual_states,
+            VirtualViewportHint::default(),
+        )
+    }
+
+    pub(super) fn resolve_with_runtime_state(
+        &self,
+        theme: &Theme,
+        previous: Option<&ResolvedElement<VM>>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+        fallback_viewport_hint: VirtualViewportHint,
+    ) -> ResolvedElement<VM> {
+        self.resolve_with_previous_and_runtime_state(
+            theme,
+            previous,
+            scroll_offsets,
+            virtual_states,
+            fallback_viewport_hint,
+        )
+    }
+
+    fn resolve_with_previous_and_runtime_state(
+        &self,
+        theme: &Theme,
+        previous: Option<&ResolvedElement<VM>>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+        fallback_viewport_hint: VirtualViewportHint,
+    ) -> ResolvedElement<VM> {
+        super::tree::with_widget_stack_frame(|| {
+            self.resolve_with_previous_inner(
+                theme,
+                previous,
+                scroll_offsets,
+                virtual_states,
+                fallback_viewport_hint,
+            )
+        })
     }
 
     fn resolve_with_previous_inner(
         &self,
         theme: &Theme,
         previous: Option<&ResolvedElement<VM>>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+        fallback_viewport_hint: VirtualViewportHint,
     ) -> ResolvedElement<VM> {
         // `id` may be carried over from the previously resolved element so widget
         // identity stays stable across rebuilds.
@@ -55,7 +104,15 @@ impl<VM: 'static> Element<VM> {
                     Some(&mut child_source_spans),
                 )
                 .into_iter()
-                .map(|(child, previous_child)| child.resolve_with_previous(theme, previous_child))
+                .map(|(child, previous_child)| {
+                    child.resolve_with_previous_and_runtime_state(
+                        theme,
+                        previous_child,
+                        scroll_offsets,
+                        virtual_states,
+                        fallback_viewport_hint.clone(),
+                    )
+                })
                 .collect();
                 ResolvedWidgetKind::Container {
                     layout,
@@ -74,10 +131,38 @@ impl<VM: 'static> Element<VM> {
             } => {
                 let resolved_style = resolved_container_style(style.as_ref(), theme);
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
+                let mut runtime_state = runtime_state.clone();
+                if let Some(cache) = virtual_states.get(&id) {
+                    runtime_state.viewport_hint = cache.viewport_hint.clone();
+                    runtime_state.measured_extents = cache.measured_extents.clone();
+                    runtime_state.widget_ids_by_key = cache.widget_ids_by_key.clone();
+                    runtime_state.bootstrap = runtime_state.viewport_hint.is_none();
+                } else {
+                    runtime_state.viewport_hint = None;
+                    runtime_state.measured_extents.clear();
+                    runtime_state.widget_ids_by_key.clear();
+                    runtime_state.bootstrap = true;
+                }
+                runtime_state.fallback_viewport_hint = fallback_viewport_hint.clone();
+                runtime_state.scroll_offset =
+                    scroll_offsets.get(&id).copied().unwrap_or(Point::ZERO);
+                if matches!(
+                    arrangement.direction(),
+                    crate::ui::widget::VirtualDirection::Vertical
+                ) && content_cross_extent.is_none()
+                {
+                    runtime_state.scroll_offset.x = Dp::ZERO;
+                } else if matches!(
+                    arrangement.direction(),
+                    crate::ui::widget::VirtualDirection::Horizontal
+                ) && content_cross_extent.is_none()
+                {
+                    runtime_state.scroll_offset.y = Dp::ZERO;
+                }
                 let window_plan = resolve_virtual_window_plan(
                     *arrangement,
                     *item_layout,
-                    runtime_state,
+                    &runtime_state,
                     source.len(),
                     runtime_state.fallback_viewport_hint.clone(),
                     content_cross_extent.as_ref().map(|value| value.resolve()),
@@ -120,16 +205,22 @@ impl<VM: 'static> Element<VM> {
                     let item_key = source
                         .key(placement.item_index)
                         .unwrap_or_else(|| WidgetKey::from(placement.item_index));
+                    let use_live_cross_extent =
+                        content_cross_extent.is_none() && arrangement.lanes() == 1;
                     match arrangement.direction() {
                         crate::ui::widget::VirtualDirection::Vertical => {
-                            child.layout.width = Some(Value::Static(
-                                crate::ui::layout::Length::Px(placement.cross_extent),
-                            ));
+                            child.layout.width = Some(Value::Static(if use_live_cross_extent {
+                                crate::ui::layout::Length::Percent(1.0)
+                            } else {
+                                crate::ui::layout::Length::Px(placement.cross_extent)
+                            }));
                         }
                         crate::ui::widget::VirtualDirection::Horizontal => {
-                            child.layout.height = Some(Value::Static(
-                                crate::ui::layout::Length::Px(placement.cross_extent),
-                            ));
+                            child.layout.height = Some(Value::Static(if use_live_cross_extent {
+                                crate::ui::layout::Length::Percent(1.0)
+                            } else {
+                                crate::ui::layout::Length::Px(placement.cross_extent)
+                            }));
                         }
                     }
                     let previous_id = runtime_state.widget_ids_by_key.get(&item_key).copied();
@@ -153,7 +244,13 @@ impl<VM: 'static> Element<VM> {
                     child_meta.push(VirtualResolvedItemMeta {
                         item_index: placement.item_index,
                     });
-                    children.push(child.resolve_with_previous(theme, previous_child));
+                    children.push(child.resolve_with_previous_and_runtime_state(
+                        theme,
+                        previous_child,
+                        scroll_offsets,
+                        virtual_states,
+                        fallback_viewport_hint.clone(),
+                    ));
                 }
                 ResolvedWidgetKind::Virtual {
                     arrangement: *arrangement,
@@ -162,7 +259,7 @@ impl<VM: 'static> Element<VM> {
                     overflow_x: *overflow_x,
                     overflow_y: *overflow_y,
                     style: resolved_style,
-                    runtime_state: runtime_state.clone(),
+                    runtime_state,
                     window_plan,
                     children,
                     child_meta,
