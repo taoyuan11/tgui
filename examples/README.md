@@ -159,6 +159,14 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 - `Image`
 - `Canvas`
 
+运行方式：
+
+```bash
+cargo run --manifest-path examples/demo/Cargo.toml
+```
+
+说明：macOS 当前不支持系统通知 action；普通通知仍可用于展示。
+
 ### `toast_snackbar`
 
 Toast / Snackbar 专项示例。演示：

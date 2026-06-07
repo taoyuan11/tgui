@@ -514,6 +514,12 @@ impl App {
     }
 
     pub(crate) fn send_action_notification(&mut self, ctx: &CommandContext<Self>) {
+        if cfg!(target_os = "macos") {
+            self.notification_status
+                .set("macOS 当前不支持系统通知 action；请使用 Snackbar action 或普通通知。".to_string());
+            return;
+        }
+
         let result = ctx.notifications().send_with_actions(
             NotificationOptions::new("TGUI Demo")
                 .body("请选择一个动作，结果会回到 ViewModel。")

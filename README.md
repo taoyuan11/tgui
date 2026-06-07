@@ -552,7 +552,7 @@ Button::new("发送通知").on_click(Command::new_with_context(|_, ctx| {
 
 - Windows：建议始终设置 `Application::app_id(...)`，这是通知身份的前置条件。
 - Linux：当前通过 `notify-rust` 发送通知，并支持 action 回调。
-- macOS：公开 API 已提供，但当前后端仍依赖额外 bridge，调用时可能返回错误。
+- macOS：支持普通通知；系统通知 action 当前标记为不支持。
 
 ## 图片、画布与视频
 

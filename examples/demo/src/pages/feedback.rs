@@ -324,7 +324,7 @@ fn notification_component(app: &App) -> Element<App> {
             UsageDemo::new(
                 "notification/action",
                 "动作通知",
-                "最多两个 action，点击结果会派发回当前 App。",
+                "最多两个 action，点击结果会派发回当前 App；macOS 当前不支持系统通知 action。",
                 Flex::vertical().gap(dp(8.0)).child(el![
                     Button::new("发送动作通知").on_click(Command::new_with_context(
                         |app: &mut App, ctx| app.send_action_notification(ctx),

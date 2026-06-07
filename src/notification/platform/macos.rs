@@ -7,18 +7,24 @@ use crate::notification::types::{NotificationError, NotificationOptions, Notific
 ///
 /// 现代的 `UNUserNotificationCenter` API 要求进程运行在一个已签名的 `.app`
 /// bundle 中；从裸二进制(例如 `cargo run`)直接调用会以
-/// `bundleProxyForCurrentProcess is nil` 崩溃。因此这里采用与 Linux 后端
-/// (notify-rust + notify-send)相同的“原生优先、CLI 兜底”策略:
+/// `bundleProxyForCurrentProcess is nil` 崩溃。交互式 action 通知还需要稳定
+/// category 注册和系统展示策略配合,在开发态裸二进制下不可可靠支持。因此当前
+/// macOS 后端明确不支持 action 通知,普通通知仍采用“原生优先、CLI 兜底”策略:
 ///
-/// - 运行在 bundle 中:走原生 `UNUserNotificationCenter`(支持权限、声音、
-///   交互动作回调)。
-/// - 未打包(裸二进制):退回到 `osascript display notification`,只展示横幅,
-///   不支持动作按钮回调。
+/// - 带 action:返回不支持错误。
+/// - 运行在 bundle 中的普通通知:走原生 `UNUserNotificationCenter`。
+/// - 未打包(裸二进制)的普通通知:退回到 `osascript display notification`。
 pub(crate) fn platform_send(
     options: NotificationOptions,
     app_id: Option<&str>,
     on_action: Option<NotificationActionHandler>,
 ) -> Result<(), NotificationError> {
+    if !options.action_items().is_empty() {
+        return Err(NotificationError::Backend(
+            "macOS interactive notification actions are not supported by tgui; use plain notifications or in-app Toast/Snackbar instead".to_string(),
+        ));
+    }
+
     if native::is_supported() {
         return native::send(options, app_id, on_action);
     }
@@ -46,12 +52,18 @@ pub(crate) fn platform_permission_status() -> Result<NotificationPermission, Not
 /// 未打包二进制的兜底:用 `osascript` 展示横幅通知。
 ///
 /// `display notification` 无法呈现动作按钮,也无法回传被点击的动作,因此交互
-/// 回调在这里会被丢弃(优雅降级)。该路径只在裸二进制(`cargo run`)下触发。
+/// 通知在这里会返回明确错误。该路径只在裸二进制(`cargo run`)下触发。
 fn fallback_send(
     options: NotificationOptions,
     on_action: Option<NotificationActionHandler>,
 ) -> Result<(), NotificationError> {
     let _ = on_action;
+
+    if !options.action_items().is_empty() {
+        return Err(NotificationError::Backend(
+            "macOS interactive notifications require running from an .app bundle; bare binaries use osascript, which cannot display action buttons".to_string(),
+        ));
+    }
 
     let mut script = String::from("display notification ");
     script.push_str(&applescript_string(options.body_text().unwrap_or("")));
@@ -98,6 +110,39 @@ pub(crate) fn applescript_string(value: &str) -> String {
     }
     escaped.push('"');
     escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::notification::types::NotificationAction;
+
+    #[test]
+    fn fallback_rejects_interactive_notifications() {
+        let result = fallback_send(
+            NotificationOptions::new("Title")
+                .body("Body")
+                .action(NotificationAction::new("open", "Open")),
+            Some(Box::new(|_| {})),
+        );
+
+        assert!(
+            matches!(result, Err(NotificationError::Backend(message)) if message.contains("cannot display action buttons"))
+        );
+    }
+
+    #[test]
+    fn platform_rejects_interactive_notifications() {
+        let result = platform_send(
+            NotificationOptions::new("Title").action(NotificationAction::new("open", "Open")),
+            None,
+            Some(Box::new(|_| {})),
+        );
+
+        assert!(
+            matches!(result, Err(NotificationError::Backend(message)) if message.contains("not supported"))
+        );
+    }
 }
 
 mod native {
