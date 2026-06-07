@@ -109,6 +109,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                         computed.extend(child_chunk);
                     }
                 }
+                let after_child_subtrees = computed.clone();
                 let mut after_children = ComputedScene::default();
                 if show_scrollbar {
                     push_scrollbar_primitives(
@@ -123,14 +124,15 @@ impl<VM: 'static> ResolvedElement<VM> {
                         context.active_scrollbar,
                     );
                 }
+                computed.extend(&after_children);
+                let after_children = computed.delta_since(&after_child_subtrees);
                 caches.chunk_parts.insert(
                     self.id,
                     SceneChunkParts {
                         before_children,
-                        after_children: after_children.clone(),
+                        after_children,
                     },
                 );
-                computed.extend(&after_children);
                 true
             }
             ResolvedWidgetKind::Virtual {
@@ -289,6 +291,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                         computed.extend(child_chunk);
                     }
                 }
+                let after_child_subtrees = computed.clone();
                 computed
                     .virtual_state_updates
                     .push(crate::ui::widget::VirtualSceneStateUpdate {
@@ -313,14 +316,15 @@ impl<VM: 'static> ResolvedElement<VM> {
                     context.hovered_scrollbar,
                     context.active_scrollbar,
                 );
+                computed.extend(&after_children);
+                let after_children = computed.delta_since(&after_child_subtrees);
                 caches.chunk_parts.insert(
                     self.id,
                     SceneChunkParts {
                         before_children,
-                        after_children: after_children.clone(),
+                        after_children,
                     },
                 );
-                computed.extend(&after_children);
                 true
             }
             ResolvedWidgetKind::Portal { .. } => true,

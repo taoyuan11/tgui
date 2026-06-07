@@ -139,6 +139,47 @@ impl<VM> Clone for OverlayLayerBucket<VM> {
 }
 
 impl<VM> OverlayLayerBucket<VM> {
+    fn delta_since(&self, base: &Self) -> Self {
+        let mut delta = Self::default();
+        delta
+            .commands
+            .extend(self.commands.iter().skip(base.commands.len()).cloned());
+        delta.backdrop_blurs.extend(
+            self.backdrop_blurs
+                .iter()
+                .skip(base.backdrop_blurs.len())
+                .copied(),
+        );
+        delta
+            .shapes
+            .extend(self.shapes.iter().skip(base.shapes.len()).copied());
+        delta
+            .textures
+            .extend(self.textures.iter().skip(base.textures.len()).cloned());
+        delta
+            .meshes
+            .extend(self.meshes.iter().skip(base.meshes.len()).cloned());
+        delta
+            .texts
+            .extend(self.texts.iter().skip(base.texts.len()).cloned());
+        delta
+            .hits
+            .extend(self.hits.iter().skip(base.hits.len()).cloned());
+        delta.close_handlers.extend(
+            self.close_handlers
+                .iter()
+                .skip(base.close_handlers.len())
+                .cloned(),
+        );
+        delta.focus_scopes.extend(
+            self.focus_scopes
+                .iter()
+                .skip(base.focus_scopes.len())
+                .cloned(),
+        );
+        delta
+    }
+
     fn extend_from(&mut self, other: &Self) {
         self.commands.extend(other.commands.iter().cloned());
         self.backdrop_blurs
@@ -213,6 +254,105 @@ impl<VM> Default for ComputedScene<VM> {
 }
 
 impl<VM> ComputedScene<VM> {
+    pub(crate) fn delta_since(&self, base: &ComputedScene<VM>) -> ComputedScene<VM> {
+        let mut delta = ComputedScene::default();
+        delta.scene = self.scene.delta_since(&base.scene);
+        delta.hit_regions.extend(
+            self.hit_regions
+                .iter()
+                .skip(base.hit_regions.len())
+                .cloned(),
+        );
+        delta.overlay_hit_regions.extend(
+            self.overlay_hit_regions
+                .iter()
+                .skip(base.overlay_hit_regions.len())
+                .cloned(),
+        );
+        delta.overlay_close_handlers.extend(
+            self.overlay_close_handlers
+                .iter()
+                .skip(base.overlay_close_handlers.len())
+                .cloned(),
+        );
+        delta.focus_scopes.extend(
+            self.focus_scopes
+                .iter()
+                .skip(base.focus_scopes.len())
+                .cloned(),
+        );
+        delta.overlay_anchors.extend(
+            self.overlay_anchors
+                .iter()
+                .filter(|(key, rect)| base.overlay_anchors.get(key) != Some(*rect))
+                .map(|(key, rect)| (*key, *rect)),
+        );
+        delta.portal_entries.extend(
+            self.portal_entries
+                .iter()
+                .skip(base.portal_entries.len())
+                .cloned(),
+        );
+        delta.external_portal_requests.extend(
+            self.external_portal_requests
+                .iter()
+                .skip(base.external_portal_requests.len())
+                .cloned(),
+        );
+        delta.portal_overlay_counts.shapes = self
+            .portal_overlay_counts
+            .shapes
+            .saturating_sub(base.portal_overlay_counts.shapes);
+        delta.portal_overlay_counts.textures = self
+            .portal_overlay_counts
+            .textures
+            .saturating_sub(base.portal_overlay_counts.textures);
+        delta.portal_overlay_counts.meshes = self
+            .portal_overlay_counts
+            .meshes
+            .saturating_sub(base.portal_overlay_counts.meshes);
+        delta.portal_overlay_counts.texts = self
+            .portal_overlay_counts
+            .texts
+            .saturating_sub(base.portal_overlay_counts.texts);
+        delta.portal_overlay_counts.commands = self
+            .portal_overlay_counts
+            .commands
+            .saturating_sub(base.portal_overlay_counts.commands);
+        delta.portal_overlay_counts.hits = self
+            .portal_overlay_counts
+            .hits
+            .saturating_sub(base.portal_overlay_counts.hits);
+        delta.portal_overlay_counts.close_handlers = self
+            .portal_overlay_counts
+            .close_handlers
+            .saturating_sub(base.portal_overlay_counts.close_handlers);
+        delta.portal_overlay_counts.focus_scopes = self
+            .portal_overlay_counts
+            .focus_scopes
+            .saturating_sub(base.portal_overlay_counts.focus_scopes);
+        for i in 0..OVERLAY_LAYER_COUNT {
+            delta.overlay_layers[i] = self.overlay_layers[i].delta_since(&base.overlay_layers[i]);
+        }
+        delta.scroll_regions.extend(
+            self.scroll_regions
+                .iter()
+                .skip(base.scroll_regions.len())
+                .copied(),
+        );
+        if base.ime_cursor_area.is_none() {
+            delta.ime_cursor_area = self.ime_cursor_area;
+        }
+        delta.virtual_state_updates.extend(
+            self.virtual_state_updates
+                .iter()
+                .skip(base.virtual_state_updates.len())
+                .cloned(),
+        );
+        delta.dependencies = self.dependencies.clone();
+        delta
+    }
+
     pub(crate) fn extend(&mut self, other: &ComputedScene<VM>) {
         self.scene.extend(&other.scene);
         self.hit_regions.extend(other.hit_regions.iter().cloned());

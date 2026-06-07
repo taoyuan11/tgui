@@ -98,7 +98,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if let Some(active) = self.active_slider_drag.as_mut() {
                 active.current_value = value;
             }
-            let _ = self.patch_active_slider_scene(Instant::now());
+            if !self.patch_active_slider_scene(Instant::now()) {
+                self.invalidate_computed_scene();
+            }
             return true;
         }
         false

@@ -180,6 +180,78 @@ pub struct ScenePrimitives {
 }
 
 impl ScenePrimitives {
+    pub(crate) fn delta_since(&self, base: &ScenePrimitives) -> ScenePrimitives {
+        let mut delta = ScenePrimitives::default();
+        delta.backdrop_blurs.extend(
+            self.backdrop_blurs
+                .iter()
+                .skip(base.backdrop_blurs.len())
+                .copied(),
+        );
+        delta
+            .brushes
+            .extend(self.brushes.iter().skip(base.brushes.len()).cloned());
+        delta.canvas_composites.extend(
+            self.canvas_composites
+                .iter()
+                .skip(base.canvas_composites.len())
+                .cloned(),
+        );
+        delta
+            .shapes
+            .extend(self.shapes.iter().skip(base.shapes.len()).copied());
+        delta
+            .meshes
+            .extend(self.meshes.iter().skip(base.meshes.len()).cloned());
+        delta
+            .textures
+            .extend(self.textures.iter().skip(base.textures.len()).cloned());
+        #[cfg(feature = "video")]
+        delta.video_textures.extend(
+            self.video_textures
+                .iter()
+                .skip(base.video_textures.len())
+                .cloned(),
+        );
+        delta
+            .texts
+            .extend(self.texts.iter().skip(base.texts.len()).cloned());
+        delta.overlay_shapes.extend(
+            self.overlay_shapes
+                .iter()
+                .skip(base.overlay_shapes.len())
+                .copied(),
+        );
+        delta.overlay_textures.extend(
+            self.overlay_textures
+                .iter()
+                .skip(base.overlay_textures.len())
+                .cloned(),
+        );
+        delta.overlay_meshes.extend(
+            self.overlay_meshes
+                .iter()
+                .skip(base.overlay_meshes.len())
+                .cloned(),
+        );
+        delta.overlay_texts.extend(
+            self.overlay_texts
+                .iter()
+                .skip(base.overlay_texts.len())
+                .cloned(),
+        );
+        delta
+            .commands
+            .extend(self.commands.iter().skip(base.commands.len()).cloned());
+        delta.overlay_commands.extend(
+            self.overlay_commands
+                .iter()
+                .skip(base.overlay_commands.len())
+                .cloned(),
+        );
+        delta
+    }
+
     pub(crate) fn push_render_command(&mut self, command: RenderCommand) {
         match command {
             RenderCommand::BackdropBlur(primitive) => self.push_backdrop_blur(primitive),

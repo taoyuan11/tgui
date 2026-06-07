@@ -1,7 +1,8 @@
 use super::*;
+use crate::theme::ResolvedThemeMode;
 use crate::ui::widget::{
-    Calendar, ColorPicker, DatePicker, NumberInput, TimePicker, Upload, UploadFile, UploadFileId,
-    UploadStatus,
+    Calendar, ColorPicker, DatePicker, NumberInput, PopoverStyle, TimePicker, Upload, UploadFile,
+    UploadFileId, UploadStatus,
 };
 use chrono::{NaiveDate, NaiveTime};
 use std::path::PathBuf;
@@ -101,6 +102,18 @@ fn date_and_time_pickers_emit_popover_content_when_open() {
     assert!(overlay_labels.contains(&"schedule"));
     assert!(overlay_labels.contains(&"09:00"));
     assert!(overlay_labels.contains(&"10:00"));
+    let panel_background_count = rendered
+        .primitives
+        .overlay_shapes
+        .iter()
+        .filter(|shape| {
+            shape.color
+                == PopoverStyle::default_for(ResolvedThemeMode::Dark)
+                    .background
+                    .resolve()
+        })
+        .count();
+    assert!(panel_background_count >= 4);
 
     let trigger_labels = rendered
         .primitives
@@ -110,6 +123,50 @@ fn date_and_time_pickers_emit_popover_content_when_open() {
         .collect::<Vec<_>>();
     assert!(trigger_labels.contains(&"calendar_today"));
     assert!(trigger_labels.contains(&"schedule"));
+}
+
+#[test]
+fn picker_popovers_render_panel_background_in_light_theme() {
+    let theme = Theme::light();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Flex::vertical()
+            .gap(dp(12.0))
+            .child(
+                DatePicker::new(
+                    "2026-06-06",
+                    Some(NaiveDate::from_ymd_opt(2026, 6, 6).unwrap()),
+                    NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+                )
+                .open(true),
+            )
+            .child(ColorPicker::new(Color::hexa(0x3366CCFF)).open(true)),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 420.0, 420.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered.primitives.overlay_shapes.iter().any(|shape| {
+        shape.color
+            == PopoverStyle::default_for(ResolvedThemeMode::Light)
+                .background
+                .resolve()
+    }));
 }
 
 #[test]
@@ -203,6 +260,18 @@ fn color_picker_open_renders_channel_sliders_and_swatches() {
     assert!(labels.contains(&"palette"));
     assert!(labels.contains(&"keyboard_arrow_down"));
     assert!(labels.contains(&"Current color"));
+    let panel_background_count = rendered
+        .primitives
+        .overlay_shapes
+        .iter()
+        .filter(|shape| {
+            shape.color
+                == PopoverStyle::default_for(ResolvedThemeMode::Dark)
+                    .background
+                    .resolve()
+        })
+        .count();
+    assert!(panel_background_count >= 2);
 }
 
 #[test]

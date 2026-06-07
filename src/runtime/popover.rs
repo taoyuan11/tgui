@@ -50,7 +50,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let Some(widget_id) = handle.source_widget_id else {
                 continue;
             };
-            if !handle.rect.contains(cursor) {
+            let inside_hover_region = handle.rect.contains(cursor)
+                || layout
+                    .widget_bounds(widget_id)
+                    .map(|anchor_rect| rect_union_contains(anchor_rect, handle.rect, cursor))
+                    .unwrap_or(false);
+            if !inside_hover_region {
                 continue;
             }
             let Some(resolved) = layout.resolved_widget(widget_id) else {
@@ -66,4 +71,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         None
     }
+}
+
+fn rect_union_contains(a: Rect, b: Rect, point: Point) -> bool {
+    let left = a.x.min(b.x);
+    let top = a.y.min(b.y);
+    let right = a.right().max(b.right());
+    let bottom = a.bottom().max(b.bottom());
+    Rect::new(left, top, right - left, bottom - top).contains(point)
 }

@@ -531,7 +531,7 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
             .on_change(calendar_command)
             .unframed();
         let popover = Popover::new(trigger)
-            .content(content)
+            .content(picker_popover_content(content))
             .open(open)
             .disable(disabled);
         if let Some(command) = on_open_change {
@@ -667,7 +667,7 @@ impl<VM: 'static> From<TimePicker<VM>> for Element<VM> {
             style,
         );
         let popover = Popover::new(trigger)
-            .content(content)
+            .content(picker_popover_content(content))
             .open(open)
             .disable(disabled);
         if let Some(command) = on_open_change {
@@ -908,7 +908,13 @@ impl<VM: 'static> From<ColorPicker<VM>> for Element<VM> {
             on_open_change.clone(),
             style.clone(),
         );
-        let content = color_picker_content(color, disabled.resolve(), on_change, swatches, style);
+        let content = picker_popover_content(color_picker_content(
+            color,
+            disabled.resolve(),
+            on_change,
+            swatches,
+            style,
+        ));
         let popover = Popover::new(trigger)
             .content(content)
             .open(open)
@@ -1690,6 +1696,14 @@ fn color_slider<VM: 'static>(
         .into()
 }
 
+fn picker_popover_content<VM: 'static>(content: impl Into<Element<VM>>) -> Element<VM> {
+    let content = content.into();
+    Stack::new()
+        .style(picker_popover_content_style)
+        .child(content)
+        .into()
+}
+
 fn build_upload_list<VM: 'static>(
     files: Vec<UploadFile>,
     on_remove: Option<ValueCommand<VM, UploadRemove>>,
@@ -2050,6 +2064,15 @@ fn transparent_panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style.surface.background = Some(Value::Static(Color::TRANSPARENT));
     style.surface.border_color = Some(Value::Static(Color::TRANSPARENT));
     style.surface.border_width = Some(Value::Static(dp(0.0)));
+    style.surface.shadow = None;
+    style
+}
+
+fn picker_popover_content_style(mode: ResolvedThemeMode) -> ContainerStyle {
+    let popover = PopoverStyle::default_for(mode);
+    let mut style = ContainerStyle::default_for(mode);
+    style.surface.background = Some(popover.background);
+    style.surface.border_radius = Some(popover.radius);
     style.surface.shadow = None;
     style
 }

@@ -162,6 +162,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 "unhandled widget kind in collect_subtree_cache_tracked"
             );
         }
+        let before_overlays = computed.clone();
 
         self.emit_tooltip_if_visible(context, &mut computed, &visual);
         self.emit_popover_overlay_if_visible(context, &mut computed, &visual);
@@ -170,6 +171,16 @@ impl<VM: 'static> ResolvedElement<VM> {
         self.emit_drawer_close_overlay_if_open(context, &mut computed, &visual);
         self.emit_toast_overlay_if_visible(context, &mut computed, &visual);
         self.emit_portal_if_open(context, &mut computed, &visual);
+
+        if matches!(
+            self.kind,
+            ResolvedWidgetKind::Container { .. } | ResolvedWidgetKind::Virtual { .. }
+        ) {
+            let overlay_delta = computed.delta_since(&before_overlays);
+            if let Some(parts) = caches.chunk_parts.get_mut(&self.id) {
+                parts.after_children.extend(&overlay_delta);
+            }
+        }
 
         timed(Phase::Bookkeeping, || {
             // `chunk_parts` 只被 `recompose_scene_chunk` 读取(scene_layout.rs),而 recompose
