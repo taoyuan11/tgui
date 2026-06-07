@@ -320,6 +320,7 @@ impl WidgetBenchmarkContext {
         let empty_widget_states = WidgetStateMap::default();
         let empty_select_states = HashMap::new();
         let empty_scroll_offsets = HashMap::new();
+        let empty_virtual_states = HashMap::new();
 
         struct ScenePatch {
             old_ids: Vec<WidgetId>,
@@ -353,6 +354,7 @@ impl WidgetBenchmarkContext {
                     &empty_widget_states,
                     &empty_select_states,
                     &empty_scroll_offsets,
+                    &empty_virtual_states,
                     self.viewport,
                     None,
                     None,

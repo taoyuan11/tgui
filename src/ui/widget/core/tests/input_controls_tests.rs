@@ -263,6 +263,32 @@ fn upload_renders_drop_handler_queue_progress_and_remove_action() {
     assert!(labels.contains(&"queued.pdf"));
     assert!(labels.contains(&"Uploading 50%"));
     assert!(labels.contains(&"upload_file"));
+    let upload_badge = rendered
+        .primitives
+        .shapes
+        .iter()
+        .find(|shape| {
+            (shape.rect.width - dp(44.0)).abs() <= dp(0.1)
+                && (shape.rect.height - dp(44.0)).abs() <= dp(0.1)
+        })
+        .expect("upload badge should render");
+    let upload_icon = rendered
+        .primitives
+        .texts
+        .iter()
+        .find(|text| text.content.as_ref() == "upload_file")
+        .expect("upload icon should render");
+    let badge_center_x = upload_badge.rect.x + upload_badge.rect.width * 0.5;
+    let badge_center_y = upload_badge.rect.y + upload_badge.rect.height * 0.5;
+    let icon_center_x = upload_icon.frame.x + upload_icon.frame.width * 0.5;
+    let icon_center_y = upload_icon.frame.y + upload_icon.frame.height * 0.5;
+    assert!(
+        (icon_center_x - badge_center_x).abs() <= dp(0.1)
+            && (icon_center_y - badge_center_y).abs() <= dp(0.1),
+        "upload icon should be centered in its badge: badge={:?}, icon={:?}",
+        upload_badge.rect,
+        upload_icon.frame
+    );
     assert!(
         labels
             .iter()

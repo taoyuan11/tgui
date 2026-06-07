@@ -1271,11 +1271,17 @@ fn solid_color_preview<VM: 'static>(color: Color, size: Dp) -> Element<VM> {
 }
 
 fn upload_badge<VM: 'static>() -> Element<VM> {
+    let icon_box = dp(30.0);
     Flex::vertical()
         .size(dp(44.0), dp(44.0))
+        .shrink(0.0)
         .center()
         .style(accent_badge_style)
-        .child(material_icon(ICON_UPLOAD, sp(26.0)))
+        .child(
+            Text::new(ICON_UPLOAD)
+                .size(icon_box, icon_box)
+                .style(upload_icon_text_style),
+        )
         .into()
 }
 
@@ -2059,6 +2065,12 @@ fn icon_text_style(mode: ResolvedThemeMode, size: crate::ui::unit::Sp) -> TextWi
         weight: FontWeight::Regular,
         letter_spacing: Some(sp(0.0)),
     };
+    style
+}
+
+fn upload_icon_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
+    let mut style = icon_text_style(mode, sp(26.0));
+    style.typography.line_height = Some(sp(18.0));
     style
 }
 
