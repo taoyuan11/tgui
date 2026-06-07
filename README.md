@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="./docs/images/tgui_logo.png" width="150px" alt="logo">
+  <img src="./docs/public/images/tgui_logo.png" width="150px" alt="logo">
 </p>
 
 `tgui` 是一个基于 `wgpu` 的 Rust GUI 框架，强调这几件事：
@@ -30,6 +30,17 @@
 ### MSRV
 
 最低支持 Rust 版本（MSRV）为 **`1.85`**。MSRV 提升被视为 minor-level 变更并在 CHANGELOG 中显式标注。
+
+## 文档站开发
+
+项目文档使用 VitePress，文档工程位于 [`docs`](./docs/)：
+
+```sh
+pnpm --dir docs install
+pnpm --dir docs dev
+pnpm --dir docs build
+pnpm --dir docs preview
+```
 
 ## 当前能力概览
 
@@ -639,7 +650,7 @@ if let Some(hit) = scene.query_point(Point::new(12.0, 12.0)) {
 }
 ```
 
-更完整的能力说明、限制和 retained scene 建议见 [docs/canvas.md](D:/Project/Rust/libs/tgui/docs/canvas.md)。
+更完整的能力说明、限制和 retained scene 建议见 [Canvas 文档](./docs/features/canvas.md)。
 
 ### 通用背景
 
