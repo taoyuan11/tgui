@@ -31,8 +31,8 @@ fn text_background_matches_measured_text_width() {
     let background = crate::foundation::color::Color::RED;
     let tree: WidgetTree<()> =
         WidgetTree::new(Stack::new().size(dp(52.0), dp(52.0)).center().child(
-            Text::new("A").style(move |mode| {
-                let mut style = text_style(mode, None);
+            Text::new("A").style_full(move |ctx| {
+                let mut style = text_style(ctx, None);
                 style.surface.background = Some(background.into());
                 style
             }),
@@ -74,7 +74,7 @@ fn text_background_matches_measured_text_width() {
 fn larger_font_sizes_scale_default_line_height() {
     let theme = Theme::default();
     let mut text = Text::new("Background Effects Gallery");
-    let style = text_style(resolved_theme_mode(&theme), Some(sp(30.0)));
+    let style = text_style(&StyleContext::from_theme(&theme), Some(sp(30.0)));
     super::apply_text_widget_style(&mut text, &style);
     let (font_size, line_height, _) = resolved_text_metrics(&text, &theme, UnitContext::default());
 

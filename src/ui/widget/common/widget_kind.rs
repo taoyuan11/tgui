@@ -718,6 +718,82 @@ impl<VM: 'static> DataGridResizeHandleState<VM> {
     }
 }
 
+pub(crate) struct SplitterHandleState<VM> {
+    pub axis: Axis,
+    pub index: usize,
+    pub sizes: Vec<f32>,
+    pub constraints: Vec<(f32, f32)>,
+    pub step: f32,
+    pub on_resize: Option<ValueCommand<VM, crate::ui::widget::SplitterResize>>,
+}
+
+impl<VM> Clone for SplitterHandleState<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            axis: self.axis,
+            index: self.index,
+            sizes: self.sizes.clone(),
+            constraints: self.constraints.clone(),
+            step: self.step,
+            on_resize: self.on_resize.clone(),
+        }
+    }
+}
+
+impl<VM: 'static> SplitterHandleState<VM> {
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> SplitterHandleState<RootVm> {
+        SplitterHandleState {
+            axis: self.axis,
+            index: self.index,
+            sizes: self.sizes,
+            constraints: self.constraints,
+            step: self.step,
+            on_resize: self.on_resize.map(|command| command.scope(selector)),
+        }
+    }
+}
+
+pub(crate) struct CarouselAutoPlayState<VM> {
+    pub id: WidgetId,
+    pub frame: Rect,
+    pub selected: usize,
+    pub count: usize,
+    pub interval: std::time::Duration,
+    pub on_change: Option<ValueCommand<VM, usize>>,
+}
+
+impl<VM> Clone for CarouselAutoPlayState<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            frame: self.frame,
+            selected: self.selected,
+            count: self.count,
+            interval: self.interval,
+            on_change: self.on_change.clone(),
+        }
+    }
+}
+
+impl<VM: 'static> CarouselAutoPlayState<VM> {
+    pub(crate) fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> CarouselAutoPlayState<RootVm> {
+        CarouselAutoPlayState {
+            id: self.id,
+            frame: self.frame,
+            selected: self.selected,
+            count: self.count,
+            interval: self.interval,
+            on_change: self.on_change.map(|command| command.scope(selector)),
+        }
+    }
+}
+
 impl<VM> Clone for ListItemState<VM> {
     fn clone(&self) -> Self {
         Self {

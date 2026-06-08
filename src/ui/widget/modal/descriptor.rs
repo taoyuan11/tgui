@@ -11,9 +11,9 @@
 use std::sync::Arc;
 
 use crate::foundation::view_model::ValueCommand;
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::Value;
-use crate::ui::widget::style::ModalStyle;
+use crate::ui::widget::style::{ModalStyle, StyleResolver};
 use crate::ui::widget::WidgetId;
 
 /// 挂在 `Element::modal` 上的 Modal 状态描述符。
@@ -25,7 +25,7 @@ pub(crate) struct ModalDescriptor<VM> {
     pub(crate) return_focus_to: Option<WidgetId>,
     pub(crate) backdrop_widget_id: WidgetId,
     pub(crate) card_widget_id: WidgetId,
-    pub(crate) style: Option<ModalStyle>,
+    pub(crate) style: Option<StyleResolver<ModalStyle>>,
 }
 
 impl<VM> Clone for ModalDescriptor<VM> {
@@ -64,10 +64,13 @@ impl<VM> ModalDescriptor<VM> {
         }
     }
 
-    /// 按主题模式解析最终样式。
-    pub(crate) fn resolved_style(&self, mode: ResolvedThemeMode) -> ModalStyle {
+    /// 按当前主题解析最终样式。
+    pub(crate) fn resolved_style(&self, context: &StyleContext<'_>) -> ModalStyle {
+        let mut base = ModalStyle::default_for_theme(context.theme);
+        context.theme.components.modal.apply(&mut base, context);
         self.style
-            .clone()
-            .unwrap_or_else(|| ModalStyle::default_for(mode))
+            .as_ref()
+            .map(|resolver| resolver.resolve_from(base.clone(), context))
+            .unwrap_or(base)
     }
 }

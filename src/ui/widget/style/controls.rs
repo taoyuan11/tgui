@@ -1,36 +1,61 @@
+mod avatar;
+mod badge;
+mod breadcrumb;
+mod card;
+mod carousel;
+mod collapse;
+mod combobox;
 mod divider;
+mod icon;
 mod input;
+mod pagination;
 mod progress;
+mod rating;
+mod rich_text;
+mod skeleton;
 mod slider;
 mod spinner;
+mod splitter;
 
 use crate::foundation::color::Color;
-use crate::theme::FontWeight;
-use crate::theme::ResolvedThemeMode;
+use crate::theme::{FontWeight, ResolvedThemeMode};
 use crate::ui::layout::{Insets, Value};
-use crate::ui::theme::{Shadow, Stateful, TextStyle};
-use crate::ui::unit::{dp, sp, Dp};
+use crate::ui::theme::{Shadow, StateValue, TextStyle, Theme};
+use crate::ui::unit::{dp, Dp};
 
 use super::super::common::ButtonVariantKind;
 use super::palette::{
-    body_text_style, border_hover_lighten, hover_lighten, label_text_style, palette,
-    stateful_colors, stateful_single, surface_hover_lighten,
+    border_hover_lighten, hover_lighten, palette_from_theme, stateful_colors, stateful_single,
+    surface_hover_lighten,
 };
 use super::shared::{FocusRingOverride, WidgetSurfaceStyle};
 
+pub use self::avatar::{AvatarShape, AvatarStyle};
+pub use self::badge::{BadgeStyle, BadgeTone};
+pub use self::breadcrumb::BreadcrumbStyle;
+pub use self::card::CardStyle;
+pub use self::carousel::CarouselStyle;
+pub use self::collapse::CollapseStyle;
+pub use self::combobox::ComboboxStyle;
 pub use self::divider::DividerStyle;
+pub use self::icon::IconStyle;
 pub use self::input::{InputStyle, TextareaStyle};
+pub use self::pagination::PaginationStyle;
 pub use self::progress::ProgressBarStyle;
+pub use self::rating::RatingStyle;
+pub use self::rich_text::RichTextStyle;
+pub use self::skeleton::SkeletonStyle;
 pub use self::slider::SliderStyle;
 pub use self::spinner::SpinnerStyle;
+pub use self::splitter::SplitterStyle;
 
 /// 按钮 widget 的样式定义。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ButtonStyle {
     pub surface: WidgetSurfaceStyle,
-    pub background: Stateful<Value<Color>>,
-    pub foreground: Stateful<Value<Color>>,
-    pub border: Stateful<Value<Color>>,
+    pub background: StateValue<Value<Color>>,
+    pub foreground: StateValue<Value<Color>>,
+    pub border: StateValue<Value<Color>>,
     pub focus_ring: Option<FocusRingOverride>,
     pub border_width: Value<Dp>,
     pub radius: Value<Dp>,
@@ -41,9 +66,28 @@ pub struct ButtonStyle {
 }
 
 impl ButtonStyle {
-    /// 按解析后的主题模式和按钮变体创建默认样式。
-    pub fn default_for(mode: ResolvedThemeMode, variant: ButtonVariantKind) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme, variant: ButtonVariantKind) -> Self {
+        let palette = palette_from_theme(theme);
+        Self::from_palette(
+            palette,
+            variant,
+            theme.radius.md,
+            theme.spacing.sm,
+            theme.spacing.xs,
+            dp(32.0),
+            theme.typography.label.clone(),
+        )
+    }
+
+    fn from_palette(
+        palette: super::palette::Palette,
+        variant: ButtonVariantKind,
+        radius: Dp,
+        padding_x: Dp,
+        padding_y: Dp,
+        min_height: Dp,
+        text_style: TextStyle,
+    ) -> Self {
         let (background, foreground, border, border_width) = match variant {
             ButtonVariantKind::Primary => (
                 stateful_colors(
@@ -138,11 +182,11 @@ impl ButtonStyle {
             border,
             focus_ring: None,
             border_width: Value::Static(border_width),
-            radius: Value::Static(dp(8.0)),
-            padding_x: dp(8.0),
-            padding_y: dp(4.0),
-            min_height: dp(32.0),
-            text_style: label_text_style(),
+            radius: Value::Static(radius),
+            padding_x,
+            padding_y,
+            min_height,
+            text_style,
         }
     }
 }
@@ -151,13 +195,13 @@ impl ButtonStyle {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CheckboxStyle {
     pub surface: WidgetSurfaceStyle,
-    pub background: Stateful<Value<Color>>,
-    pub background_checked: Stateful<Value<Color>>,
-    pub border: Stateful<Value<Color>>,
-    pub border_checked: Stateful<Value<Color>>,
+    pub background: StateValue<Value<Color>>,
+    pub background_checked: StateValue<Value<Color>>,
+    pub border: StateValue<Value<Color>>,
+    pub border_checked: StateValue<Value<Color>>,
     pub focus_ring: Option<FocusRingOverride>,
-    pub checkmark: Stateful<Value<Color>>,
-    pub label: Stateful<Value<Color>>,
+    pub checkmark: StateValue<Value<Color>>,
+    pub label: StateValue<Value<Color>>,
     pub border_width: Value<Dp>,
     pub radius: Value<Dp>,
     pub size: Dp,
@@ -166,9 +210,8 @@ pub struct CheckboxStyle {
 }
 
 impl CheckboxStyle {
-    /// 按解析后的主题模式创建默认复选框样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_single(
@@ -208,11 +251,11 @@ impl CheckboxStyle {
                 palette.on_surface,
                 palette.disabled_content,
             ),
-            border_width: Value::Static(dp(1.0)),
-            radius: Value::Static(dp(8.0)),
-            size: dp(16.0),
-            label_gap: dp(8.0),
-            text_style: label_text_style(),
+            border_width: Value::Static(theme.border.thin),
+            radius: Value::Static(theme.radius.md),
+            size: theme.spacing.md,
+            label_gap: theme.spacing.sm,
+            text_style: theme.typography.label.clone(),
         }
     }
 }
@@ -221,13 +264,13 @@ impl CheckboxStyle {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RadioStyle {
     pub surface: WidgetSurfaceStyle,
-    pub background: Stateful<Value<Color>>,
-    pub background_checked: Stateful<Value<Color>>,
-    pub border: Stateful<Value<Color>>,
-    pub border_checked: Stateful<Value<Color>>,
+    pub background: StateValue<Value<Color>>,
+    pub background_checked: StateValue<Value<Color>>,
+    pub border: StateValue<Value<Color>>,
+    pub border_checked: StateValue<Value<Color>>,
     pub focus_ring: Option<FocusRingOverride>,
-    pub indicator: Stateful<Value<Color>>,
-    pub label: Stateful<Value<Color>>,
+    pub indicator: StateValue<Value<Color>>,
+    pub label: StateValue<Value<Color>>,
     pub border_width: Value<Dp>,
     pub radius: Value<Dp>,
     pub size: Dp,
@@ -236,9 +279,8 @@ pub struct RadioStyle {
 }
 
 impl RadioStyle {
-    /// 按解析后的主题模式创建默认单选框样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
@@ -259,17 +301,17 @@ impl RadioStyle {
                 palette.outline.darken(border_hover_lighten()),
                 palette.disabled_surface,
             ),
-            border_checked: stateful_colors(
+            border_checked: stateful_single(
                 palette.primary,
-                palette.primary.lighten(hover_lighten()),
-                palette.primary.darken(hover_lighten()),
+                palette.primary,
+                palette.primary,
                 palette.disabled_surface,
             ),
             focus_ring: None,
-            indicator: stateful_colors(
+            indicator: stateful_single(
                 palette.primary,
-                palette.primary.lighten(hover_lighten()),
-                palette.primary.darken(hover_lighten()),
+                palette.primary,
+                palette.primary,
                 palette.disabled_content,
             ),
             label: stateful_single(
@@ -278,11 +320,11 @@ impl RadioStyle {
                 palette.on_surface,
                 palette.disabled_content,
             ),
-            border_width: Value::Static(dp(1.0)),
-            radius: Value::Static(dp(999.0)),
-            size: dp(16.0),
-            label_gap: dp(8.0),
-            text_style: label_text_style(),
+            border_width: Value::Static(theme.border.thin),
+            radius: Value::Static(theme.radius.full),
+            size: theme.spacing.md,
+            label_gap: theme.spacing.sm,
+            text_style: theme.typography.label.clone(),
         }
     }
 }
@@ -291,12 +333,12 @@ impl RadioStyle {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SwitchStyle {
     pub surface: WidgetSurfaceStyle,
-    pub track: Stateful<Value<Color>>,
-    pub track_checked: Stateful<Value<Color>>,
-    pub thumb: Stateful<Value<Color>>,
-    pub thumb_checked: Stateful<Value<Color>>,
-    pub border: Stateful<Value<Color>>,
-    pub border_checked: Stateful<Value<Color>>,
+    pub track: StateValue<Value<Color>>,
+    pub track_checked: StateValue<Value<Color>>,
+    pub thumb: StateValue<Value<Color>>,
+    pub thumb_checked: StateValue<Value<Color>>,
+    pub border: StateValue<Value<Color>>,
+    pub border_checked: StateValue<Value<Color>>,
     pub focus_ring: Option<FocusRingOverride>,
     pub border_width: Value<Dp>,
     pub radius: Value<Dp>,
@@ -306,9 +348,8 @@ pub struct SwitchStyle {
 }
 
 impl SwitchStyle {
-    /// 按解析后的主题模式创建默认开关样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
             track: stateful_single(
@@ -324,15 +365,15 @@ impl SwitchStyle {
                 palette.disabled_surface,
             ),
             thumb: stateful_single(
-                Color::WHITE,
-                Color::WHITE,
-                Color::WHITE,
+                palette.surface,
+                palette.surface,
+                palette.surface,
                 palette.disabled_content,
             ),
             thumb_checked: stateful_single(
-                Color::WHITE,
-                Color::WHITE,
-                Color::WHITE,
+                palette.on_primary,
+                palette.on_primary,
+                palette.on_primary,
                 palette.disabled_content,
             ),
             border: stateful_colors(
@@ -348,9 +389,9 @@ impl SwitchStyle {
                 palette.disabled_surface,
             ),
             focus_ring: None,
-            border_width: Value::Static(dp(0.0)),
-            radius: Value::Static(dp(999.0)),
-            padding: Insets::all(dp(4.0)),
+            border_width: Value::Static(theme.border.none),
+            radius: Value::Static(theme.radius.full),
+            padding: Insets::all(theme.spacing.xs),
             width: dp(42.0),
             height: dp(24.0),
         }
@@ -361,14 +402,14 @@ impl SwitchStyle {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SelectStyle {
     pub surface: WidgetSurfaceStyle,
-    pub background: Stateful<Value<Color>>,
-    pub text: Stateful<Value<Color>>,
-    pub placeholder: Stateful<Value<Color>>,
-    pub border: Stateful<Value<Color>>,
+    pub background: StateValue<Value<Color>>,
+    pub text: StateValue<Value<Color>>,
+    pub placeholder: StateValue<Value<Color>>,
+    pub border: StateValue<Value<Color>>,
     pub focus_ring: Option<FocusRingOverride>,
-    pub arrow: Stateful<Value<Color>>,
+    pub arrow: StateValue<Value<Color>>,
     pub menu_background: Value<Color>,
-    pub option_background: Stateful<Value<Color>>,
+    pub option_background: StateValue<Value<Color>>,
     pub selected_option_background: Value<Color>,
     pub border_width: Value<Dp>,
     pub radius: Value<Dp>,
@@ -381,9 +422,8 @@ pub struct SelectStyle {
 }
 
 impl SelectStyle {
-    /// 按解析后的主题模式创建默认下拉选择样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
@@ -424,15 +464,15 @@ impl SelectStyle {
                 palette.surface_high.darken(surface_hover_lighten()),
                 Color::TRANSPARENT,
             ),
-            selected_option_background: Value::Static(palette.surface_high),
-            border_width: Value::Static(dp(1.0)),
-            radius: Value::Static(dp(12.0)),
-            padding_x: dp(16.0),
-            padding_y: dp(0.0),
+            selected_option_background: Value::Static(theme.colors.primary_container),
+            border_width: Value::Static(theme.border.thin),
+            radius: Value::Static(theme.radius.lg),
+            padding_x: theme.spacing.md,
+            padding_y: Dp::ZERO,
             min_height: dp(40.0),
             option_height: dp(40.0),
-            menu_gap: dp(2.0),
-            text_style: body_text_style(),
+            menu_gap: theme.spacing.xxs,
+            text_style: theme.typography.body.clone(),
         }
     }
 }
@@ -455,11 +495,9 @@ pub struct TooltipStyle {
 }
 
 impl TooltipStyle {
-    /// 按解析后的主题模式创建默认 tooltip 样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
-        // Tooltip 习惯上是"反色"——浅色主题用深色背景，深色主题用浅色背景。
-        let (background, foreground) = match mode {
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
+        let (background, foreground) = match theme.mode {
             ResolvedThemeMode::Light => (palette.on_surface, palette.surface),
             ResolvedThemeMode::Dark => (palette.surface_high, palette.on_surface),
         };
@@ -467,21 +505,15 @@ impl TooltipStyle {
             background,
             foreground,
             border: Color::TRANSPARENT,
-            border_width: dp(0.0),
-            radius: dp(6.0),
-            padding: Insets::symmetric(dp(8.0), dp(4.0)),
+            border_width: theme.border.none,
+            radius: theme.radius.sm,
+            padding: Insets::symmetric(theme.spacing.sm, theme.spacing.xs),
             max_width: dp(240.0),
-            offset: dp(8.0),
-            pointer_size: dp(8.0),
-            pointer_inset: dp(16.0),
-            shadow: Shadow {
-                offset_x: dp(0.0),
-                offset_y: dp(6.0),
-                blur: dp(16.0),
-                spread: dp(0.0),
-                color: foreground.with_alpha_factor(0.18),
-            },
-            text_style: label_text_style(),
+            offset: theme.spacing.sm,
+            pointer_size: theme.spacing.sm,
+            pointer_inset: theme.spacing.md,
+            shadow: theme.elevation.sm.clone(),
+            text_style: theme.typography.label.clone(),
         }
     }
 }
@@ -504,8 +536,8 @@ pub struct PopoverStyle {
 }
 
 impl PopoverStyle {
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let menu = MenuStyle::default_for(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let menu = MenuStyle::default_for_theme(theme);
         Self {
             surface: menu.surface,
             background: menu.background,
@@ -513,12 +545,12 @@ impl PopoverStyle {
             border_width: menu.border_width,
             radius: menu.radius,
             shadow: menu.shadow,
-            padding: Insets::all(dp(12.0)),
+            padding: Insets::all(theme.spacing.md),
             min_width: dp(220.0),
             max_width: dp(420.0),
-            offset: dp(8.0),
+            offset: theme.spacing.sm,
             pointer_size: None,
-            pointer_inset: dp(20.0),
+            pointer_inset: theme.spacing.lg,
         }
     }
 }
@@ -544,15 +576,15 @@ pub struct MenuStyle {
     /// 单个菜单项内部 padding。
     pub item_padding: Insets,
     pub item_min_height: Dp,
-    pub item_background: Stateful<Value<Color>>,
-    pub item_foreground: Stateful<Value<Color>>,
+    pub item_background: StateValue<Value<Color>>,
+    pub item_foreground: StateValue<Value<Color>>,
     pub item_icon_size: Dp,
     pub item_icon_gap: Dp,
     pub shortcut_color: Value<Color>,
     pub shortcut_gap: Dp,
     pub checked_indicator_color: Value<Color>,
     pub submenu_arrow_size: Dp,
-    pub submenu_arrow_color: Stateful<Value<Color>>,
+    pub submenu_arrow_color: StateValue<Value<Color>>,
     pub separator_color: Value<Color>,
     pub separator_height: Dp,
     pub separator_inset_x: Dp,
@@ -560,27 +592,20 @@ pub struct MenuStyle {
 }
 
 impl MenuStyle {
-    /// 按解析后的主题模式创建默认菜单样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(palette.surface),
-            border: Value::Static(palette.outline),
-            border_width: Value::Static(dp(1.0)),
-            radius: Value::Static(dp(8.0)),
-            shadow: Shadow {
-                offset_x: dp(0.0),
-                offset_y: dp(8.0),
-                blur: dp(24.0),
-                spread: dp(0.0),
-                color: Color::BLACK.with_alpha_factor(0.18),
-            },
+            background: Value::Static(theme.colors.surface),
+            border: Value::Static(theme.colors.outline),
+            border_width: Value::Static(theme.border.thin),
+            radius: Value::Static(theme.radius.md),
+            shadow: theme.elevation.md.clone(),
             min_width: dp(160.0),
             max_width: dp(360.0),
-            padding: Insets::symmetric(dp(0.0), dp(4.0)),
-            item_padding: Insets::symmetric(dp(12.0), dp(6.0)),
-            item_min_height: dp(32.0),
+            padding: Insets::symmetric(Dp::ZERO, theme.spacing.xs),
+            item_padding: Insets::symmetric(theme.spacing.md, theme.spacing.xs + theme.spacing.xxs),
+            item_min_height: theme.spacing.xl,
             item_background: stateful_colors(
                 Color::TRANSPARENT,
                 palette.surface_high.lighten(surface_hover_lighten()),
@@ -593,22 +618,22 @@ impl MenuStyle {
                 palette.on_surface,
                 palette.disabled_content,
             ),
-            item_icon_size: dp(16.0),
-            item_icon_gap: dp(10.0),
+            item_icon_size: theme.spacing.md,
+            item_icon_gap: theme.spacing.sm,
             shortcut_color: Value::Static(palette.on_surface_muted),
-            shortcut_gap: dp(16.0),
-            checked_indicator_color: Value::Static(palette.primary),
-            submenu_arrow_size: dp(8.0),
+            shortcut_gap: theme.spacing.lg,
+            checked_indicator_color: Value::Static(theme.colors.primary),
+            submenu_arrow_size: theme.spacing.sm,
             submenu_arrow_color: stateful_single(
                 palette.on_surface_muted,
                 palette.on_surface,
                 palette.on_surface,
                 palette.disabled_content,
             ),
-            separator_color: Value::Static(palette.outline_muted),
-            separator_height: dp(1.0),
-            separator_inset_x: dp(8.0),
-            text_style: label_text_style(),
+            separator_color: Value::Static(theme.colors.outline_muted),
+            separator_height: theme.border.thin,
+            separator_inset_x: theme.spacing.sm,
+            text_style: theme.typography.label.clone(),
         }
     }
 }
@@ -631,8 +656,8 @@ pub struct MenuBarStyle {
     /// 顶级条目左右 padding。
     pub entry_padding_x: Dp,
     pub entry_min_width: Dp,
-    pub entry_background: Stateful<Value<Color>>,
-    pub entry_foreground: Stateful<Value<Color>>,
+    pub entry_background: StateValue<Value<Color>>,
+    pub entry_foreground: StateValue<Value<Color>>,
     /// 条目高亮（active=该 entry 展开了下拉时）的强调色。
     pub entry_active_background: Value<Color>,
     pub entry_gap: Dp,
@@ -640,19 +665,18 @@ pub struct MenuBarStyle {
 }
 
 impl MenuBarStyle {
-    /// 按解析后的主题模式创建默认 MenuBar 样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(palette.surface_low),
-            border: Value::Static(palette.outline_muted),
-            border_width: Value::Static(dp(0.0)),
-            radius: Value::Static(dp(0.0)),
-            padding: Insets::symmetric(dp(4.0), dp(2.0)),
-            height: dp(32.0),
-            entry_padding_x: dp(10.0),
-            entry_min_width: dp(48.0),
+            background: Value::Static(theme.colors.surface_low),
+            border: Value::Static(theme.colors.outline_muted),
+            border_width: Value::Static(theme.border.none),
+            radius: Value::Static(theme.radius.none),
+            padding: Insets::symmetric(theme.spacing.xs, theme.spacing.xxs),
+            height: theme.spacing.xl,
+            entry_padding_x: theme.spacing.sm + theme.spacing.xxs,
+            entry_min_width: theme.spacing.xxl + theme.spacing.sm,
             entry_background: stateful_colors(
                 Color::TRANSPARENT,
                 palette.surface_high.lighten(surface_hover_lighten()),
@@ -665,9 +689,9 @@ impl MenuBarStyle {
                 palette.on_surface,
                 palette.disabled_content,
             ),
-            entry_active_background: Value::Static(palette.surface_high),
-            entry_gap: dp(2.0),
-            text_style: label_text_style(),
+            entry_active_background: Value::Static(theme.colors.surface_high),
+            entry_gap: theme.spacing.xxs,
+            text_style: theme.typography.label.clone(),
         }
     }
 }
@@ -678,9 +702,9 @@ pub struct TabsStyle {
     pub surface: WidgetSurfaceStyle,
     pub tab_bar_background: Value<Color>,
     pub panel_background: Value<Color>,
-    pub tab_background: Stateful<Value<Color>>,
+    pub tab_background: StateValue<Value<Color>>,
     pub active_tab_background: Value<Color>,
-    pub tab_foreground: Stateful<Value<Color>>,
+    pub tab_foreground: StateValue<Value<Color>>,
     pub active_tab_foreground: Value<Color>,
     pub indicator_color: Value<Color>,
     pub border: Value<Color>,
@@ -696,38 +720,37 @@ pub struct TabsStyle {
 }
 
 impl TabsStyle {
-    /// 按解析后的主题模式创建默认 Tabs 样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            tab_bar_background: Value::Static(palette.surface_low),
-            panel_background: Value::Static(palette.surface),
+            tab_bar_background: Value::Static(theme.colors.surface_low),
+            panel_background: Value::Static(theme.colors.surface),
             tab_background: stateful_colors(
                 Color::TRANSPARENT,
                 palette.surface_high.lighten(surface_hover_lighten()),
                 palette.surface_high.darken(surface_hover_lighten()),
                 Color::TRANSPARENT,
             ),
-            active_tab_background: Value::Static(palette.surface_high),
+            active_tab_background: Value::Static(theme.colors.surface_high),
             tab_foreground: stateful_single(
                 palette.on_surface_muted,
                 palette.on_surface,
                 palette.on_surface,
                 palette.disabled_content,
             ),
-            active_tab_foreground: Value::Static(palette.primary),
-            indicator_color: Value::Static(palette.primary),
-            border: Value::Static(palette.outline_muted),
-            border_width: Value::Static(dp(1.0)),
-            radius: Value::Static(dp(8.0)),
-            tab_padding: Insets::symmetric(dp(12.0), dp(6.0)),
-            tab_min_height: dp(36.0),
+            active_tab_foreground: Value::Static(theme.colors.primary),
+            indicator_color: Value::Static(theme.colors.primary),
+            border: Value::Static(theme.colors.outline_muted),
+            border_width: Value::Static(theme.border.thin),
+            radius: Value::Static(theme.radius.lg),
+            tab_padding: Insets::symmetric(theme.spacing.md, theme.spacing.xs + theme.spacing.xxs),
+            tab_min_height: theme.spacing.xl + theme.spacing.xs,
             tab_min_width: dp(72.0),
-            tab_gap: dp(4.0),
-            panel_padding: Insets::all(dp(12.0)),
-            indicator_thickness: dp(3.0),
-            text_style: label_text_style(),
+            tab_gap: theme.spacing.xs,
+            panel_padding: Insets::all(theme.spacing.md),
+            indicator_thickness: theme.border.normal,
+            text_style: theme.typography.label.clone(),
         }
     }
 }
@@ -773,39 +796,29 @@ pub struct ModalStyle {
 }
 
 impl ModalStyle {
-    /// 按解析后的主题模式创建默认样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
-        // backdrop alpha 在 light/dark 下都用 ~50% 黑遮罩，足够把主界面"压暗"。
-        let backdrop = Color::rgba(0, 0, 0, 0x80);
+    pub fn default_for_theme(theme: &Theme) -> Self {
         Self {
-            backdrop_color: Value::Static(backdrop),
+            backdrop_color: Value::Static(Color::rgba(0, 0, 0, 0x80)),
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(palette.surface),
-            border: Value::Static(palette.outline_muted),
-            border_width: Value::Static(dp(1.0)),
-            radius: Value::Static(dp(12.0)),
-            shadow: Shadow {
-                offset_x: dp(0.0),
-                offset_y: dp(16.0),
-                blur: dp(40.0),
-                spread: dp(0.0),
-                color: Color::BLACK.with_alpha_factor(0.32),
-            },
+            background: Value::Static(theme.colors.surface),
+            border: Value::Static(theme.colors.outline_muted),
+            border_width: Value::Static(theme.border.thin),
+            radius: Value::Static(theme.radius.lg),
+            shadow: theme.elevation.lg.clone(),
             min_width: dp(280.0),
             max_width: dp(560.0),
             max_height: dp(640.0),
-            margin: Insets::all(dp(24.0)),
-            padding: Insets::all(dp(0.0)),
+            margin: Insets::all(theme.spacing.lg),
+            padding: Insets::all(Dp::ZERO),
             title_text_style: {
-                let mut style = label_text_style();
+                let mut style = theme.typography.label.clone();
                 style.size = crate::ui::unit::sp(18.0);
                 style
             },
-            title_padding: Insets::symmetric(dp(20.0), dp(16.0)),
-            content_padding: Insets::symmetric(dp(20.0), dp(12.0)),
-            actions_gap: dp(8.0),
-            actions_padding: Insets::symmetric(dp(20.0), dp(16.0)),
+            title_padding: Insets::symmetric(theme.spacing.lg, theme.spacing.md),
+            content_padding: Insets::symmetric(theme.spacing.lg, theme.spacing.sm),
+            actions_gap: theme.spacing.sm,
+            actions_padding: Insets::symmetric(theme.spacing.lg, theme.spacing.md),
             enter_scale: 0.96,
         }
     }
@@ -843,64 +856,57 @@ pub struct ToastStyle {
 }
 
 impl ToastStyle {
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
-        let mut action_button =
-            ButtonStyle::default_for(mode, crate::ui::widget::common::ButtonVariantKind::Ghost);
-        action_button.min_height = dp(20.0);
-        action_button.padding_x = dp(4.0);
-        action_button.padding_y = dp(1.0);
-        action_button.radius = Value::Static(dp(4.0));
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
+        let mut action_button = ButtonStyle::default_for_theme(
+            theme,
+            crate::ui::widget::common::ButtonVariantKind::Ghost,
+        );
+        action_button.min_height = theme.spacing.lg;
+        action_button.padding_x = theme.spacing.xs;
+        action_button.padding_y = theme.spacing.xxs;
+        action_button.radius = Value::Static(theme.radius.sm);
 
-        let mut close_button =
-            ButtonStyle::default_for(mode, crate::ui::widget::common::ButtonVariantKind::Ghost);
-        close_button.min_height = dp(18.0);
-        close_button.padding_x = dp(3.0);
-        close_button.padding_y = dp(1.0);
-        close_button.radius = Value::Static(dp(999.0));
+        let mut close_button = ButtonStyle::default_for_theme(
+            theme,
+            crate::ui::widget::common::ButtonVariantKind::Ghost,
+        );
+        close_button.min_height = theme.spacing.md + theme.spacing.xs;
+        close_button.padding_x = theme.spacing.xxs;
+        close_button.padding_y = theme.spacing.xxs;
+        close_button.radius = Value::Static(theme.radius.full);
 
         Self {
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(palette.surface_high),
-            foreground: Value::Static(palette.on_surface),
-            border: Value::Static(palette.outline_muted),
-            border_width: Value::Static(dp(1.0)),
-            radius: Value::Static(dp(6.0)),
-            shadow: Shadow {
-                offset_x: dp(0.0),
-                offset_y: dp(3.0),
-                blur: dp(8.0),
-                spread: dp(0.0),
-                color: Color::BLACK.with_alpha_factor(0.15),
-            },
-            padding: Insets::symmetric(dp(10.0), dp(8.0)),
-            gap: dp(8.0),
+            background: Value::Static(theme.colors.surface_high),
+            foreground: Value::Static(theme.colors.on_surface),
+            border: Value::Static(theme.colors.outline_muted),
+            border_width: Value::Static(theme.border.thin),
+            radius: Value::Static(theme.radius.md),
+            shadow: theme.elevation.sm.clone(),
+            padding: Insets::symmetric(theme.spacing.md, theme.spacing.sm),
+            gap: theme.spacing.sm,
             title_text_style: {
-                let mut style = label_text_style();
+                let mut style = theme.typography.label.clone();
                 style.weight = FontWeight::Medium;
-                style.size = sp(13.0);
                 style
             },
-            body_text_style: {
-                let mut style = label_text_style();
-                style.size = sp(12.0);
-                style
-            },
-            icon_size: dp(12.0),
+            body_text_style: theme.typography.label.clone(),
+            icon_size: theme.spacing.md,
             min_width: dp(200.0),
             max_width: dp(280.0),
-            margin: dp(12.0),
-            stack_gap: dp(8.0),
+            margin: theme.spacing.md,
+            stack_gap: theme.spacing.sm,
             action_button,
             close_button,
             success_icon_background: Value::Static(Color::hexa(0x10B981FF)),
-            success_icon_foreground: Value::Static(Color::hexa(0xFFFFFFFF)),
-            error_icon_background: Value::Static(Color::hexa(0xEF4444FF)),
-            error_icon_foreground: Value::Static(Color::hexa(0xFFFFFFFF)),
+            success_icon_foreground: Value::Static(Color::WHITE),
+            error_icon_background: Value::Static(theme.colors.error),
+            error_icon_foreground: Value::Static(theme.colors.on_error),
             warning_icon_background: Value::Static(Color::hexa(0xF59E0BFF)),
-            warning_icon_foreground: Value::Static(Color::hexa(0xFFFFFFFF)),
-            info_icon_background: Value::Static(Color::hexa(0x3B82F6FF)),
-            info_icon_foreground: Value::Static(Color::hexa(0xFFFFFFFF)),
+            warning_icon_foreground: Value::Static(Color::WHITE),
+            info_icon_background: Value::Static(palette.primary),
+            info_icon_foreground: Value::Static(palette.on_primary),
         }
     }
 }
@@ -926,28 +932,69 @@ pub struct DrawerStyle {
 }
 
 impl DrawerStyle {
-    /// 按解析后的主题模式创建默认样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
-        // backdrop alpha 在 light/dark 下都用 ~50% 黑遮罩。
-        let backdrop = Color::rgba(0, 0, 0, 0x80);
+    pub fn default_for_theme(theme: &Theme) -> Self {
         Self {
-            backdrop_color: Value::Static(backdrop),
+            backdrop_color: Value::Static(Color::rgba(0, 0, 0, 0x80)),
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(palette.surface),
-            border: Value::Static(palette.outline_muted),
-            border_width: Value::Static(dp(1.0)),
-            radius: Value::Static(dp(0.0)),
-            shadow: Shadow {
-                offset_x: dp(0.0),
-                offset_y: dp(0.0),
-                blur: dp(24.0),
-                spread: dp(0.0),
-                color: Color::BLACK.with_alpha_factor(0.24),
-            },
+            background: Value::Static(theme.colors.surface),
+            border: Value::Static(theme.colors.outline_muted),
+            border_width: Value::Static(theme.border.thin),
+            radius: Value::Static(theme.radius.none),
+            shadow: theme.elevation.md.clone(),
             width: dp(280.0),
             height: dp(240.0),
-            padding: Insets::all(dp(16.0)),
+            padding: Insets::all(theme.spacing.lg),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::foundation::color::Color;
+    use crate::ui::unit::sp;
+
+    #[test]
+    fn button_default_for_theme_uses_theme_tokens() {
+        let mut theme = Theme::light();
+        theme.colors.primary = Color::hexa(0xCC3366FF);
+        theme.radius.md = dp(6.0);
+        theme.typography.label.size = sp(13.0);
+
+        let style = ButtonStyle::default_for_theme(&theme, ButtonVariantKind::Primary);
+
+        assert_eq!(style.background.normal.resolve(), theme.colors.primary);
+        assert_eq!(style.border.normal.resolve(), theme.colors.primary);
+        assert_eq!(style.radius.resolve(), theme.radius.md);
+        assert_eq!(style.text_style.size, theme.typography.label.size);
+    }
+
+    #[test]
+    fn input_and_select_defaults_use_theme_tokens() {
+        let mut theme = Theme::dark();
+        theme.colors.surface_low = Color::hexa(0x102030FF);
+        theme.colors.primary = Color::hexa(0x44DD99FF);
+        theme.colors.selection = Color::hexa(0x44DD9966);
+        theme.radius.lg = dp(10.0);
+
+        let input = InputStyle::default_for_theme(&theme);
+        assert_eq!(input.background.normal.resolve(), theme.colors.surface_low);
+        assert_eq!(
+            input.caret.as_ref().map(Value::resolve),
+            Some(theme.colors.primary)
+        );
+        assert_eq!(
+            input.selection.as_ref().map(Value::resolve),
+            Some(theme.colors.selection)
+        );
+        assert_eq!(input.radius.resolve(), theme.radius.lg);
+
+        let select = SelectStyle::default_for_theme(&theme);
+        assert_eq!(select.background.normal.resolve(), theme.colors.surface_low);
+        assert_eq!(
+            select.selected_option_background.resolve(),
+            theme.colors.primary_container
+        );
+        assert_eq!(select.radius.resolve(), theme.radius.lg);
     }
 }

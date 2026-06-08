@@ -26,7 +26,6 @@ use crate::media::{
     resolve_media_rect, ContentFit, IntrinsicSize, MediaManager, MediaSource, RasterRequest,
 };
 use crate::text::font::{FontCatalog, FontManager, FontWeight, TextFontRequest};
-use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{Dp, Sp, UnitContext};
 use unicode_segmentation::UnicodeSegmentation;

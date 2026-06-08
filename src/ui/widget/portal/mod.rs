@@ -245,6 +245,8 @@ impl<VM: 'static> From<Portal<VM>> for Element<VM> {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::Portal {
                 content: Box::new(portal.content),
                 open: portal.open,

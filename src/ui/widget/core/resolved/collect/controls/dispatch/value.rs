@@ -202,6 +202,8 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         taffy: &taffy,
         font_manager: context.font_manager,
         theme: context.theme,
+        style_context: context.style_context,
+        style_sheet: context.style_sheet,
         media: context.media,
         focused_input: context.focused_input,
         focused_text_state: context.focused_text_state,
@@ -304,6 +306,8 @@ fn select_option_row_element<VM>(
         data_grid_cell: None,
         data_grid_header: None,
         data_grid_resize_handle: None,
+        splitter_handle: None,
+        carousel_auto_play: None,
         kind: WidgetKind::SelectOptionRow {
             owner_id,
             option_index,
@@ -748,6 +752,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             .widget_states
             .get_select_option(*owner_id, *option_index);
         option_state.disabled = option_disabled;
+        option_state.selected = selected;
         let hovered_option_color = default_select_menu_option_color(context.theme, option_state);
         let option_color = if option_state.hovered || option_state.pressed {
             hovered_option_color

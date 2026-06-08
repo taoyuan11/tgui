@@ -167,7 +167,7 @@ fn input_component(app: &App) -> Element<App> {
                             .first_error()
                             .map(|v| v.unwrap_or_default())
                     )
-                    .style(styles::status_style),
+                    .style_full(styles::status_style),
                 ]),
                 CODE_INPUT_VALIDATION,
             ),
@@ -200,7 +200,7 @@ fn textarea_component(app: &App) -> Element<App> {
                         .on_change(Command::new(|app: &mut App| {
                             app.profile_status.set("Textarea 已更新".to_string());
                         })),
-                    Text::new(app.profile_status.signal()).style(styles::status_style),
+                    Text::new(app.profile_status.signal()).style_full(styles::status_style),
                 ]),
                 CODE_TEXTAREA_STATUS,
             ),
@@ -225,7 +225,7 @@ fn switch_component(app: &App) -> Element<App> {
                     Text::new(app.switch.signal().map(|enabled| {
                         if enabled { "已开启" } else { "已关闭" }.to_string()
                     }))
-                    .style(styles::status_style),
+                    .style_full(styles::status_style),
                 ]),
                 CODE_SWITCH_BASIC,
             ),
@@ -274,7 +274,7 @@ fn checkbox_component(app: &App) -> Element<App> {
                             .first_error()
                             .map(|v| v.unwrap_or_default())
                     )
-                    .style(styles::status_style),
+                    .style_full(styles::status_style),
                 ]),
                 CODE_CHECKBOX_VALIDATION,
             ),
@@ -358,7 +358,7 @@ fn select_component(app: &App) -> Element<App> {
                     Text::new(app.select_action.signal().map(|value| {
                         format!("当前选择: {}", value.unwrap_or_else(|| "无".to_string()))
                     }))
-                    .style(styles::status_style),
+                    .style_full(styles::status_style),
                 ]),
                 CODE_SELECT_BASIC,
             ),
@@ -366,7 +366,7 @@ fn select_component(app: &App) -> Element<App> {
                 "select/disabled",
                 "禁用选项",
                 "不可用操作可以留在菜单里但禁用点击。",
-                Text::new("示例中的删除选项已禁用。").style(styles::status_style),
+                Text::new("示例中的删除选项已禁用。").style_full(styles::status_style),
                 CODE_SELECT_DISABLED,
             ),
         ],
@@ -409,7 +409,7 @@ fn slider_component(app: &App) -> Element<App> {
                             .signal()
                             .map(|value| format!("音量: {value:.0}%"))
                     )
-                    .style(styles::status_style),
+                    .style_full(styles::status_style),
                 ]),
                 CODE_SLIDER_CONTROLLED,
             ),
@@ -436,7 +436,7 @@ fn date_picker_component(app: &App) -> Element<App> {
                 .on_open_change(ValueCommand::new(App::set_demo_date_open))
                 .on_month_change(ValueCommand::new(App::set_demo_date_month))
                 .on_change(ValueCommand::new(App::set_demo_date)),
-                Text::new(app.profile_status.signal()).style(styles::status_style),
+                Text::new(app.profile_status.signal()).style_full(styles::status_style),
             ]),
             CODE_DATE_PICKER,
         )],
@@ -458,7 +458,7 @@ fn time_picker_component(app: &App) -> Element<App> {
                     .minute_step(30)
                     .on_open_change(ValueCommand::new(App::set_demo_time_open))
                     .on_change(ValueCommand::new(App::set_demo_time)),
-                Text::new(app.profile_status.signal()).style(styles::status_style),
+                Text::new(app.profile_status.signal()).style_full(styles::status_style),
             ]),
             CODE_TIME_PICKER,
         )],
@@ -479,7 +479,7 @@ fn number_input_component(app: &App) -> Element<App> {
                     .range(0.0, 99.0)
                     .step(1.0)
                     .on_change(ValueCommand::new(App::set_demo_number)),
-                Text::new(app.profile_status.signal()).style(styles::status_style),
+                Text::new(app.profile_status.signal()).style_full(styles::status_style),
             ]),
             CODE_NUMBER_INPUT,
         )],
@@ -500,7 +500,7 @@ fn color_picker_component(app: &App) -> Element<App> {
                     .open(app.demo_color_open.signal())
                     .on_open_change(ValueCommand::new(App::set_demo_color_open))
                     .on_change(ValueCommand::new(App::set_demo_color)),
-                Text::new(app.profile_status.signal()).style(styles::status_style),
+                Text::new(app.profile_status.signal()).style_full(styles::status_style),
             ]),
             CODE_COLOR_PICKER,
         )],
@@ -526,7 +526,7 @@ fn upload_component(app: &App) -> Element<App> {
                     Button::new("推进进度")
                         .secondary()
                         .on_click(Command::new(App::advance_uploads)),
-                    Text::new(app.upload_status.signal()).style(styles::status_style),
+                    Text::new(app.upload_status.signal()).style_full(styles::status_style),
                 ]),
             ]),
             CODE_UPLOAD,
@@ -558,7 +558,7 @@ fn form_component(app: &App) -> Element<App> {
                             .first_error()
                             .map(|v| v.unwrap_or_default())
                     )
-                    .style(styles::status_style),
+                    .style_full(styles::status_style),
                     Input::new(app.profile_email.controller())
                         .placeholder("name@example.com")
                         .width(dp(300.0))
@@ -568,7 +568,7 @@ fn form_component(app: &App) -> Element<App> {
                             .first_error()
                             .map(|v| v.unwrap_or_default())
                     )
-                    .style(styles::status_style),
+                    .style_full(styles::status_style),
                     Checkbox::new(app.profile_newsletter.signal())
                         .label("订阅每周邮件")
                         .validation(newsletter_validation)
@@ -616,7 +616,7 @@ fn form_component(app: &App) -> Element<App> {
                             status.validating, status.submitting
                         )
                     }))
-                    .style(styles::status_style),
+                    .style_full(styles::status_style),
                     Text::new(app.profile_form.is_valid().map(|valid| {
                         if valid {
                             "表单当前无错误"
@@ -625,8 +625,8 @@ fn form_component(app: &App) -> Element<App> {
                         }
                         .to_string()
                     }))
-                    .style(styles::status_style),
-                    Text::new(app.profile_status.signal()).style(styles::status_style),
+                    .style_full(styles::status_style),
+                    Text::new(app.profile_status.signal()).style_full(styles::status_style),
                 ]),
                 CODE_FORM_SUBMIT,
             ),

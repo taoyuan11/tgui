@@ -70,9 +70,9 @@ impl ViewModel for AppVm {
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
             .gap(dp(14.0))
-            .style(root_style)
-            .child(Text::new("Tree").style(title_style))
-            .child(Text::new(self.summary()).style(muted_style))
+            .style_full(root_style)
+            .child(Text::new("Tree").style_full(title_style))
+            .child(Text::new(self.summary()).style_full(muted_style))
             .child(
                 Flex::horizontal()
                     .gap(dp(8.0))
@@ -98,14 +98,14 @@ impl ViewModel for AppVm {
                         MenuItem::new("Select checked").on_select(Command::new(Self::select_checked)),
                         MenuItem::new("Clear selection").on_select(Command::new(Self::clear_selection)),
                     ])
-                    .style(tree_style)
+                    .style_full(tree_style)
                     .on_expand_change(ValueCommand::new(Self::set_expanded))
                     .on_selection_change(ValueCommand::new(Self::set_selected))
                     .on_check_change(ValueCommand::new(Self::set_checked))
                     .on_node_action(ValueCommand::new(Self::open_node))
                     .on_drop(ValueCommand::new(Self::drop_node)),
             )
-            .child(Text::new(self.status.signal()).style(status_style))
+            .child(Text::new(self.status.signal()).style_full(status_style))
             .into()
     }
 }
@@ -336,75 +336,79 @@ fn file_row(ctx: TreeNodeContext<FileInfo>) -> Element<AppVm> {
     } else {
         format!("{} ({})", ctx.item.name, ctx.item.kind)
     };
-    Text::new(label).style(move |mode| row_text_style(mode, ctx.selected, ctx.disabled)).into()
+    Text::new(label).style_full(move |ctx| row_text_style(ctx, ctx.selected, ctx.disabled)).into()
 }
 
 fn state_view(text: &'static str) -> Element<AppVm> {
     Stack::new()
         .height(dp(160.0))
         .center()
-        .style(empty_state_style)
-        .child(Text::new(text).style(muted_style))
+        .style_full(empty_state_style)
+        .child(Text::new(text).style_full(muted_style))
         .into()
 }
 
-fn root_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
-    style.surface.background = Some(match mode {
+fn root_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
+    style.surface.background = Some(match ctx.mode {
         ResolvedThemeMode::Light => Color::hexa(0xF7F8FBFF).into(),
         ResolvedThemeMode::Dark => Color::hexa(0x101418FF).into(),
     });
     style
 }
 
-fn tree_style(mode: ResolvedThemeMode) -> TreeStyle {
-    let mut style = TreeStyle::default_for(mode);
-    style.surface.background = Some(match mode {
+fn tree_style(ctx: &StyleContext<'_>) -> TreeStyle {
+    let mut style = TreeStyle::default_for_theme(ctx.theme);
+    style.surface.background = Some(match ctx.mode {
         ResolvedThemeMode::Light => Color::hexa(0xFFFFFFFF).into(),
         ResolvedThemeMode::Dark => Color::hexa(0x161B22FF).into(),
     });
-    style.surface.border_color = Some(match mode {
+    style.surface.border_color = Some(match ctx.mode {
         ResolvedThemeMode::Light => Color::hexa(0xD7DEE8FF).into(),
         ResolvedThemeMode::Dark => Color::hexa(0x303846FF).into(),
     });
     style.surface.border_width = Some(dp(1.0).into());
     style.surface.border_radius = Some(dp(8.0).into());
-    style.item_selected_background = match mode {
+    style.item_selected_background = match ctx.mode {
         ResolvedThemeMode::Light => Color::hexa(0xD8EAFEFF).into(),
         ResolvedThemeMode::Dark => Color::hexa(0x28537AFF).into(),
     };
-    style.item_hover_background = match mode {
+    style.item_hover_background = match ctx.mode {
         ResolvedThemeMode::Light => Color::hexa(0xEEF3F8FF).into(),
         ResolvedThemeMode::Dark => Color::hexa(0x222B36FF).into(),
     };
     style
 }
 
-fn title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = sp(26.0);
     style.typography.weight = FontWeight::SemiBold;
     style
 }
 
-fn muted_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn muted_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = sp(14.0);
-    style.color = match mode {
+    style.color = match ctx.mode {
         ResolvedThemeMode::Light => Color::hexa(0x4B5563FF).into(),
         ResolvedThemeMode::Dark => Color::hexa(0xC8D0DAFF).into(),
     };
     style
 }
 
-fn status_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = muted_style(mode);
+fn status_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = muted_style(ctx);
     style.typography.weight = FontWeight::Medium;
     style
 }
 
-fn row_text_style(mode: ResolvedThemeMode, selected: bool, disabled: bool) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn row_text_style(
+    ctx: &StyleContext<'_>,
+    selected: bool,
+    disabled: bool,
+) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = sp(14.0);
     style.typography.weight = if selected {
         FontWeight::SemiBold
@@ -412,12 +416,12 @@ fn row_text_style(mode: ResolvedThemeMode, selected: bool, disabled: bool) -> Te
         FontWeight::Regular
     };
     style.color = if disabled {
-        match mode {
+        match ctx.mode {
             ResolvedThemeMode::Light => Color::hexa(0x9AA4B2FF).into(),
             ResolvedThemeMode::Dark => Color::hexa(0x697586FF).into(),
         }
     } else {
-        match mode {
+        match ctx.mode {
             ResolvedThemeMode::Light => Color::hexa(0x111827FF).into(),
             ResolvedThemeMode::Dark => Color::hexa(0xF6F8FBFF).into(),
         }
@@ -425,9 +429,9 @@ fn row_text_style(mode: ResolvedThemeMode, selected: bool, disabled: bool) -> Te
     style
 }
 
-fn empty_state_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
-    style.surface.background = Some(match mode {
+fn empty_state_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
+    style.surface.background = Some(match ctx.mode {
         ResolvedThemeMode::Light => Color::hexa(0xF1F5F9FF).into(),
         ResolvedThemeMode::Dark => Color::hexa(0x1F2732FF).into(),
     });

@@ -68,7 +68,8 @@ pnpm --dir docs preview
 ### 布局与组件
 
 - 布局与滚动容器：`Stack`、`Grid`、`Flex`、`ScrollView`、`VirtualViewport`、`VirtualList`、`List`、`DataGrid` / `Table`、`Tree`
-- 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Switch`、`Tabs` / `TabView`、`ProgressBar`、`Spinner`、`Image`
+- 基础组件：`Text`、`Button`、`Input`、`Textarea`、`Radio`、`Checkbox`、`Select`、`Slider`、`Switch`、`Tabs` / `TabView`、`ProgressBar`、`Spinner`、`Image`、`Badge`、`Avatar` / `AvatarGroup`、`Skeleton`、`Card`、`Icon`
+- 体验组件：`Collapse` / `Accordion`、`Splitter` / `ResizablePanels`、`Breadcrumb`、`Pagination`、`Rating`、`RichText`、`Carousel`、`AutoComplete` / `Combobox`
 - 浮层基础设施：统一的 runtime overlay anchoring 引擎，当前已为 `Tooltip`、`Popover`、`Select` 与 `Menu` / `ContextMenu` / `MenuBar` 提供锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力
 - `Popover`：支持 click 固定打开、hover 预览、外部点击 / `Esc` 关闭的锚定轻量浮层，可承载任意 widget 子树
 - `ToastHost` + `ToastQueue`：应用内 toast / snackbar 队列，支持 success / error / warning / info、自动消失、持久提示、action 按钮以及桌面端 hover 暂停
@@ -509,7 +510,7 @@ fn build_form_ui(ctx: &ViewModelContext) -> Element<()> {
 - `canvas`：scene-style 画布，支持 path/text/image/group/clip、渐变、阴影、布尔运算和 item 事件
 - `background_effects`：通用渐变背景和 backdrop blur
 - `frameless_window`：关闭系统装饰后的自绘标题栏、拖拽、拉伸和窗口按钮
-- `demo`：综合展示常用布局、组件、`Tooltip` / `Popover` / `Tabs` / `Toast`、通知和画布
+- `demo`：综合展示常用布局、组件、P3 组件、`Tooltip` / `Popover` / `Tabs` / `Toast`、通知和画布
 - `toast_snackbar`：`ToastHost` / `ToastQueue` 专项示例，覆盖语义提示、action、持久提示、短时提示和不同位置
 - `list_virtual_list`：`List` / `VirtualList` 专项示例，覆盖受控多选、分组、loading / empty slot、行主动作、右键菜单和大数据虚拟化
 - `table_datagrid`：`DataGrid` / `Table` 专项示例，覆盖受控选择、排序、列宽、列重排、固定列、右键菜单和文本提交
@@ -669,8 +670,7 @@ if let Some(hit) = scene.query_point(Point::new(12.0, 12.0)) {
 常规控件也可以通过 style resolver 上的 `style.surface.shadow` 配置单层外阴影：
 
 ```rust
-Stack::new().style(|mode| {
-    let mut style = tgui::widgets::ContainerStyle::default_for(mode);
+Stack::new().style(|style, _ctx| {
     style.surface.shadow = Some(tgui::theme::Shadow {
         offset_x: dp(0.0),
         offset_y: dp(8.0),
@@ -678,7 +678,6 @@ Stack::new().style(|mode| {
         spread: dp(-4.0),
         color: Color::hexa(0x00000033),
     }.into());
-    style
 })
 ```
 

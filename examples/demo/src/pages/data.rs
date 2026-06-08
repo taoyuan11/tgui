@@ -139,7 +139,7 @@ fn tabs_component(app: &App) -> Element<App> {
                         .into();
                         tabs
                     }))
-                    .child(Text::new(app.tabs_reorder_status.signal()).style(styles::status_style)),
+                    .child(Text::new(app.tabs_reorder_status.signal()).style_full(styles::status_style)),
                 CODE_TABS_BASIC,
             ),
             UsageDemo::new(
@@ -151,17 +151,17 @@ fn tabs_component(app: &App) -> Element<App> {
                         TabItem::new(
                             "overview",
                             "概览",
-                            Text::new("概览内容").style(styles::status_style),
+                            Text::new("概览内容").style_full(styles::status_style),
                         ),
                         TabItem::new(
                             "logs",
                             "日志",
-                            Text::new("日志内容").style(styles::status_style),
+                            Text::new("日志内容").style_full(styles::status_style),
                         ),
                         TabItem::new(
                             "settings",
                             "设置",
-                            Text::new("设置内容").style(styles::status_style),
+                            Text::new("设置内容").style_full(styles::status_style),
                         ),
                     ],
                     selected_for_left,
@@ -191,7 +191,7 @@ fn demo_tab_items(
                 "overview",
                 "概览",
                 Flex::vertical().gap(dp(8.0)).child(el![
-                    Text::new("Tabs 会根据选中 key 只渲染当前 panel。").style(styles::status_style),
+                    Text::new("Tabs 会根据选中 key 只渲染当前 panel。").style_full(styles::status_style),
                     ProgressBar::new(slider_value.clone().map(|value| value / 100.0))
                         .width(dp(240.0))
                         .show_label(true)
@@ -220,17 +220,17 @@ fn demo_tab_items(
                 "logs",
                 "日志",
                 Text::new(selected.clone().map(|key| format!("active tab: {key}")))
-                    .style(styles::status_style),
+                    .style_full(styles::status_style),
             ),
             "metrics" => TabItem::new(
                 "metrics",
                 "指标",
-                Text::new("More 模式下会被收进更多菜单。").style(styles::status_style),
+                Text::new("More 模式下会被收进更多菜单。").style_full(styles::status_style),
             ),
             _ => TabItem::new(
                 "advanced",
                 "高级",
-                Text::new("支持拖拽重排的 tab。").style(styles::status_style),
+                Text::new("支持拖拽重排的 tab。").style_full(styles::status_style),
             ),
         })
         .collect()
@@ -247,7 +247,7 @@ fn list_component(app: &App) -> Element<App> {
                 "分组和多选",
                 "点击行、Shift-click 范围和键盘 Enter 都会派发事件。",
                 Flex::vertical().gap(dp(8.0)).child(el![
-                    Text::new(list_selection_summary(app)).style(styles::status_style),
+                    Text::new(list_selection_summary(app)).style_full(styles::status_style),
                     List::sections(contact_sections(), contact_row)
                         .width(pct(100.0))
                         .height(dp(300.0))
@@ -266,7 +266,7 @@ fn list_component(app: &App) -> Element<App> {
                         ])
                         .on_selection_change(ValueCommand::new(App::set_list_selection))
                         .on_item_action(ValueCommand::new(App::open_list_item)),
-                    Text::new(app.list_status.signal()).style(styles::status_style),
+                    Text::new(app.list_status.signal()).style_full(styles::status_style),
                 ]),
                 CODE_LIST_SELECTION,
             ),
@@ -365,7 +365,7 @@ fn section_header(text: &'static str) -> Element<App> {
         .child(
             Text::new(text)
                 .width(pct(100.0))
-                .style(styles::status_style),
+                .style_full(styles::status_style),
         )
         .into()
 }
@@ -383,12 +383,12 @@ fn contact_row(ctx: ListItemContext<DemoContact>) -> Element<App> {
         .child(
             Text::new(title)
                 .width(pct(100.0))
-                .style(styles::usage_title_style),
+                .style_full(styles::usage_title_style),
         )
         .child(
             Text::new(format!("{} - {}", ctx.item.role, ctx.item.status))
                 .width(pct(100.0))
-                .style(styles::status_style),
+                .style_full(styles::status_style),
         )
         .into()
 }
@@ -397,7 +397,7 @@ fn state_view(text: &'static str) -> Element<App> {
     Stack::new()
         .height(dp(150.0))
         .center()
-        .child(Text::new(text).style(styles::status_style))
+        .child(Text::new(text).style_full(styles::status_style))
         .into()
 }
 
@@ -446,7 +446,7 @@ fn virtual_row(ctx: ListItemContext<String>) -> Element<App> {
         .child(
             Text::new(ctx.item)
                 .width(pct(100.0))
-                .style(styles::status_style),
+                .style_full(styles::status_style),
         )
         .into()
 }
@@ -461,7 +461,7 @@ fn tree_component(app: &App) -> Element<App> {
             "层级节点",
             "受控 keys 保持展开、选择和复选状态，拖拽只派发 drop 事件。",
             Flex::vertical().gap(dp(8.0)).child(el![
-                Text::new(tree_summary(app)).style(styles::status_style),
+                Text::new(tree_summary(app)).style_full(styles::status_style),
                 Flex::horizontal().gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
                     Button::new("Toggle loading").on_click(Command::new(App::toggle_tree_loading)),
                     Button::new("Toggle empty").on_click(Command::new(App::toggle_tree_empty)),
@@ -498,7 +498,7 @@ fn tree_component(app: &App) -> Element<App> {
                 .on_check_change(ValueCommand::new(App::set_tree_checked))
                 .on_node_action(ValueCommand::new(App::open_tree_node))
                 .on_drop(ValueCommand::new(App::drop_tree_node)),
-                Text::new(app.tree_status.signal()).style(styles::status_style),
+                Text::new(app.tree_status.signal()).style_full(styles::status_style),
             ]),
             CODE_TREE_BASIC,
         )],
@@ -542,7 +542,7 @@ fn tree_row(ctx: TreeNodeContext<&'static str>) -> Element<App> {
     };
     Text::new(label)
         .width(pct(100.0))
-        .style(styles::status_style)
+        .style_full(styles::status_style)
         .into()
 }
 
@@ -557,7 +557,7 @@ fn data_grid_component(app: &App) -> Element<App> {
                 "选择、排序和编辑",
                 "表头排序、行选择、单元格编辑和右键菜单都在同一表格中展示。",
                 Flex::vertical().gap(dp(8.0)).child(el![
-                    Text::new(data_summary(app)).style(styles::status_style),
+                    Text::new(data_summary(app)).style_full(styles::status_style),
                     DataGrid::new(sorted_rows(app), columns(app))
                         .width(pct(100.0))
                         .height(dp(360.0))
@@ -577,7 +577,7 @@ fn data_grid_component(app: &App) -> Element<App> {
                         .on_column_reorder(ValueCommand::new(App::reorder_data_column))
                         .on_cell_action(ValueCommand::new(App::open_data_cell))
                         .on_cell_edit_commit(ValueCommand::new(App::commit_data_cell_edit)),
-                    Text::new(app.data_status.signal()).style(styles::status_style),
+                    Text::new(app.data_status.signal()).style_full(styles::status_style),
                 ]),
                 CODE_DATAGRID_BASIC,
             ),
@@ -586,7 +586,7 @@ fn data_grid_component(app: &App) -> Element<App> {
                 "列能力",
                 "列可排序、调整宽度、重排、固定在开始或结束位置。",
                 Text::new("上方表格的 ID 列固定在开始位置，Status 列固定在结束位置，Name/Role/Status 支持编辑。")
-                    .style(styles::status_style),
+                    .style_full(styles::status_style),
                 CODE_DATAGRID_COLUMNS,
             ),
             UsageDemo::new(

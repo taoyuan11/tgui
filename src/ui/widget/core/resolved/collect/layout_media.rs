@@ -109,6 +109,15 @@ impl<VM: 'static> ResolvedElement<VM> {
                         computed.extend(child_chunk);
                     }
                 }
+                push_splitter_handle_hit_regions(
+                    children,
+                    layout_node,
+                    visual.frame,
+                    scroll_offset,
+                    child_clip_rect,
+                    context,
+                    computed,
+                );
                 let after_child_subtrees = computed.clone();
                 let mut after_children = ComputedScene::default();
                 if show_scrollbar {
@@ -568,4 +577,76 @@ impl<VM: 'static> ResolvedElement<VM> {
             _ => false,
         }
     }
+}
+
+fn push_splitter_handle_hit_regions<VM: 'static>(
+    children: &[ResolvedElement<VM>],
+    layout_node: &LayoutNode,
+    parent_frame: Rect,
+    scroll_offset: Point,
+    clip_rect: Rect,
+    context: &CollectContext<'_, '_>,
+    computed: &mut ComputedScene<VM>,
+) {
+    for (child_index, child) in children.iter().enumerate() {
+        let Some(state) = child.splitter_handle.as_ref() else {
+            continue;
+        };
+        let Some(handle_layout) = layout_node.children.get(child_index) else {
+            continue;
+        };
+        let Some(handle_frame) =
+            child_frame_from_parent_layout(handle_layout, parent_frame, scroll_offset, context)
+        else {
+            continue;
+        };
+        let before = child_index
+            .checked_sub(1)
+            .and_then(|index| layout_node.children.get(index))
+            .and_then(|node| {
+                child_frame_from_parent_layout(node, parent_frame, scroll_offset, context)
+            });
+        let after = layout_node.children.get(child_index + 1).and_then(|node| {
+            child_frame_from_parent_layout(node, parent_frame, scroll_offset, context)
+        });
+        let pair_extent = match state.axis {
+            Axis::Horizontal => {
+                before.map(|frame| frame.width).unwrap_or(Dp::ZERO)
+                    + after.map(|frame| frame.width).unwrap_or(Dp::ZERO)
+            }
+            Axis::Vertical => {
+                before.map(|frame| frame.height).unwrap_or(Dp::ZERO)
+                    + after.map(|frame| frame.height).unwrap_or(Dp::ZERO)
+            }
+        }
+        .max(Dp::new(1.0));
+        computed.hit_regions.push(HitRegion {
+            rect: handle_frame,
+            clip_rect: Some(clip_rect),
+            geometry: HitGeometry::Rect,
+            scope_path: context.focus_scope_path(),
+            focus: None,
+            interaction: HitInteraction::SplitterHandle {
+                id: child.id,
+                state: state.clone(),
+                interactions: child.interactions.clone(),
+                pair_extent,
+            },
+        });
+    }
+}
+
+fn child_frame_from_parent_layout(
+    layout_node: &LayoutNode,
+    parent_frame: Rect,
+    scroll_offset: Point,
+    context: &CollectContext<'_, '_>,
+) -> Option<Rect> {
+    let layout = context.taffy.layout(layout_node.node).ok()?;
+    Some(Rect::new(
+        parent_frame.x - scroll_offset.x + layout.location.x,
+        parent_frame.y - scroll_offset.y + layout.location.y,
+        layout.size.width,
+        layout.size.height,
+    ))
 }

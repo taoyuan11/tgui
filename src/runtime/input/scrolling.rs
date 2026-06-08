@@ -284,6 +284,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             HitInteraction::Widget { interactions, .. } => interactions.on_mouse_move.is_some(),
             HitInteraction::SelectableText { .. }
             | HitInteraction::Slider { .. }
+            | HitInteraction::SplitterHandle { .. }
             | HitInteraction::TextInput { .. }
             | HitInteraction::CanvasItem { .. } => true,
             HitInteraction::Switch { .. }

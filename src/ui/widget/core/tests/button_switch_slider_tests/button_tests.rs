@@ -405,7 +405,7 @@ fn explicit_button_transparent_border_overrides_theme_border() {
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> = WidgetTree::new(
         crate::ui::widget::Button::new("border")
-            .style(|mode| button_style(mode, None, Some(dp(0.0)), Some(Color::TRANSPARENT)))
+            .style_full(|ctx| button_style(ctx, None, Some(dp(0.0)), Some(Color::TRANSPARENT)))
             .size(dp(120.0), dp(40.0)),
     );
 
@@ -445,7 +445,7 @@ fn explicit_button_radius_overrides_theme_radius() {
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> = WidgetTree::new(
         crate::ui::widget::Button::new("radius")
-            .style(|mode| button_style(mode, Some(dp(12.0)), None, None))
+            .style_full(|ctx| button_style(ctx, Some(dp(12.0)), None, None))
             .size(dp(120.0), dp(40.0)),
     );
 

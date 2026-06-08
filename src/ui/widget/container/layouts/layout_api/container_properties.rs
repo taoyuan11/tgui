@@ -1,18 +1,26 @@
 macro_rules! impl_container_properties {
     ($name:ident) => {
         impl<VM> $name<VM> {
-            /// 设置容器样式解析器。
+            /// 设置容器样式 patch。
             ///
             /// # 参数
-            /// - `resolver`：根据主题模式生成容器样式的回调。
+            /// - `mutator`：在主题解析后的完整容器样式上应用局部修改。
             ///
             /// # 返回值
             /// 返回更新后的容器实例。
             pub fn style(
                 self,
-                resolver: impl Fn(ResolvedThemeMode) -> ContainerStyle + Send + Sync + 'static,
+                mutator: impl Fn(&mut ContainerStyle, &StyleContext<'_>) + Send + Sync + 'static,
             ) -> Self {
-                Self(self.0.style(resolver))
+                Self(self.0.style(mutator))
+            }
+
+            /// 完整替换容器样式解析器。
+            pub fn style_full(
+                self,
+                resolver: impl Fn(&StyleContext<'_>) -> ContainerStyle + Send + Sync + 'static,
+            ) -> Self {
+                Self(self.0.style_full(resolver))
             }
 
             /// 注册点击命令。

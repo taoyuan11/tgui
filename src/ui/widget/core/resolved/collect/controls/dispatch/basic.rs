@@ -169,12 +169,16 @@ impl<VM> ResolvedElement<VM> {
             on_change,
             active_thumb_color,
             inactive_thumb_color,
-            style,
             ..
         } = &self.kind
         else {
             return false;
         };
+        let switch_style = visual
+            .styles
+            .switch_style
+            .as_ref()
+            .expect("switch style should be resolved for switch widgets");
 
         let padding = self
             .layout
@@ -188,17 +192,17 @@ impl<VM> ResolvedElement<VM> {
                     context.now,
                 )
             })
-            .unwrap_or(style.padding);
+            .unwrap_or(switch_style.padding);
         push_switch_primitives(
             visual.background_frame,
             visual.background_radius.get(),
             padding,
             checked.resolve(),
             active_thumb_color.as_ref().map(Value::resolve).unwrap_or(
-                resolve_stateful_widget_color(&style.thumb_checked, visual.widget_state),
+                resolve_stateful_widget_color(&switch_style.thumb_checked, visual.widget_state),
             ),
             inactive_thumb_color.as_ref().map(Value::resolve).unwrap_or(
-                resolve_stateful_widget_color(&style.thumb, visual.widget_state),
+                resolve_stateful_widget_color(&switch_style.thumb, visual.widget_state),
             ),
             visual.opacity,
             self.id,

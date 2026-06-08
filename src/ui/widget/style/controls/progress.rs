@@ -16,19 +16,19 @@ pub struct ProgressBarStyle {
 }
 
 impl ProgressBarStyle {
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            track_color: Value::Static(palette.outline_muted),
+            track_color: Value::Static(palette.surface_low),
             fill_color: Value::Static(palette.primary),
             label_color: Value::Static(palette.on_surface),
-            radius: Value::Static(dp(999.0)),
-            height: dp(8.0),
-            gap: dp(8.0),
+            radius: Value::Static(theme.radius.full),
+            height: theme.spacing.sm,
+            gap: theme.spacing.sm,
             min_width: dp(120.0),
             indeterminate_segment_ratio: 0.34,
-            text_style: label_text_style(),
+            text_style: theme.typography.label.clone(),
         }
     }
 }

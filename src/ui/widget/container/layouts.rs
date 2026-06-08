@@ -1,5 +1,5 @@
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Axis, Insets, Overflow, Track, Value, Wrap};
 
 use self::layout_api::impl_layout_api;

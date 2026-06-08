@@ -150,7 +150,7 @@ fn modal_with_on_open_change_keeps_descriptor_attached() {
 
 #[test]
 fn modal_style_defaults_include_enter_scale() {
-    let style = ModalStyle::default_for(crate::theme::ResolvedThemeMode::Light);
+    let style = ModalStyle::default_for_theme(&Theme::light());
     assert!((style.enter_scale - 0.96).abs() < f32::EPSILON);
 }
 

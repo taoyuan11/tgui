@@ -215,6 +215,9 @@ fn role_for_widget<VM>(resolved: &ResolvedElement<VM>) -> Role {
     if resolved.tab_trigger.is_some() {
         return Role::Tab;
     }
+    if resolved.splitter_handle.is_some() {
+        return Role::Splitter;
+    }
     match &resolved.kind {
         ResolvedWidgetKind::Container { layout, .. } if layout.scroll_view.is_some() => {
             Role::ScrollView
@@ -333,6 +336,35 @@ fn apply_widget_semantics<VM: 'static>(
         if cell.disabled.resolve() {
             node.set_disabled();
         }
+    }
+
+    if let Some(splitter) = resolved.splitter_handle.as_ref() {
+        let current = splitter
+            .sizes
+            .get(splitter.index)
+            .copied()
+            .unwrap_or_default()
+            .clamp(0.0, 1.0);
+        node.set_numeric_value(current as f64);
+        node.set_min_numeric_value(
+            splitter
+                .constraints
+                .get(splitter.index)
+                .map(|(min, _)| *min)
+                .unwrap_or(0.0) as f64,
+        );
+        node.set_max_numeric_value(
+            splitter
+                .constraints
+                .get(splitter.index)
+                .map(|(_, max)| *max)
+                .unwrap_or(1.0) as f64,
+        );
+        node.set_numeric_value_step(splitter.step as f64);
+        node.add_action(Action::Increment);
+        node.add_action(Action::Decrement);
+        node.add_action(Action::SetValue);
+        node.add_action(Action::Click);
     }
 
     match &resolved.kind {
@@ -509,6 +541,12 @@ fn apply_hit_actions<VM>(node: &mut Node, regions: Option<&[&HitRegion<VM>]>) {
                 node.add_action(Action::Decrement);
                 node.add_action(Action::SetValue);
             }
+            HitInteraction::SplitterHandle { .. } => {
+                node.add_action(Action::Increment);
+                node.add_action(Action::Decrement);
+                node.add_action(Action::SetValue);
+                node.add_action(Action::Click);
+            }
             HitInteraction::TextInput { .. } => {
                 node.add_action(Action::SetValue);
             }
@@ -594,6 +632,7 @@ fn hit_widget_id<VM>(interaction: &HitInteraction<VM>) -> Option<WidgetId> {
         | HitInteraction::DataGridCell { id, .. }
         | HitInteraction::DataGridHeader { id, .. }
         | HitInteraction::DataGridResizeHandle { id, .. }
+        | HitInteraction::SplitterHandle { id, .. }
         | HitInteraction::Slider { id, .. }
         | HitInteraction::TextInput { id, .. }
         | HitInteraction::CanvasItem { id, .. } => Some(*id),

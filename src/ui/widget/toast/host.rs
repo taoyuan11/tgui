@@ -1,5 +1,5 @@
 use crate::foundation::binding::{ToastPlacement, ToastQueue};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{LayoutStyle, Value};
 use crate::ui::widget::common::VisualStyle;
 use crate::ui::widget::common::{
@@ -39,9 +39,20 @@ impl<VM> ToastHost<VM> {
 
     pub fn style(
         mut self,
-        style: impl Fn(ResolvedThemeMode) -> ToastStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut ToastStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
-        self.style = Some(StyleResolver::new(style));
+        self.style = Some(StyleResolver::mutate(
+            |context| ToastStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> ToastStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 }
@@ -75,6 +86,8 @@ impl<VM> From<ToastHost<VM>> for Element<VM> {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::ToastHost {
                 queue: value.queue,
                 placement: value.placement,

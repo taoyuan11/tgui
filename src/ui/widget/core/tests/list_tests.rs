@@ -140,8 +140,8 @@ fn list_selected_row_emits_selected_background() {
     let tree: WidgetTree<()> = WidgetTree::new(
         List::<&'static str, ()>::new(items, |ctx| Text::new(ctx.item).into())
             .selected_keys(vec![WidgetKey::from("b")])
-            .style(move |mode| {
-                let mut style = ListStyle::default_for(mode);
+            .style_full(move |ctx| {
+                let mut style = ListStyle::default_for_theme(ctx.theme);
                 style.item_selected_background = selected.into();
                 style
             })

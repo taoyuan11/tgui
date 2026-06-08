@@ -21,11 +21,17 @@ fn freeze_option_value<T: Clone>(value: &mut Option<Value<T>>) {
     }
 }
 
-fn freeze_stateful_value<T: Clone>(value: &mut crate::ui::theme::Stateful<Value<T>>) {
+fn freeze_stateful_value<T: Clone>(value: &mut crate::ui::theme::StateValue<Value<T>>) {
     freeze_value(&mut value.normal);
     freeze_value(&mut value.hovered);
     freeze_value(&mut value.pressed);
     freeze_value(&mut value.disabled);
+    freeze_option_value(&mut value.focused);
+    freeze_option_value(&mut value.focus_visible);
+    freeze_option_value(&mut value.selected);
+    freeze_option_value(&mut value.checked);
+    freeze_option_value(&mut value.open);
+    freeze_option_value(&mut value.invalid);
 }
 
 fn freeze_widget_surface_style(style: &mut WidgetSurfaceStyle) {
@@ -298,7 +304,9 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
         ResolvedWidgetKind::Button {
             label,
             disabled,
+            variant: _,
             style,
+            ..
         } => {
             let mut label = label.clone();
             let mut disabled = disabled.clone();
@@ -511,6 +519,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             show_label,
             label,
             style,
+            ..
         } => {
             let mut value = value.clone();
             let mut indeterminate = indeterminate.clone();
@@ -533,6 +542,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             size_override,
             thickness_override,
             track_override,
+            ..
         } => {
             let mut style = style.clone();
             let mut size_override = size_override.clone();
@@ -555,6 +565,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             inset_override,
             label,
             style,
+            ..
         } => {
             let mut dashed = dashed.clone();
             let mut color_override = color_override.clone();

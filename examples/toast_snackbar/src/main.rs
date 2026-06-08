@@ -2,39 +2,39 @@ use std::time::Duration;
 
 use tgui::prelude::*;
 
-fn text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn text_style(ctx: &StyleContext<'_>, size: Sp) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = size;
     style
 }
 
-fn title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = text_style(mode, sp(28.0));
+fn title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = text_style(ctx, sp(28.0));
     style.typography.weight = FontWeight::SemiBold;
     style
 }
 
-fn body_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let style = text_style(mode, sp(15.0));
+fn body_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let style = text_style(ctx, sp(15.0));
     style
 }
 
-fn status_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = text_style(mode, sp(14.0));
+fn status_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = text_style(ctx, sp(14.0));
     style.color = Color::BLUE.into();
     style
 }
 
-fn panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn panel_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.border_color = Some(Color::hexa(0x334155FF).into());
     style.surface.border_width = Some(dp(1.0).into());
     style.surface.border_radius = Some(dp(8.0).into());
     style
 }
 
-fn toast_style(mode: ResolvedThemeMode) -> ToastStyle {
-    let mut style = ToastStyle::default_for(mode);
+fn toast_style(ctx: &StyleContext<'_>) -> ToastStyle {
+    let mut style = ToastStyle::default_for_theme(ctx.theme);
     style.radius = Value::Static(dp(8.0));
     style.border_width = Value::Static(dp(0.0));
     style.padding = Insets::all(dp(12.0));
@@ -48,7 +48,7 @@ fn toast_style(mode: ResolvedThemeMode) -> ToastStyle {
         offset_y: dp(10.0),
         blur: dp(30.0),
         spread: dp(0.0),
-        color: match mode {
+        color: match ctx.mode {
             ResolvedThemeMode::Light => Color::rgba(15, 23, 42, 45),
             ResolvedThemeMode::Dark => Color::rgba(0, 0, 0, 125),
         },
@@ -221,9 +221,9 @@ impl ToastDemoVm {
             .max_width(pct(100.0))
             .padding(Insets::all(dp(24.0)))
             .gap(dp(18.0))
-            .style(panel_style)
-            .child(Text::new("Toast / Snackbar").style(title_style))
-            .child(Text::new("单独展示 ToastHost + ToastQueue 的常见用法: 语义类型、action、持久提示、短时提示、清空队列和不同屏幕位置。").style(body_style))
+            .style_full(panel_style)
+            .child(Text::new("Toast / Snackbar").style_full(title_style))
+            .child(Text::new("单独展示 ToastHost + ToastQueue 的常见用法: 语义类型、action、持久提示、短时提示、清空队列和不同屏幕位置。").style_full(body_style))
             .child(
                 Flex::new(Axis::Horizontal)
                     .gap(dp(10.0))
@@ -272,7 +272,7 @@ impl ToastDemoVm {
                             .on_click(Command::new(Self::clear_toasts)),
                     ),
             )
-            .child(Text::new("Placement").style(body_style))
+            .child(Text::new("Placement").style_full(body_style))
             .child(
                 Flex::new(Axis::Horizontal)
                     .gap(dp(10.0))
@@ -308,7 +308,7 @@ impl ToastDemoVm {
                             .on_click(Command::new(Self::push_bottom_end)),
                     ),
             )
-            .child(Text::new(self.status.signal()).style(status_style))
+            .child(Text::new(self.status.signal()).style_full(status_style))
             .into()
     }
 }
@@ -332,31 +332,31 @@ impl ViewModel for ToastDemoVm {
             .padding(Insets::all(dp(28.0)))
             .center()
             .child(self.controls())
-            .child(ToastHost::new(self.main_queue.clone()).style(toast_style))
+            .child(ToastHost::new(self.main_queue.clone()).style_full(toast_style))
             .child(
                 ToastHost::new(self.top_start_queue.clone())
                     .placement(ToastPlacement::TopStart)
-                    .style(toast_style),
+                    .style_full(toast_style),
             )
             .child(
                 ToastHost::new(self.top_center_queue.clone())
                     .placement(ToastPlacement::TopCenter)
-                    .style(toast_style),
+                    .style_full(toast_style),
             )
             .child(
                 ToastHost::new(self.top_end_queue.clone())
                     .placement(ToastPlacement::TopEnd)
-                    .style(toast_style),
+                    .style_full(toast_style),
             )
             .child(
                 ToastHost::new(self.bottom_start_queue.clone())
                     .placement(ToastPlacement::BottomStart)
-                    .style(toast_style),
+                    .style_full(toast_style),
             )
             .child(
                 ToastHost::new(self.bottom_center_queue.clone())
                     .placement(ToastPlacement::BottomCenter)
-                    .style(toast_style),
+                    .style_full(toast_style),
             )
             .into()
     }

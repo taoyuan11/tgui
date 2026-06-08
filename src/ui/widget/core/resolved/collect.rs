@@ -21,6 +21,7 @@ struct CollectResolvedStyles {
     progress_bar_style: Option<crate::ui::widget::style::ProgressBarStyle>,
     spinner_style: Option<crate::ui::widget::style::SpinnerStyle>,
     divider_style: Option<crate::ui::widget::style::DividerStyle>,
+    switch_style: Option<crate::ui::widget::style::SwitchStyle>,
     input_style: Option<ResolvedInputStyle>,
     checkbox_style: Option<ResolvedCheckboxStyle>,
     radio_style: Option<ResolvedRadioStyle>,
@@ -144,6 +145,11 @@ impl<VM: 'static> ResolvedElement<VM> {
         timed(Phase::Surface, || {
             self.push_surface_primitives_and_base_hit_regions(&mut computed, context, &visual)
         });
+        if let Some(auto_play) = self.carousel_auto_play.as_ref() {
+            let mut auto_play = auto_play.clone();
+            auto_play.frame = visual.frame;
+            computed.carousel_auto_play.push(auto_play);
+        }
 
         let kind_handled = timed(Phase::KindBody, || {
             self.collect_layout_media_kind(

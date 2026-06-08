@@ -169,7 +169,7 @@ fn textarea_keeps_wrapped_text_and_caret_clear_of_vertical_scrollbar() {
         .iter()
         .find(|region| region.id == text_id)
         .expect("textarea should register a scroll region");
-    let style = TextareaStyle::default_for(infer_theme_mode(&theme));
+    let style = TextareaStyle::default_for_theme(&theme);
     let text = super::text_with_typography(content.clone(), &style.text_style);
     let (font_size, line_height, letter_spacing) =
         resolved_text_metrics(&text, &theme, UnitContext::default());

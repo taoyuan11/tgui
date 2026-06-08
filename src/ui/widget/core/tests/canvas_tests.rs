@@ -57,7 +57,7 @@ fn canvas_border_radius_clips_item_meshes() {
                 .fill_rect(0.0, 0.0, 120.0, 80.0);
         }))
         .size(dp(120.0), dp(80.0))
-        .style(|mode| canvas_style(mode, dp(18.0))),
+        .style_full(|ctx| canvas_style(ctx, dp(18.0))),
     );
 
     let rendered = tree.render_output(

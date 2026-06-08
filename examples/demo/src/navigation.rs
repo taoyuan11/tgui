@@ -9,6 +9,7 @@ pub(crate) enum DemoPage {
     Feedback,
     Overlays,
     Data,
+    P3,
     MediaCanvas,
 }
 
@@ -20,7 +21,7 @@ pub(crate) struct NavigationItem {
     pub accent: u32,
 }
 
-pub(crate) const NAV_ITEMS: [NavigationItem; 6] = [
+pub(crate) const NAV_ITEMS: [NavigationItem; 7] = [
     NavigationItem {
         page: DemoPage::Basics,
         title: "Basics",
@@ -57,6 +58,13 @@ pub(crate) const NAV_ITEMS: [NavigationItem; 6] = [
         accent: 0x22C55EFF,
     },
     NavigationItem {
+        page: DemoPage::P3,
+        title: "P3 Widgets",
+        description: "Badges, rich text, combo",
+        badge: "P3",
+        accent: 0x0EA5E9FF,
+    },
+    NavigationItem {
         page: DemoPage::MediaCanvas,
         title: "Media & Canvas",
         description: "Canvas and playback",
@@ -71,8 +79,8 @@ pub(crate) fn sidebar(_app: &App, current: DemoPage) -> Element<App> {
     items.push(
         Flex::vertical()
             .gap(dp(4.0))
-            .child(Text::new("TGUI Demo").style(styles::section_title_style))
-            .child(Text::new("组件文档式示例").style(styles::status_style))
+            .child(Text::new("TGUI Demo").style_full(styles::section_title_style))
+            .child(Text::new("组件文档式示例").style_full(styles::status_style))
             .into(),
     );
 
@@ -85,7 +93,7 @@ pub(crate) fn sidebar(_app: &App, current: DemoPage) -> Element<App> {
         .height(pct(100.0))
         .gap(dp(14.0))
         .padding(Insets::all(dp(18.0)))
-        .style(styles::sidebar_style)
+        .style_full(styles::sidebar_style)
         .child(items)
         .into()
 }
@@ -99,7 +107,7 @@ fn nav_item(item: NavigationItem, current: DemoPage) -> Element<App> {
         .width(pct(100.0))
         .padding(Insets::symmetric(dp(12.0), dp(10.0)))
         .cursor(CursorStyle::Pointer)
-        .style(move |mode| styles::nav_item_style(mode, active, accent))
+        .style_full(move |ctx| styles::nav_item_style(ctx, active, accent))
         .on_click(Command::new(move |app: &mut App| app.show_page(page)))
         .child(
             Flex::horizontal()
@@ -109,10 +117,10 @@ fn nav_item(item: NavigationItem, current: DemoPage) -> Element<App> {
                     Stack::new()
                         .size(dp(34.0), dp(34.0))
                         .center()
-                        .style(move |mode| styles::nav_badge_style(mode, active, accent))
+                        .style_full(move |ctx| styles::nav_badge_style(ctx, active, accent))
                         .child(
                             Text::new(item.badge)
-                                .style(move |mode| styles::nav_badge_text_style(mode, active)),
+                                .style_full(move |ctx| styles::nav_badge_text_style(ctx, active)),
                         ),
                 )
                 .child(
@@ -121,11 +129,11 @@ fn nav_item(item: NavigationItem, current: DemoPage) -> Element<App> {
                         .gap(dp(3.0))
                         .child(
                             Text::new(item.title)
-                                .style(move |mode| styles::nav_title_style(mode, active)),
+                                .style_full(move |ctx| styles::nav_title_style(ctx, active)),
                         )
                         .child(
                             Text::new(item.description)
-                                .style(move |mode| styles::nav_description_style(mode, active)),
+                                .style_full(move |ctx| styles::nav_description_style(ctx, active)),
                         ),
                 ),
         )

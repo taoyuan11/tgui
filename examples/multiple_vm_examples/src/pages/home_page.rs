@@ -1,14 +1,14 @@
 use tgui::prelude::*;
 
-fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn text_style(ctx: &StyleContext<'_>, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = size;
     style.color = color.into();
     style
 }
 
-fn panel_style(mode: ResolvedThemeMode, background: Color) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn panel_style(ctx: &StyleContext<'_>, background: Color) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(background.into());
     style.surface.border_color = Some(Color::WHITE.into());
     style.surface.border_width = Some(dp(1.0).into());
@@ -53,10 +53,10 @@ impl HomePage {
         Flex::new(Axis::Vertical)
             .size(pct(60.0), pct(60.0))
             .padding(Insets::all(dp(20.0)))
-            .style(|mode| panel_style(mode, Color::hex(0x0066FF)))
+            .style_full(|ctx| panel_style(ctx, Color::hex(0x0066FF)))
             .child(el![
                 Text::new("Home 内部也有页面切换")
-                    .style(|mode| text_style(mode, sp(22.0), Color::WHITE)),
+                    .style_full(|ctx| text_style(ctx, sp(22.0), Color::WHITE)),
                 Flex::new(Axis::Horizontal).gap(dp(10.0)).child(el![
                     Button::new("Counter").on_click(Command::new(Self::show_counter)),
                     Button::new("Details").on_click(Command::new(Self::show_details)),
@@ -93,10 +93,10 @@ impl HomeCounterPage {
     fn view(&self) -> Element<Self> {
         Flex::new(Axis::Vertical)
             .padding(Insets::all(dp(14.0)))
-            .style(|mode| panel_style(mode, Color::hex(0x0D47A1)))
+            .style_full(|ctx| panel_style(ctx, Color::hex(0x0D47A1)))
             .child(el![
                 Text::new(self.count.signal().map(|i| format!("Home Counter 数量：{i}")))
-                    .style(|mode| text_style(mode, sp(16.0), Color::WHITE)),
+                    .style_full(|ctx| text_style(ctx, sp(16.0), Color::WHITE)),
                 Button::new("Counter +1").on_click(Command::new(Self::increment)),
             ])
             .into()
@@ -122,12 +122,12 @@ impl HomeDetailsPage {
     fn view(&self) -> Element<Self> {
         Flex::new(Axis::Vertical)
             .padding(Insets::all(dp(14.0)))
-            .style(|mode| panel_style(mode, Color::hex(0x1565C0)))
+            .style_full(|ctx| panel_style(ctx, Color::hex(0x1565C0)))
             .child(el![
                 Text::new("Home Details 子页面")
-                    .style(|mode| text_style(mode, sp(16.0), Color::WHITE)),
+                    .style_full(|ctx| text_style(ctx, sp(16.0), Color::WHITE)),
                 Text::new(self.visits.signal().map(|visits| format!("访问次数：{visits}")))
-                    .style(|mode| text_style(mode, sp(16.0), Color::WHITE)),
+                    .style_full(|ctx| text_style(ctx, sp(16.0), Color::WHITE)),
                 Button::new("记录访问").on_click(Command::new(Self::add_visit)),
             ])
             .into()

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+mod combobox;
 mod editing;
 mod focus;
 mod gesture;
@@ -18,6 +19,7 @@ mod scrolling;
 mod select_state;
 mod session;
 mod slider;
+mod splitter;
 mod table;
 mod tabs;
 mod text_input;
@@ -308,13 +310,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             {
                 self.advance_focus(self.modifiers.shift_key())
             }
-            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
-                if self.focused_text_input_id().is_none() =>
-            {
-                self.activate_focused_data_grid_cell(true, false)
-                    || self.activate_focused_tree_node(true, false)
-                    || self.activate_focused_list_item(true, false)
-                    || self.activate_focused_widget(true, false)
+            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
+                if self.activate_first_open_popover_option_from_input() {
+                    true
+                } else if self.focused_text_input_id().is_none() {
+                    self.activate_focused_data_grid_cell(true, false)
+                        || self.activate_focused_tree_node(true, false)
+                        || self.activate_focused_list_item(true, false)
+                        || self.activate_focused_widget(true, false)
+                } else {
+                    false
+                }
             }
             PhysicalKey::Code(KeyCode::Space) if self.focused_text_input_id().is_none() => {
                 self.activate_focused_data_grid_cell(false, true)
@@ -330,6 +336,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 } else if self.move_focused_data_grid_cell(0, -1, self.modifiers.shift_key()) {
                     true
                 } else if self.collapse_or_focus_parent_tree_node() {
+                    true
+                } else if self.adjust_focused_splitter(crate::ui::layout::Axis::Horizontal, -1) {
                     true
                 } else if self.adjust_focused_slider(-1, None) {
                     true
@@ -358,6 +366,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     true
                 } else if self.expand_or_focus_child_tree_node() {
                     true
+                } else if self.adjust_focused_splitter(crate::ui::layout::Axis::Horizontal, 1) {
+                    true
                 } else if self.adjust_focused_slider(1, None) {
                     true
                 } else {
@@ -379,22 +389,27 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             PhysicalKey::Code(KeyCode::ArrowUp) => {
-                (self.focused_tab_is_horizontal() == Some(false) && self.move_focused_tab(-1))
+                self.focus_open_popover_option_from_input(-1)
+                    || (self.focused_tab_is_horizontal() == Some(false)
+                        && self.move_focused_tab(-1))
                     || self.move_focused_data_grid_cell(-1, 0, self.modifiers.shift_key())
                     || self.move_focused_tree_node(-1, self.modifiers.shift_key())
                     || self.enter_focused_tree_root(true, self.modifiers.shift_key())
                     || self.move_focused_list_item(-1, self.modifiers.shift_key())
                     || self.enter_focused_list_root(true, self.modifiers.shift_key())
+                    || self.adjust_focused_splitter(crate::ui::layout::Axis::Vertical, -1)
                     || self.adjust_focused_slider(1, None)
                     || self.move_focused_input_cursor_vertically(-1, self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::ArrowDown) => {
-                (self.focused_tab_is_horizontal() == Some(false) && self.move_focused_tab(1))
+                self.focus_open_popover_option_from_input(1)
+                    || (self.focused_tab_is_horizontal() == Some(false) && self.move_focused_tab(1))
                     || self.move_focused_data_grid_cell(1, 0, self.modifiers.shift_key())
                     || self.move_focused_tree_node(1, self.modifiers.shift_key())
                     || self.enter_focused_tree_root(false, self.modifiers.shift_key())
                     || self.move_focused_list_item(1, self.modifiers.shift_key())
                     || self.enter_focused_list_root(false, self.modifiers.shift_key())
+                    || self.adjust_focused_splitter(crate::ui::layout::Axis::Vertical, 1)
                     || self.adjust_focused_slider(-1, None)
                     || self.move_focused_input_cursor_vertically(1, self.modifiers.shift_key())
             }

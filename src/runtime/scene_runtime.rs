@@ -248,6 +248,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     &self.tooltip_hover_started_at,
                                     active_tooltip,
                                     active_hover_popover,
+                                    &self.config.style_sheet,
                                 );
                             collect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
@@ -303,6 +304,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                         &self.tooltip_hover_started_at,
                                         active_tooltip,
                                         active_hover_popover,
+                                        &self.config.style_sheet,
                                     );
                                 recollect_duration += collect_started_at.elapsed();
                                 collect_passes += 1;
@@ -317,18 +319,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             let previous_layout = previous_cached
                                 .as_ref()
                                 .and_then(|cached| cached.layout.as_ref());
-                            let layout = tree.build_scene_layout_at_with_previous(
-                                &self.font_manager,
-                                &theme,
-                                &self.media_manager,
-                                &mut self.animation_engine,
-                                units,
-                                &self.scroll_states,
-                                &self.virtual_states,
-                                viewport,
-                                now,
-                                previous_layout,
-                            );
+                            let layout = tree
+                                .build_scene_layout_at_with_previous_style_sheet_and_reduced_motion(
+                                    &self.font_manager,
+                                    &theme,
+                                    &self.media_manager,
+                                    &mut self.animation_engine,
+                                    units,
+                                    &self.scroll_states,
+                                    &self.virtual_states,
+                                    viewport,
+                                    now,
+                                    previous_layout,
+                                    self.reduced_motion,
+                                    &self.config.style_sheet,
+                                );
                             layout_duration += layout_started_at.elapsed();
                             layout
                         };
@@ -373,6 +378,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     &self.tooltip_hover_started_at,
                                     active_tooltip,
                                     active_hover_popover,
+                                    &self.config.style_sheet,
                                 );
                             collect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
@@ -427,6 +433,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     &self.tooltip_hover_started_at,
                                     active_tooltip,
                                     active_hover_popover,
+                                    &self.config.style_sheet,
                                 );
                             recollect_duration += collect_started_at.elapsed();
                             collect_passes += 1;
@@ -476,6 +483,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 selected_text: self.selected_text,
                 caret_visible,
                 theme_epoch: self.theme_store.version(),
+                style_sheet_version: self.config.style_sheet.version(),
+                density: self.theme.density,
+                reduced_motion: self.reduced_motion,
+                text_scale_bits: units.font_scale().to_bits(),
                 animation_epoch: self.animation_epoch,
                 layout_animation_epoch: self.layout_animation_epoch,
                 scroll_epoch: self.scroll_epoch,
@@ -598,6 +609,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if let Some(focused) = self.focused_widget.as_ref() {
                 let mut state = states.get(focused.widget_id);
                 state.focused = true;
+                state.focus_visible = true;
                 states.set(focused.widget_id, state);
             }
         }

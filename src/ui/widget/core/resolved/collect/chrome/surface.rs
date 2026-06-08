@@ -141,11 +141,15 @@ impl<VM> ResolvedElement<VM> {
                 .as_ref()
                 .and_then(|style| style.focus_ring.clone()),
             ResolvedWidgetKind::TextEditor { .. } => None,
-            ResolvedWidgetKind::Switch { style, .. } => resolve_focus_ring(
-                context.theme,
-                style.focus_ring.as_ref(),
-                visual.widget_state,
-            ),
+            ResolvedWidgetKind::Switch { .. } => {
+                visual.styles.switch_style.as_ref().and_then(|style| {
+                    resolve_focus_ring(
+                        context.theme,
+                        style.focus_ring.as_ref(),
+                        visual.widget_state,
+                    )
+                })
+            }
             _ if (self.list_item.is_some() || self.tree_node.is_some())
                 && visual.widget_state.focused =>
             {
@@ -266,12 +270,16 @@ impl<VM> ResolvedElement<VM> {
                         interactions: self.interactions.clone(),
                     }
                 } else {
+                    let keyboard_click_activation =
+                        self.focus.focusable.unwrap_or(fallback_focusable)
+                            && self.interactions.on_click.is_some();
                     HitInteraction::Widget {
                         id: self.id,
                         interactions: self.interactions.clone(),
                         focusable: fallback_focusable,
                         default_activation: match self.kind {
                             ResolvedWidgetKind::Button { .. } => DefaultActivation::EnterAndSpace,
+                            _ if keyboard_click_activation => DefaultActivation::EnterAndSpace,
                             _ => DefaultActivation::None,
                         },
                     }

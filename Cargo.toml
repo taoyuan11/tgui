@@ -1,6 +1,6 @@
 [package]
 name = "tgui"
-version = "0.1.8"
+version = "0.2.0"
 authors = ["a2542209451@gmail.com"]
 edition = "2021"
 rust-version = "1.85"
@@ -57,6 +57,7 @@ lyon = "1.0"
 mimalloc = { version = "0.1", optional = true }
 parking_lot = "0.12"
 pollster = "0.4"
+pulldown-cmark = "0.13.4"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider"] }
 resvg = "0.47"
 ropey = "1.6"

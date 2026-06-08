@@ -64,9 +64,9 @@ fn hit_testing_tracks_currently_resolved_children() {
     let visible = context.state(true);
     let clickable: Element<()> = Stack::new()
         .size(dp(40.0), dp(40.0))
-        .style(|mode| {
+        .style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(crate::foundation::color::Color::WHITE),
                 None,
                 None,

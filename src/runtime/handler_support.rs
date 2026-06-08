@@ -29,6 +29,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .then_some(now + super::TOUCH_SCROLL_INERTIA_FRAME);
         let tooltip_deadline = self.next_tooltip_wakeup_deadline;
         let toast_deadline = self.next_toast_wakeup_deadline;
+        let carousel_deadline = self.next_carousel_wakeup_deadline;
         [
             animation_deadline,
             controller_deadline,
@@ -41,6 +42,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             touch_scroll_inertia_deadline,
             tooltip_deadline,
             toast_deadline,
+            carousel_deadline,
         ]
         .into_iter()
         .flatten()

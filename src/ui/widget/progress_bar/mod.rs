@@ -1,4 +1,4 @@
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
@@ -176,6 +176,8 @@ impl<VM> ProgressBar<VM> {
                 data_grid_cell: None,
                 data_grid_header: None,
                 data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
                 kind: WidgetKind::ProgressBar {
                     value: value.into(),
                     indeterminate: Value::Static(false),
@@ -216,6 +218,8 @@ impl<VM> ProgressBar<VM> {
                 data_grid_cell: None,
                 data_grid_header: None,
                 data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
                 kind: WidgetKind::ProgressBar {
                     value: Value::Static(0.0),
                     indeterminate: open.into(),
@@ -253,10 +257,23 @@ impl<VM> ProgressBar<VM> {
 
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> ProgressBarStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut ProgressBarStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
         if let WidgetKind::ProgressBar { style, .. } = &mut self.element.kind {
-            *style = Some(StyleResolver::new(resolver));
+            *style = Some(StyleResolver::mutate(
+                |context| ProgressBarStyle::default_for_theme(context.theme),
+                mutator,
+            ));
+        }
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> ProgressBarStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::ProgressBar { style, .. } = &mut self.element.kind {
+            *style = Some(StyleResolver::full(resolver));
         }
         self
     }

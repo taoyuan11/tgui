@@ -13,27 +13,27 @@ fn logo_source() -> MediaSource {
     MediaSource::bytes(include_bytes!("../../../docs/images/tgui_logo.png"))
 }
 
-fn text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn text_style(ctx: &StyleContext<'_>, size: Sp) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = size;
     style
 }
 
-fn muted_text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
-    let mut style = text_style(mode, size);
+fn muted_text_style(ctx: &StyleContext<'_>, size: Sp) -> TextWidgetStyle {
+    let mut style = text_style(ctx, size);
     style.color = Color::hexa(0x475569FF).into();
     style
 }
 
-fn hero_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn hero_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hexa(0xE2E8F0FF).into());
     style.surface.border_radius = Some(dp(24.0).into());
     style
 }
 
-fn card_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn card_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hexa(0xF8FAFCFF).into());
     style.surface.border_color = Some(Color::hexa(0xCBD5E1FF).into());
     style.surface.border_width = Some(dp(1.0).into());
@@ -41,8 +41,8 @@ fn card_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn canvas_frame_style(mode: ResolvedThemeMode) -> CanvasStyle {
-    let mut style = CanvasStyle::default_for(mode);
+fn canvas_frame_style(ctx: &StyleContext<'_>) -> CanvasStyle {
+    let mut style = CanvasStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hexa(0x0F172AFF).into());
     style.surface.border_color = Some(Color::hexa(0x334155FF).into());
     style.surface.border_width = Some(dp(1.0).into());
@@ -50,16 +50,16 @@ fn canvas_frame_style(mode: ResolvedThemeMode) -> CanvasStyle {
     style
 }
 
-fn info_chip_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn info_chip_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hexa(0xE2E8F0FF).into());
     style.surface.border_radius = Some(dp(14.0).into());
     style.color = Color::hexa(0x0F172AFF).into();
     style
 }
 
-fn action_row_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn action_row_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hexa(0xEFF6FFFF).into());
     style.surface.border_radius = Some(dp(18.0).into());
     style
@@ -868,7 +868,7 @@ impl CanvasVm {
     fn sample_canvas(scene: CanvasScene) -> Canvas<Self> {
         Canvas::new(scene)
             .size(dp(CARD_CANVAS_WIDTH), dp(CARD_CANVAS_HEIGHT))
-            .style(canvas_frame_style)
+            .style_full(canvas_frame_style)
             .on_item_mouse_move(ValueCommand::new(Self::on_hover))
             .on_item_click(ValueCommand::new(Self::on_click))
             .on_item_drag(ValueCommand::new(Self::on_drag))
@@ -917,9 +917,9 @@ impl CanvasVm {
             .height(dp(height))
             .padding(Insets::all(dp(18.0)))
             .gap(dp(12.0))
-            .style(card_style)
-            .child(Text::new(title).style(|mode| text_style(mode, sp(22.0))))
-            .child(Text::new(description).style(|mode| muted_text_style(mode, sp(14.0))))
+            .style_full(card_style)
+            .child(Text::new(title).style_full(|ctx| text_style(ctx, sp(22.0))))
+            .child(Text::new(description).style_full(|ctx| muted_text_style(ctx, sp(14.0))))
             .child(body)
             .into()
     }
@@ -941,11 +941,11 @@ impl CanvasVm {
             .height(dp(RETAINED_CARD_HEIGHT))
             .padding(Insets::all(dp(18.0)))
             .gap(dp(12.0))
-            .style(card_style)
-            .child(Text::new("Retained Scene Lab").style(|mode| text_style(mode, sp(22.0))))
+            .style_full(card_style)
+            .child(Text::new("Retained Scene Lab").style_full(|ctx| text_style(ctx, sp(22.0))))
             .child(
                 Text::new("直接持有 CanvasScene，并用 names / visit / query / export / remove / insert / push / clear 驱动一个动态场景。")
-                    .style(|mode| muted_text_style(mode, sp(14.0))),
+                    .style_full(|ctx| muted_text_style(ctx, sp(14.0))),
             )
             .child(Flex::new(Axis::Vertical)
                 .gap(dp(12.0))
@@ -953,7 +953,7 @@ impl CanvasVm {
                     Flex::new(Axis::Horizontal)
                         .padding(Insets::all(dp(12.0)))
                         .gap(dp(10.0))
-                        .style(action_row_style)
+                        .style_full(action_row_style)
                         .child(
                             Button::new("重建 Scene")
                                 .secondary()
@@ -983,7 +983,7 @@ impl CanvasVm {
                 .child(
                     Canvas::new(retained_scene.clone())
                         .size(dp(CARD_CANVAS_WIDTH), dp(LAB_CANVAS_HEIGHT))
-                        .style(canvas_frame_style)
+                        .style_full(canvas_frame_style)
                         .on_mouse_move(ValueCommand::new(Self::probe_retained_scene))
                         .on_mouse_leave(Command::new(Self::reset_probe))
                         .on_item_mouse_move(ValueCommand::new(Self::on_hover))
@@ -992,12 +992,12 @@ impl CanvasVm {
                 .child(
                     Text::new(retained_probe)
                         .padding(Insets::all(dp(12.0)))
-                        .style(info_chip_style),
+                        .style_full(info_chip_style),
                 )
                 .child(
                     Text::new(retained_scene.map(|scene| retained_scene_report(&scene)))
                         .padding(Insets::all(dp(12.0)))
-                        .style(|mode| muted_text_style(mode, sp(13.0))),
+                        .style_full(|ctx| muted_text_style(ctx, sp(13.0))),
                 )
             )
     }
@@ -1007,16 +1007,16 @@ impl CanvasVm {
             .height(dp(EVENT_CARD_HEIGHT))
             .padding(Insets::all(dp(18.0)))
             .gap(dp(12.0))
-            .style(card_style)
-            .child(Text::new("Interaction Lab").style(|mode| text_style(mode, sp(22.0))))
+            .style_full(card_style)
+            .child(Text::new("Interaction Lab").style_full(|ctx| text_style(ctx, sp(22.0))))
             .child(
                 Text::new("这里把 item 级 hover、enter、leave、down、up、click、double click、wheel、drag start、drag、drag end 和 text hit 都接起来了。")
-                    .style(|mode| muted_text_style(mode, sp(14.0))),
+                    .style_full(|ctx| muted_text_style(ctx, sp(14.0))),
             )
             .child(
                 Canvas::new(interaction_scene())
                     .size(dp(CARD_CANVAS_WIDTH), dp(CARD_CANVAS_HEIGHT))
-                    .style(canvas_frame_style)
+                    .style_full(canvas_frame_style)
                     .on_item_mouse_enter(ValueCommand::new(Self::on_mouse_enter))
                     .on_item_mouse_leave(ValueCommand::new(Self::on_mouse_leave))
                     .on_item_mouse_down(ValueCommand::new(Self::on_mouse_down))
@@ -1257,13 +1257,13 @@ impl ViewModel for CanvasVm {
                 Flex::new(Axis::Vertical)
                     .padding(Insets::all(dp(20.0)))
                     .gap(dp(10.0))
-                    .style(hero_style)
-                    .child(Text::new("Canvas Capability Atlas").style(|mode| text_style(mode, sp(30.0))))
+                    .style_full(hero_style)
+                    .child(Text::new("Canvas Capability Atlas").style_full(|ctx| text_style(ctx, sp(30.0))))
                     .child(
                         Text::new(
                             "这个示例把公开 Canvas API 尽量都串到一个地方：path、快捷图元、文字、富文本、图片、clip、mask、blend、effect、transform、retained scene、主动 query、命名、导出和完整 item 事件。",
                         )
-                        .style(|mode| muted_text_style(mode, sp(15.0))),
+                        .style_full(|ctx| muted_text_style(ctx, sp(15.0))),
                     ),
             )
             .child(
@@ -1272,12 +1272,12 @@ impl ViewModel for CanvasVm {
                     .child(
                         Text::new(self.hovered.signal())
                             .padding(Insets::all(dp(12.0)))
-                            .style(info_chip_style),
+                            .style_full(info_chip_style),
                     )
                     .child(
                         Text::new(self.activity.signal())
                             .padding(Insets::all(dp(12.0)))
-                            .style(info_chip_style),
+                            .style_full(info_chip_style),
                     ),
             )
             .child(
@@ -1285,7 +1285,7 @@ impl ViewModel for CanvasVm {
                     .wrap(Wrap::Wrap)
                     .padding(Insets::all(dp(12.0)))
                     .gap(dp(10.0))
-                    .style(action_row_style)
+                    .style_full(action_row_style)
                     .child(el![
                         Button::new("Primitives")
                             .secondary()
@@ -1324,16 +1324,16 @@ impl ViewModel for CanvasVm {
                     .height(dp(CARD_PANEL_HEIGHT))
                     .padding(Insets::all(dp(18.0)))
                     .gap(dp(12.0))
-                    .style(card_style)
-                    .child(Text::new(selected_title).style(|mode| text_style(mode, sp(22.0))))
+                    .style_full(card_style)
+                    .child(Text::new(selected_title).style_full(|ctx| text_style(ctx, sp(22.0))))
                     .child(
                         Text::new(selected_description)
-                            .style(|mode| muted_text_style(mode, sp(14.0))),
+                            .style_full(|ctx| muted_text_style(ctx, sp(14.0))),
                     )
                     .child(
                         Canvas::new(selected_scene)
                             .size(dp(CARD_CANVAS_WIDTH), dp(CARD_CANVAS_HEIGHT))
-                            .style(canvas_frame_style)
+                            .style_full(canvas_frame_style)
                             .on_item_mouse_enter(ValueCommand::new(Self::on_mouse_enter))
                             .on_item_mouse_leave(ValueCommand::new(Self::on_mouse_leave))
                             .on_item_mouse_down(ValueCommand::new(Self::on_mouse_down))

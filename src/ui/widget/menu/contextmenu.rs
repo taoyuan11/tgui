@@ -45,9 +45,10 @@
 
 use crate::foundation::view_model::ValueCommand;
 use crate::ui::layout::Value;
+use crate::ui::theme::StyleContext;
 use crate::ui::widget::core::Element;
 use crate::ui::widget::gesture::{GestureRecognizer, LongPressEvent};
-use crate::ui::widget::style::MenuStyle;
+use crate::ui::widget::style::{MenuStyle, StyleResolver};
 
 use super::descriptor::{ContextMenuDescriptor, MenuItemState};
 use super::types::MenuItem;
@@ -59,7 +60,7 @@ pub struct ContextMenu<VM> {
     on_show: Option<ValueCommand<VM, LongPressEvent>>,
     on_open_change: Option<ValueCommand<VM, bool>>,
     disabled: Value<bool>,
-    style: Option<MenuStyle>,
+    style: Option<StyleResolver<MenuStyle>>,
 }
 
 impl<VM> ContextMenu<VM> {
@@ -106,9 +107,24 @@ impl<VM> ContextMenu<VM> {
         self
     }
 
-    /// 覆盖默认主题样式。
-    pub fn style(mut self, style: MenuStyle) -> Self {
-        self.style = Some(style);
+    /// Patch the theme-derived style.
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut MenuStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| MenuStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    /// Replace the full resolved style.
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> MenuStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 }

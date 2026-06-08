@@ -197,6 +197,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         caret_visible: bool,
         active_tooltip: Option<ActiveTooltipState>,
         active_hover_popover: Option<WidgetId>,
+        style_sheet: &crate::ui::widget::StyleSheet,
     ) -> Option<CollectedSceneCache<VM>> {
         let path = self.path_for(widget_id)?;
         let tooltip_hover_started_at: HashMap<WidgetId, std::time::Instant> = HashMap::new();
@@ -223,10 +224,15 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                 let empty_menu_open_states = HashMap::<WidgetId, bool>::new();
                 let empty_menubar_active_states = HashMap::<u64, Option<usize>>::new();
                 let empty_context_menu_anchor_states = HashMap::<WidgetId, Point>::new();
+                let style_context = crate::ui::theme::StyleContext::from_theme(theme)
+                    .with_reduced_motion(reduced_motion)
+                    .with_text_scale(self.units.font_scale());
                 let mut context = CollectContext {
                     taffy: &self.taffy,
                     font_manager,
                     theme,
+                    style_context,
+                    style_sheet,
                     media,
                     focused_input,
                     focused_text_state,

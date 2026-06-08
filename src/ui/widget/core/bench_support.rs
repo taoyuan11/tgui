@@ -336,6 +336,7 @@ impl WidgetBenchmarkContext {
             }
 
             let mut patches = SmallVec::<[ScenePatch; 8]>::new();
+            let default_style_sheet = crate::ui::widget::StyleSheet::default();
             for root in roots {
                 let old_ids = layout.subtree_widget_ids(*root);
                 let Some(visual_context) = self.cached_visual_contexts.get(root).copied() else {
@@ -367,6 +368,7 @@ impl WidgetBenchmarkContext {
                     false,
                     None,
                     None,
+                    &default_style_sheet,
                 ) else {
                     return false;
                 };

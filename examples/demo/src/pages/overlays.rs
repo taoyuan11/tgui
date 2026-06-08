@@ -120,7 +120,7 @@ fn tooltip_component(app: &App) -> Element<App> {
                     )),
                     Button::new("强调样式").tooltip(
                         Tooltip::new("自定义 background / radius 即可换风格")
-                            .style(styles::accent_tooltip_style(ResolvedThemeMode::Dark)),
+                            .style_full(styles::accent_tooltip_style),
                     ),
                     Button::new("富内容").tooltip(Tooltip::content(
                         Flex::vertical()
@@ -151,9 +151,9 @@ fn popover_component(app: &App) -> Element<App> {
             .gap(dp(10.0))
             .width(dp(280.0))
             .padding(Insets::all(dp(14.0)))
-            .style(styles::popover_panel_style)
+            .style_full(styles::popover_panel_style)
             .child(el![
-                Text::new("快速设置").style(styles::usage_title_style),
+                Text::new("快速设置").style_full(styles::usage_title_style),
                 Input::new(app.popover_note.clone())
                     .placeholder("输入浮层里的备注")
                     .width(dp(240.0)),
@@ -192,7 +192,7 @@ fn popover_component(app: &App) -> Element<App> {
                         }
                         .to_string()
                     }))
-                    .style(styles::status_style),
+                    .style_full(styles::status_style),
                 ]),
                 CODE_POPOVER_CONTROLLED,
             ),
@@ -237,7 +237,7 @@ fn menu_component(app: &App) -> Element<App> {
                                 app.toast_status.set("菜单操作: 删除".to_string());
                             }))
                         ),
-                    Text::new(app.toast_status.signal()).style(styles::status_style),
+                    Text::new(app.toast_status.signal()).style_full(styles::status_style),
                 ]),
                 CODE_MENU_BUTTON,
             ),
@@ -293,7 +293,7 @@ fn modal_component(app: &App) -> Element<App> {
                 modal_preview(
                     Flex::vertical().gap(dp(8.0)).child(el![
                         Button::new("打开 Confirm").on_click(Command::new(App::open_confirm_modal)),
-                        Text::new(app.modal_confirm_result.signal()).style(styles::status_style),
+                        Text::new(app.modal_confirm_result.signal()).style_full(styles::status_style),
                     ]),
                     Modal::new(app.modal_confirm_open.signal())
                         .on_open_change(ValueCommand::new(App::dismiss_confirm_modal))
@@ -315,7 +315,7 @@ fn modal_component(app: &App) -> Element<App> {
                 modal_preview(
                     Flex::vertical().gap(dp(8.0)).child(el![
                         Button::new("编辑名称").on_click(Command::new(App::open_form_modal)),
-                        Text::new(app.modal_form_result.signal()).style(styles::status_style),
+                        Text::new(app.modal_form_result.signal()).style_full(styles::status_style),
                     ]),
                     Modal::new(app.modal_form_open.signal())
                         .on_open_change(ValueCommand::new(App::dismiss_form_modal))
@@ -430,10 +430,10 @@ fn drawer_component(app: &App) -> Element<App> {
                     Flex::vertical()
                         .gap(dp(8.0))
                         .padding(Insets::all(dp(16.0)))
-                        .child(Text::new("主内容区域").style(styles::usage_title_style))
+                        .child(Text::new("主内容区域").style_full(styles::usage_title_style))
                         .child(
                             Text::new("打开 Push 模式时，这块内容会被侧栏同步推开。")
-                                .style(styles::status_style),
+                                .style_full(styles::status_style),
                         )
                         .child(
                             Button::new("Push 模式")
@@ -466,8 +466,8 @@ fn drawer_panel(title: &'static str, close: fn(&mut App)) -> Element<App> {
     Flex::vertical()
         .gap(dp(12.0))
         .padding(Insets::all(dp(16.0)))
-        .child(Text::new(title).style(styles::usage_title_style))
-        .child(Text::new("这里可以放置导航、表单或上下文操作。").style(styles::status_style))
+        .child(Text::new(title).style_full(styles::usage_title_style))
+        .child(Text::new("这里可以放置导航、表单或上下文操作。").style_full(styles::status_style))
         .child(Button::new("关闭").ghost().on_click(Command::new(close)))
         .into()
 }

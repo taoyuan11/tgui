@@ -8,7 +8,7 @@ use crate::animation::AnimationEngine;
 use crate::foundation::binding::DependencyGraph;
 use crate::media::MediaManager;
 use crate::text::font::{FontManager, TextLayoutInfo};
-use crate::ui::theme::Theme;
+use crate::ui::theme::{StyleContext, Theme};
 use crate::ui::unit::UnitContext;
 use crate::ui::widget::common::{
     ClipMask, ComputedScene, FocusScopeState, FocusTargetMeta, LifecycleEventState, MeasureContext,
@@ -27,6 +27,8 @@ pub(crate) struct CollectContext<'a, 'b> {
     pub(crate) taffy: &'a TaffyTree<MeasureContext>,
     pub(crate) font_manager: &'a FontManager,
     pub(crate) theme: &'a Theme,
+    pub(crate) style_context: StyleContext<'a>,
+    pub(crate) style_sheet: &'a crate::ui::widget::StyleSheet,
     pub(crate) media: &'a MediaManager,
     pub(crate) focused_input: Option<WidgetId>,
     pub(crate) focused_text_state: Option<&'a TextEditState>,

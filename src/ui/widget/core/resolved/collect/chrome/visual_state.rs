@@ -69,7 +69,7 @@ impl<VM> ResolvedElement<VM> {
                 1.0,
             )
             * if disabled { 0.55 } else { 1.0 };
-        let styles = self.resolve_collect_styles(widget_state, context.theme);
+        let styles = self.resolve_collect_styles(widget_state, context);
         let border_width = self.resolve_collect_border_width(&styles, context).max(0.0);
         let border_radius = self
             .resolve_collect_border_radius(&styles, context)
@@ -188,14 +188,57 @@ impl<VM> ResolvedElement<VM> {
         disabled: bool,
         context: &CollectContext<'_, '_>,
     ) -> WidgetState {
-        if disabled {
+        let mut state = if disabled {
             WidgetState {
                 disabled: true,
                 ..Default::default()
             }
         } else {
             context.widget_states.get(self.id)
+        };
+
+        match &self.kind {
+            ResolvedWidgetKind::Checkbox {
+                checked,
+                validation,
+                ..
+            }
+            | ResolvedWidgetKind::Radio {
+                checked,
+                validation,
+                ..
+            }
+            | ResolvedWidgetKind::Switch {
+                checked,
+                validation,
+                ..
+            } => {
+                let checked = checked.resolve();
+                state.selected = checked;
+                state.checked = checked;
+                state.invalid = validation.resolve().invalid;
+            }
+            ResolvedWidgetKind::Select {
+                open, validation, ..
+            } => {
+                state.open = open
+                    .as_ref()
+                    .map(Value::resolve)
+                    .or_else(|| context.select_open_states.get(&self.id).copied())
+                    .unwrap_or(false);
+                state.invalid = validation.resolve().invalid;
+            }
+            ResolvedWidgetKind::Slider { validation, .. }
+            | ResolvedWidgetKind::TextEditor { validation, .. } => {
+                state.invalid = validation.resolve().invalid;
+            }
+            _ => {}
         }
+
+        if disabled {
+            state.disabled = true;
+        }
+        state
     }
 }
 

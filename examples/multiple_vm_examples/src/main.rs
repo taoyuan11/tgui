@@ -5,8 +5,8 @@ use crate::pages::settings_page::SettingsPage;
 use std::sync::Arc;
 use tgui::prelude::*;
 
-fn root_style(mode: ResolvedThemeMode, background: Signal<Color>) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn root_style(ctx: &StyleContext<'_>, background: Signal<Color>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(background.into());
     style
 }
@@ -83,9 +83,9 @@ impl ViewModel for RootVM {
         let settings = self.settings.clone();
         Flex::new(Axis::Vertical)
             .padding(Insets::all(dp(20.0)))
-            .style({
+            .style_full({
                 let background = self.background_color();
-                move |mode| root_style(mode, background.clone())
+                move |ctx| root_style(ctx, background.clone())
             })
             .child(el![
                 Text::new("根 VM：多页面应用"),

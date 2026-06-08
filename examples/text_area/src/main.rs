@@ -2,16 +2,16 @@ use std::fs;
 use std::path::Path;
 use tgui::prelude::*;
 
-fn card_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn card_style(context: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.border_color = Some(Color::rgb(48, 58, 76).into());
     style.surface.border_width = Some(dp(1.0).into());
     style.surface.border_radius = Some(dp(14.0).into());
     style
 }
 
-fn title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn title_style(context: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(context.theme);
     style.typography.size = sp(26.0);
     style.typography.weight = FontWeight::Medium;
     style
@@ -59,7 +59,7 @@ impl ViewModel for App {
                 tgui_log(LogLevel::Info, "root view update")
             }))
             .child(el![
-                Text::new("Textarea 示例").style(title_style),
+                Text::new("Textarea 示例").style_full(title_style),
                 Text::new("下面的内容读取自当前示例的 `main.rs`，你可以编辑它，但修改不会保存到磁盘。")
                 .user_select(true),
                 Text::new(self.path_label.signal()).user_select(true),
@@ -69,7 +69,7 @@ impl ViewModel for App {
                     .width(pct(100.0))
                     .min_height(dp(0.0))
                     .grow(1.0)
-                    .style(card_style)
+                    .style_full(card_style)
                     .child(el![
                         Text::new("源码编辑区"),
                         Textarea::new(self.content.clone())

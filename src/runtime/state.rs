@@ -2,6 +2,7 @@ use crate::foundation::binding::{DependencyGraph, TextChange, TextChangeSet};
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::platform::event::FingerId;
 use crate::text::font::{FontWeight, TextLayoutInfo};
+use crate::ui::theme::Density;
 use crate::ui::unit::{Dp, UnitContext};
 #[cfg(feature = "audio")]
 use crate::ui::widget::LifecycleWidgetKind;
@@ -32,6 +33,10 @@ pub(super) struct CachedScene<VM> {
     pub(super) selected_text: Option<WidgetId>,
     pub(super) caret_visible: bool,
     pub(super) theme_epoch: u64,
+    pub(super) style_sheet_version: u64,
+    pub(super) density: Density,
+    pub(super) reduced_motion: bool,
+    pub(super) text_scale_bits: u32,
     pub(super) animation_epoch: u64,
     pub(super) layout_animation_epoch: u64,
     pub(super) scroll_epoch: u64,
@@ -473,6 +478,20 @@ pub(super) struct ActiveDataGridColumnResize<VM> {
     pub(super) max_width: Option<Dp>,
     pub(super) current_width: Dp,
     pub(super) on_change: Option<ValueCommand<VM, crate::ui::widget::DataGridColumnWidthChange>>,
+}
+
+#[derive(Clone)]
+pub(super) struct ActiveSplitterResize<VM> {
+    pub(super) axis: crate::ui::layout::Axis,
+    pub(super) index: usize,
+    pub(super) start_position: Point,
+    pub(super) pair_extent: Dp,
+    pub(super) start_sizes: Vec<f32>,
+    pub(super) constraints: Vec<(f32, f32)>,
+    pub(super) current_sizes: Vec<f32>,
+    pub(super) moved: bool,
+    pub(super) step: f32,
+    pub(super) on_resize: Option<ValueCommand<VM, crate::ui::widget::SplitterResize>>,
 }
 
 #[derive(Clone)]

@@ -105,8 +105,8 @@ fn tree_selected_row_emits_selected_background() {
             .expanded_keys(vec![WidgetKey::from("root")])
             .selection_mode(TreeSelectionMode::Multiple)
             .selected_keys(vec![WidgetKey::from("child-a")])
-            .style(move |mode| {
-                let mut style = TreeStyle::default_for(mode);
+            .style_full(move |ctx| {
+                let mut style = TreeStyle::default_for_theme(ctx.theme);
                 style.item_selected_background = selected.into();
                 style
             })

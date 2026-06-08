@@ -9,10 +9,10 @@
 use std::sync::Arc;
 
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::Value;
 use crate::ui::widget::overlay::{Alignment, FlipPolicy, Placement};
-use crate::ui::widget::style::MenuStyle;
+use crate::ui::widget::style::{MenuStyle, StyleResolver};
 
 use super::types::{KeyChord, MenuBarGroupId, MenuIcon, MenuItem, MenuItemKind};
 
@@ -102,7 +102,7 @@ pub struct MenuDescriptor<VM> {
     pub(crate) placement: Placement,
     pub(crate) flip_policy: FlipPolicy,
     pub(crate) disabled: Value<bool>,
-    pub(crate) style: Option<MenuStyle>,
+    pub(crate) style: Option<StyleResolver<MenuStyle>>,
     /// 关联到同一个 MenuBar 的标记（None=独立 Menu）。
     pub(crate) menubar_group: Option<MenuBarGroupId>,
     /// 在所属 MenuBar 里的索引（与 menubar_group 同时出现或都为 None）。
@@ -172,11 +172,14 @@ impl<VM> MenuDescriptor<VM> {
         }
     }
 
-    /// 按主题模式解析最终样式（用户未提供则取主题默认值）。
-    pub(crate) fn resolved_style(&self, mode: ResolvedThemeMode) -> MenuStyle {
+    /// 按当前主题解析最终样式（用户未提供则取主题默认值）。
+    pub(crate) fn resolved_style(&self, context: &StyleContext<'_>) -> MenuStyle {
+        let mut base = MenuStyle::default_for_theme(context.theme);
+        context.theme.components.menu.apply(&mut base, context);
         self.style
-            .clone()
-            .unwrap_or_else(|| MenuStyle::default_for(mode))
+            .as_ref()
+            .map(|resolver| resolver.resolve_from(base.clone(), context))
+            .unwrap_or(base)
     }
 }
 
@@ -190,7 +193,7 @@ pub struct ContextMenuDescriptor<VM> {
     pub(crate) items: Vec<MenuItemState<VM>>,
     pub(crate) on_open_change: Option<ValueCommand<VM, bool>>,
     pub(crate) disabled: Value<bool>,
-    pub(crate) style: Option<MenuStyle>,
+    pub(crate) style: Option<StyleResolver<MenuStyle>>,
 }
 
 impl<VM> Clone for ContextMenuDescriptor<VM> {
@@ -233,10 +236,13 @@ impl<VM> ContextMenuDescriptor<VM> {
         }
     }
 
-    /// 按主题模式解析最终样式。
-    pub(crate) fn resolved_style(&self, mode: ResolvedThemeMode) -> MenuStyle {
+    /// 按当前主题解析最终样式。
+    pub(crate) fn resolved_style(&self, context: &StyleContext<'_>) -> MenuStyle {
+        let mut base = MenuStyle::default_for_theme(context.theme);
+        context.theme.components.menu.apply(&mut base, context);
         self.style
-            .clone()
-            .unwrap_or_else(|| MenuStyle::default_for(mode))
+            .as_ref()
+            .map(|resolver| resolver.resolve_from(base.clone(), context))
+            .unwrap_or(base)
     }
 }

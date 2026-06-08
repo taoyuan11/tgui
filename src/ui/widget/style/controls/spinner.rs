@@ -13,14 +13,14 @@ pub struct SpinnerStyle {
 }
 
 impl SpinnerStyle {
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            track_color: Value::Static(palette.outline_muted.with_alpha_factor(0.55)),
+            track_color: Value::Static(palette.outline_muted),
             indicator_color: Value::Static(palette.primary),
-            size: dp(20.0),
-            thickness: dp(3.0),
+            size: theme.spacing.lg,
+            thickness: theme.border.thick,
             sweep_degrees: 110.0,
             show_track: true,
         }

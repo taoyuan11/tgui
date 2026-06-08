@@ -8,14 +8,15 @@ use crate::foundation::color::Color;
 use crate::foundation::form::ValidationVisualState;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::ICON_FONT_FAMILY;
-use crate::theme::{FontWeight, ResolvedThemeMode};
+use crate::theme::{FontWeight, ResolvedThemeMode, StyleContext, Theme};
 use crate::ui::layout::{fr, Align, Insets, Justify, Value, Wrap};
-use crate::ui::theme::{Stateful, TextStyle};
+use crate::ui::theme::{StateValue, TextStyle};
 use crate::ui::unit::{dp, sp, Dp};
 
 use super::common::ButtonVariantKind;
 use super::style::{
-    ButtonStyle, ContainerStyle, InputStyle, PopoverStyle, SelectStyle, TextWidgetStyle,
+    ButtonStyle, ContainerStyle, InputStyle, PopoverStyle, SelectStyle, StyleResolver,
+    TextWidgetStyle,
 };
 use super::{
     Button, CursorStyle, Element, FileDropEvent, Flex, Grid, Input, Popover, ProgressBar,
@@ -62,10 +63,10 @@ pub struct CalendarStyle {
 }
 
 impl CalendarStyle {
-    pub fn default_for(_: ResolvedThemeMode) -> Self {
+    pub(crate) fn default_for_theme(theme: &Theme) -> Self {
         Self {
-            day_size: dp(32.0),
-            gap: dp(4.0),
+            day_size: theme.spacing.xl,
+            gap: theme.spacing.xs,
             panel_width: dp(320.0),
         }
     }
@@ -78,10 +79,10 @@ pub struct DatePickerStyle {
 }
 
 impl DatePickerStyle {
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
+    pub(crate) fn default_for_theme(theme: &Theme) -> Self {
         Self {
             width: dp(320.0),
-            calendar: CalendarStyle::default_for(mode),
+            calendar: CalendarStyle::default_for_theme(theme),
         }
     }
 }
@@ -93,10 +94,10 @@ pub struct TimePickerStyle {
 }
 
 impl TimePickerStyle {
-    pub fn default_for(_: ResolvedThemeMode) -> Self {
+    pub(crate) fn default_for_theme(theme: &Theme) -> Self {
         Self {
             width: dp(320.0),
-            option_width: dp(68.0),
+            option_width: theme.spacing.xxl + theme.spacing.md + theme.spacing.xs,
         }
     }
 }
@@ -108,10 +109,10 @@ pub struct NumberInputStyle {
 }
 
 impl NumberInputStyle {
-    pub fn default_for(_: ResolvedThemeMode) -> Self {
+    pub(crate) fn default_for_theme(theme: &Theme) -> Self {
         Self {
             width: dp(180.0),
-            button_width: dp(40.0),
+            button_width: theme.spacing.xxl,
         }
     }
 }
@@ -123,10 +124,10 @@ pub struct ColorPickerStyle {
 }
 
 impl ColorPickerStyle {
-    pub fn default_for(_: ResolvedThemeMode) -> Self {
+    pub(crate) fn default_for_theme(theme: &Theme) -> Self {
         Self {
             width: dp(320.0),
-            swatch_size: dp(30.0),
+            swatch_size: theme.spacing.xl - theme.spacing.xxs,
         }
     }
 }
@@ -137,9 +138,21 @@ pub struct UploadStyle {
 }
 
 impl UploadStyle {
-    pub fn default_for(_: ResolvedThemeMode) -> Self {
+    pub(crate) fn default_for_theme(_: &Theme) -> Self {
         Self { width: dp(460.0) }
     }
+}
+
+fn resolve_input_control_style<T: Clone>(
+    style: Option<&StyleResolver<T>>,
+    default: impl Fn(&Theme) -> T,
+) -> T {
+    let theme = Theme::default();
+    let context = StyleContext::from_theme(&theme);
+    let base = default(&theme);
+    style
+        .map(|resolver| resolver.resolve_from(base.clone(), &context))
+        .unwrap_or(base)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -290,7 +303,7 @@ pub struct Calendar<VM> {
     today: Option<NaiveDate>,
     disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, CalendarSelectionChange>>,
-    style: CalendarStyle,
+    style: Option<StyleResolver<CalendarStyle>>,
     framed: bool,
 }
 
@@ -305,7 +318,7 @@ impl<VM> Calendar<VM> {
             today: Some(chrono::Local::now().date_naive()),
             disabled: Value::Static(false),
             on_change: None,
-            style: CalendarStyle::default_for(ResolvedThemeMode::Light),
+            style: None,
             framed: true,
         }
     }
@@ -325,8 +338,22 @@ impl<VM> Calendar<VM> {
         self
     }
 
-    pub fn style(mut self, style: CalendarStyle) -> Self {
-        self.style = style;
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut CalendarStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| CalendarStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> CalendarStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 
@@ -339,31 +366,41 @@ impl<VM> Calendar<VM> {
 impl<VM: 'static> From<Calendar<VM>> for Element<VM> {
     fn from(calendar: Calendar<VM>) -> Self {
         match calendar.display_month {
-            Value::Static(month) => calendar_element(
-                month,
-                calendar.selected.resolve(),
-                calendar.today,
-                calendar.disabled.resolve(),
-                calendar.on_change,
-                calendar.style,
-                calendar.framed,
-            ),
+            Value::Static(month) => {
+                let style = resolve_input_control_style(
+                    calendar.style.as_ref(),
+                    CalendarStyle::default_for_theme,
+                );
+                calendar_element(
+                    month,
+                    calendar.selected.resolve(),
+                    calendar.today,
+                    calendar.disabled.resolve(),
+                    calendar.on_change,
+                    style,
+                    calendar.framed,
+                )
+            }
             Value::Signal(month) => {
                 let selected = calendar.selected.clone();
                 let today = calendar.today;
                 let disabled = calendar.disabled.clone();
                 let on_change = calendar.on_change.clone();
-                let style = calendar.style.clone();
+                let style_resolver = calendar.style.clone();
                 let framed = calendar.framed;
                 Flex::vertical()
                     .child(month.map(move |month| {
+                        let style = resolve_input_control_style(
+                            style_resolver.as_ref(),
+                            CalendarStyle::default_for_theme,
+                        );
                         calendar_element(
                             month,
                             selected.resolve(),
                             today,
                             disabled.resolve(),
                             on_change.clone(),
-                            style.clone(),
+                            style,
                             framed,
                         )
                     }))
@@ -384,7 +421,7 @@ pub struct DatePicker<VM> {
     on_change: Option<ValueCommand<VM, DatePickerChange>>,
     on_month_change: Option<ValueCommand<VM, NaiveDate>>,
     on_open_change: Option<ValueCommand<VM, bool>>,
-    style: DatePickerStyle,
+    style: Option<StyleResolver<DatePickerStyle>>,
 }
 
 impl<VM> DatePicker<VM> {
@@ -404,7 +441,7 @@ impl<VM> DatePicker<VM> {
             on_change: None,
             on_month_change: None,
             on_open_change: None,
-            style: DatePickerStyle::default_for(ResolvedThemeMode::Light),
+            style: None,
         }
     }
 
@@ -443,8 +480,22 @@ impl<VM> DatePicker<VM> {
         self
     }
 
-    pub fn style(mut self, style: DatePickerStyle) -> Self {
-        self.style = style;
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut DatePickerStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| DatePickerStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> DatePickerStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 }
@@ -464,6 +515,7 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
             on_open_change,
             style,
         } = picker;
+        let style = resolve_input_control_style(style.as_ref(), DatePickerStyle::default_for_theme);
 
         let parse_controller = controller.clone();
         let typed_change = on_change.clone().map(|command| {
@@ -526,7 +578,7 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
         };
 
         let content = Calendar::new(display_month, selected)
-            .style(style.calendar)
+            .style_full(move |_| style.calendar.clone())
             .disable(disabled.clone())
             .on_change(calendar_command)
             .unframed();
@@ -552,7 +604,7 @@ pub struct TimePicker<VM> {
     minute_step: u32,
     on_change: Option<ValueCommand<VM, TimePickerChange>>,
     on_open_change: Option<ValueCommand<VM, bool>>,
-    style: TimePickerStyle,
+    style: Option<StyleResolver<TimePickerStyle>>,
 }
 
 impl<VM> TimePicker<VM> {
@@ -570,7 +622,7 @@ impl<VM> TimePicker<VM> {
             minute_step: 15,
             on_change: None,
             on_open_change: None,
-            style: TimePickerStyle::default_for(ResolvedThemeMode::Light),
+            style: None,
         }
     }
 
@@ -609,8 +661,22 @@ impl<VM> TimePicker<VM> {
         self
     }
 
-    pub fn style(mut self, style: TimePickerStyle) -> Self {
-        self.style = style;
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut TimePickerStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| TimePickerStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> TimePickerStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 }
@@ -629,6 +695,7 @@ impl<VM: 'static> From<TimePicker<VM>> for Element<VM> {
             on_open_change,
             style,
         } = picker;
+        let style = resolve_input_control_style(style.as_ref(), TimePickerStyle::default_for_theme);
 
         let parse_controller = controller.clone();
         let typed_change = on_change.clone().map(|command| {
@@ -688,7 +755,7 @@ pub struct NumberInput<VM> {
     validation: Value<ValidationVisualState>,
     placeholder: Value<String>,
     on_change: Option<ValueCommand<VM, NumberInputChange>>,
-    style: NumberInputStyle,
+    style: Option<StyleResolver<NumberInputStyle>>,
 }
 
 impl<VM> NumberInput<VM> {
@@ -706,7 +773,7 @@ impl<VM> NumberInput<VM> {
             validation: Value::Static(ValidationVisualState::default()),
             placeholder: Value::Static("0".to_string()),
             on_change: None,
-            style: NumberInputStyle::default_for(ResolvedThemeMode::Light),
+            style: None,
         }
     }
 
@@ -755,8 +822,22 @@ impl<VM> NumberInput<VM> {
         self
     }
 
-    pub fn style(mut self, style: NumberInputStyle) -> Self {
-        self.style = style;
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut NumberInputStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| NumberInputStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> NumberInputStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 }
@@ -775,6 +856,8 @@ impl<VM: 'static> From<NumberInput<VM>> for Element<VM> {
             on_change,
             style,
         } = input;
+        let style =
+            resolve_input_control_style(style.as_ref(), NumberInputStyle::default_for_theme);
 
         let text_controller = controller.clone();
         let typed_change = on_change.clone().map(|command| {
@@ -843,7 +926,7 @@ pub struct ColorPicker<VM> {
     on_change: Option<ValueCommand<VM, ColorPickerChange>>,
     on_open_change: Option<ValueCommand<VM, bool>>,
     swatches: Vec<Color>,
-    style: ColorPickerStyle,
+    style: Option<StyleResolver<ColorPickerStyle>>,
 }
 
 impl<VM> ColorPicker<VM> {
@@ -855,7 +938,7 @@ impl<VM> ColorPicker<VM> {
             on_change: None,
             on_open_change: None,
             swatches: default_swatches(),
-            style: ColorPickerStyle::default_for(ResolvedThemeMode::Light),
+            style: None,
         }
     }
 
@@ -884,8 +967,22 @@ impl<VM> ColorPicker<VM> {
         self
     }
 
-    pub fn style(mut self, style: ColorPickerStyle) -> Self {
-        self.style = style;
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut ColorPickerStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| ColorPickerStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> ColorPickerStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 }
@@ -901,6 +998,8 @@ impl<VM: 'static> From<ColorPicker<VM>> for Element<VM> {
             swatches,
             style,
         } = picker;
+        let style =
+            resolve_input_control_style(style.as_ref(), ColorPickerStyle::default_for_theme);
         let trigger = color_picker_trigger(
             color.clone(),
             disabled.clone(),
@@ -937,7 +1036,7 @@ pub struct Upload<VM> {
     hint: Value<String>,
     on_select: Option<ValueCommand<VM, UploadSelection>>,
     on_remove: Option<ValueCommand<VM, UploadRemove>>,
-    style: UploadStyle,
+    style: Option<StyleResolver<UploadStyle>>,
 }
 
 impl<VM> Upload<VM> {
@@ -952,7 +1051,7 @@ impl<VM> Upload<VM> {
             hint: Value::Static("or choose files".to_string()),
             on_select: None,
             on_remove: None,
-            style: UploadStyle::default_for(ResolvedThemeMode::Light),
+            style: None,
         }
     }
 
@@ -999,8 +1098,22 @@ impl<VM> Upload<VM> {
         self
     }
 
-    pub fn style(mut self, style: UploadStyle) -> Self {
-        self.style = style;
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut UploadStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| UploadStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> UploadStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 }
@@ -1019,6 +1132,7 @@ impl<VM: 'static> From<Upload<VM>> for Element<VM> {
             on_remove,
             style,
         } = upload;
+        let style = resolve_input_control_style(style.as_ref(), UploadStyle::default_for_theme);
 
         let disabled_for_click = disabled.clone();
         let dialog_command = {
@@ -1102,12 +1216,12 @@ impl<VM: 'static> From<Upload<VM>> for Element<VM> {
             .padding(Insets::all(dp(18.0)))
             .gap(dp(8.0))
             .center()
-            .style(input_panel_style)
+            .style_full(input_panel_style)
             .cursor(CursorStyle::Pointer)
             .on_click(dialog_command.clone())
             .child(upload_badge::<VM>())
-            .child(Text::new(title).style(label_text_style))
-            .child(Text::new(hint).style(muted_text_style))
+            .child(Text::new(title).style_full(label_text_style))
+            .child(Text::new(hint).style_full(muted_text_style))
             .child(
                 Button::new("Choose files")
                     .secondary()
@@ -1171,7 +1285,7 @@ fn picker_input_trigger<VM: 'static>(
     let icon = Button::new(icon)
         .secondary()
         .size(FIELD_HEIGHT, FIELD_HEIGHT)
-        .style(input_icon_button_style)
+        .style_full(input_icon_button_style)
         .disable(disabled);
     let icon: Element<VM> = if let Some(command) = toggle {
         icon.on_click(command).into()
@@ -1200,7 +1314,7 @@ fn color_picker_trigger<VM: 'static>(
     let mut button = Button::new(color_label(color.clone()))
         .width(style.width)
         .height(FIELD_HEIGHT)
-        .style(color_trigger_accessible_button_style)
+        .style_full(color_trigger_accessible_button_style)
         .disable(disabled.clone());
     if let Some(command) = toggle.clone() {
         button = button.on_click(command);
@@ -1212,7 +1326,7 @@ fn color_picker_trigger<VM: 'static>(
         .padding(Insets::symmetric(dp(12.0), dp(0.0)))
         .align(Align::Center)
         .gap(dp(10.0))
-        .style(input_control_shell_style)
+        .style_full(input_control_shell_style)
         .cursor(if disabled.resolve() {
             CursorStyle::NotAllowed
         } else {
@@ -1224,7 +1338,7 @@ fn color_picker_trigger<VM: 'static>(
         .child(
             Text::new(color_label(color))
                 .grow(1.0)
-                .style(label_text_style),
+                .style_full(label_text_style),
         )
         .child(material_icon(ICON_EXPAND, sp(20.0)));
     if let Some(command) = toggle {
@@ -1257,7 +1371,7 @@ fn open_toggle_command<VM: 'static>(
 fn material_icon(name: &'static str, size: crate::ui::unit::Sp) -> Text {
     Text::new(name)
         .size(Dp::new(size.0), Dp::new(size.0))
-        .style(move |mode| icon_text_style(mode, size))
+        .style_full(move |context| icon_text_style(context, size))
 }
 
 fn color_preview_box<VM: 'static>(color: Value<Color>, size: Dp) -> Element<VM> {
@@ -1272,7 +1386,7 @@ fn color_preview_box<VM: 'static>(color: Value<Color>, size: Dp) -> Element<VM> 
 fn solid_color_preview<VM: 'static>(color: Color, size: Dp) -> Element<VM> {
     Flex::vertical()
         .size(size, size)
-        .style(move |mode| color_preview_style(mode, color))
+        .style_full(move |context| color_preview_style(context, color))
         .into()
 }
 
@@ -1282,11 +1396,11 @@ fn upload_badge<VM: 'static>() -> Element<VM> {
         .size(dp(44.0), dp(44.0))
         .shrink(0.0)
         .center()
-        .style(accent_badge_style)
+        .style_full(accent_badge_style)
         .child(
             Text::new(ICON_UPLOAD)
                 .size(icon_box, icon_box)
-                .style(upload_icon_text_style),
+                .style_full(upload_icon_text_style),
         )
         .into()
 }
@@ -1295,7 +1409,7 @@ fn file_badge<VM: 'static>() -> Element<VM> {
     Flex::vertical()
         .size(dp(34.0), dp(34.0))
         .center()
-        .style(subtle_badge_style)
+        .style_full(subtle_badge_style)
         .child(material_icon(ICON_FILE, sp(20.0)))
         .into()
 }
@@ -1321,7 +1435,9 @@ fn calendar_element<VM: 'static>(
     let month = month_start(display_month);
     let mut root = Flex::vertical().width(style.panel_width).gap(dp(10.0));
     if framed {
-        root = root.padding(Insets::all(PANEL_PADDING)).style(panel_style);
+        root = root
+            .padding(Insets::all(PANEL_PADDING))
+            .style_full(panel_style);
     }
 
     root = root.child(
@@ -1342,7 +1458,7 @@ fn calendar_element<VM: 'static>(
                     MONTHS[month.month0() as usize],
                     month.year()
                 ))
-                .style(label_text_style),
+                .style_full(label_text_style),
             )
             .child(calendar_nav_button(
                 ICON_NEXT,
@@ -1368,7 +1484,7 @@ fn calendar_element<VM: 'static>(
             Flex::<VM>::vertical()
                 .size(style.day_size, dp(22.0))
                 .center()
-                .child(Text::new(label).style(calendar_weekday_text_style)),
+                .child(Text::new(label).style_full(calendar_weekday_text_style)),
         );
     }
     root = root.child(weekday_row);
@@ -1389,7 +1505,9 @@ fn calendar_element<VM: 'static>(
         let is_today = today == Some(date);
         let button = Button::new(date.day().to_string())
             .size(style.day_size, style.day_size)
-            .style(move |mode| calendar_day_button_style(mode, is_selected, is_today, same_month))
+            .style_full(move |context| {
+                calendar_day_button_style(context, is_selected, is_today, same_month)
+            })
             .disable(disabled);
         let command = on_change.clone();
         days = days.child(button.on_click(Command::new_with_context(move |vm, ctx| {
@@ -1412,7 +1530,7 @@ fn calendar_element<VM: 'static>(
             Button::new("Today")
                 .secondary()
                 .height(dp(32.0))
-                .style(calendar_today_button_style)
+                .style_full(calendar_today_button_style)
                 .disable(disabled)
                 .on_click(Command::new_with_context(move |vm, ctx| {
                     if let Some(command) = on_change.as_ref() {
@@ -1442,7 +1560,7 @@ fn calendar_nav_button<VM: 'static>(
     Button::new(label)
         .ghost()
         .size(dp(32.0), dp(32.0))
-        .style(icon_button_style)
+        .style_full(icon_button_style)
         .disable(disabled)
         .on_click(Command::new_with_context(move |vm, ctx| {
             if let Some(command) = on_change.as_ref() {
@@ -1484,9 +1602,11 @@ fn time_picker_content<VM: 'static>(
             .height(dp(32.0))
             .disable(disabled);
         if selected == Some(time) {
-            button = button.primary().style(time_option_selected_button_style);
+            button = button
+                .primary()
+                .style_full(time_option_selected_button_style);
         } else {
-            button = button.secondary().style(time_option_button_style);
+            button = button.secondary().style_full(time_option_button_style);
         }
         chips = chips.child(button.on_click(Command::new_with_context(move |vm, ctx| {
             let text = format_time(time);
@@ -1516,13 +1636,13 @@ fn time_picker_content<VM: 'static>(
                 .align(Align::Center)
                 .gap(dp(8.0))
                 .child(material_icon(ICON_TIME, sp(18.0)))
-                .child(Text::new("Select time").style(label_text_style)),
+                .child(Text::new("Select time").style_full(label_text_style)),
         )
         .child(
             ScrollView::new()
                 .height(dp(238.0))
                 .show_scrollbar(true)
-                .style(transparent_panel_style)
+                .style_full(transparent_panel_style)
                 .child(chips),
         )
         .into()
@@ -1544,7 +1664,7 @@ fn number_step_button<VM: 'static>(
         .secondary()
         .width(width)
         .height(FIELD_HEIGHT)
-        .style(icon_button_style)
+        .style_full(icon_button_style)
         .disable(disabled)
         .on_click(Command::new_with_context(move |vm, ctx| {
             let current = parse_number(&controller.text(), min, max)
@@ -1583,8 +1703,8 @@ fn color_picker_content<VM: 'static>(
             .child(
                 Flex::vertical()
                     .gap(dp(2.0))
-                    .child(Text::new("Current color").style(muted_text_style))
-                    .child(Text::new(color_label(color.clone())).style(label_text_style)),
+                    .child(Text::new("Current color").style_full(muted_text_style))
+                    .child(Text::new(color_label(color.clone())).style_full(label_text_style)),
             ),
     );
 
@@ -1594,7 +1714,7 @@ fn color_picker_content<VM: 'static>(
         swatch_row = swatch_row.child(
             Flex::<VM>::vertical()
                 .size(style.swatch_size, style.swatch_size)
-                .style(move |mode| color_swatch_style(mode, swatch))
+                .style_full(move |context| color_swatch_style(context, swatch))
                 .cursor(if disabled {
                     CursorStyle::NotAllowed
                 } else {
@@ -1660,7 +1780,11 @@ fn color_slider<VM: 'static>(
     Flex::horizontal()
         .align(Align::Center)
         .gap(dp(8.0))
-        .child(Text::new(label).width(dp(18.0)).style(label_text_style))
+        .child(
+            Text::new(label)
+                .width(dp(18.0))
+                .style_full(label_text_style),
+        )
         .child(
             Slider::new(value, 0.0, 255.0)
                 .step(1.0)
@@ -1691,7 +1815,7 @@ fn color_slider<VM: 'static>(
         .child(
             Text::new(color_channel_label(color, trigger))
                 .width(dp(32.0))
-                .style(muted_text_style),
+                .style_full(muted_text_style),
         )
         .into()
 }
@@ -1699,7 +1823,7 @@ fn color_slider<VM: 'static>(
 fn picker_popover_content<VM: 'static>(content: impl Into<Element<VM>>) -> Element<VM> {
     let content = content.into();
     Stack::new()
-        .style(picker_popover_content_style)
+        .style_full(picker_popover_content_style)
         .child(content)
         .into()
 }
@@ -1744,14 +1868,14 @@ fn upload_row<VM: 'static>(
                 .align(Align::Center)
                 .gap(dp(6.0))
                 .child(material_icon(status_icon, sp(16.0)))
-                .child(Text::new(status).style(muted_text_style)),
+                .child(Text::new(status).style_full(muted_text_style)),
         );
     if let Some(command) = remove {
         footer = footer.child(
             Button::new(ICON_DELETE)
                 .ghost()
                 .size(dp(32.0), dp(32.0))
-                .style(icon_button_style)
+                .style_full(icon_button_style)
                 .disable(disabled)
                 .on_click(command),
         );
@@ -1760,7 +1884,7 @@ fn upload_row<VM: 'static>(
         .width(style.width)
         .padding(Insets::all(dp(12.0)))
         .gap(dp(8.0))
-        .style(input_panel_style)
+        .style_full(input_panel_style)
         .child(
             Flex::horizontal()
                 .align(Align::Center)
@@ -1769,8 +1893,10 @@ fn upload_row<VM: 'static>(
                 .child(
                     Flex::vertical()
                         .gap(dp(2.0))
-                        .child(Text::new(file.name.clone()).style(label_text_style))
-                        .child(Text::new(format_size(file.size_bytes)).style(muted_text_style)),
+                        .child(Text::new(file.name.clone()).style_full(label_text_style))
+                        .child(
+                            Text::new(format_size(file.size_bytes)).style_full(muted_text_style),
+                        ),
                 ),
         )
         .child(ProgressBar::<VM>::new(file.progress()).height(dp(8.0)))
@@ -1998,20 +2124,20 @@ fn value_color(
     hovered: Color,
     pressed: Color,
     disabled: Color,
-) -> Stateful<Value<Color>> {
-    Stateful {
-        normal: Value::Static(normal),
-        hovered: Value::Static(hovered),
-        pressed: Value::Static(pressed),
-        disabled: Value::Static(disabled),
-    }
+) -> StateValue<Value<Color>> {
+    StateValue::interactive(
+        Value::Static(normal),
+        Value::Static(hovered),
+        Value::Static(pressed),
+        Value::Static(disabled),
+    )
 }
 
-fn mode_colors(mode: ResolvedThemeMode) -> (bool, Color, Color, Color, Color, Color, Color) {
-    let dark = matches!(mode, ResolvedThemeMode::Dark);
-    let input = InputStyle::default_for(mode);
-    let select = SelectStyle::default_for(mode);
-    let primary_button = ButtonStyle::default_for(mode, ButtonVariantKind::Primary);
+fn mode_colors(context: &StyleContext<'_>) -> (bool, Color, Color, Color, Color, Color, Color) {
+    let dark = matches!(context.mode, ResolvedThemeMode::Dark);
+    let input = InputStyle::default_for_theme(context.theme);
+    let select = SelectStyle::default_for_theme(context.theme);
+    let primary_button = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Primary);
     (
         dark,
         primary_button.background.normal.resolve(),
@@ -2023,9 +2149,9 @@ fn mode_colors(mode: ResolvedThemeMode) -> (bool, Color, Color, Color, Color, Co
     )
 }
 
-fn input_control_shell_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let input = InputStyle::default_for(mode);
-    let mut style = ContainerStyle::default_for(mode);
+fn input_control_shell_style(context: &StyleContext<'_>) -> ContainerStyle {
+    let input = InputStyle::default_for_theme(context.theme);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(input.background.normal);
     style.surface.border_color = Some(input.border.normal);
     style.surface.border_width = Some(input.border_width);
@@ -2034,9 +2160,9 @@ fn input_control_shell_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn input_panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let input = InputStyle::default_for(mode);
-    let mut style = ContainerStyle::default_for(mode);
+fn input_panel_style(context: &StyleContext<'_>) -> ContainerStyle {
+    let input = InputStyle::default_for_theme(context.theme);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(input.background.normal);
     style.surface.border_color = Some(input.border.normal);
     style.surface.border_width = Some(input.border_width);
@@ -2045,8 +2171,8 @@ fn input_panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn color_trigger_accessible_button_style(mode: ResolvedThemeMode) -> ButtonStyle {
-    let mut style = ButtonStyle::default_for(mode, ButtonVariantKind::Secondary);
+fn color_trigger_accessible_button_style(context: &StyleContext<'_>) -> ButtonStyle {
+    let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Secondary);
     style.foreground = value_color(
         Color::TRANSPARENT,
         Color::TRANSPARENT,
@@ -2059,8 +2185,8 @@ fn color_trigger_accessible_button_style(mode: ResolvedThemeMode) -> ButtonStyle
     style
 }
 
-fn transparent_panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn transparent_panel_style(context: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(Value::Static(Color::TRANSPARENT));
     style.surface.border_color = Some(Value::Static(Color::TRANSPARENT));
     style.surface.border_width = Some(Value::Static(dp(0.0)));
@@ -2068,18 +2194,18 @@ fn transparent_panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn picker_popover_content_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let popover = PopoverStyle::default_for(mode);
-    let mut style = ContainerStyle::default_for(mode);
+fn picker_popover_content_style(context: &StyleContext<'_>) -> ContainerStyle {
+    let popover = PopoverStyle::default_for_theme(context.theme);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(popover.background);
     style.surface.border_radius = Some(popover.radius);
     style.surface.shadow = None;
     style
 }
 
-fn icon_text_style(mode: ResolvedThemeMode, size: crate::ui::unit::Sp) -> TextWidgetStyle {
-    let (_, _, _, muted, _, _, _) = mode_colors(mode);
-    let mut style = TextWidgetStyle::default_for(mode);
+fn icon_text_style(context: &StyleContext<'_>, size: crate::ui::unit::Sp) -> TextWidgetStyle {
+    let (_, _, _, muted, _, _, _) = mode_colors(context);
+    let mut style = TextWidgetStyle::default_for_theme(context.theme);
     style.color = Value::Static(muted);
     style.typography = TextStyle {
         font_family: Some(ICON_FONT_FAMILY.to_string()),
@@ -2091,14 +2217,14 @@ fn icon_text_style(mode: ResolvedThemeMode, size: crate::ui::unit::Sp) -> TextWi
     style
 }
 
-fn upload_icon_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = icon_text_style(mode, sp(26.0));
+fn upload_icon_text_style(context: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = icon_text_style(context, sp(26.0));
     style.typography.line_height = Some(sp(18.0));
     style
 }
 
-fn icon_button_style(mode: ResolvedThemeMode) -> ButtonStyle {
-    let mut style = ButtonStyle::default_for(mode, ButtonVariantKind::Ghost);
+fn icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
+    let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Ghost);
     style.radius = Value::Static(dp(8.0));
     style.padding_x = dp(0.0);
     style.padding_y = dp(0.0);
@@ -2113,9 +2239,9 @@ fn icon_button_style(mode: ResolvedThemeMode) -> ButtonStyle {
     style
 }
 
-fn input_icon_button_style(mode: ResolvedThemeMode) -> ButtonStyle {
-    let mut style = ButtonStyle::default_for(mode, ButtonVariantKind::Secondary);
-    style.radius = InputStyle::default_for(mode).radius;
+fn input_icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
+    let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Secondary);
+    style.radius = InputStyle::default_for_theme(context.theme).radius;
     style.padding_x = dp(0.0);
     style.padding_y = dp(0.0);
     style.min_height = FIELD_HEIGHT;
@@ -2129,8 +2255,8 @@ fn input_icon_button_style(mode: ResolvedThemeMode) -> ButtonStyle {
     style
 }
 
-fn time_option_button_style(mode: ResolvedThemeMode) -> ButtonStyle {
-    let mut style = ButtonStyle::default_for(mode, ButtonVariantKind::Secondary);
+fn time_option_button_style(context: &StyleContext<'_>) -> ButtonStyle {
+    let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Secondary);
     style.radius = Value::Static(dp(8.0));
     style.padding_x = dp(10.0);
     style.padding_y = dp(4.0);
@@ -2145,17 +2271,17 @@ fn time_option_button_style(mode: ResolvedThemeMode) -> ButtonStyle {
     style
 }
 
-fn time_option_selected_button_style(mode: ResolvedThemeMode) -> ButtonStyle {
-    let (_, primary, _, muted, _, _, _) = mode_colors(mode);
-    let mut style = time_option_button_style(mode);
+fn time_option_selected_button_style(context: &StyleContext<'_>) -> ButtonStyle {
+    let (_, primary, _, muted, _, _, _) = mode_colors(context);
+    let mut style = time_option_button_style(context);
     style.background = value_color(primary, primary.lighten(0.08), primary.darken(0.08), muted);
     style.foreground = value_color(Color::WHITE, Color::WHITE, Color::WHITE, muted);
     style.border = value_color(primary, primary.lighten(0.08), primary.darken(0.08), muted);
     style
 }
 
-fn calendar_weekday_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = muted_text_style(mode);
+fn calendar_weekday_text_style(context: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = muted_text_style(context);
     style.typography.size = sp(12.0);
     style.typography.line_height = Some(sp(16.0));
     style.typography.weight = FontWeight::Medium;
@@ -2163,13 +2289,13 @@ fn calendar_weekday_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
 }
 
 fn calendar_day_button_style(
-    mode: ResolvedThemeMode,
+    context: &StyleContext<'_>,
     selected: bool,
     today: bool,
     same_month: bool,
 ) -> ButtonStyle {
-    let (_, primary, text, muted, _, _, outline) = mode_colors(mode);
-    let mut style = ButtonStyle::default_for(mode, ButtonVariantKind::Ghost);
+    let (_, primary, text, muted, _, _, outline) = mode_colors(context);
+    let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Ghost);
     let normal_bg = if selected {
         primary
     } else if today {
@@ -2231,15 +2357,15 @@ fn calendar_day_button_style(
     style
 }
 
-fn calendar_today_button_style(mode: ResolvedThemeMode) -> ButtonStyle {
-    let mut style = time_option_button_style(mode);
+fn calendar_today_button_style(context: &StyleContext<'_>) -> ButtonStyle {
+    let mut style = time_option_button_style(context);
     style.min_height = dp(34.0);
     style
 }
 
-fn panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let popover = PopoverStyle::default_for(mode);
-    let mut style = ContainerStyle::default_for(mode);
+fn panel_style(context: &StyleContext<'_>) -> ContainerStyle {
+    let popover = PopoverStyle::default_for_theme(context.theme);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(popover.background);
     style.surface.border_color = Some(popover.border);
     style.surface.border_width = Some(popover.border_width);
@@ -2248,9 +2374,9 @@ fn panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn color_preview_style(mode: ResolvedThemeMode, color: Color) -> ContainerStyle {
-    let (_, _, _, _, _, _, outline) = mode_colors(mode);
-    let mut style = ContainerStyle::default_for(mode);
+fn color_preview_style(context: &StyleContext<'_>, color: Color) -> ContainerStyle {
+    let (_, _, _, _, _, _, outline) = mode_colors(context);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(Value::Static(color));
     style.surface.border_color = Some(Value::Static(outline));
     style.surface.border_width = Some(Value::Static(dp(1.0)));
@@ -2259,15 +2385,15 @@ fn color_preview_style(mode: ResolvedThemeMode, color: Color) -> ContainerStyle 
     style
 }
 
-fn color_swatch_style(mode: ResolvedThemeMode, color: Color) -> ContainerStyle {
-    let mut style = color_preview_style(mode, color);
+fn color_swatch_style(context: &StyleContext<'_>, color: Color) -> ContainerStyle {
+    let mut style = color_preview_style(context, color);
     style.surface.border_radius = Some(Value::Static(dp(7.0)));
     style
 }
 
-fn accent_badge_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let (_, primary, _, _, _, _, _) = mode_colors(mode);
-    let mut style = ContainerStyle::default_for(mode);
+fn accent_badge_style(context: &StyleContext<'_>) -> ContainerStyle {
+    let (_, primary, _, _, _, _, _) = mode_colors(context);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(Value::Static(primary.with_alpha_factor(0.12)));
     style.surface.border_color = Some(Value::Static(primary.with_alpha_factor(0.24)));
     style.surface.border_width = Some(Value::Static(dp(1.0)));
@@ -2276,9 +2402,9 @@ fn accent_badge_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn subtle_badge_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let (_, _, _, _, _, surface_low, outline) = mode_colors(mode);
-    let mut style = ContainerStyle::default_for(mode);
+fn subtle_badge_style(context: &StyleContext<'_>) -> ContainerStyle {
+    let (_, _, _, _, _, surface_low, outline) = mode_colors(context);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(Value::Static(surface_low));
     style.surface.border_color = Some(Value::Static(outline));
     style.surface.border_width = Some(Value::Static(dp(1.0)));
@@ -2287,8 +2413,8 @@ fn subtle_badge_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn label_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn label_text_style(context: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(context.theme);
     style.typography = TextStyle {
         font_family: None,
         size: sp(14.0),
@@ -2299,9 +2425,9 @@ fn label_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
     style
 }
 
-fn muted_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let (_, _, _, muted, _, _, _) = mode_colors(mode);
-    let mut style = label_text_style(mode);
+fn muted_text_style(context: &StyleContext<'_>) -> TextWidgetStyle {
+    let (_, _, _, muted, _, _, _) = mode_colors(context);
+    let mut style = label_text_style(context);
     style.color = Value::Static(muted);
     style
 }

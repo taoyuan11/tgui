@@ -1,8 +1,49 @@
 use super::*;
 
+pub trait WidgetStyleExt<VM>: Into<Element<VM>> + Sized {
+    fn class(self, class: impl Into<String>) -> Element<VM> {
+        self.into().class(class)
+    }
+
+    fn classes<I, S>(self, classes: I) -> Element<VM>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.into().classes(classes)
+    }
+
+    fn style_id(self, style_id: impl Into<String>) -> Element<VM> {
+        self.into().style_id(style_id)
+    }
+}
+
+impl<VM, T> WidgetStyleExt<VM> for T where T: Into<Element<VM>> {}
+
 impl<VM> Element<VM> {
     pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
         self.key = Some(key.into());
+        self
+    }
+
+    pub fn class(mut self, class: impl Into<String>) -> Self {
+        self.visual.classes.push(class.into());
+        self
+    }
+
+    pub fn classes<I, S>(mut self, classes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.visual
+            .classes
+            .extend(classes.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn style_id(mut self, style_id: impl Into<String>) -> Self {
+        self.visual.style_id = Some(style_id.into());
         self
     }
 
@@ -356,7 +397,11 @@ impl<VM> Element<VM> {
                 .map(|state| state.scope(selector.clone())),
             data_grid_resize_handle: self
                 .data_grid_resize_handle
-                .map(|state| state.scope(selector)),
+                .map(|state| state.scope(selector.clone())),
+            splitter_handle: self
+                .splitter_handle
+                .map(|state| state.scope(selector.clone())),
+            carousel_auto_play: self.carousel_auto_play.map(|state| state.scope(selector)),
             kind,
         }
     }

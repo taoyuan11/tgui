@@ -1,5 +1,5 @@
 use crate::foundation::color::Color;
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::Dp;
 
@@ -178,6 +178,8 @@ impl<VM> Divider<VM> {
                 data_grid_cell: None,
                 data_grid_header: None,
                 data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
                 kind: WidgetKind::Divider {
                     orientation: DividerOrientation::Horizontal,
                     dashed: Value::Static(false),
@@ -264,10 +266,23 @@ impl<VM> Divider<VM> {
 
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> DividerStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut DividerStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
         if let WidgetKind::Divider { style, .. } = &mut self.element.kind {
-            *style = Some(StyleResolver::new(resolver));
+            *style = Some(StyleResolver::mutate(
+                |context| DividerStyle::default_for_theme(context.theme),
+                mutator,
+            ));
+        }
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> DividerStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Divider { style, .. } = &mut self.element.kind {
+            *style = Some(StyleResolver::full(resolver));
         }
         self
     }

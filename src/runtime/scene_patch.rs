@@ -203,6 +203,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 caret_visible,
                 active_tooltip,
                 active_hover_popover,
+                &self.config.style_sheet,
             ) else {
                 return false;
             };
@@ -371,6 +372,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 cached.selected_text = self.selected_text;
                 cached.caret_visible = caret_visible;
                 cached.theme_epoch = self.theme_store.version();
+                cached.style_sheet_version = self.config.style_sheet.version();
+                cached.density = self.theme.density;
+                cached.reduced_motion = self.reduced_motion;
+                cached.text_scale_bits = cached.units.font_scale().to_bits();
                 cached.animation_epoch = self.animation_epoch;
                 cached.layout_animation_epoch = self.layout_animation_epoch;
                 cached.scroll_epoch = self.scroll_epoch;

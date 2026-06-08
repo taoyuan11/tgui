@@ -33,6 +33,8 @@ pub struct Element<VM> {
     pub(crate) data_grid_cell: Option<common::DataGridCellState<VM>>,
     pub(crate) data_grid_header: Option<common::DataGridHeaderState<VM>>,
     pub(crate) data_grid_resize_handle: Option<common::DataGridResizeHandleState<VM>>,
+    pub(crate) splitter_handle: Option<common::SplitterHandleState<VM>>,
+    pub(crate) carousel_auto_play: Option<common::CarouselAutoPlayState<VM>>,
     pub(crate) kind: WidgetKind<VM>,
 }
 
@@ -62,6 +64,8 @@ impl<VM> Clone for Element<VM> {
             data_grid_cell: self.data_grid_cell.clone(),
             data_grid_header: self.data_grid_header.clone(),
             data_grid_resize_handle: self.data_grid_resize_handle.clone(),
+            splitter_handle: self.splitter_handle.clone(),
+            carousel_auto_play: self.carousel_auto_play.clone(),
             kind: self.kind.clone(),
         }
     }
@@ -91,6 +95,8 @@ pub(crate) struct ResolvedElement<VM> {
     pub(crate) data_grid_cell: Option<common::DataGridCellState<VM>>,
     pub(crate) data_grid_header: Option<common::DataGridHeaderState<VM>>,
     pub(crate) data_grid_resize_handle: Option<common::DataGridResizeHandleState<VM>>,
+    pub(crate) splitter_handle: Option<common::SplitterHandleState<VM>>,
+    pub(crate) carousel_auto_play: Option<common::CarouselAutoPlayState<VM>>,
     pub(crate) child_source_spans: Vec<usize>,
     pub(crate) kind: ResolvedWidgetKind<VM>,
 }
@@ -162,7 +168,9 @@ pub(crate) enum ResolvedWidgetKind<VM> {
     Button {
         label: Value<String>,
         disabled: Value<bool>,
+        variant: common::ButtonVariantKind,
         style: WidgetButtonStyle,
+        runtime_style: ResolvedRuntimeStyle<WidgetButtonStyle>,
     },
     Checkbox {
         checked: Value<bool>,
@@ -171,6 +179,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         validation: Value<ValidationVisualState>,
         style: WidgetCheckboxStyle,
+        runtime_style: ResolvedRuntimeStyle<WidgetCheckboxStyle>,
     },
     Radio {
         checked: Value<bool>,
@@ -179,6 +188,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         validation: Value<ValidationVisualState>,
         style: WidgetRadioStyle,
+        runtime_style: ResolvedRuntimeStyle<WidgetRadioStyle>,
     },
     Switch {
         checked: Value<bool>,
@@ -190,6 +200,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         validation: Value<ValidationVisualState>,
         style: WidgetSwitchStyle,
+        runtime_style: ResolvedRuntimeStyle<WidgetSwitchStyle>,
     },
     Select {
         selected_label: Value<Option<String>>,
@@ -200,6 +211,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         validation: Value<ValidationVisualState>,
         style: WidgetSelectStyle,
+        runtime_style: ResolvedRuntimeStyle<WidgetSelectStyle>,
     },
     SelectOptionRow {
         owner_id: WidgetId,
@@ -221,16 +233,19 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         disabled: Value<bool>,
         validation: Value<ValidationVisualState>,
         style: WidgetSliderStyle,
+        runtime_style: ResolvedRuntimeStyle<WidgetSliderStyle>,
     },
     ProgressBar {
         value: Value<f32>,
         indeterminate: Value<bool>,
         show_label: bool,
         label: Option<Value<String>>,
-        style: crate::ui::widget::style::ProgressBarStyle,
+        style: WidgetProgressBarStyle,
+        runtime_style: ResolvedRuntimeStyle<WidgetProgressBarStyle>,
     },
     Spinner {
-        style: crate::ui::widget::style::SpinnerStyle,
+        style: WidgetSpinnerStyle,
+        runtime_style: ResolvedRuntimeStyle<WidgetSpinnerStyle>,
         size_override: Option<Value<Dp>>,
         thickness_override: Option<Value<Dp>>,
         track_override: Option<bool>,
@@ -242,7 +257,8 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         thickness_override: Option<Value<Dp>>,
         inset_override: Option<Value<Dp>>,
         label: Option<Value<String>>,
-        style: crate::ui::widget::style::DividerStyle,
+        style: WidgetDividerStyle,
+        runtime_style: ResolvedRuntimeStyle<WidgetDividerStyle>,
     },
     TextEditor {
         controller: TextController,
@@ -251,6 +267,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
         disabled: Value<bool>,
         style: WidgetInputStyle,
+        runtime_style: ResolvedTextEditorRuntimeStyle,
         multiline: bool,
         show_scrollbar: Value<bool>,
         auto_wrap: Value<bool>,
@@ -260,7 +277,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         queue: crate::foundation::binding::ToastQueue<VM>,
         placement: crate::foundation::binding::ToastPlacement,
         max_visible: Option<usize>,
-        style: crate::ui::widget::style::ToastStyle,
+        style: WidgetToastStyle,
     },
     Portal {
         content: Box<Element<VM>>,
@@ -303,6 +320,8 @@ impl<VM> Clone for ResolvedElement<VM> {
             data_grid_cell: self.data_grid_cell.clone(),
             data_grid_header: self.data_grid_header.clone(),
             data_grid_resize_handle: self.data_grid_resize_handle.clone(),
+            splitter_handle: self.splitter_handle.clone(),
+            carousel_auto_play: self.carousel_auto_play.clone(),
             child_source_spans: self.child_source_spans.clone(),
             kind: self.kind.clone(),
         }
@@ -314,6 +333,34 @@ pub(crate) struct FocusState {
     pub(crate) focusable: Option<bool>,
     pub(crate) tab_index: Option<i32>,
     pub(crate) scope: Option<crate::ui::widget::FocusScopeOptions>,
+}
+
+pub(crate) struct ResolvedRuntimeStyle<T> {
+    pub(crate) base: T,
+    pub(crate) local: Option<StyleResolver<T>>,
+}
+
+impl<T: Clone> Clone for ResolvedRuntimeStyle<T> {
+    fn clone(&self) -> Self {
+        Self {
+            base: self.base.clone(),
+            local: self.local.clone(),
+        }
+    }
+}
+
+pub(crate) enum ResolvedTextEditorRuntimeStyle {
+    Input(ResolvedRuntimeStyle<WidgetInputStyle>),
+    Textarea(ResolvedRuntimeStyle<WidgetTextareaStyle>),
+}
+
+impl Clone for ResolvedTextEditorRuntimeStyle {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Input(style) => Self::Input(style.clone()),
+            Self::Textarea(style) => Self::Textarea(style.clone()),
+        }
+    }
 }
 
 impl<VM> Clone for ResolvedWidgetKind<VM> {
@@ -369,11 +416,15 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
             Self::Button {
                 label,
                 disabled,
+                variant,
                 style,
+                runtime_style,
             } => Self::Button {
                 label: label.clone(),
                 disabled: disabled.clone(),
+                variant: *variant,
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
             },
             Self::Checkbox {
                 checked,
@@ -382,6 +433,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled,
                 validation,
                 style,
+                runtime_style,
             } => Self::Checkbox {
                 checked: checked.clone(),
                 label: label.clone(),
@@ -389,6 +441,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled: disabled.clone(),
                 validation: validation.clone(),
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
             },
             Self::Radio {
                 checked,
@@ -397,6 +450,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled,
                 validation,
                 style,
+                runtime_style,
             } => Self::Radio {
                 checked: checked.clone(),
                 label: label.clone(),
@@ -404,6 +458,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled: disabled.clone(),
                 validation: validation.clone(),
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
             },
             Self::Switch {
                 checked,
@@ -415,6 +470,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled,
                 validation,
                 style,
+                runtime_style,
             } => Self::Switch {
                 checked: checked.clone(),
                 on_change: on_change.clone(),
@@ -425,6 +481,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled: disabled.clone(),
                 validation: validation.clone(),
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
             },
             Self::Select {
                 selected_label,
@@ -435,6 +492,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled,
                 validation,
                 style,
+                runtime_style,
             } => Self::Select {
                 selected_label: selected_label.clone(),
                 placeholder: placeholder.clone(),
@@ -444,6 +502,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled: disabled.clone(),
                 validation: validation.clone(),
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
             },
             Self::SelectOptionRow {
                 owner_id,
@@ -471,6 +530,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled,
                 validation,
                 style,
+                runtime_style,
             } => Self::Slider {
                 value: value.clone(),
                 min: *min,
@@ -484,6 +544,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 disabled: disabled.clone(),
                 validation: validation.clone(),
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
             },
             Self::ProgressBar {
                 value,
@@ -491,20 +552,24 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 show_label,
                 label,
                 style,
+                runtime_style,
             } => Self::ProgressBar {
                 value: value.clone(),
                 indeterminate: indeterminate.clone(),
                 show_label: *show_label,
                 label: label.clone(),
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
             },
             Self::Spinner {
                 style,
+                runtime_style,
                 size_override,
                 thickness_override,
                 track_override,
             } => Self::Spinner {
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
                 size_override: size_override.clone(),
                 thickness_override: thickness_override.clone(),
                 track_override: *track_override,
@@ -517,6 +582,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 inset_override,
                 label,
                 style,
+                runtime_style,
             } => Self::Divider {
                 orientation: *orientation,
                 dashed: dashed.clone(),
@@ -525,6 +591,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 inset_override: inset_override.clone(),
                 label: label.clone(),
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
             },
             Self::TextEditor {
                 controller,
@@ -533,6 +600,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 on_change_set,
                 disabled,
                 style,
+                runtime_style,
                 multiline,
                 show_scrollbar,
                 auto_wrap,
@@ -544,6 +612,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 on_change_set: on_change_set.clone(),
                 disabled: disabled.clone(),
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
                 multiline: *multiline,
                 show_scrollbar: show_scrollbar.clone(),
                 auto_wrap: auto_wrap.clone(),

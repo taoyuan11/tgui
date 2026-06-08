@@ -46,9 +46,9 @@ pub(crate) use super::slider_shared::SliderValueFormatter;
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle;
 use super::style::{
-    infer_theme_mode, ButtonStyle as WidgetButtonStyle, CanvasStyle,
-    CheckboxStyle as WidgetCheckboxStyle, ContainerStyle, SelectStyle as WidgetSelectStyle,
-    SliderStyle as WidgetSliderStyle, StyleResolver, SwitchStyle as WidgetSwitchStyle,
+    ButtonStyle as WidgetButtonStyle, CanvasStyle, CheckboxStyle as WidgetCheckboxStyle,
+    ContainerStyle, SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle,
+    StyleResolver, SwitchStyle as WidgetSwitchStyle,
 };
 use super::style::{InputStyle as WidgetInputStyle, TextareaStyle as WidgetTextareaStyle};
 use super::text::Text;
@@ -172,7 +172,7 @@ pub(crate) fn text_input_content_viewport(
         return inner;
     }
 
-    let defaults = ContainerStyle::default_for(infer_theme_mode(theme)).scrollbar;
+    let defaults = ContainerStyle::default_for_theme(theme).scrollbar;
     let thickness = Dp::new(units.resolve_dp(defaults.thickness.unwrap_or(dp(5.0)).max(dp(2.0))));
 
     Rect::new(
@@ -266,6 +266,8 @@ pub(crate) fn text_input_layout_width(
 
 #[derive(Clone, PartialEq)]
 pub struct VisualStyle {
+    pub style_id: Option<String>,
+    pub classes: Vec<String>,
     pub border_color: Option<Value<Color>>,
     pub border_radius: Option<Value<Dp>>,
     pub border_width: Option<Value<Dp>>,
@@ -281,6 +283,8 @@ pub struct VisualStyle {
 impl Default for VisualStyle {
     fn default() -> Self {
         Self {
+            style_id: None,
+            classes: Vec::new(),
             border_color: None,
             border_radius: None,
             border_width: None,

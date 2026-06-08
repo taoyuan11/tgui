@@ -1,5 +1,5 @@
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
@@ -208,6 +208,8 @@ impl<VM> Button<VM> {
                 data_grid_cell: None,
                 data_grid_header: None,
                 data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
                 kind: WidgetKind::Button {
                     label: label.into(),
                     disabled: Value::Static(false),
@@ -264,13 +266,27 @@ impl<VM> Button<VM> {
         self
     }
 
-    /// 设置按钮样式解析器。
+    /// 设置按钮样式。
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> ButtonStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut ButtonStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Button { style, variant, .. } = &mut self.element.kind {
+            let variant = *variant;
+            *style = Some(super::style::StyleResolver::mutate(
+                move |context| ButtonStyle::default_for_theme(context.theme, variant),
+                mutator,
+            ));
+        }
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> ButtonStyle + Send + Sync + 'static,
     ) -> Self {
         if let WidgetKind::Button { style, .. } = &mut self.element.kind {
-            *style = Some(super::style::StyleResolver::new(resolver));
+            *style = Some(super::style::StyleResolver::full(resolver));
         }
         self
     }

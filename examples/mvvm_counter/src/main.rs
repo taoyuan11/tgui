@@ -2,24 +2,19 @@ use tgui::core::Color;
 use tgui::platform::keyboard::KeyCode;
 use tgui::prelude::*;
 
-fn stateful<T: Clone>(value: T) -> Stateful<T> {
-    Stateful {
-        normal: value.clone(),
-        hovered: value.clone(),
-        pressed: value.clone(),
-        disabled: value,
-    }
+fn stateful<T: Clone>(value: T) -> StateValue<T> {
+    StateValue::new(value)
 }
 
-fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn text_style(ctx: &StyleContext<'_>, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = size;
     style.color = color.into();
     style
 }
 
-fn card_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn card_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hexa(0x162033EE).into());
     style.surface.border_color = Some(Color::hexa(0x31415FFF).into());
     style.surface.border_width = Some(dp(1.0).into());
@@ -27,8 +22,8 @@ fn card_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn solid_button_style(mode: ResolvedThemeMode, background: Color) -> ButtonStyle {
-    let typography = TextWidgetStyle::default_for(mode).typography;
+fn solid_button_style(ctx: &StyleContext<'_>, background: Color) -> ButtonStyle {
+    let typography = TextWidgetStyle::default_for_theme(ctx.theme).typography;
     ButtonStyle {
         surface: WidgetSurfaceStyle::default(),
         background: stateful(background.into()),
@@ -120,18 +115,18 @@ impl ViewModel for CounterVm {
                     .width(dp(520.0))
                     .padding(Insets::all(dp(26.0)))
                     .gap(dp(16.0))
-                    .style(card_style)
+                    .style_full(card_style)
                     .child(
                         Text::new("MVVM counter")
-                            .style(|mode| text_style(mode, sp(26.0), Color::hexa(0xF8FAFCFF))),
+                            .style_full(|ctx| text_style(ctx, sp(26.0), Color::hexa(0xF8FAFCFF))),
                     )
                     .child(
                         Text::new(self.headline())
-                            .style(|mode| text_style(mode, sp(20.0), Color::hexa(0x7DD3FCFF))),
+                            .style_full(|ctx| text_style(ctx, sp(20.0), Color::hexa(0x7DD3FCFF))),
                     )
                     .child(
                         Text::new(self.hint())
-                            .style(|mode| text_style(mode, sp(15.0), Color::hexa(0xCBD5E1FF))),
+                            .style_full(|ctx| text_style(ctx, sp(15.0), Color::hexa(0xCBD5E1FF))),
                     )
                     .child(
                         Flex::new(Axis::Horizontal)
@@ -139,19 +134,19 @@ impl ViewModel for CounterVm {
                             .child(
                                 Button::new("-1")
                                     .grow(1.0)
-                                    .style(|mode| solid_button_style(mode, Color::hexa(0x243247FF)))
+                                    .style_full(|ctx| solid_button_style(ctx, Color::hexa(0x243247FF)))
                                     .on_click(Command::new(Self::decrement)),
                             )
                             .child(
                                 Button::new("+1")
                                     .grow(1.0)
-                                    .style(|mode| solid_button_style(mode, Color::hexa(0x0F766EFF)))
+                                    .style_full(|ctx| solid_button_style(ctx, Color::hexa(0x0F766EFF)))
                                     .on_click(Command::new(Self::increment)),
                             )
                             .child(
                                 Button::new("Reset")
                                     .grow(1.0)
-                                    .style(|mode| solid_button_style(mode, Color::hexa(0x7C2D12FF)))
+                                    .style_full(|ctx| solid_button_style(ctx, Color::hexa(0x7C2D12FF)))
                                     .on_click(Command::new(Self::reset)),
                             ),
                     ),

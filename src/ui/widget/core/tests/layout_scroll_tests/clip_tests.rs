@@ -11,9 +11,9 @@ fn clipped_children_keep_clip_rect_and_do_not_hit_outside_parent() {
         Stack::new().child(
             Stack::new()
                 .size(dp(100.0), dp(100.0))
-                .style(|mode| {
+                .style_full(|ctx| {
                     container_style(
-                        mode,
+                        ctx,
                         Some(Color::hexa(0x1E293BFF)),
                         None,
                         None,
@@ -27,9 +27,9 @@ fn clipped_children_keep_clip_rect_and_do_not_hit_outside_parent() {
                 .child(
                     Stack::new()
                         .size(dp(80.0), dp(80.0))
-                        .style(|mode| {
+                        .style_full(|ctx| {
                             container_style(
-                                mode,
+                                ctx,
                                 Some(Color::hexa(0x38BDF8FF)),
                                 None,
                                 None,
@@ -95,9 +95,9 @@ fn overflow_clips_children_to_inside_of_border() {
         Stack::<()>::new()
             .size(dp(100.0), dp(100.0))
             .overflow(Overflow::Hidden)
-            .style(|mode| {
+            .style_full(|ctx| {
                 container_style(
-                    mode,
+                    ctx,
                     None,
                     None,
                     None,
@@ -108,9 +108,9 @@ fn overflow_clips_children_to_inside_of_border() {
                     None,
                 )
             })
-            .child(Stack::new().size(dp(100.0), dp(100.0)).style(|mode| {
+            .child(Stack::new().size(dp(100.0), dp(100.0)).style_full(|ctx| {
                 container_style(
-                    mode,
+                    ctx,
                     Some(crate::foundation::color::Color::BLACK),
                     None,
                     None,
@@ -157,9 +157,9 @@ fn rounded_overflow_clips_children_with_parent_corner_mask() {
     let tree = WidgetTree::new(
         Stack::<()>::new()
             .size(dp(100.0), dp(100.0))
-            .style(|mode| {
+            .style_full(|ctx| {
                 container_style(
-                    mode,
+                    ctx,
                     Some(crate::foundation::color::Color::WHITE),
                     None,
                     None,
@@ -171,9 +171,9 @@ fn rounded_overflow_clips_children_with_parent_corner_mask() {
                 )
             })
             .overflow(Overflow::Hidden)
-            .child(Stack::new().size(dp(100.0), dp(40.0)).style(|mode| {
+            .child(Stack::new().size(dp(100.0), dp(40.0)).style_full(|ctx| {
                 container_style(
-                    mode,
+                    ctx,
                     Some(crate::foundation::color::Color::BLACK),
                     None,
                     None,
@@ -226,9 +226,9 @@ fn painted_stack_overlay_occludes_button_hit() {
     let covered_button: Element<()> = Button::new("covered").into();
     let overlay: Element<()> = Stack::new()
         .size(dp(100.0), dp(100.0))
-        .style(|mode| {
+        .style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(crate::foundation::color::Color::hexa(0x00000055)),
                 None,
                 None,

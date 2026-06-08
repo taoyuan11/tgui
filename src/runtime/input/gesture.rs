@@ -533,6 +533,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | HitInteraction::DataGridResizeHandle {
                 id, interactions, ..
             }
+            | HitInteraction::SplitterHandle {
+                id, interactions, ..
+            }
             | HitInteraction::Slider {
                 id, interactions, ..
             }

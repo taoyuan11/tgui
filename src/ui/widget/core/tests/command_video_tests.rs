@@ -196,8 +196,8 @@ fn video_surface_idle_placeholder_uses_surface_background() {
     let tree: WidgetTree<()> = WidgetTree::new(
         VideoSurface::new(controller)
             .size(dp(160.0), dp(90.0))
-            .style(move |mode| {
-                let mut style = VideoSurfaceStyle::default_for(mode);
+            .style_full(move |ctx| {
+                let mut style = VideoSurfaceStyle::default_for_theme(ctx.theme);
                 style.surface.background = Some(background.into());
                 style.surface.border_radius = Some(radius.into());
                 style

@@ -99,7 +99,11 @@ impl<VM> ResolvedElement<VM> {
                     context.now,
                 )
             }
-            ResolvedWidgetKind::Switch { style, checked, .. } => {
+            ResolvedWidgetKind::Switch { checked, .. } => {
+                let style = styles
+                    .switch_style
+                    .as_ref()
+                    .expect("switch style should be resolved for switch widgets");
                 let visual_state = base_interaction_state(widget_state);
                 if checked.resolve() {
                     resolve_stateful_widget_color(&style.border_checked, visual_state)
@@ -192,7 +196,6 @@ impl<VM> ResolvedElement<VM> {
                 checked,
                 active_background,
                 inactive_background,
-                style,
                 ..
             } => context.animations.resolve_color(
                 crate::animation::AnimationKey::Widget {
@@ -204,6 +207,10 @@ impl<VM> ResolvedElement<VM> {
                     if let Some(color) = self.collect_validation_color(context.theme) {
                         return color;
                     }
+                    let style = styles
+                        .switch_style
+                        .as_ref()
+                        .expect("switch style should be resolved for switch widgets");
                     if checked.resolve() {
                         active_background.as_ref().map(Value::resolve).unwrap_or(
                             resolve_stateful_widget_color(&style.track_checked, visual_state),

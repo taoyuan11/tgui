@@ -7,7 +7,7 @@ use tgui::prelude::*;
 
 const CODE_IMAGE_PATH: &str = r#"Image::from_path(demo_image_path())
     .size(dp(260.0), dp(150.0))
-    .style(image_style)"#;
+    .style_full(image_style)"#;
 
 const CODE_IMAGE_EVENTS: &str = r#"Image::from_path(demo_image_path())
     .on_success(Command::new(|app: &mut App| {
@@ -78,7 +78,7 @@ fn image_component(app: &App) -> Element<App> {
                 "从示例资源目录加载图片，并应用圆角样式。",
                 Image::from_path(demo_image_path())
                     .size(dp(260.0), dp(150.0))
-                    .style(styles::image_style),
+                    .style_full(styles::image_style),
                 CODE_IMAGE_PATH,
             ),
             UsageDemo::new(
@@ -88,11 +88,11 @@ fn image_component(app: &App) -> Element<App> {
                 Flex::vertical().gap(dp(8.0)).child(el![
                     Image::from_path(demo_image_path())
                         .size(dp(180.0), dp(100.0))
-                        .style(styles::image_style)
+                        .style_full(styles::image_style)
                         .on_success(Command::new(|app: &mut App| {
                             app.toast_status.set("图片加载完成".to_string());
                         })),
-                    Text::new(app.toast_status.signal()).style(styles::status_style),
+                    Text::new(app.toast_status.signal()).style_full(styles::status_style),
                 ]),
                 CODE_IMAGE_EVENTS,
             ),
@@ -140,7 +140,7 @@ fn audio_component(app: &App) -> Element<App> {
                         .width(dp(420.0))
                         .placeholder("输入音频文件路径或 URL"),
                     Button::new("加载").on_click(Command::new(App::load_audio_from_input)),
-                    Text::new(app.audio_status.signal()).style(styles::status_style),
+                    Text::new(app.audio_status.signal()).style_full(styles::status_style),
                 ]),
                 CODE_AUDIO_SAFE_LOAD,
             ),
@@ -158,7 +158,7 @@ fn audio_component(app: &App) -> Element<App> {
                         })),
                     ]),
                     Text::new(app.audio_controller.playback_state().map(audio_status_text))
-                        .style(styles::status_style),
+                        .style_full(styles::status_style),
                 ]),
                 CODE_AUDIO_PLAYBACK,
             ),
@@ -183,7 +183,7 @@ fn video_component(app: &App) -> Element<App> {
                     Button::new("加载").on_click(Command::new(|app: &mut App| {
                         app.video_player.load_from_input();
                     })),
-                    Text::new(app.video_player.status.signal()).style(styles::status_style),
+                    Text::new(app.video_player.status.signal()).style_full(styles::status_style),
                 ]),
                 CODE_VIDEO_SAFE_LOAD,
             ),
@@ -202,7 +202,7 @@ fn video_component(app: &App) -> Element<App> {
                             app.video_player.controller.pause();
                         })),
                     ]),
-                    Text::new(app.video_player.playback_status()).style(styles::status_style),
+                    Text::new(app.video_player.playback_status()).style_full(styles::status_style),
                 ]),
                 CODE_VIDEO_SURFACE,
             ),
@@ -236,7 +236,7 @@ fn demo_canvas_gradient() -> Element<App> {
             .fill_and_stroke();
     }))
     .size(dp(232.0), dp(160.0))
-    .style(styles::canvas_style)
+    .style_full(styles::canvas_style)
     .into()
 }
 
@@ -254,6 +254,6 @@ fn demo_canvas_path() -> Element<App> {
             .fill_and_stroke();
     }))
     .size(dp(232.0), dp(150.0))
-    .style(styles::canvas_style)
+    .style_full(styles::canvas_style)
     .into()
 }

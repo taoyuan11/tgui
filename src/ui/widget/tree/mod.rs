@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{pct, Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{dp, sp, Dp, Sp};
 
@@ -14,7 +14,8 @@ use super::common::{
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
 use super::r#virtual::{ItemLayout, ItemSource, VirtualList};
-use super::style::{StyleResolver, WidgetSurfaceStyle};
+use super::style::palette::palette_from_theme;
+use super::style::{ContainerStyle, StyleResolver, StyleSheet, WidgetSurfaceStyle};
 use super::{
     ContextMenuDescriptor, Flex, GestureRecognizer, LongPressEvent, MenuItem, MenuItemState, Stack,
     Text,
@@ -191,81 +192,51 @@ pub struct TreeStyle {
 }
 
 impl TreeStyle {
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let dark = matches!(mode, ResolvedThemeMode::Dark);
+    pub fn default_for_theme(theme: &crate::ui::theme::Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle {
-                background: Some(Value::Static(if dark {
-                    Color::hexa(0x111827FF)
-                } else {
-                    Color::hexa(0xFFFFFFFF)
-                })),
-                border_color: Some(Value::Static(if dark {
-                    Color::hexa(0x334155FF)
-                } else {
-                    Color::hexa(0xCBD5E1FF)
-                })),
-                border_width: Some(Value::Static(dp(1.0))),
-                border_radius: Some(Value::Static(dp(8.0))),
+                background: Some(Value::Static(theme.colors.surface)),
+                border_color: Some(Value::Static(theme.colors.outline)),
+                border_width: Some(Value::Static(theme.border.thin)),
+                border_radius: Some(Value::Static(theme.radius.lg)),
                 ..WidgetSurfaceStyle::default()
             },
-            item_height: dp(40.0),
-            item_padding: Insets::symmetric(dp(8.0), dp(4.0)),
-            item_radius: dp(6.0),
-            indent_width: dp(22.0),
-            disclosure_width: dp(24.0),
-            checkbox_width: dp(24.0),
+            item_height: theme.spacing.xl + theme.spacing.md,
+            item_padding: Insets::symmetric(theme.spacing.sm, theme.spacing.xs),
+            item_radius: theme.radius.md,
+            indent_width: theme.spacing.xl + theme.spacing.xs,
+            disclosure_width: theme.spacing.xl,
+            checkbox_width: theme.spacing.xl,
             disclosure_icon_size: sp(20.0),
             checkbox_icon_size: sp(20.0),
-            indent_line_color: Value::Static(if dark {
-                Color::hexa(0xFFFFFF14)
-            } else {
-                Color::hexa(0x0F172A12)
-            }),
-            disclosure_icon_color: Value::Static(if dark {
-                Color::hexa(0xCBD5E1FF)
-            } else {
-                Color::hexa(0x64748BFF)
-            }),
-            disclosure_hover_background: Value::Static(if dark {
-                Color::hexa(0xFFFFFF14)
-            } else {
-                Color::hexa(0x0F172A0A)
-            }),
-            checkbox_unchecked_color: Value::Static(if dark {
-                Color::hexa(0x94A3B8FF)
-            } else {
-                Color::hexa(0x64748BFF)
-            }),
-            checkbox_checked_color: Value::Static(if dark {
-                Color::hexa(0x60A5FAFF)
-            } else {
-                Color::hexa(0x2563EBFF)
-            }),
-            checkbox_indeterminate_color: Value::Static(if dark {
-                Color::hexa(0x93C5FDFF)
-            } else {
-                Color::hexa(0x1D4ED8FF)
-            }),
-            checkbox_disabled_color: Value::Static(if dark {
-                Color::hexa(0x475569FF)
-            } else {
-                Color::hexa(0xCBD5E1FF)
-            }),
+            indent_line_color: Value::Static(theme.colors.outline_muted.with_alpha_factor(0.6)),
+            disclosure_icon_color: Value::Static(palette.on_surface_muted),
+            disclosure_hover_background: Value::Static(palette.surface_high.with_alpha_factor(0.7)),
+            checkbox_unchecked_color: Value::Static(theme.colors.outline),
+            checkbox_checked_color: Value::Static(theme.colors.primary),
+            checkbox_indeterminate_color: Value::Static(theme.colors.primary.lighten(0.08)),
+            checkbox_disabled_color: Value::Static(theme.colors.on_disabled),
             item_background: Value::Static(Color::TRANSPARENT),
-            item_hover_background: Value::Static(if dark {
-                Color::hexa(0xFFFFFF12)
-            } else {
-                Color::hexa(0x0F172A0A)
-            }),
-            item_selected_background: Value::Static(if dark {
-                Color::hexa(0x60A5FA33)
-            } else {
-                Color::hexa(0x2563EB18)
-            }),
+            item_hover_background: Value::Static(palette.surface_high.with_alpha_factor(0.7)),
+            item_selected_background: Value::Static(theme.colors.primary.with_alpha_factor(0.16)),
             item_disabled_background: Value::Static(Color::TRANSPARENT),
         }
     }
+}
+
+fn resolve_tree_style(
+    style: Option<&StyleResolver<TreeStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+) -> TreeStyle {
+    let mut base = TreeStyle::default_for_theme(context.theme);
+    context.theme.components.tree.apply(&mut base, context);
+    style_sheet.apply_tree(&mut base, context, visual);
+    style
+        .map(|resolver| resolver.resolve_from(base.clone(), context))
+        .unwrap_or(base)
 }
 
 struct TreeRow<T> {
@@ -562,9 +533,20 @@ where
 
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> TreeStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut TreeStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
-        self.style = Some(StyleResolver::new(resolver));
+        self.style = Some(StyleResolver::mutate(
+            |context| TreeStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> TreeStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 
@@ -722,11 +704,10 @@ where
         }
 
         let tree_id = WidgetId::next();
-        let style = self
-            .style
-            .as_ref()
-            .map(|resolver| resolver.resolve(ResolvedThemeMode::Light))
-            .unwrap_or_else(|| TreeStyle::default_for(ResolvedThemeMode::Light));
+        let style_resolver = self.style.clone();
+        let row_visual = self.visual.clone();
+        let root_style_resolver = self.style.clone();
+        let root_visual = self.visual.clone();
         let expanded_now: HashSet<_> = self.expanded_keys.resolve().into_iter().collect();
         let rows = flatten_tree_rows(&self.nodes, &expanded_now);
         if rows.is_empty() {
@@ -761,57 +742,75 @@ where
         let on_node_action = self.on_node_action.clone();
         let on_drop = self.on_drop.clone();
         let context_menu = Arc::new(self.context_menu);
-        let tree_style = Arc::new(style);
-        let row_style = tree_style.clone();
         let item_layout = self.item_layout;
         let item_extent = item_layout.estimate().max(Dp::ZERO);
         let item_spacing = item_layout.spacing().max(Dp::ZERO);
         let draggable = self.draggable;
-        let mut tree: Element<VM> = VirtualList::new(source, move |visible_index, row| {
-            let selected = selected_keys.resolve().contains(&row.key);
-            let disabled_now = row.disabled.resolve();
-            let check_state = tree_check_state(&row.check_target_keys, &checked_keys.resolve());
-            let context = TreeNodeContext {
-                index: row.source_index,
-                key: row.key.clone(),
-                item: row.value.clone(),
-                depth: row.depth,
-                parent_key: row.parent_key.clone(),
-                has_children: row.has_children,
-                expanded: row.expanded,
-                selected,
-                disabled: disabled_now,
-                check_state,
-            };
-            let child = render(context);
-            build_tree_row(
-                tree_id,
-                visible_index,
-                row.clone(),
-                child,
-                selected_keys.clone(),
-                expanded_keys.clone(),
-                checked_keys.clone(),
-                checkable.clone(),
-                selection_mode,
-                visible_keys.clone(),
-                visible_disabled.clone(),
-                row_style.clone(),
-                item_layout,
-                item_extent,
-                item_spacing,
-                on_selection_change.clone(),
-                on_expand_change.clone(),
-                on_check_change.clone(),
-                on_node_action.clone(),
-                on_drop.clone(),
-                context_menu.clone(),
-                draggable,
-            )
-        })
+        let mut tree: Element<VM> = VirtualList::new_with_style_context(
+            source,
+            move |visible_index, row, context, style_sheet| {
+                let row_style = Arc::new(resolve_tree_style(
+                    style_resolver.as_ref(),
+                    &context,
+                    style_sheet,
+                    &row_visual,
+                ));
+                let selected = selected_keys.resolve().contains(&row.key);
+                let disabled_now = row.disabled.resolve();
+                let check_state = tree_check_state(&row.check_target_keys, &checked_keys.resolve());
+                let context = TreeNodeContext {
+                    index: row.source_index,
+                    key: row.key.clone(),
+                    item: row.value.clone(),
+                    depth: row.depth,
+                    parent_key: row.parent_key.clone(),
+                    has_children: row.has_children,
+                    expanded: row.expanded,
+                    selected,
+                    disabled: disabled_now,
+                    check_state,
+                };
+                let child = render(context);
+                build_tree_row(
+                    tree_id,
+                    visible_index,
+                    row.clone(),
+                    child,
+                    selected_keys.clone(),
+                    expanded_keys.clone(),
+                    checked_keys.clone(),
+                    checkable.clone(),
+                    selection_mode,
+                    visible_keys.clone(),
+                    visible_disabled.clone(),
+                    row_style.clone(),
+                    item_layout,
+                    item_extent,
+                    item_spacing,
+                    on_selection_change.clone(),
+                    on_expand_change.clone(),
+                    on_check_change.clone(),
+                    on_node_action.clone(),
+                    on_drop.clone(),
+                    context_menu.clone(),
+                    draggable,
+                )
+            },
+        )
         .widget_id(tree_id)
         .item_layout(self.item_layout)
         .width(pct(100.0))
+        .style_full(move |context| {
+            let style = resolve_tree_style(
+                root_style_resolver.as_ref(),
+                context,
+                &StyleSheet::default(),
+                &root_visual,
+            );
+            let mut container = ContainerStyle::default_for_theme(context.theme);
+            container.surface = style.surface;
+            container
+        })
         .into();
         tree.key = self.key;
         tree.layout = self.layout;
@@ -829,18 +828,6 @@ where
             selected_keys: root_selected_keys,
             checkable: root_checkable,
         });
-        if let Some(background) = tree_style.surface.background.clone() {
-            tree.background = Some(background);
-        }
-        tree.visual.background_brush = tree_style.surface.background_brush.clone();
-        tree.visual.background_image = tree_style.surface.background_image.clone();
-        tree.visual.background_blur = tree_style.surface.background_blur.clone();
-        tree.visual.shadow = tree_style.surface.shadow.clone();
-        tree.visual.border_color = tree_style.surface.border_color.clone();
-        tree.visual.border_radius = tree_style.surface.border_radius.clone();
-        tree.visual.border_width = tree_style.surface.border_width.clone();
-        tree.visual.opacity = tree_style.surface.opacity.clone();
-        tree.visual.offset = tree_style.surface.offset.clone();
         tree
     }
 }

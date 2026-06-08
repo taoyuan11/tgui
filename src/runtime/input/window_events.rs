@@ -62,6 +62,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         needs_redraw |= self.handle_data_grid_column_resize();
                         needs_redraw |= self.handle_hover(viewport);
                         needs_redraw |= self.update_cursor_icon();
+                    } else if self.active_splitter_resize.is_some() {
+                        needs_redraw |= self.handle_splitter_resize();
+                        needs_redraw |= self.handle_hover(viewport);
+                        needs_redraw |= self.update_cursor_icon();
                     } else if self.active_canvas_drag.is_some() {
                         needs_redraw |= self.handle_canvas_drag();
                         needs_redraw |= self.handle_hover(viewport);
@@ -177,6 +181,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.end_slider_drag();
                 self.end_canvas_drag();
                 self.end_data_grid_column_resize();
+                self.end_splitter_resize();
                 self.active_tree_drag = None;
                 self.active_data_grid_column_reorder = None;
                 self.pressed_widget = None;
@@ -300,6 +305,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.end_touch_scroll_drag();
                 self.end_slider_drag();
                 self.end_data_grid_column_resize();
+                self.end_splitter_resize();
                 self.pressed_widget = None;
                 self.end_text_selection_drag();
                 self.handle_hover(self.viewport_rect());

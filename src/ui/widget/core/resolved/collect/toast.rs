@@ -356,6 +356,8 @@ fn collect_toast_card_scene<VM: 'static>(
         taffy: &taffy,
         font_manager: context.font_manager,
         theme: context.theme,
+        style_context: context.style_context,
+        style_sheet: context.style_sheet,
         media: context.media,
         focused_input: context.focused_input,
         focused_text_state: context.focused_text_state,
@@ -483,15 +485,17 @@ fn collect_toast_card_shell_scene<VM: 'static>(
     context: &mut CollectContext<'_, '_>,
 ) -> Option<ComputedScene<VM>> {
     let background = style.background.resolve();
-    let shell = Stack::<VM>::new().size(width, height).style(move |mode| {
-        let mut container = ContainerStyle::default_for(mode);
-        container.surface.background = Some(Value::Static(background));
-        container.surface.border_color = Some(style.border.clone());
-        container.surface.border_width = Some(style.border_width.clone());
-        container.surface.border_radius = Some(style.radius.clone());
-        container.surface.shadow = Some(Value::Static(style.shadow.clone()));
-        container
-    });
+    let shell = Stack::<VM>::new()
+        .size(width, height)
+        .style_full(move |context| {
+            let mut container = ContainerStyle::default_for_theme(context.theme);
+            container.surface.background = Some(Value::Static(background));
+            container.surface.border_color = Some(style.border.clone());
+            container.surface.border_width = Some(style.border_width.clone());
+            container.surface.border_radius = Some(style.radius.clone());
+            container.surface.shadow = Some(Value::Static(style.shadow.clone()));
+            container
+        });
 
     let mut resolved: Element<VM> = shell.into();
     super::prepare_nested_scene_root(&mut resolved, context, context.viewport);
@@ -537,6 +541,8 @@ fn collect_toast_card_shell_scene<VM: 'static>(
         taffy: &taffy,
         font_manager: context.font_manager,
         theme: context.theme,
+        style_context: context.style_context,
+        style_sheet: context.style_sheet,
         media: context.media,
         focused_input: context.focused_input,
         focused_text_state: context.focused_text_state,
@@ -743,14 +749,14 @@ fn build_toast_card<VM: 'static>(
     let icon_circle = Stack::<VM>::new()
         .size(dp(18.0), dp(18.0))
         .center()
-        .style(move |mode| {
-            let mut container = ContainerStyle::default_for(mode);
+        .style_full(move |context| {
+            let mut container = ContainerStyle::default_for_theme(context.theme);
             container.surface.background = Some(Value::Static(icon_bg));
             container.surface.border_radius = Some(Value::Static(dp(9.0)));
             container
         })
-        .child(Text::new(kind_glyph(kind)).style(move |mode| {
-            let mut text_style = TextWidgetStyle::default_for(mode);
+        .child(Text::new(kind_glyph(kind)).style_full(move |context| {
+            let mut text_style = TextWidgetStyle::default_for_theme(context.theme);
             text_style.color = Value::Static(icon_fg);
             text_style.typography.size = sp(12.0);
             text_style.typography.line_height = Some(sp(12.0));
@@ -758,8 +764,8 @@ fn build_toast_card<VM: 'static>(
         }));
 
     let title_style_for_label = title_text_style.clone();
-    let kind_label = Text::new(kind_label(kind)).style(move |mode| {
-        let mut text_style = TextWidgetStyle::default_for(mode);
+    let kind_label = Text::new(kind_label(kind)).style_full(move |context| {
+        let mut text_style = TextWidgetStyle::default_for_theme(context.theme);
         text_style.color = Value::Static(foreground);
         text_style.typography = title_style_for_label.clone();
         text_style
@@ -772,16 +778,16 @@ fn build_toast_card<VM: 'static>(
         let close_pressed = foreground;
         Button::new("\u{e5cd}") // close icon
             .ghost()
-            .style(move |_| {
+            .style_full(move |_| {
                 let mut button_style = close_style.clone();
                 button_style.text_style.font_family = Some("tgui-icons".to_string());
                 button_style.text_style.size = sp(14.0);
-                button_style.foreground = crate::ui::theme::Stateful {
-                    normal: close_fg.into(),
-                    hovered: close_hover.into(),
-                    pressed: close_pressed.into(),
-                    disabled: close_fg.with_alpha_factor(0.5).into(),
-                };
+                button_style.foreground = crate::ui::theme::StateValue::interactive(
+                    close_fg.into(),
+                    close_hover.into(),
+                    close_pressed.into(),
+                    close_fg.with_alpha_factor(0.5).into(),
+                );
                 button_style
             })
             .on_click(Command::new(move |_vm| {
@@ -808,21 +814,21 @@ fn build_toast_card<VM: 'static>(
     let content_area = if let Some(title_text) = title {
         Flex::<VM>::new(Axis::Vertical)
             .gap(dp(3.0))
-            .child(Text::new(title_text).style(move |mode| {
-                let mut text_style = TextWidgetStyle::default_for(mode);
+            .child(Text::new(title_text).style_full(move |context| {
+                let mut text_style = TextWidgetStyle::default_for_theme(context.theme);
                 text_style.color = Value::Static(foreground);
                 text_style.typography = title_style_for_content.clone();
                 text_style
             }))
-            .child(Text::new(message).style(move |mode| {
-                let mut text_style = TextWidgetStyle::default_for(mode);
+            .child(Text::new(message).style_full(move |context| {
+                let mut text_style = TextWidgetStyle::default_for_theme(context.theme);
                 text_style.color = Value::Static(foreground);
                 text_style.typography = body_style_for_content.clone();
                 text_style
             }))
     } else {
-        Flex::<VM>::new(Axis::Vertical).child(Text::new(message).style(move |mode| {
-            let mut text_style = TextWidgetStyle::default_for(mode);
+        Flex::<VM>::new(Axis::Vertical).child(Text::new(message).style_full(move |context| {
+            let mut text_style = TextWidgetStyle::default_for_theme(context.theme);
             text_style.color = Value::Static(foreground);
             text_style.typography = body_style_for_content_else.clone();
             text_style
@@ -836,7 +842,7 @@ fn build_toast_card<VM: 'static>(
             .child(
                 Button::new(action.label)
                     .ghost()
-                    .style(move |_| action_style.clone())
+                    .style_full(move |_| action_style.clone())
                     .on_click(action.on_click),
             )
             .into()
@@ -846,8 +852,8 @@ fn build_toast_card<VM: 'static>(
 
     let mut card = Stack::<VM>::new()
         .width(pct_or_fixed(card_width))
-        .style(move |mode| {
-            let mut container = ContainerStyle::default_for(mode);
+        .style_full(move |context| {
+            let mut container = ContainerStyle::default_for_theme(context.theme);
             container.surface.background = Some(Value::Static(background));
             container.surface.border_color = Some(style.border.clone());
             container.surface.border_width = Some(style.border_width.clone());

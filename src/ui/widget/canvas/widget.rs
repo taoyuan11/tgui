@@ -1,4 +1,5 @@
 use super::*;
+use crate::theme::StyleContext;
 use crate::ui::widget::style::StyleResolver;
 use crate::ui::widget::WidgetKey;
 
@@ -169,6 +170,8 @@ impl<VM> Canvas<VM> {
                 data_grid_cell: None,
                 data_grid_header: None,
                 data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
                 kind: WidgetKind::Canvas {
                     scene: scene.into(),
                     item_interactions: CanvasItemInteractionHandlers::default(),
@@ -182,10 +185,23 @@ impl<VM> Canvas<VM> {
 
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> CanvasStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut CanvasStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
         if let WidgetKind::Canvas { style, .. } = &mut self.element.kind {
-            *style = Some(StyleResolver::new(resolver));
+            *style = Some(StyleResolver::mutate(
+                |context| CanvasStyle::default_for_theme(context.theme),
+                mutator,
+            ));
+        }
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> CanvasStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Canvas { style, .. } = &mut self.element.kind {
+            *style = Some(StyleResolver::full(resolver));
         }
         self
     }

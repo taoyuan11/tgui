@@ -106,11 +106,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let next_tooltip_wakeup = Cell::new(None);
         let next_toast_wakeup = Cell::new(None);
         let taffy: TaffyTree<MeasureContext> = TaffyTree::new();
+        let style_context = crate::ui::theme::StyleContext::from_theme(&theme)
+            .with_reduced_motion(self.reduced_motion)
+            .with_text_scale(units.font_scale());
 
         let mut context = CollectContext {
             taffy: &taffy,
             font_manager: &self.font_manager,
             theme: &theme,
+            style_context,
+            style_sheet: &self.config.style_sheet,
             media: &self.media_manager,
             focused_input,
             focused_text_state: focused_text_state.as_ref(),

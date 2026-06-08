@@ -85,8 +85,8 @@ impl ViewModel for DemoVm {
             .gap(dp(16.0))
             .child(
                 Text::new("tgui Modal / Dialog Demo")
-                    .style(|mode| {
-                        let mut s = TextWidgetStyle::default_for(mode);
+                    .style_full(|ctx| {
+                        let mut s = TextWidgetStyle::default_for_theme(ctx.theme);
                         s.typography.size = sp(24.0);
                         s
                     }),

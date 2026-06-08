@@ -1,7 +1,7 @@
 use super::*;
 use crate::accessibility::{build_tree_update, widget_id_from_node};
 use crate::foundation::binding::{TextChange, TextChangeSet};
-use crate::ui::widget::HitInteraction;
+use crate::ui::widget::{splitter_adjusted_sizes, HitInteraction, SplitterResize};
 use accesskit::{Action, ActionData, ActionRequest};
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
@@ -183,6 +183,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     &state,
                     crate::ui::widget::CanvasMouseButton::Left,
                 ),
+            Some(HitInteraction::SplitterHandle { state, .. }) => {
+                self.reset_splitter_from_hit(&state)
+            }
             Some(HitInteraction::SelectOption {
                 on_select,
                 on_open_change,
@@ -212,10 +215,63 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if self.adjust_accessibility_slider(widget_id, action, data.clone()) {
             return true;
         }
+        if self.adjust_accessibility_splitter(widget_id, action, data.clone()) {
+            return true;
+        }
         if matches!(action, Action::SetValue) {
             return self.set_accessibility_text_value(widget_id, data);
         }
         false
+    }
+
+    fn adjust_accessibility_splitter(
+        &mut self,
+        widget_id: WidgetId,
+        action: Action,
+        data: Option<ActionData>,
+    ) -> bool {
+        let computed = self.computed_scene().clone();
+        let splitter = computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .find_map(|region| match &region.interaction {
+                HitInteraction::SplitterHandle { id, state, .. } if *id == widget_id => {
+                    Some(state.clone())
+                }
+                _ => None,
+            });
+        let Some(state) = splitter else {
+            return false;
+        };
+        let Some(command) = state.on_resize.as_ref() else {
+            return false;
+        };
+        let delta = match action {
+            Action::Increment => state.step,
+            Action::Decrement => -state.step,
+            Action::SetValue => {
+                let target = match data {
+                    Some(ActionData::NumericValue(value)) => value as f32,
+                    Some(ActionData::Value(value)) => match value.parse::<f32>() {
+                        Ok(value) => value,
+                        Err(_) => return false,
+                    },
+                    _ => return false,
+                };
+                target - state.sizes.get(state.index).copied().unwrap_or(0.0)
+            }
+            _ => return false,
+        };
+        let sizes = splitter_adjusted_sizes(&state.sizes, &state.constraints, state.index, delta);
+        self.execute_value_command(
+            command,
+            SplitterResize {
+                index: state.index,
+                sizes,
+            },
+        );
+        true
     }
 
     fn adjust_accessibility_slider(
@@ -333,6 +389,7 @@ fn hit_interaction_widget_id<VM>(interaction: &HitInteraction<VM>) -> Option<Wid
         | HitInteraction::DataGridCell { id, .. }
         | HitInteraction::DataGridHeader { id, .. }
         | HitInteraction::DataGridResizeHandle { id, .. }
+        | HitInteraction::SplitterHandle { id, .. }
         | HitInteraction::Slider { id, .. }
         | HitInteraction::TextInput { id, .. }
         | HitInteraction::CanvasItem { id, .. } => Some(*id),

@@ -305,7 +305,7 @@ fn textarea_non_focused_render_reuses_stable_layout_snapshot() {
         .find(|region| region.id == widget_id)
         .expect("textarea scroll region should exist");
 
-    let style = TextareaStyle::default_for(infer_theme_mode(&theme));
+    let style = TextareaStyle::default_for_theme(&theme);
     let text = super::text_with_typography(content, &style.text_style);
     let (font_size, line_height, letter_spacing) =
         resolved_text_metrics(&text, &theme, UnitContext::default());

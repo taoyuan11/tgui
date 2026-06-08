@@ -40,8 +40,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             return;
         }
 
-        let theme_mode = crate::ui::widget::style::infer_theme_mode(context.theme);
-        let style = Box::new(popover.resolved_style(theme_mode));
+        let style = Box::new(self.resolved_popover_style(context, visual));
         let anchor_width = popover
             .match_anchor_width
             .then_some(visual.frame.width.max(style.min_width).min(style.max_width));
@@ -143,6 +142,28 @@ impl<VM: 'static> ResolvedElement<VM> {
             },
         );
     }
+
+    fn resolved_popover_style(
+        &self,
+        context: &CollectContext<'_, '_>,
+        visual: &CollectVisualState,
+    ) -> PopoverStyle {
+        let popover = self
+            .popover
+            .as_ref()
+            .expect("popover style should only resolve for popover elements");
+        let mut style = popover.resolved_style(&context.style_context);
+        context
+            .style_sheet
+            .apply_popover(&mut style, &context.style_context, &self.visual);
+        context.style_sheet.apply_popover_state(
+            &mut style,
+            &context.style_context,
+            &self.visual,
+            visual.widget_state,
+        );
+        style
+    }
 }
 
 fn build_popover_scene<VM: 'static>(
@@ -235,6 +256,8 @@ fn build_popover_scene<VM: 'static>(
                     taffy: &taffy,
                     font_manager: context.font_manager,
                     theme: context.theme,
+                    style_context: context.style_context,
+                    style_sheet: context.style_sheet,
                     media: context.media,
                     focused_input: context.focused_input,
                     focused_text_state: context.focused_text_state,

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::{dp, Dp};
 
@@ -13,7 +13,8 @@ use super::common::{
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
 use super::r#virtual::{ItemLayout, ItemSource, VirtualList};
-use super::style::StyleResolver;
+use super::style::palette::palette_from_theme;
+use super::style::{ContainerStyle, StyleResolver, StyleSheet};
 use super::{
     ContextMenuDescriptor, Flex, GestureRecognizer, LongPressEvent, MenuItem, MenuItemState, Stack,
     Text,
@@ -185,33 +186,35 @@ pub struct ListStyle {
 }
 
 impl ListStyle {
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let dark = matches!(mode, ResolvedThemeMode::Dark);
+    pub fn default_for_theme(theme: &crate::ui::theme::Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: super::style::WidgetSurfaceStyle::default(),
-            item_height: dp(40.0),
-            item_padding: Insets::symmetric(dp(12.0), dp(6.0)),
-            item_radius: dp(6.0),
+            item_height: theme.spacing.xl + theme.spacing.md,
+            item_padding: Insets::symmetric(theme.spacing.md, theme.spacing.xs + theme.spacing.xxs),
+            item_radius: theme.radius.md,
             item_background: Value::Static(Color::TRANSPARENT),
-            item_hover_background: Value::Static(if dark {
-                Color::hexa(0xFFFFFF14)
-            } else {
-                Color::hexa(0x1118270D)
-            }),
-            item_selected_background: Value::Static(if dark {
-                Color::hexa(0x5EA2FF40)
-            } else {
-                Color::hexa(0x2563EB24)
-            }),
+            item_hover_background: Value::Static(palette.surface_high.with_alpha_factor(0.68)),
+            item_selected_background: Value::Static(theme.colors.primary.with_alpha_factor(0.16)),
             item_disabled_background: Value::Static(Color::TRANSPARENT),
             group_header_background: Value::Static(Color::TRANSPARENT),
-            group_header_text: Value::Static(if dark {
-                Color::hexa(0xAEB8C8FF)
-            } else {
-                Color::hexa(0x475569FF)
-            }),
+            group_header_text: Value::Static(palette.on_surface_muted),
         }
     }
+}
+
+fn resolve_list_style(
+    style: Option<&StyleResolver<ListStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+) -> ListStyle {
+    let mut base = ListStyle::default_for_theme(context.theme);
+    context.theme.components.list.apply(&mut base, context);
+    style_sheet.apply_list(&mut base, context, visual);
+    style
+        .map(|resolver| resolver.resolve_from(base.clone(), context))
+        .unwrap_or(base)
 }
 
 pub struct List<T, VM> {
@@ -435,9 +438,20 @@ where
 
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> ListStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut ListStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
-        self.style = Some(StyleResolver::new(resolver));
+        self.style = Some(StyleResolver::mutate(
+            |context| ListStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> ListStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 
@@ -599,11 +613,10 @@ where
         }
 
         let list_id = WidgetId::next();
-        let style = self
-            .style
-            .as_ref()
-            .map(|resolver| resolver.resolve(ResolvedThemeMode::Light))
-            .unwrap_or_else(|| ListStyle::default_for(ResolvedThemeMode::Light));
+        let style_resolver = self.style.clone();
+        let row_visual = self.visual.clone();
+        let root_style_resolver = self.style.clone();
+        let root_visual = self.visual.clone();
         let selected_keys = self.selected_keys.clone();
         let row_keys: Arc<[WidgetKey]> = self
             .rows
@@ -631,84 +644,111 @@ where
         let selection_mode = self.selection_mode;
         let item_extent = self.item_layout.estimate().max(Dp::ZERO);
         let item_spacing = self.item_layout.spacing().max(Dp::ZERO);
-        let list_style = Arc::new(style);
-        let row_style = Arc::clone(&list_style);
         let render = self.render.clone();
         let context_menu = Arc::new(self.context_menu);
         let item_layout = self.item_layout;
-        let mut list: Element<VM> = VirtualList::new(source, move |_visible, row| match row {
-            ListRow::Header(header) => header.clone(),
-            ListRow::Item {
-                source_index,
-                key,
-                value,
-                disabled,
-            } => {
-                let selected = selected_keys.resolve().contains(key);
-                let disabled_now = disabled.resolve();
-                let context = ListItemContext {
-                    index: *source_index,
-                    key: key.clone(),
-                    item: value.clone(),
-                    selected,
-                    disabled: disabled_now,
-                };
-                let child = render(context.clone());
-                let row_container = Flex::vertical()
-                    .align(Align::Stretch)
-                    .child(child)
-                    .padding(row_style.item_padding);
-                let row_container = match item_layout {
-                    ItemLayout::Fixed { item_extent, .. } => row_container.height(item_extent),
-                    ItemLayout::Estimated { estimate, .. } => row_container.height(estimate),
-                    ItemLayout::Measured { .. } => row_container.min_height(row_style.item_height),
-                };
-                let mut row: Element<VM> = row_container.into();
-                row.key = Some(key.clone());
-                row.interactions.cursor_style = Some(Value::Static(if disabled_now {
-                    CursorStyle::Default
-                } else {
-                    CursorStyle::Pointer
-                }));
-                row.visual.border_radius = Some(Value::Static(row_style.item_radius));
-                row.list_item = Some(ListItemState {
-                    list_id,
-                    row_index: _visible,
-                    item_index: *source_index,
-                    key: key.clone(),
-                    selected_keys: selected_keys.clone(),
-                    selection_mode,
-                    disabled: disabled.clone(),
-                    item_extent,
-                    item_spacing,
-                    item_background: row_style.item_background.clone(),
-                    item_hover_background: row_style.item_hover_background.clone(),
-                    item_selected_background: row_style.item_selected_background.clone(),
-                    item_disabled_background: row_style.item_disabled_background.clone(),
-                    on_selection_change: on_selection_change.clone(),
-                    on_item_action: on_item_action.clone(),
-                    sibling_keys: row_keys.clone(),
-                    sibling_disabled: row_disabled.clone(),
-                });
-                if !context_menu.is_empty() {
-                    let on_show = ValueCommand::new(|_: &mut VM, _: LongPressEvent| {});
-                    row.interactions.gesture = Some(match row.interactions.gesture.take() {
-                        Some(existing) => existing.on_long_press(on_show),
-                        None => GestureRecognizer::new().on_long_press(on_show),
-                    });
-                    let descriptor = ContextMenuDescriptor {
-                        items: context_menu.as_ref().to_vec(),
-                        on_open_change: None,
-                        disabled: Value::Static(false),
-                        style: None,
-                    };
-                    row.context_menu = Some(Box::new(descriptor));
+        let mut list: Element<VM> = VirtualList::new_with_style_context(
+            source,
+            move |_visible, row, context, style_sheet| {
+                let row_style = Arc::new(resolve_list_style(
+                    style_resolver.as_ref(),
+                    &context,
+                    style_sheet,
+                    &row_visual,
+                ));
+                match row {
+                    ListRow::Header(header) => header.clone(),
+                    ListRow::Item {
+                        source_index,
+                        key,
+                        value,
+                        disabled,
+                    } => {
+                        let selected = selected_keys.resolve().contains(key);
+                        let disabled_now = disabled.resolve();
+                        let context = ListItemContext {
+                            index: *source_index,
+                            key: key.clone(),
+                            item: value.clone(),
+                            selected,
+                            disabled: disabled_now,
+                        };
+                        let child = render(context.clone());
+                        let row_container = Flex::vertical()
+                            .align(Align::Stretch)
+                            .child(child)
+                            .padding(row_style.item_padding);
+                        let row_container = match item_layout {
+                            ItemLayout::Fixed { item_extent, .. } => {
+                                row_container.height(item_extent)
+                            }
+                            ItemLayout::Estimated { estimate, .. } => {
+                                row_container.height(estimate)
+                            }
+                            ItemLayout::Measured { .. } => {
+                                row_container.min_height(row_style.item_height)
+                            }
+                        };
+                        let mut row: Element<VM> = row_container.into();
+                        row.key = Some(key.clone());
+                        row.interactions.cursor_style = Some(Value::Static(if disabled_now {
+                            CursorStyle::Default
+                        } else {
+                            CursorStyle::Pointer
+                        }));
+                        row.visual.border_radius = Some(Value::Static(row_style.item_radius));
+                        row.list_item = Some(ListItemState {
+                            list_id,
+                            row_index: _visible,
+                            item_index: *source_index,
+                            key: key.clone(),
+                            selected_keys: selected_keys.clone(),
+                            selection_mode,
+                            disabled: disabled.clone(),
+                            item_extent,
+                            item_spacing,
+                            item_background: row_style.item_background.clone(),
+                            item_hover_background: row_style.item_hover_background.clone(),
+                            item_selected_background: row_style.item_selected_background.clone(),
+                            item_disabled_background: row_style.item_disabled_background.clone(),
+                            on_selection_change: on_selection_change.clone(),
+                            on_item_action: on_item_action.clone(),
+                            sibling_keys: row_keys.clone(),
+                            sibling_disabled: row_disabled.clone(),
+                        });
+                        if !context_menu.is_empty() {
+                            let on_show = ValueCommand::new(|_: &mut VM, _: LongPressEvent| {});
+                            row.interactions.gesture =
+                                Some(match row.interactions.gesture.take() {
+                                    Some(existing) => existing.on_long_press(on_show),
+                                    None => GestureRecognizer::new().on_long_press(on_show),
+                                });
+                            let descriptor = ContextMenuDescriptor {
+                                items: context_menu.as_ref().to_vec(),
+                                on_open_change: None,
+                                disabled: Value::Static(false),
+                                style: None,
+                            };
+                            row.context_menu = Some(Box::new(descriptor));
+                        }
+                        row
+                    }
                 }
-                row
-            }
-        })
+            },
+        )
         .widget_id(list_id)
         .item_layout(self.item_layout)
+        .style_full(move |context| {
+            let style = resolve_list_style(
+                root_style_resolver.as_ref(),
+                context,
+                &StyleSheet::default(),
+                &root_visual,
+            );
+            let mut container = ContainerStyle::default_for_theme(context.theme);
+            container.surface = style.surface;
+            container
+        })
         .into();
         list.key = self.key;
         list.layout = self.layout;
@@ -716,26 +756,6 @@ where
         list.focus.tab_index = self.tab_index;
         list.focus.scope = self.focus_scope;
         list.visual = self.visual;
-        if let Some(background) = list_style.surface.background.clone() {
-            list.background = Some(background);
-        }
-        list.visual.background_brush = list_style.surface.background_brush.clone();
-        list.visual.background_image = list_style.surface.background_image.clone();
-        list.visual.background_blur = list_style.surface.background_blur.clone();
-        if let Some(shadow) = list_style.surface.shadow.clone() {
-            list.visual.shadow = Some(shadow);
-        }
-        if let Some(border_color) = list_style.surface.border_color.clone() {
-            list.visual.border_color = Some(border_color);
-        }
-        if let Some(border_radius) = list_style.surface.border_radius.clone() {
-            list.visual.border_radius = Some(border_radius);
-        }
-        if let Some(border_width) = list_style.surface.border_width.clone() {
-            list.visual.border_width = Some(border_width);
-        }
-        list.visual.opacity = list_style.surface.opacity.clone();
-        list.visual.offset = list_style.surface.offset.clone();
         list.interactions = self.interactions;
         list.lifecycle_events = self.lifecycle_events;
         list.media_events = self.media_events;

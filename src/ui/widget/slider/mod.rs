@@ -1,6 +1,6 @@
 use crate::foundation::form::ValidationVisualState;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
@@ -213,6 +213,8 @@ impl<VM> Slider<VM> {
                 data_grid_cell: None,
                 data_grid_header: None,
                 data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
                 kind: WidgetKind::Slider {
                     value: value.into(),
                     min,
@@ -298,10 +300,23 @@ impl<VM> Slider<VM> {
     /// 设置滑块样式解析器。
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> SliderStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut SliderStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
         if let WidgetKind::Slider { style, .. } = &mut self.element.kind {
-            *style = Some(StyleResolver::new(resolver));
+            *style = Some(StyleResolver::mutate(
+                |context| SliderStyle::default_for_theme(context.theme),
+                mutator,
+            ));
+        }
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> SliderStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Slider { style, .. } = &mut self.element.kind {
+            *style = Some(StyleResolver::full(resolver));
         }
         self
     }

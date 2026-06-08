@@ -9,9 +9,9 @@
 //! 子树（详见 `widget.rs`）。
 
 use crate::foundation::view_model::ValueCommand;
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::Value;
-use crate::ui::widget::style::DrawerStyle;
+use crate::ui::widget::style::{DrawerStyle, StyleResolver};
 use crate::ui::widget::WidgetId;
 
 use super::placement::DrawerPlacement;
@@ -28,7 +28,7 @@ pub(crate) struct DrawerDescriptor<VM> {
     pub(crate) return_focus_to: Option<WidgetId>,
     pub(crate) backdrop_widget_id: WidgetId,
     pub(crate) panel_widget_id: WidgetId,
-    pub(crate) style: Option<DrawerStyle>,
+    pub(crate) style: Option<StyleResolver<DrawerStyle>>,
 }
 
 impl<VM> Clone for DrawerDescriptor<VM> {
@@ -71,10 +71,13 @@ impl<VM> DrawerDescriptor<VM> {
         }
     }
 
-    /// 按主题模式解析最终样式。
-    pub(crate) fn resolved_style(&self, mode: ResolvedThemeMode) -> DrawerStyle {
+    /// 按当前主题解析最终样式。
+    pub(crate) fn resolved_style(&self, context: &StyleContext<'_>) -> DrawerStyle {
+        let mut base = DrawerStyle::default_for_theme(context.theme);
+        context.theme.components.drawer.apply(&mut base, context);
         self.style
-            .clone()
-            .unwrap_or_else(|| DrawerStyle::default_for(mode))
+            .as_ref()
+            .map(|resolver| resolver.resolve_from(base.clone(), context))
+            .unwrap_or(base)
     }
 }

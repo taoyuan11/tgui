@@ -7,9 +7,9 @@ fn background_image_produces_texture_primitive() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> =
-        WidgetTree::new(Stack::new().size(dp(64.0), dp(64.0)).style(|mode| {
+        WidgetTree::new(Stack::new().size(dp(64.0), dp(64.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 None,
                 None,
                 Some(BackgroundImage::from_bytes(ONE_BY_ONE_GIF)),
@@ -42,10 +42,10 @@ fn background_image_loading_failure_keeps_base_background_without_placeholder_te
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let fallback = Color::hexa(0x112233FF);
-    let tree: WidgetTree<()> =
-        WidgetTree::new(Stack::new().size(dp(80.0), dp(50.0)).style(move |mode| {
+    let tree: WidgetTree<()> = WidgetTree::new(Stack::new().size(dp(80.0), dp(50.0)).style_full(
+        move |ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(fallback),
                 None,
                 Some(BackgroundImage::new(MediaSource::bytes(
@@ -57,7 +57,8 @@ fn background_image_loading_failure_keeps_base_background_without_placeholder_te
                 None,
                 None,
             )
-        }));
+        },
+    ));
 
     let rendered = wait_for_rendered_output(
         &tree,
@@ -84,9 +85,9 @@ fn background_image_renders_between_blur_and_brush_overlay() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> =
-        WidgetTree::new(Stack::new().size(dp(96.0), dp(72.0)).style(|mode| {
+        WidgetTree::new(Stack::new().size(dp(96.0), dp(72.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(Color::hexa(0x0F172AFF)),
                 Some(
                     BackgroundLinearGradient::new(
@@ -143,9 +144,9 @@ fn background_image_texture_uses_corner_radius() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> =
-        WidgetTree::new(Stack::new().size(dp(64.0), dp(64.0)).style(|mode| {
+        WidgetTree::new(Stack::new().size(dp(64.0), dp(64.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 None,
                 None,
                 Some(BackgroundImage::from_bytes(ONE_BY_ONE_GIF)),

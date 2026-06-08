@@ -1,12 +1,12 @@
 use crate::foundation::color::Color;
 use crate::ui::layout::Value;
-use crate::ui::theme::{Shadow, Theme, WidgetState};
+use crate::ui::theme::{Shadow, StyleContext, Theme, WidgetState};
 use crate::ui::unit::Dp;
 
 #[cfg(feature = "video")]
 use super::super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::super::style::{
-    infer_theme_mode, ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
+    ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
     DividerStyle as WidgetDividerStyle, FocusRingOverride, InputStyle as WidgetInputStyle,
     ProgressBarStyle as WidgetProgressBarStyle, RadioStyle as WidgetRadioStyle,
     SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle,
@@ -109,152 +109,334 @@ pub(super) struct ResolvedInputStyle {
     pub(super) text_style: crate::ui::theme::TextStyle,
 }
 
+pub(super) fn apply_local_style<T: Clone>(
+    style: Option<&super::super::style::StyleResolver<T>>,
+    base: T,
+    context: &StyleContext<'_>,
+) -> T {
+    style
+        .map(|resolver| resolver.resolve_from(base.clone(), context))
+        .unwrap_or(base)
+}
+
 pub(super) fn resolved_button_style(
     style: Option<&super::super::style::StyleResolver<WidgetButtonStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
     variant: crate::ui::widget::common::ButtonVariantKind,
 ) -> WidgetButtonStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| WidgetButtonStyle::default_for(infer_theme_mode(theme), variant))
+    let base = button_style_base(context, style_sheet, visual, variant);
+    apply_local_style(style, base, context)
+}
+
+pub(super) fn button_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+    variant: crate::ui::widget::common::ButtonVariantKind,
+) -> WidgetButtonStyle {
+    let mut base = WidgetButtonStyle::default_for_theme(context.theme, variant);
+    context.theme.components.button.apply(&mut base, context);
+    style_sheet.apply_button(&mut base, context, variant, visual);
+    base
 }
 
 pub(super) fn resolved_checkbox_style(
     style: Option<&super::super::style::StyleResolver<WidgetCheckboxStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> WidgetCheckboxStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| WidgetCheckboxStyle::default_for(infer_theme_mode(theme)))
+    let base = checkbox_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context)
+}
+
+pub(super) fn checkbox_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> WidgetCheckboxStyle {
+    let mut base = WidgetCheckboxStyle::default_for_theme(context.theme);
+    context.theme.components.checkbox.apply(&mut base, context);
+    style_sheet.apply_checkbox(&mut base, context, visual);
+    base
 }
 
 pub(super) fn resolved_radio_style(
     style: Option<&super::super::style::StyleResolver<WidgetRadioStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> WidgetRadioStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| WidgetRadioStyle::default_for(infer_theme_mode(theme)))
+    let base = radio_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context)
+}
+
+pub(super) fn radio_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> WidgetRadioStyle {
+    let mut base = WidgetRadioStyle::default_for_theme(context.theme);
+    context.theme.components.radio.apply(&mut base, context);
+    style_sheet.apply_radio(&mut base, context, visual);
+    base
 }
 
 pub(super) fn resolved_switch_style(
     style: Option<&super::super::style::StyleResolver<super::super::style::SwitchStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> super::super::style::SwitchStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| super::super::style::SwitchStyle::default_for(infer_theme_mode(theme)))
+    let base = switch_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context)
+}
+
+pub(super) fn switch_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> super::super::style::SwitchStyle {
+    let mut base = super::super::style::SwitchStyle::default_for_theme(context.theme);
+    context.theme.components.switch.apply(&mut base, context);
+    style_sheet.apply_switch(&mut base, context, visual);
+    base
 }
 
 pub(super) fn resolved_select_style(
     style: Option<&super::super::style::StyleResolver<WidgetSelectStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> WidgetSelectStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| WidgetSelectStyle::default_for(infer_theme_mode(theme)))
+    let base = select_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context)
+}
+
+pub(super) fn select_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> WidgetSelectStyle {
+    let mut base = WidgetSelectStyle::default_for_theme(context.theme);
+    context.theme.components.select.apply(&mut base, context);
+    style_sheet.apply_select(&mut base, context, visual);
+    base
 }
 
 pub(super) fn resolved_slider_style(
     style: Option<&super::super::style::StyleResolver<WidgetSliderStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> WidgetSliderStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| WidgetSliderStyle::default_for(infer_theme_mode(theme)))
+    let base = slider_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context)
+}
+
+pub(super) fn slider_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> WidgetSliderStyle {
+    let mut base = WidgetSliderStyle::default_for_theme(context.theme);
+    context.theme.components.slider.apply(&mut base, context);
+    style_sheet.apply_slider(&mut base, context, visual);
+    base
 }
 
 pub(super) fn resolved_progress_bar_style(
     style: Option<&super::super::style::StyleResolver<WidgetProgressBarStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> WidgetProgressBarStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| WidgetProgressBarStyle::default_for(infer_theme_mode(theme)))
+    let base = progress_bar_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context)
+}
+
+pub(super) fn progress_bar_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> WidgetProgressBarStyle {
+    let mut base = WidgetProgressBarStyle::default_for_theme(context.theme);
+    context
+        .theme
+        .components
+        .progress_bar
+        .apply(&mut base, context);
+    style_sheet.apply_progress_bar(&mut base, context, visual);
+    base
 }
 
 pub(super) fn resolved_spinner_style(
     style: Option<&super::super::style::StyleResolver<WidgetSpinnerStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> WidgetSpinnerStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| WidgetSpinnerStyle::default_for(infer_theme_mode(theme)))
+    let base = spinner_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context)
+}
+
+pub(super) fn spinner_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> WidgetSpinnerStyle {
+    let mut base = WidgetSpinnerStyle::default_for_theme(context.theme);
+    context.theme.components.spinner.apply(&mut base, context);
+    style_sheet.apply_spinner(&mut base, context, visual);
+    base
 }
 
 pub(super) fn resolved_divider_style(
     style: Option<&super::super::style::StyleResolver<WidgetDividerStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> WidgetDividerStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| WidgetDividerStyle::default_for(infer_theme_mode(theme)))
+    let base = divider_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context)
+}
+
+pub(super) fn divider_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> WidgetDividerStyle {
+    let mut base = WidgetDividerStyle::default_for_theme(context.theme);
+    context.theme.components.divider.apply(&mut base, context);
+    style_sheet.apply_divider(&mut base, context, visual);
+    base
 }
 
 pub(super) fn resolved_input_style(
     style: Option<&super::super::style::StyleResolver<WidgetInputStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> WidgetInputStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| WidgetInputStyle::default_for(infer_theme_mode(theme)))
+    let base = input_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context)
+}
+
+pub(super) fn input_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> WidgetInputStyle {
+    let mut base = WidgetInputStyle::default_for_theme(context.theme);
+    context.theme.components.input.apply(&mut base, context);
+    style_sheet.apply_input(&mut base, context, visual);
+    base
 }
 
 pub(super) fn resolved_textarea_style(
     style: Option<&super::super::style::StyleResolver<WidgetTextareaStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> WidgetTextareaStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| WidgetTextareaStyle::default_for(infer_theme_mode(theme)))
+    let base = textarea_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context)
+}
+
+pub(super) fn textarea_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> WidgetTextareaStyle {
+    let mut base = WidgetTextareaStyle::default_for_theme(context.theme);
+    context.theme.components.textarea.apply(&mut base, context);
+    style_sheet.apply_textarea(&mut base, context, visual);
+    base
+}
+
+pub(super) fn input_style_from_textarea_style(style: WidgetTextareaStyle) -> WidgetInputStyle {
+    WidgetInputStyle {
+        surface: style.surface,
+        background: style.background,
+        text: style.text,
+        placeholder: style.placeholder,
+        border: style.border,
+        selection: style.selection,
+        caret: style.caret,
+        border_width: style.border_width,
+        radius: style.radius,
+        padding_x: style.padding_x,
+        padding_y: style.padding_y,
+        min_height: style.min_height,
+        text_style: style.text_style,
+    }
 }
 
 pub(super) fn resolved_container_style(
     style: Option<&super::super::style::StyleResolver<super::super::style::ContainerStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> super::super::style::ContainerStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| {
-            super::super::style::ContainerStyle::default_for(infer_theme_mode(theme))
-        })
+    let mut base = super::super::style::ContainerStyle::default_for_theme(context.theme);
+    context.theme.components.container.apply(&mut base, context);
+    style_sheet.apply_container(&mut base, context, visual);
+    apply_local_style(style, base, context)
 }
 
 pub(super) fn resolved_image_style(
     style: Option<&super::super::style::StyleResolver<super::super::style::ImageStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> super::super::style::ImageStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| super::super::style::ImageStyle::default_for(infer_theme_mode(theme)))
+    let mut base = super::super::style::ImageStyle::default_for_theme(context.theme);
+    context.theme.components.image.apply(&mut base, context);
+    style_sheet.apply_image(&mut base, context, visual);
+    apply_local_style(style, base, context)
 }
 
 pub(super) fn resolved_canvas_style(
     style: Option<&super::super::style::StyleResolver<super::super::style::CanvasStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> super::super::style::CanvasStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| super::super::style::CanvasStyle::default_for(infer_theme_mode(theme)))
+    let mut base = super::super::style::CanvasStyle::default_for_theme(context.theme);
+    context.theme.components.canvas.apply(&mut base, context);
+    style_sheet.apply_canvas(&mut base, context, visual);
+    apply_local_style(style, base, context)
 }
 
 pub(super) fn resolved_text_widget_style(
     style: Option<&super::super::style::StyleResolver<TextWidgetStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> TextWidgetStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| TextWidgetStyle::default_for(infer_theme_mode(theme)))
+    let mut base = TextWidgetStyle::default_for_theme(context.theme);
+    context.theme.components.text.apply(&mut base, context);
+    style_sheet.apply_text(&mut base, context, visual);
+    apply_local_style(style, base, context)
 }
 
 #[cfg(feature = "video")]
 pub(super) fn resolved_video_surface_style(
     style: Option<&super::super::style::StyleResolver<WidgetVideoSurfaceStyle>>,
-    theme: &Theme,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> WidgetVideoSurfaceStyle {
-    style
-        .map(|resolver| resolver.resolve(infer_theme_mode(theme)))
-        .unwrap_or_else(|| WidgetVideoSurfaceStyle::default_for(infer_theme_mode(theme)))
+    let mut base = WidgetVideoSurfaceStyle::default_for_theme(context.theme);
+    context
+        .theme
+        .components
+        .video_surface
+        .apply(&mut base, context);
+    style_sheet.apply_video_surface(&mut base, context, visual);
+    apply_local_style(style, base, context)
 }
 
 pub(super) fn apply_surface_style(
@@ -262,16 +444,7 @@ pub(super) fn apply_surface_style(
     visual: &mut VisualStyle,
     surface: &super::super::style::WidgetSurfaceStyle,
 ) {
-    *background = surface.background.clone();
-    visual.background_brush = surface.background_brush.clone();
-    visual.background_image = surface.background_image.clone();
-    visual.background_blur = surface.background_blur.clone();
-    visual.shadow = surface.shadow.clone();
-    visual.border_color = surface.border_color.clone();
-    visual.border_radius = surface.border_radius.clone();
-    visual.border_width = surface.border_width.clone();
-    visual.opacity = surface.opacity.clone();
-    visual.offset = surface.offset.clone();
+    super::super::style::merge_surface_style(background, visual, surface);
 }
 
 pub(super) fn apply_text_widget_style(text: &mut Text, style: &TextWidgetStyle) {
@@ -285,7 +458,7 @@ pub(super) fn apply_text_widget_style(text: &mut Text, style: &TextWidgetStyle) 
 }
 
 pub(super) fn resolve_stateful_widget_color(
-    value: &crate::ui::theme::Stateful<Value<Color>>,
+    value: &crate::ui::theme::StateValue<Value<Color>>,
     state: WidgetState,
 ) -> Color {
     value.resolve(state).resolve()
@@ -293,6 +466,7 @@ pub(super) fn resolve_stateful_widget_color(
 
 pub(super) fn base_interaction_state(mut state: WidgetState) -> WidgetState {
     state.focused = false;
+    state.focus_visible = false;
     state
 }
 
@@ -340,6 +514,7 @@ pub(super) fn resolve_checkbox_style(
 ) -> ResolvedCheckboxStyle {
     let mut control_state = base_interaction_state(state);
     control_state.selected = checked;
+    control_state.checked = checked;
     ResolvedCheckboxStyle {
         background: if checked {
             resolve_stateful_widget_color(&style.background_checked, control_state)
@@ -370,6 +545,7 @@ pub(super) fn resolve_radio_style(
 ) -> ResolvedRadioStyle {
     let mut control_state = base_interaction_state(state);
     control_state.selected = checked;
+    control_state.checked = checked;
     ResolvedRadioStyle {
         background: if checked {
             resolve_stateful_widget_color(&style.background_checked, control_state)
@@ -464,12 +640,12 @@ pub(super) fn resolve_slider_style(
 }
 
 pub(super) fn default_select_menu_option_color(theme: &Theme, state: WidgetState) -> Color {
-    let style = WidgetSelectStyle::default_for(infer_theme_mode(theme));
+    let style = WidgetSelectStyle::default_for_theme(theme);
     resolve_stateful_widget_color(&style.option_background, base_interaction_state(state))
 }
 
 pub(super) fn default_select_disabled_text_color(theme: &Theme) -> Color {
-    let style = WidgetSelectStyle::default_for(infer_theme_mode(theme));
+    let style = WidgetSelectStyle::default_for_theme(theme);
     let mut state = WidgetState::default();
     state.disabled = true;
     resolve_stateful_widget_color(&style.text, state)

@@ -53,8 +53,7 @@ fn drawer_panel_rect<VM>(
         return rect;
     }
 
-    let mode = crate::ui::widget::style::infer_theme_mode(context.theme);
-    let style = drawer.resolved_style(mode);
+    let style = drawer.resolved_style(&context.style_context);
     match drawer.placement {
         DrawerPlacement::Left => Rect::new(
             viewport.x,

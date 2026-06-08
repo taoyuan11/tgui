@@ -37,10 +37,16 @@ pub(crate) enum WidgetProperty {
     Gap,
     Grow,
     ProgressIndeterminatePhase,
+    #[allow(dead_code)]
+    SkeletonShimmerPhase,
     SpinnerPhase,
     ToastStackExpand,
     TreeDisclosureRotation,
     TreeCheckboxState,
+    #[allow(dead_code)]
+    CollapseProgress,
+    #[allow(dead_code)]
+    CarouselSlideProgress,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

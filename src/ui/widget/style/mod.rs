@@ -1,15 +1,20 @@
 mod controls;
-mod palette;
+pub(crate) mod palette;
 mod shared;
+mod sheet;
 
 pub use controls::{
-    ButtonStyle, CheckboxStyle, DividerStyle, DrawerStyle, InputStyle, MenuBarStyle, MenuStyle,
-    ModalStyle, PopoverStyle, ProgressBarStyle, RadioStyle, SelectStyle, SliderStyle, SpinnerStyle,
-    SwitchStyle, TabsStyle, TextareaStyle, ToastStyle, TooltipStyle,
+    AvatarShape, AvatarStyle, BadgeStyle, BadgeTone, BreadcrumbStyle, ButtonStyle, CardStyle,
+    CarouselStyle, CheckboxStyle, CollapseStyle, ComboboxStyle, DividerStyle, DrawerStyle,
+    IconStyle, InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PaginationStyle, PopoverStyle,
+    ProgressBarStyle, RadioStyle, RatingStyle, RichTextStyle, SelectStyle, SkeletonStyle,
+    SliderStyle, SpinnerStyle, SplitterStyle, SwitchStyle, TabsStyle, TextareaStyle, ToastStyle,
+    TooltipStyle,
 };
 pub use shared::{
     CanvasStyle, ContainerStyle, FocusRingOverride, ImageStyle, TextWidgetStyle, VideoSurfaceStyle,
     WidgetSurfaceStyle,
 };
+pub use sheet::{ButtonSelector, StyleSelector, StyleSheet};
 
-pub(crate) use shared::{infer_theme_mode, StyleResolver};
+pub(crate) use shared::{merge_surface_style, StyleResolver};

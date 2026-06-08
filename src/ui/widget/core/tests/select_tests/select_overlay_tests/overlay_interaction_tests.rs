@@ -162,6 +162,7 @@ fn long_select_dropdown_uses_overlay_scroll_offset_for_visible_range() {
     let empty_scroll_offsets = HashMap::new();
     let empty_virtual_states = HashMap::new();
     let empty_tooltip_hover_started_at = HashMap::new();
+    let default_style_sheet = crate::ui::widget::StyleSheet::default();
     let first = tree
         .collect_scene_cache_from_layout_with_focus_value_at_with_virtual_state(
             &font_manager,
@@ -190,6 +191,7 @@ fn long_select_dropdown_uses_overlay_scroll_offset_for_visible_range() {
             &empty_virtual_states,
             None,
             None,
+            &default_style_sheet,
         )
         .computed;
     let baseline_min = select_option_indices(&first)
@@ -242,6 +244,7 @@ fn long_select_dropdown_uses_overlay_scroll_offset_for_visible_range() {
             &virtual_states,
             None,
             None,
+            &default_style_sheet,
         )
         .computed;
     let scrolled_min = select_option_indices(&scrolled)

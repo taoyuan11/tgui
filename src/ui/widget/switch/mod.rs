@@ -1,6 +1,6 @@
 use crate::foundation::form::ValidationVisualState;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
@@ -210,6 +210,8 @@ impl<VM> Switch<VM> {
                 data_grid_cell: None,
                 data_grid_header: None,
                 data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
                 kind: WidgetKind::Switch {
                     checked: checked.into(),
                     on_change: None,
@@ -236,10 +238,23 @@ impl<VM> Switch<VM> {
     /// 设置开关样式解析器。
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> SwitchStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut SwitchStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
         if let WidgetKind::Switch { style, .. } = &mut self.element.kind {
-            *style = Some(super::style::StyleResolver::new(resolver));
+            *style = Some(super::style::StyleResolver::mutate(
+                |context| SwitchStyle::default_for_theme(context.theme),
+                mutator,
+            ));
+        }
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> SwitchStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Switch { style, .. } = &mut self.element.kind {
+            *style = Some(super::style::StyleResolver::full(resolver));
         }
         self
     }

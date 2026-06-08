@@ -93,6 +93,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 window.request_redraw();
             }
         }
+        if self.drive_carousel_auto_play(now) {
+            frame_advanced = true;
+        }
         let controller_changed = self.animations.refresh(now);
         if controller_changed {
             frame_advanced = true;
@@ -136,6 +139,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let tooltip_release_deadline = self.tooltip_state.long_press_release_deadline;
         let caret_deadline = self.next_caret_blink_deadline(now);
         let key_repeat_deadline = self.next_key_repeat_deadline();
+        let carousel_deadline = self.next_carousel_wakeup_deadline;
         let smooth_scroll_deadline =
             (!self.smooth_scroll_states.is_empty()).then_some(now + Duration::from_millis(16));
         let touch_scroll_inertia_deadline = (!self.touch_scroll_inertia_states.is_empty())
@@ -165,7 +169,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 "textarea_animation",
                 started_at.elapsed(),
                 format!(
-                    "smooth_scroll_advanced={} touch_scroll_inertia_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} animation_active={} controller_active={} pending_click={} gesture_deadline={} tooltip_release_deadline={} caret_deadline={} key_repeat_deadline={} smooth_scroll_deadline={} touch_scroll_inertia_deadline={} next_deadline={}",
+                    "smooth_scroll_advanced={} touch_scroll_inertia_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} animation_active={} controller_active={} pending_click={} gesture_deadline={} tooltip_release_deadline={} caret_deadline={} key_repeat_deadline={} carousel_deadline={} smooth_scroll_deadline={} touch_scroll_inertia_deadline={} next_deadline={}",
                     smooth_scroll_advanced,
                     touch_scroll_inertia_advanced,
                     controller_changed,
@@ -179,6 +183,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     tooltip_release_deadline.is_some(),
                     caret_deadline.is_some(),
                     key_repeat_deadline.is_some(),
+                    carousel_deadline.is_some(),
                     smooth_scroll_deadline.is_some(),
                     touch_scroll_inertia_deadline.is_some(),
                     next_deadline.is_some(),

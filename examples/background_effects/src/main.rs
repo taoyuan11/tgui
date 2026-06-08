@@ -2,15 +2,15 @@ use tgui::prelude::*;
 
 struct BackgroundEffectsVm;
 
-fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn text_style(context: &StyleContext<'_>, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(context.theme);
     style.typography.size = size;
     style.color = color.into();
     style
 }
 
 fn surface_style(
-    mode: ResolvedThemeMode,
+    context: &StyleContext<'_>,
     radius: Dp,
     background: Option<Color>,
     brush: Option<BackgroundBrush>,
@@ -18,7 +18,7 @@ fn surface_style(
     border: Option<(Dp, Color)>,
     background_image: Option<BackgroundImage>,
 ) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = background.map(Into::into);
     style.surface.background_brush = brush.map(Into::into);
     style.surface.background_blur = blur.into();
@@ -40,9 +40,9 @@ impl ViewModel for BackgroundEffectsVm {
     fn view(&self) -> Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
-            .style(|mode| {
+            .style_full(|context| {
                 surface_style(
-                    mode,
+                    context,
                     dp(0.0),
                     None,
                     None,
@@ -94,9 +94,9 @@ fn background_pattern() -> Element<BackgroundEffectsVm> {
 fn color_band(start: u32, end: u32) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .grow(1.0)
-        .style(move |mode| {
+        .style_full(move |context| {
             surface_style(
-                mode,
+                context,
                 dp(28.0),
                 None,
                 Some(
@@ -122,9 +122,9 @@ fn hero_card() -> Element<BackgroundEffectsVm> {
     Flex::new(Axis::Vertical)
         .padding(Insets::all(dp(24.0)))
         .gap(dp(12.0))
-        .style(|mode| {
+        .style_full(|context| {
             surface_style(
-                mode,
+                context,
                 dp(26.0),
                 None,
                 Some(
@@ -145,13 +145,13 @@ fn hero_card() -> Element<BackgroundEffectsVm> {
         })
         .child(
             Text::new("Background Effects Gallery")
-                .style(|mode| text_style(mode, sp(30.0), Color::WHITE)),
+                .style_full(|context| text_style(context, sp(30.0), Color::WHITE)),
         )
         .child(
             Text::new(
                 "Linear gradients, radial gradients, layered glass cards, and backdrop blur on a shared background.",
             )
-            .style(|mode| text_style(mode, sp(15.0), Color::hexa(0xE2E8F0FF))),
+            .style_full(|context| text_style(context, sp(15.0), Color::hexa(0xE2E8F0FF))),
         )
         .into()
 }
@@ -174,9 +174,9 @@ fn gallery_column(
         .grow(1.0)
         .padding(Insets::all(dp(18.0)))
         .gap(dp(16.0))
-        .style(move |mode| {
+        .style_full(move |context| {
             surface_style(
-                mode,
+                context,
                 dp(24.0),
                 None,
                 Some(
@@ -195,7 +195,7 @@ fn gallery_column(
                 None,
             )
         })
-        .child(Text::new(title).style(|mode| text_style(mode, sp(20.0), Color::WHITE)))
+        .child(Text::new(title).style_full(|context| text_style(context, sp(20.0), Color::WHITE)))
         .child(content)
         .into()
 }
@@ -273,9 +273,9 @@ fn gradient_tile(
 ) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .height(dp(110.0))
-        .style(move |mode| {
+        .style_full(move |context| {
             surface_style(
-                mode,
+                context,
                 dp(18.0),
                 None,
                 Some(gradient.clone().into()),
@@ -286,7 +286,7 @@ fn gradient_tile(
         })
         .child(
             Text::new(label)
-                .style(|mode| text_style(mode, sp(16.0), Color::WHITE))
+                .style_full(|context| text_style(context, sp(16.0), Color::WHITE))
                 .padding(Insets::all(dp(14.0))),
         )
         .into()
@@ -298,9 +298,9 @@ fn radial_tile(
 ) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .height(dp(110.0))
-        .style(move |mode| {
+        .style_full(move |context| {
             surface_style(
-                mode,
+                context,
                 dp(18.0),
                 Some(Color::hexa(0x0F172AFF)),
                 Some(gradient.clone().into()),
@@ -311,7 +311,7 @@ fn radial_tile(
         })
         .child(
             Text::new(label)
-                .style(|mode| text_style(mode, sp(16.0), Color::WHITE))
+                .style_full(|context| text_style(context, sp(16.0), Color::WHITE))
                 .padding(Insets::all(dp(14.0))),
         )
         .into()
@@ -320,9 +320,9 @@ fn radial_tile(
 fn glass_tile(label: &str, blur: Dp, fill: Color) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .height(dp(96.0))
-        .style(move |mode| {
+        .style_full(move |context| {
             surface_style(
-                mode,
+                context,
                 dp(18.0),
                 Some(fill),
                 None,
@@ -333,7 +333,7 @@ fn glass_tile(label: &str, blur: Dp, fill: Color) -> Element<BackgroundEffectsVm
         })
         .child(
             Text::new(label)
-                .style(|mode| text_style(mode, sp(16.0), Color::WHITE))
+                .style_full(|context| text_style(context, sp(16.0), Color::WHITE))
                 .padding(Insets::all(dp(14.0))),
         )
         .into()

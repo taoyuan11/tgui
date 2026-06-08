@@ -44,6 +44,7 @@ pub(crate) struct ComputedScene<VM> {
     pub overlay_close_handlers: SmallVec<[crate::runtime::overlay::OverlayCloseHandle<VM>; 1]>,
     pub portal_overlay_counts: PortalOverlayCounts,
     pub focus_scopes: SmallVec<[FocusScopeState; 1]>,
+    pub carousel_auto_play: SmallVec<[CarouselAutoPlayState<VM>; 1]>,
     pub overlay_anchors: HashMap<AnchorKey, Rect>,
     pub portal_entries: SmallVec<[PortalEntry<VM>; 1]>,
     pub external_portal_requests: SmallVec<[ExternalPortalRequest<VM>; 1]>,
@@ -67,6 +68,7 @@ impl<VM> Clone for ComputedScene<VM> {
             overlay_close_handlers: self.overlay_close_handlers.clone(),
             portal_overlay_counts: self.portal_overlay_counts,
             focus_scopes: self.focus_scopes.clone(),
+            carousel_auto_play: self.carousel_auto_play.clone(),
             overlay_anchors: self.overlay_anchors.clone(),
             portal_entries: self.portal_entries.clone(),
             external_portal_requests: self.external_portal_requests.clone(),
@@ -241,6 +243,7 @@ impl<VM> Default for ComputedScene<VM> {
             overlay_close_handlers: SmallVec::new(),
             portal_overlay_counts: PortalOverlayCounts::default(),
             focus_scopes: SmallVec::new(),
+            carousel_auto_play: SmallVec::new(),
             overlay_anchors: HashMap::new(),
             portal_entries: SmallVec::new(),
             external_portal_requests: SmallVec::new(),
@@ -279,6 +282,12 @@ impl<VM> ComputedScene<VM> {
             self.focus_scopes
                 .iter()
                 .skip(base.focus_scopes.len())
+                .cloned(),
+        );
+        delta.carousel_auto_play.extend(
+            self.carousel_auto_play
+                .iter()
+                .skip(base.carousel_auto_play.len())
                 .cloned(),
         );
         delta.overlay_anchors.extend(
@@ -361,6 +370,8 @@ impl<VM> ComputedScene<VM> {
         self.overlay_close_handlers
             .extend(other.overlay_close_handlers.iter().cloned());
         self.focus_scopes.extend(other.focus_scopes.iter().cloned());
+        self.carousel_auto_play
+            .extend(other.carousel_auto_play.iter().cloned());
         self.overlay_anchors
             .extend(other.overlay_anchors.iter().map(|(k, v)| (*k, *v)));
         self.portal_entries

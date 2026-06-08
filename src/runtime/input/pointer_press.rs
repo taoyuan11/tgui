@@ -304,6 +304,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | HitInteraction::DataGridCell { id, .. }
             | HitInteraction::DataGridHeader { id, .. }
             | HitInteraction::DataGridResizeHandle { id, .. }
+            | HitInteraction::SplitterHandle { id, .. }
             | HitInteraction::Slider { id, .. }
             | HitInteraction::TextInput { id, .. } => {
                 let has_context_menu = self
@@ -411,6 +412,60 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 let _ = self.open_context_menu_at(context_menu_id, position);
             } else {
                 let _ = self.begin_data_grid_column_resize(&state, button);
+            }
+            self.pressed_widget = Some(id);
+            return;
+        }
+
+        if let HitInteraction::SplitterHandle {
+            id,
+            state,
+            interactions,
+            pair_extent,
+        } = hit.clone()
+        {
+            let hit_scope_path = {
+                let computed = self.computed_scene();
+                computed
+                    .hit_regions
+                    .iter()
+                    .chain(computed.overlay_hit_regions.iter())
+                    .find(|region| region.interaction.target_id() == hit_target_id)
+                    .map(|region| region.scope_path.clone())
+                    .unwrap_or_default()
+            };
+            if let Some(trap) = active_trap.as_ref() {
+                if !hit_scope_path.starts_with(trap) && focus_restore.is_none() {
+                    self.pending_click = None;
+                    self.pressed_widget = None;
+                    return;
+                }
+            }
+            self.update_focus(
+                Some(FocusedWidget {
+                    widget_id: id,
+                    scope_path: hit_scope_path,
+                    on_blur: interactions.on_blur.clone(),
+                }),
+                interactions.on_focus.clone(),
+                false,
+            );
+            if let Some((context_menu_id, position)) = context_menu_open {
+                let _ = self.open_context_menu_at(context_menu_id, position);
+            } else if button == CanvasMouseButton::Left {
+                let target_id = HoverTargetId::Widget(id);
+                if self.pending_click_matches_target(target_id, now) {
+                    self.pending_click = None;
+                    let _ = self.reset_splitter_from_hit(&state);
+                } else {
+                    self.pending_click = Some(PendingClick {
+                        target_id,
+                        deadline: now + super::super::DOUBLE_CLICK_THRESHOLD,
+                        position: self.cursor_position.unwrap_or(Point::ZERO),
+                        command: None,
+                    });
+                    let _ = self.begin_splitter_resize(&state, pair_extent, button);
+                }
             }
             self.pressed_widget = Some(id);
             return;
@@ -835,6 +890,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             | HitInteraction::DataGridResizeHandle { .. } => {
                 unreachable!("data grid hits handled above")
             }
+            HitInteraction::SplitterHandle { .. } => unreachable!("splitter hits handled above"),
         };
 
         if selectable_text.is_none() {

@@ -1,11 +1,18 @@
 #[cfg(feature = "audio")]
 mod audio;
+mod avatar;
 mod background;
+mod badge;
+mod breadcrumb;
 mod button;
 mod calendar;
 mod canvas;
+mod card;
+mod carousel;
 mod checkbox;
+mod collapse;
 mod color_picker;
+mod combobox;
 mod common;
 mod container;
 mod core;
@@ -13,6 +20,7 @@ mod date_picker;
 mod divider;
 mod drawer;
 mod gesture;
+mod icon;
 mod image;
 mod input;
 mod input_controls;
@@ -21,15 +29,21 @@ mod menu;
 mod modal;
 mod number_input;
 mod overlay;
+mod p3_support;
+mod pagination;
 mod popover;
 mod portal;
 mod progress_bar;
 mod radio;
+mod rating;
+mod rich_text;
 mod scroll_view;
 mod select;
+mod skeleton;
 mod slider;
 mod slider_shared;
 mod spinner;
+mod splitter;
 mod style;
 mod switch;
 mod table;
@@ -47,10 +61,13 @@ mod r#virtual;
 
 #[cfg(feature = "audio")]
 pub use audio::Audio;
+pub use avatar::{Avatar, AvatarGroup, AvatarSource};
 pub use background::{
     BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
     BackgroundRadialGradient,
 };
+pub use badge::{Badge, BadgeContent, BadgePlacement};
+pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::Button;
 pub use calendar::{Calendar, CalendarChangeTrigger, CalendarSelectionChange, CalendarStyle};
 pub use canvas::{
@@ -65,10 +82,14 @@ pub use canvas::{
     CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextSpan, CanvasTextStyle,
     CanvasTextVerticalAlign, CanvasTextWrap, CanvasTransform2D, CanvasWheelEvent, PathBuilder,
 };
+pub use card::Card;
+pub use carousel::Carousel;
 pub use checkbox::Checkbox;
+pub use collapse::{Accordion, AccordionItem, Collapse};
 pub use color_picker::{
     ColorPicker, ColorPickerChange, ColorPickerChangeTrigger, ColorPickerStyle,
 };
+pub use combobox::{AutoComplete, Combobox, ComboboxChange, ComboboxOption};
 pub(crate) use common::{
     slider_effective_step, slider_resolve_value, slider_value_from_normalized,
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
@@ -79,7 +100,8 @@ pub(crate) use common::{
     HitInteraction, HitRegion, HitTargetId, InteractionHandlers, LifecycleEventHandlers,
     LifecycleEventState, ListItemState, MeasureContext, MediaEventPhase, MediaEventState,
     MeshPrimitive, MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    TextEditState, TextInputContentGeometry, TexturePrimitive, TreeNodeState, WidgetStateMap,
+    SplitterHandleState, TextEditState, TextInputContentGeometry, TexturePrimitive, TreeNodeState,
+    WidgetStateMap,
 };
 pub use common::{
     CursorStyle, DividerOrientation, FileDropEvent, FocusScopeOptions, Point, Rect,
@@ -99,7 +121,7 @@ pub(crate) use core::{
     ResolvedSceneLayout, ResolvedWidgetKind, SceneChunkParts, TextInputLayoutOverride,
     TooltipTrigger, VisualContextSnapshot,
 };
-pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetTree};
+pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetStyleExt, WidgetTree};
 pub use date_picker::{DatePicker, DatePickerChange, DatePickerStyle};
 pub use divider::Divider;
 pub use drawer::{Drawer, DrawerHost, DrawerMode, DrawerPlacement};
@@ -107,6 +129,7 @@ pub use gesture::{
     DoubleTapEvent, EdgeSwipeEvent, GestureEdge, GestureEdgeSet, GesturePhase, GestureRecognizer,
     GestureSource, LongPressEvent, PinchGestureEvent, SwipeAxis, SwipeDirection, SwipeGestureEvent,
 };
+pub use icon::{BuiltinIcon, Icon, IconSource};
 pub use image::Image;
 pub use input::Input;
 pub use list::{
@@ -127,6 +150,7 @@ pub use overlay::{
     Placement as OverlayPlacement, PlacementOptions as OverlayPlacementOptions,
     Side as OverlaySide, SolvedPlacement as OverlaySolvedPlacement,
 };
+pub use pagination::{Pagination, PaginationChange};
 pub use popover::{Popover, PopoverTriggerMode};
 pub use portal::{LayerStack, Portal, PortalAnchor, PortalTarget};
 pub use progress_bar::ProgressBar;
@@ -136,14 +160,22 @@ pub use r#virtual::{
 };
 pub(crate) use r#virtual::{VirtualCacheState, MEASURED_EXTENT_INVALIDATION_EPSILON};
 pub use radio::{Radio, RadioGroup, RadioOption};
+pub use rating::{Rating, RatingChange};
+pub use rich_text::{RichText, RichTextImage, RichTextLinkClick};
 pub use scroll_view::ScrollView;
 pub use select::{Select, SelectOption};
+pub use skeleton::{Skeleton, SkeletonShape};
 pub use slider::Slider;
 pub use spinner::Spinner;
+pub(crate) use splitter::{splitter_adjusted_sizes, splitter_reset_sizes};
+pub use splitter::{Pane, ResizablePanels, Splitter, SplitterAxis, SplitterResize};
 pub use style::{
-    ButtonStyle, CanvasStyle, CheckboxStyle, ContainerStyle, DividerStyle, DrawerStyle,
-    FocusRingOverride, ImageStyle, InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PopoverStyle,
-    ProgressBarStyle, RadioStyle, SelectStyle, SliderStyle, SpinnerStyle, SwitchStyle, TabsStyle,
+    AvatarShape, AvatarStyle, BadgeStyle, BadgeTone, BreadcrumbStyle, ButtonSelector, ButtonStyle,
+    CanvasStyle, CardStyle, CarouselStyle, CheckboxStyle, CollapseStyle, ComboboxStyle,
+    ContainerStyle, DividerStyle, DrawerStyle, FocusRingOverride, IconStyle, ImageStyle,
+    InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PaginationStyle, PopoverStyle,
+    ProgressBarStyle, RadioStyle, RatingStyle, RichTextStyle, SelectStyle, SkeletonStyle,
+    SliderStyle, SpinnerStyle, SplitterStyle, StyleSelector, StyleSheet, SwitchStyle, TabsStyle,
     TextWidgetStyle, TextareaStyle, ToastStyle, TooltipStyle, VideoSurfaceStyle,
     WidgetSurfaceStyle,
 };

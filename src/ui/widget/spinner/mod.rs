@@ -1,4 +1,4 @@
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
@@ -176,6 +176,8 @@ impl<VM> Spinner<VM> {
                 data_grid_cell: None,
                 data_grid_header: None,
                 data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
                 kind: WidgetKind::Spinner {
                     style: None,
                     size_override: None,
@@ -212,10 +214,23 @@ impl<VM> Spinner<VM> {
 
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> SpinnerStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut SpinnerStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
         if let WidgetKind::Spinner { style, .. } = &mut self.element.kind {
-            *style = Some(StyleResolver::new(resolver));
+            *style = Some(StyleResolver::mutate(
+                |context| SpinnerStyle::default_for_theme(context.theme),
+                mutator,
+            ));
+        }
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> SpinnerStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Spinner { style, .. } = &mut self.element.kind {
+            *style = Some(StyleResolver::full(resolver));
         }
         self
     }

@@ -283,6 +283,12 @@ pub(crate) enum HitInteraction<VM> {
         state: crate::ui::widget::common::DataGridResizeHandleState<VM>,
         interactions: InteractionHandlers<VM>,
     },
+    SplitterHandle {
+        id: WidgetId,
+        state: crate::ui::widget::common::SplitterHandleState<VM>,
+        interactions: InteractionHandlers<VM>,
+        pair_extent: Dp,
+    },
     Slider {
         id: WidgetId,
         interactions: InteractionHandlers<VM>,
@@ -487,6 +493,17 @@ impl<VM> Clone for HitInteraction<VM> {
                 state: state.clone(),
                 interactions: interactions.clone(),
             },
+            Self::SplitterHandle {
+                id,
+                state,
+                interactions,
+                pair_extent,
+            } => Self::SplitterHandle {
+                id: *id,
+                state: state.clone(),
+                interactions: interactions.clone(),
+                pair_extent: *pair_extent,
+            },
             Self::Slider {
                 id,
                 interactions,
@@ -586,6 +603,7 @@ impl<VM> HitInteraction<VM> {
             | Self::DataGridCell { interactions, .. }
             | Self::DataGridHeader { interactions, .. }
             | Self::DataGridResizeHandle { interactions, .. }
+            | Self::SplitterHandle { interactions, .. }
             | Self::Slider { interactions, .. }
             | Self::TextInput { interactions, .. }
             | Self::SelectOption { interactions, .. } => Some(interactions),
@@ -611,6 +629,7 @@ impl<VM> HitInteraction<VM> {
             | Self::DataGridCell { id, .. }
             | Self::DataGridHeader { id, .. }
             | Self::DataGridResizeHandle { id, .. }
+            | Self::SplitterHandle { id, .. }
             | Self::Slider { id, .. }
             | Self::TextInput { id, .. } => HitTargetId::Widget(*id),
             Self::SelectOption {

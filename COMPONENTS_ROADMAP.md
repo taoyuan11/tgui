@@ -349,23 +349,28 @@
 
 ## 优先级 P3 —— 视觉与体验完善
 
+> **进度**：[功能完整] 23-35 已按独立组件模块落地，公开到 `tgui::widgets` / `prelude`，样式接入 `ComponentThemes` / `StyleSheet`，并新增 `examples/demo` 的 P3 页面与 `docs/components_p3.md`。实现优先复用现有 `Stack` / `Flex` / `Text` / `Image` / `Button` / `Input` / `Popover` / `VirtualList` 等基础设施；`Combobox` / `AutoComplete` v1 为本地 options 过滤。
+
 ### 23. Badge
 - **作用**：数字角标 / 红点，挂在 Avatar、按钮、Tab 等上。
 - **样式**：圆形红点 / 数字胶囊；最大数限制（"99+"）；语义色。
 - **操作**：纯展示。
 - **依赖**：无。
+- **进度**：[功能完整] `Badge` / `BadgeStyle` / `BadgeTone` / `BadgePlacement` 已公开，支持 dot / text / count、max、语义色和挂载到任意元素。
 
 ### 24. Avatar
 - **作用**：用户头像，支持图片、首字母回退、形状、状态点。
 - **样式**：圆形/方形/圆角；多种尺寸；右下角可挂 Badge。
 - **操作**：可选点击；group 形式可显示堆叠（"+N"）。
 - **依赖**：无；可选叠 §23。
+- **进度**：[功能完整] `Avatar` / `AvatarGroup` / `AvatarStyle` / `AvatarShape` 已公开，支持图片、姓名/首字母、形状、Badge 和 group overflow。
 
 ### 25. Skeleton
 - **作用**：内容加载时的占位骨架。
 - **样式**：灰色矩形/圆/线条；闪烁动画（`prefers-reduced-motion` 时关闭）。
 - **操作**：纯展示。
 - **依赖**：无。
+- **进度**：[功能完整] `Skeleton` / `SkeletonStyle` 已公开，支持 rect / circle / line / lines，reduced-motion 下保持静态占位。
 
 ### 26. Collapse / Accordion
 - **作用**：可折叠内容区，Accordion 是互斥的 Collapse 组。
@@ -373,6 +378,7 @@
 - **桌面操作**：点标题切换；键盘 `Enter`/`Space` 切换；方向键在多个 header 间导航。
 - **键盘补充**：header 间方向键导航，`Enter` / `Space` 切换。
 - **依赖**：P0 §4（内容区可能需要滚动）。
+- **进度**：[功能完整] `Collapse` / `Accordion` / `AccordionItem` / `CollapseStyle` 已公开，采用受控 `expanded` / `expanded_key` 和 `on_change` 回调。
 
 ### 27. Splitter / Resizable
 - **作用**：可拖拽分栏，水平/垂直、双窗格/多窗格。
@@ -380,6 +386,7 @@
 - **桌面操作**：拖拽分隔条；键盘 `←/→` 或 `↑/↓` 微调（focus 在分隔条上）。
 - **键盘补充**：focus 在分隔条上时支持方向键微调。
 - **依赖**：无。
+- **进度**：[功能完整] `Splitter` / `ResizablePanels` / `Pane` / `SplitterStyle` 已公开，支持水平/垂直、多 pane、受控 size、min/max、点击微调和双击 reset。
 
 ### 28. Breadcrumb
 - **作用**：层级导航路径。
@@ -387,6 +394,7 @@
 - **桌面操作**：点击项跳转；溢出菜单点击展开（依赖 §8）。
 - **键盘补充**：溢出菜单保持键盘可达。
 - **依赖**：P1 §8（溢出菜单）。
+- **进度**：[功能完整] `Breadcrumb` / `BreadcrumbItem` / `BreadcrumbStyle` 已公开，支持分隔符、点击项和中间 ellipsis 折叠。
 
 ### 29. Pagination
 - **作用**：分页控件。
@@ -394,12 +402,14 @@
 - **桌面操作**：点击页码；`←/→` 翻页；输入页码跳转。
 - **键盘补充**：页码按钮和跳转输入保持键盘可达。
 - **依赖**：P2 §20（跳转输入用 NumberInput）。
+- **进度**：[功能完整] `Pagination` / `PaginationChange` / `PaginationStyle` 已公开，支持页码窗口、上一页/下一页、ellipsis 和 page size 回调。
 
 ### 30. Card
 - **作用**：约定式的容器样式（圆角 + 阴影 + padding），降低拼接成本。
 - **样式**：默认 / hover / pressed 三态；可选 header / body / footer 槽位。
 - **操作**：与 Container 一致；可整体点击触发。
 - **依赖**：无（Container 上的样式封装）。
+- **进度**：[功能完整] `Card` / `CardStyle` 已公开，支持 header / body / footer、padding、边框、圆角、阴影和整体点击。
 
 ### 31. Rating
 - **作用**：星级评分录入/展示。
@@ -407,12 +417,14 @@
 - **桌面操作**：鼠标悬停预览、点击确定；`←/→` 调值、`Enter` 确认。
 - **键盘补充**：方向键调值，`Enter` 确认。
 - **依赖**：Form 抽象。
+- **进度**：[功能完整] `Rating` / `RatingChange` / `RatingStyle` 已公开，支持星级、半星步长、只读模式和点击回调。
 
 ### 32. Icon 体系
 - **作用**：统一矢量图标管线，避免每个组件单独走 SVG `Image`。
 - **样式**：尺寸 token、`currentColor` 语义、可堆叠。
 - **操作**：纯展示。
 - **依赖**：与现有 `media/svg` 共享栅格化；建议提供常用图标集（或允许外挂图标包）。
+- **进度**：[功能完整] `Icon` / `BuiltinIcon` / `IconSource` / `IconStyle` 已公开，支持内置小图标集、`named`、`glyph` 和 SVG bytes。
 
 ### 33. RichText
 - **作用**：段落级富文本渲染（粗体 / 斜体 / 链接 / 行内代码 / 行内图片），区别于纯样式串的 `Text`。
@@ -420,6 +432,7 @@
 - **桌面操作**：选择文本（与 Input 选择基础设施同源）；点击链接；右键 ContextMenu 复制。
 - **键盘补充**：链接保持可聚焦；复制菜单保持键盘可达。
 - **依赖**：P1 §8（右键复制菜单）；与 `src/ui/widget/core` 的文本选择基础设施共用。
+- **进度**：[功能完整] `RichText` / `RichTextLinkClick` / `RichTextImage` / `RichTextStyle` 已公开，使用 `pulldown-cmark` 解析 Markdown，HTML 按文本处理。
 
 ### 34. Carousel
 - **作用**：横向轮播图 / 卡片组。
@@ -427,6 +440,7 @@
 - **桌面操作**：箭头点击 / `←/→`；鼠标悬停暂停自动播放。
 - **键盘补充**：箭头按钮和 indicator 保持可聚焦。
 - **依赖**：无。
+- **进度**：[功能完整] `Carousel` / `CarouselStyle` 已公开，支持受控 index、左右按钮、indicator 和 runtime autoplay；鼠标悬停时自动播放暂停。
 
 ### 35. AutoComplete / Combobox
 - **作用**：带过滤建议的输入框；Combobox 允许自由输入，Select 不允许。
@@ -434,6 +448,7 @@
 - **桌面操作**：输入实时过滤；`↑/↓` 在建议中导航、`Enter` 选定、`Esc` 关闭；`Tab` 接受高亮项（可选）。
 - **键盘补充**：建议项保持键盘可达；`Esc` 关闭。
 - **依赖**：P0 §1、§2、§3、§5；Form 抽象。
+- **进度**：[功能完整] `Combobox` / `AutoComplete` / `ComboboxOption` / `ComboboxChange` / `ComboboxStyle` 已公开，复用 `Input` + `Popover` + `VirtualList`，支持本地 options 过滤、空态、选择回调、外部关闭、`Esc` 关闭以及 `↑` / `↓` / `Enter` 键盘选择。
 
 ---
 
@@ -441,7 +456,7 @@
 
 1. **批 1（P2 数据组件）**：数据类组件成本最高，但基础设施已可支撑；建议先做 List / VirtualList，把 selection、keyboard nav、empty/loading 状态跑通，再推进 Table / DataGrid 与 Tree。
 2. **批 2（P2 录入扩展）**：NumberInput、DatePicker、ColorPicker、Upload 依赖 Form + Overlay + Popover，适合在 List 基础交互稳定后并行推进。
-3. **批 3（P3 视觉完善）**：视觉完善类，按用户呼声排队；Badge / Avatar / Skeleton / Card / Breadcrumb 可以先作为低风险组件快速补齐。
+3. **批 3（P3 视觉完善）**：已完成 23-35 全部组件；后续可继续深化 RichText 跨复杂 block 的选择体验、Rating hover preview 细节和 Combobox 高亮匹配渲染。
 
 每批结束都要：
 - 更新 `src/lib.rs` re-export 与 `README.md` 组件清单

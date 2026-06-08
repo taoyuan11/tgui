@@ -1,8 +1,9 @@
 use super::{
-    apply_text_widget_style, centered_text_frame, media_loading_fill_color,
-    resolve_stateful_widget_color, resolved_text_metrics, text_with_typography, HitInteraction,
-    ResolvedWidgetKind, TextInputLayoutOverride, CARET_WIDTH, CHECKBOX_CHECKMARK_ICON,
-    SELECT_ARROW_ICON,
+    apply_local_style, apply_surface_style, apply_text_widget_style, button_style_base,
+    centered_text_frame, media_loading_fill_color, resolve_button_style,
+    resolve_stateful_widget_color, resolved_button_style, resolved_text_metrics,
+    text_with_typography, HitInteraction, ResolvedWidgetKind, TextInputLayoutOverride, CARET_WIDTH,
+    CHECKBOX_CHECKMARK_ICON, SELECT_ARROW_ICON,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,10 +18,9 @@ use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 use crate::media::{MediaManager, MediaSource};
 use crate::text::font::{FontCatalog, FontManager, TextFontRequest};
 use crate::ui::layout::{pct, Axis, Insets, Overflow};
-use crate::ui::theme::{Shadow, Stateful, Theme};
+use crate::ui::theme::{Shadow, StateValue, StyleContext, Theme};
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
 use crate::ui::widget::common::{ContainerKind, Rect, WidgetKind};
-use crate::ui::widget::style::infer_theme_mode;
 use crate::ui::widget::{
     BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient, BackgroundRadialGradient,
 };
@@ -46,20 +46,12 @@ const ONE_BY_ONE_GIF: &[u8] = &[
     0x00, 0x3B,
 ];
 
-fn stateful<T: Clone>(value: T) -> Stateful<T> {
-    Stateful {
-        normal: value.clone(),
-        hovered: value.clone(),
-        pressed: value.clone(),
-        disabled: value,
-    }
+fn stateful<T: Clone>(value: T) -> StateValue<T> {
+    StateValue::interactive(value.clone(), value.clone(), value.clone(), value)
 }
 
-fn text_style(
-    mode: crate::theme::ResolvedThemeMode,
-    size: Option<crate::ui::unit::Sp>,
-) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn text_style(ctx: &StyleContext<'_>, size: Option<crate::ui::unit::Sp>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     if let Some(size) = size {
         style.typography.size = size;
     }
@@ -67,7 +59,7 @@ fn text_style(
 }
 
 fn container_style(
-    mode: crate::theme::ResolvedThemeMode,
+    ctx: &StyleContext<'_>,
     background: Option<Color>,
     brush: Option<crate::ui::widget::BackgroundBrush>,
     image: Option<BackgroundImage>,
@@ -77,7 +69,7 @@ fn container_style(
     radius: Option<Dp>,
     offset: Option<Point>,
 ) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = background.map(Into::into);
     style.surface.background_brush = brush.map(Into::into);
     style.surface.background_image = image.map(Into::into);
@@ -100,8 +92,8 @@ fn container_style(
     style
 }
 
-fn canvas_style(mode: crate::theme::ResolvedThemeMode, radius: Dp) -> CanvasStyle {
-    let mut style = CanvasStyle::default_for(mode);
+fn canvas_style(ctx: &StyleContext<'_>, radius: Dp) -> CanvasStyle {
+    let mut style = CanvasStyle::default_for_theme(ctx.theme);
     style.surface.border_radius = Some(radius.into());
     style
 }
@@ -117,13 +109,15 @@ fn test_shadow() -> Shadow {
 }
 
 fn button_style(
-    mode: crate::theme::ResolvedThemeMode,
+    ctx: &StyleContext<'_>,
     radius: Option<Dp>,
     border_width: Option<Dp>,
     border_color: Option<Color>,
 ) -> ButtonStyle {
-    let mut style =
-        ButtonStyle::default_for(mode, crate::ui::widget::common::ButtonVariantKind::Primary);
+    let mut style = ButtonStyle::default_for_theme(
+        ctx.theme,
+        crate::ui::widget::common::ButtonVariantKind::Primary,
+    );
     if let Some(radius) = radius {
         style.radius = radius.into();
     }
@@ -137,13 +131,13 @@ fn button_style(
 }
 
 fn switch_style(
-    mode: crate::theme::ResolvedThemeMode,
+    ctx: &StyleContext<'_>,
     active_background: Color,
     inactive_background: Color,
     active_thumb: Option<Color>,
     inactive_thumb: Option<Color>,
 ) -> SwitchStyle {
-    let mut style = SwitchStyle::default_for(mode);
+    let mut style = SwitchStyle::default_for_theme(ctx.theme);
     style.track_checked = stateful(active_background.into());
     style.track = stateful(inactive_background.into());
     if let Some(active_thumb) = active_thumb {
@@ -155,17 +149,13 @@ fn switch_style(
     style
 }
 
-fn resolved_theme_mode(theme: &Theme) -> crate::theme::ResolvedThemeMode {
-    infer_theme_mode(theme)
-}
-
 fn default_checkbox_style(
     theme: &Theme,
     state: crate::ui::theme::WidgetState,
     checked: bool,
 ) -> super::ResolvedCheckboxStyle {
     super::resolve_checkbox_style(
-        &super::WidgetCheckboxStyle::default_for(resolved_theme_mode(theme)),
+        &super::WidgetCheckboxStyle::default_for_theme(theme),
         state,
         checked,
         theme,
@@ -178,7 +168,7 @@ fn default_radio_style(
     checked: bool,
 ) -> super::ResolvedRadioStyle {
     super::resolve_radio_style(
-        &super::WidgetRadioStyle::default_for(resolved_theme_mode(theme)),
+        &super::WidgetRadioStyle::default_for_theme(theme),
         state,
         checked,
         theme,
@@ -191,14 +181,14 @@ fn default_button_style(
     variant: crate::ui::widget::common::ButtonVariantKind,
 ) -> super::ResolvedButtonStyle {
     super::resolve_button_style(
-        &ButtonStyle::default_for(resolved_theme_mode(theme), variant),
+        &ButtonStyle::default_for_theme(theme, variant),
         state,
         theme,
     )
 }
 
 fn default_switch_style(theme: &Theme) -> super::WidgetSwitchStyle {
-    super::WidgetSwitchStyle::default_for(resolved_theme_mode(theme))
+    super::WidgetSwitchStyle::default_for_theme(theme)
 }
 
 fn default_select_style(
@@ -206,7 +196,7 @@ fn default_select_style(
     state: crate::ui::theme::WidgetState,
 ) -> super::ResolvedSelectStyle {
     super::resolve_select_style(
-        &super::WidgetSelectStyle::default_for(resolved_theme_mode(theme)),
+        &super::WidgetSelectStyle::default_for_theme(theme),
         state,
         theme,
     )
@@ -231,6 +221,7 @@ mod table_tests;
 mod tabs_tests;
 mod text_and_background;
 mod text_input_tests;
+mod theme_style_v2_tests;
 mod toast_tests;
 mod tree_tests;
 

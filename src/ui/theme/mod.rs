@@ -1,4 +1,7 @@
+mod builder;
 mod color;
+mod components;
+mod context;
 mod mode;
 mod motion;
 mod resolved_mode;
@@ -9,13 +12,16 @@ mod store;
 mod theme;
 mod typography;
 
+pub use builder::ThemeBuilder;
 pub use color::ColorScheme;
+pub use components::{ComponentStyle, ComponentThemes};
+pub use context::{ControlSize, Density, StyleContext};
 pub use mode::ThemeMode;
 pub use motion::MotionScale;
 pub use resolved_mode::ResolvedThemeMode;
 pub use shape::{BorderScale, ElevationScale, RadiusScale, Shadow};
 pub use spacing::SpaceScale;
-pub use state::{Stateful, WidgetState};
+pub use state::{StateValue, WidgetState};
 pub use store::{ThemeSet, ThemeStore};
 pub use theme::{FocusRingStyle, Theme};
 pub use typography::{FontWeight, TextStyle, TypeScale};

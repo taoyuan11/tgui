@@ -76,7 +76,7 @@ pub(crate) fn compute_scrollbar_geometry(
         return ScrollbarGeometry::default();
     }
 
-    let defaults = resolved_container_style(None, theme).scrollbar;
+    let defaults = crate::ui::widget::ContainerStyle::default_for_theme(theme).scrollbar;
     let style = layout.scrollbar_style;
     let thickness = units.resolve_dp(
         style
@@ -169,7 +169,7 @@ pub(crate) fn push_scrollbar_primitives(
     }
 
     let track_clip = Some(clip_rect);
-    let defaults = resolved_container_style(None, theme).scrollbar;
+    let defaults = crate::ui::widget::ContainerStyle::default_for_theme(theme).scrollbar;
     let style = layout.scrollbar_style;
     let track_color = style
         .track_color

@@ -55,9 +55,9 @@ fn background_brush_generates_brush_primitive() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> =
-        WidgetTree::new(Stack::new().size(dp(120.0), dp(80.0)).style(|mode| {
+        WidgetTree::new(Stack::new().size(dp(120.0), dp(80.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 None,
                 Some(
                     BackgroundLinearGradient::new(
@@ -109,9 +109,9 @@ fn background_brush_takes_priority_over_background_color() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> =
-        WidgetTree::new(Stack::new().size(dp(120.0), dp(80.0)).style(|mode| {
+        WidgetTree::new(Stack::new().size(dp(120.0), dp(80.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(Color::hexa(0xEF4444FF)),
                 Some(
                     BackgroundRadialGradient::new(
@@ -167,9 +167,9 @@ fn background_brush_keeps_clip_rect() {
         Stack::new()
             .size(dp(100.0), dp(100.0))
             .overflow(Overflow::Hidden)
-            .child(Stack::new().size(dp(120.0), dp(80.0)).style(|mode| {
+            .child(Stack::new().size(dp(120.0), dp(80.0)).style_full(|ctx| {
                 container_style(
-                    mode,
+                    ctx,
                     None,
                     Some(
                         BackgroundLinearGradient::new(

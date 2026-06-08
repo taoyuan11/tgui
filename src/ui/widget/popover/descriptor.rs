@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use crate::foundation::view_model::ValueCommand;
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::Value;
 use crate::ui::widget::core::Element;
 use crate::ui::widget::overlay::{FlipPolicy, Placement};
-use crate::ui::widget::style::PopoverStyle;
+use crate::ui::widget::style::{PopoverStyle, StyleResolver};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PopoverTriggerMode {
@@ -31,7 +31,7 @@ pub struct PopoverDescriptor<VM> {
     pub(crate) placement: Placement,
     pub(crate) flip_policy: FlipPolicy,
     pub(crate) disabled: Value<bool>,
-    pub(crate) style: Option<PopoverStyle>,
+    pub(crate) style: Option<StyleResolver<PopoverStyle>>,
     pub(crate) trigger_mode: PopoverTriggerMode,
     pub(crate) close_on_escape: bool,
     pub(crate) close_on_outside_click: bool,
@@ -79,9 +79,12 @@ impl<VM> PopoverDescriptor<VM> {
         }
     }
 
-    pub(crate) fn resolved_style(&self, mode: ResolvedThemeMode) -> PopoverStyle {
+    pub(crate) fn resolved_style(&self, context: &StyleContext<'_>) -> PopoverStyle {
+        let mut base = PopoverStyle::default_for_theme(context.theme);
+        context.theme.components.popover.apply(&mut base, context);
         self.style
-            .clone()
-            .unwrap_or_else(|| PopoverStyle::default_for(mode))
+            .as_ref()
+            .map(|resolver| resolver.resolve_from(base.clone(), context))
+            .unwrap_or(base)
     }
 }

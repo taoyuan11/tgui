@@ -34,10 +34,10 @@ pub(crate) fn page(
     sections: Vec<Element<App>>,
 ) -> Element<App> {
     let mut children = Vec::new();
-    children.push(Text::new(title).style(styles::title_style).into());
+    children.push(Text::new(title).style_full(styles::title_style).into());
     children.push(
         Text::new(description)
-            .style(|mode| styles::muted_text_style(mode, sp(15.0)))
+            .style_full(|ctx| styles::muted_text_style(ctx, sp(15.0)))
             .into(),
     );
     children.extend(sections);
@@ -82,8 +82,8 @@ fn component_doc_with_layout(
     layout: DemoLayout,
 ) -> Element<App> {
     let mut children: Vec<Element<App>> = Vec::new();
-    children.push(Text::new(title).style(styles::section_title_style).into());
-    children.push(Text::new(intro).style(styles::status_style).into());
+    children.push(Text::new(title).style_full(styles::section_title_style).into());
+    children.push(Text::new(intro).style_full(styles::status_style).into());
     let mut demo_cards: Vec<Element<App>> = Vec::new();
     for demo in demos {
         demo_cards.push(usage_demo(app, demo, layout));
@@ -104,7 +104,7 @@ fn component_doc_with_layout(
         .width(pct(100.0))
         .gap(dp(14.0))
         .padding(Insets::all(dp(16.0)))
-        .style(styles::component_card_style)
+        .style_full(styles::component_card_style)
         .child(children)
         .into()
 }
@@ -120,19 +120,19 @@ fn usage_demo(app: &App, demo: UsageDemo, layout: DemoLayout) -> Element<App> {
     };
 
     card.padding(Insets::all(dp(12.0)))
-        .style(styles::usage_card_style)
+        .style_full(styles::usage_card_style)
         .child(
             Flex::vertical()
                 .gap(dp(4.0))
-                .child(Text::new(demo.title).style(styles::usage_title_style))
-                .child(Text::new(demo.description).style(styles::status_style)),
+                .child(Text::new(demo.title).style_full(styles::usage_title_style))
+                .child(Text::new(demo.description).style_full(styles::status_style)),
         )
         .child(
             Flex::vertical()
                 .width(pct(100.0))
                 .align(Align::Stretch)
                 .padding(Insets::all(dp(14.0)))
-                .style(styles::preview_style)
+                .style_full(styles::preview_style)
                 .child(demo.preview),
         )
         .child(
@@ -157,10 +157,10 @@ fn code_block(code: &'static str) -> Element<App> {
         .overflow_x(Overflow::Scroll)
         .overflow_y(Overflow::Scroll)
         .padding(Insets::all(dp(12.0)))
-        .style(styles::code_block_style)
+        .style_full(styles::code_block_style)
         .child(
             Text::new(code)
-                .style(styles::code_text_style)
+                .style_full(styles::code_text_style)
                 .user_select(true),
         )
         .into()

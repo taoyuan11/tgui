@@ -1,5 +1,5 @@
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, Justify, LayoutStyle, Overflow, ScrollbarStyle, Value};
 use crate::ui::unit::Dp;
 
@@ -55,6 +55,8 @@ impl<VM> Container<VM> {
                 data_grid_cell: None,
                 data_grid_header: None,
                 data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
                 kind: WidgetKind::Container {
                     layout,
                     children: Vec::new(),
@@ -64,19 +66,25 @@ impl<VM> Container<VM> {
         }
     }
 
-    /// 设置容器样式解析器。
-    ///
-    /// # 参数
-    /// - `resolver`：根据主题模式生成容器样式的回调。
-    ///
-    /// # 返回值
-    /// 返回更新后的容器实例，便于继续链式调用。
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> ContainerStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut ContainerStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
         if let WidgetKind::Container { style, .. } = &mut self.element.kind {
-            *style = Some(super::super::style::StyleResolver::new(resolver));
+            *style = Some(super::super::style::StyleResolver::mutate(
+                |context| ContainerStyle::default_for_theme(context.theme),
+                mutator,
+            ));
+        }
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> ContainerStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Container { style, .. } = &mut self.element.kind {
+            *style = Some(super::super::style::StyleResolver::full(resolver));
         }
         self
     }

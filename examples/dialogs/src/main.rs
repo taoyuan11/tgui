@@ -120,10 +120,8 @@ impl ViewModel for App {
 
         Flex::new(Axis::Vertical)
             .size(pct(100.0), pct(100.0))
-            .style(|theme_mode: ResolvedThemeMode| {
-                let mut style = ContainerStyle::default_for(theme_mode);
+            .style(|style, _ctx| {
                 style.surface.background = Some(Color::rgba(0, 0, 0, 0)).map(Into::into);
-                style
             })
             .child(el![
                 open_sync,

@@ -1,7 +1,7 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::ContentFit;
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::video::VideoController;
 
@@ -180,9 +180,20 @@ impl VideoSurface {
 
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> VideoSurfaceStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut VideoSurfaceStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
-        self.style = Some(super::style::StyleResolver::new(resolver));
+        self.style = Some(super::style::StyleResolver::mutate(
+            |context| VideoSurfaceStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> VideoSurfaceStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(super::style::StyleResolver::full(resolver));
         self
     }
 
@@ -297,6 +308,8 @@ impl VideoSurface {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -335,6 +348,8 @@ impl VideoSurface {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -373,6 +388,8 @@ impl VideoSurface {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::VideoSurface {
                 style: self.style.clone(),
                 video: self,
@@ -410,6 +427,8 @@ impl<VM> From<VideoSurface> for Element<VM> {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::VideoSurface {
                 style: value.style.clone(),
                 video: value,

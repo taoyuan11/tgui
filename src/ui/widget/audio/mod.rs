@@ -133,6 +133,8 @@ impl Audio {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::Audio { audio: self },
         }
     }
@@ -165,6 +167,8 @@ impl Audio {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::Audio { audio: self },
         }
     }
@@ -196,6 +200,8 @@ impl<VM> From<Audio> for Element<VM> {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::Audio { audio: value },
         }
     }

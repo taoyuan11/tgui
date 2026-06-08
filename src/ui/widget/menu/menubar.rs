@@ -15,11 +15,16 @@
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 use crate::ui::layout::Axis;
 use crate::ui::layout::Value;
+use crate::ui::theme::{StateValue, StyleContext};
 use crate::ui::widget::button::Button;
 use crate::ui::widget::container::Flex;
 use crate::ui::widget::core::Element;
 use crate::ui::widget::overlay::{Alignment, Placement};
+use crate::ui::widget::style::{
+    ButtonStyle, ContainerStyle, MenuBarStyle, MenuStyle, StyleResolver,
+};
 
+use super::super::common::ButtonVariantKind;
 use super::types::{MenuBarGroupId, MenuItem};
 use super::widget::Menu;
 
@@ -65,9 +70,8 @@ pub struct MenuBar<VM> {
     active_index: Option<Value<Option<usize>>>,
     on_active_change: Option<ValueCommand<VM, Option<usize>>>,
     group: MenuBarGroupId,
-    // 主题样式预留位（暂未在 Flex 包装中应用——step 9 一起接 README/examples 时打磨）。
-    _style: Option<crate::ui::widget::style::MenuBarStyle>,
-    _menu_style: Option<crate::ui::widget::style::MenuStyle>,
+    style: Option<StyleResolver<MenuBarStyle>>,
+    menu_style: Option<StyleResolver<MenuStyle>>,
 }
 
 impl<VM> MenuBar<VM> {
@@ -78,8 +82,8 @@ impl<VM> MenuBar<VM> {
             active_index: Some(active_index.into()),
             on_active_change: None,
             group: MenuBarGroupId::next(),
-            _style: None,
-            _menu_style: None,
+            style: None,
+            menu_style: None,
         }
     }
 
@@ -90,8 +94,8 @@ impl<VM> MenuBar<VM> {
             active_index: None,
             on_active_change: None,
             group: MenuBarGroupId::next(),
-            _style: None,
-            _menu_style: None,
+            style: None,
+            menu_style: None,
         }
     }
 
@@ -116,13 +120,41 @@ impl<VM> MenuBar<VM> {
         self
     }
 
-    pub fn style(mut self, style: crate::ui::widget::style::MenuBarStyle) -> Self {
-        self._style = Some(style);
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut MenuBarStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| MenuBarStyle::default_for_theme(context.theme),
+            mutator,
+        ));
         self
     }
 
-    pub fn menu_style(mut self, style: crate::ui::widget::style::MenuStyle) -> Self {
-        self._menu_style = Some(style);
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> MenuBarStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
+        self
+    }
+
+    pub fn menu_style(
+        mut self,
+        mutator: impl Fn(&mut MenuStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.menu_style = Some(StyleResolver::mutate(
+            |context| MenuStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn menu_style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> MenuStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.menu_style = Some(StyleResolver::full(resolver));
         self
     }
 }
@@ -137,10 +169,11 @@ where
             active_index,
             on_active_change,
             group,
-            _style,
-            _menu_style: menu_style,
+            style,
+            menu_style,
         } = bar;
 
+        let layout_style = resolve_menu_bar_style_for_layout(style.as_ref());
         let mut children: Vec<Element<VM>> = Vec::with_capacity(entries.len());
         for (index, entry) in entries.into_iter().enumerate() {
             let MenuBarEntry {
@@ -157,7 +190,17 @@ where
             });
 
             // 点击事件：toggle 我这一项
-            let mut button = Button::new(label).disable(disabled.clone());
+            let entry_style = style.clone();
+            let mut button = Button::new(label)
+                .disable(disabled.clone())
+                .height(layout_style.height)
+                .min_width(layout_style.entry_min_width)
+                .style_full(move |context| {
+                    menu_bar_entry_button_style(
+                        resolve_menu_bar_style(entry_style.as_ref(), context),
+                        context,
+                    )
+                });
             if let Some(on_change) = on_active_change.clone() {
                 if let Some(active_signal) = active_index.clone() {
                     let click_cmd =
@@ -187,7 +230,7 @@ where
                 menu = menu.menubar_set_active_command(on_change);
             }
             if let Some(style) = menu_style.clone() {
-                menu = menu.style(style);
+                menu = menu.style_full(move |context| resolve_menu_style(Some(&style), context));
             }
             if let Some(on_change) = on_active_change.clone() {
                 menu = menu.on_open_change(ValueCommand::new_with_context(
@@ -202,6 +245,71 @@ where
             children.push(menu.into());
         }
 
-        Flex::new(Axis::Horizontal).child(children).into()
+        let root_style = style.clone();
+        Flex::new(Axis::Horizontal)
+            .height(layout_style.height)
+            .padding(layout_style.padding)
+            .gap(layout_style.entry_gap)
+            .style_full(move |context| {
+                menu_bar_container_style(
+                    resolve_menu_bar_style(root_style.as_ref(), context),
+                    context,
+                )
+            })
+            .child(children)
+            .into()
     }
+}
+
+fn resolve_menu_bar_style(
+    style: Option<&StyleResolver<MenuBarStyle>>,
+    context: &StyleContext<'_>,
+) -> MenuBarStyle {
+    let mut base = MenuBarStyle::default_for_theme(context.theme);
+    context.theme.components.menu_bar.apply(&mut base, context);
+    style
+        .map(|resolver| resolver.resolve_from(base.clone(), context))
+        .unwrap_or(base)
+}
+
+fn resolve_menu_bar_style_for_layout(style: Option<&StyleResolver<MenuBarStyle>>) -> MenuBarStyle {
+    let theme = crate::ui::theme::Theme::default();
+    let context = StyleContext::from_theme(&theme);
+    resolve_menu_bar_style(style, &context)
+}
+
+fn resolve_menu_style(
+    style: Option<&StyleResolver<MenuStyle>>,
+    context: &StyleContext<'_>,
+) -> MenuStyle {
+    let mut base = MenuStyle::default_for_theme(context.theme);
+    context.theme.components.menu.apply(&mut base, context);
+    style
+        .map(|resolver| resolver.resolve_from(base.clone(), context))
+        .unwrap_or(base)
+}
+
+fn menu_bar_container_style(style: MenuBarStyle, context: &StyleContext<'_>) -> ContainerStyle {
+    let mut container = ContainerStyle::default_for_theme(context.theme);
+    container.surface = style.surface;
+    container.surface.background = Some(style.background);
+    container.surface.border_color = Some(style.border);
+    container.surface.border_width = Some(style.border_width);
+    container.surface.border_radius = Some(style.radius);
+    container
+}
+
+fn menu_bar_entry_button_style(style: MenuBarStyle, context: &StyleContext<'_>) -> ButtonStyle {
+    let mut button = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Ghost);
+    button.background = style.entry_background;
+    button.background.open = Some(style.entry_active_background);
+    button.foreground = style.entry_foreground;
+    button.border = StateValue::new(crate::foundation::color::Color::TRANSPARENT.into());
+    button.border_width = crate::ui::unit::Dp::ZERO.into();
+    button.radius = style.radius;
+    button.padding_x = style.entry_padding_x;
+    button.padding_y = crate::ui::unit::Dp::ZERO;
+    button.min_height = style.height;
+    button.text_style = style.text_style;
+    button
 }

@@ -172,6 +172,8 @@ pub(crate) fn collect_portal_content_scene<VM: 'static>(
                     taffy: &taffy,
                     font_manager: context.font_manager,
                     theme: context.theme,
+                    style_context: context.style_context,
+                    style_sheet: context.style_sheet,
                     media: context.media,
                     focused_input: context.focused_input,
                     focused_text_state: context.focused_text_state,

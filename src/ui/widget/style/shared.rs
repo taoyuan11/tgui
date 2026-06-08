@@ -1,15 +1,15 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::foundation::color::Color;
 use crate::media::ContentFit;
-use crate::theme::{FocusRingStyle, ResolvedThemeMode};
+use crate::theme::{FocusRingStyle, StyleContext};
 use crate::ui::layout::{ScrollbarStyle, Value};
 use crate::ui::theme::{Shadow, TextStyle, Theme};
 use crate::ui::unit::{dp, Dp};
 
 use super::super::background::{BackgroundBrush, BackgroundImage};
-use super::super::common::Point;
-use super::palette::{body_text_style, palette};
+use super::super::common::{Point, VisualStyle};
+use super::palette::palette_from_theme;
 
 /// 覆盖主题默认焦点环配置的样式。
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -40,42 +40,39 @@ impl FocusRingOverride {
 
 #[derive(Clone)]
 pub(crate) struct StyleResolver<T> {
-    resolver: Arc<dyn Fn(ResolvedThemeMode) -> T + Send + Sync>,
-    cache: Arc<Mutex<Option<(ResolvedThemeMode, T)>>>,
+    kind: StyleResolverKind<T>,
+}
+
+#[derive(Clone)]
+enum StyleResolverKind<T> {
+    Full(Arc<dyn Fn(&StyleContext<'_>) -> T + Send + Sync>),
+    Mutator(Arc<dyn Fn(&mut T, &StyleContext<'_>) + Send + Sync>),
 }
 
 impl<T: Clone> StyleResolver<T> {
-    pub(crate) fn new(resolver: impl Fn(ResolvedThemeMode) -> T + Send + Sync + 'static) -> Self {
+    pub(crate) fn full(resolver: impl Fn(&StyleContext<'_>) -> T + Send + Sync + 'static) -> Self {
         Self {
-            resolver: Arc::new(resolver),
-            cache: Arc::new(Mutex::new(None)),
+            kind: StyleResolverKind::Full(Arc::new(resolver)),
         }
     }
 
-    pub(crate) fn resolve(&self, mode: ResolvedThemeMode) -> T {
-        let mut cache = self
-            .cache
-            .lock()
-            .expect("style resolver cache lock should not be poisoned");
-        if let Some((cached_mode, cached_value)) = cache.as_ref() {
-            if *cached_mode == mode {
-                return cached_value.clone();
+    pub(crate) fn mutate(
+        _default: impl Fn(&StyleContext<'_>) -> T + Send + Sync + 'static,
+        mutator: impl Fn(&mut T, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            kind: StyleResolverKind::Mutator(Arc::new(mutator)),
+        }
+    }
+
+    pub(crate) fn resolve_from(&self, mut base: T, context: &StyleContext<'_>) -> T {
+        match &self.kind {
+            StyleResolverKind::Full(resolver) => resolver(context),
+            StyleResolverKind::Mutator(mutator) => {
+                mutator(&mut base, context);
+                base
             }
         }
-        let value = (self.resolver)(mode);
-        *cache = Some((mode, value.clone()));
-        value
-    }
-}
-
-pub(crate) fn infer_theme_mode(theme: &Theme) -> ResolvedThemeMode {
-    let luminance = (0.299 * theme.colors.background.r as f32)
-        + (0.587 * theme.colors.background.g as f32)
-        + (0.114 * theme.colors.background.b as f32);
-    if luminance >= 140.0 {
-        ResolvedThemeMode::Light
-    } else {
-        ResolvedThemeMode::Dark
     }
 }
 
@@ -111,6 +108,45 @@ impl Default for WidgetSurfaceStyle {
     }
 }
 
+pub(crate) fn merge_surface_style(
+    background: &mut Option<Value<Color>>,
+    visual: &mut VisualStyle,
+    surface: &WidgetSurfaceStyle,
+) {
+    let default_visual = VisualStyle::default();
+
+    if background.is_none() {
+        *background = surface.background.clone();
+    }
+    if visual.background_brush.is_none() {
+        visual.background_brush = surface.background_brush.clone();
+    }
+    if visual.background_image.is_none() {
+        visual.background_image = surface.background_image.clone();
+    }
+    if visual.background_blur == default_visual.background_blur {
+        visual.background_blur = surface.background_blur.clone();
+    }
+    if visual.shadow.is_none() {
+        visual.shadow = surface.shadow.clone();
+    }
+    if visual.border_color.is_none() {
+        visual.border_color = surface.border_color.clone();
+    }
+    if visual.border_radius.is_none() {
+        visual.border_radius = surface.border_radius.clone();
+    }
+    if visual.border_width.is_none() {
+        visual.border_width = surface.border_width.clone();
+    }
+    if visual.opacity == default_visual.opacity {
+        visual.opacity = surface.opacity.clone();
+    }
+    if visual.offset == default_visual.offset {
+        visual.offset = surface.offset.clone();
+    }
+}
+
 /// 纯文本 widget 的样式定义。
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextWidgetStyle {
@@ -120,13 +156,12 @@ pub struct TextWidgetStyle {
 }
 
 impl TextWidgetStyle {
-    /// 按解析后的主题模式创建默认文本样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
             color: Value::Static(palette.text_primary),
-            typography: body_text_style(),
+            typography: theme.typography.body.clone(),
         }
     }
 }
@@ -139,9 +174,8 @@ pub struct ContainerStyle {
 }
 
 impl ContainerStyle {
-    /// 按解析后的主题模式创建默认容器样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
             scrollbar: ScrollbarStyle {
@@ -150,9 +184,9 @@ impl ContainerStyle {
                 active_thumb_color: Some(palette.scrollbar_thumb.pressed),
                 track_color: Some(palette.scrollbar_track),
                 thickness: Some(dp(5.0)),
-                radius: Some(dp(999.0)),
+                radius: Some(theme.radius.full),
                 insets: None,
-                min_thumb_length: Some(dp(12.0)),
+                min_thumb_length: Some(theme.spacing.sm + theme.spacing.xs),
             },
         }
     }
@@ -166,8 +200,7 @@ pub struct ImageStyle {
 }
 
 impl ImageStyle {
-    /// 按解析后的主题模式创建默认图片样式。
-    pub fn default_for(_: ResolvedThemeMode) -> Self {
+    pub fn default_for_theme(_: &Theme) -> Self {
         Self {
             surface: WidgetSurfaceStyle::default(),
             fit: ContentFit::Contain,
@@ -182,8 +215,7 @@ pub struct CanvasStyle {
 }
 
 impl CanvasStyle {
-    /// 按解析后的主题模式创建默认画布样式。
-    pub fn default_for(_: ResolvedThemeMode) -> Self {
+    pub fn default_for_theme(_: &Theme) -> Self {
         Self {
             surface: WidgetSurfaceStyle::default(),
         }
@@ -198,11 +230,46 @@ pub struct VideoSurfaceStyle {
 }
 
 impl VideoSurfaceStyle {
-    /// 按解析后的主题模式创建默认视频样式。
-    pub fn default_for(_: ResolvedThemeMode) -> Self {
+    pub fn default_for_theme(_: &Theme) -> Self {
         Self {
             surface: WidgetSurfaceStyle::default(),
             fit: ContentFit::Contain,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::foundation::color::Color;
+    use crate::ui::unit::{dp, sp};
+
+    #[test]
+    fn text_default_for_theme_uses_typography_and_surface_colors() {
+        let mut theme = Theme::light();
+        theme.colors.on_surface = Color::hexa(0x123456FF);
+        theme.typography.body.size = sp(18.0);
+
+        let style = TextWidgetStyle::default_for_theme(&theme);
+
+        assert_eq!(style.color.resolve(), theme.colors.on_surface);
+        assert_eq!(style.typography.size, theme.typography.body.size);
+    }
+
+    #[test]
+    fn container_default_for_theme_uses_scrollbar_tokens() {
+        let mut theme = Theme::dark();
+        theme.colors.surface_low = Color::hexa(0x223344FF);
+        theme.colors.outline = Color::hexa(0x778899FF);
+        theme.radius.full = dp(99.0);
+
+        let style = ContainerStyle::default_for_theme(&theme);
+
+        assert_eq!(style.scrollbar.track_color, Some(theme.colors.surface_low));
+        assert_eq!(
+            style.scrollbar.thumb_color,
+            Some(theme.colors.outline.with_alpha_factor(0.72))
+        );
+        assert_eq!(style.scrollbar.radius, Some(theme.radius.full));
     }
 }

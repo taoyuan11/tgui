@@ -3,6 +3,7 @@ mod application_handler;
 mod binding_sync;
 mod bootstrap;
 mod cache_support;
+mod carousel;
 mod commands;
 mod handler_meta;
 mod handler_support;
@@ -44,12 +45,13 @@ use self::state::audio_lifecycle_state;
 use self::state::{collect_pending_lifecycle_events, collect_pending_media_event};
 use self::state::{
     ActiveCanvasDrag, ActiveDataGridColumnReorder, ActiveDataGridColumnResize,
-    ActiveGestureSession, ActiveKeyRepeat, ActivePinchSession, ActiveTabReorder, ActiveTreeDrag,
-    CachedScene, CanvasPointerContext, ClickHandler, ClipboardService, DeferredMouseClick,
-    DispatchedLifecycleState, DispatchedMediaState, FocusedWidget, HoverMoveHandler, HoverTargetId,
-    HoverTransitionHandler, HoveredWidget, PendingClick, PendingLifecycleEvent, PendingMediaEvent,
-    ScrollbarDrag, SliderDrag, SmoothScrollState, TextInputBufferState, TextInputSessionConfig,
-    TextSelectionDrag, TooltipState, TouchScrollDrag, TouchScrollInertiaState,
+    ActiveGestureSession, ActiveKeyRepeat, ActivePinchSession, ActiveSplitterResize,
+    ActiveTabReorder, ActiveTreeDrag, CachedScene, CanvasPointerContext, ClickHandler,
+    ClipboardService, DeferredMouseClick, DispatchedLifecycleState, DispatchedMediaState,
+    FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
+    PendingClick, PendingLifecycleEvent, PendingMediaEvent, ScrollbarDrag, SliderDrag,
+    SmoothScrollState, TextInputBufferState, TextInputSessionConfig, TextSelectionDrag,
+    TooltipState, TouchScrollDrag, TouchScrollInertiaState,
 };
 use self::theme::{resolve_theme, resolve_window_theme};
 use self::windows::MultiWindowHandler;
@@ -281,6 +283,8 @@ pub struct BoundRuntimeHandler<VM> {
     next_tooltip_wakeup_deadline: Option<Instant>,
     /// 最近一次 collect 上报的 toast 唤醒时刻（最早自动消失 deadline）。
     next_toast_wakeup_deadline: Option<Instant>,
+    /// Carousel autoplay 的下一次唤醒时刻。
+    next_carousel_wakeup_deadline: Option<Instant>,
     tooltip_state: TooltipState,
     /// 最近一次成功解析出的 hover 预览浮层锚点（Popover 触发 widget 的 id）。
     /// `resolve_active_hover_popover` 正常依赖上一帧 `cached_scene` 的 overlay rect 判断光标是否仍在
@@ -323,7 +327,9 @@ pub struct BoundRuntimeHandler<VM> {
     active_tab_reorder: Option<ActiveTabReorder<VM>>,
     active_tree_drag: Option<ActiveTreeDrag<VM>>,
     active_data_grid_column_resize: Option<ActiveDataGridColumnResize<VM>>,
+    active_splitter_resize: Option<ActiveSplitterResize<VM>>,
     active_data_grid_column_reorder: Option<ActiveDataGridColumnReorder<VM>>,
+    carousel_auto_play_last: HashMap<WidgetId, Instant>,
     active_key_repeat: Option<ActiveKeyRepeat>,
     pending_click: Option<PendingClick<VM>>,
     deferred_mouse_click: Option<DeferredMouseClick<VM>>,
@@ -430,6 +436,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             tooltip_hover_started_at: HashMap::new(),
             next_tooltip_wakeup_deadline: None,
             next_toast_wakeup_deadline: None,
+            next_carousel_wakeup_deadline: None,
             tooltip_state: TooltipState {
                 active: None,
                 hover_suppressed: None,
@@ -459,7 +466,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             active_tab_reorder: None,
             active_tree_drag: None,
             active_data_grid_column_resize: None,
+            active_splitter_resize: None,
             active_data_grid_column_reorder: None,
+            carousel_auto_play_last: HashMap::new(),
             active_key_repeat: None,
             pending_click: None,
             deferred_mouse_click: None,

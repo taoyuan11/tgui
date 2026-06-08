@@ -33,13 +33,13 @@ use crate::animation::Transition;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::ValueCommand;
 use crate::log::Log;
-use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{pct, Axis, Insets, LayoutStyle, Value};
+use crate::ui::theme::StyleContext;
 use crate::ui::unit::Dp;
 use crate::ui::widget::container::{set_layout_length, set_layout_lengths, IntoLengthValue};
 use crate::ui::widget::container::{Flex, Stack};
 use crate::ui::widget::core::Element;
-use crate::ui::widget::style::{ContainerStyle, DrawerStyle};
+use crate::ui::widget::style::{ContainerStyle, DrawerStyle, StyleResolver};
 use crate::ui::widget::{CursorStyle, FocusScopeOptions, WidgetId};
 
 use super::descriptor::DrawerDescriptor;
@@ -71,7 +71,7 @@ pub struct Drawer<VM> {
     close_on_backdrop_click: bool,
     return_focus_to: Option<WidgetId>,
     auto_focus_first: bool,
-    style: Option<DrawerStyle>,
+    style: Option<StyleResolver<DrawerStyle>>,
 }
 
 impl<VM: 'static> Drawer<VM> {
@@ -140,9 +140,24 @@ impl<VM: 'static> Drawer<VM> {
         self
     }
 
-    /// 覆盖默认主题样式。
-    pub fn style(mut self, style: DrawerStyle) -> Self {
-        self.style = Some(style);
+    /// Patch the theme-derived style.
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut DrawerStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| DrawerStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    /// Replace the full resolved style.
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> DrawerStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 }
@@ -198,52 +213,21 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
         // backdrop：覆盖整个区域的半透明 scrim
         // 根据 open 状态动态设置背景色，确保关闭时完全透明
         // -----------------------------------------------------------------
-        let backdrop_color_base = match &style {
-            Some(s) => s.backdrop_color.clone(),
-            None => Value::Static(Color::rgba(0, 0, 0, 0x80)),
-        };
-
-        // 根据 open 状态动态设置背景色
-        // 关键：无论是 Static 还是 Signal，关闭时都必须是透明色
-        let backdrop_color = match open.clone() {
-            Value::Static(open_now) => {
-                if open_now {
-                    backdrop_color_base
-                } else {
-                    Value::Static(Color::TRANSPARENT)
-                }
-            }
-            Value::Signal(signal) => {
-                // 对于 Signal，根据 open 状态动态切换颜色
-                let base_color = match backdrop_color_base {
-                    Value::Static(c) => c,
-                    Value::Signal(_) => {
-                        // 如果 backdrop_color 本身也是 Signal，取第一个值
-                        // 这种情况很少见，通常 backdrop_color 是静态的
-                        Color::rgba(0, 0, 0, 0x80)
-                    }
-                };
-                Value::Signal(signal.map(
-                    move |open| {
-                        if open {
-                            base_color
-                        } else {
-                            Color::TRANSPARENT
-                        }
-                    },
-                ))
-            }
-        };
-
+        let backdrop_open = open.clone();
+        let backdrop_style = style.clone();
         let backdrop = Stack::<VM>::new()
             .size(pct(100.0), pct(100.0))
             .position_absolute()
             .left(Dp::ZERO)
             .top(Dp::ZERO)
             .opacity(backdrop_visibility.clone())
-            .style(move |mode| {
-                let mut s = ContainerStyle::default_for(mode);
-                s.surface.background = Some(backdrop_color.clone());
+            .style_full(move |context| {
+                let resolved = resolve_drawer_style(backdrop_style.as_ref(), context);
+                let mut s = ContainerStyle::default_for_theme(context.theme);
+                s.surface.background = Some(drawer_backdrop_color(
+                    backdrop_open.clone(),
+                    resolved.backdrop_color,
+                ));
                 s.surface.border_color = Some(Color::TRANSPARENT.into());
                 s.surface.border_width = Some(Dp::ZERO.into());
                 s.surface.border_radius = Some(Dp::ZERO.into());
@@ -256,9 +240,7 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
         // panel：侧边栏面板，根据 placement 决定位置和滑动方向
         // -----------------------------------------------------------------
         let drawer_style_for_panel = style.clone();
-        let resolved_style_for_layout = style
-            .clone()
-            .unwrap_or_else(|| DrawerStyle::default_for(ResolvedThemeMode::Light));
+        let resolved_style_for_layout = resolve_drawer_style_for_layout(style.as_ref());
 
         // 根据 placement 计算 panel 的位置和尺寸
         let (panel_width, panel_height) = match placement {
@@ -313,11 +295,9 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
             .position_absolute()
             .cursor(CursorStyle::Default)
             // 不在 panel 上设置 opacity，由外层 Stack 统一控制
-            .style(move |mode| {
-                let resolved = drawer_style_for_panel
-                    .clone()
-                    .unwrap_or_else(|| DrawerStyle::default_for(mode));
-                let mut s = ContainerStyle::default_for(mode);
+            .style_full(move |context| {
+                let resolved = resolve_drawer_style(drawer_style_for_panel.as_ref(), context);
+                let mut s = ContainerStyle::default_for_theme(context.theme);
                 s.surface.background = Some(resolved.background.clone());
                 s.surface.border_color = Some(resolved.border.clone());
                 s.surface.border_width = Some(resolved.border_width.clone());
@@ -482,9 +462,7 @@ fn build_push_drawer_host<VM: 'static>(content: Element<VM>, drawer: Drawer<VM>)
 
     let slide_transition = Transition::ease_in_out(Duration::from_millis(DRAWER_SLIDE_DURATION_MS));
     let drawer_style_for_panel = style.clone();
-    let resolved_style_for_layout = style
-        .clone()
-        .unwrap_or_else(|| DrawerStyle::default_for(ResolvedThemeMode::Light));
+    let resolved_style_for_layout = resolve_drawer_style_for_layout(style.as_ref());
     let target_extent = match placement {
         DrawerPlacement::Left | DrawerPlacement::Right => resolved_style_for_layout.width,
         DrawerPlacement::Top | DrawerPlacement::Bottom => resolved_style_for_layout.height,
@@ -507,11 +485,9 @@ fn build_push_drawer_host<VM: 'static>(content: Element<VM>, drawer: Drawer<VM>)
                 .auto_focus_first(auto_focus_first)
                 .active(open.clone()),
         )
-        .style(move |mode| {
-            let resolved = drawer_style_for_panel
-                .clone()
-                .unwrap_or_else(|| DrawerStyle::default_for(mode));
-            let mut s = ContainerStyle::default_for(mode);
+        .style_full(move |context| {
+            let resolved = resolve_drawer_style(drawer_style_for_panel.as_ref(), context);
+            let mut s = ContainerStyle::default_for_theme(context.theme);
             s.surface.background = Some(resolved.background.clone());
             s.surface.border_color = Some(resolved.border.clone());
             s.surface.border_width = Some(resolved.border_width.clone());
@@ -574,5 +550,49 @@ impl<VM> Drawer<VM> {
     #[doc(hidden)]
     pub fn _panel_id_of(element: &Element<VM>) -> Option<WidgetId> {
         element.drawer.as_ref().map(|d| d.panel_widget_id)
+    }
+}
+
+fn resolve_drawer_style(
+    style: Option<&StyleResolver<DrawerStyle>>,
+    context: &StyleContext<'_>,
+) -> DrawerStyle {
+    let mut base = DrawerStyle::default_for_theme(context.theme);
+    context.theme.components.drawer.apply(&mut base, context);
+    style
+        .map(|resolver| resolver.resolve_from(base.clone(), context))
+        .unwrap_or(base)
+}
+
+fn resolve_drawer_style_for_layout(style: Option<&StyleResolver<DrawerStyle>>) -> DrawerStyle {
+    let theme = crate::ui::theme::Theme::default();
+    let context = StyleContext::from_theme(&theme);
+    resolve_drawer_style(style, &context)
+}
+
+fn drawer_backdrop_color(open: Value<bool>, base: Value<Color>) -> Value<Color> {
+    match open {
+        Value::Static(open_now) => {
+            if open_now {
+                base
+            } else {
+                Value::Static(Color::TRANSPARENT)
+            }
+        }
+        Value::Signal(signal) => {
+            let base_color = match base {
+                Value::Static(color) => color,
+                Value::Signal(_) => Color::rgba(0, 0, 0, 0x80),
+            };
+            Value::Signal(signal.map(
+                move |open| {
+                    if open {
+                        base_color
+                    } else {
+                        Color::TRANSPARENT
+                    }
+                },
+            ))
+        }
     }
 }

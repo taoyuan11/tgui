@@ -42,8 +42,8 @@ fn slider_thumb_shadow_renders_before_thumb_fill_without_changing_hit_geometry()
     let mut animations = AnimationEngine::default();
     let element: Element<()> = Slider::new(50.0, 0.0, 100.0)
         .width(dp(220.0))
-        .style(|mode| {
-            let mut style = SliderStyle::default_for(mode);
+        .style_full(|ctx| {
+            let mut style = SliderStyle::default_for_theme(ctx.theme);
             style.thumb_shadow = Some(test_shadow());
             style
         })
@@ -165,8 +165,8 @@ fn slider_renders_custom_colors() {
             .width(dp(220.0))
             .show_ticks(true)
             .show_value_label(true)
-            .style(move |mode| {
-                let mut style = SliderStyle::default_for(mode);
+            .style_full(move |ctx| {
+                let mut style = SliderStyle::default_for_theme(ctx.theme);
                 style.track = stateful(track.into());
                 style.active_track = stateful(active_track.into());
                 style.thumb = stateful(thumb.into());

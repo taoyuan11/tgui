@@ -1,7 +1,7 @@
 use crate::foundation::binding::{TextChangeSet, TextController};
 use crate::foundation::form::ValidationVisualState;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::super::common::{
@@ -214,6 +214,8 @@ impl<VM> Textarea<VM> {
                 data_grid_cell: None,
                 data_grid_header: None,
                 data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
                 kind: WidgetKind::TextEditor {
                     controller,
                     placeholder: Value::Static(String::new()),
@@ -361,10 +363,23 @@ impl<VM> Textarea<VM> {
     /// 返回更新后的多行输入组件。
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> TextareaStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut TextareaStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
         if let WidgetKind::TextEditor { textarea_style, .. } = &mut self.element.kind {
-            *textarea_style = Some(StyleResolver::new(resolver));
+            *textarea_style = Some(StyleResolver::mutate(
+                |context| TextareaStyle::default_for_theme(context.theme),
+                mutator,
+            ));
+        }
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> TextareaStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::TextEditor { textarea_style, .. } = &mut self.element.kind {
+            *textarea_style = Some(StyleResolver::full(resolver));
         }
         self
     }

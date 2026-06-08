@@ -4,20 +4,52 @@ impl<VM> ResolvedElement<VM> {
     pub(super) fn resolve_collect_styles(
         &self,
         widget_state: WidgetState,
-        theme: &Theme,
+        context: &CollectContext<'_, '_>,
     ) -> CollectResolvedStyles {
+        let theme = context.theme;
         CollectResolvedStyles {
             button_style: match &self.kind {
-                ResolvedWidgetKind::Button { style, .. } => {
-                    Some(resolve_button_style(style, widget_state, theme))
+                ResolvedWidgetKind::Button {
+                    runtime_style,
+                    variant,
+                    ..
+                } => {
+                    let mut style = runtime_style.base.clone();
+                    context.style_sheet.apply_button_state(
+                        &mut style,
+                        &context.style_context,
+                        *variant,
+                        &self.visual,
+                        widget_state,
+                    );
+                    let style = apply_local_style(
+                        runtime_style.local.as_ref(),
+                        style,
+                        &context.style_context,
+                    );
+                    Some(resolve_button_style(&style, widget_state, theme))
                 }
                 _ => None,
             },
             select_style: match &self.kind {
                 ResolvedWidgetKind::Select {
-                    style, validation, ..
+                    runtime_style,
+                    validation,
+                    ..
                 } => {
-                    let mut style = resolve_select_style(style, widget_state, theme);
+                    let mut source_style = runtime_style.base.clone();
+                    context.style_sheet.apply_select_state(
+                        &mut source_style,
+                        &context.style_context,
+                        &self.visual,
+                        widget_state,
+                    );
+                    let source_style = apply_local_style(
+                        runtime_style.local.as_ref(),
+                        source_style,
+                        &context.style_context,
+                    );
+                    let mut style = resolve_select_style(&source_style, widget_state, theme);
                     if let Some(color) = validation_state_color(&validation.resolve(), theme) {
                         style.border = color;
                         apply_validation_focus_ring(&mut style.focus_ring, color);
@@ -28,9 +60,23 @@ impl<VM> ResolvedElement<VM> {
             },
             slider_style: match &self.kind {
                 ResolvedWidgetKind::Slider {
-                    style, validation, ..
+                    runtime_style,
+                    validation,
+                    ..
                 } => {
-                    let mut style = resolve_slider_style(style, widget_state, theme);
+                    let mut source_style = runtime_style.base.clone();
+                    context.style_sheet.apply_slider_state(
+                        &mut source_style,
+                        &context.style_context,
+                        &self.visual,
+                        widget_state,
+                    );
+                    let source_style = apply_local_style(
+                        runtime_style.local.as_ref(),
+                        source_style,
+                        &context.style_context,
+                    );
+                    let mut style = resolve_slider_style(&source_style, widget_state, theme);
                     if let Some(color) = validation_state_color(&validation.resolve(), theme) {
                         style.active_track = color;
                         style.tick = color.with_alpha_factor(0.55);
@@ -41,22 +87,127 @@ impl<VM> ResolvedElement<VM> {
                 _ => None,
             },
             progress_bar_style: match &self.kind {
-                ResolvedWidgetKind::ProgressBar { style, .. } => Some(style.clone()),
+                ResolvedWidgetKind::ProgressBar { runtime_style, .. } => {
+                    let mut style = runtime_style.base.clone();
+                    context.style_sheet.apply_progress_bar_state(
+                        &mut style,
+                        &context.style_context,
+                        &self.visual,
+                        widget_state,
+                    );
+                    let style = apply_local_style(
+                        runtime_style.local.as_ref(),
+                        style,
+                        &context.style_context,
+                    );
+                    Some(style)
+                }
                 _ => None,
             },
             spinner_style: match &self.kind {
-                ResolvedWidgetKind::Spinner { style, .. } => Some(style.clone()),
+                ResolvedWidgetKind::Spinner { runtime_style, .. } => {
+                    let mut style = runtime_style.base.clone();
+                    context.style_sheet.apply_spinner_state(
+                        &mut style,
+                        &context.style_context,
+                        &self.visual,
+                        widget_state,
+                    );
+                    let style = apply_local_style(
+                        runtime_style.local.as_ref(),
+                        style,
+                        &context.style_context,
+                    );
+                    Some(style)
+                }
                 _ => None,
             },
             divider_style: match &self.kind {
-                ResolvedWidgetKind::Divider { style, .. } => Some(style.clone()),
+                ResolvedWidgetKind::Divider { runtime_style, .. } => {
+                    let mut style = runtime_style.base.clone();
+                    context.style_sheet.apply_divider_state(
+                        &mut style,
+                        &context.style_context,
+                        &self.visual,
+                        widget_state,
+                    );
+                    let style = apply_local_style(
+                        runtime_style.local.as_ref(),
+                        style,
+                        &context.style_context,
+                    );
+                    Some(style)
+                }
+                _ => None,
+            },
+            switch_style: match &self.kind {
+                ResolvedWidgetKind::Switch {
+                    runtime_style,
+                    validation,
+                    ..
+                } => {
+                    let mut style = runtime_style.base.clone();
+                    context.style_sheet.apply_switch_state(
+                        &mut style,
+                        &context.style_context,
+                        &self.visual,
+                        widget_state,
+                    );
+                    let mut style = apply_local_style(
+                        runtime_style.local.as_ref(),
+                        style,
+                        &context.style_context,
+                    );
+                    if let Some(color) = validation_state_color(&validation.resolve(), theme) {
+                        style.border.normal = Value::Static(color);
+                        style.border.hovered = Value::Static(color);
+                        style.border.pressed = Value::Static(color);
+                        style.border_checked.normal = Value::Static(color);
+                        style.border_checked.hovered = Value::Static(color);
+                        style.border_checked.pressed = Value::Static(color);
+                    }
+                    Some(style)
+                }
                 _ => None,
             },
             input_style: match &self.kind {
                 ResolvedWidgetKind::TextEditor {
-                    style, validation, ..
+                    runtime_style,
+                    validation,
+                    ..
                 } => {
-                    let mut style = resolve_input_style(style, widget_state);
+                    let source_style = match runtime_style {
+                        ResolvedTextEditorRuntimeStyle::Textarea(runtime_style) => {
+                            let mut textarea_style = runtime_style.base.clone();
+                            context.style_sheet.apply_textarea_state(
+                                &mut textarea_style,
+                                &context.style_context,
+                                &self.visual,
+                                widget_state,
+                            );
+                            let textarea_style = apply_local_style(
+                                runtime_style.local.as_ref(),
+                                textarea_style,
+                                &context.style_context,
+                            );
+                            input_style_from_textarea_style(textarea_style)
+                        }
+                        ResolvedTextEditorRuntimeStyle::Input(runtime_style) => {
+                            let mut input_style = runtime_style.base.clone();
+                            context.style_sheet.apply_input_state(
+                                &mut input_style,
+                                &context.style_context,
+                                &self.visual,
+                                widget_state,
+                            );
+                            apply_local_style(
+                                runtime_style.local.as_ref(),
+                                input_style,
+                                &context.style_context,
+                            )
+                        }
+                    };
+                    let mut style = resolve_input_style(&source_style, widget_state);
                     if let Some(color) = validation_state_color(&validation.resolve(), theme) {
                         style.border = color;
                     }
@@ -67,12 +218,28 @@ impl<VM> ResolvedElement<VM> {
             checkbox_style: match &self.kind {
                 ResolvedWidgetKind::Checkbox {
                     checked,
-                    style,
+                    runtime_style,
                     validation,
                     ..
                 } => {
-                    let mut style =
-                        resolve_checkbox_style(style, widget_state, checked.resolve(), theme);
+                    let mut source_style = runtime_style.base.clone();
+                    context.style_sheet.apply_checkbox_state(
+                        &mut source_style,
+                        &context.style_context,
+                        &self.visual,
+                        widget_state,
+                    );
+                    let source_style = apply_local_style(
+                        runtime_style.local.as_ref(),
+                        source_style,
+                        &context.style_context,
+                    );
+                    let mut style = resolve_checkbox_style(
+                        &source_style,
+                        widget_state,
+                        checked.resolve(),
+                        theme,
+                    );
                     if let Some(color) = validation_state_color(&validation.resolve(), theme) {
                         style.border = color;
                         if checked.resolve() {
@@ -88,12 +255,24 @@ impl<VM> ResolvedElement<VM> {
             radio_style: match &self.kind {
                 ResolvedWidgetKind::Radio {
                     checked,
-                    style,
+                    runtime_style,
                     validation,
                     ..
                 } => {
+                    let mut source_style = runtime_style.base.clone();
+                    context.style_sheet.apply_radio_state(
+                        &mut source_style,
+                        &context.style_context,
+                        &self.visual,
+                        widget_state,
+                    );
+                    let source_style = apply_local_style(
+                        runtime_style.local.as_ref(),
+                        source_style,
+                        &context.style_context,
+                    );
                     let mut style =
-                        resolve_radio_style(style, widget_state, checked.resolve(), theme);
+                        resolve_radio_style(&source_style, widget_state, checked.resolve(), theme);
                     if let Some(color) = validation_state_color(&validation.resolve(), theme) {
                         style.border = color;
                         if checked.resolve() {
@@ -189,9 +368,14 @@ impl<VM> ResolvedElement<VM> {
                     .expect("radio style should be resolved for radio widgets")
                     .border_width,
             ),
-            ResolvedWidgetKind::Switch { style, .. } => {
-                context.units.resolve_dp(style.border_width.resolve())
-            }
+            ResolvedWidgetKind::Switch { .. } => context.units.resolve_dp(
+                styles
+                    .switch_style
+                    .as_ref()
+                    .expect("switch style should be resolved for switch widgets")
+                    .border_width
+                    .resolve(),
+            ),
             ResolvedWidgetKind::Slider { .. } => context.units.resolve_dp(
                 styles
                     .slider_style
@@ -244,9 +428,14 @@ impl<VM> ResolvedElement<VM> {
                     .expect("radio style should be resolved for radio widgets")
                     .radius,
             ),
-            ResolvedWidgetKind::Switch { style, .. } => {
-                context.units.resolve_dp(style.radius.resolve())
-            }
+            ResolvedWidgetKind::Switch { .. } => context.units.resolve_dp(
+                styles
+                    .switch_style
+                    .as_ref()
+                    .expect("switch style should be resolved for switch widgets")
+                    .radius
+                    .resolve(),
+            ),
             ResolvedWidgetKind::Slider { .. } => context.units.resolve_dp(
                 styles
                     .slider_style

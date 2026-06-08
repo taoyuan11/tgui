@@ -4,10 +4,10 @@ use super::*;
 #[derive(Clone, Debug, PartialEq)]
 pub struct InputStyle {
     pub surface: WidgetSurfaceStyle,
-    pub background: Stateful<Value<Color>>,
-    pub text: Stateful<Value<Color>>,
-    pub placeholder: Stateful<Value<Color>>,
-    pub border: Stateful<Value<Color>>,
+    pub background: StateValue<Value<Color>>,
+    pub text: StateValue<Value<Color>>,
+    pub placeholder: StateValue<Value<Color>>,
+    pub border: StateValue<Value<Color>>,
     pub selection: Option<Value<Color>>,
     pub caret: Option<Value<Color>>,
     pub border_width: Value<Dp>,
@@ -19,9 +19,8 @@ pub struct InputStyle {
 }
 
 impl InputStyle {
-    /// 按解析后的主题模式创建默认输入框样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
@@ -48,14 +47,14 @@ impl InputStyle {
                 palette.outline,
                 palette.disabled_surface,
             ),
-            selection: None,
-            caret: None,
-            border_width: Value::Static(dp(1.0)),
-            radius: Value::Static(dp(12.0)),
-            padding_x: dp(12.0),
-            padding_y: dp(8.0),
+            selection: Some(Value::Static(theme.colors.selection)),
+            caret: Some(Value::Static(theme.colors.primary)),
+            border_width: Value::Static(theme.border.thin),
+            radius: Value::Static(theme.radius.lg),
+            padding_x: theme.spacing.md - theme.spacing.xs,
+            padding_y: theme.spacing.sm,
             min_height: dp(40.0),
-            text_style: body_text_style(),
+            text_style: theme.typography.body.clone(),
         }
     }
 }
@@ -64,10 +63,10 @@ impl InputStyle {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextareaStyle {
     pub surface: WidgetSurfaceStyle,
-    pub background: Stateful<Value<Color>>,
-    pub text: Stateful<Value<Color>>,
-    pub placeholder: Stateful<Value<Color>>,
-    pub border: Stateful<Value<Color>>,
+    pub background: StateValue<Value<Color>>,
+    pub text: StateValue<Value<Color>>,
+    pub placeholder: StateValue<Value<Color>>,
+    pub border: StateValue<Value<Color>>,
     pub selection: Option<Value<Color>>,
     pub caret: Option<Value<Color>>,
     pub border_width: Value<Dp>,
@@ -79,9 +78,8 @@ pub struct TextareaStyle {
 }
 
 impl TextareaStyle {
-    /// 按解析后的主题模式创建默认多行文本框样式。
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let mut style = InputStyle::default_for(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let mut style = InputStyle::default_for_theme(theme);
         style.min_height = dp(96.0);
         Self {
             surface: style.surface,

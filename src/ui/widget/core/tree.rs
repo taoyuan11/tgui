@@ -192,11 +192,105 @@ impl<VM: 'static> WidgetTree<VM> {
         now: Instant,
         previous: Option<&ResolvedSceneLayout<VM>>,
     ) -> ResolvedSceneLayout<VM> {
+        let default_style_sheet = crate::ui::widget::StyleSheet::default();
+        self.build_scene_layout_at_with_previous_and_style_sheet(
+            font_manager,
+            theme,
+            media,
+            animations,
+            units,
+            scroll_offsets,
+            virtual_states,
+            viewport,
+            now,
+            previous,
+            &default_style_sheet,
+        )
+    }
+
+    pub(crate) fn build_scene_layout_at_with_previous_and_style_sheet(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        units: UnitContext,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+        viewport: Rect,
+        now: Instant,
+        previous: Option<&ResolvedSceneLayout<VM>>,
+        style_sheet: &crate::ui::widget::StyleSheet,
+    ) -> ResolvedSceneLayout<VM> {
+        self.build_scene_layout_at_with_previous_and_style_context(
+            font_manager,
+            theme,
+            media,
+            animations,
+            units,
+            scroll_offsets,
+            virtual_states,
+            viewport,
+            now,
+            previous,
+            crate::ui::theme::StyleContext::from_theme(theme).with_text_scale(units.font_scale()),
+            style_sheet,
+        )
+    }
+
+    pub(crate) fn build_scene_layout_at_with_previous_style_sheet_and_reduced_motion(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        units: UnitContext,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+        viewport: Rect,
+        now: Instant,
+        previous: Option<&ResolvedSceneLayout<VM>>,
+        reduced_motion: bool,
+        style_sheet: &crate::ui::widget::StyleSheet,
+    ) -> ResolvedSceneLayout<VM> {
+        self.build_scene_layout_at_with_previous_and_style_context(
+            font_manager,
+            theme,
+            media,
+            animations,
+            units,
+            scroll_offsets,
+            virtual_states,
+            viewport,
+            now,
+            previous,
+            crate::ui::theme::StyleContext::from_theme(theme)
+                .with_reduced_motion(reduced_motion)
+                .with_text_scale(units.font_scale()),
+            style_sheet,
+        )
+    }
+
+    fn build_scene_layout_at_with_previous_and_style_context(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        units: UnitContext,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+        viewport: Rect,
+        now: Instant,
+        previous: Option<&ResolvedSceneLayout<VM>>,
+        style_context: crate::ui::theme::StyleContext<'_>,
+        style_sheet: &crate::ui::widget::StyleSheet,
+    ) -> ResolvedSceneLayout<VM> {
         let (mut layout, dependencies) = with_widget_stack(|| {
             with_dependency_collection(|| {
                 let mut taffy = TaffyTree::new();
                 let root = std::sync::Arc::clone(&self.root);
-                let resolved_root = root.resolve_with_runtime_state(
+                let resolved_root = root.resolve_with_runtime_state_and_style_sheet(
                     theme,
                     previous.map(|layout| &layout.resolved_root),
                     scroll_offsets,
@@ -205,6 +299,8 @@ impl<VM: 'static> WidgetTree<VM> {
                         width: viewport.width,
                         height: viewport.height,
                     },
+                    &style_context,
+                    style_sheet,
                 );
                 let root_layout = resolved_root
                     .build_layout_tree(
@@ -314,6 +410,7 @@ impl<VM: 'static> WidgetTree<VM> {
         caret_visible: bool,
         now: Instant,
     ) -> ComputedScene<VM> {
+        let default_style_sheet = crate::ui::widget::StyleSheet::default();
         self.collect_scene_cache_from_layout_with_focus_value_at(
             font_manager,
             layout,
@@ -340,6 +437,7 @@ impl<VM: 'static> WidgetTree<VM> {
             &HashMap::new(),
             None,
             None,
+            &default_style_sheet,
         )
         .computed
     }
@@ -371,6 +469,7 @@ impl<VM: 'static> WidgetTree<VM> {
         active_tooltip: Option<ActiveTooltipState>,
         active_hover_popover: Option<WidgetId>,
     ) -> CollectedSceneCache<VM> {
+        let default_style_sheet = crate::ui::widget::StyleSheet::default();
         self.collect_scene_cache_from_layout_with_focus_value_at(
             font_manager,
             layout,
@@ -397,6 +496,7 @@ impl<VM: 'static> WidgetTree<VM> {
             tooltip_hover_started_at,
             active_tooltip,
             active_hover_popover,
+            &default_style_sheet,
         )
     }
 
@@ -428,6 +528,7 @@ impl<VM: 'static> WidgetTree<VM> {
         active_tooltip: Option<ActiveTooltipState>,
         active_hover_popover: Option<WidgetId>,
     ) -> CollectedSceneCache<VM> {
+        let default_style_sheet = crate::ui::widget::StyleSheet::default();
         self.collect_scene_cache_from_layout_with_focus_value_at_with_virtual_state(
             font_manager,
             layout,
@@ -455,6 +556,7 @@ impl<VM: 'static> WidgetTree<VM> {
             virtual_states,
             active_tooltip,
             active_hover_popover,
+            &default_style_sheet,
         )
     }
 
@@ -488,6 +590,7 @@ impl<VM: 'static> WidgetTree<VM> {
         tooltip_hover_started_at: &HashMap<WidgetId, Instant>,
         active_tooltip: Option<ActiveTooltipState>,
         active_hover_popover: Option<WidgetId>,
+        style_sheet: &crate::ui::widget::StyleSheet,
     ) -> CollectedSceneCache<VM> {
         self.collect_scene_cache_from_layout_with_focus_value_and_reduced_motion_at(
             font_manager,
@@ -519,6 +622,7 @@ impl<VM: 'static> WidgetTree<VM> {
             virtual_states,
             active_tooltip,
             active_hover_popover,
+            style_sheet,
         )
     }
 
@@ -549,6 +653,7 @@ impl<VM: 'static> WidgetTree<VM> {
         tooltip_hover_started_at: &HashMap<WidgetId, Instant>,
         active_tooltip: Option<ActiveTooltipState>,
         active_hover_popover: Option<WidgetId>,
+        style_sheet: &crate::ui::widget::StyleSheet,
     ) -> CollectedSceneCache<VM> {
         self.collect_scene_cache_from_layout_with_focus_value_at_with_virtual_state(
             font_manager,
@@ -577,6 +682,7 @@ impl<VM: 'static> WidgetTree<VM> {
             &HashMap::new(),
             active_tooltip,
             active_hover_popover,
+            style_sheet,
         )
     }
 
@@ -608,6 +714,7 @@ impl<VM: 'static> WidgetTree<VM> {
         virtual_states: &HashMap<WidgetId, VirtualCacheState>,
         active_tooltip: Option<ActiveTooltipState>,
         active_hover_popover: Option<WidgetId>,
+        style_sheet: &crate::ui::widget::StyleSheet,
     ) -> CollectedSceneCache<VM> {
         self.collect_scene_cache_from_layout_with_focus_value_and_reduced_motion_at(
             font_manager,
@@ -639,6 +746,7 @@ impl<VM: 'static> WidgetTree<VM> {
             virtual_states,
             active_tooltip,
             active_hover_popover,
+            style_sheet,
         )
     }
 
@@ -673,6 +781,7 @@ impl<VM: 'static> WidgetTree<VM> {
         virtual_states: &HashMap<WidgetId, VirtualCacheState>,
         active_tooltip: Option<ActiveTooltipState>,
         active_hover_popover: Option<WidgetId>,
+        style_sheet: &crate::ui::widget::StyleSheet,
     ) -> CollectedSceneCache<VM> {
         let next_tooltip_wakeup: std::cell::Cell<Option<Instant>> = std::cell::Cell::new(None);
         let next_toast_wakeup: std::cell::Cell<Option<Instant>> = std::cell::Cell::new(None);
@@ -684,10 +793,15 @@ impl<VM: 'static> WidgetTree<VM> {
                     let mut chunks = HashMap::with_capacity(cap);
                     let mut chunk_parts = HashMap::with_capacity(cap / 2);
                     let mut visual_contexts = HashMap::with_capacity(cap);
+                    let style_context = crate::ui::theme::StyleContext::from_theme(theme)
+                        .with_reduced_motion(reduced_motion)
+                        .with_text_scale(layout.units.font_scale());
                     let mut context = CollectContext {
                         taffy: &layout.taffy,
                         font_manager,
                         theme,
+                        style_context,
+                        style_sheet,
                         media,
                         focused_input,
                         focused_text_state,

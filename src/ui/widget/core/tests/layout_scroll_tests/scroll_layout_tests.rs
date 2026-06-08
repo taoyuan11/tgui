@@ -14,45 +14,51 @@ fn wrapped_flex_align_start_packs_lines_from_cross_axis_start() {
             .justify(crate::ui::layout::Justify::Start)
             .gap(dp(10.0))
             .child([
-                Stack::new().size(dp(60.0), dp(40.0)).style(move |mode| {
-                    container_style(
-                        mode,
-                        Some(child_color),
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                }),
-                Stack::new().size(dp(60.0), dp(40.0)).style(move |mode| {
-                    container_style(
-                        mode,
-                        Some(child_color),
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                }),
-                Stack::new().size(dp(60.0), dp(40.0)).style(move |mode| {
-                    container_style(
-                        mode,
-                        Some(child_color),
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                }),
+                Stack::new()
+                    .size(dp(60.0), dp(40.0))
+                    .style_full(move |ctx| {
+                        container_style(
+                            ctx,
+                            Some(child_color),
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                    }),
+                Stack::new()
+                    .size(dp(60.0), dp(40.0))
+                    .style_full(move |ctx| {
+                        container_style(
+                            ctx,
+                            Some(child_color),
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                    }),
+                Stack::new()
+                    .size(dp(60.0), dp(40.0))
+                    .style_full(move |ctx| {
+                        container_style(
+                            ctx,
+                            Some(child_color),
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                    }),
             ]),
     );
 
@@ -94,9 +100,9 @@ fn scroll_offsets_are_clamped_to_content_bounds() {
     let scroller: super::Element<()> = Stack::new()
         .size(dp(100.0), dp(100.0))
         .overflow_y(Overflow::Scroll)
-        .style(|mode| {
+        .style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(crate::foundation::color::Color::hexa(0x111827FF)),
                 None,
                 None,
@@ -107,9 +113,9 @@ fn scroll_offsets_are_clamped_to_content_bounds() {
                 None,
             )
         })
-        .child(Stack::new().size(dp(100.0), dp(300.0)).style(|mode| {
+        .child(Stack::new().size(dp(100.0), dp(300.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(crate::foundation::color::Color::hexa(0x22C55EFF)),
                 None,
                 None,
@@ -162,9 +168,9 @@ fn scroll_content_bounds_include_container_bottom_padding() {
         .size(dp(100.0), dp(100.0))
         .padding(Insets::all(dp(20.0)))
         .overflow_y(Overflow::Scroll)
-        .child(Stack::new().size(dp(60.0), dp(120.0)).style(|mode| {
+        .child(Stack::new().size(dp(60.0), dp(120.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(crate::foundation::color::Color::hexa(0x22C55EFF)),
                 None,
                 None,
@@ -275,8 +281,8 @@ fn scroll_containers_render_scrollbar_track_and_thumb() {
     let scroller: super::Element<()> = Stack::new()
         .size(dp(120.0), dp(120.0))
         .overflow_y(Overflow::Scroll)
-        .style(|mode| {
-            let mut style = ContainerStyle::default_for(mode);
+        .style_full(|ctx| {
+            let mut style = ContainerStyle::default_for_theme(ctx.theme);
             style.scrollbar.thumb_color = Some(crate::foundation::color::Color::BLACK);
             style.scrollbar.track_color = Some(crate::foundation::color::Color::WHITE);
             style.scrollbar.hover_thumb_color =
@@ -285,9 +291,9 @@ fn scroll_containers_render_scrollbar_track_and_thumb() {
                 Some(crate::foundation::color::Color::hexa(0x445566FF));
             style
         })
-        .child(Stack::new().size(dp(120.0), dp(260.0)).style(|mode| {
+        .child(Stack::new().size(dp(120.0), dp(260.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(crate::foundation::color::Color::hexa(0x1D4ED8FF)),
                 None,
                 None,

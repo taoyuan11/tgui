@@ -20,6 +20,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && cached.selected_text == self.selected_text
             && cached.caret_visible == caret_visible
             && cached.theme_epoch == self.theme_store.version()
+            && cached.style_sheet_version == self.config.style_sheet.version()
+            && cached.density == self.theme.density
+            && cached.reduced_motion == self.reduced_motion
+            && cached.text_scale_bits == units.font_scale().to_bits()
             && cached.animation_epoch == self.animation_epoch
             && cached.scroll_epoch == self.scroll_epoch
             && cached.hover_epoch == self.hover_epoch
@@ -45,6 +49,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         cached.viewport == viewport
             && cached.units == units
             && cached.theme_epoch == self.theme_store.version()
+            && cached.style_sheet_version == self.config.style_sheet.version()
+            && cached.density == self.theme.density
+            && cached.reduced_motion == self.reduced_motion
+            && cached.text_scale_bits == units.font_scale().to_bits()
             && cached.layout_animation_epoch == self.layout_animation_epoch
             && virtual_scroll_matches
     }
@@ -84,6 +92,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         if cached.theme_epoch != self.theme_store.version() {
             reasons.push("theme_epoch");
+        }
+        if cached.style_sheet_version != self.config.style_sheet.version() {
+            reasons.push("style_sheet_version");
+        }
+        if cached.density != self.theme.density {
+            reasons.push("density");
+        }
+        if cached.reduced_motion != self.reduced_motion {
+            reasons.push("reduced_motion");
+        }
+        if cached.text_scale_bits != units.font_scale().to_bits() {
+            reasons.push("text_scale");
         }
         if cached.animation_epoch != self.animation_epoch {
             reasons.push("animation_epoch");
@@ -141,6 +161,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && cached.pressed_widget == self.pressed_widget
             && cached.selected_text == self.selected_text
             && cached.theme_epoch == self.theme_store.version()
+            && cached.style_sheet_version == self.config.style_sheet.version()
+            && cached.density == self.theme.density
+            && cached.reduced_motion == self.reduced_motion
+            && cached.text_scale_bits == units.font_scale().to_bits()
             && cached.animation_epoch == self.animation_epoch
             && cached.layout_animation_epoch == self.layout_animation_epoch
             && cached.hover_epoch == self.hover_epoch

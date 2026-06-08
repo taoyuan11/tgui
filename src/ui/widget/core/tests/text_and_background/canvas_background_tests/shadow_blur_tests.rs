@@ -7,9 +7,9 @@ fn background_blur_is_emitted_before_background_fill() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> =
-        WidgetTree::new(Stack::new().size(dp(120.0), dp(80.0)).style(|mode| {
+        WidgetTree::new(Stack::new().size(dp(120.0), dp(80.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(Color::hexa(0x112233AA)),
                 None,
                 None,
@@ -51,9 +51,9 @@ fn background_shadow_is_emitted_before_blur_and_fill() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> =
-        WidgetTree::new(Stack::new().size(dp(120.0), dp(80.0)).style(|mode| {
+        WidgetTree::new(Stack::new().size(dp(120.0), dp(80.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(Color::hexa(0x112233AA)),
                 None,
                 None,
@@ -103,9 +103,9 @@ fn background_shadow_does_not_expand_hit_region() {
     let mut animations = AnimationEngine::default();
     let element: Element<()> = Stack::new()
         .size(dp(120.0), dp(80.0))
-        .style(|mode| {
+        .style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(Color::hexa(0x112233AA)),
                 None,
                 None,
@@ -152,11 +152,11 @@ fn background_shadow_negative_spread_can_skip_render_without_panicking() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> =
-        WidgetTree::new(Stack::new().size(dp(40.0), dp(24.0)).style(|mode| {
+        WidgetTree::new(Stack::new().size(dp(40.0), dp(24.0)).style_full(|ctx| {
             let mut shadow = test_shadow();
             shadow.spread = dp(-40.0);
             container_style(
-                mode,
+                ctx,
                 Some(Color::hexa(0x112233AA)),
                 None,
                 None,
@@ -198,9 +198,9 @@ fn background_shadow_texture_size_matches_primitive_frame_with_positive_offset()
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> =
-        WidgetTree::new(Stack::new().size(dp(100.0), dp(100.0)).style(|mode| {
+        WidgetTree::new(Stack::new().size(dp(100.0), dp(100.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(Color::hexa(0xFFFFFFFF)),
                 None,
                 None,
@@ -259,9 +259,9 @@ fn background_shadow_reuses_cached_texture_when_widget_moves() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let tree: WidgetTree<()> =
-        WidgetTree::new(Stack::new().size(dp(100.0), dp(100.0)).style(|mode| {
+        WidgetTree::new(Stack::new().size(dp(100.0), dp(100.0)).style_full(|ctx| {
             container_style(
-                mode,
+                ctx,
                 Some(Color::hexa(0xFFFFFFFF)),
                 None,
                 None,

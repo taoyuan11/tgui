@@ -76,9 +76,9 @@ impl ViewModel for AppVm {
             .size(pct(100.0), pct(100.0))
             .padding(Insets::all(dp(24.0)))
             .gap(dp(14.0))
-            .style(root_style)
-            .child(Text::new("Table / DataGrid").style(title_style))
-            .child(Text::new(self.summary_text()).style(muted_style))
+            .style_full(root_style)
+            .child(Text::new("Table / DataGrid").style_full(title_style))
+            .child(Text::new(self.summary_text()).style_full(muted_style))
             .child(
                 DataGrid::new(self.sorted_rows(), self.columns())
                     .width(pct(100.0))
@@ -100,7 +100,7 @@ impl ViewModel for AppVm {
                     .on_cell_action(ValueCommand::new(Self::open_cell))
                     .on_cell_edit_commit(ValueCommand::new(Self::commit_cell_edit)),
             )
-            .child(Text::new(self.status.signal()).style(status_style))
+            .child(Text::new(self.status.signal()).style_full(status_style))
             .into()
     }
 }
@@ -306,34 +306,34 @@ fn compare_employee(left: &Employee, right: &Employee, sort: &DataGridSort) -> O
     }
 }
 
-fn root_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
-    style.surface.background = Some(match mode {
+fn root_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
+    style.surface.background = Some(match ctx.mode {
         ResolvedThemeMode::Light => Color::hexa(0xF8FAFCFF).into(),
         ResolvedThemeMode::Dark => Color::hexa(0x0B1120FF).into(),
     });
     style
 }
 
-fn title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = sp(26.0);
     style.typography.weight = FontWeight::SemiBold;
     style
 }
 
-fn muted_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn muted_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = sp(14.0);
-    style.color = match mode {
+    style.color = match ctx.mode {
         ResolvedThemeMode::Light => Color::hexa(0x475569FF).into(),
         ResolvedThemeMode::Dark => Color::hexa(0xCBD5E1FF).into(),
     };
     style
 }
 
-fn status_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = muted_style(mode);
+fn status_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = muted_style(ctx);
     style.typography.weight = FontWeight::Medium;
     style
 }

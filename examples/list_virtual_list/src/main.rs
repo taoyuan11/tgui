@@ -130,7 +130,7 @@ impl ViewModel for AppVm {
     fn view(&self) -> Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
-            .style(root_style)
+            .style_full(root_style)
             .padding(Insets::all(dp(24.0)))
             .child(
                 Flex::horizontal()
@@ -149,9 +149,9 @@ impl AppVm {
             .height(pct(100.0))
             .gap(dp(12.0))
             .padding(Insets::all(dp(16.0)))
-            .style(panel_style)
-            .child(Text::new("List").style(title_style))
-            .child(Text::new(self.selection_summary()).style(muted_text_style))
+            .style_full(panel_style)
+            .child(Text::new("List").style_full(title_style))
+            .child(Text::new(self.selection_summary()).style_full(muted_text_style))
             .child(
                 Flex::horizontal()
                     .gap(dp(8.0))
@@ -175,7 +175,7 @@ impl AppVm {
                         spacing: dp(4.0),
                         overscan: 3,
                     })
-                    .style(contact_list_style)
+                    .style_full(contact_list_style)
                     .selection_mode(ListSelectionMode::Multiple)
                     .selected_keys(self.selected_keys.signal())
                     .loading(self.loading.signal())
@@ -189,7 +189,7 @@ impl AppVm {
                     .on_selection_change(ValueCommand::new(Self::set_selection))
                     .on_item_action(ValueCommand::new(Self::open_contact)),
             )
-            .child(Text::new(self.status()).style(status_text_style))
+            .child(Text::new(self.status()).style_full(status_text_style))
             .into()
     }
 
@@ -199,9 +199,9 @@ impl AppVm {
             .height(pct(100.0))
             .gap(dp(12.0))
             .padding(Insets::all(dp(16.0)))
-            .style(panel_style)
-            .child(Text::new("VirtualList").style(title_style))
-            .child(Text::new("10,000 rows, fixed 32dp item layout, overscan 4").style(muted_text_style))
+            .style_full(panel_style)
+            .child(Text::new("VirtualList").style_full(title_style))
+            .child(Text::new("10,000 rows, fixed 32dp item layout, overscan 4").style_full(muted_text_style))
             .child(
                 VirtualList::new_with_context(self.virtual_rows.clone(), virtual_row)
                     .item_layout(ItemLayout::Fixed {
@@ -211,7 +211,7 @@ impl AppVm {
                     })
                     .width(pct(100.0))
                     .height(dp(430.0))
-                    .style(virtual_surface_style),
+                    .style_full(virtual_surface_style),
             )
             .into()
     }
@@ -221,7 +221,7 @@ fn section_header(text: &'static str) -> Element<AppVm> {
     Stack::new()
         .height(dp(30.0))
         .padding(Insets::symmetric(dp(12.0), dp(6.0)))
-        .child(Text::new(text).style(section_text_style))
+        .child(Text::new(text).style_full(section_text_style))
         .into()
 }
 
@@ -235,8 +235,8 @@ fn contact_row(ctx: ListItemContext<Contact>) -> Element<AppVm> {
     };
     Flex::vertical()
         .gap(dp(2.0))
-        .child(Text::new(ctx.item.name).style(move |mode| row_title_style(mode, accent)))
-        .child(Text::new(format!("{} - {}", ctx.item.role, ctx.item.status)).style(muted_text_style))
+        .child(Text::new(ctx.item.name).style_full(move |ctx| row_title_style(ctx, accent)))
+        .child(Text::new(format!("{} - {}", ctx.item.role, ctx.item.status)).style_full(muted_text_style))
         .into()
 }
 
@@ -248,7 +248,7 @@ fn virtual_row(ctx: ListItemContext<String>) -> Element<AppVm> {
     };
     Stack::new()
         .padding(Insets::symmetric(dp(12.0), dp(6.0)))
-        .child(Text::new(ctx.item).style(move |mode| row_title_style(mode, color)))
+        .child(Text::new(ctx.item).style_full(move |ctx| row_title_style(ctx, color)))
         .into()
 }
 
@@ -256,13 +256,13 @@ fn state_view(text: &'static str) -> Element<AppVm> {
     Stack::new()
         .height(dp(160.0))
         .center()
-        .style(empty_state_style)
-        .child(Text::new(text).style(muted_text_style))
+        .style_full(empty_state_style)
+        .child(Text::new(text).style_full(muted_text_style))
         .into()
 }
 
-fn panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn panel_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hexa(0x182235FF).into());
     style.surface.border_color = Some(Color::hexa(0x334155FF).into());
     style.surface.border_width = Some(dp(1.0).into());
@@ -270,14 +270,14 @@ fn panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn root_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn root_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hexa(0x101828FF).into());
     style
 }
 
-fn virtual_surface_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn virtual_surface_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hexa(0x0F172AFF).into());
     style.surface.border_color = Some(Color::hexa(0x263244FF).into());
     style.surface.border_width = Some(dp(1.0).into());
@@ -285,8 +285,8 @@ fn virtual_surface_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn empty_state_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn empty_state_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hexa(0x0F172AFF).into());
     style.surface.border_color = Some(Color::hexa(0x334155FF).into());
     style.surface.border_width = Some(dp(1.0).into());
@@ -294,8 +294,8 @@ fn empty_state_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-fn contact_list_style(mode: ResolvedThemeMode) -> ListStyle {
-    let mut style = ListStyle::default_for(mode);
+fn contact_list_style(ctx: &StyleContext<'_>) -> ListStyle {
+    let mut style = ListStyle::default_for_theme(ctx.theme);
     style.item_height = dp(64.0);
     style.item_padding = Insets::symmetric(dp(12.0), dp(8.0));
     style.item_radius = dp(8.0);
@@ -307,39 +307,39 @@ fn contact_list_style(mode: ResolvedThemeMode) -> ListStyle {
     style
 }
 
-fn title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = sp(24.0);
     style.typography.weight = FontWeight::SemiBold;
     style.color = Color::hexa(0xF8FAFCFF).into();
     style
 }
 
-fn section_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn section_text_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = sp(13.0);
     style.typography.weight = FontWeight::SemiBold;
     style.color = Color::hexa(0x93C5FDFF).into();
     style
 }
 
-fn row_title_style(mode: ResolvedThemeMode, color: Color) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn row_title_style(ctx: &StyleContext<'_>, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = sp(15.0);
     style.typography.weight = FontWeight::Medium;
     style.color = color.into();
     style
 }
 
-fn muted_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn muted_text_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = sp(13.0);
     style.color = Color::hexa(0xCBD5E1FF).into();
     style
 }
 
-fn status_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = muted_text_style(mode);
+fn status_text_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = muted_text_style(ctx);
     style.color = Color::hexa(0xA7F3D0FF).into();
     style
 }

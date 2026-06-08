@@ -50,6 +50,7 @@ fn toast_host_emits_overlay_content_in_stack_order_and_tracks_wakeup() {
         viewport,
         now,
     );
+    let default_style_sheet = crate::ui::widget::StyleSheet::default();
     let collected = tree.collect_scene_cache_from_layout_with_focus_value_at(
         &font_manager,
         &layout,
@@ -76,6 +77,7 @@ fn toast_host_emits_overlay_content_in_stack_order_and_tracks_wakeup() {
         &HashMap::new(),
         None,
         None,
+        &default_style_sheet,
     );
 
     // Toast在1秒前创建，入场动画已完成（400ms），唤醒时间应该是最早的deadline
@@ -596,8 +598,8 @@ fn toast_close_button_aligns_to_card_trailing_edge() {
     );
 
     let tree = WidgetTree::new(Stack::new().child(Text::new("content")).child(
-        ToastHost::new(queue.clone()).style(|mode| {
-            let mut style = ToastStyle::default_for(mode);
+        ToastHost::new(queue.clone()).style_full(|ctx| {
+            let mut style = ToastStyle::default_for_theme(ctx.theme);
             style.max_width = dp(320.0);
             style.padding = Insets::all(dp(12.0));
             style
@@ -672,8 +674,8 @@ fn toast_kind_icon_is_centered_inside_circle() {
     );
 
     let tree = WidgetTree::new(Stack::new().child(Text::new("content")).child(
-        ToastHost::new(queue.clone()).style(|mode| {
-            let mut style = ToastStyle::default_for(mode);
+        ToastHost::new(queue.clone()).style_full(|ctx| {
+            let mut style = ToastStyle::default_for_theme(ctx.theme);
             style.max_width = dp(320.0);
             style.padding = Insets::all(dp(12.0));
             style

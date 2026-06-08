@@ -53,9 +53,11 @@ use super::common::{
 use super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::style::{
     ButtonStyle as WidgetButtonStyle, CheckboxStyle as WidgetCheckboxStyle,
-    InputStyle as WidgetInputStyle, RadioStyle as WidgetRadioStyle,
+    DividerStyle as WidgetDividerStyle, InputStyle as WidgetInputStyle,
+    ProgressBarStyle as WidgetProgressBarStyle, RadioStyle as WidgetRadioStyle,
     SelectStyle as WidgetSelectStyle, SliderStyle as WidgetSliderStyle,
-    SwitchStyle as WidgetSwitchStyle,
+    SpinnerStyle as WidgetSpinnerStyle, StyleResolver, SwitchStyle as WidgetSwitchStyle,
+    TextareaStyle as WidgetTextareaStyle, ToastStyle as WidgetToastStyle,
 };
 use super::text::{IntoTextContent, Text};
 
@@ -83,6 +85,7 @@ mod tree_query;
 mod tree_scene;
 mod types;
 
+pub use self::element::WidgetStyleExt;
 use self::element_path::resolve_subtree_from_source_path;
 use self::layout::*;
 use self::render::*;

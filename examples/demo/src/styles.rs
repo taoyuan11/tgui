@@ -5,36 +5,37 @@ fn with_alpha(color: Color, factor: f32) -> Color {
     Color::rgba(color.r, color.g, color.b, alpha)
 }
 
-pub(crate) fn text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+pub(crate) fn text_style(ctx: &StyleContext<'_>, size: Sp) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = size;
     style
 }
 
-pub(crate) fn title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = text_style(mode, sp(28.0));
+pub(crate) fn title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = text_style(ctx, sp(28.0));
     style.typography.weight = FontWeight::SemiBold;
     style
 }
 
-pub(crate) fn section_title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = text_style(mode, sp(20.0));
+pub(crate) fn section_title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = text_style(ctx, sp(20.0));
     style.typography.weight = FontWeight::SemiBold;
     style
 }
 
-pub(crate) fn usage_title_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = text_style(mode, sp(16.0));
+pub(crate) fn usage_title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = text_style(ctx, sp(16.0));
     style.typography.weight = FontWeight::SemiBold;
     style
 }
 
-pub(crate) fn status_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    muted_text_style(mode, sp(14.0))
+pub(crate) fn status_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    muted_text_style(ctx, sp(14.0))
 }
 
-pub(crate) fn muted_text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetStyle {
-    let mut style = text_style(mode, size);
+pub(crate) fn muted_text_style(ctx: &StyleContext<'_>, size: Sp) -> TextWidgetStyle {
+    let mode = ctx.mode;
+    let mut style = text_style(ctx, size);
     style.color = match mode {
         ResolvedThemeMode::Light => Color::hexa(0x475569FF).into(),
         ResolvedThemeMode::Dark => Color::hexa(0xCBD5E1FF).into(),
@@ -42,8 +43,9 @@ pub(crate) fn muted_text_style(mode: ResolvedThemeMode, size: Sp) -> TextWidgetS
     style
 }
 
-pub(crate) fn code_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
-    let mut style = text_style(mode, sp(13.0));
+pub(crate) fn code_text_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mode = ctx.mode;
+    let mut style = text_style(ctx, sp(13.0));
     style.color = match mode {
         ResolvedThemeMode::Light => Color::hexa(0x1F2937FF).into(),
         ResolvedThemeMode::Dark => Color::hexa(0xE5E7EBFF).into(),
@@ -51,8 +53,9 @@ pub(crate) fn code_text_style(mode: ResolvedThemeMode) -> TextWidgetStyle {
     style
 }
 
-pub(crate) fn root_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+pub(crate) fn root_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mode = ctx.mode;
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(
         match mode {
             ResolvedThemeMode::Light => Color::hexa(0xF8FAFCFF),
@@ -63,8 +66,9 @@ pub(crate) fn root_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-pub(crate) fn sidebar_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+pub(crate) fn sidebar_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mode = ctx.mode;
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(
         match mode {
             ResolvedThemeMode::Light => Color::hexa(0xFFFFFFFF),
@@ -83,9 +87,14 @@ pub(crate) fn sidebar_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-pub(crate) fn nav_item_style(mode: ResolvedThemeMode, active: bool, accent: u32) -> ContainerStyle {
+pub(crate) fn nav_item_style(
+    ctx: &StyleContext<'_>,
+    active: bool,
+    accent: u32,
+) -> ContainerStyle {
+    let mode = ctx.mode;
     let accent = Color::hexa(accent);
-    let mut style = ContainerStyle::default_for(mode);
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(
         match (mode, active) {
             (ResolvedThemeMode::Light, true) => with_alpha(accent, 0.12),
@@ -128,12 +137,13 @@ pub(crate) fn nav_item_style(mode: ResolvedThemeMode, active: bool, accent: u32)
 }
 
 pub(crate) fn nav_badge_style(
-    mode: ResolvedThemeMode,
+    ctx: &StyleContext<'_>,
     active: bool,
     accent: u32,
 ) -> ContainerStyle {
+    let mode = ctx.mode;
     let accent = Color::hexa(accent);
-    let mut style = ContainerStyle::default_for(mode);
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(
         if active {
             accent
@@ -157,8 +167,9 @@ pub(crate) fn nav_badge_style(
     style
 }
 
-pub(crate) fn nav_badge_text_style(mode: ResolvedThemeMode, active: bool) -> TextWidgetStyle {
-    let mut style = text_style(mode, sp(13.0));
+pub(crate) fn nav_badge_text_style(ctx: &StyleContext<'_>, active: bool) -> TextWidgetStyle {
+    let mode = ctx.mode;
+    let mut style = text_style(ctx, sp(13.0));
     style.typography.weight = FontWeight::SemiBold;
     style.color = if active {
         Color::hexa(0xFFFFFFFF).into()
@@ -172,8 +183,9 @@ pub(crate) fn nav_badge_text_style(mode: ResolvedThemeMode, active: bool) -> Tex
     style
 }
 
-pub(crate) fn nav_title_style(mode: ResolvedThemeMode, active: bool) -> TextWidgetStyle {
-    let mut style = text_style(mode, sp(14.0));
+pub(crate) fn nav_title_style(ctx: &StyleContext<'_>, active: bool) -> TextWidgetStyle {
+    let mode = ctx.mode;
+    let mut style = text_style(ctx, sp(14.0));
     style.typography.weight = FontWeight::SemiBold;
     style.color = match (mode, active) {
         (ResolvedThemeMode::Light, true) => Color::hexa(0x0F172AFF),
@@ -185,8 +197,9 @@ pub(crate) fn nav_title_style(mode: ResolvedThemeMode, active: bool) -> TextWidg
     style
 }
 
-pub(crate) fn nav_description_style(mode: ResolvedThemeMode, active: bool) -> TextWidgetStyle {
-    let mut style = text_style(mode, sp(12.0));
+pub(crate) fn nav_description_style(ctx: &StyleContext<'_>, active: bool) -> TextWidgetStyle {
+    let mode = ctx.mode;
+    let mut style = text_style(ctx, sp(12.0));
     style.color = match (mode, active) {
         (ResolvedThemeMode::Light, true) => Color::hexa(0x475569FF),
         (ResolvedThemeMode::Light, false) => Color::hexa(0x64748BFF),
@@ -197,8 +210,9 @@ pub(crate) fn nav_description_style(mode: ResolvedThemeMode, active: bool) -> Te
     style
 }
 
-pub(crate) fn component_card_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+pub(crate) fn component_card_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mode = ctx.mode;
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(
         match mode {
             ResolvedThemeMode::Light => Color::hexa(0xFFFFFFFF),
@@ -218,8 +232,9 @@ pub(crate) fn component_card_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-pub(crate) fn usage_card_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+pub(crate) fn usage_card_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mode = ctx.mode;
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(
         match mode {
             ResolvedThemeMode::Light => Color::hexa(0xF8FAFCFF),
@@ -239,8 +254,9 @@ pub(crate) fn usage_card_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-pub(crate) fn preview_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+pub(crate) fn preview_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mode = ctx.mode;
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(
         match mode {
             ResolvedThemeMode::Light => Color::hexa(0xFFFFFFFF),
@@ -260,8 +276,9 @@ pub(crate) fn preview_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-pub(crate) fn code_block_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+pub(crate) fn code_block_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mode = ctx.mode;
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(
         match mode {
             ResolvedThemeMode::Light => Color::hexa(0xF1F5F9FF),
@@ -281,8 +298,8 @@ pub(crate) fn code_block_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-pub(crate) fn shadow_showcase_style(_: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(ResolvedThemeMode::Light);
+pub(crate) fn shadow_showcase_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hexa(0xFFFFFFFF).into());
     style.surface.border_radius = Some(dp(50.0).into());
     style.surface.shadow = Some(
@@ -298,16 +315,17 @@ pub(crate) fn shadow_showcase_style(_: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-pub(crate) fn accent_tooltip_style(_: ResolvedThemeMode) -> TooltipStyle {
-    let mut style = TooltipStyle::default_for(ResolvedThemeMode::Dark);
+pub(crate) fn accent_tooltip_style(ctx: &StyleContext<'_>) -> TooltipStyle {
+    let mut style = TooltipStyle::default_for_theme(ctx.theme);
     style.background = Color::hexa(0x4F9CF9FF);
     style.foreground = Color::hexa(0x0B1220FF);
     style.radius = dp(8.0);
     style
 }
 
-pub(crate) fn popover_panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = component_card_style(mode);
+pub(crate) fn popover_panel_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mode = ctx.mode;
+    let mut style = component_card_style(ctx);
     style.surface.shadow = Some(
         Shadow {
             offset_x: dp(0.0),
@@ -325,14 +343,14 @@ pub(crate) fn popover_panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
     style
 }
 
-pub(crate) fn image_style(mode: ResolvedThemeMode) -> ImageStyle {
-    let mut style = ImageStyle::default_for(mode);
+pub(crate) fn image_style(ctx: &StyleContext<'_>) -> ImageStyle {
+    let mut style = ImageStyle::default_for_theme(ctx.theme);
     style.surface.border_radius = Some(dp(8.0).into());
     style
 }
 
-pub(crate) fn canvas_style(mode: ResolvedThemeMode) -> CanvasStyle {
-    let mut style = CanvasStyle::default_for(mode);
+pub(crate) fn canvas_style(ctx: &StyleContext<'_>) -> CanvasStyle {
+    let mut style = CanvasStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::rgb(15, 23, 42).into());
     style.surface.border_color = Some(Color::rgb(51, 65, 85).into());
     style.surface.border_width = Some(dp(1.0).into());
@@ -340,8 +358,9 @@ pub(crate) fn canvas_style(mode: ResolvedThemeMode) -> CanvasStyle {
     style
 }
 
-pub(crate) fn modern_toast_style(mode: ResolvedThemeMode) -> ToastStyle {
-    let mut style = ToastStyle::default_for(mode);
+pub(crate) fn modern_toast_style(ctx: &StyleContext<'_>) -> ToastStyle {
+    let mode = ctx.mode;
+    let mut style = ToastStyle::default_for_theme(ctx.theme);
     style.radius = Value::Static(dp(8.0));
     style.border_width = Value::Static(dp(0.0));
     style.padding = Insets::all(dp(12.0));

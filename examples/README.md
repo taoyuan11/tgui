@@ -154,6 +154,7 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 - `Button` / `Switch` / `Checkbox` / `Radio` / `Select`
 - `Tooltip` / `Popover` / `Tabs` / `Toast`
 - `List` / `DataGrid` / `Tree`
+- P3 组件：`Badge`、`Avatar`、`Skeleton`、`Collapse`、`Splitter`、`Breadcrumb`、`Pagination`、`Card`、`Rating`、`Icon`、`RichText`、`Carousel`、`Combobox`
 - `Input` / `Textarea`
 - `CommandContext::notifications()`
 - `Image`

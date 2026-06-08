@@ -1,7 +1,7 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{ContentFit, MediaBytes, MediaSource};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::super::common::{
@@ -229,12 +229,24 @@ impl Image {
         self
     }
 
-    /// 设置图片样式解析器。
+    /// 设置图片样式 patch。
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> ImageStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut ImageStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
-        self.style = Some(super::super::style::StyleResolver::new(resolver));
+        self.style = Some(super::super::style::StyleResolver::mutate(
+            |context| ImageStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    /// 完整替换图片样式解析器。
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> ImageStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(super::super::style::StyleResolver::full(resolver));
         self
     }
 
@@ -361,6 +373,8 @@ impl Image {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -396,6 +410,8 @@ impl Image {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -431,6 +447,8 @@ impl Image {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::Image { image: self },
         }
     }
@@ -465,6 +483,8 @@ impl<VM> From<Image> for Element<VM> {
             data_grid_cell: None,
             data_grid_header: None,
             data_grid_resize_handle: None,
+            splitter_handle: None,
+            carousel_auto_play: None,
             kind: WidgetKind::Image { image: value },
         }
     }

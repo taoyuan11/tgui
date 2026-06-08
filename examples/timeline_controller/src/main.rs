@@ -2,17 +2,12 @@ use std::time::Duration;
 
 use tgui::prelude::*;
 
-fn stateful<T: Clone>(value: T) -> Stateful<T> {
-    Stateful {
-        normal: value.clone(),
-        hovered: value.clone(),
-        pressed: value.clone(),
-        disabled: value,
-    }
+fn stateful<T: Clone>(value: T) -> StateValue<T> {
+    StateValue::new(value)
 }
 
-fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn text_style(ctx: &StyleContext<'_>, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = size;
     style.color = color.into();
     style
@@ -158,7 +153,7 @@ impl ViewModel for TimelineVm {
             .gap(dp(16.0))
             .child(
                 Text::new("Timeline controller")
-                    .style(|mode| text_style(mode, sp(28.0), Color::hexa(0xF8FAFCFF))),
+                    .style_full(|ctx| text_style(ctx, sp(28.0), Color::hexa(0xF8FAFCFF))),
             )
             .child(
                 Text::new(
@@ -166,7 +161,7 @@ impl ViewModel for TimelineVm {
                         .signal()
                         .map(|status| format!("Status: {status}")),
                 )
-                    .style(|mode| text_style(mode, sp(16.0), Color::hexa(0xCBD5E1FF))),
+                    .style_full(|ctx| text_style(ctx, sp(16.0), Color::hexa(0xCBD5E1FF))),
             )
             .child(
                 Flex::new(Axis::Horizontal)
@@ -185,11 +180,11 @@ impl ViewModel for TimelineVm {
                 Button::new("Timeline-driven card")
                     .width(self.card_width.signal())
                     .padding(self.card_padding.signal())
-                    .style({
+                    .style_full({
                         let color = self.card_color.signal();
                         let opacity = self.card_opacity.signal();
                         let offset = self.card_offset.signal();
-                        move |mode| ButtonStyle {
+                        move |ctx| ButtonStyle {
                             surface: WidgetSurfaceStyle {
                                 opacity: opacity.clone().into(),
                                 offset: offset.clone().into(),
@@ -204,7 +199,8 @@ impl ViewModel for TimelineVm {
                             padding_x: dp(18.0),
                             padding_y: dp(14.0),
                             min_height: dp(44.0),
-                            text_style: TextWidgetStyle::default_for(mode).typography,
+                            text_style: TextWidgetStyle::default_for_theme(ctx.theme)
+                                .typography,
                         }
                     }),
             )

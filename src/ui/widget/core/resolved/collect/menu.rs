@@ -41,8 +41,7 @@ impl<VM> ResolvedElement<VM> {
     ) {
         if let Some(menu) = &self.menu {
             if resolved_menu_open(self.id, menu, context) && !menu.disabled.resolve() {
-                let theme_mode = crate::ui::widget::style::infer_theme_mode(context.theme);
-                let style = Box::new(menu.resolved_style(theme_mode));
+                let style = Box::new(self.resolved_menu_style(menu, context, visual));
                 emit_menu_layer(
                     self,
                     context,
@@ -74,9 +73,8 @@ impl<VM> ResolvedElement<VM> {
         let Some(anchor) = context.context_menu_anchor_states.get(&self.id).copied() else {
             return;
         };
-        let theme_mode = crate::ui::widget::style::infer_theme_mode(context.theme);
-        let style = Box::new(menu.resolved_style(theme_mode));
         let descriptor = context_menu_as_menu_descriptor(menu);
+        let style = Box::new(self.resolved_menu_style(&descriptor, context, visual));
         emit_menu_layer(
             self,
             context,
@@ -87,6 +85,25 @@ impl<VM> ResolvedElement<VM> {
             Anchor::Point(anchor),
             Some(OverlayId::new(self.id.raw() ^ CONTEXT_MENU_OVERLAY_TAG)),
         );
+    }
+
+    fn resolved_menu_style(
+        &self,
+        menu: &MenuDescriptor<VM>,
+        context: &CollectContext<'_, '_>,
+        visual: &CollectVisualState,
+    ) -> MenuStyle {
+        let mut style = menu.resolved_style(&context.style_context);
+        context
+            .style_sheet
+            .apply_menu(&mut style, &context.style_context, &self.visual);
+        context.style_sheet.apply_menu_state(
+            &mut style,
+            &context.style_context,
+            &self.visual,
+            visual.widget_state,
+        );
+        style
     }
 }
 
@@ -388,8 +405,18 @@ pub(crate) fn emit_menu_layer<VM>(
             } => {
                 let item_rect = Rect::new(item_left, cursor_y, item_width, height);
                 let disabled = menu.items[index].disabled.resolve();
+                let is_checked = menu.items[index]
+                    .checked
+                    .as_ref()
+                    .map(|c| c.resolve())
+                    .unwrap_or(false);
                 let mut widget_state = context.widget_states.get_select_option(menu_id, index);
                 widget_state.disabled = disabled;
+                widget_state.selected = is_checked;
+                widget_state.checked = is_checked;
+                widget_state.open = matches!(menu.items[index].kind, MenuItemKind::Submenu)
+                    && widget_state.hovered
+                    && !menu.items[index].submenu.is_empty();
                 let item_bg = style.item_background.resolve(widget_state).resolve();
                 if item_bg.a > 0 {
                     primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Shape(
@@ -410,11 +437,6 @@ pub(crate) fn emit_menu_layer<VM>(
                 // 勾选列：仅当本项是 Checkable 且 checked = true 时画 ✓
                 let mut cursor_x = item_left + style.item_padding.left;
                 if any_checkable {
-                    let is_checked = menu.items[index]
-                        .checked
-                        .as_ref()
-                        .map(|c| c.resolve())
-                        .unwrap_or(false);
                     if is_checked {
                         let check_frame =
                             Rect::new(cursor_x, label_baseline_y, check_col_w_dp, text_h);

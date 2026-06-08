@@ -1,5 +1,5 @@
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Axis, Insets, LayoutStyle, Overflow, Value};
 use crate::ui::widget::button::Button;
 use crate::ui::widget::common::{TabPlacement, TabTriggerState, WidgetId};
@@ -235,9 +235,20 @@ impl<VM> Tabs<VM> {
 
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> TabsStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut TabsStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
-        self.style = Some(StyleResolver::new(resolver));
+        self.style = Some(StyleResolver::mutate(
+            |context| TabsStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> TabsStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 
@@ -380,16 +391,20 @@ fn build_tab_strip<VM: 'static>(
                 Overflow::Scroll
             })
             .show_scrollbar(false)
-            .style({
+            .style_full({
                 let style = style.clone();
-                move |mode| tab_bar_container_style(resolve_tabs_style(style.as_ref(), mode))
+                move |context| {
+                    tab_bar_container_style(resolve_tabs_style(style.as_ref(), context), context)
+                }
             })
             .child(list)
             .into(),
         TabsOverflowMode::More => Flex::new(axis)
-            .style({
+            .style_full({
                 let style = style.clone();
-                move |mode| tab_bar_container_style(resolve_tabs_style(style.as_ref(), mode))
+                move |context| {
+                    tab_bar_container_style(resolve_tabs_style(style.as_ref(), context), context)
+                }
             })
             .child(list)
             .into(),
@@ -427,9 +442,11 @@ fn build_triggers<VM: 'static>(
             .ghost()
             .disable(item.disabled.clone())
             .min_width(layout_style.tab_min_width)
-            .style({
+            .style_full({
                 let style = style.clone();
-                move |mode| tab_button_style(resolve_tabs_style(style.as_ref(), mode), mode, active)
+                move |context| {
+                    tab_button_style(resolve_tabs_style(style.as_ref(), context), context, active)
+                }
             });
         if !disabled_now {
             if let Some(command) = on_change.clone() {
@@ -533,9 +550,11 @@ fn build_more_trigger<VM: 'static>(
     let trigger = Button::new("More")
         .ghost()
         .min_width(layout_style.tab_min_width)
-        .style({
+        .style_full({
             let style = style.clone();
-            move |mode| tab_button_style(resolve_tabs_style(style.as_ref(), mode), mode, false)
+            move |context| {
+                tab_button_style(resolve_tabs_style(style.as_ref(), context), context, false)
+            }
         });
     Menu::new(trigger)
         .items(more_items)
@@ -560,9 +579,11 @@ fn build_panel<VM: 'static>(
     let mut panel = Flex::vertical()
         .grow(1.0)
         .padding(layout_style.panel_padding)
-        .style({
+        .style_full({
             let style = style.clone();
-            move |mode| panel_container_style(resolve_tabs_style(style.as_ref(), mode))
+            move |context| {
+                panel_container_style(resolve_tabs_style(style.as_ref(), context), context)
+            }
         });
 
     match selected {
@@ -587,54 +608,60 @@ fn selected_panel<VM>(panels: &[(String, Element<VM>)], selected: &str) -> Eleme
 
 fn resolve_tabs_style(
     style: Option<&StyleResolver<TabsStyle>>,
-    mode: ResolvedThemeMode,
+    context: &StyleContext<'_>,
 ) -> TabsStyle {
+    let mut base = TabsStyle::default_for_theme(context.theme);
+    context.theme.components.tabs.apply(&mut base, context);
     style
-        .map(|resolver| resolver.resolve(mode))
-        .unwrap_or_else(|| TabsStyle::default_for(mode))
+        .map(|resolver| resolver.resolve_from(base.clone(), context))
+        .unwrap_or(base)
 }
 
 fn resolve_tabs_style_for_layout(style: Option<&StyleResolver<TabsStyle>>) -> TabsStyle {
-    resolve_tabs_style(style, ResolvedThemeMode::Light)
+    let theme = crate::ui::theme::Theme::default();
+    let context = StyleContext::from_theme(&theme);
+    resolve_tabs_style(style, &context)
 }
 
-fn tab_button_style(style: TabsStyle, mode: ResolvedThemeMode, active: bool) -> ButtonStyle {
-    let mut button =
-        ButtonStyle::default_for(mode, crate::ui::widget::common::ButtonVariantKind::Ghost);
+fn tab_button_style(style: TabsStyle, context: &StyleContext<'_>, active: bool) -> ButtonStyle {
+    let mut button = ButtonStyle::default_for_theme(
+        context.theme,
+        crate::ui::widget::common::ButtonVariantKind::Ghost,
+    );
     button.background = if active {
-        crate::ui::theme::Stateful {
-            normal: style.active_tab_background.clone(),
-            hovered: style.active_tab_background.clone(),
-            pressed: style.active_tab_background.clone(),
-            disabled: style.tab_background.disabled.clone(),
-        }
+        crate::ui::theme::StateValue::interactive(
+            style.active_tab_background.clone(),
+            style.active_tab_background.clone(),
+            style.active_tab_background.clone(),
+            style.tab_background.disabled.clone(),
+        )
     } else {
         style.tab_background.clone()
     };
     button.foreground = if active {
-        crate::ui::theme::Stateful {
-            normal: style.active_tab_foreground.clone(),
-            hovered: style.active_tab_foreground.clone(),
-            pressed: style.active_tab_foreground.clone(),
-            disabled: style.tab_foreground.disabled.clone(),
-        }
+        crate::ui::theme::StateValue::interactive(
+            style.active_tab_foreground.clone(),
+            style.active_tab_foreground.clone(),
+            style.active_tab_foreground.clone(),
+            style.tab_foreground.disabled.clone(),
+        )
     } else {
         style.tab_foreground.clone()
     };
     button.border = if active {
-        crate::ui::theme::Stateful {
-            normal: style.indicator_color.clone(),
-            hovered: style.indicator_color.clone(),
-            pressed: style.indicator_color.clone(),
-            disabled: style.border.clone(),
-        }
+        crate::ui::theme::StateValue::interactive(
+            style.indicator_color.clone(),
+            style.indicator_color.clone(),
+            style.indicator_color.clone(),
+            style.border.clone(),
+        )
     } else {
-        crate::ui::theme::Stateful {
-            normal: crate::foundation::color::Color::TRANSPARENT.into(),
-            hovered: style.border.clone(),
-            pressed: style.border.clone(),
-            disabled: crate::foundation::color::Color::TRANSPARENT.into(),
-        }
+        crate::ui::theme::StateValue::interactive(
+            crate::foundation::color::Color::TRANSPARENT.into(),
+            style.border.clone(),
+            style.border.clone(),
+            crate::foundation::color::Color::TRANSPARENT.into(),
+        )
     };
     button.border_width = if active {
         style.indicator_thickness.into()
@@ -649,8 +676,8 @@ fn tab_button_style(style: TabsStyle, mode: ResolvedThemeMode, active: bool) -> 
     button
 }
 
-fn tab_bar_container_style(style: TabsStyle) -> ContainerStyle {
-    let mut container = ContainerStyle::default_for(ResolvedThemeMode::Light);
+fn tab_bar_container_style(style: TabsStyle, context: &StyleContext<'_>) -> ContainerStyle {
+    let mut container = ContainerStyle::default_for_theme(context.theme);
     container.surface = style.surface;
     container.surface.background = Some(style.tab_bar_background);
     container.surface.border_color = Some(style.border);
@@ -659,8 +686,8 @@ fn tab_bar_container_style(style: TabsStyle) -> ContainerStyle {
     container
 }
 
-fn panel_container_style(style: TabsStyle) -> ContainerStyle {
-    let mut container = ContainerStyle::default_for(ResolvedThemeMode::Light);
+fn panel_container_style(style: TabsStyle, context: &StyleContext<'_>) -> ContainerStyle {
+    let mut container = ContainerStyle::default_for_theme(context.theme);
     container.surface.background = Some(style.panel_background);
     container.surface.border_color = Some(style.border);
     container.surface.border_width = Some(style.border_width);

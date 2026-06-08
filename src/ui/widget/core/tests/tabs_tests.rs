@@ -1,5 +1,4 @@
 use super::*;
-use crate::theme::ResolvedThemeMode;
 use crate::widgets::{TabItem, Tabs, TabsOverflowMode, TabsStyle};
 
 fn tabs_tree(selected: &str) -> WidgetTree<()> {
@@ -91,8 +90,8 @@ fn disabled_tabs_do_not_create_tab_trigger_hit_region() {
 
 #[test]
 fn tabs_style_defaults_resolve_for_light_and_dark() {
-    let light = TabsStyle::default_for(ResolvedThemeMode::Light);
-    let dark = TabsStyle::default_for(ResolvedThemeMode::Dark);
+    let light = TabsStyle::default_for_theme(&Theme::light());
+    let dark = TabsStyle::default_for_theme(&Theme::dark());
 
     assert_ne!(
         light.active_tab_foreground.resolve(),

@@ -94,16 +94,21 @@ impl<VM> PartialEq for ResolvedWidgetKind<VM> {
                 Self::Button {
                     label: left_label,
                     disabled: left_disabled,
+                    variant: left_variant,
                     style: left_style,
+                    ..
                 },
                 Self::Button {
                     label: right_label,
                     disabled: right_disabled,
+                    variant: right_variant,
                     style: right_style,
+                    ..
                 },
             ) => {
                 left_label == right_label
                     && left_disabled == right_disabled
+                    && left_variant == right_variant
                     && left_style == right_style
             }
             (

@@ -187,6 +187,18 @@ pub(crate) struct App {
     pub data_team_width: State<Dp>,
     pub data_status_width: State<Dp>,
     pub data_status: State<String>,
+
+    pub p3_collapse_open: State<bool>,
+    pub p3_accordion_key: State<Option<String>>,
+    pub p3_splitter_sizes: State<Vec<f32>>,
+    pub p3_page: State<usize>,
+    pub p3_page_size: State<usize>,
+    pub p3_rating: State<f32>,
+    pub p3_carousel: State<usize>,
+    pub p3_combobox_text: TextController,
+    pub p3_combobox_open: State<bool>,
+    pub p3_combobox_selected: State<Option<String>>,
+    pub p3_status: State<String>,
 }
 
 impl ViewModel for App {
@@ -374,6 +386,17 @@ impl ViewModel for App {
             data_team_width: context.state(dp(160.0)),
             data_status_width: context.state(dp(180.0)),
             data_status: context.state("点击表头、拖动列边缘、重排列或右键单元格。".to_string()),
+            p3_collapse_open: context.state(true),
+            p3_accordion_key: context.state(Some("usage".to_string())),
+            p3_splitter_sizes: context.state(vec![0.42, 0.58]),
+            p3_page: context.state(3),
+            p3_page_size: context.state(25),
+            p3_rating: context.state(3.5),
+            p3_carousel: context.state(0),
+            p3_combobox_text: context.text_controller(""),
+            p3_combobox_open: context.state(false),
+            p3_combobox_selected: context.state(None),
+            p3_status: context.state("P3 组件已就绪。".to_string()),
         }
     }
 
@@ -382,7 +405,7 @@ impl ViewModel for App {
         let content_app = self.clone();
         Stack::new()
             .size(pct(100.0), pct(100.0))
-            .style(styles::root_style)
+            .style_full(styles::root_style)
             .child(
                 Flex::horizontal()
                     .size(pct(100.0), pct(100.0))
@@ -401,31 +424,31 @@ impl ViewModel for App {
                         ),
                     ),
             )
-            .child(ToastHost::new(self.toast_queue.clone()).style(styles::modern_toast_style))
+            .child(ToastHost::new(self.toast_queue.clone()).style_full(styles::modern_toast_style))
             .child(
                 ToastHost::new(self.toast_top_start.clone())
                     .placement(ToastPlacement::TopStart)
-                    .style(styles::modern_toast_style),
+                    .style_full(styles::modern_toast_style),
             )
             .child(
                 ToastHost::new(self.toast_top_center.clone())
                     .placement(ToastPlacement::TopCenter)
-                    .style(styles::modern_toast_style),
+                    .style_full(styles::modern_toast_style),
             )
             .child(
                 ToastHost::new(self.toast_top_end.clone())
                     .placement(ToastPlacement::TopEnd)
-                    .style(styles::modern_toast_style),
+                    .style_full(styles::modern_toast_style),
             )
             .child(
                 ToastHost::new(self.toast_bottom_start.clone())
                     .placement(ToastPlacement::BottomStart)
-                    .style(styles::modern_toast_style),
+                    .style_full(styles::modern_toast_style),
             )
             .child(
                 ToastHost::new(self.toast_bottom_center.clone())
                     .placement(ToastPlacement::BottomCenter)
-                    .style(styles::modern_toast_style),
+                    .style_full(styles::modern_toast_style),
             )
             .into()
     }

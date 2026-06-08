@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{pct, Align, Insets, LayoutStyle, Overflow, ScrollbarStyle, Value};
 use crate::ui::unit::{dp, Dp};
 
@@ -14,7 +14,8 @@ use super::common::{
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
 use super::r#virtual::{ItemLayout, ItemSource, VirtualList};
-use super::style::{StyleResolver, WidgetSurfaceStyle};
+use super::style::palette::palette_from_theme;
+use super::style::{merge_surface_style, StyleResolver, WidgetSurfaceStyle};
 use super::{
     ContainerStyle, ContextMenuDescriptor, Flex, GestureRecognizer, LongPressEvent, MenuItem,
     MenuItemState, Stack, Text, TextWidgetStyle,
@@ -340,81 +341,33 @@ pub struct DataGridStyle {
 }
 
 impl DataGridStyle {
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let dark = matches!(mode, ResolvedThemeMode::Dark);
+    pub fn default_for_theme(theme: &crate::ui::theme::Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle {
-                background: Some(Value::Static(if dark {
-                    Color::hexa(0x111827FF)
-                } else {
-                    Color::hexa(0xFFFFFFFF)
-                })),
-                border_color: Some(Value::Static(if dark {
-                    Color::hexa(0x334155FF)
-                } else {
-                    Color::hexa(0xCBD5E1FF)
-                })),
-                border_width: Some(Value::Static(dp(1.0))),
-                border_radius: Some(Value::Static(dp(6.0))),
+                background: Some(Value::Static(theme.colors.surface)),
+                border_color: Some(Value::Static(theme.colors.outline)),
+                border_width: Some(Value::Static(theme.border.thin)),
+                border_radius: Some(Value::Static(theme.radius.md)),
                 ..WidgetSurfaceStyle::default()
             },
-            header_height: dp(38.0),
-            compact_row_height: dp(32.0),
-            regular_row_height: dp(40.0),
-            spacious_row_height: dp(48.0),
-            cell_padding: Insets::symmetric(dp(10.0), dp(6.0)),
-            header_background: Value::Static(if dark {
-                Color::hexa(0x1E293BFF)
-            } else {
-                Color::hexa(0xF8FAFCFF)
-            }),
-            header_text: Value::Static(if dark {
-                Color::hexa(0xE2E8F0FF)
-            } else {
-                Color::hexa(0x334155FF)
-            }),
+            header_height: theme.spacing.xl + theme.spacing.sm,
+            compact_row_height: theme.spacing.xl,
+            regular_row_height: theme.spacing.xl + theme.spacing.sm,
+            spacious_row_height: theme.spacing.xxl,
+            cell_padding: Insets::symmetric(theme.spacing.md, theme.spacing.xs + theme.spacing.xxs),
+            header_background: Value::Static(theme.colors.surface_low),
+            header_text: Value::Static(palette.on_surface),
             row_background: Value::Static(Color::TRANSPARENT),
-            zebra_background: Value::Static(if dark {
-                Color::hexa(0xFFFFFF08)
-            } else {
-                Color::hexa(0x0F172A05)
-            }),
-            row_hover_background: Value::Static(if dark {
-                Color::hexa(0xFFFFFF12)
-            } else {
-                Color::hexa(0x0F172A0A)
-            }),
-            row_selected_background: Value::Static(if dark {
-                Color::hexa(0x5EA2FF38)
-            } else {
-                Color::hexa(0x2563EB20)
-            }),
-            cell_focused_border: Value::Static(if dark {
-                Color::hexa(0x93C5FDFF)
-            } else {
-                Color::hexa(0x2563EBFF)
-            }),
-            cell_editing_background: Value::Static(if dark {
-                Color::hexa(0x0F172AFF)
-            } else {
-                Color::hexa(0xFFFFFFFF)
-            }),
-            grid_line: Value::Static(if dark {
-                Color::hexa(0x334155FF)
-            } else {
-                Color::hexa(0xE2E8F0FF)
-            }),
-            resize_handle: Value::Static(if dark {
-                Color::hexa(0x64748BFF)
-            } else {
-                Color::hexa(0x94A3B8FF)
-            }),
-            sort_indicator: Value::Static(if dark {
-                Color::hexa(0xBFDBFEFF)
-            } else {
-                Color::hexa(0x1D4ED8FF)
-            }),
-            scrollbar: ScrollbarStyle::default(),
+            zebra_background: Value::Static(theme.colors.surface_low.with_alpha_factor(0.48)),
+            row_hover_background: Value::Static(theme.colors.surface_high.with_alpha_factor(0.72)),
+            row_selected_background: Value::Static(theme.colors.primary.with_alpha_factor(0.14)),
+            cell_focused_border: Value::Static(theme.colors.primary),
+            cell_editing_background: Value::Static(theme.colors.surface),
+            grid_line: Value::Static(theme.colors.outline_muted),
+            resize_handle: Value::Static(theme.colors.outline),
+            sort_indicator: Value::Static(theme.colors.primary),
+            scrollbar: ContainerStyle::default_for_theme(theme).scrollbar,
         }
     }
 
@@ -664,9 +617,20 @@ where
 
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> DataGridStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut DataGridStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
-        self.style = Some(StyleResolver::new(resolver));
+        self.style = Some(StyleResolver::mutate(
+            |context| DataGridStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> DataGridStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 
@@ -876,7 +840,7 @@ where
 
         let grid_id = WidgetId::next();
         let style_resolver = self.style.clone();
-        let style = resolve_data_grid_style(style_resolver.as_ref(), ResolvedThemeMode::Light);
+        let style = resolve_data_grid_style_for_layout(style_resolver.as_ref());
         let row_height = self
             .row_height
             .unwrap_or_else(|| style.row_height(self.density));
@@ -982,11 +946,11 @@ where
             .overflow_x(Overflow::Scroll)
             .overflow_y(Overflow::Scroll)
             .grow(1.0)
-            .style({
+            .style_full({
                 let style_resolver = body_style_resolver;
-                move |mode| {
-                    let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
-                    let mut container = ContainerStyle::default_for(mode);
+                move |context| {
+                    let style = resolve_data_grid_style(style_resolver.as_ref(), context);
+                    let mut container = ContainerStyle::default_for_theme(context.theme);
                     container.scrollbar = style.scrollbar;
                     container.surface.background = style.surface.background.clone();
                     container
@@ -1017,18 +981,7 @@ where
             selection_mode,
             selected_keys,
         });
-        if let Some(background) = style.surface.background.clone() {
-            root.background = Some(background);
-        }
-        root.visual.background_brush = style.surface.background_brush.clone();
-        root.visual.background_image = style.surface.background_image.clone();
-        root.visual.background_blur = style.surface.background_blur.clone();
-        root.visual.shadow = style.surface.shadow.clone();
-        root.visual.border_color = style.surface.border_color.clone();
-        root.visual.border_radius = style.surface.border_radius.clone();
-        root.visual.border_width = style.surface.border_width.clone();
-        root.visual.opacity = style.surface.opacity.clone();
-        root.visual.offset = style.surface.offset.clone();
+        merge_surface_style(&mut root.background, &mut root.visual, &style.surface);
         apply_data_grid_root_style(&mut root, style_resolver);
         root
     }
@@ -1297,19 +1250,29 @@ enum DataGridTextRole {
 
 fn resolve_data_grid_style(
     style: Option<&StyleResolver<DataGridStyle>>,
-    mode: ResolvedThemeMode,
+    context: &StyleContext<'_>,
 ) -> DataGridStyle {
+    let mut base = DataGridStyle::default_for_theme(context.theme);
+    context.theme.components.data_grid.apply(&mut base, context);
     style
-        .map(|resolver| resolver.resolve(mode))
-        .unwrap_or_else(|| DataGridStyle::default_for(mode))
+        .map(|resolver| resolver.resolve_from(base.clone(), context))
+        .unwrap_or(base)
+}
+
+fn resolve_data_grid_style_for_layout(
+    style: Option<&StyleResolver<DataGridStyle>>,
+) -> DataGridStyle {
+    let theme = crate::ui::theme::Theme::default();
+    let context = StyleContext::from_theme(&theme);
+    resolve_data_grid_style(style, &context)
 }
 
 fn apply_container_style<VM>(
     element: &mut Element<VM>,
-    resolver: impl Fn(ResolvedThemeMode) -> ContainerStyle + Send + Sync + 'static,
+    resolver: impl Fn(&StyleContext<'_>) -> ContainerStyle + Send + Sync + 'static,
 ) {
     if let WidgetKind::Container { style, .. } = &mut element.kind {
-        *style = Some(StyleResolver::new(resolver));
+        *style = Some(StyleResolver::full(resolver));
     }
 }
 
@@ -1317,9 +1280,9 @@ fn apply_data_grid_root_style<VM>(
     element: &mut Element<VM>,
     style_resolver: Option<StyleResolver<DataGridStyle>>,
 ) {
-    apply_container_style(element, move |mode| {
-        let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
-        let mut container = ContainerStyle::default_for(mode);
+    apply_container_style(element, move |context| {
+        let style = resolve_data_grid_style(style_resolver.as_ref(), context);
+        let mut container = ContainerStyle::default_for_theme(context.theme);
         container.scrollbar = style.scrollbar;
         container.surface.background = style.surface.background;
         container.surface.background_brush = style.surface.background_brush;
@@ -1336,9 +1299,9 @@ fn apply_data_grid_header_container_style<VM>(
     element: &mut Element<VM>,
     style_resolver: Option<StyleResolver<DataGridStyle>>,
 ) {
-    apply_container_style(element, move |mode| {
-        let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
-        let mut container = ContainerStyle::default_for(mode);
+    apply_container_style(element, move |context| {
+        let style = resolve_data_grid_style(style_resolver.as_ref(), context);
+        let mut container = ContainerStyle::default_for_theme(context.theme);
         container.surface.background = Some(style.header_background);
         container
     });
@@ -1350,8 +1313,8 @@ fn apply_data_grid_row_container_style<VM>(
     selected: bool,
     row_index: usize,
 ) {
-    apply_container_style(element, move |mode| {
-        let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
+    apply_container_style(element, move |context| {
+        let style = resolve_data_grid_style(style_resolver.as_ref(), context);
         let background = if selected {
             style.row_selected_background
         } else if row_index % 2 == 1 {
@@ -1359,7 +1322,7 @@ fn apply_data_grid_row_container_style<VM>(
         } else {
             style.row_background
         };
-        let mut container = ContainerStyle::default_for(mode);
+        let mut container = ContainerStyle::default_for_theme(context.theme);
         container.surface.background = Some(background);
         container
     });
@@ -1369,9 +1332,9 @@ fn apply_data_grid_cell_container_style<VM>(
     element: &mut Element<VM>,
     style_resolver: Option<StyleResolver<DataGridStyle>>,
 ) {
-    apply_container_style(element, move |mode| {
-        let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
-        let mut container = ContainerStyle::default_for(mode);
+    apply_container_style(element, move |context| {
+        let style = resolve_data_grid_style(style_resolver.as_ref(), context);
+        let mut container = ContainerStyle::default_for_theme(context.theme);
         container.surface.border_color = Some(style.grid_line);
         container.surface.border_width = Some(Value::Static(dp(0.5)));
         container
@@ -1385,9 +1348,9 @@ fn apply_default_data_grid_text_style<VM>(
 ) {
     match &mut element.kind {
         WidgetKind::Text { text } if text.style.is_none() => {
-            text.style = Some(StyleResolver::new(move |mode| {
-                let style = resolve_data_grid_style(style_resolver.as_ref(), mode);
-                let mut text_style = TextWidgetStyle::default_for(mode);
+            text.style = Some(StyleResolver::full(move |context| {
+                let style = resolve_data_grid_style(style_resolver.as_ref(), context);
+                let mut text_style = TextWidgetStyle::default_for_theme(context.theme);
                 text_style.color = match role {
                     DataGridTextRole::Header | DataGridTextRole::Cell => style.header_text,
                 };

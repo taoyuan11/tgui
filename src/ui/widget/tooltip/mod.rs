@@ -10,11 +10,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::Value;
 use crate::ui::widget::core::Element;
 use crate::ui::widget::overlay::{FlipPolicy, Placement};
-use crate::ui::widget::style::TooltipStyle;
+use crate::ui::widget::style::{StyleResolver, TooltipStyle};
 
 /// 默认 hover 延迟。与 Material / Web 平台习惯一致。
 pub const TOOLTIP_DEFAULT_DELAY: Duration = Duration::from_millis(500);
@@ -25,7 +25,7 @@ pub struct Tooltip<VM = ()> {
     pub(crate) placement: Placement,
     pub(crate) flip_policy: FlipPolicy,
     pub(crate) delay: Duration,
-    pub(crate) style: Option<TooltipStyle>,
+    pub(crate) style: Option<StyleResolver<TooltipStyle>>,
 }
 
 pub(crate) enum TooltipContent<VM = ()> {
@@ -96,17 +96,35 @@ impl<VM> Tooltip<VM> {
         self
     }
 
-    /// 覆盖默认主题样式。
-    pub fn style(mut self, style: TooltipStyle) -> Self {
-        self.style = Some(style);
+    /// Patch the theme-derived style.
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut TooltipStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| TooltipStyle::default_for_theme(context.theme),
+            mutator,
+        ));
         self
     }
 
-    /// 按主题模式解析最终样式（用户未提供则取主题默认值）。
-    pub(crate) fn resolved_style(&self, mode: ResolvedThemeMode) -> TooltipStyle {
+    /// Replace the full resolved style.
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> TooltipStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
+        self
+    }
+
+    /// 按当前主题解析最终样式（用户未提供则取主题默认值）。
+    pub(crate) fn resolved_style(&self, context: &StyleContext<'_>) -> TooltipStyle {
+        let mut base = TooltipStyle::default_for_theme(context.theme);
+        context.theme.components.tooltip.apply(&mut base, context);
         self.style
-            .clone()
-            .unwrap_or_else(|| TooltipStyle::default_for(mode))
+            .as_ref()
+            .map(|resolver| resolver.resolve_from(base.clone(), context))
+            .unwrap_or(base)
     }
 
     pub(crate) fn scope<RootVm: 'static>(

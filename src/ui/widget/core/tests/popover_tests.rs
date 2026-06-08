@@ -1,7 +1,6 @@
 pub(super) use super::*;
 
 use crate::foundation::view_model::ValueCommand;
-use crate::theme::ResolvedThemeMode;
 use crate::ui::widget::Flex;
 use crate::ui::widget::{Button, Popover, PopoverStyle, PopoverTriggerMode};
 
@@ -97,13 +96,13 @@ fn popover_pointer_style_emits_overlay_mesh() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();
-    let mut style = PopoverStyle::default_for(ResolvedThemeMode::Light);
+    let mut style = PopoverStyle::default_for_theme(&Theme::light());
     style.pointer_size = Some(dp(8.0));
 
     let tree: WidgetTree<()> = WidgetTree::new(
         Popover::new(Button::new("More").size(dp(90.0), dp(36.0)))
             .content(Text::new("popover body"))
-            .style(style)
+            .style_full(move |_| style.clone())
             .open(true),
     );
 
@@ -132,7 +131,7 @@ fn popover_pointer_style_emits_overlay_mesh() {
 
 #[test]
 fn popover_style_defaults_match_expected_baseline() {
-    let light = PopoverStyle::default_for(ResolvedThemeMode::Light);
+    let light = PopoverStyle::default_for_theme(&Theme::light());
     assert_eq!(light.padding, Insets::all(dp(12.0)));
     assert_eq!(light.min_width, dp(220.0));
     assert_eq!(light.offset, dp(8.0));

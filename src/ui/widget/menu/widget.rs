@@ -17,9 +17,10 @@
 
 use crate::foundation::view_model::ValueCommand;
 use crate::ui::layout::Value;
+use crate::ui::theme::StyleContext;
 use crate::ui::widget::core::Element;
 use crate::ui::widget::overlay::{Alignment, FlipPolicy, Placement};
-use crate::ui::widget::style::MenuStyle;
+use crate::ui::widget::style::{MenuStyle, StyleResolver};
 
 use super::descriptor::{MenuDescriptor, MenuItemState};
 use super::types::{MenuBarGroupId, MenuItem};
@@ -34,7 +35,7 @@ pub struct Menu<VM> {
     placement: Placement,
     flip_policy: FlipPolicy,
     disabled: Value<bool>,
-    style: Option<MenuStyle>,
+    style: Option<StyleResolver<MenuStyle>>,
     menubar_group: Option<MenuBarGroupId>,
     menubar_index: Option<usize>,
     menubar_set_active: Option<ValueCommand<VM, Option<usize>>>,
@@ -101,9 +102,24 @@ impl<VM> Menu<VM> {
         self
     }
 
-    /// 覆盖默认主题样式。
-    pub fn style(mut self, style: MenuStyle) -> Self {
-        self.style = Some(style);
+    /// Patch the theme-derived style.
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut MenuStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| MenuStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    /// Replace the full resolved style.
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> MenuStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 

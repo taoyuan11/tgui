@@ -113,8 +113,8 @@ fn input_uses_custom_selection_and_caret_colors() {
     let mut animations = AnimationEngine::default();
     let selection = Color::hexa(0x11AA33FF);
     let caret = Color::hexa(0xCC2211FF);
-    let tree: WidgetTree<()> = WidgetTree::new(Input::new("hello").style(move |mode| {
-        let mut style = InputStyle::default_for(mode);
+    let tree: WidgetTree<()> = WidgetTree::new(Input::new("hello").style_full(move |ctx| {
+        let mut style = InputStyle::default_for_theme(ctx.theme);
         style.selection = Some(selection.into());
         style.caret = Some(caret.into());
         style

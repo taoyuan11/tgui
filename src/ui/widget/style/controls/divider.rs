@@ -23,18 +23,18 @@ pub struct DividerStyle {
 }
 
 impl DividerStyle {
-    pub fn default_for(mode: ResolvedThemeMode) -> Self {
-        let palette = palette(mode);
+    pub fn default_for_theme(theme: &Theme) -> Self {
+        let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            color: Value::Static(palette.outline),
-            thickness: Value::Static(dp(1.0)),
-            dash_length: dp(4.0),
-            dash_gap: dp(3.0),
-            inset: Value::Static(dp(0.0)),
-            label_color: Value::Static(palette.on_surface),
-            label_gap: dp(8.0),
-            text_style: label_text_style(),
+            color: Value::Static(palette.outline_muted),
+            thickness: Value::Static(theme.border.thin),
+            dash_length: theme.spacing.xs,
+            dash_gap: theme.spacing.xs,
+            inset: Value::Static(Dp::ZERO),
+            label_color: Value::Static(palette.on_surface_muted),
+            label_gap: theme.spacing.sm,
+            text_style: theme.typography.label.clone(),
         }
     }
 }

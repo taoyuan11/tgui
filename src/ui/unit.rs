@@ -356,6 +356,10 @@ impl UnitContext {
         self.scale_factor
     }
 
+    pub(crate) fn font_scale(self) -> f32 {
+        self.font_scale
+    }
+
     pub(crate) fn resolve_dp(self, value: Dp) -> f32 {
         value.get()
     }

@@ -65,6 +65,7 @@ impl<VM> ResolvedElement<VM> {
                 show_label,
                 label,
                 style,
+                ..
             } => MeasureContext::ProgressBar {
                 id: self.id,
                 value: value.clone(),
@@ -78,6 +79,7 @@ impl<VM> ResolvedElement<VM> {
                 size_override,
                 thickness_override,
                 track_override,
+                ..
             } => MeasureContext::Spinner {
                 id: self.id,
                 style: style.clone(),

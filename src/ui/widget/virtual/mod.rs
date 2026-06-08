@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::ResolvedThemeMode;
+use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, Overflow, Value};
 use crate::ui::unit::{dp, Dp};
 
@@ -15,7 +15,7 @@ use super::common::{
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
-use super::style::StyleResolver;
+use super::style::{StyleResolver, StyleSheet};
 use super::ContainerStyle;
 
 pub trait ItemSource<T>: Send + Sync + 'static {
@@ -455,10 +455,14 @@ pub(crate) fn resolve_virtual_window_plan(
     }
 }
 
+type VirtualBuildFn<VM> = dyn for<'a, 'b> Fn(usize, StyleContext<'a>, &'b StyleSheet) -> Option<Element<VM>>
+    + Send
+    + Sync;
+
 pub(crate) struct ErasedVirtualItemSource<VM> {
     len_fn: Arc<dyn Fn() -> usize + Send + Sync>,
     key_fn: Arc<dyn Fn(usize) -> Option<WidgetKey> + Send + Sync>,
-    build_fn: Arc<dyn Fn(usize) -> Option<Element<VM>> + Send + Sync>,
+    build_fn: Arc<VirtualBuildFn<VM>>,
 }
 
 impl<VM> Clone for ErasedVirtualItemSource<VM> {
@@ -489,9 +493,37 @@ impl<VM: 'static> ErasedVirtualItemSource<VM> {
                 let source = source.clone();
                 Arc::new(move |index| source.key(index))
             },
-            build_fn: Arc::new(move |index| {
+            build_fn: Arc::new(move |index, _context, _style_sheet| {
                 let item = source.item(index)?;
                 Some(render(index, &item))
+            }),
+        }
+    }
+
+    pub(crate) fn new_with_style_context<T, S>(
+        source: Arc<S>,
+        render: Arc<
+            dyn for<'a, 'b> Fn(usize, &T, StyleContext<'a>, &'b StyleSheet) -> Element<VM>
+                + Send
+                + Sync,
+        >,
+    ) -> Self
+    where
+        T: Send + Sync + 'static,
+        S: ItemSource<T>,
+    {
+        Self {
+            len_fn: {
+                let source = source.clone();
+                Arc::new(move || source.len())
+            },
+            key_fn: {
+                let source = source.clone();
+                Arc::new(move |index| source.key(index))
+            },
+            build_fn: Arc::new(move |index, context, style_sheet| {
+                let item = source.item(index)?;
+                Some(render(index, &item, context, style_sheet))
             }),
         }
     }
@@ -513,7 +545,7 @@ impl<VM: 'static> ErasedVirtualItemSource<VM> {
                 let source = source.clone();
                 Arc::new(move |index| source.key(index))
             },
-            build_fn: Arc::new(move |index| {
+            build_fn: Arc::new(move |index, _context, _style_sheet| {
                 let item = source.item(index)?;
                 let key = source.key(index).unwrap_or_else(|| WidgetKey::from(index));
                 Some(render(crate::ui::widget::ListItemContext {
@@ -535,8 +567,13 @@ impl<VM: 'static> ErasedVirtualItemSource<VM> {
         (self.key_fn)(index)
     }
 
-    pub(crate) fn build(&self, index: usize) -> Option<Element<VM>> {
-        (self.build_fn)(index)
+    pub(crate) fn build(
+        &self,
+        index: usize,
+        context: StyleContext<'_>,
+        style_sheet: &StyleSheet,
+    ) -> Option<Element<VM>> {
+        (self.build_fn)(index, context, style_sheet)
     }
 
     pub(crate) fn scope<RootVm: 'static>(
@@ -552,8 +589,9 @@ impl<VM: 'static> ErasedVirtualItemSource<VM> {
         ErasedVirtualItemSource {
             len_fn,
             key_fn,
-            build_fn: Arc::new(move |index| {
-                build_fn(index).map(|element| element.scope_with_selector(selector.clone()))
+            build_fn: Arc::new(move |index, context, style_sheet| {
+                build_fn(index, context, style_sheet)
+                    .map(|element| element.scope_with_selector(selector.clone()))
             }),
         }
     }
@@ -607,10 +645,74 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
                 data_grid_cell: None,
                 data_grid_header: None,
                 data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
                 kind: WidgetKind::Virtual {
                     arrangement,
                     item_layout,
                     source: ErasedVirtualItemSource::new::<T, S>(source, render),
+                    content_cross_extent: None,
+                    overflow_x,
+                    overflow_y,
+                    style: None,
+                    runtime_state: VirtualRuntimeState::default(),
+                },
+            },
+            marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn new_with_style_context<S>(
+        source: S,
+        arrangement: VirtualArrangement,
+        item_layout: ItemLayout,
+        render: impl for<'a, 'b> Fn(usize, &T, StyleContext<'a>, &'b StyleSheet) -> Element<VM>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self
+    where
+        T: Send + Sync + 'static,
+        S: ItemSource<T>,
+    {
+        let source = Arc::new(source);
+        let render = Arc::new(render);
+        let (overflow_x, overflow_y) = match arrangement.direction() {
+            VirtualDirection::Vertical => (Overflow::Hidden, Overflow::Scroll),
+            VirtualDirection::Horizontal => (Overflow::Scroll, Overflow::Hidden),
+        };
+
+        Self {
+            element: Element {
+                id: WidgetId::next(),
+                key: None,
+                layout: crate::ui::layout::LayoutStyle::default(),
+                focus: Default::default(),
+                visual: VisualStyle::default(),
+                interactions: InteractionHandlers::default(),
+                lifecycle_events: LifecycleEventHandlers::default(),
+                media_events: MediaEventHandlers::default(),
+                background: None,
+                tooltip: None,
+                popover: None,
+                menu: None,
+                context_menu: None,
+                modal: None,
+                drawer: None,
+                tab_trigger: None,
+                list_item: None,
+                tree_root: None,
+                tree_node: None,
+                data_grid_root: None,
+                data_grid_cell: None,
+                data_grid_header: None,
+                data_grid_resize_handle: None,
+                splitter_handle: None,
+                carousel_auto_play: None,
+                kind: WidgetKind::Virtual {
+                    arrangement,
+                    item_layout,
+                    source: ErasedVirtualItemSource::new_with_style_context::<T, S>(source, render),
                     content_cross_extent: None,
                     overflow_x,
                     overflow_y,
@@ -703,10 +805,23 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
 
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> ContainerStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut ContainerStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
         if let WidgetKind::Virtual { style, .. } = &mut self.element.kind {
-            *style = Some(StyleResolver::new(resolver));
+            *style = Some(StyleResolver::mutate(
+                |context| ContainerStyle::default_for_theme(context.theme),
+                mutator,
+            ));
+        }
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> ContainerStyle + Send + Sync + 'static,
+    ) -> Self {
+        if let WidgetKind::Virtual { style, .. } = &mut self.element.kind {
+            *style = Some(StyleResolver::full(resolver));
         }
         self
     }
@@ -984,6 +1099,31 @@ impl<T, VM: 'static> VirtualList<T, VM> {
         }
     }
 
+    pub(crate) fn new_with_style_context<S>(
+        source: S,
+        render: impl for<'a, 'b> Fn(usize, &T, StyleContext<'a>, &'b StyleSheet) -> Element<VM>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self
+    where
+        T: Send + Sync + 'static,
+        S: ItemSource<T>,
+    {
+        Self {
+            viewport: VirtualViewport::new_with_style_context(
+                source,
+                VirtualArrangement::Linear(VirtualDirection::Vertical),
+                ItemLayout::Fixed {
+                    item_extent: dp(40.0),
+                    spacing: Dp::ZERO,
+                    overscan: 2,
+                },
+                render,
+            ),
+        }
+    }
+
     pub fn new_with_context<S>(
         source: S,
         render: impl Fn(crate::ui::widget::ListItemContext<T>) -> Element<VM> + Send + Sync + 'static,
@@ -1020,6 +1160,8 @@ impl<T, VM: 'static> VirtualList<T, VM> {
                     data_grid_cell: None,
                     data_grid_header: None,
                     data_grid_resize_handle: None,
+                    splitter_handle: None,
+                    carousel_auto_play: None,
                     kind: WidgetKind::Virtual {
                         arrangement: VirtualArrangement::Linear(VirtualDirection::Vertical),
                         item_layout: ItemLayout::Fixed {
@@ -1082,9 +1224,17 @@ impl<T, VM: 'static> VirtualList<T, VM> {
 
     pub fn style(
         mut self,
-        resolver: impl Fn(ResolvedThemeMode) -> ContainerStyle + Send + Sync + 'static,
+        mutator: impl Fn(&mut ContainerStyle, &StyleContext<'_>) + Send + Sync + 'static,
     ) -> Self {
-        self.viewport = self.viewport.style(resolver);
+        self.viewport = self.viewport.style(mutator);
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> ContainerStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.viewport = self.viewport.style_full(resolver);
         self
     }
 

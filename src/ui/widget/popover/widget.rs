@@ -1,8 +1,9 @@
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::Value;
+use crate::ui::theme::StyleContext;
 use crate::ui::widget::core::Element;
 use crate::ui::widget::overlay::{Alignment, FlipPolicy, Placement};
-use crate::ui::widget::style::PopoverStyle;
+use crate::ui::widget::style::{PopoverStyle, StyleResolver};
 
 use super::descriptor::{PopoverDescriptor, PopoverTriggerMode};
 
@@ -14,7 +15,7 @@ pub struct Popover<VM> {
     placement: Placement,
     flip_policy: FlipPolicy,
     disabled: Value<bool>,
-    style: Option<PopoverStyle>,
+    style: Option<StyleResolver<PopoverStyle>>,
     trigger_mode: PopoverTriggerMode,
     close_on_escape: bool,
     close_on_outside_click: bool,
@@ -69,8 +70,22 @@ impl<VM: 'static> Popover<VM> {
         self
     }
 
-    pub fn style(mut self, style: PopoverStyle) -> Self {
-        self.style = Some(style);
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut PopoverStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| PopoverStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> PopoverStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 

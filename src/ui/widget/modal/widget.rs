@@ -26,13 +26,15 @@ use std::time::Duration;
 use crate::animation::Transition;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
-use crate::theme::ResolvedThemeMode;
 use crate::ui::layout::{pct, Align, Axis, Insets, Value};
+use crate::ui::theme::StyleContext;
 use crate::ui::unit::Dp;
 use crate::ui::widget::button::Button;
 use crate::ui::widget::container::{Flex, Stack};
 use crate::ui::widget::core::Element;
-use crate::ui::widget::style::{ButtonStyle, ContainerStyle, ModalStyle, TextWidgetStyle};
+use crate::ui::widget::style::{
+    ButtonStyle, ContainerStyle, ModalStyle, StyleResolver, TextWidgetStyle,
+};
 use crate::ui::widget::text::Text;
 use crate::ui::widget::{FocusScopeOptions, WidgetId};
 
@@ -52,7 +54,7 @@ pub struct Modal<VM> {
     close_on_backdrop_click: bool,
     return_focus_to: Option<WidgetId>,
     auto_focus_first: bool,
-    style: Option<ModalStyle>,
+    style: Option<StyleResolver<ModalStyle>>,
 }
 
 impl<VM: 'static> Modal<VM> {
@@ -127,9 +129,24 @@ impl<VM: 'static> Modal<VM> {
         self
     }
 
-    /// 覆盖默认主题样式。
-    pub fn style(mut self, style: ModalStyle) -> Self {
-        self.style = Some(style);
+    /// Patch the theme-derived style.
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut ModalStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| ModalStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    /// Replace the full resolved style.
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> ModalStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
         self
     }
 }
@@ -164,9 +181,7 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                     .animated(fade_transition),
             ),
         };
-        let resolved_style_for_layout = style
-            .clone()
-            .unwrap_or_else(|| ModalStyle::default_for(ResolvedThemeMode::Light));
+        let resolved_style_for_layout = resolve_modal_style_for_layout(style.as_ref());
         let enter_scale = resolved_style_for_layout.enter_scale.clamp(0.01, 16.0);
         let scale_value: Value<f32> = match open.clone() {
             Value::Static(open_now) => Value::Static(if open_now { 1.0 } else { enter_scale }),
@@ -192,19 +207,17 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
         // 通过 `.opacity(visibility_value)` 走动画通道。
         // 背景色由 ContainerStyle.surface.background 设置。
         // -----------------------------------------------------------------
-        let backdrop_color = match &style {
-            Some(s) => s.backdrop_color.clone(),
-            None => Value::Static(Color::rgba(0, 0, 0, 0x80)),
-        };
+        let backdrop_style = style.clone();
         let mut backdrop = Stack::<VM>::new()
             .size(pct(100.0), pct(100.0))
             .position_absolute()
             .left(Dp::ZERO)
             .top(Dp::ZERO)
             .opacity(visibility_value.clone())
-            .style(move |mode| {
-                let mut s = ContainerStyle::default_for(mode);
-                s.surface.background = Some(backdrop_color.clone());
+            .style_full(move |context| {
+                let resolved = resolve_modal_style(backdrop_style.as_ref(), context);
+                let mut s = ContainerStyle::default_for_theme(context.theme);
+                s.surface.background = Some(resolved.backdrop_color);
                 s.surface.border_color = Some(Color::TRANSPARENT.into());
                 s.surface.border_width = Some(Dp::ZERO.into());
                 s.surface.border_radius = Some(Dp::ZERO.into());
@@ -226,11 +239,9 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
         let mut card: Flex<VM> = Flex::new(Axis::Vertical)
             .opacity(visibility_value.clone())
             .scale(scale_value)
-            .style(move |mode| {
-                let resolved = modal_style_for_card
-                    .clone()
-                    .unwrap_or_else(|| ModalStyle::default_for(mode));
-                let mut s = ContainerStyle::default_for(mode);
+            .style_full(move |context| {
+                let resolved = resolve_modal_style(modal_style_for_card.as_ref(), context);
+                let mut s = ContainerStyle::default_for_theme(context.theme);
                 s.surface.background = Some(resolved.background.clone());
                 s.surface.border_color = Some(resolved.border.clone());
                 s.surface.border_width = Some(resolved.border_width.clone());
@@ -254,8 +265,8 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
             let title_text_style = resolved_style_for_layout.title_text_style.clone();
             let title_element: Element<VM> = Flex::<VM>::new(Axis::Horizontal)
                 .padding(title_padding)
-                .child(Text::new(title_value).style(move |mode| {
-                    let mut s = TextWidgetStyle::default_for(mode);
+                .child(Text::new(title_value).style_full(move |context| {
+                    let mut s = TextWidgetStyle::default_for_theme(context.theme);
                     s.typography = title_text_style.clone();
                     s
                 }))
@@ -300,22 +311,21 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                 let _ = total;
                 let _ = action_style;
                 // ButtonStyle: primary 走 Primary 变体，否则 Secondary。
-                let btn_style: fn(ResolvedThemeMode) -> ButtonStyle = if primary {
-                    |mode| {
-                        ButtonStyle::default_for(
-                            mode,
+                if primary {
+                    button = button.style_full(|context| {
+                        ButtonStyle::default_for_theme(
+                            context.theme,
                             crate::ui::widget::common::ButtonVariantKind::Primary,
                         )
-                    }
+                    });
                 } else {
-                    |mode| {
-                        ButtonStyle::default_for(
-                            mode,
+                    button = button.style_full(|context| {
+                        ButtonStyle::default_for_theme(
+                            context.theme,
                             crate::ui::widget::common::ButtonVariantKind::Secondary,
                         )
-                    }
-                };
-                button = button.style(btn_style);
+                    });
+                }
                 let mut button_element: Element<VM> = button.into();
                 if primary {
                     button_element = button_element.tab_index(1);
@@ -376,4 +386,21 @@ impl<VM> Modal<VM> {
     pub fn _card_id_of(element: &Element<VM>) -> Option<WidgetId> {
         element.modal.as_ref().map(|m| m.card_widget_id)
     }
+}
+
+fn resolve_modal_style(
+    style: Option<&StyleResolver<ModalStyle>>,
+    context: &StyleContext<'_>,
+) -> ModalStyle {
+    let mut base = ModalStyle::default_for_theme(context.theme);
+    context.theme.components.modal.apply(&mut base, context);
+    style
+        .map(|resolver| resolver.resolve_from(base.clone(), context))
+        .unwrap_or(base)
+}
+
+fn resolve_modal_style_for_layout(style: Option<&StyleResolver<ModalStyle>>) -> ModalStyle {
+    let theme = crate::ui::theme::Theme::default();
+    let context = StyleContext::from_theme(&theme);
+    resolve_modal_style(style, &context)
 }

@@ -9,6 +9,7 @@
 - 反馈控件：`ProgressBar`、`Spinner`、toast / snackbar。
 - 结构控件：`Tabs` / `TabView`、`List`、`DataGrid` / `Table`、`Tree`。
 - 浮层控件：`Tooltip`、`Popover`、`Menu`、`ContextMenu`、`MenuBar`、`Modal`、`Drawer`。
+- P3 体验组件：`Badge`、`Avatar` / `AvatarGroup`、`Skeleton`、`Collapse` / `Accordion`、`Splitter` / `ResizablePanels`、`Breadcrumb`、`Pagination`、`Card`、`Rating`、`Icon`、`RichText`、`Carousel`、`AutoComplete` / `Combobox`。
 - 音视频：`Audio`、`VideoSurface`，需要启用对应 feature。
 
 ## 常见 builder 能力

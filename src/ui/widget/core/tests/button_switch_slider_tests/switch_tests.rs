@@ -9,17 +9,19 @@ fn switch_renders_custom_track_and_thumb_colors() {
     let active_background = Color::hexa(0x10B981FF);
     let inactive_background = Color::hexa(0x475569FF);
     let active_thumb = Color::hexa(0xECFDF5FF);
-    let tree: WidgetTree<()> = WidgetTree::new(Switch::new(true).size(dp(52.0), dp(30.0)).style(
-        move |mode| {
-            switch_style(
-                mode,
-                active_background,
-                inactive_background,
-                Some(active_thumb),
-                None,
-            )
-        },
-    ));
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Switch::new(true)
+            .size(dp(52.0), dp(30.0))
+            .style_full(move |ctx| {
+                switch_style(
+                    ctx,
+                    active_background,
+                    inactive_background,
+                    Some(active_thumb),
+                    None,
+                )
+            }),
+    );
 
     let rendered = tree.render_output(
         &font_manager,
@@ -51,9 +53,9 @@ fn switch_renders_custom_track_and_thumb_colors() {
     let inactive_tree: WidgetTree<()> = WidgetTree::new(
         Switch::new(false)
             .size(dp(52.0), dp(30.0))
-            .style(move |mode| {
+            .style_full(move |ctx| {
                 switch_style(
-                    mode,
+                    ctx,
                     active_background,
                     inactive_background,
                     None,
@@ -159,9 +161,9 @@ fn button_focus_ring_override_changes_overlay_without_affecting_layout() {
     let media = test_media();
     let mut animations = AnimationEngine::default();
     let button: Element<()> = crate::ui::widget::Button::new("focus")
-        .style(|mode| {
-            let mut style = ButtonStyle::default_for(
-                mode,
+        .style_full(|ctx| {
+            let mut style = ButtonStyle::default_for_theme(
+                ctx.theme,
                 crate::ui::widget::common::ButtonVariantKind::Primary,
             );
             style.focus_ring = Some(crate::ui::widget::FocusRingOverride {

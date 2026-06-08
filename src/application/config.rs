@@ -6,6 +6,7 @@ use crate::text::font::FontCatalog;
 use crate::ui::layout::Insets;
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::Dp;
+use crate::ui::widget::StyleSheet;
 
 pub(crate) fn logical_window_size(width: Dp, height: Dp) -> LogicalSize<f64> {
     LogicalSize::new(
@@ -113,6 +114,7 @@ pub struct Application {
     fonts: FontCatalog,
     theme: ThemeSelection,
     theme_set: ThemeSet,
+    style_sheet: StyleSheet,
     reduced_motion: bool,
     window_icon: Option<&'static [u8]>,
     resource_budget: ResourceBudget,
@@ -139,6 +141,7 @@ impl Application {
             fonts: FontCatalog::default(),
             theme: ThemeSelection::System,
             theme_set: ThemeSet::default(),
+            style_sheet: StyleSheet::default(),
             reduced_motion: false,
             window_icon: None,
             resource_budget: ResourceBudget::DEFAULT,
@@ -342,6 +345,11 @@ impl Application {
         self
     }
 
+    pub fn style_sheet(mut self, style_sheet: StyleSheet) -> Self {
+        self.style_sheet = style_sheet;
+        self
+    }
+
     /// 设置应用级 reduced motion 默认值。
     pub fn reduced_motion(mut self, reduced_motion: bool) -> Self {
         self.reduced_motion = reduced_motion;
@@ -389,6 +397,7 @@ impl Application {
             fonts: self.fonts.clone(),
             theme: self.theme.clone(),
             theme_set: self.theme_set.clone(),
+            style_sheet: self.style_sheet.clone(),
             reduced_motion: self.reduced_motion,
             window_icon: self.window_icon,
             resource_budget: self.resource_budget,
@@ -420,6 +429,7 @@ pub(crate) struct ApplicationConfig {
     pub(crate) fonts: FontCatalog,
     pub(crate) theme: ThemeSelection,
     pub(crate) theme_set: ThemeSet,
+    pub(crate) style_sheet: StyleSheet,
     pub(crate) reduced_motion: bool,
     pub(crate) window_icon: Option<&'static [u8]>,
     pub(crate) resource_budget: ResourceBudget,

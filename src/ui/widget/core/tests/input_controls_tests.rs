@@ -1,5 +1,4 @@
 use super::*;
-use crate::theme::ResolvedThemeMode;
 use crate::ui::widget::{
     Calendar, ColorPicker, DatePicker, NumberInput, PopoverStyle, TimePicker, Upload, UploadFile,
     UploadFileId, UploadStatus,
@@ -108,7 +107,7 @@ fn date_and_time_pickers_emit_popover_content_when_open() {
         .iter()
         .filter(|shape| {
             shape.color
-                == PopoverStyle::default_for(ResolvedThemeMode::Dark)
+                == PopoverStyle::default_for_theme(&Theme::dark())
                     .background
                     .resolve()
         })
@@ -163,7 +162,7 @@ fn picker_popovers_render_panel_background_in_light_theme() {
 
     assert!(rendered.primitives.overlay_shapes.iter().any(|shape| {
         shape.color
-            == PopoverStyle::default_for(ResolvedThemeMode::Light)
+            == PopoverStyle::default_for_theme(&Theme::light())
                 .background
                 .resolve()
     }));
@@ -266,7 +265,7 @@ fn color_picker_open_renders_channel_sliders_and_swatches() {
         .iter()
         .filter(|shape| {
             shape.color
-                == PopoverStyle::default_for(ResolvedThemeMode::Dark)
+                == PopoverStyle::default_for_theme(&Theme::dark())
                     .background
                     .resolve()
         })

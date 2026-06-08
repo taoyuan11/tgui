@@ -238,8 +238,8 @@ fn leaf_dependency_update_does_not_rebuild_unaffected_sibling_chunk() {
     let changed_button: Element<TestVm> = Button::new(changed.signal()).key("changed").into();
     let sibling_surface: Element<TestVm> = Stack::new()
         .size(dp(24.0), dp(24.0))
-        .style(move |mode| {
-            let mut style = ContainerStyle::default_for(mode);
+        .style_full(move |ctx| {
+            let mut style = ContainerStyle::default_for_theme(ctx.theme);
             style.surface.background = Some(sibling_background.clone().into());
             style
         })

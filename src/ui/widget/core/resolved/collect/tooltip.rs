@@ -109,8 +109,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             return;
         }
 
-        let theme_mode = crate::ui::widget::style::infer_theme_mode(context.theme);
-        let style = Box::new(tooltip.resolved_style(theme_mode));
+        let style = Box::new(self.resolved_tooltip_style(context, visual));
         let background = style.background;
         let animated_offset = (style.offset - Dp::from((1.0 - visibility) * 4.0)).max(Dp::ZERO);
 
@@ -170,6 +169,28 @@ impl<VM: 'static> ResolvedElement<VM> {
                 computed,
             ),
         }
+    }
+
+    fn resolved_tooltip_style(
+        &self,
+        context: &CollectContext<'_, '_>,
+        visual: &CollectVisualState,
+    ) -> TooltipStyle {
+        let tooltip = self
+            .tooltip
+            .as_ref()
+            .expect("tooltip style should only resolve for tooltip elements");
+        let mut style = tooltip.resolved_style(&context.style_context);
+        context
+            .style_sheet
+            .apply_tooltip(&mut style, &context.style_context, &self.visual);
+        context.style_sheet.apply_tooltip_state(
+            &mut style,
+            &context.style_context,
+            &self.visual,
+            visual.widget_state,
+        );
+        style
     }
 }
 
@@ -468,6 +489,8 @@ fn build_tooltip_scene<VM: 'static>(
                     taffy: &taffy,
                     font_manager: context.font_manager,
                     theme: context.theme,
+                    style_context: context.style_context,
+                    style_sheet: context.style_sheet,
                     media: context.media,
                     focused_input: context.focused_input,
                     focused_text_state: context.focused_text_state,

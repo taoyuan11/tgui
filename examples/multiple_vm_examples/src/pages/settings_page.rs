@@ -1,15 +1,15 @@
 use std::sync::Arc;
 use tgui::prelude::*;
 
-fn text_style(mode: ResolvedThemeMode, size: Sp, color: Color) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for(mode);
+fn text_style(ctx: &StyleContext<'_>, size: Sp, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = size;
     style.color = color.into();
     style
 }
 
-fn panel_style(mode: ResolvedThemeMode) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for(mode);
+fn panel_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+    let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(Color::hex(0x2E7D32).into());
     style.surface.border_color = Some(Color::WHITE.into());
     style.surface.border_width = Some(dp(1.0).into());
@@ -44,15 +44,15 @@ impl SettingsPage {
         Flex::new(Axis::Vertical)
             .size(pct(60.0), pct(60.0))
             .padding(Insets::all(dp(20.0)))
-            .style(panel_style)
+            .style_full(panel_style)
             .child(el![
-                Text::new("设置页").style(|mode| text_style(mode, sp(24.0), Color::WHITE)),
+                Text::new("设置页").style_full(|ctx| text_style(ctx, sp(24.0), Color::WHITE)),
                 Text::new(
                     self.enabled
                         .signal()
                         .map(|enabled| format!("当前状态：{}", if enabled { "已启用" } else { "已关闭" }))
                 )
-                .style(|mode| text_style(mode, sp(16.0), Color::WHITE)),
+                .style_full(|ctx| text_style(ctx, sp(16.0), Color::WHITE)),
                 Button::new("切换状态").on_click(Command::new(Self::toggle)),
             ])
             .into()
