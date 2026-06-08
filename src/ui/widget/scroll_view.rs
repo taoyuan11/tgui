@@ -1,9 +1,9 @@
 use crate::foundation::binding::ScrollViewController;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Insets, Overflow, ScrollbarStyle, Value};
 
-use super::common::{ContainerKind, CursorStyle, Point, ScrollViewConfig, WidgetKind};
+use super::common::{ContainerKind, CursorStyle, Point, ScrollViewConfig, VisualStyle, WidgetKind};
 use super::container::{apply_layout_api, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::container::{Container, IntoChildren};
 use super::core::Element;
@@ -127,6 +127,16 @@ impl<VM> ScrollView<VM> {
         resolver: impl Fn(&StyleContext<'_>) -> ContainerStyle + Send + Sync + 'static,
     ) -> Self {
         Self(self.0.style_full(resolver))
+    }
+
+    pub(crate) fn style_full_with_style_sheet(
+        self,
+        resolver: impl Fn(&StyleContext<'_>, &super::StyleSheet, &VisualStyle, WidgetState) -> ContainerStyle
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self(self.0.style_full_with_style_sheet(resolver))
     }
 
     pub fn key(self, key: impl Into<super::WidgetKey>) -> Self {

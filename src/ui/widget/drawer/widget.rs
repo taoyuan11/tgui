@@ -34,12 +34,13 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::ValueCommand;
 use crate::log::Log;
 use crate::ui::layout::{pct, Axis, Insets, LayoutStyle, Value};
-use crate::ui::theme::StyleContext;
+use crate::ui::theme::{StyleContext, WidgetState};
 use crate::ui::unit::Dp;
+use crate::ui::widget::common::VisualStyle;
 use crate::ui::widget::container::{set_layout_length, set_layout_lengths, IntoLengthValue};
 use crate::ui::widget::container::{Flex, Stack};
 use crate::ui::widget::core::Element;
-use crate::ui::widget::style::{ContainerStyle, DrawerStyle, StyleResolver};
+use crate::ui::widget::style::{ContainerStyle, DrawerStyle, StyleResolver, StyleSheet};
 use crate::ui::widget::{CursorStyle, FocusScopeOptions, WidgetId};
 
 use super::descriptor::DrawerDescriptor;
@@ -221,8 +222,14 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
             .left(Dp::ZERO)
             .top(Dp::ZERO)
             .opacity(backdrop_visibility.clone())
-            .style_full(move |context| {
-                let resolved = resolve_drawer_style(backdrop_style.as_ref(), context);
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_drawer_style_with_sheet(
+                    backdrop_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
                 let mut s = ContainerStyle::default_for_theme(context.theme);
                 s.surface.background = Some(drawer_backdrop_color(
                     backdrop_open.clone(),
@@ -295,8 +302,14 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
             .position_absolute()
             .cursor(CursorStyle::Default)
             // 不在 panel 上设置 opacity，由外层 Stack 统一控制
-            .style_full(move |context| {
-                let resolved = resolve_drawer_style(drawer_style_for_panel.as_ref(), context);
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_drawer_style_with_sheet(
+                    drawer_style_for_panel.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
                 let mut s = ContainerStyle::default_for_theme(context.theme);
                 s.surface.background = Some(resolved.background.clone());
                 s.surface.border_color = Some(resolved.border.clone());
@@ -485,8 +498,14 @@ fn build_push_drawer_host<VM: 'static>(content: Element<VM>, drawer: Drawer<VM>)
                 .auto_focus_first(auto_focus_first)
                 .active(open.clone()),
         )
-        .style_full(move |context| {
-            let resolved = resolve_drawer_style(drawer_style_for_panel.as_ref(), context);
+        .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+            let resolved = resolve_drawer_style_with_sheet(
+                drawer_style_for_panel.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                state,
+            );
             let mut s = ContainerStyle::default_for_theme(context.theme);
             s.surface.background = Some(resolved.background.clone());
             s.surface.border_color = Some(resolved.border.clone());
@@ -557,8 +576,28 @@ fn resolve_drawer_style(
     style: Option<&StyleResolver<DrawerStyle>>,
     context: &StyleContext<'_>,
 ) -> DrawerStyle {
+    let style_sheet = StyleSheet::default();
+    let visual = VisualStyle::default();
+    resolve_drawer_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &visual,
+        WidgetState::default(),
+    )
+}
+
+fn resolve_drawer_style_with_sheet(
+    style: Option<&StyleResolver<DrawerStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> DrawerStyle {
     let mut base = DrawerStyle::default_for_theme(context.theme);
     context.theme.components.drawer.apply(&mut base, context);
+    style_sheet.apply_drawer(&mut base, context, visual);
+    style_sheet.apply_drawer_state(&mut base, context, visual, state);
     style
         .map(|resolver| resolver.resolve_from(base.clone(), context))
         .unwrap_or(base)

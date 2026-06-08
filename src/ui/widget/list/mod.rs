@@ -738,13 +738,14 @@ where
         )
         .widget_id(list_id)
         .item_layout(self.item_layout)
-        .style_full(move |context| {
-            let style = resolve_list_style(
+        .style_full_with_style_sheet(move |context, style_sheet, _visual, state| {
+            let mut style = resolve_list_style(
                 root_style_resolver.as_ref(),
                 context,
-                &StyleSheet::default(),
+                style_sheet,
                 &root_visual,
             );
+            style_sheet.apply_list_state(&mut style, context, &root_visual, state);
             let mut container = ContainerStyle::default_for_theme(context.theme);
             container.surface = style.surface;
             container

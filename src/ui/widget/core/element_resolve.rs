@@ -137,8 +137,14 @@ impl<VM: 'static> Element<VM> {
                 children,
                 style,
             } => {
-                let resolved_style =
-                    resolved_container_style(style.as_ref(), context, style_sheet, &self.visual);
+                let base_style = container_style_base(context, style_sheet, &self.visual);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 let mut layout = container_layout.clone();
                 layout.scrollbar_style = resolved_style.scrollbar;
@@ -170,6 +176,12 @@ impl<VM: 'static> Element<VM> {
                 ResolvedWidgetKind::Container {
                     layout,
                     children: resolved_children,
+                    runtime_style: ResolvedRuntimeSurfaceStyle {
+                        base: base_style,
+                        local: style.as_ref().cloned(),
+                        explicit_visual: self.visual.clone(),
+                        explicit_background: self.background.clone(),
+                    },
                 }
             }
             WidgetKind::Virtual {
@@ -182,8 +194,14 @@ impl<VM: 'static> Element<VM> {
                 style,
                 runtime_state,
             } => {
-                let resolved_style =
-                    resolved_container_style(style.as_ref(), context, style_sheet, &self.visual);
+                let base_style = container_style_base(context, style_sheet, &self.visual);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 let mut runtime_state = runtime_state.clone();
                 if let Some(cache) = virtual_states.get(&id) {
@@ -316,6 +334,12 @@ impl<VM: 'static> Element<VM> {
                     overflow_x: *overflow_x,
                     overflow_y: *overflow_y,
                     style: resolved_style,
+                    runtime_style: ResolvedRuntimeSurfaceStyle {
+                        base: base_style,
+                        local: style.as_ref().cloned(),
+                        explicit_visual: self.visual.clone(),
+                        explicit_background: self.background.clone(),
+                    },
                     runtime_state,
                     window_plan,
                     children,
@@ -324,15 +348,26 @@ impl<VM: 'static> Element<VM> {
             }
             WidgetKind::Text { text } => {
                 let mut text = text.clone();
-                let resolved_style = resolved_text_widget_style(
+                let local_style = text.style.as_ref().cloned();
+                let base_style = text_widget_style_base(context, style_sheet, &self.visual);
+                let resolved_style = apply_local_style(
                     text.style.as_ref(),
+                    base_style.clone(),
                     context,
                     style_sheet,
                     &self.visual,
                 );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 apply_text_widget_style(&mut text, &resolved_style);
-                ResolvedWidgetKind::Text { text }
+                ResolvedWidgetKind::Text {
+                    text,
+                    runtime_style: ResolvedRuntimeSurfaceStyle {
+                        base: base_style,
+                        local: local_style,
+                        explicit_visual: self.visual.clone(),
+                        explicit_background: self.background.clone(),
+                    },
+                }
             }
             #[cfg(feature = "audio")]
             WidgetKind::Audio { audio } => ResolvedWidgetKind::Audio {
@@ -340,31 +375,61 @@ impl<VM: 'static> Element<VM> {
             },
             WidgetKind::Image { image } => {
                 let mut image = image.clone();
-                let resolved_style =
-                    resolved_image_style(image.style.as_ref(), context, style_sheet, &self.visual);
+                let local_style = image.style.as_ref().cloned();
+                let base_style = image_style_base(context, style_sheet, &self.visual);
+                let resolved_style = apply_local_style(
+                    image.style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 image.background = resolved_style.surface.background.clone();
                 image.fit = resolved_style.fit;
-                ResolvedWidgetKind::Image { image }
+                ResolvedWidgetKind::Image {
+                    image,
+                    runtime_style: ResolvedRuntimeSurfaceStyle {
+                        base: base_style,
+                        local: local_style,
+                        explicit_visual: self.visual.clone(),
+                        explicit_background: self.background.clone(),
+                    },
+                }
             }
             WidgetKind::Canvas {
                 scene,
                 item_interactions,
                 style,
             } => {
-                let resolved_style =
-                    resolved_canvas_style(style.as_ref(), context, style_sheet, &self.visual);
+                let base_style = canvas_style_base(context, style_sheet, &self.visual);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 ResolvedWidgetKind::Canvas {
                     scene: scene.clone(),
                     item_interactions: item_interactions.clone(),
+                    runtime_style: ResolvedRuntimeSurfaceStyle {
+                        base: base_style,
+                        local: style.as_ref().cloned(),
+                        explicit_visual: self.visual.clone(),
+                        explicit_background: self.background.clone(),
+                    },
                 }
             }
             #[cfg(feature = "video")]
             WidgetKind::VideoSurface { video, style } => {
                 let mut video = video.clone();
-                let resolved_style = resolved_video_surface_style(
+                let local_style = style.as_ref().cloned();
+                let base_style = video_surface_style_base(context, style_sheet, &self.visual);
+                let resolved_style = apply_local_style(
                     style.as_ref(),
+                    base_style.clone(),
                     context,
                     style_sheet,
                     &self.visual,
@@ -375,6 +440,12 @@ impl<VM: 'static> Element<VM> {
                 ResolvedWidgetKind::VideoSurface {
                     video,
                     style: resolved_style,
+                    runtime_style: ResolvedRuntimeSurfaceStyle {
+                        base: base_style,
+                        local: local_style,
+                        explicit_visual: self.visual.clone(),
+                        explicit_background: self.background.clone(),
+                    },
                 }
             }
             WidgetKind::Button {
@@ -384,7 +455,13 @@ impl<VM: 'static> Element<VM> {
                 style,
             } => {
                 let base_style = button_style_base(context, style_sheet, &self.visual, *variant);
-                let resolved_style = apply_local_style(style.as_ref(), base_style.clone(), context);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 ResolvedWidgetKind::Button {
                     label: label.clone(),
                     disabled: disabled.clone(),
@@ -405,7 +482,13 @@ impl<VM: 'static> Element<VM> {
                 style,
             } => {
                 let base_style = checkbox_style_base(context, style_sheet, &self.visual);
-                let resolved_style = apply_local_style(style.as_ref(), base_style.clone(), context);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 ResolvedWidgetKind::Checkbox {
                     checked: checked.clone(),
                     label: label.clone(),
@@ -428,7 +511,13 @@ impl<VM: 'static> Element<VM> {
                 style,
             } => {
                 let base_style = radio_style_base(context, style_sheet, &self.visual);
-                let resolved_style = apply_local_style(style.as_ref(), base_style.clone(), context);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 ResolvedWidgetKind::Radio {
                     checked: checked.clone(),
                     label: label.clone(),
@@ -454,7 +543,13 @@ impl<VM: 'static> Element<VM> {
                 style,
             } => {
                 let base_style = switch_style_base(context, style_sheet, &self.visual);
-                let resolved_style = apply_local_style(style.as_ref(), base_style.clone(), context);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 ResolvedWidgetKind::Switch {
                     checked: checked.clone(),
                     on_change: on_change.clone(),
@@ -482,7 +577,13 @@ impl<VM: 'static> Element<VM> {
                 style,
             } => {
                 let base_style = select_style_base(context, style_sheet, &self.visual);
-                let resolved_style = apply_local_style(style.as_ref(), base_style.clone(), context);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 ResolvedWidgetKind::Select {
                     selected_label: selected_label.clone(),
                     placeholder: placeholder.clone(),
@@ -526,7 +627,13 @@ impl<VM: 'static> Element<VM> {
                 style,
             } => {
                 let base_style = slider_style_base(context, style_sheet, &self.visual);
-                let resolved_style = apply_local_style(style.as_ref(), base_style.clone(), context);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 ResolvedWidgetKind::Slider {
                     value: value.clone(),
                     min: *min,
@@ -554,7 +661,13 @@ impl<VM: 'static> Element<VM> {
                 style,
             } => {
                 let base_style = progress_bar_style_base(context, style_sheet, &self.visual);
-                let resolved_style = apply_local_style(style.as_ref(), base_style.clone(), context);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 ResolvedWidgetKind::ProgressBar {
                     value: value.clone(),
@@ -575,7 +688,13 @@ impl<VM: 'static> Element<VM> {
                 track_override,
             } => {
                 let base_style = spinner_style_base(context, style_sheet, &self.visual);
-                let resolved_style = apply_local_style(style.as_ref(), base_style.clone(), context);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 ResolvedWidgetKind::Spinner {
                     style: resolved_style,
@@ -598,7 +717,13 @@ impl<VM: 'static> Element<VM> {
                 style,
             } => {
                 let base_style = divider_style_base(context, style_sheet, &self.visual);
-                let resolved_style = apply_local_style(style.as_ref(), base_style.clone(), context);
+                let resolved_style = apply_local_style(
+                    style.as_ref(),
+                    base_style.clone(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 ResolvedWidgetKind::Divider {
                     orientation: *orientation,
@@ -629,8 +754,13 @@ impl<VM: 'static> Element<VM> {
             } => {
                 let (resolved_style, runtime_style) = if *multiline {
                     let base_style = textarea_style_base(context, style_sheet, &self.visual);
-                    let resolved_textarea =
-                        apply_local_style(textarea_style.as_ref(), base_style.clone(), context);
+                    let resolved_textarea = apply_local_style(
+                        textarea_style.as_ref(),
+                        base_style.clone(),
+                        context,
+                        style_sheet,
+                        &self.visual,
+                    );
                     (
                         input_style_from_textarea_style(resolved_textarea),
                         ResolvedTextEditorRuntimeStyle::Textarea(ResolvedRuntimeStyle {
@@ -640,8 +770,13 @@ impl<VM: 'static> Element<VM> {
                     )
                 } else {
                     let base_style = input_style_base(context, style_sheet, &self.visual);
-                    let resolved_input =
-                        apply_local_style(input_style.as_ref(), base_style.clone(), context);
+                    let resolved_input = apply_local_style(
+                        input_style.as_ref(),
+                        base_style.clone(),
+                        context,
+                        style_sheet,
+                        &self.visual,
+                    );
                     (
                         resolved_input,
                         ResolvedTextEditorRuntimeStyle::Input(ResolvedRuntimeStyle {

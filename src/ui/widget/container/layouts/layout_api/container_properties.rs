@@ -23,6 +23,21 @@ macro_rules! impl_container_properties {
                 Self(self.0.style_full(resolver))
             }
 
+            pub(crate) fn style_full_with_style_sheet(
+                self,
+                resolver: impl Fn(
+                        &StyleContext<'_>,
+                        &crate::ui::widget::StyleSheet,
+                        &crate::ui::widget::common::VisualStyle,
+                        crate::ui::theme::WidgetState,
+                    ) -> ContainerStyle
+                    + Send
+                    + Sync
+                    + 'static,
+            ) -> Self {
+                Self(self.0.style_full_with_style_sheet(resolver))
+            }
+
             /// 注册点击命令。
             ///
             /// # 参数

@@ -1,5 +1,5 @@
 use super::*;
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::widget::style::StyleResolver;
 use crate::ui::widget::WidgetKey;
 
@@ -202,6 +202,24 @@ impl<VM> Canvas<VM> {
     ) -> Self {
         if let WidgetKind::Canvas { style, .. } = &mut self.element.kind {
             *style = Some(StyleResolver::full(resolver));
+        }
+        self
+    }
+
+    pub(crate) fn style_full_with_style_sheet(
+        mut self,
+        resolver: impl Fn(
+                &StyleContext<'_>,
+                &crate::ui::widget::StyleSheet,
+                &VisualStyle,
+                WidgetState,
+            ) -> CanvasStyle
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        if let WidgetKind::Canvas { style, .. } = &mut self.element.kind {
+            *style = Some(StyleResolver::full_with_style_sheet(resolver));
         }
         self
     }

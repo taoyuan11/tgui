@@ -1,7 +1,7 @@
 use crate::foundation::binding::{TextChangeSet, TextController};
 use crate::foundation::form::ValidationVisualState;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::super::common::{
@@ -349,6 +349,24 @@ impl<VM> Input<VM> {
     ) -> Self {
         if let WidgetKind::TextEditor { input_style, .. } = &mut self.element.kind {
             *input_style = Some(StyleResolver::full(resolver));
+        }
+        self
+    }
+
+    pub(crate) fn style_full_with_style_sheet(
+        mut self,
+        resolver: impl Fn(
+                &StyleContext<'_>,
+                &crate::ui::widget::StyleSheet,
+                &VisualStyle,
+                WidgetState,
+            ) -> InputStyle
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        if let WidgetKind::TextEditor { input_style, .. } = &mut self.element.kind {
+            *input_style = Some(StyleResolver::full_with_style_sheet(resolver));
         }
         self
     }

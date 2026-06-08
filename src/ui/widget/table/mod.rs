@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{pct, Align, Insets, LayoutStyle, Overflow, ScrollbarStyle, Value};
 use crate::ui::unit::{dp, Dp};
 
@@ -15,7 +15,7 @@ use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, 
 use super::core::Element;
 use super::r#virtual::{ItemLayout, ItemSource, VirtualList};
 use super::style::palette::palette_from_theme;
-use super::style::{merge_surface_style, StyleResolver, WidgetSurfaceStyle};
+use super::style::{StyleResolver, StyleSheet, WidgetSurfaceStyle};
 use super::{
     ContainerStyle, ContextMenuDescriptor, Flex, GestureRecognizer, LongPressEvent, MenuItem,
     MenuItemState, Stack, Text, TextWidgetStyle,
@@ -946,10 +946,16 @@ where
             .overflow_x(Overflow::Scroll)
             .overflow_y(Overflow::Scroll)
             .grow(1.0)
-            .style_full({
+            .style_full_with_style_sheet({
                 let style_resolver = body_style_resolver;
-                move |context| {
-                    let style = resolve_data_grid_style(style_resolver.as_ref(), context);
+                move |context, style_sheet, visual, state| {
+                    let style = resolve_data_grid_style_with_sheet(
+                        style_resolver.as_ref(),
+                        context,
+                        style_sheet,
+                        visual,
+                        state,
+                    );
                     let mut container = ContainerStyle::default_for_theme(context.theme);
                     container.scrollbar = style.scrollbar;
                     container.surface.background = style.surface.background.clone();
@@ -981,7 +987,6 @@ where
             selection_mode,
             selected_keys,
         });
-        merge_surface_style(&mut root.background, &mut root.visual, &style.surface);
         apply_data_grid_root_style(&mut root, style_resolver);
         root
     }
@@ -1252,8 +1257,28 @@ fn resolve_data_grid_style(
     style: Option<&StyleResolver<DataGridStyle>>,
     context: &StyleContext<'_>,
 ) -> DataGridStyle {
+    let style_sheet = StyleSheet::default();
+    let visual = VisualStyle::default();
+    resolve_data_grid_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &visual,
+        WidgetState::default(),
+    )
+}
+
+fn resolve_data_grid_style_with_sheet(
+    style: Option<&StyleResolver<DataGridStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> DataGridStyle {
     let mut base = DataGridStyle::default_for_theme(context.theme);
     context.theme.components.data_grid.apply(&mut base, context);
+    style_sheet.apply_data_grid(&mut base, context, visual);
+    style_sheet.apply_data_grid_state(&mut base, context, visual, state);
     style
         .map(|resolver| resolver.resolve_from(base.clone(), context))
         .unwrap_or(base)
@@ -1269,10 +1294,13 @@ fn resolve_data_grid_style_for_layout(
 
 fn apply_container_style<VM>(
     element: &mut Element<VM>,
-    resolver: impl Fn(&StyleContext<'_>) -> ContainerStyle + Send + Sync + 'static,
+    resolver: impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> ContainerStyle
+        + Send
+        + Sync
+        + 'static,
 ) {
     if let WidgetKind::Container { style, .. } = &mut element.kind {
-        *style = Some(StyleResolver::full(resolver));
+        *style = Some(StyleResolver::full_with_style_sheet(resolver));
     }
 }
 
@@ -1280,8 +1308,14 @@ fn apply_data_grid_root_style<VM>(
     element: &mut Element<VM>,
     style_resolver: Option<StyleResolver<DataGridStyle>>,
 ) {
-    apply_container_style(element, move |context| {
-        let style = resolve_data_grid_style(style_resolver.as_ref(), context);
+    apply_container_style(element, move |context, style_sheet, visual, state| {
+        let style = resolve_data_grid_style_with_sheet(
+            style_resolver.as_ref(),
+            context,
+            style_sheet,
+            visual,
+            state,
+        );
         let mut container = ContainerStyle::default_for_theme(context.theme);
         container.scrollbar = style.scrollbar;
         container.surface.background = style.surface.background;
@@ -1299,8 +1333,14 @@ fn apply_data_grid_header_container_style<VM>(
     element: &mut Element<VM>,
     style_resolver: Option<StyleResolver<DataGridStyle>>,
 ) {
-    apply_container_style(element, move |context| {
-        let style = resolve_data_grid_style(style_resolver.as_ref(), context);
+    apply_container_style(element, move |context, style_sheet, visual, state| {
+        let style = resolve_data_grid_style_with_sheet(
+            style_resolver.as_ref(),
+            context,
+            style_sheet,
+            visual,
+            state,
+        );
         let mut container = ContainerStyle::default_for_theme(context.theme);
         container.surface.background = Some(style.header_background);
         container
@@ -1313,8 +1353,14 @@ fn apply_data_grid_row_container_style<VM>(
     selected: bool,
     row_index: usize,
 ) {
-    apply_container_style(element, move |context| {
-        let style = resolve_data_grid_style(style_resolver.as_ref(), context);
+    apply_container_style(element, move |context, style_sheet, visual, state| {
+        let style = resolve_data_grid_style_with_sheet(
+            style_resolver.as_ref(),
+            context,
+            style_sheet,
+            visual,
+            state,
+        );
         let background = if selected {
             style.row_selected_background
         } else if row_index % 2 == 1 {
@@ -1332,8 +1378,14 @@ fn apply_data_grid_cell_container_style<VM>(
     element: &mut Element<VM>,
     style_resolver: Option<StyleResolver<DataGridStyle>>,
 ) {
-    apply_container_style(element, move |context| {
-        let style = resolve_data_grid_style(style_resolver.as_ref(), context);
+    apply_container_style(element, move |context, style_sheet, visual, state| {
+        let style = resolve_data_grid_style_with_sheet(
+            style_resolver.as_ref(),
+            context,
+            style_sheet,
+            visual,
+            state,
+        );
         let mut container = ContainerStyle::default_for_theme(context.theme);
         container.surface.border_color = Some(style.grid_line);
         container.surface.border_width = Some(Value::Static(dp(0.5)));

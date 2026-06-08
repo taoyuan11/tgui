@@ -22,10 +22,13 @@ impl<VM> ResolvedElement<VM> {
                         &self.visual,
                         widget_state,
                     );
-                    let style = apply_local_style(
+                    let style = apply_local_style_with_state(
                         runtime_style.local.as_ref(),
                         style,
                         &context.style_context,
+                        context.style_sheet,
+                        &self.visual,
+                        widget_state,
                     );
                     Some(resolve_button_style(&style, widget_state, theme))
                 }
@@ -44,10 +47,13 @@ impl<VM> ResolvedElement<VM> {
                         &self.visual,
                         widget_state,
                     );
-                    let source_style = apply_local_style(
+                    let source_style = apply_local_style_with_state(
                         runtime_style.local.as_ref(),
                         source_style,
                         &context.style_context,
+                        context.style_sheet,
+                        &self.visual,
+                        widget_state,
                     );
                     let mut style = resolve_select_style(&source_style, widget_state, theme);
                     if let Some(color) = validation_state_color(&validation.resolve(), theme) {
@@ -71,10 +77,13 @@ impl<VM> ResolvedElement<VM> {
                         &self.visual,
                         widget_state,
                     );
-                    let source_style = apply_local_style(
+                    let source_style = apply_local_style_with_state(
                         runtime_style.local.as_ref(),
                         source_style,
                         &context.style_context,
+                        context.style_sheet,
+                        &self.visual,
+                        widget_state,
                     );
                     let mut style = resolve_slider_style(&source_style, widget_state, theme);
                     if let Some(color) = validation_state_color(&validation.resolve(), theme) {
@@ -95,10 +104,13 @@ impl<VM> ResolvedElement<VM> {
                         &self.visual,
                         widget_state,
                     );
-                    let style = apply_local_style(
+                    let style = apply_local_style_with_state(
                         runtime_style.local.as_ref(),
                         style,
                         &context.style_context,
+                        context.style_sheet,
+                        &self.visual,
+                        widget_state,
                     );
                     Some(style)
                 }
@@ -113,10 +125,13 @@ impl<VM> ResolvedElement<VM> {
                         &self.visual,
                         widget_state,
                     );
-                    let style = apply_local_style(
+                    let style = apply_local_style_with_state(
                         runtime_style.local.as_ref(),
                         style,
                         &context.style_context,
+                        context.style_sheet,
+                        &self.visual,
+                        widget_state,
                     );
                     Some(style)
                 }
@@ -131,10 +146,13 @@ impl<VM> ResolvedElement<VM> {
                         &self.visual,
                         widget_state,
                     );
-                    let style = apply_local_style(
+                    let style = apply_local_style_with_state(
                         runtime_style.local.as_ref(),
                         style,
                         &context.style_context,
+                        context.style_sheet,
+                        &self.visual,
+                        widget_state,
                     );
                     Some(style)
                 }
@@ -153,10 +171,13 @@ impl<VM> ResolvedElement<VM> {
                         &self.visual,
                         widget_state,
                     );
-                    let mut style = apply_local_style(
+                    let mut style = apply_local_style_with_state(
                         runtime_style.local.as_ref(),
                         style,
                         &context.style_context,
+                        context.style_sheet,
+                        &self.visual,
+                        widget_state,
                     );
                     if let Some(color) = validation_state_color(&validation.resolve(), theme) {
                         style.border.normal = Value::Static(color);
@@ -185,10 +206,13 @@ impl<VM> ResolvedElement<VM> {
                                 &self.visual,
                                 widget_state,
                             );
-                            let textarea_style = apply_local_style(
+                            let textarea_style = apply_local_style_with_state(
                                 runtime_style.local.as_ref(),
                                 textarea_style,
                                 &context.style_context,
+                                context.style_sheet,
+                                &self.visual,
+                                widget_state,
                             );
                             input_style_from_textarea_style(textarea_style)
                         }
@@ -200,10 +224,13 @@ impl<VM> ResolvedElement<VM> {
                                 &self.visual,
                                 widget_state,
                             );
-                            apply_local_style(
+                            apply_local_style_with_state(
                                 runtime_style.local.as_ref(),
                                 input_style,
                                 &context.style_context,
+                                context.style_sheet,
+                                &self.visual,
+                                widget_state,
                             )
                         }
                     };
@@ -229,10 +256,13 @@ impl<VM> ResolvedElement<VM> {
                         &self.visual,
                         widget_state,
                     );
-                    let source_style = apply_local_style(
+                    let source_style = apply_local_style_with_state(
                         runtime_style.local.as_ref(),
                         source_style,
                         &context.style_context,
+                        context.style_sheet,
+                        &self.visual,
+                        widget_state,
                     );
                     let mut style = resolve_checkbox_style(
                         &source_style,
@@ -266,10 +296,13 @@ impl<VM> ResolvedElement<VM> {
                         &self.visual,
                         widget_state,
                     );
-                    let source_style = apply_local_style(
+                    let source_style = apply_local_style_with_state(
                         runtime_style.local.as_ref(),
                         source_style,
                         &context.style_context,
+                        context.style_sheet,
+                        &self.visual,
+                        widget_state,
                     );
                     let mut style =
                         resolve_radio_style(&source_style, widget_state, checked.resolve(), theme);
@@ -289,10 +322,11 @@ impl<VM> ResolvedElement<VM> {
 
     pub(super) fn resolve_collect_border_width(
         &self,
+        visual: &VisualStyle,
         styles: &CollectResolvedStyles,
         context: &mut CollectContext<'_, '_>,
     ) -> f32 {
-        self.visual
+        visual
             .border_width
             .as_ref()
             .map(|width| {
@@ -309,10 +343,11 @@ impl<VM> ResolvedElement<VM> {
 
     pub(super) fn resolve_collect_border_radius(
         &self,
+        visual: &VisualStyle,
         styles: &CollectResolvedStyles,
         context: &mut CollectContext<'_, '_>,
     ) -> f32 {
-        self.visual
+        visual
             .border_radius
             .as_ref()
             .map(|radius| {

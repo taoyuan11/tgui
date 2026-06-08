@@ -13,7 +13,10 @@ use std::sync::Arc;
 use crate::foundation::view_model::ValueCommand;
 use crate::theme::StyleContext;
 use crate::ui::layout::Value;
+use crate::ui::theme::WidgetState;
+use crate::ui::widget::common::VisualStyle;
 use crate::ui::widget::style::{ModalStyle, StyleResolver};
+use crate::ui::widget::StyleSheet;
 use crate::ui::widget::WidgetId;
 
 /// 挂在 `Element::modal` 上的 Modal 状态描述符。
@@ -66,8 +69,26 @@ impl<VM> ModalDescriptor<VM> {
 
     /// 按当前主题解析最终样式。
     pub(crate) fn resolved_style(&self, context: &StyleContext<'_>) -> ModalStyle {
+        let style_sheet = StyleSheet::default();
+        self.resolved_style_with_sheet(
+            context,
+            &style_sheet,
+            &VisualStyle::default(),
+            WidgetState::default(),
+        )
+    }
+
+    pub(crate) fn resolved_style_with_sheet(
+        &self,
+        context: &StyleContext<'_>,
+        style_sheet: &StyleSheet,
+        visual: &VisualStyle,
+        state: WidgetState,
+    ) -> ModalStyle {
         let mut base = ModalStyle::default_for_theme(context.theme);
         context.theme.components.modal.apply(&mut base, context);
+        style_sheet.apply_modal(&mut base, context, visual);
+        style_sheet.apply_modal_state(&mut base, context, visual, state);
         self.style
             .as_ref()
             .map(|resolver| resolver.resolve_from(base.clone(), context))

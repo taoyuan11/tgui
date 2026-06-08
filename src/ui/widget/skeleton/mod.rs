@@ -1,11 +1,14 @@
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{pct, LayoutStyle, Value};
 use crate::ui::theme::Theme;
 use crate::ui::unit::{dp, Dp};
 
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{ContainerStyle, ProgressBarStyle, SkeletonStyle, StyleResolver};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{ContainerStyle, ProgressBarStyle, SkeletonStyle, StyleResolver, StyleSheet};
 use super::{Flex, ProgressBar, Stack, WidgetKey};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +23,7 @@ pub struct Skeleton<VM> {
     lines: usize,
     style: Option<StyleResolver<SkeletonStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
     _marker: std::marker::PhantomData<fn() -> VM>,
 }
@@ -50,6 +54,7 @@ impl<VM> Skeleton<VM> {
             lines: 1,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
             _marker: std::marker::PhantomData,
         }
@@ -80,39 +85,61 @@ impl<VM> Skeleton<VM> {
 impl<VM: 'static> From<Skeleton<VM>> for Element<VM> {
     fn from(skeleton: Skeleton<VM>) -> Self {
         let layout_style = resolve_skeleton_style_for_layout(skeleton.style.as_ref());
+        let visual_identity = skeleton.visual.clone();
         let block = |width: Dp, height: Dp, radius: Dp| -> Element<VM> {
             let style = skeleton.style.clone();
             let shimmer_style = skeleton.style.clone();
-            Stack::new()
-                .size(width, height)
-                .style_full(move |context| {
-                    let resolved = resolve_skeleton_style(style.as_ref(), context);
-                    let mut container = ContainerStyle::default_for_theme(context.theme);
-                    container.surface.background = Some(resolved.base);
-                    container.surface.border_radius = Some(Value::Static(radius));
-                    container
-                })
-                .child(
-                    ProgressBar::<VM>::indeterminate(true)
-                        .position_absolute()
-                        .left(pct(0.0))
-                        .top(pct(0.0))
-                        .width(pct(100.0))
-                        .height(pct(100.0))
-                        .style_full(move |context| {
-                            let resolved = resolve_skeleton_style(shimmer_style.as_ref(), context);
-                            let mut progress = ProgressBarStyle::default_for_theme(context.theme);
-                            progress.track_color =
-                                Value::Static(crate::foundation::color::Color::TRANSPARENT);
-                            progress.fill_color = resolved.highlight;
-                            progress.radius = Value::Static(radius);
-                            progress.height = height;
-                            progress.min_width = Dp::ZERO;
-                            progress.indeterminate_segment_ratio = 0.42;
-                            progress
-                        }),
-                )
-                .into()
+            let shimmer_identity = visual_identity.clone();
+            with_visual_identity(
+                Stack::new()
+                    .size(width, height)
+                    .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                        let resolved = resolve_skeleton_style_with_sheet(
+                            style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                        );
+                        let mut container = ContainerStyle::default_for_theme(context.theme);
+                        container.surface.background = Some(resolved.base);
+                        container.surface.border_radius = Some(Value::Static(radius));
+                        container
+                    })
+                    .child(with_visual_identity(
+                        ProgressBar::<VM>::indeterminate(true)
+                            .position_absolute()
+                            .left(pct(0.0))
+                            .top(pct(0.0))
+                            .width(pct(100.0))
+                            .height(pct(100.0))
+                            .style_full_with_style_sheet(
+                                move |context, style_sheet, visual, state| {
+                                    let resolved = resolve_skeleton_style_with_sheet(
+                                        shimmer_style.as_ref(),
+                                        context,
+                                        style_sheet,
+                                        visual,
+                                        state,
+                                    );
+                                    let mut progress =
+                                        ProgressBarStyle::default_for_theme(context.theme);
+                                    progress.track_color =
+                                        Value::Static(crate::foundation::color::Color::TRANSPARENT);
+                                    progress.fill_color = resolved.highlight;
+                                    progress.radius = Value::Static(radius);
+                                    progress.height = height;
+                                    progress.min_width = Dp::ZERO;
+                                    progress.indeterminate_segment_ratio = 0.42;
+                                    progress
+                                },
+                            )
+                            .into(),
+                        &visual_identity,
+                    ))
+                    .into(),
+                &shimmer_identity,
+            )
         };
         let mut root = if skeleton.lines > 1 {
             let lines = (0..skeleton.lines)
@@ -136,6 +163,7 @@ impl<VM: 'static> From<Skeleton<VM>> for Element<VM> {
             }
         };
         root.key = skeleton.key;
+        root = with_visual_identity(root, &skeleton.visual);
         root.layout = merge_layout(root.layout, skeleton.layout);
         root
     }
@@ -145,11 +173,36 @@ fn resolve_skeleton_style(
     style: Option<&StyleResolver<SkeletonStyle>>,
     context: &StyleContext<'_>,
 ) -> SkeletonStyle {
-    let mut base = SkeletonStyle::default_for_theme(context.theme);
-    context.theme.components.skeleton.apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_skeleton_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_skeleton_style_with_sheet(
+    style: Option<&StyleResolver<SkeletonStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> SkeletonStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        SkeletonStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.skeleton.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_skeleton(base, context, visual),
+        |sheet, base, context, visual, state| {
+            sheet.apply_skeleton_state(base, context, visual, state)
+        },
+    )
 }
 
 fn resolve_skeleton_style_for_layout(

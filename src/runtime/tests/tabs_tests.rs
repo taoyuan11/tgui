@@ -29,9 +29,12 @@ fn tab_center(handler: &mut BoundRuntimeHandler<TestVm>, key: &str) -> Point {
         .hit_regions
         .iter()
         .find_map(|region| match &region.interaction {
-            HitInteraction::TabTrigger { key: candidate, .. } if candidate == key => {
-                Some(region.rect)
-            }
+            HitInteraction::TabTrigger { key: candidate, .. } if candidate == key => Some(
+                region
+                    .clip_rect
+                    .and_then(|clip| region.rect.intersect(clip))
+                    .unwrap_or(region.rect),
+            ),
             _ => None,
         })
         .expect("tab trigger should exist");

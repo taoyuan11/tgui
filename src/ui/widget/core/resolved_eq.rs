@@ -29,10 +29,12 @@ impl<VM> PartialEq for ResolvedWidgetKind<VM> {
                 Self::Container {
                     layout: left_layout,
                     children: left_children,
+                    ..
                 },
                 Self::Container {
                     layout: right_layout,
                     children: right_children,
+                    ..
                 },
             ) => {
                 left_layout == right_layout
@@ -42,7 +44,7 @@ impl<VM> PartialEq for ResolvedWidgetKind<VM> {
                         .zip(right_children.iter())
                         .all(|(left_child, right_child)| left_child.id == right_child.id)
             }
-            (Self::Text { text: left }, Self::Text { text: right }) => {
+            (Self::Text { text: left, .. }, Self::Text { text: right, .. }) => {
                 left.content == right.content
                     && left.font_family == right.font_family
                     && left.background == right.background
@@ -60,7 +62,7 @@ impl<VM> PartialEq for ResolvedWidgetKind<VM> {
                     && left.autoplay == right.autoplay
                     && left.looping == right.looping
             }
-            (Self::Image { image: left }, Self::Image { image: right }) => {
+            (Self::Image { image: left, .. }, Self::Image { image: right, .. }) => {
                 left.source == right.source
                     && left.background == right.background
                     && left.fit == right.fit
@@ -79,10 +81,12 @@ impl<VM> PartialEq for ResolvedWidgetKind<VM> {
                 Self::VideoSurface {
                     video: left_video,
                     style: left_style,
+                    ..
                 },
                 Self::VideoSurface {
                     video: right_video,
                     style: right_style,
+                    ..
                 },
             ) => {
                 left_video.background == right_video.background

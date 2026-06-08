@@ -800,13 +800,14 @@ where
         .widget_id(tree_id)
         .item_layout(self.item_layout)
         .width(pct(100.0))
-        .style_full(move |context| {
-            let style = resolve_tree_style(
+        .style_full_with_style_sheet(move |context, style_sheet, _visual, state| {
+            let mut style = resolve_tree_style(
                 root_style_resolver.as_ref(),
                 context,
-                &StyleSheet::default(),
+                style_sheet,
                 &root_visual,
             );
+            style_sheet.apply_tree_state(&mut style, context, &root_visual, state);
             let mut container = ContainerStyle::default_for_theme(context.theme);
             container.surface = style.surface;
             container

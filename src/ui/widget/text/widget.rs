@@ -1,7 +1,7 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::FontWeight;
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 use crate::ui::unit::Sp;
 
@@ -238,6 +238,22 @@ impl Text {
         resolver: impl Fn(&StyleContext<'_>) -> TextWidgetStyle + Send + Sync + 'static,
     ) -> Self {
         self.style = Some(StyleResolver::full(resolver));
+        self
+    }
+
+    pub(crate) fn style_full_with_style_sheet(
+        mut self,
+        resolver: impl Fn(
+                &StyleContext<'_>,
+                &crate::ui::widget::StyleSheet,
+                &VisualStyle,
+                WidgetState,
+            ) -> TextWidgetStyle
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full_with_style_sheet(resolver));
         self
     }
 

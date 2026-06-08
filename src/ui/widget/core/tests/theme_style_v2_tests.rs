@@ -62,7 +62,7 @@ fn theme_tokens_drive_default_component_styles() {
     assert_eq!(select.menu_background.resolve(), theme.colors.surface);
     assert_eq!(
         select.selected_option_background.resolve(),
-        theme.colors.primary.with_alpha_factor(0.16)
+        theme.colors.primary_container
     );
     assert_eq!(select.radius.resolve(), theme.radius.lg);
 
@@ -248,7 +248,7 @@ fn local_style_resolves_after_stylesheet_state_patch_without_double_applying_mut
         &visual,
         hovered,
     );
-    let state_style = apply_local_style(Some(&local), state_style, &context);
+    let state_style = apply_local_style(Some(&local), state_style, &context, &sheet, &visual);
     let resolved = resolve_button_style(&state_style, hovered, &theme);
 
     assert_eq!(resolved.background, local_color);

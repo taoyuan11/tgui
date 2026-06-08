@@ -94,8 +94,8 @@ fn tabs_style_defaults_resolve_for_light_and_dark() {
     let dark = TabsStyle::default_for_theme(&Theme::dark());
 
     assert_ne!(
-        light.active_tab_foreground.resolve(),
-        dark.active_tab_foreground.resolve()
+        light.tab_foreground.normal.resolve(),
+        dark.tab_foreground.normal.resolve()
     );
     assert!(light.indicator_thickness > dp(0.0));
     assert!(dark.tab_min_height > dp(0.0));

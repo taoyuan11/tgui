@@ -31,6 +31,7 @@ struct CollectVisualState {
     frame: Rect,
     background_frame: Rect,
     background_radius: Dp,
+    runtime_visual: VisualStyle,
     primitive_clip: Option<Rect>,
     primitive_clip_mask: Option<ClipMask>,
     disabled: bool,

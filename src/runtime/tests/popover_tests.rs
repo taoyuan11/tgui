@@ -113,18 +113,7 @@ fn hover_preview_remains_visible_when_cursor_moves_into_popover_rect() {
     handler.cursor_position = Some(Point::new(dp(40.0), dp(20.0)));
     let _ = handler.handle_hover(viewport);
     handler.invalidate_computed_scene();
-    let shown = handler.computed_scene();
-    let popover_rect = shown
-        .overlay_close_handlers
-        .iter()
-        .find(|handle| handle.layer == crate::runtime::overlay::OverlayLayer::Popover)
-        .map(|handle| handle.rect)
-        .expect("popover overlay rect should exist");
-
-    handler.cursor_position = Some(Point::new(
-        popover_rect.x + dp(12.0),
-        popover_rect.y + dp(12.0),
-    ));
+    handler.cursor_position = Some(popover_widget_center(&mut handler));
     let _ = handler.handle_hover(viewport);
     handler.invalidate_computed_scene();
     let hovered_panel = handler.computed_scene();
@@ -308,6 +297,20 @@ fn popover_content_visible(handler: &mut BoundRuntimeHandler<PopoverVm>, label: 
         .any(|text| text.content.as_ref() == label)
 }
 
+fn popover_widget_center(handler: &mut BoundRuntimeHandler<PopoverVm>) -> Point {
+    let computed = handler.computed_scene();
+    let region = computed
+        .overlay_hit_regions
+        .iter()
+        .find(|region| matches!(region.interaction, HitInteraction::Widget { .. }))
+        .expect("popover widget should be hittable");
+    let rect = region
+        .clip_rect
+        .and_then(|clip| region.rect.intersect(clip))
+        .unwrap_or(region.rect);
+    Point::new(rect.x + rect.width * 0.5, rect.y + rect.height * 0.5)
+}
+
 #[test]
 fn hover_preview_survives_clicking_interactive_content() {
     let invalidation = InvalidationSignal::new();
@@ -333,19 +336,8 @@ fn hover_preview_survives_clicking_interactive_content() {
     handler.cursor_position = Some(Point::new(dp(40.0), dp(20.0)));
     let _ = handler.handle_hover(viewport);
     handler.invalidate_computed_scene();
-    let popover_rect = handler
-        .computed_scene()
-        .overlay_close_handlers
-        .iter()
-        .find(|handle| handle.layer == crate::runtime::overlay::OverlayLayer::Popover)
-        .map(|handle| handle.rect)
-        .expect("popover overlay rect should exist");
-
     // Move into the content.
-    handler.cursor_position = Some(Point::new(
-        popover_rect.x + dp(12.0),
-        popover_rect.y + dp(12.0),
-    ));
+    handler.cursor_position = Some(popover_widget_center(&mut handler));
     let _ = handler.handle_hover(viewport);
     handler.invalidate_computed_scene();
     assert!(

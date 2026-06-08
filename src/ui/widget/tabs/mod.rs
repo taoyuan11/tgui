@@ -1,14 +1,14 @@
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Axis, Insets, LayoutStyle, Overflow, Value};
 use crate::ui::widget::button::Button;
-use crate::ui::widget::common::{TabPlacement, TabTriggerState, WidgetId};
+use crate::ui::widget::common::{TabPlacement, TabTriggerState, VisualStyle, WidgetId};
 use crate::ui::widget::container::{set_layout_inset, set_layout_length, set_layout_lengths};
 use crate::ui::widget::container::{Flex, IntoLengthValue};
 use crate::ui::widget::core::Element;
 use crate::ui::widget::menu::{Menu, MenuItem};
 use crate::ui::widget::scroll_view::ScrollView;
-use crate::ui::widget::style::{ButtonStyle, ContainerStyle, StyleResolver, TabsStyle};
+use crate::ui::widget::style::{ButtonStyle, ContainerStyle, StyleResolver, StyleSheet, TabsStyle};
 use crate::ui::widget::Stack;
 
 const TABS_MORE_VISIBLE_BUDGET: usize = 4;
@@ -391,19 +391,37 @@ fn build_tab_strip<VM: 'static>(
                 Overflow::Scroll
             })
             .show_scrollbar(false)
-            .style_full({
+            .style_full_with_style_sheet({
                 let style = style.clone();
-                move |context| {
-                    tab_bar_container_style(resolve_tabs_style(style.as_ref(), context), context)
+                move |context, style_sheet, visual, state| {
+                    tab_bar_container_style(
+                        resolve_tabs_style_with_sheet(
+                            style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                        ),
+                        context,
+                    )
                 }
             })
             .child(list)
             .into(),
         TabsOverflowMode::More => Flex::new(axis)
-            .style_full({
+            .style_full_with_style_sheet({
                 let style = style.clone();
-                move |context| {
-                    tab_bar_container_style(resolve_tabs_style(style.as_ref(), context), context)
+                move |context, style_sheet, visual, state| {
+                    tab_bar_container_style(
+                        resolve_tabs_style_with_sheet(
+                            style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                        ),
+                        context,
+                    )
                 }
             })
             .child(list)
@@ -442,10 +460,20 @@ fn build_triggers<VM: 'static>(
             .ghost()
             .disable(item.disabled.clone())
             .min_width(layout_style.tab_min_width)
-            .style_full({
+            .style_full_with_style_sheet({
                 let style = style.clone();
-                move |context| {
-                    tab_button_style(resolve_tabs_style(style.as_ref(), context), context, active)
+                move |context, style_sheet, visual, state| {
+                    tab_button_style(
+                        resolve_tabs_style_with_sheet(
+                            style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                        ),
+                        context,
+                        active,
+                    )
                 }
             });
         if !disabled_now {
@@ -550,10 +578,20 @@ fn build_more_trigger<VM: 'static>(
     let trigger = Button::new("More")
         .ghost()
         .min_width(layout_style.tab_min_width)
-        .style_full({
+        .style_full_with_style_sheet({
             let style = style.clone();
-            move |context| {
-                tab_button_style(resolve_tabs_style(style.as_ref(), context), context, false)
+            move |context, style_sheet, visual, state| {
+                tab_button_style(
+                    resolve_tabs_style_with_sheet(
+                        style.as_ref(),
+                        context,
+                        style_sheet,
+                        visual,
+                        state,
+                    ),
+                    context,
+                    false,
+                )
             }
         });
     Menu::new(trigger)
@@ -579,10 +617,19 @@ fn build_panel<VM: 'static>(
     let mut panel = Flex::vertical()
         .grow(1.0)
         .padding(layout_style.panel_padding)
-        .style_full({
+        .style_full_with_style_sheet({
             let style = style.clone();
-            move |context| {
-                panel_container_style(resolve_tabs_style(style.as_ref(), context), context)
+            move |context, style_sheet, visual, state| {
+                panel_container_style(
+                    resolve_tabs_style_with_sheet(
+                        style.as_ref(),
+                        context,
+                        style_sheet,
+                        visual,
+                        state,
+                    ),
+                    context,
+                )
             }
         });
 
@@ -610,8 +657,28 @@ fn resolve_tabs_style(
     style: Option<&StyleResolver<TabsStyle>>,
     context: &StyleContext<'_>,
 ) -> TabsStyle {
+    let style_sheet = StyleSheet::default();
+    let visual = VisualStyle::default();
+    resolve_tabs_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &visual,
+        WidgetState::default(),
+    )
+}
+
+fn resolve_tabs_style_with_sheet(
+    style: Option<&StyleResolver<TabsStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> TabsStyle {
     let mut base = TabsStyle::default_for_theme(context.theme);
     context.theme.components.tabs.apply(&mut base, context);
+    style_sheet.apply_tabs(&mut base, context, visual);
+    style_sheet.apply_tabs_state(&mut base, context, visual, state);
     style
         .map(|resolver| resolver.resolve_from(base.clone(), context))
         .unwrap_or(base)

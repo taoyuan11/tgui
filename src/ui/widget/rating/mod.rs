@@ -1,13 +1,16 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::ValueCommand;
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{pct, Align, LayoutStyle, Value};
 use crate::ui::theme::{StateValue, Theme};
 
+use super::common::VisualStyle;
 use super::core::Element;
 use super::icon::{BuiltinIcon, Icon};
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{IconStyle, RatingStyle, SliderStyle, StyleResolver};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{IconStyle, RatingStyle, SliderStyle, StyleResolver, StyleSheet};
 use super::{Flex, Slider, Stack, WidgetKey};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -23,6 +26,7 @@ pub struct Rating<VM> {
     on_change: Option<ValueCommand<VM, RatingChange>>,
     style: Option<StyleResolver<RatingStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -36,6 +40,7 @@ impl<VM> Rating<VM> {
             on_change: None,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -92,6 +97,7 @@ impl<VM: 'static> From<Rating<VM>> for Element<VM> {
         let layout_style = resolve_rating_style_for_layout(rating.style.as_ref());
         let value = rating.value.resolve().clamp(0.0, rating.max as f32);
         let read_only = rating.read_only.resolve();
+        let visual_identity = rating.visual.clone();
         let mut stars = Vec::new();
         for index in 0..rating.max {
             let threshold = index as f32 + 1.0;
@@ -104,19 +110,23 @@ impl<VM: 'static> From<Rating<VM>> for Element<VM> {
             };
             let active = value + f32::EPSILON >= threshold - 0.5;
             let style = rating.style.clone();
-            let icon_element: Element<VM> = Icon::builtin(icon)
-                .style_full(move |context| {
-                    let resolved = resolve_rating_style(style.as_ref(), context);
-                    IconStyle {
-                        color: if active {
-                            resolved.active
-                        } else {
-                            resolved.inactive
-                        },
-                        size: resolved.size,
-                    }
-                })
-                .into();
+            let icon_identity = visual_identity.clone();
+            let icon_element: Element<VM> = with_visual_identity(
+                Icon::builtin(icon)
+                    .style_full(move |context| {
+                        let resolved = resolve_rating_style(style.as_ref(), context);
+                        IconStyle {
+                            color: if active {
+                                resolved.active
+                            } else {
+                                resolved.inactive
+                            },
+                            size: resolved.size,
+                        }
+                    })
+                    .into(),
+                &icon_identity,
+            );
             stars.push(icon_element);
         }
         let star_row: Element<VM> = Flex::horizontal()
@@ -138,7 +148,18 @@ impl<VM: 'static> From<Rating<VM>> for Element<VM> {
                             .top(pct(0.0))
                             .width(pct(100.0))
                             .height(pct(100.0))
-                            .style_full(move |context| transparent_rating_slider_style(context))
+                            .style_full_with_style_sheet({
+                                let style = rating.style.clone();
+                                move |context, style_sheet, visual, state| {
+                                    transparent_rating_slider_style(
+                                        style.as_ref(),
+                                        context,
+                                        style_sheet,
+                                        visual,
+                                        state,
+                                    )
+                                }
+                            })
                             .on_change(ValueCommand::new_with_context(
                                 move |vm, next: f32, context| {
                                     command.execute_with_context(
@@ -159,12 +180,20 @@ impl<VM: 'static> From<Rating<VM>> for Element<VM> {
             star_row
         };
         root.key = rating.key;
+        root = with_visual_identity(root, &rating.visual);
         root.layout = merge_layout(root.layout, rating.layout);
         root
     }
 }
 
-fn transparent_rating_slider_style(context: &StyleContext<'_>) -> SliderStyle {
+fn transparent_rating_slider_style(
+    style: Option<&StyleResolver<RatingStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> SliderStyle {
+    let _ = resolve_rating_style_with_sheet(style, context, style_sheet, visual, state);
     let mut style = SliderStyle::default_for_theme(context.theme);
     let transparent = Value::Static(Color::TRANSPARENT);
     style.track = StateValue::new(transparent.clone());
@@ -186,11 +215,36 @@ fn resolve_rating_style(
     style: Option<&StyleResolver<RatingStyle>>,
     context: &StyleContext<'_>,
 ) -> RatingStyle {
-    let mut base = RatingStyle::default_for_theme(context.theme);
-    context.theme.components.rating.apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_rating_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_rating_style_with_sheet(
+    style: Option<&StyleResolver<RatingStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> RatingStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        RatingStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.rating.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_rating(base, context, visual),
+        |sheet, base, context, visual, state| {
+            sheet.apply_rating_state(base, context, visual, state)
+        },
+    )
 }
 
 fn resolve_rating_style_for_layout(style: Option<&StyleResolver<RatingStyle>>) -> RatingStyle {

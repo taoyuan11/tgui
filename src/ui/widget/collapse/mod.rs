@@ -1,11 +1,14 @@
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{LayoutStyle, Value};
 use crate::ui::theme::Theme;
 
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{ButtonStyle, CollapseStyle, ContainerStyle, StyleResolver};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{ButtonStyle, CollapseStyle, ContainerStyle, StyleResolver, StyleSheet};
 use super::{Button, Flex, Stack, WidgetKey};
 
 pub struct Collapse<VM> {
@@ -15,6 +18,7 @@ pub struct Collapse<VM> {
     on_change: Option<ValueCommand<VM, bool>>,
     style: Option<StyleResolver<CollapseStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -27,6 +31,7 @@ impl<VM> Collapse<VM> {
             on_change: None,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -69,10 +74,17 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
         let expanded = collapse.expanded.resolve();
         let on_change = collapse.on_change.clone();
         let header_style = collapse.style.clone();
+        let header_identity = collapse.visual.clone();
         let header = Button::new(collapse.title.clone())
             .secondary()
-            .style_full(move |context| {
-                let resolved = resolve_collapse_style(header_style.as_ref(), context);
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_collapse_style_with_sheet(
+                    header_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
                 let mut button = ButtonStyle::default_for_theme(
                     context.theme,
                     crate::ui::widget::common::ButtonVariantKind::Secondary,
@@ -88,27 +100,42 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
                     command.execute_with_context(vm, !expanded, context);
                 }
             }));
-        let mut children: Vec<Element<VM>> = vec![header.into()];
+        let mut children: Vec<Element<VM>> =
+            vec![with_visual_identity(header.into(), &header_identity)];
         if expanded {
             let style = collapse.style.clone();
-            children.push(
+            let panel_identity = collapse.visual.clone();
+            children.push(with_visual_identity(
                 Stack::new()
                     .padding(layout_style.padding)
-                    .style_full(move |context| {
-                        let resolved = resolve_collapse_style(style.as_ref(), context);
+                    .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                        let resolved = resolve_collapse_style_with_sheet(
+                            style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                        );
                         let mut container = ContainerStyle::default_for_theme(context.theme);
                         container.surface.background = Some(resolved.panel_background);
                         container
                     })
                     .child(collapse.content)
                     .into(),
-            );
+                &panel_identity,
+            ));
         }
         let style = collapse.style.clone();
         let mut root: Element<VM> = Flex::vertical()
             .gap(layout_style.gap)
-            .style_full(move |context| {
-                let resolved = resolve_collapse_style(style.as_ref(), context);
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_collapse_style_with_sheet(
+                    style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
                 let mut container = ContainerStyle::default_for_theme(context.theme);
                 container.surface.border_color = Some(resolved.border);
                 container.surface.border_width = Some(Value::Static(resolved.border_width));
@@ -118,6 +145,7 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
             .child(children)
             .into();
         root.key = collapse.key;
+        root = with_visual_identity(root, &collapse.visual);
         root.layout = merge_layout(root.layout, collapse.layout);
         root
     }
@@ -150,6 +178,7 @@ pub struct Accordion<VM> {
     on_change: Option<ValueCommand<VM, Option<String>>>,
     style: Option<StyleResolver<CollapseStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -164,6 +193,7 @@ impl<VM> Accordion<VM> {
             on_change: None,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -221,6 +251,7 @@ impl<VM: 'static> From<Accordion<VM>> for Element<VM> {
                     })),
                     style: accordion.style.clone(),
                     layout: LayoutStyle::default(),
+                    visual: accordion.visual.clone(),
                     key: None,
                 }
                 .into()
@@ -228,6 +259,7 @@ impl<VM: 'static> From<Accordion<VM>> for Element<VM> {
             .collect::<Vec<Element<VM>>>();
         let mut root: Element<VM> = Flex::vertical().gap(layout_style.gap).child(items).into();
         root.key = accordion.key;
+        root = with_visual_identity(root, &accordion.visual);
         root.layout = merge_layout(root.layout, accordion.layout);
         root
     }
@@ -237,11 +269,36 @@ fn resolve_collapse_style(
     style: Option<&StyleResolver<CollapseStyle>>,
     context: &StyleContext<'_>,
 ) -> CollapseStyle {
-    let mut base = CollapseStyle::default_for_theme(context.theme);
-    context.theme.components.collapse.apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_collapse_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_collapse_style_with_sheet(
+    style: Option<&StyleResolver<CollapseStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> CollapseStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        CollapseStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.collapse.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_collapse(base, context, visual),
+        |sheet, base, context, visual, state| {
+            sheet.apply_collapse_state(base, context, visual, state)
+        },
+    )
 }
 
 fn resolve_collapse_style_for_layout(

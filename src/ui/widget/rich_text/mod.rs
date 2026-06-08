@@ -3,14 +3,19 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::MediaSource;
 use crate::text::font::FontWeight;
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value, Wrap};
 use crate::ui::theme::Theme;
 use crate::ui::unit::{dp, sp};
 
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{ContainerStyle, ImageStyle, RichTextStyle, StyleResolver, TextWidgetStyle};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{
+    ContainerStyle, ImageStyle, RichTextStyle, StyleResolver, StyleSheet, TextWidgetStyle,
+};
 use super::{CursorStyle, Flex, Image, Stack, Text, WidgetKey};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +35,7 @@ pub struct RichText<VM> {
     on_link_click: Option<ValueCommand<VM, RichTextLinkClick>>,
     style: Option<StyleResolver<RichTextStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -40,6 +46,7 @@ impl<VM> RichText<VM> {
             on_link_click: None,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -77,13 +84,21 @@ impl<VM: 'static> From<RichText<VM>> for Element<VM> {
         let blocks = markdown_blocks(&rich.markdown.resolve());
         let children = blocks
             .into_iter()
-            .map(|block| rich_block_element(block, rich.style.clone(), rich.on_link_click.clone()))
+            .map(|block| {
+                rich_block_element(
+                    block,
+                    rich.style.clone(),
+                    rich.on_link_click.clone(),
+                    rich.visual.clone(),
+                )
+            })
             .collect::<Vec<_>>();
         let mut root: Element<VM> = Flex::vertical()
             .gap(layout_style.gap)
             .child(children)
             .into();
         root.key = rich.key;
+        root = with_visual_identity(root, &rich.visual);
         root.layout = merge_layout(root.layout, rich.layout);
         root
     }
@@ -265,37 +280,60 @@ fn rich_block_element<VM: 'static>(
     block: RichBlock,
     style: Option<StyleResolver<RichTextStyle>>,
     on_link_click: Option<ValueCommand<VM, RichTextLinkClick>>,
+    visual_identity: VisualStyle,
 ) -> Element<VM> {
     match block {
-        RichBlock::Paragraph(inlines) => rich_inline_row(inlines, style, on_link_click),
+        RichBlock::Paragraph(inlines) => {
+            rich_inline_row(inlines, style, on_link_click, visual_identity)
+        }
         RichBlock::Heading(level, inlines) => {
-            rich_inline_row_with_heading(inlines, style, on_link_click, level)
+            rich_inline_row_with_heading(inlines, style, on_link_click, level, visual_identity)
         }
         RichBlock::Code(code) => {
             let container_style = style.clone();
             let text_style = style;
-            Stack::new()
-                .padding(Insets::all(dp(10.0)))
-                .style_full(move |context| {
-                    let resolved = resolve_rich_text_style(container_style.as_ref(), context);
-                    let mut container = ContainerStyle::default_for_theme(context.theme);
-                    container.surface.background = Some(resolved.code_background);
-                    container.surface.border_radius = Some(Value::Static(dp(6.0)));
-                    container
-                })
-                .child(
-                    Text::new(code)
-                        .user_select(true)
-                        .style_full(move |context| {
-                            let resolved = resolve_rich_text_style(text_style.as_ref(), context);
-                            TextWidgetStyle {
-                                surface: Default::default(),
-                                color: resolved.code_foreground,
-                                typography: resolved.code_text_style,
-                            }
-                        }),
-                )
-                .into()
+            let text_identity = visual_identity.clone();
+            with_visual_identity(
+                Stack::new()
+                    .padding(Insets::all(dp(10.0)))
+                    .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                        let resolved = resolve_rich_text_style_with_sheet(
+                            container_style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                        );
+                        let mut container = ContainerStyle::default_for_theme(context.theme);
+                        container.surface.background = Some(resolved.code_background);
+                        container.surface.border_radius = Some(Value::Static(dp(6.0)));
+                        container
+                    })
+                    .child(with_visual_identity(
+                        Text::new(code)
+                            .user_select(true)
+                            .style_full_with_style_sheet(
+                                move |context, style_sheet, visual, state| {
+                                    let resolved = resolve_rich_text_style_with_sheet(
+                                        text_style.as_ref(),
+                                        context,
+                                        style_sheet,
+                                        visual,
+                                        state,
+                                    );
+                                    TextWidgetStyle {
+                                        surface: Default::default(),
+                                        color: resolved.code_foreground,
+                                        typography: resolved.code_text_style,
+                                    }
+                                },
+                            )
+                            .into(),
+                        &text_identity,
+                    ))
+                    .into(),
+                &visual_identity,
+            )
         }
         RichBlock::List { ordered, items } => {
             let rows = items
@@ -310,21 +348,35 @@ fn rich_block_element<VM: 'static>(
                     Flex::horizontal()
                         .align(Align::Start)
                         .gap(dp(6.0))
-                        .child(Text::new(marker).style_full(rich_text_style(style.clone())))
+                        .child(with_visual_identity(
+                            Text::new(marker)
+                                .style_full_with_style_sheet(rich_text_style(style.clone()))
+                                .into(),
+                            &visual_identity,
+                        ))
                         .child(rich_inline_row(
                             inlines,
                             style.clone(),
                             on_link_click.clone(),
+                            visual_identity.clone(),
                         ))
                         .into()
                 })
                 .collect::<Vec<Element<VM>>>();
-            Flex::vertical().gap(dp(4.0)).child(rows).into()
+            with_visual_identity(
+                Flex::vertical().gap(dp(4.0)).child(rows).into(),
+                &visual_identity,
+            )
         }
-        RichBlock::Image(image) => Image::new(image.source)
-            .height(dp(160.0))
-            .style_full(|context| ImageStyle::default_for_theme(context.theme))
-            .into(),
+        RichBlock::Image(image) => with_visual_identity(
+            Image::new(image.source)
+                .height(dp(160.0))
+                .style_full_with_style_sheet(|context, _style_sheet, _visual, _state| {
+                    ImageStyle::default_for_theme(context.theme)
+                })
+                .into(),
+            &visual_identity,
+        ),
     }
 }
 
@@ -333,6 +385,7 @@ fn rich_inline_row_with_heading<VM: 'static>(
     style: Option<StyleResolver<RichTextStyle>>,
     on_link_click: Option<ValueCommand<VM, RichTextLinkClick>>,
     level: u8,
+    visual_identity: VisualStyle,
 ) -> Element<VM> {
     let heading_style = style.clone();
     rich_inline_row_with_style(
@@ -350,6 +403,7 @@ fn rich_inline_row_with_heading<VM: 'static>(
             rich_style
         },
         heading_style,
+        visual_identity,
     )
 }
 
@@ -357,8 +411,16 @@ fn rich_inline_row<VM: 'static>(
     inlines: Vec<RichInline>,
     style: Option<StyleResolver<RichTextStyle>>,
     on_link_click: Option<ValueCommand<VM, RichTextLinkClick>>,
+    visual_identity: VisualStyle,
 ) -> Element<VM> {
-    rich_inline_row_with_style(inlines, style.clone(), on_link_click, |style| style, style)
+    rich_inline_row_with_style(
+        inlines,
+        style.clone(),
+        on_link_click,
+        |style| style,
+        style,
+        visual_identity,
+    )
 }
 
 fn rich_inline_row_with_style<VM: 'static>(
@@ -367,99 +429,154 @@ fn rich_inline_row_with_style<VM: 'static>(
     on_link_click: Option<ValueCommand<VM, RichTextLinkClick>>,
     mapper: impl Fn(RichTextStyle) -> RichTextStyle + Clone + Send + Sync + 'static,
     link_style: Option<StyleResolver<RichTextStyle>>,
+    visual_identity: VisualStyle,
 ) -> Element<VM> {
     let children = inlines
         .into_iter()
         .map(|inline| match inline {
-            RichInline::Text(text) => Text::new(text)
-                .user_select(true)
-                .style_full(rich_text_style_mapped(style.clone(), mapper.clone()))
-                .into(),
+            RichInline::Text(text) => with_visual_identity(
+                Text::new(text)
+                    .user_select(true)
+                    .style_full_with_style_sheet(rich_text_style_mapped(
+                        style.clone(),
+                        mapper.clone(),
+                    ))
+                    .into(),
+                &visual_identity,
+            ),
             RichInline::Strong(text) => {
                 let mapper = mapper.clone();
                 let style = style.clone();
-                Text::new(text)
-                    .user_select(true)
-                    .style_full(move |context| {
-                        let mut resolved = mapper(resolve_rich_text_style(style.as_ref(), context));
-                        resolved.text_style.weight = FontWeight::Bold;
-                        TextWidgetStyle {
-                            surface: Default::default(),
-                            color: resolved.foreground,
-                            typography: resolved.text_style,
-                        }
-                    })
-                    .into()
-            }
-            RichInline::Emphasis(text) => Text::new(text)
-                .user_select(true)
-                .style_full(rich_text_style_mapped(style.clone(), mapper.clone()))
-                .into(),
-            RichInline::Code(text) => Text::new(text)
-                .user_select(true)
-                .style_full({
-                    let style = style.clone();
-                    move |context| {
-                        let resolved = resolve_rich_text_style(style.as_ref(), context);
-                        TextWidgetStyle {
-                            surface: Default::default(),
-                            color: resolved.code_foreground,
-                            typography: resolved.code_text_style,
-                        }
-                    }
-                })
-                .into(),
-            RichInline::Link { href, label } => {
-                let command = on_link_click.clone();
-                Text::new(label.clone())
-                    .cursor(CursorStyle::Pointer)
-                    .style_full({
-                        let style = link_style.clone();
-                        move |context| {
-                            let resolved = resolve_rich_text_style(style.as_ref(), context);
+                with_visual_identity(
+                    Text::new(text)
+                        .user_select(true)
+                        .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                            let mut resolved = mapper(resolve_rich_text_style_with_sheet(
+                                style.as_ref(),
+                                context,
+                                style_sheet,
+                                visual,
+                                state,
+                            ));
+                            resolved.text_style.weight = FontWeight::Bold;
                             TextWidgetStyle {
                                 surface: Default::default(),
-                                color: resolved.link,
+                                color: resolved.foreground,
                                 typography: resolved.text_style,
+                            }
+                        })
+                        .into(),
+                    &visual_identity,
+                )
+            }
+            RichInline::Emphasis(text) => with_visual_identity(
+                Text::new(text)
+                    .user_select(true)
+                    .style_full_with_style_sheet(rich_text_style_mapped(
+                        style.clone(),
+                        mapper.clone(),
+                    ))
+                    .into(),
+                &visual_identity,
+            ),
+            RichInline::Code(text) => with_visual_identity(
+                Text::new(text)
+                    .user_select(true)
+                    .style_full_with_style_sheet({
+                        let style = style.clone();
+                        move |context, style_sheet, visual, state| {
+                            let resolved = resolve_rich_text_style_with_sheet(
+                                style.as_ref(),
+                                context,
+                                style_sheet,
+                                visual,
+                                state,
+                            );
+                            TextWidgetStyle {
+                                surface: Default::default(),
+                                color: resolved.code_foreground,
+                                typography: resolved.code_text_style,
                             }
                         }
                     })
-                    .on_click(Command::new_with_context(move |vm, context| {
-                        if let Some(command) = command.as_ref() {
-                            command.execute_with_context(
-                                vm,
-                                RichTextLinkClick {
-                                    href: href.clone(),
-                                    label: label.clone(),
-                                },
-                                context,
-                            );
-                        }
-                    }))
-                    .focusable(true)
-                    .tab_index(0)
+                    .into(),
+                &visual_identity,
+            ),
+            RichInline::Link { href, label } => {
+                let command = on_link_click.clone();
+                with_visual_identity(
+                    Text::new(label.clone())
+                        .cursor(CursorStyle::Pointer)
+                        .style_full_with_style_sheet({
+                            let style = link_style.clone();
+                            move |context, style_sheet, visual, state| {
+                                let resolved = resolve_rich_text_style_with_sheet(
+                                    style.as_ref(),
+                                    context,
+                                    style_sheet,
+                                    visual,
+                                    state,
+                                );
+                                TextWidgetStyle {
+                                    surface: Default::default(),
+                                    color: resolved.link,
+                                    typography: resolved.text_style,
+                                }
+                            }
+                        })
+                        .on_click(Command::new_with_context(move |vm, context| {
+                            if let Some(command) = command.as_ref() {
+                                command.execute_with_context(
+                                    vm,
+                                    RichTextLinkClick {
+                                        href: href.clone(),
+                                        label: label.clone(),
+                                    },
+                                    context,
+                                );
+                            }
+                        }))
+                        .focusable(true)
+                        .tab_index(0),
+                    &visual_identity,
+                )
             }
         })
         .collect::<Vec<Element<VM>>>();
-    Flex::horizontal()
-        .wrap(Wrap::Wrap)
-        .gap(dp(2.0))
-        .child(children)
-        .into()
+    with_visual_identity(
+        Flex::horizontal()
+            .wrap(Wrap::Wrap)
+            .gap(dp(2.0))
+            .child(children)
+            .into(),
+        &visual_identity,
+    )
 }
 
 fn rich_text_style(
     style: Option<StyleResolver<RichTextStyle>>,
-) -> impl Fn(&StyleContext<'_>) -> TextWidgetStyle + Send + Sync + 'static {
+) -> impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> TextWidgetStyle
+       + Send
+       + Sync
+       + 'static {
     rich_text_style_mapped(style, |style| style)
 }
 
 fn rich_text_style_mapped(
     style: Option<StyleResolver<RichTextStyle>>,
     mapper: impl Fn(RichTextStyle) -> RichTextStyle + Clone + Send + Sync + 'static,
-) -> impl Fn(&StyleContext<'_>) -> TextWidgetStyle + Send + Sync + 'static {
-    move |context| {
-        let resolved = mapper(resolve_rich_text_style(style.as_ref(), context));
+) -> impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> TextWidgetStyle
+       + Send
+       + Sync
+       + 'static {
+    move |context, style_sheet, visual, state| {
+        let resolved = mapper(resolve_rich_text_style_with_sheet(
+            style.as_ref(),
+            context,
+            style_sheet,
+            visual,
+            state,
+        ));
         TextWidgetStyle {
             surface: Default::default(),
             color: resolved.foreground,
@@ -472,11 +589,36 @@ fn resolve_rich_text_style(
     style: Option<&StyleResolver<RichTextStyle>>,
     context: &StyleContext<'_>,
 ) -> RichTextStyle {
-    let mut base = RichTextStyle::default_for_theme(context.theme);
-    context.theme.components.rich_text.apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_rich_text_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_rich_text_style_with_sheet(
+    style: Option<&StyleResolver<RichTextStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> RichTextStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        RichTextStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.rich_text.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_rich_text(base, context, visual),
+        |sheet, base, context, visual, state| {
+            sheet.apply_rich_text_state(base, context, visual, state)
+        },
+    )
 }
 
 fn resolve_rich_text_style_for_layout(

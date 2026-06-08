@@ -1,7 +1,7 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{ContentFit, MediaBytes, MediaSource};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::super::common::{
@@ -247,6 +247,24 @@ impl Image {
         resolver: impl Fn(&StyleContext<'_>) -> ImageStyle + Send + Sync + 'static,
     ) -> Self {
         self.style = Some(super::super::style::StyleResolver::full(resolver));
+        self
+    }
+
+    pub(crate) fn style_full_with_style_sheet(
+        mut self,
+        resolver: impl Fn(
+                &StyleContext<'_>,
+                &crate::ui::widget::StyleSheet,
+                &VisualStyle,
+                WidgetState,
+            ) -> ImageStyle
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        self.style = Some(super::super::style::StyleResolver::full_with_style_sheet(
+            resolver,
+        ));
         self
     }
 

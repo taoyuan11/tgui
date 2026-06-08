@@ -3,13 +3,14 @@ use super::*;
 impl<VM> ResolvedElement<VM> {
     pub(super) fn resolve_collect_border_color(
         &self,
+        visual: &VisualStyle,
         widget_state: WidgetState,
         _opacity: f32,
         validation_color: Option<Color>,
         styles: &CollectResolvedStyles,
         context: &mut CollectContext<'_, '_>,
     ) -> Color {
-        self.visual
+        visual
             .border_color
             .as_ref()
             .map(|color| {
@@ -29,13 +30,13 @@ impl<VM> ResolvedElement<VM> {
 
     pub(super) fn resolve_collect_background(
         &self,
+        background: Option<&Value<Color>>,
         widget_state: WidgetState,
         _opacity: f32,
         styles: &CollectResolvedStyles,
         context: &mut CollectContext<'_, '_>,
     ) -> Color {
-        self.background
-            .as_ref()
+        background
             .map(|background| {
                 background.resolve_widget(
                     context.animations,

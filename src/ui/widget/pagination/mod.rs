@@ -1,11 +1,14 @@
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, LayoutStyle, Value};
 use crate::ui::theme::Theme;
 
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{PaginationStyle, StyleResolver};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{ButtonStyle, PaginationStyle, StyleResolver, StyleSheet};
 use super::{Button, Flex, WidgetKey};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -22,6 +25,7 @@ pub struct Pagination<VM> {
     on_change: Option<ValueCommand<VM, PaginationChange>>,
     style: Option<StyleResolver<PaginationStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -35,6 +39,7 @@ impl<VM> Pagination<VM> {
             on_change: None,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -98,15 +103,18 @@ impl<VM: 'static> From<Pagination<VM>> for Element<VM> {
                 }
             })
         };
-        let mut children: Vec<Element<VM>> = vec![Button::new("Prev")
-            .secondary()
-            .disable(page <= 1)
-            .on_click(change(
-                page.saturating_sub(1),
-                page_size,
-                pagination.on_change.clone(),
-            ))
-            .into()];
+        let mut children: Vec<Element<VM>> = vec![pagination_button(
+            Button::new("Prev")
+                .secondary()
+                .disable(page <= 1)
+                .on_click(change(
+                    page.saturating_sub(1),
+                    page_size,
+                    pagination.on_change.clone(),
+                )),
+            pagination.style.clone(),
+            pagination.visual.clone(),
+        )];
         for item in pagination_window(page, page_count) {
             match item {
                 PageItem::Page(value) => {
@@ -121,32 +129,39 @@ impl<VM: 'static> From<Pagination<VM>> for Element<VM> {
                         page_size,
                         pagination.on_change.clone(),
                     ));
-                    children.push(button.into());
+                    children.push(pagination_button(
+                        button,
+                        pagination.style.clone(),
+                        pagination.visual.clone(),
+                    ));
                 }
-                PageItem::Ellipsis { target } => children.push(
+                PageItem::Ellipsis { target } => children.push(pagination_button(
                     Button::new("...")
                         .ghost()
                         .width(layout_style.page_width)
-                        .on_click(change(target, page_size, pagination.on_change.clone()))
-                        .into(),
-                ),
+                        .on_click(change(target, page_size, pagination.on_change.clone())),
+                    pagination.style.clone(),
+                    pagination.visual.clone(),
+                )),
             }
         }
-        children.push(
+        children.push(pagination_button(
             Button::new("Next")
                 .secondary()
                 .disable(page >= page_count)
-                .on_click(change(page + 1, page_size, pagination.on_change.clone()))
-                .into(),
-        );
+                .on_click(change(page + 1, page_size, pagination.on_change.clone())),
+            pagination.style.clone(),
+            pagination.visual.clone(),
+        ));
         for option in pagination.page_size_options {
-            children.push(
+            children.push(pagination_button(
                 Button::new(format!("{option}/page"))
                     .ghost()
                     .disable(option == page_size)
-                    .on_click(change(page, option, pagination.on_change.clone()))
-                    .into(),
-            );
+                    .on_click(change(page, option, pagination.on_change.clone())),
+                pagination.style.clone(),
+                pagination.visual.clone(),
+            ));
         }
         let mut root: Element<VM> = Flex::horizontal()
             .align(Align::Center)
@@ -154,9 +169,35 @@ impl<VM: 'static> From<Pagination<VM>> for Element<VM> {
             .child(children)
             .into();
         root.key = pagination.key;
+        root = with_visual_identity(root, &pagination.visual);
         root.layout = merge_layout(root.layout, pagination.layout);
         root
     }
+}
+
+fn pagination_button<VM: 'static>(
+    button: Button<VM>,
+    style: Option<StyleResolver<PaginationStyle>>,
+    visual_identity: VisualStyle,
+) -> Element<VM> {
+    let variant = button.variant();
+    with_visual_identity(
+        button
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_pagination_style_with_sheet(
+                    style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
+                let mut button = ButtonStyle::default_for_theme(context.theme, variant);
+                button.text_style = resolved.text_style;
+                button
+            })
+            .into(),
+        &visual_identity,
+    )
 }
 
 enum PageItem {
@@ -192,15 +233,36 @@ fn resolve_pagination_style(
     style: Option<&StyleResolver<PaginationStyle>>,
     context: &StyleContext<'_>,
 ) -> PaginationStyle {
-    let mut base = PaginationStyle::default_for_theme(context.theme);
-    context
-        .theme
-        .components
-        .pagination
-        .apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_pagination_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_pagination_style_with_sheet(
+    style: Option<&StyleResolver<PaginationStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> PaginationStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        PaginationStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.pagination.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_pagination(base, context, visual),
+        |sheet, base, context, visual, state| {
+            sheet.apply_pagination_state(base, context, visual, state)
+        },
+    )
 }
 
 fn resolve_pagination_style_for_layout(

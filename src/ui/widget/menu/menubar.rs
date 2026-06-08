@@ -15,7 +15,7 @@
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 use crate::ui::layout::Axis;
 use crate::ui::layout::Value;
-use crate::ui::theme::{StateValue, StyleContext};
+use crate::ui::theme::{StateValue, StyleContext, WidgetState};
 use crate::ui::widget::button::Button;
 use crate::ui::widget::container::Flex;
 use crate::ui::widget::core::Element;
@@ -25,8 +25,10 @@ use crate::ui::widget::style::{
 };
 
 use super::super::common::ButtonVariantKind;
+use super::super::common::VisualStyle;
 use super::types::{MenuBarGroupId, MenuItem};
 use super::widget::Menu;
+use crate::ui::widget::StyleSheet;
 
 /// MenuBar 单个顶级条目。
 #[derive(Clone)]
@@ -195,9 +197,15 @@ where
                 .disable(disabled.clone())
                 .height(layout_style.height)
                 .min_width(layout_style.entry_min_width)
-                .style_full(move |context| {
+                .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                     menu_bar_entry_button_style(
-                        resolve_menu_bar_style(entry_style.as_ref(), context),
+                        resolve_menu_bar_style_with_sheet(
+                            entry_style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                        ),
                         context,
                     )
                 });
@@ -250,9 +258,15 @@ where
             .height(layout_style.height)
             .padding(layout_style.padding)
             .gap(layout_style.entry_gap)
-            .style_full(move |context| {
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 menu_bar_container_style(
-                    resolve_menu_bar_style(root_style.as_ref(), context),
+                    resolve_menu_bar_style_with_sheet(
+                        root_style.as_ref(),
+                        context,
+                        style_sheet,
+                        visual,
+                        state,
+                    ),
                     context,
                 )
             })
@@ -265,8 +279,28 @@ fn resolve_menu_bar_style(
     style: Option<&StyleResolver<MenuBarStyle>>,
     context: &StyleContext<'_>,
 ) -> MenuBarStyle {
+    let style_sheet = StyleSheet::default();
+    let visual = VisualStyle::default();
+    resolve_menu_bar_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &visual,
+        WidgetState::default(),
+    )
+}
+
+fn resolve_menu_bar_style_with_sheet(
+    style: Option<&StyleResolver<MenuBarStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> MenuBarStyle {
     let mut base = MenuBarStyle::default_for_theme(context.theme);
     context.theme.components.menu_bar.apply(&mut base, context);
+    style_sheet.apply_menu_bar(&mut base, context, visual);
+    style_sheet.apply_menu_bar_state(&mut base, context, visual, state);
     style
         .map(|resolver| resolver.resolve_from(base.clone(), context))
         .unwrap_or(base)

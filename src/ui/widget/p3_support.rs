@@ -1,9 +1,33 @@
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::LayoutStyle;
+use crate::ui::widget::common::VisualStyle;
+use crate::ui::widget::style::{StyleResolver, StyleSheet};
 
 macro_rules! impl_p3_layout_api {
     ($field:ident) => {
         pub fn key(mut self, key: impl Into<super::WidgetKey>) -> Self {
             self.key = Some(key.into());
+            self
+        }
+
+        pub fn class(mut self, class: impl Into<String>) -> Self {
+            self.visual.classes.push(class.into());
+            self
+        }
+
+        pub fn classes<I, S>(mut self, classes: I) -> Self
+        where
+            I: IntoIterator<Item = S>,
+            S: Into<String>,
+        {
+            self.visual
+                .classes
+                .extend(classes.into_iter().map(Into::into));
+            self
+        }
+
+        pub fn style_id(mut self, style_id: impl Into<String>) -> Self {
+            self.visual.style_id = Some(style_id.into());
             self
         }
 
@@ -132,6 +156,25 @@ macro_rules! impl_p3_layout_api {
 
 pub(crate) use impl_p3_layout_api;
 
+pub(crate) fn merge_visual_identity(target: &mut VisualStyle, identity: &VisualStyle) {
+    if target.style_id.is_none() {
+        target.style_id = identity.style_id.clone();
+    }
+    for class in &identity.classes {
+        if !target.classes.iter().any(|existing| existing == class) {
+            target.classes.push(class.clone());
+        }
+    }
+}
+
+pub(crate) fn with_visual_identity<VM>(
+    mut element: super::Element<VM>,
+    identity: &VisualStyle,
+) -> super::Element<VM> {
+    merge_visual_identity(&mut element.visual, identity);
+    element
+}
+
 pub(crate) fn merge_layout(mut base: LayoutStyle, override_layout: LayoutStyle) -> LayoutStyle {
     let default = LayoutStyle::default();
     if override_layout.width != default.width {
@@ -204,4 +247,25 @@ pub(crate) fn merge_layout(mut base: LayoutStyle, override_layout: LayoutStyle) 
         base.row_span = override_layout.row_span;
     }
     base
+}
+
+pub(crate) fn resolve_component_style_with_sheet<T: Clone>(
+    style: Option<&StyleResolver<T>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+    mut base: T,
+    component: impl FnOnce(&mut T, &StyleContext<'_>),
+    apply_static: impl FnOnce(&StyleSheet, &mut T, &StyleContext<'_>, &VisualStyle),
+    apply_state: impl FnOnce(&StyleSheet, &mut T, &StyleContext<'_>, &VisualStyle, WidgetState),
+) -> T {
+    component(&mut base, context);
+    apply_static(style_sheet, &mut base, context, visual);
+    apply_state(style_sheet, &mut base, context, visual, state);
+    style
+        .map(|resolver| {
+            resolver.resolve_with_state(base.clone(), context, style_sheet, visual, state)
+        })
+        .unwrap_or(base)
 }

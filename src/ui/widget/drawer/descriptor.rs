@@ -11,7 +11,10 @@
 use crate::foundation::view_model::ValueCommand;
 use crate::theme::StyleContext;
 use crate::ui::layout::Value;
+use crate::ui::theme::WidgetState;
+use crate::ui::widget::common::VisualStyle;
 use crate::ui::widget::style::{DrawerStyle, StyleResolver};
+use crate::ui::widget::StyleSheet;
 use crate::ui::widget::WidgetId;
 
 use super::placement::DrawerPlacement;
@@ -73,8 +76,26 @@ impl<VM> DrawerDescriptor<VM> {
 
     /// 按当前主题解析最终样式。
     pub(crate) fn resolved_style(&self, context: &StyleContext<'_>) -> DrawerStyle {
+        let style_sheet = StyleSheet::default();
+        self.resolved_style_with_sheet(
+            context,
+            &style_sheet,
+            &VisualStyle::default(),
+            WidgetState::default(),
+        )
+    }
+
+    pub(crate) fn resolved_style_with_sheet(
+        &self,
+        context: &StyleContext<'_>,
+        style_sheet: &StyleSheet,
+        visual: &VisualStyle,
+        state: WidgetState,
+    ) -> DrawerStyle {
         let mut base = DrawerStyle::default_for_theme(context.theme);
         context.theme.components.drawer.apply(&mut base, context);
+        style_sheet.apply_drawer(&mut base, context, visual);
+        style_sheet.apply_drawer_state(&mut base, context, visual, state);
         self.style
             .as_ref()
             .map(|resolver| resolver.resolve_from(base.clone(), context))

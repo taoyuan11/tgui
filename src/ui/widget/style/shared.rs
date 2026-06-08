@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::foundation::color::Color;
 use crate::media::ContentFit;
-use crate::theme::{FocusRingStyle, StyleContext};
+use crate::theme::{FocusRingStyle, StyleContext, WidgetState};
 use crate::ui::layout::{ScrollbarStyle, Value};
 use crate::ui::theme::{Shadow, TextStyle, Theme};
 use crate::ui::unit::{dp, Dp};
@@ -10,6 +10,7 @@ use crate::ui::unit::{dp, Dp};
 use super::super::background::{BackgroundBrush, BackgroundImage};
 use super::super::common::{Point, VisualStyle};
 use super::palette::palette_from_theme;
+use super::sheet::StyleSheet;
 
 /// 覆盖主题默认焦点环配置的样式。
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -46,6 +47,9 @@ pub(crate) struct StyleResolver<T> {
 #[derive(Clone)]
 enum StyleResolverKind<T> {
     Full(Arc<dyn Fn(&StyleContext<'_>) -> T + Send + Sync>),
+    FullWithStyleSheet(
+        Arc<dyn Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> T + Send + Sync>,
+    ),
     Mutator(Arc<dyn Fn(&mut T, &StyleContext<'_>) + Send + Sync>),
 }
 
@@ -53,6 +57,17 @@ impl<T: Clone> StyleResolver<T> {
     pub(crate) fn full(resolver: impl Fn(&StyleContext<'_>) -> T + Send + Sync + 'static) -> Self {
         Self {
             kind: StyleResolverKind::Full(Arc::new(resolver)),
+        }
+    }
+
+    pub(crate) fn full_with_style_sheet(
+        resolver: impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> T
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            kind: StyleResolverKind::FullWithStyleSheet(Arc::new(resolver)),
         }
     }
 
@@ -68,6 +83,45 @@ impl<T: Clone> StyleResolver<T> {
     pub(crate) fn resolve_from(&self, mut base: T, context: &StyleContext<'_>) -> T {
         match &self.kind {
             StyleResolverKind::Full(resolver) => resolver(context),
+            StyleResolverKind::FullWithStyleSheet(resolver) => {
+                let style_sheet = StyleSheet::default();
+                resolver(
+                    context,
+                    &style_sheet,
+                    &VisualStyle::default(),
+                    WidgetState::default(),
+                )
+            }
+            StyleResolverKind::Mutator(mutator) => {
+                mutator(&mut base, context);
+                base
+            }
+        }
+    }
+
+    pub(crate) fn resolve_with(
+        &self,
+        base: T,
+        context: &StyleContext<'_>,
+        style_sheet: &StyleSheet,
+        visual: &VisualStyle,
+    ) -> T {
+        self.resolve_with_state(base, context, style_sheet, visual, WidgetState::default())
+    }
+
+    pub(crate) fn resolve_with_state(
+        &self,
+        mut base: T,
+        context: &StyleContext<'_>,
+        style_sheet: &StyleSheet,
+        visual: &VisualStyle,
+        state: WidgetState,
+    ) -> T {
+        match &self.kind {
+            StyleResolverKind::Full(resolver) => resolver(context),
+            StyleResolverKind::FullWithStyleSheet(resolver) => {
+                resolver(context, style_sheet, visual, state)
+            }
             StyleResolverKind::Mutator(mutator) => {
                 mutator(&mut base, context);
                 base

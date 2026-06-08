@@ -131,10 +131,11 @@ fn popover_pointer_style_emits_overlay_mesh() {
 
 #[test]
 fn popover_style_defaults_match_expected_baseline() {
-    let light = PopoverStyle::default_for_theme(&Theme::light());
-    assert_eq!(light.padding, Insets::all(dp(12.0)));
+    let theme = Theme::light();
+    let light = PopoverStyle::default_for_theme(&theme);
+    assert_eq!(light.padding, Insets::all(theme.spacing.md));
     assert_eq!(light.min_width, dp(220.0));
-    assert_eq!(light.offset, dp(8.0));
+    assert_eq!(light.offset, theme.spacing.sm);
     assert!(light.pointer_size.is_none());
 }
 

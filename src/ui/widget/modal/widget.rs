@@ -27,13 +27,14 @@ use crate::animation::Transition;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 use crate::ui::layout::{pct, Align, Axis, Insets, Value};
-use crate::ui::theme::StyleContext;
+use crate::ui::theme::{StyleContext, WidgetState};
 use crate::ui::unit::Dp;
 use crate::ui::widget::button::Button;
+use crate::ui::widget::common::VisualStyle;
 use crate::ui::widget::container::{Flex, Stack};
 use crate::ui::widget::core::Element;
 use crate::ui::widget::style::{
-    ButtonStyle, ContainerStyle, ModalStyle, StyleResolver, TextWidgetStyle,
+    ButtonStyle, ContainerStyle, ModalStyle, StyleResolver, StyleSheet, TextWidgetStyle,
 };
 use crate::ui::widget::text::Text;
 use crate::ui::widget::{FocusScopeOptions, WidgetId};
@@ -214,8 +215,14 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
             .left(Dp::ZERO)
             .top(Dp::ZERO)
             .opacity(visibility_value.clone())
-            .style_full(move |context| {
-                let resolved = resolve_modal_style(backdrop_style.as_ref(), context);
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_modal_style_with_sheet(
+                    backdrop_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
                 let mut s = ContainerStyle::default_for_theme(context.theme);
                 s.surface.background = Some(resolved.backdrop_color);
                 s.surface.border_color = Some(Color::TRANSPARENT.into());
@@ -239,8 +246,14 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
         let mut card: Flex<VM> = Flex::new(Axis::Vertical)
             .opacity(visibility_value.clone())
             .scale(scale_value)
-            .style_full(move |context| {
-                let resolved = resolve_modal_style(modal_style_for_card.as_ref(), context);
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_modal_style_with_sheet(
+                    modal_style_for_card.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
                 let mut s = ContainerStyle::default_for_theme(context.theme);
                 s.surface.background = Some(resolved.background.clone());
                 s.surface.border_color = Some(resolved.border.clone());
@@ -392,8 +405,28 @@ fn resolve_modal_style(
     style: Option<&StyleResolver<ModalStyle>>,
     context: &StyleContext<'_>,
 ) -> ModalStyle {
+    let style_sheet = StyleSheet::default();
+    let visual = VisualStyle::default();
+    resolve_modal_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &visual,
+        WidgetState::default(),
+    )
+}
+
+fn resolve_modal_style_with_sheet(
+    style: Option<&StyleResolver<ModalStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> ModalStyle {
     let mut base = ModalStyle::default_for_theme(context.theme);
     context.theme.components.modal.apply(&mut base, context);
+    style_sheet.apply_modal(&mut base, context, visual);
+    style_sheet.apply_modal_state(&mut base, context, visual, state);
     style
         .map(|resolver| resolver.resolve_from(base.clone(), context))
         .unwrap_or(base)

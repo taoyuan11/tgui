@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, Overflow, Value};
 use crate::ui::unit::{dp, Dp};
 
@@ -826,6 +826,19 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
         self
     }
 
+    pub(crate) fn style_full_with_style_sheet(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> ContainerStyle
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        if let WidgetKind::Virtual { style, .. } = &mut self.element.kind {
+            *style = Some(StyleResolver::full_with_style_sheet(resolver));
+        }
+        self
+    }
+
     pub fn on_click(mut self, command: Command<VM>) -> Self {
         self.element.interactions.on_click = Some(command);
         self
@@ -1235,6 +1248,17 @@ impl<T, VM: 'static> VirtualList<T, VM> {
         resolver: impl Fn(&StyleContext<'_>) -> ContainerStyle + Send + Sync + 'static,
     ) -> Self {
         self.viewport = self.viewport.style_full(resolver);
+        self
+    }
+
+    pub(crate) fn style_full_with_style_sheet(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> ContainerStyle
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        self.viewport = self.viewport.style_full_with_style_sheet(resolver);
         self
     }
 

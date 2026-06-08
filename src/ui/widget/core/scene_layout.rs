@@ -89,7 +89,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             return false;
         };
         match &node.kind {
-            ResolvedWidgetKind::Text { text } => {
+            ResolvedWidgetKind::Text { text, .. } => {
                 !text.user_select
                     && node.background.is_none()
                     && !node.interactions.has_any()

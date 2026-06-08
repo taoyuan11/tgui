@@ -113,9 +113,26 @@ pub(super) fn apply_local_style<T: Clone>(
     style: Option<&super::super::style::StyleResolver<T>>,
     base: T,
     context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
 ) -> T {
     style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
+        .map(|resolver| resolver.resolve_with(base.clone(), context, style_sheet, visual))
+        .unwrap_or(base)
+}
+
+pub(super) fn apply_local_style_with_state<T: Clone>(
+    style: Option<&super::super::style::StyleResolver<T>>,
+    base: T,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> T {
+    style
+        .map(|resolver| {
+            resolver.resolve_with_state(base.clone(), context, style_sheet, visual, state)
+        })
         .unwrap_or(base)
 }
 
@@ -127,7 +144,7 @@ pub(super) fn resolved_button_style(
     variant: crate::ui::widget::common::ButtonVariantKind,
 ) -> WidgetButtonStyle {
     let base = button_style_base(context, style_sheet, visual, variant);
-    apply_local_style(style, base, context)
+    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn button_style_base(
@@ -149,7 +166,7 @@ pub(super) fn resolved_checkbox_style(
     visual: &VisualStyle,
 ) -> WidgetCheckboxStyle {
     let base = checkbox_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context)
+    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn checkbox_style_base(
@@ -170,7 +187,7 @@ pub(super) fn resolved_radio_style(
     visual: &VisualStyle,
 ) -> WidgetRadioStyle {
     let base = radio_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context)
+    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn radio_style_base(
@@ -191,7 +208,7 @@ pub(super) fn resolved_switch_style(
     visual: &VisualStyle,
 ) -> super::super::style::SwitchStyle {
     let base = switch_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context)
+    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn switch_style_base(
@@ -212,7 +229,7 @@ pub(super) fn resolved_select_style(
     visual: &VisualStyle,
 ) -> WidgetSelectStyle {
     let base = select_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context)
+    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn select_style_base(
@@ -233,7 +250,7 @@ pub(super) fn resolved_slider_style(
     visual: &VisualStyle,
 ) -> WidgetSliderStyle {
     let base = slider_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context)
+    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn slider_style_base(
@@ -254,7 +271,7 @@ pub(super) fn resolved_progress_bar_style(
     visual: &VisualStyle,
 ) -> WidgetProgressBarStyle {
     let base = progress_bar_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context)
+    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn progress_bar_style_base(
@@ -279,7 +296,7 @@ pub(super) fn resolved_spinner_style(
     visual: &VisualStyle,
 ) -> WidgetSpinnerStyle {
     let base = spinner_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context)
+    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn spinner_style_base(
@@ -300,7 +317,7 @@ pub(super) fn resolved_divider_style(
     visual: &VisualStyle,
 ) -> WidgetDividerStyle {
     let base = divider_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context)
+    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn divider_style_base(
@@ -321,7 +338,7 @@ pub(super) fn resolved_input_style(
     visual: &VisualStyle,
 ) -> WidgetInputStyle {
     let base = input_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context)
+    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn input_style_base(
@@ -342,7 +359,7 @@ pub(super) fn resolved_textarea_style(
     visual: &VisualStyle,
 ) -> WidgetTextareaStyle {
     let base = textarea_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context)
+    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn textarea_style_base(
@@ -380,10 +397,19 @@ pub(super) fn resolved_container_style(
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
 ) -> super::super::style::ContainerStyle {
+    let base = container_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context, style_sheet, visual)
+}
+
+pub(super) fn container_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> super::super::style::ContainerStyle {
     let mut base = super::super::style::ContainerStyle::default_for_theme(context.theme);
     context.theme.components.container.apply(&mut base, context);
     style_sheet.apply_container(&mut base, context, visual);
-    apply_local_style(style, base, context)
+    base
 }
 
 pub(super) fn resolved_image_style(
@@ -392,10 +418,19 @@ pub(super) fn resolved_image_style(
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
 ) -> super::super::style::ImageStyle {
+    let base = image_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context, style_sheet, visual)
+}
+
+pub(super) fn image_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> super::super::style::ImageStyle {
     let mut base = super::super::style::ImageStyle::default_for_theme(context.theme);
     context.theme.components.image.apply(&mut base, context);
     style_sheet.apply_image(&mut base, context, visual);
-    apply_local_style(style, base, context)
+    base
 }
 
 pub(super) fn resolved_canvas_style(
@@ -404,10 +439,19 @@ pub(super) fn resolved_canvas_style(
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
 ) -> super::super::style::CanvasStyle {
+    let base = canvas_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context, style_sheet, visual)
+}
+
+pub(super) fn canvas_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> super::super::style::CanvasStyle {
     let mut base = super::super::style::CanvasStyle::default_for_theme(context.theme);
     context.theme.components.canvas.apply(&mut base, context);
     style_sheet.apply_canvas(&mut base, context, visual);
-    apply_local_style(style, base, context)
+    base
 }
 
 pub(super) fn resolved_text_widget_style(
@@ -416,15 +460,34 @@ pub(super) fn resolved_text_widget_style(
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
 ) -> TextWidgetStyle {
+    let base = text_widget_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context, style_sheet, visual)
+}
+
+pub(super) fn text_widget_style_base(
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> TextWidgetStyle {
     let mut base = TextWidgetStyle::default_for_theme(context.theme);
     context.theme.components.text.apply(&mut base, context);
     style_sheet.apply_text(&mut base, context, visual);
-    apply_local_style(style, base, context)
+    base
 }
 
 #[cfg(feature = "video")]
 pub(super) fn resolved_video_surface_style(
     style: Option<&super::super::style::StyleResolver<WidgetVideoSurfaceStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    visual: &VisualStyle,
+) -> WidgetVideoSurfaceStyle {
+    let base = video_surface_style_base(context, style_sheet, visual);
+    apply_local_style(style, base, context, style_sheet, visual)
+}
+
+#[cfg(feature = "video")]
+pub(super) fn video_surface_style_base(
     context: &StyleContext<'_>,
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
@@ -436,7 +499,7 @@ pub(super) fn resolved_video_surface_style(
         .video_surface
         .apply(&mut base, context);
     style_sheet.apply_video_surface(&mut base, context, visual);
-    apply_local_style(style, base, context)
+    base
 }
 
 pub(super) fn apply_surface_style(
@@ -445,6 +508,120 @@ pub(super) fn apply_surface_style(
     surface: &super::super::style::WidgetSurfaceStyle,
 ) {
     super::super::style::merge_surface_style(background, visual, surface);
+}
+
+fn merge_runtime_surface<T>(
+    runtime_style: &super::ResolvedRuntimeSurfaceStyle<T>,
+    style: &T,
+) -> (Option<Value<Color>>, VisualStyle)
+where
+    T: super::ResolvedSurfaceStyle,
+{
+    let mut background = runtime_style.explicit_background.clone();
+    let mut visual = runtime_style.explicit_visual.clone();
+    apply_surface_style(&mut background, &mut visual, style.surface());
+    (background, visual)
+}
+
+pub(super) fn resolved_runtime_text_surface(
+    runtime_style: &super::ResolvedRuntimeSurfaceStyle<TextWidgetStyle>,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    state: WidgetState,
+) -> (Option<Value<Color>>, VisualStyle) {
+    let mut style = runtime_style.base.clone();
+    style_sheet.apply_text_state(&mut style, context, &runtime_style.explicit_visual, state);
+    let style = apply_local_style_with_state(
+        runtime_style.local.as_ref(),
+        style,
+        context,
+        style_sheet,
+        &runtime_style.explicit_visual,
+        state,
+    );
+    merge_runtime_surface(runtime_style, &style)
+}
+
+pub(super) fn resolved_runtime_container_surface(
+    runtime_style: &super::ResolvedRuntimeSurfaceStyle<super::super::style::ContainerStyle>,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    state: WidgetState,
+) -> (Option<Value<Color>>, VisualStyle) {
+    let mut style = runtime_style.base.clone();
+    style_sheet.apply_container_state(&mut style, context, &runtime_style.explicit_visual, state);
+    let style = apply_local_style_with_state(
+        runtime_style.local.as_ref(),
+        style,
+        context,
+        style_sheet,
+        &runtime_style.explicit_visual,
+        state,
+    );
+    merge_runtime_surface(runtime_style, &style)
+}
+
+pub(super) fn resolved_runtime_image_surface(
+    runtime_style: &super::ResolvedRuntimeSurfaceStyle<super::super::style::ImageStyle>,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    state: WidgetState,
+) -> (Option<Value<Color>>, VisualStyle) {
+    let mut style = runtime_style.base.clone();
+    style_sheet.apply_image_state(&mut style, context, &runtime_style.explicit_visual, state);
+    let style = apply_local_style_with_state(
+        runtime_style.local.as_ref(),
+        style,
+        context,
+        style_sheet,
+        &runtime_style.explicit_visual,
+        state,
+    );
+    merge_runtime_surface(runtime_style, &style)
+}
+
+pub(super) fn resolved_runtime_canvas_surface(
+    runtime_style: &super::ResolvedRuntimeSurfaceStyle<super::super::style::CanvasStyle>,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    state: WidgetState,
+) -> (Option<Value<Color>>, VisualStyle) {
+    let mut style = runtime_style.base.clone();
+    style_sheet.apply_canvas_state(&mut style, context, &runtime_style.explicit_visual, state);
+    let style = apply_local_style_with_state(
+        runtime_style.local.as_ref(),
+        style,
+        context,
+        style_sheet,
+        &runtime_style.explicit_visual,
+        state,
+    );
+    merge_runtime_surface(runtime_style, &style)
+}
+
+#[cfg(feature = "video")]
+pub(super) fn resolved_runtime_video_surface(
+    runtime_style: &super::ResolvedRuntimeSurfaceStyle<WidgetVideoSurfaceStyle>,
+    context: &StyleContext<'_>,
+    style_sheet: &crate::ui::widget::StyleSheet,
+    state: WidgetState,
+) -> (Option<Value<Color>>, VisualStyle) {
+    let mut style = runtime_style.base.clone();
+    style_sheet.apply_video_surface_state(
+        &mut style,
+        context,
+        &runtime_style.explicit_visual,
+        state,
+    );
+    let style = apply_local_style_with_state(
+        runtime_style.local.as_ref(),
+        style,
+        context,
+        style_sheet,
+        &runtime_style.explicit_visual,
+        state,
+    );
+    merge_runtime_surface(runtime_style, &style)
 }
 
 pub(super) fn apply_text_widget_style(text: &mut Text, style: &TextWidgetStyle) {

@@ -1,11 +1,14 @@
 use crate::foundation::view_model::Command;
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{LayoutStyle, Value};
 use crate::ui::theme::Theme;
 
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{CardStyle, ContainerStyle, StyleResolver};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{CardStyle, ContainerStyle, StyleResolver, StyleSheet};
 use super::{CursorStyle, Flex, WidgetKey};
 
 pub struct Card<VM> {
@@ -16,6 +19,7 @@ pub struct Card<VM> {
     on_click: Option<Command<VM>>,
     style: Option<StyleResolver<CardStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -29,6 +33,7 @@ impl<VM> Card<VM> {
             on_click: None,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -104,8 +109,14 @@ impl<VM: 'static> From<Card<VM>> for Element<VM> {
         let mut root: Element<VM> = Flex::vertical()
             .gap(layout_style.gap)
             .padding(layout_style.padding)
-            .style_full(move |context| {
-                let resolved = resolve_card_style(style.as_ref(), context);
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_card_style_with_sheet(
+                    style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
                 let mut container = ContainerStyle::default_for_theme(context.theme);
                 container.surface = resolved.surface.clone();
                 container.surface.background = Some(resolved.background);
@@ -122,6 +133,7 @@ impl<VM: 'static> From<Card<VM>> for Element<VM> {
             root.interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
         }
         root.key = card.key;
+        root = with_visual_identity(root, &card.visual);
         root.layout = merge_layout(root.layout, card.layout);
         root
     }
@@ -131,11 +143,34 @@ fn resolve_card_style(
     style: Option<&StyleResolver<CardStyle>>,
     context: &StyleContext<'_>,
 ) -> CardStyle {
-    let mut base = CardStyle::default_for_theme(context.theme);
-    context.theme.components.card.apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_card_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_card_style_with_sheet(
+    style: Option<&StyleResolver<CardStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> CardStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        CardStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.card.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_card(base, context, visual),
+        |sheet, base, context, visual, state| sheet.apply_card_state(base, context, visual, state),
+    )
 }
 
 fn resolve_card_style_for_layout(style: Option<&StyleResolver<CardStyle>>) -> CardStyle {

@@ -179,7 +179,7 @@ fn data_grid_defaults_render_readably_in_dark_theme() {
             .primitives
             .shapes
             .iter()
-            .any(|shape| shape.color == Color::hexa(0x111827FF)),
+            .any(|shape| shape.color == theme.colors.surface),
         "DataGrid surface should follow dark theme defaults"
     );
     assert!(
@@ -187,7 +187,7 @@ fn data_grid_defaults_render_readably_in_dark_theme() {
             .primitives
             .shapes
             .iter()
-            .any(|shape| shape.color == Color::hexa(0x1E293BFF)),
+            .any(|shape| shape.color == theme.colors.surface_low),
         "DataGrid header should follow dark theme defaults"
     );
     for label in ["Name", "Alpha"] {
@@ -197,7 +197,7 @@ fn data_grid_defaults_render_readably_in_dark_theme() {
             .iter()
             .find(|text| text.content.as_ref() == label)
             .unwrap_or_else(|| panic!("expected DataGrid text {label:?} to render"));
-        assert_eq!(text.color, Color::hexa(0xE2E8F0FF));
+        assert_eq!(text.color, theme.colors.on_surface);
     }
 }
 

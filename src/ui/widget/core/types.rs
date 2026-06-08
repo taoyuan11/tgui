@@ -6,7 +6,9 @@ use crate::foundation::form::ValidationVisualState;
 use crate::ui::widget::r#virtual::{
     ItemLayout, VirtualArrangement, VirtualResolvedItemMeta, VirtualRuntimeState, VirtualWindowPlan,
 };
-use crate::ui::widget::style::ContainerStyle;
+use crate::ui::widget::style::{
+    CanvasStyle, ContainerStyle, ImageStyle, TextWidgetStyle, WidgetSurfaceStyle,
+};
 use crate::ui::widget::{common, image};
 
 pub struct Element<VM> {
@@ -133,6 +135,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
     Container {
         layout: ContainerLayout,
         children: Vec<ResolvedElement<VM>>,
+        runtime_style: ResolvedRuntimeSurfaceStyle<ContainerStyle>,
     },
     Virtual {
         arrangement: VirtualArrangement,
@@ -141,6 +144,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         overflow_x: Overflow,
         overflow_y: Overflow,
         style: ContainerStyle,
+        runtime_style: ResolvedRuntimeSurfaceStyle<ContainerStyle>,
         runtime_state: VirtualRuntimeState,
         window_plan: VirtualWindowPlan,
         children: Vec<ResolvedElement<VM>>,
@@ -148,22 +152,24 @@ pub(crate) enum ResolvedWidgetKind<VM> {
     },
     Text {
         text: Text,
+        runtime_style: ResolvedRuntimeSurfaceStyle<TextWidgetStyle>,
     },
     #[cfg(feature = "audio")]
-    Audio {
-        audio: PublicAudio,
-    },
+    Audio { audio: PublicAudio },
     Image {
         image: image::Image,
+        runtime_style: ResolvedRuntimeSurfaceStyle<ImageStyle>,
     },
     Canvas {
         scene: Value<CanvasScene>,
         item_interactions: common::CanvasItemInteractionHandlers<VM>,
+        runtime_style: ResolvedRuntimeSurfaceStyle<CanvasStyle>,
     },
     #[cfg(feature = "video")]
     VideoSurface {
         video: PublicVideoSurface,
         style: WidgetVideoSurfaceStyle,
+        runtime_style: ResolvedRuntimeSurfaceStyle<WidgetVideoSurfaceStyle>,
     },
     Button {
         label: Value<String>,
@@ -349,6 +355,59 @@ impl<T: Clone> Clone for ResolvedRuntimeStyle<T> {
     }
 }
 
+pub(crate) struct ResolvedRuntimeSurfaceStyle<T> {
+    pub(crate) base: T,
+    pub(crate) local: Option<StyleResolver<T>>,
+    pub(crate) explicit_visual: VisualStyle,
+    pub(crate) explicit_background: Option<Value<Color>>,
+}
+
+impl<T: Clone> Clone for ResolvedRuntimeSurfaceStyle<T> {
+    fn clone(&self) -> Self {
+        Self {
+            base: self.base.clone(),
+            local: self.local.clone(),
+            explicit_visual: self.explicit_visual.clone(),
+            explicit_background: self.explicit_background.clone(),
+        }
+    }
+}
+
+pub(crate) trait ResolvedSurfaceStyle {
+    fn surface(&self) -> &WidgetSurfaceStyle;
+}
+
+impl ResolvedSurfaceStyle for TextWidgetStyle {
+    fn surface(&self) -> &WidgetSurfaceStyle {
+        &self.surface
+    }
+}
+
+impl ResolvedSurfaceStyle for ContainerStyle {
+    fn surface(&self) -> &WidgetSurfaceStyle {
+        &self.surface
+    }
+}
+
+impl ResolvedSurfaceStyle for ImageStyle {
+    fn surface(&self) -> &WidgetSurfaceStyle {
+        &self.surface
+    }
+}
+
+impl ResolvedSurfaceStyle for CanvasStyle {
+    fn surface(&self) -> &WidgetSurfaceStyle {
+        &self.surface
+    }
+}
+
+#[cfg(feature = "video")]
+impl ResolvedSurfaceStyle for WidgetVideoSurfaceStyle {
+    fn surface(&self) -> &WidgetSurfaceStyle {
+        &self.surface
+    }
+}
+
 pub(crate) enum ResolvedTextEditorRuntimeStyle {
     Input(ResolvedRuntimeStyle<WidgetInputStyle>),
     Textarea(ResolvedRuntimeStyle<WidgetTextareaStyle>),
@@ -366,9 +425,14 @@ impl Clone for ResolvedTextEditorRuntimeStyle {
 impl<VM> Clone for ResolvedWidgetKind<VM> {
     fn clone(&self) -> Self {
         match self {
-            Self::Container { layout, children } => Self::Container {
+            Self::Container {
+                layout,
+                children,
+                runtime_style,
+            } => Self::Container {
                 layout: layout.clone(),
                 children: children.clone(),
+                runtime_style: runtime_style.clone(),
             },
             Self::Virtual {
                 arrangement,
@@ -377,6 +441,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 overflow_x,
                 overflow_y,
                 style,
+                runtime_style,
                 runtime_state,
                 window_plan,
                 children,
@@ -388,30 +453,48 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 overflow_x: *overflow_x,
                 overflow_y: *overflow_y,
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
                 runtime_state: runtime_state.clone(),
                 window_plan: window_plan.clone(),
                 children: children.clone(),
                 child_meta: child_meta.clone(),
             },
-            Self::Text { text } => Self::Text { text: text.clone() },
+            Self::Text {
+                text,
+                runtime_style,
+            } => Self::Text {
+                text: text.clone(),
+                runtime_style: runtime_style.clone(),
+            },
             #[cfg(feature = "audio")]
             Self::Audio { audio } => Self::Audio {
                 audio: audio.clone(),
             },
-            Self::Image { image } => Self::Image {
+            Self::Image {
+                image,
+                runtime_style,
+            } => Self::Image {
                 image: image.clone(),
+                runtime_style: runtime_style.clone(),
             },
             Self::Canvas {
                 scene,
                 item_interactions,
+                runtime_style,
             } => Self::Canvas {
                 scene: scene.clone(),
                 item_interactions: item_interactions.clone(),
+                runtime_style: runtime_style.clone(),
             },
             #[cfg(feature = "video")]
-            Self::VideoSurface { video, style } => Self::VideoSurface {
+            Self::VideoSurface {
+                video,
+                style,
+                runtime_style,
+            } => Self::VideoSurface {
                 video: video.clone(),
                 style: style.clone(),
+                runtime_style: runtime_style.clone(),
             },
             Self::Button {
                 label,

@@ -20,7 +20,11 @@ impl<VM> ResolvedElement<VM> {
             layout.size.width,
             layout.size.height,
         );
-        let offset = self.visual.offset.resolve_widget(
+        let disabled = self.collect_visual_disabled_state();
+        let widget_state = self.collect_widget_state(disabled, context);
+        let (runtime_background, runtime_visual) =
+            self.resolve_runtime_visual(widget_state, context);
+        let offset = runtime_visual.offset.resolve_widget(
             context.animations,
             self.id,
             WidgetProperty::Offset,
@@ -34,9 +38,9 @@ impl<VM> ResolvedElement<VM> {
         );
         let frame = self.apply_data_grid_sticky_frame(frame, visual_context, context);
         let scale = if context.reduced_motion {
-            self.visual.scale.resolve().clamp(0.01, 16.0)
+            runtime_visual.scale.resolve().clamp(0.01, 16.0)
         } else {
-            self.visual.scale.resolve_widget_clamped(
+            runtime_visual.scale.resolve_widget_clamped(
                 context.animations,
                 self.id,
                 WidgetProperty::Scale,
@@ -57,10 +61,8 @@ impl<VM> ResolvedElement<VM> {
         } else {
             frame
         };
-        let disabled = self.collect_visual_disabled_state();
-        let widget_state = self.collect_widget_state(disabled, context);
         let opacity = visual_context.opacity
-            * self.visual.opacity.resolve_widget_clamped(
+            * runtime_visual.opacity.resolve_widget_clamped(
                 context.animations,
                 self.id,
                 WidgetProperty::Opacity,
@@ -70,16 +72,31 @@ impl<VM> ResolvedElement<VM> {
             )
             * if disabled { 0.55 } else { 1.0 };
         let styles = self.resolve_collect_styles(widget_state, context);
-        let border_width = self.resolve_collect_border_width(&styles, context).max(0.0);
+        let border_width = self
+            .resolve_collect_border_width(&runtime_visual, &styles, context)
+            .max(0.0);
         let border_radius = self
-            .resolve_collect_border_radius(&styles, context)
+            .resolve_collect_border_radius(&runtime_visual, &styles, context)
             .max(0.0);
         let validation_color = self.collect_validation_color(context.theme);
         let border_color = self
-            .resolve_collect_border_color(widget_state, opacity, validation_color, &styles, context)
+            .resolve_collect_border_color(
+                &runtime_visual,
+                widget_state,
+                opacity,
+                validation_color,
+                &styles,
+                context,
+            )
             .with_alpha_factor(opacity);
         let background = self
-            .resolve_collect_background(widget_state, opacity, &styles, context)
+            .resolve_collect_background(
+                runtime_background.as_ref(),
+                widget_state,
+                opacity,
+                &styles,
+                context,
+            )
             .with_alpha_factor(opacity);
         let background_inset = border_width
             .min((frame.width * 0.5).get())
@@ -91,6 +108,7 @@ impl<VM> ResolvedElement<VM> {
             frame,
             background_frame,
             background_radius: Dp::new(background_radius),
+            runtime_visual,
             primitive_clip: Some(visual_context.clip_rect),
             primitive_clip_mask: visual_context.clip_mask,
             disabled,
@@ -101,6 +119,52 @@ impl<VM> ResolvedElement<VM> {
             border_color,
             background,
             styles,
+        }
+    }
+
+    fn resolve_runtime_visual(
+        &self,
+        widget_state: WidgetState,
+        context: &CollectContext<'_, '_>,
+    ) -> (Option<Value<Color>>, VisualStyle) {
+        match &self.kind {
+            ResolvedWidgetKind::Container { runtime_style, .. }
+            | ResolvedWidgetKind::Virtual { runtime_style, .. } => {
+                resolved_runtime_container_surface(
+                    runtime_style,
+                    &context.style_context,
+                    context.style_sheet,
+                    widget_state,
+                )
+            }
+            ResolvedWidgetKind::Text { runtime_style, .. } => resolved_runtime_text_surface(
+                runtime_style,
+                &context.style_context,
+                context.style_sheet,
+                widget_state,
+            ),
+            ResolvedWidgetKind::Image { runtime_style, .. } => resolved_runtime_image_surface(
+                runtime_style,
+                &context.style_context,
+                context.style_sheet,
+                widget_state,
+            ),
+            ResolvedWidgetKind::Canvas { runtime_style, .. } => resolved_runtime_canvas_surface(
+                runtime_style,
+                &context.style_context,
+                context.style_sheet,
+                widget_state,
+            ),
+            #[cfg(feature = "video")]
+            ResolvedWidgetKind::VideoSurface { runtime_style, .. } => {
+                resolved_runtime_video_surface(
+                    runtime_style,
+                    &context.style_context,
+                    context.style_sheet,
+                    widget_state,
+                )
+            }
+            _ => (self.background.clone(), self.visual.clone()),
         }
     }
 

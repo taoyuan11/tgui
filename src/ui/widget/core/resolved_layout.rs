@@ -5,13 +5,13 @@ impl<VM> ResolvedElement<VM> {
         match &self.kind {
             ResolvedWidgetKind::Container { .. } => MeasureContext::None,
             ResolvedWidgetKind::Virtual { .. } => MeasureContext::None,
-            ResolvedWidgetKind::Text { text } => MeasureContext::Text {
+            ResolvedWidgetKind::Text { text, .. } => MeasureContext::Text {
                 id: self.id,
                 text: text.clone(),
             },
             #[cfg(feature = "audio")]
             ResolvedWidgetKind::Audio { .. } => MeasureContext::Audio { id: self.id },
-            ResolvedWidgetKind::Image { image } => MeasureContext::Image {
+            ResolvedWidgetKind::Image { image, .. } => MeasureContext::Image {
                 id: self.id,
                 image: image.clone(),
             },
@@ -159,7 +159,9 @@ impl<VM> ResolvedElement<VM> {
     ) -> Result<LayoutNode, taffy::TaffyError> {
         let mut child_layouts = Vec::new();
         match &self.kind {
-            ResolvedWidgetKind::Container { layout, children } => {
+            ResolvedWidgetKind::Container {
+                layout, children, ..
+            } => {
                 child_layouts.reserve(children.len());
                 for child in children {
                     child_layouts.push(child.build_layout_tree(

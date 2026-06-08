@@ -2,14 +2,20 @@ use std::sync::Arc;
 
 use crate::foundation::binding::{TextChangeSet, TextController};
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Insets, LayoutStyle, Value};
 use crate::ui::theme::Theme;
 use crate::ui::unit::{dp, Dp};
 
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{ComboboxStyle, ContainerStyle, StyleResolver, TextWidgetStyle};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{
+    ButtonStyle, ComboboxStyle, ContainerStyle, InputStyle, StyleResolver, StyleSheet,
+    TextWidgetStyle,
+};
 use super::{Button, Input, ItemLayout, Popover, Stack, Text, VirtualList, WidgetKey};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -54,6 +60,7 @@ pub struct Combobox<VM> {
     on_open_change: Option<ValueCommand<VM, bool>>,
     style: Option<StyleResolver<ComboboxStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -76,6 +83,7 @@ impl<VM> Combobox<VM> {
             on_open_change: None,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -160,9 +168,22 @@ impl<VM: 'static> From<Combobox<VM>> for Element<VM> {
                 })
             }
         });
+        let input_style = combo.style.clone();
         let mut input = Input::new(combo.controller.clone())
             .placeholder(combo.placeholder.clone())
-            .width(layout_style.width);
+            .width(layout_style.width)
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_combobox_style_with_sheet(
+                    input_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
+                let mut input = InputStyle::default_for_theme(context.theme);
+                input.min_height = resolved.option_height;
+                input
+            });
         if let Some(command) = on_text_change {
             input = input.on_change_set(command);
         }
@@ -171,21 +192,37 @@ impl<VM: 'static> From<Combobox<VM>> for Element<VM> {
                 command.execute_with_context(vm, true, context);
             }));
         }
-        let trigger: Element<VM> = input.into();
+        let trigger: Element<VM> = with_visual_identity(input.into(), &combo.visual);
         let content: Element<VM> = if options.is_empty() {
             let style = combo.style.clone();
-            Stack::new()
-                .width(layout_style.menu_width)
-                .padding(Insets::all(dp(10.0)))
-                .child(Text::new("No results").style_full(move |context| {
-                    let resolved = resolve_combobox_style(style.as_ref(), context);
-                    TextWidgetStyle {
-                        surface: Default::default(),
-                        color: resolved.empty_foreground,
-                        typography: context.theme.typography.body_small.clone(),
-                    }
-                }))
-                .into()
+            with_visual_identity(
+                Stack::new()
+                    .width(layout_style.menu_width)
+                    .padding(Insets::all(dp(10.0)))
+                    .child(with_visual_identity(
+                        Text::new("No results")
+                            .style_full_with_style_sheet(
+                                move |context, style_sheet, visual, state| {
+                                    let resolved = resolve_combobox_style_with_sheet(
+                                        style.as_ref(),
+                                        context,
+                                        style_sheet,
+                                        visual,
+                                        state,
+                                    );
+                                    TextWidgetStyle {
+                                        surface: Default::default(),
+                                        color: resolved.empty_foreground,
+                                        typography: context.theme.typography.body_small.clone(),
+                                    }
+                                },
+                            )
+                            .into(),
+                        &combo.visual,
+                    ))
+                    .into(),
+                &combo.visual,
+            )
         } else {
             let height = dp(layout_style.option_height.get()
                 * layout_style.max_visible_options.min(options.len()).max(1) as f32);
@@ -194,58 +231,93 @@ impl<VM: 'static> From<Combobox<VM>> for Element<VM> {
             let on_open_change = combo.on_open_change.clone();
             let option_height = layout_style.option_height;
             let menu_width = layout_style.menu_width;
-            VirtualList::new(options, move |_index, option: &ComboboxOption| {
-                let controller = controller.clone();
-                let on_change = on_change.clone();
-                let on_open_change = on_open_change.clone();
-                let key = option.key.clone();
-                let label = option.label.clone();
-                Button::new(label.clone())
-                    .ghost()
-                    .disable(option.disabled)
-                    .width(menu_width)
-                    .height(option_height)
-                    .on_click(Command::new_with_context(move |vm, context| {
-                        controller.set_text(label.clone());
-                        if let Some(command) = on_change.as_ref() {
-                            command.execute_with_context(
-                                vm,
-                                ComboboxChange {
-                                    text: label.clone(),
-                                    selected_key: Some(key.clone()),
+            let combo_visual = combo.visual.clone();
+            let combo_style = combo.style.clone();
+            let menu: Element<VM> =
+                VirtualList::new(options, move |_index, option: &ComboboxOption| {
+                    let controller = controller.clone();
+                    let on_change = on_change.clone();
+                    let on_open_change = on_open_change.clone();
+                    let key = option.key.clone();
+                    let label = option.label.clone();
+                    let button_style = combo_style.clone();
+                    let button = Button::new(label.clone())
+                        .ghost()
+                        .disable(option.disabled)
+                        .width(menu_width)
+                        .height(option_height);
+                    let variant = button.variant();
+                    with_visual_identity(
+                        button
+                            .style_full_with_style_sheet(
+                                move |context, style_sheet, visual, state| {
+                                    let resolved = resolve_combobox_style_with_sheet(
+                                        button_style.as_ref(),
+                                        context,
+                                        style_sheet,
+                                        visual,
+                                        state,
+                                    );
+                                    let mut button =
+                                        ButtonStyle::default_for_theme(context.theme, variant);
+                                    button.background = crate::ui::theme::StateValue::new(
+                                        resolved.highlight.clone(),
+                                    );
+                                    button
                                 },
-                                context,
-                            );
-                        }
-                        if let Some(command) = on_open_change.as_ref() {
-                            command.execute_with_context(vm, false, context);
-                        }
-                    }))
-                    .into()
-            })
-            .item_layout(ItemLayout::Fixed {
-                item_extent: layout_style.option_height,
-                spacing: Dp::ZERO,
-                overscan: 3,
-            })
-            .width(layout_style.menu_width)
-            .height(height)
-            .style_full({
-                let style = combo.style.clone();
-                move |context| {
-                    let resolved = resolve_combobox_style(style.as_ref(), context);
-                    let mut container = ContainerStyle::default_for_theme(context.theme);
-                    container.surface.background =
-                        Some(Value::Static(context.theme.colors.surface_overlay));
-                    container.surface.border_radius = Some(Value::Static(context.theme.radius.md));
-                    container.surface.border_color =
-                        Some(Value::Static(context.theme.colors.outline_muted));
-                    container.surface.border_width = Some(Value::Static(context.theme.border.thin));
-                    let _ = resolved.highlight;
-                    container
-                }
-            })
-            .into()
+                            )
+                            .on_click(Command::new_with_context(move |vm, context| {
+                                controller.set_text(label.clone());
+                                if let Some(command) = on_change.as_ref() {
+                                    command.execute_with_context(
+                                        vm,
+                                        ComboboxChange {
+                                            text: label.clone(),
+                                            selected_key: Some(key.clone()),
+                                        },
+                                        context,
+                                    );
+                                }
+                                if let Some(command) = on_open_change.as_ref() {
+                                    command.execute_with_context(vm, false, context);
+                                }
+                            }))
+                            .into(),
+                        &combo_visual,
+                    )
+                })
+                .item_layout(ItemLayout::Fixed {
+                    item_extent: layout_style.option_height,
+                    spacing: Dp::ZERO,
+                    overscan: 3,
+                })
+                .width(layout_style.menu_width)
+                .height(height)
+                .style_full_with_style_sheet({
+                    let style = combo.style.clone();
+                    move |context, style_sheet, visual, state| {
+                        let resolved = resolve_combobox_style_with_sheet(
+                            style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                        );
+                        let mut container = ContainerStyle::default_for_theme(context.theme);
+                        container.surface.background =
+                            Some(Value::Static(context.theme.colors.surface_overlay));
+                        container.surface.border_radius =
+                            Some(Value::Static(context.theme.radius.md));
+                        container.surface.border_color =
+                            Some(Value::Static(context.theme.colors.outline_muted));
+                        container.surface.border_width =
+                            Some(Value::Static(context.theme.border.thin));
+                        let _ = resolved.highlight;
+                        container
+                    }
+                })
+                .into();
+            with_visual_identity(menu, &combo.visual)
         };
         let popover = Popover::new(trigger)
             .content(content)
@@ -257,6 +329,7 @@ impl<VM: 'static> From<Combobox<VM>> for Element<VM> {
             popover.into()
         };
         root.key = combo.key;
+        root = with_visual_identity(root, &combo.visual);
         root.layout = merge_layout(root.layout, combo.layout);
         root
     }
@@ -284,11 +357,36 @@ fn resolve_combobox_style(
     style: Option<&StyleResolver<ComboboxStyle>>,
     context: &StyleContext<'_>,
 ) -> ComboboxStyle {
-    let mut base = ComboboxStyle::default_for_theme(context.theme);
-    context.theme.components.combobox.apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_combobox_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_combobox_style_with_sheet(
+    style: Option<&StyleResolver<ComboboxStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> ComboboxStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        ComboboxStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.combobox.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_combobox(base, context, visual),
+        |sheet, base, context, visual, state| {
+            sheet.apply_combobox_state(base, context, visual, state)
+        },
+    )
 }
 
 fn resolve_combobox_style_for_layout(

@@ -19,8 +19,8 @@ impl<VM> ResolvedElement<VM> {
         context: &mut CollectContext<'_, '_>,
         visual: &CollectVisualState,
     ) {
-        let background_blur = self
-            .visual
+        let background_blur = visual
+            .runtime_visual
             .background_blur
             .resolve_widget_to_logical(
                 context.animations,
@@ -30,14 +30,14 @@ impl<VM> ResolvedElement<VM> {
                 context.units,
             )
             .max(0.0);
-        let shadow = self.visual.shadow.as_ref().map(Value::resolve);
-        let background_brush = self
-            .visual
+        let shadow = visual.runtime_visual.shadow.as_ref().map(Value::resolve);
+        let background_brush = visual
+            .runtime_visual
             .background_brush
             .as_ref()
             .map(|brush| brush.resolve_widget());
-        let background_image = self
-            .visual
+        let background_image = visual
+            .runtime_visual
             .background_image
             .as_ref()
             .map(|image| image.resolve_widget());
@@ -192,7 +192,7 @@ impl<VM> ResolvedElement<VM> {
                 focus: None,
                 interaction: HitInteraction::Disabled { id: self.id },
             });
-        } else if !matches!(&self.kind, ResolvedWidgetKind::Text { text } if text.user_select)
+        } else if !matches!(&self.kind, ResolvedWidgetKind::Text { text, .. } if text.user_select)
             && !matches!(&self.kind, ResolvedWidgetKind::Select { .. })
         {
             let fallback_focusable = matches!(

@@ -74,7 +74,9 @@ pub(super) fn patch_layout_at_path<VM>(
     }
 
     let (parent_kind, children) = match &mut current.kind {
-        ResolvedWidgetKind::Container { layout, children } => (Some(layout.kind.clone()), children),
+        ResolvedWidgetKind::Container {
+            layout, children, ..
+        } => (Some(layout.kind.clone()), children),
         ResolvedWidgetKind::Virtual { children, .. } => (None, children),
         _ => return Ok(()),
     };
@@ -121,6 +123,15 @@ fn patch_layout_tree<VM>(
             ResolvedWidgetKind::Container {
                 layout: ContainerLayout::flow(),
                 children: Vec::new(),
+                runtime_style: {
+                    let theme = Theme::default();
+                    ResolvedRuntimeSurfaceStyle {
+                        base: crate::ui::widget::style::ContainerStyle::default_for_theme(&theme),
+                        local: None,
+                        explicit_visual: VisualStyle::default(),
+                        explicit_background: None,
+                    }
+                },
             },
         ) {
             ResolvedWidgetKind::Container { children, .. } => children,

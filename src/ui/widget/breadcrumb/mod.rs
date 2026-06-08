@@ -1,11 +1,14 @@
 use crate::foundation::view_model::Command;
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, LayoutStyle, Value, Wrap};
 use crate::ui::theme::Theme;
 
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{BreadcrumbStyle, StyleResolver, TextWidgetStyle};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{BreadcrumbStyle, StyleResolver, StyleSheet, TextWidgetStyle};
 use super::{Button, CursorStyle, Flex, Menu, MenuItem, Text, WidgetKey};
 
 pub struct BreadcrumbItem<VM> {
@@ -42,6 +45,7 @@ pub struct Breadcrumb<VM> {
     separator: Value<String>,
     style: Option<StyleResolver<BreadcrumbStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -53,6 +57,7 @@ impl<VM> Breadcrumb<VM> {
             separator: Value::Static("/".to_string()),
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -130,25 +135,28 @@ impl<VM: 'static> From<Breadcrumb<VM>> for Element<VM> {
         let mut children = Vec::new();
         for (index, item) in visible.into_iter().enumerate() {
             if index > 0 {
-                children.push(
+                children.push(with_visual_identity(
                     Text::new(breadcrumb.separator.clone())
-                        .style_full(separator_text_style(breadcrumb.style.clone()))
+                        .style_full_with_style_sheet(separator_text_style(breadcrumb.style.clone()))
                         .into(),
-                );
+                    &breadcrumb.visual,
+                ));
             }
             let current = index + 1 == visible_len;
             match item {
                 BreadcrumbRenderItem::Item(item) => {
-                    let text = Text::new(item.label.clone())
-                        .style_full(breadcrumb_text_style(breadcrumb.style.clone(), current));
-                    children.push(if let Some(command) = item.on_click {
+                    let text = Text::new(item.label.clone()).style_full_with_style_sheet(
+                        breadcrumb_text_style(breadcrumb.style.clone(), current),
+                    );
+                    let text_element = if let Some(command) = item.on_click {
                         text.cursor(CursorStyle::Pointer)
                             .on_click(command)
                             .focusable(true)
                             .tab_index(0)
                     } else {
                         text.into()
-                    });
+                    };
+                    children.push(with_visual_identity(text_element, &breadcrumb.visual));
                 }
                 BreadcrumbRenderItem::Overflow(items) => {
                     let menu_items = items
@@ -178,6 +186,7 @@ impl<VM: 'static> From<Breadcrumb<VM>> for Element<VM> {
             .child(children)
             .into();
         root.key = breadcrumb.key;
+        root = with_visual_identity(root, &breadcrumb.visual);
         root.layout = merge_layout(root.layout, breadcrumb.layout);
         root
     }
@@ -191,9 +200,18 @@ enum BreadcrumbRenderItem<VM> {
 fn breadcrumb_text_style(
     style: Option<StyleResolver<BreadcrumbStyle>>,
     current: bool,
-) -> impl Fn(&StyleContext<'_>) -> TextWidgetStyle + Send + Sync + 'static {
-    move |context| {
-        let resolved = resolve_breadcrumb_style(style.as_ref(), context);
+) -> impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> TextWidgetStyle
+       + Send
+       + Sync
+       + 'static {
+    move |context, style_sheet, visual, state| {
+        let resolved = resolve_breadcrumb_style_with_sheet(
+            style.as_ref(),
+            context,
+            style_sheet,
+            visual,
+            state,
+        );
         TextWidgetStyle {
             surface: Default::default(),
             color: if current {
@@ -208,9 +226,18 @@ fn breadcrumb_text_style(
 
 fn separator_text_style(
     style: Option<StyleResolver<BreadcrumbStyle>>,
-) -> impl Fn(&StyleContext<'_>) -> TextWidgetStyle + Send + Sync + 'static {
-    move |context| {
-        let resolved = resolve_breadcrumb_style(style.as_ref(), context);
+) -> impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> TextWidgetStyle
+       + Send
+       + Sync
+       + 'static {
+    move |context, style_sheet, visual, state| {
+        let resolved = resolve_breadcrumb_style_with_sheet(
+            style.as_ref(),
+            context,
+            style_sheet,
+            visual,
+            state,
+        );
         TextWidgetStyle {
             surface: Default::default(),
             color: resolved.separator,
@@ -223,15 +250,36 @@ fn resolve_breadcrumb_style(
     style: Option<&StyleResolver<BreadcrumbStyle>>,
     context: &StyleContext<'_>,
 ) -> BreadcrumbStyle {
-    let mut base = BreadcrumbStyle::default_for_theme(context.theme);
-    context
-        .theme
-        .components
-        .breadcrumb
-        .apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_breadcrumb_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_breadcrumb_style_with_sheet(
+    style: Option<&StyleResolver<BreadcrumbStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> BreadcrumbStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        BreadcrumbStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.breadcrumb.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_breadcrumb(base, context, visual),
+        |sheet, base, context, visual, state| {
+            sheet.apply_breadcrumb_state(base, context, visual, state)
+        },
+    )
 }
 
 fn resolve_breadcrumb_style_for_layout(

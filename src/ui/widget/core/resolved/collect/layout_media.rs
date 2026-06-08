@@ -14,7 +14,9 @@ impl<VM: 'static> ResolvedElement<VM> {
         visual: &CollectVisualState,
     ) -> bool {
         match &self.kind {
-            ResolvedWidgetKind::Container { layout, children } => {
+            ResolvedWidgetKind::Container {
+                layout, children, ..
+            } => {
                 let content_bounds = compute_container_content_bounds(
                     self,
                     children,
@@ -337,7 +339,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 true
             }
             ResolvedWidgetKind::Portal { .. } => true,
-            ResolvedWidgetKind::Text { text } => {
+            ResolvedWidgetKind::Text { text, .. } => {
                 let padding = text
                     .layout
                     .padding
@@ -400,7 +402,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             ResolvedWidgetKind::ToastHost { .. } => true,
             #[cfg(feature = "audio")]
             ResolvedWidgetKind::Audio { .. } => true,
-            ResolvedWidgetKind::Image { image } => {
+            ResolvedWidgetKind::Image { image, .. } => {
                 let source = image.source.resolve();
                 let loading_background = image
                     .background
@@ -434,6 +436,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             ResolvedWidgetKind::Canvas {
                 scene,
                 item_interactions,
+                ..
             } => {
                 let scene = scene.resolve();
                 let padding = self

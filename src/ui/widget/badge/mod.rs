@@ -1,11 +1,16 @@
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Insets, LayoutStyle, Value};
 use crate::ui::theme::Theme;
 use crate::ui::unit::{dp, Dp};
 
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{BadgeStyle, BadgeTone, ContainerStyle, StyleResolver, TextWidgetStyle};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{
+    BadgeStyle, BadgeTone, ContainerStyle, StyleResolver, StyleSheet, TextWidgetStyle,
+};
 use super::{Stack, Text, WidgetKey};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +43,7 @@ pub struct Badge<VM> {
     style: Option<StyleResolver<BadgeStyle>>,
     anchor: Option<Element<VM>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -66,6 +72,7 @@ impl<VM> Badge<VM> {
             style: None,
             anchor: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -122,7 +129,12 @@ impl<VM> Badge<VM> {
 impl<VM: 'static> From<Badge<VM>> for Element<VM> {
     fn from(badge: Badge<VM>) -> Self {
         let layout_style = resolve_badge_style_for_layout(badge.style.as_ref(), badge.tone);
-        let badge_element = badge_content_element(&badge.content, badge.style.clone(), badge.tone);
+        let badge_element = badge_content_element(
+            &badge.content,
+            badge.style.clone(),
+            badge.tone,
+            badge.visual.clone(),
+        );
         let mut root = if let Some(anchor) = badge.anchor {
             let mut overlay = badge_element;
             overlay.layout.position_type = crate::ui::layout::PositionType::Absolute;
@@ -150,6 +162,7 @@ impl<VM: 'static> From<Badge<VM>> for Element<VM> {
             badge_element
         };
         root.key = badge.key;
+        root = with_visual_identity(root, &badge.visual);
         root.layout = merge_layout(root.layout, badge.layout);
         if matches!(badge.content, BadgeContent::Dot) && root.layout.width.is_none() {
             root.layout.width = Some(crate::ui::layout::Length::Px(layout_style.dot_size).into());
@@ -162,23 +175,34 @@ fn badge_content_element<VM: 'static>(
     content: &BadgeContent,
     style: Option<StyleResolver<BadgeStyle>>,
     tone: BadgeTone,
+    visual_identity: VisualStyle,
 ) -> Element<VM> {
     let layout_style = resolve_badge_style_for_layout(style.as_ref(), tone);
     match content {
         BadgeContent::Dot => {
             let style = style.clone();
-            Stack::new()
-                .size(layout_style.dot_size, layout_style.dot_size)
-                .style_full(move |context| {
-                    let resolved = resolve_badge_style(style.as_ref(), context, tone);
-                    let mut container = ContainerStyle::default_for_theme(context.theme);
-                    container.surface.background = Some(resolved.background);
-                    container.surface.border_radius = Some(Value::Static(resolved.radius));
-                    container
-                })
-                .into()
+            with_visual_identity(
+                Stack::new()
+                    .size(layout_style.dot_size, layout_style.dot_size)
+                    .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                        let resolved = resolve_badge_style_with_sheet(
+                            style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                            tone,
+                        );
+                        let mut container = ContainerStyle::default_for_theme(context.theme);
+                        container.surface.background = Some(resolved.background);
+                        container.surface.border_radius = Some(Value::Static(resolved.radius));
+                        container
+                    })
+                    .into(),
+                &visual_identity,
+            )
         }
-        BadgeContent::Text(text) => badge_pill(text.clone(), style, tone),
+        BadgeContent::Text(text) => badge_pill(text.clone(), style, tone, visual_identity),
         BadgeContent::Count { value, max } => {
             let max = *max;
             let label = match value {
@@ -187,7 +211,7 @@ fn badge_content_element<VM: 'static>(
                     .map(move |value| format_badge_count(value, max))
                     .into(),
             };
-            badge_pill(label, style, tone)
+            badge_pill(label, style, tone, visual_identity)
         }
     }
 }
@@ -196,30 +220,54 @@ fn badge_pill<VM: 'static>(
     label: Value<String>,
     style: Option<StyleResolver<BadgeStyle>>,
     tone: BadgeTone,
+    visual_identity: VisualStyle,
 ) -> Element<VM> {
     let layout_style = resolve_badge_style_for_layout(style.as_ref(), tone);
     let container_style = style.clone();
     let text_style = style;
-    Stack::new()
-        .min_height(layout_style.min_height)
-        .padding(Insets::symmetric(layout_style.padding_x, dp(1.0)))
-        .center()
-        .style_full(move |context| {
-            let resolved = resolve_badge_style(container_style.as_ref(), context, tone);
-            let mut container = ContainerStyle::default_for_theme(context.theme);
-            container.surface.background = Some(resolved.background);
-            container.surface.border_radius = Some(Value::Static(resolved.radius));
-            container
-        })
-        .child(Text::new(label).style_full(move |context| {
-            let resolved = resolve_badge_style(text_style.as_ref(), context, tone);
-            TextWidgetStyle {
-                surface: Default::default(),
-                color: resolved.foreground,
-                typography: resolved.text_style,
-            }
-        }))
-        .into()
+    let text_identity = visual_identity.clone();
+    with_visual_identity(
+        Stack::new()
+            .min_height(layout_style.min_height)
+            .padding(Insets::symmetric(layout_style.padding_x, dp(1.0)))
+            .center()
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_badge_style_with_sheet(
+                    container_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                    tone,
+                );
+                let mut container = ContainerStyle::default_for_theme(context.theme);
+                container.surface.background = Some(resolved.background);
+                container.surface.border_radius = Some(Value::Static(resolved.radius));
+                container
+            })
+            .child(with_visual_identity(
+                Text::new(label)
+                    .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                        let resolved = resolve_badge_style_with_sheet(
+                            text_style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                            tone,
+                        );
+                        TextWidgetStyle {
+                            surface: Default::default(),
+                            color: resolved.foreground,
+                            typography: resolved.text_style,
+                        }
+                    })
+                    .into(),
+                &text_identity,
+            ))
+            .into(),
+        &visual_identity,
+    )
 }
 
 fn format_badge_count(value: u32, max: u32) -> String {
@@ -235,11 +283,36 @@ fn resolve_badge_style(
     context: &StyleContext<'_>,
     tone: BadgeTone,
 ) -> BadgeStyle {
-    let mut base = BadgeStyle::default_for_theme(context.theme, tone);
-    context.theme.components.badge.apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_badge_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+        tone,
+    )
+}
+
+fn resolve_badge_style_with_sheet(
+    style: Option<&StyleResolver<BadgeStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+    tone: BadgeTone,
+) -> BadgeStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        BadgeStyle::default_for_theme(context.theme, tone),
+        |base, context| context.theme.components.badge.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_badge(base, context, visual),
+        |sheet, base, context, visual, state| sheet.apply_badge_state(base, context, visual, state),
+    )
 }
 
 fn resolve_badge_style_for_layout(

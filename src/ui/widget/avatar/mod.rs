@@ -1,14 +1,18 @@
 use crate::foundation::view_model::Command;
 use crate::media::{ContentFit, MediaSource};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Axis, LayoutStyle, Value};
 use crate::ui::theme::Theme;
 
 use super::badge::Badge;
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
 use super::style::{
-    AvatarShape, AvatarStyle, ContainerStyle, ImageStyle, StyleResolver, TextWidgetStyle,
+    AvatarShape, AvatarStyle, ContainerStyle, ImageStyle, StyleResolver, StyleSheet,
+    TextWidgetStyle,
 };
 use super::{CursorStyle, Flex, Image, Stack, Text, WidgetKey};
 
@@ -27,6 +31,7 @@ pub struct Avatar<VM> {
     on_click: Option<Command<VM>>,
     style: Option<StyleResolver<AvatarStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -51,6 +56,7 @@ impl<VM> Avatar<VM> {
             on_click: None,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -95,30 +101,49 @@ impl<VM> Avatar<VM> {
 impl<VM: 'static> From<Avatar<VM>> for Element<VM> {
     fn from(avatar: Avatar<VM>) -> Self {
         let layout_style = resolve_avatar_style_for_layout(avatar.style.as_ref(), avatar.shape);
+        let visual_identity = avatar.visual.clone();
         let content: Element<VM> = match avatar.source {
             AvatarSource::Image(source) => {
                 let style = avatar.style.clone();
                 let shape = avatar.shape;
-                Image::new(source)
-                    .size(layout_style.size, layout_style.size)
-                    .style_full(move |context| {
-                        let resolved = resolve_avatar_style(style.as_ref(), context, shape);
-                        let mut image = ImageStyle::default_for_theme(context.theme);
-                        image.fit = ContentFit::Cover;
-                        image.surface.border_radius = Some(Value::Static(resolved.radius));
-                        image
-                    })
-                    .into()
+                with_visual_identity(
+                    Image::new(source)
+                        .size(layout_style.size, layout_style.size)
+                        .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                            let resolved = resolve_avatar_style_with_sheet(
+                                style.as_ref(),
+                                context,
+                                style_sheet,
+                                visual,
+                                state,
+                                shape,
+                            );
+                            let mut image = ImageStyle::default_for_theme(context.theme);
+                            image.fit = ContentFit::Cover;
+                            image.surface.border_radius = Some(Value::Static(resolved.radius));
+                            image
+                        })
+                        .into(),
+                    &visual_identity,
+                )
             }
-            AvatarSource::Initials(initials) => {
-                avatar_initials(initials, avatar.style.clone(), avatar.shape)
-            }
+            AvatarSource::Initials(initials) => avatar_initials(
+                initials,
+                avatar.style.clone(),
+                avatar.shape,
+                avatar.visual.clone(),
+            ),
             AvatarSource::Name(name) => {
                 let initials = match name {
                     Value::Static(name) => Value::Static(initials_from_name(&name)),
                     Value::Signal(signal) => signal.map(|name| initials_from_name(&name)).into(),
                 };
-                avatar_initials(initials, avatar.style.clone(), avatar.shape)
+                avatar_initials(
+                    initials,
+                    avatar.style.clone(),
+                    avatar.shape,
+                    avatar.visual.clone(),
+                )
             }
         };
         let mut root = if let Some(badge) = avatar.badge {
@@ -131,6 +156,7 @@ impl<VM: 'static> From<Avatar<VM>> for Element<VM> {
             root.interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
         }
         root.key = avatar.key;
+        root = with_visual_identity(root, &avatar.visual);
         root.layout = merge_layout(root.layout, avatar.layout);
         root
     }
@@ -140,29 +166,53 @@ fn avatar_initials<VM: 'static>(
     initials: Value<String>,
     style: Option<StyleResolver<AvatarStyle>>,
     shape: AvatarShape,
+    visual_identity: VisualStyle,
 ) -> Element<VM> {
     let layout_style = resolve_avatar_style_for_layout(style.as_ref(), shape);
     let container_style = style.clone();
     let text_style = style;
-    Stack::new()
-        .size(layout_style.size, layout_style.size)
-        .center()
-        .style_full(move |context| {
-            let resolved = resolve_avatar_style(container_style.as_ref(), context, shape);
-            let mut container = ContainerStyle::default_for_theme(context.theme);
-            container.surface.background = Some(resolved.background);
-            container.surface.border_radius = Some(Value::Static(resolved.radius));
-            container
-        })
-        .child(Text::new(initials).style_full(move |context| {
-            let resolved = resolve_avatar_style(text_style.as_ref(), context, shape);
-            TextWidgetStyle {
-                surface: Default::default(),
-                color: resolved.foreground,
-                typography: resolved.text_style,
-            }
-        }))
-        .into()
+    let text_identity = visual_identity.clone();
+    with_visual_identity(
+        Stack::new()
+            .size(layout_style.size, layout_style.size)
+            .center()
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_avatar_style_with_sheet(
+                    container_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                    shape,
+                );
+                let mut container = ContainerStyle::default_for_theme(context.theme);
+                container.surface.background = Some(resolved.background);
+                container.surface.border_radius = Some(Value::Static(resolved.radius));
+                container
+            })
+            .child(with_visual_identity(
+                Text::new(initials)
+                    .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                        let resolved = resolve_avatar_style_with_sheet(
+                            text_style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                            shape,
+                        );
+                        TextWidgetStyle {
+                            surface: Default::default(),
+                            color: resolved.foreground,
+                            typography: resolved.text_style,
+                        }
+                    })
+                    .into(),
+                &text_identity,
+            ))
+            .into(),
+        &visual_identity,
+    )
 }
 
 fn initials_from_name(name: &str) -> String {
@@ -188,6 +238,7 @@ pub struct AvatarGroup<VM> {
     max_visible: usize,
     style: Option<StyleResolver<AvatarStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -198,6 +249,7 @@ impl<VM> AvatarGroup<VM> {
             max_visible: usize::MAX,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -242,22 +294,25 @@ impl<VM: 'static> From<AvatarGroup<VM>> for Element<VM> {
             .map(Element::from)
             .collect::<Vec<_>>();
         if total > visible {
-            children.push(
-                Avatar::initials(format!("+{}", total - visible))
-                    .style_full({
-                        let style = group.style.clone();
-                        move |context| {
-                            resolve_avatar_style(style.as_ref(), context, AvatarShape::Circle)
-                        }
-                    })
-                    .into(),
-            );
+            let mut overflow = Avatar::initials(format!("+{}", total - visible))
+                .style_full({
+                    let style = group.style.clone();
+                    move |context| {
+                        resolve_avatar_style(style.as_ref(), context, AvatarShape::Circle)
+                    }
+                })
+                .classes(group.visual.classes.clone());
+            if let Some(style_id) = group.visual.style_id.clone() {
+                overflow = overflow.style_id(style_id);
+            }
+            children.push(overflow.into());
         }
         let mut root: Element<VM> = Flex::new(Axis::Horizontal)
             .gap(-layout_style.group_overlap.get())
             .child(children)
             .into();
         root.key = group.key;
+        root = with_visual_identity(root, &group.visual);
         root.layout = merge_layout(root.layout, group.layout);
         root
     }
@@ -268,11 +323,38 @@ fn resolve_avatar_style(
     context: &StyleContext<'_>,
     shape: AvatarShape,
 ) -> AvatarStyle {
-    let mut base = AvatarStyle::default_for_theme(context.theme, shape);
-    context.theme.components.avatar.apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_avatar_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+        shape,
+    )
+}
+
+fn resolve_avatar_style_with_sheet(
+    style: Option<&StyleResolver<AvatarStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+    shape: AvatarShape,
+) -> AvatarStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        AvatarStyle::default_for_theme(context.theme, shape),
+        |base, context| context.theme.components.avatar.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_avatar(base, context, visual),
+        |sheet, base, context, visual, state| {
+            sheet.apply_avatar_state(base, context, visual, state)
+        },
+    )
 }
 
 fn resolve_avatar_style_for_layout(

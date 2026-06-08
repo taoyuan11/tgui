@@ -386,7 +386,7 @@ fn apply_widget_semantics<VM: 'static>(
                 }
             }
         }
-        ResolvedWidgetKind::Text { text } => {
+        ResolvedWidgetKind::Text { text, .. } => {
             node.set_value(text.content.resolve());
         }
         ResolvedWidgetKind::Button {

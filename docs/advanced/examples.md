@@ -33,6 +33,8 @@ cargo run --manifest-path examples/basic_window/Cargo.toml
 | `toast_snackbar` | toast / snackbar |
 | `tree` | Tree 组件 |
 
+`examples/demo` 中的 `Forms` 页面覆盖 `DatePicker`、`TimePicker`、`NumberInput`、`ColorPicker` 和 `Upload`；`P3 Widgets` 页面覆盖 `Badge`、`Avatar`、`Skeleton`、`Card`、`RichText`、`Breadcrumb`、`Pagination`、`Collapse`、`Accordion`、`ResizablePanels`、`Rating`、`Carousel` 和 `Combobox`。
+
 ## 推荐阅读顺序
 
 1. `basic_window`

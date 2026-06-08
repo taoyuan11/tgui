@@ -239,7 +239,9 @@ pub(super) fn lifecycle_snapshot<VM>(element: &ResolvedElement<VM>) -> Lifecycle
 
 pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> LifecycleWidgetKind {
     match kind {
-        ResolvedWidgetKind::Container { layout, children } => {
+        ResolvedWidgetKind::Container {
+            layout, children, ..
+        } => {
             let mut layout = layout.clone();
             freeze_container_layout(&mut layout);
             LifecycleWidgetKind::Container {
@@ -271,7 +273,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
                 child_meta: child_meta.clone(),
             }
         }
-        ResolvedWidgetKind::Text { text } => {
+        ResolvedWidgetKind::Text { text, .. } => {
             let mut text = text.clone();
             freeze_text(&mut text);
             LifecycleWidgetKind::Text { text }
@@ -282,7 +284,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             freeze_audio(&mut audio);
             LifecycleWidgetKind::Audio { audio }
         }
-        ResolvedWidgetKind::Image { image } => {
+        ResolvedWidgetKind::Image { image, .. } => {
             let mut image = image.clone();
             freeze_image(&mut image);
             LifecycleWidgetKind::Image { image }
@@ -293,7 +295,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             LifecycleWidgetKind::Canvas { scene }
         }
         #[cfg(feature = "video")]
-        ResolvedWidgetKind::VideoSurface { video, style } => {
+        ResolvedWidgetKind::VideoSurface { video, style, .. } => {
             let mut video = video.clone();
             let mut style = style.clone();
             freeze_option_value(&mut video.background);

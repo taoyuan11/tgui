@@ -33,7 +33,7 @@ impl<VM> ResolvedElement<VM> {
                     });
                 }
             }
-            ResolvedWidgetKind::Image { image } => {
+            ResolvedWidgetKind::Image { image, .. } => {
                 if !self.media_events.has_any() {
                     return;
                 }

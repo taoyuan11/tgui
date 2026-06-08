@@ -1,14 +1,17 @@
 use std::time::Duration;
 
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, LayoutStyle, Value};
 use crate::ui::theme::Theme;
 
 use super::common::CarouselAutoPlayState;
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{CarouselStyle, ContainerStyle, StyleResolver};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{CarouselStyle, ContainerStyle, StyleResolver, StyleSheet};
 use super::{Button, CursorStyle, Flex, Stack, WidgetKey};
 
 pub struct Carousel<VM> {
@@ -18,6 +21,7 @@ pub struct Carousel<VM> {
     auto_play: Option<Duration>,
     style: Option<StyleResolver<CarouselStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -30,6 +34,7 @@ impl<VM> Carousel<VM> {
             auto_play: None,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -82,29 +87,38 @@ impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
             .map(|index| {
                 let on_change = carousel.on_change.clone();
                 let style = carousel.style.clone();
-                Stack::new()
-                    .size(layout_style.indicator_size, layout_style.indicator_size)
-                    .style_full(move |context| {
-                        let resolved = resolve_carousel_style(style.as_ref(), context);
-                        let mut container = ContainerStyle::default_for_theme(context.theme);
-                        container.surface.background = Some(if index == selected {
-                            resolved.active_indicator
-                        } else {
-                            resolved.indicator
-                        });
-                        container.surface.border_radius =
-                            Some(Value::Static(context.theme.radius.full));
-                        container
-                    })
-                    .on_click(Command::new_with_context(move |vm, context| {
-                        if let Some(command) = on_change.as_ref() {
-                            command.execute_with_context(vm, index, context);
-                        }
-                    }))
-                    .focusable(true)
-                    .tab_index(0)
-                    .cursor(CursorStyle::Pointer)
-                    .into()
+                with_visual_identity(
+                    Stack::new()
+                        .size(layout_style.indicator_size, layout_style.indicator_size)
+                        .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                            let resolved = resolve_carousel_style_with_sheet(
+                                style.as_ref(),
+                                context,
+                                style_sheet,
+                                visual,
+                                state,
+                            );
+                            let mut container = ContainerStyle::default_for_theme(context.theme);
+                            container.surface.background = Some(if index == selected {
+                                resolved.active_indicator
+                            } else {
+                                resolved.indicator
+                            });
+                            container.surface.border_radius =
+                                Some(Value::Static(context.theme.radius.full));
+                            container
+                        })
+                        .on_click(Command::new_with_context(move |vm, context| {
+                            if let Some(command) = on_change.as_ref() {
+                                command.execute_with_context(vm, index, context);
+                            }
+                        }))
+                        .focusable(true)
+                        .tab_index(0)
+                        .cursor(CursorStyle::Pointer)
+                        .into(),
+                    &carousel.visual,
+                )
             })
             .collect::<Vec<Element<VM>>>();
         let mut root: Element<VM> = Flex::vertical()
@@ -140,6 +154,7 @@ impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
             });
         }
         root.key = carousel.key;
+        root = with_visual_identity(root, &carousel.visual);
         root.layout = merge_layout(root.layout, carousel.layout);
         root
     }
@@ -175,11 +190,36 @@ fn resolve_carousel_style(
     style: Option<&StyleResolver<CarouselStyle>>,
     context: &StyleContext<'_>,
 ) -> CarouselStyle {
-    let mut base = CarouselStyle::default_for_theme(context.theme);
-    context.theme.components.carousel.apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_carousel_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_carousel_style_with_sheet(
+    style: Option<&StyleResolver<CarouselStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> CarouselStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        CarouselStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.carousel.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_carousel(base, context, visual),
+        |sheet, base, context, visual, state| {
+            sheet.apply_carousel_state(base, context, visual, state)
+        },
+    )
 }
 
 fn resolve_carousel_style_for_layout(

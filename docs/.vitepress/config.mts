@@ -35,7 +35,8 @@ export default defineConfig({
         items: [
           { text: '布局系统', link: '/features/layout' },
           { text: '组件', link: '/features/widgets' },
-          { text: 'P3 组件', link: '/components_p3' },
+          { text: '表单增强控件', link: '/features/input-controls' },
+          { text: 'P3 体验组件', link: '/features/p3-components' },
           { text: 'Canvas', link: '/features/canvas' },
           { text: '主题与样式', link: '/features/theme' },
           { text: '媒体', link: '/features/media' },

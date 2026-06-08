@@ -1,6 +1,6 @@
 use crate::foundation::form::ValidationVisualState;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
@@ -317,6 +317,19 @@ impl<VM> Slider<VM> {
     ) -> Self {
         if let WidgetKind::Slider { style, .. } = &mut self.element.kind {
             *style = Some(StyleResolver::full(resolver));
+        }
+        self
+    }
+
+    pub(crate) fn style_full_with_style_sheet(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>, &super::StyleSheet, &VisualStyle, WidgetState) -> SliderStyle
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        if let WidgetKind::Slider { style, .. } = &mut self.element.kind {
+            *style = Some(StyleResolver::full_with_style_sheet(resolver));
         }
         self
     }

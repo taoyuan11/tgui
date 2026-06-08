@@ -1,11 +1,14 @@
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{pct, Axis, LayoutStyle, Value};
 use crate::ui::theme::Theme;
 
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{ContainerStyle, SplitterStyle, StyleResolver};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{ContainerStyle, SplitterStyle, StyleResolver, StyleSheet};
 use super::{CursorStyle, Flex, SplitterHandleState, Stack, WidgetKey};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,6 +58,7 @@ pub struct ResizablePanels<VM> {
     on_resize: Option<ValueCommand<VM, SplitterResize>>,
     style: Option<StyleResolver<SplitterStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
 }
 
@@ -70,6 +74,7 @@ impl<VM> ResizablePanels<VM> {
             on_resize: None,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
         }
     }
@@ -132,6 +137,7 @@ impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
                 let reset_sizes = splitter_reset_sizes(sizes.len());
                 let style = splitter.style.clone();
                 let axis = splitter.axis;
+                let handle_identity = splitter.visual.clone();
                 let handle_width = if axis == SplitterAxis::Horizontal {
                     crate::ui::layout::Length::Px(layout_style.hit_extent)
                 } else {
@@ -152,54 +158,70 @@ impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
                 } else {
                     crate::ui::layout::Length::Px(layout_style.handle_thickness)
                 };
-                let mut handle: Element<VM> = Stack::new()
-                    .size(handle_width, handle_height)
-                    .center()
-                    .cursor(if axis == SplitterAxis::Horizontal {
-                        CursorStyle::EwResize
-                    } else {
-                        CursorStyle::NsResize
-                    })
-                    .on_click(Command::new_with_context({
-                        let on_resize = on_resize.clone();
-                        let next_sizes = next_sizes.clone();
-                        move |vm, context| {
+                let mut handle: Element<VM> = with_visual_identity(
+                    Stack::new()
+                        .size(handle_width, handle_height)
+                        .center()
+                        .cursor(if axis == SplitterAxis::Horizontal {
+                            CursorStyle::EwResize
+                        } else {
+                            CursorStyle::NsResize
+                        })
+                        .on_click(Command::new_with_context({
+                            let on_resize = on_resize.clone();
+                            let next_sizes = next_sizes.clone();
+                            move |vm, context| {
+                                if let Some(command) = on_resize.as_ref() {
+                                    command.execute_with_context(
+                                        vm,
+                                        SplitterResize {
+                                            index,
+                                            sizes: next_sizes.clone(),
+                                        },
+                                        context,
+                                    );
+                                }
+                            }
+                        }))
+                        .on_double_click(Command::new_with_context(move |vm, context| {
                             if let Some(command) = on_resize.as_ref() {
                                 command.execute_with_context(
                                     vm,
                                     SplitterResize {
                                         index,
-                                        sizes: next_sizes.clone(),
+                                        sizes: reset_sizes.clone(),
                                     },
                                     context,
                                 );
                             }
-                        }
-                    }))
-                    .on_double_click(Command::new_with_context(move |vm, context| {
-                        if let Some(command) = on_resize.as_ref() {
-                            command.execute_with_context(
-                                vm,
-                                SplitterResize {
-                                    index,
-                                    sizes: reset_sizes.clone(),
-                                },
-                                context,
-                            );
-                        }
-                    }))
-                    .focusable(true)
-                    .tab_index(0)
-                    .child(Stack::<VM>::new().size(line_width, line_height).style_full(
-                        move |context| {
-                            let resolved = resolve_splitter_style(style.as_ref(), context);
-                            let mut container = ContainerStyle::default_for_theme(context.theme);
-                            container.surface.background =
-                                Some(resolved.handle_color.normal.clone());
-                            container
-                        },
-                    ))
-                    .into();
+                        }))
+                        .focusable(true)
+                        .tab_index(0)
+                        .child(with_visual_identity(
+                            Stack::<VM>::new()
+                                .size(line_width, line_height)
+                                .style_full_with_style_sheet(
+                                    move |context, style_sheet, visual, state| {
+                                        let resolved = resolve_splitter_style_with_sheet(
+                                            style.as_ref(),
+                                            context,
+                                            style_sheet,
+                                            visual,
+                                            state,
+                                        );
+                                        let mut container =
+                                            ContainerStyle::default_for_theme(context.theme);
+                                        container.surface.background =
+                                            Some(resolved.handle_color.resolve(state).clone());
+                                        container
+                                    },
+                                )
+                                .into(),
+                            &handle_identity,
+                        ))
+                        .into(),
+                    &handle_identity,
+                );
                 handle.splitter_handle = Some(SplitterHandleState {
                     axis: match axis {
                         SplitterAxis::Horizontal => Axis::Horizontal,
@@ -222,6 +244,7 @@ impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
         .child(children)
         .into();
         root.key = splitter.key;
+        root = with_visual_identity(root, &splitter.visual);
         root.layout = merge_layout(root.layout, splitter.layout);
         root
     }
@@ -297,11 +320,36 @@ fn resolve_splitter_style(
     style: Option<&StyleResolver<SplitterStyle>>,
     context: &StyleContext<'_>,
 ) -> SplitterStyle {
-    let mut base = SplitterStyle::default_for_theme(context.theme);
-    context.theme.components.splitter.apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_splitter_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_splitter_style_with_sheet(
+    style: Option<&StyleResolver<SplitterStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> SplitterStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        SplitterStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.splitter.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_splitter(base, context, visual),
+        |sheet, base, context, visual, state| {
+            sheet.apply_splitter_state(base, context, visual, state)
+        },
+    )
 }
 
 fn resolve_splitter_style_for_layout(
@@ -315,6 +363,13 @@ fn resolve_splitter_style_for_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_sizes_close(actual: Vec<f32>, expected: &[f32]) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert!((actual - expected).abs() < f32::EPSILON);
+        }
+    }
 
     #[test]
     fn splitter_adjusted_sizes_supports_positive_and_negative_delta() {
@@ -336,13 +391,13 @@ mod tests {
         let sizes = vec![0.75, 0.25];
         let constraints = vec![(0.2, 0.8), (0.2, 0.8)];
 
-        assert_eq!(
+        assert_sizes_close(
             splitter_adjusted_sizes(&sizes, &constraints, 0, 0.5),
-            vec![0.8, 0.2]
+            &[0.8, 0.2],
         );
-        assert_eq!(
+        assert_sizes_close(
             splitter_adjusted_sizes(&sizes, &constraints, 0, -0.8),
-            vec![0.2, 0.8]
+            &[0.2, 0.8],
         );
     }
 }

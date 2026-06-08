@@ -1,5 +1,5 @@
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, Justify, LayoutStyle, Overflow, ScrollbarStyle, Value};
 use crate::ui::unit::Dp;
 
@@ -85,6 +85,26 @@ impl<VM> Container<VM> {
     ) -> Self {
         if let WidgetKind::Container { style, .. } = &mut self.element.kind {
             *style = Some(super::super::style::StyleResolver::full(resolver));
+        }
+        self
+    }
+
+    pub(crate) fn style_full_with_style_sheet(
+        mut self,
+        resolver: impl Fn(
+                &StyleContext<'_>,
+                &super::super::style::StyleSheet,
+                &VisualStyle,
+                WidgetState,
+            ) -> ContainerStyle
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        if let WidgetKind::Container { style, .. } = &mut self.element.kind {
+            *style = Some(super::super::style::StyleResolver::full_with_style_sheet(
+                resolver,
+            ));
         }
         self
     }

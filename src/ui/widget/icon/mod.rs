@@ -2,14 +2,17 @@ use std::sync::Arc;
 
 use crate::media::{MediaBytes, MediaSource};
 use crate::text::font::ICON_FONT_FAMILY;
-use crate::theme::StyleContext;
+use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{LayoutStyle, Value};
 use crate::ui::theme::Theme;
 use crate::ui::unit::sp;
 
+use super::common::VisualStyle;
 use super::core::Element;
-use super::p3_support::{impl_p3_layout_api, merge_layout};
-use super::style::{IconStyle, ImageStyle, StyleResolver, TextWidgetStyle};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{IconStyle, ImageStyle, StyleResolver, StyleSheet, TextWidgetStyle};
 use super::{Image, Text, WidgetKey};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -75,6 +78,7 @@ pub struct Icon<VM> {
     source: IconSource,
     style: Option<StyleResolver<IconStyle>>,
     layout: LayoutStyle,
+    visual: VisualStyle,
     key: Option<WidgetKey>,
     _marker: std::marker::PhantomData<fn() -> VM>,
 }
@@ -107,6 +111,7 @@ impl<VM> Icon<VM> {
             source,
             style: None,
             layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
             key: None,
             _marker: std::marker::PhantomData,
         }
@@ -141,24 +146,40 @@ impl<VM: 'static> From<Icon<VM>> for Element<VM> {
             IconSource::Builtin(icon_source) => icon_text(
                 Value::Static(icon_source.name().to_string()),
                 icon.style.clone(),
+                icon.visual.clone(),
                 true,
             ),
-            IconSource::Named(name) => icon_text(name, icon.style.clone(), true),
-            IconSource::Glyph(ch) => {
-                icon_text(Value::Static(ch.to_string()), icon.style.clone(), false)
+            IconSource::Named(name) => {
+                icon_text(name, icon.style.clone(), icon.visual.clone(), true)
             }
+            IconSource::Glyph(ch) => icon_text(
+                Value::Static(ch.to_string()),
+                icon.style.clone(),
+                icon.visual.clone(),
+                false,
+            ),
             IconSource::Svg(bytes) => {
                 let style = icon.style.clone();
-                Image::new(MediaSource::bytes(bytes))
-                    .size(layout_style.size, layout_style.size)
-                    .style_full(move |context| {
-                        let _ = resolve_icon_style(style.as_ref(), context);
-                        ImageStyle::default_for_theme(context.theme)
-                    })
-                    .into()
+                with_visual_identity(
+                    Image::new(MediaSource::bytes(bytes))
+                        .size(layout_style.size, layout_style.size)
+                        .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                            let _ = resolve_icon_style_with_sheet(
+                                style.as_ref(),
+                                context,
+                                style_sheet,
+                                visual,
+                                state,
+                            );
+                            ImageStyle::default_for_theme(context.theme)
+                        })
+                        .into(),
+                    &icon.visual,
+                )
             }
         };
         root.key = icon.key;
+        root = with_visual_identity(root, &icon.visual);
         root.layout = merge_layout(root.layout, icon.layout);
         root
     }
@@ -167,32 +188,65 @@ impl<VM: 'static> From<Icon<VM>> for Element<VM> {
 fn icon_text<VM: 'static>(
     name: Value<String>,
     style: Option<StyleResolver<IconStyle>>,
+    visual_identity: VisualStyle,
     icon_font: bool,
 ) -> Element<VM> {
-    Text::new(name)
-        .style_full(move |context| {
-            let resolved = resolve_icon_style(style.as_ref(), context);
-            let mut text = TextWidgetStyle::default_for_theme(context.theme);
-            text.color = resolved.color;
-            text.typography.size = sp(resolved.size.get());
-            text.typography.line_height = Some(sp(resolved.size.get()));
-            if icon_font {
-                text.typography.font_family = Some(ICON_FONT_FAMILY.to_string());
-            }
-            text
-        })
-        .into()
+    with_visual_identity(
+        Text::new(name)
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_icon_style_with_sheet(
+                    style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
+                let mut text = TextWidgetStyle::default_for_theme(context.theme);
+                text.color = resolved.color;
+                text.typography.size = sp(resolved.size.get());
+                text.typography.line_height = Some(sp(resolved.size.get()));
+                if icon_font {
+                    text.typography.font_family = Some(ICON_FONT_FAMILY.to_string());
+                }
+                text
+            })
+            .into(),
+        &visual_identity,
+    )
 }
 
 fn resolve_icon_style(
     style: Option<&StyleResolver<IconStyle>>,
     context: &StyleContext<'_>,
 ) -> IconStyle {
-    let mut base = IconStyle::default_for_theme(context.theme);
-    context.theme.components.icon.apply(&mut base, context);
-    style
-        .map(|resolver| resolver.resolve_from(base.clone(), context))
-        .unwrap_or(base)
+    let style_sheet = StyleSheet::default();
+    resolve_icon_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_icon_style_with_sheet(
+    style: Option<&StyleResolver<IconStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> IconStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        IconStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.icon.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_icon(base, context, visual),
+        |sheet, base, context, visual, state| sheet.apply_icon_state(base, context, visual, state),
+    )
 }
 
 fn resolve_icon_style_for_layout(style: Option<&StyleResolver<IconStyle>>) -> IconStyle {
