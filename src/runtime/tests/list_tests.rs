@@ -1,7 +1,9 @@
 use super::*;
 
+use crate::ui::layout::pct;
 use crate::ui::widget::{
-    List, ListItem, ListItemAction, ListSelectionChange, ListSelectionMode, MenuItem, WidgetKey,
+    ItemLayout, List, ListItem, ListItemAction, ListSection, ListSelectionChange,
+    ListSelectionMode, MenuItem, ScrollRegion, WidgetKey,
 };
 
 fn list_row_center(
@@ -36,6 +38,130 @@ fn primary_shortcut_modifier() -> ModifiersState {
     {
         ModifiersState::CONTROL
     }
+}
+
+fn visible_list_item_centers(handler: &mut BoundRuntimeHandler<TestVm>) -> Vec<(WidgetKey, Point)> {
+    let viewport = handler.viewport_rect();
+    handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .filter_map(|region| match &region.interaction {
+            HitInteraction::ListItem { state, .. } => {
+                let center = Point::new(
+                    region.rect.x + region.rect.width * 0.5,
+                    region.rect.y + region.rect.height * 0.5,
+                );
+                viewport
+                    .contains(center)
+                    .then(|| (state.key.clone(), center))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn first_vertical_scroll_region(handler: &mut BoundRuntimeHandler<TestVm>) -> ScrollRegion {
+    handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.max_offset().y > Dp::ZERO)
+        .copied()
+        .expect("scrollable list region should exist")
+}
+
+fn grouped_multi_select_list(selected: State<Vec<WidgetKey>>) -> Element<TestVm> {
+    let selected_for_command = selected.clone();
+    let sections = (0..3)
+        .map(|section| {
+            let prefix = match section {
+                0 => "product",
+                1 => "engineering",
+                _ => "operations",
+            };
+            let items = (0..8)
+                .map(|index| {
+                    ListItem::keyed(format!("{prefix}-{index}"), format!("{prefix} row {index}"))
+                })
+                .collect::<Vec<_>>();
+            ListSection::new(Text::new(format!("Section {section}")), items)
+        })
+        .collect::<Vec<_>>();
+
+    List::sections(sections, |ctx| Text::new(ctx.item).width(pct(100.0)).into())
+        .key("grouped-multi-select-list")
+        .width(dp(260.0))
+        .height(dp(140.0))
+        .item_layout(ItemLayout::Measured {
+            estimate: dp(42.0),
+            spacing: dp(3.0),
+            overscan: 2,
+        })
+        .selection_mode(ListSelectionMode::Multiple)
+        .selected_keys(selected.signal())
+        .on_selection_change(ValueCommand::new(
+            move |_vm: &mut TestVm, change: ListSelectionChange| {
+                selected_for_command.set(change.selected_keys);
+            },
+        ))
+        .into()
+}
+
+#[test]
+fn list_grouped_multi_select_click_keeps_scroll_offset_after_dynamic_rebuild() {
+    let invalidation = InvalidationSignal::new();
+    let selected = State::new(Vec::<WidgetKey>::new(), invalidation.clone());
+    let page_revision = State::new(0_u32, invalidation.clone());
+    let selected_for_page = selected.clone();
+    let dynamic_page = page_revision.signal().map(move |_| {
+        grouped_multi_select_list(selected_for_page.clone()).key("dynamic-list-page")
+    });
+    let tree = WidgetTree::new(Stack::new().child(dynamic_page));
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation.clone(),
+        test_config_with_size(320.0, 180.0),
+    );
+
+    let before_region = first_vertical_scroll_region(&mut handler);
+    handler.set_scroll_offset(before_region.id, Point::new(Dp::ZERO, dp(260.0)));
+    handler.invalidate_computed_scene();
+
+    let before_region = first_vertical_scroll_region(&mut handler);
+    let before_offset = before_region.scroll_offset;
+    assert!(
+        before_offset.y > dp(100.0),
+        "test should start from a scrolled list; offset was {:?}",
+        before_offset
+    );
+    let (clicked_key, click_point) = visible_list_item_centers(&mut handler)
+        .into_iter()
+        .find(|(key, _)| *key != WidgetKey::from("product-0"))
+        .expect("a visible list item should be available after scrolling");
+
+    handler.cursor_position = Some(click_point);
+    handler.handle_mouse_press(
+        handler.viewport_rect(),
+        Instant::now(),
+        CanvasMouseButton::Left,
+    );
+    handler.request_redraw_if_dirty(Instant::now());
+
+    assert_eq!(selected.get(), vec![clicked_key]);
+    let after_region = first_vertical_scroll_region(&mut handler);
+    let after_offset = after_region.scroll_offset;
+    assert_eq!(
+        after_region.id, before_region.id,
+        "keyed List should preserve its scroll region identity across selection rebuild"
+    );
+    assert!(
+        after_offset.y > Dp::ZERO,
+        "clicking a selected row should not reset the List scroll offset; before={:?}, after={:?}",
+        before_offset,
+        after_offset
+    );
 }
 
 #[test]

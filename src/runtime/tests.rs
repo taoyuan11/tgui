@@ -351,6 +351,7 @@ fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
         external_portal_revision: 0,
         hovered_scrollbar: None,
         active_scrollbar: None,
+        layout_valid: true,
         computed_valid: true,
         layout: None,
         computed: Default::default(),

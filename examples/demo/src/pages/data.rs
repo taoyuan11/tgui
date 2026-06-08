@@ -294,6 +294,7 @@ fn list_component(app: &App) -> Element<App> {
                 Flex::vertical().gap(dp(8.0)).child(el![
                     Text::new(list_selection_summary(app)).style_full(styles::status_style),
                     List::sections(contact_sections(), contact_row)
+                        .key("demo-list-selection")
                         .width(pct(100.0))
                         .height(dp(300.0))
                         .item_layout(ItemLayout::Measured {
@@ -336,6 +337,7 @@ fn list_component(app: &App) -> Element<App> {
                         },
                         contact_row,
                     )
+                    .key("demo-list-states")
                     .width(pct(100.0))
                     .height(dp(220.0))
                     .item_layout(ItemLayout::Measured {
@@ -376,6 +378,14 @@ fn contact_sections() -> Vec<ListSection<DemoContact, App>> {
                     DemoContact::new("Mika Chen", "Designer", "Reviewing interaction states"),
                 ),
                 ListItem::keyed(
+                    "ivy",
+                    DemoContact::new("Ivy Stone", "Product manager", "Triaging customer notes"),
+                ),
+                ListItem::keyed(
+                    "leo",
+                    DemoContact::new("Leo Martin", "Content design", "Auditing empty states"),
+                ),
+                ListItem::keyed(
                     "nora",
                     DemoContact::new("Nora Patel", "Research", "Disabled sample row"),
                 )
@@ -396,6 +406,31 @@ fn contact_sections() -> Vec<ListSection<DemoContact, App>> {
                 ListItem::keyed(
                     "sam",
                     DemoContact::new("Sam Rivera", "Platform", "Context menus"),
+                ),
+                ListItem::keyed(
+                    "kai",
+                    DemoContact::new("Kai Morgan", "Input", "Keyboard focus paths"),
+                ),
+                ListItem::keyed(
+                    "ren",
+                    DemoContact::new("Ren Sato", "Layout", "Measuring dynamic rows"),
+                ),
+            ],
+        ),
+        ListSection::new(
+            section_header("Operations"),
+            vec![
+                ListItem::keyed(
+                    "zoe",
+                    DemoContact::new("Zoe Evans", "QA", "Validating scrollbars"),
+                ),
+                ListItem::keyed(
+                    "omar",
+                    DemoContact::new("Omar Ali", "Support", "Reviewing escalations"),
+                ),
+                ListItem::keyed(
+                    "mina",
+                    DemoContact::new("Mina Park", "Release", "Preparing weekly notes"),
                 ),
             ],
         ),
@@ -457,6 +492,7 @@ fn virtual_list_component(app: &App) -> Element<App> {
                 "固定行高",
                 "10,000 行数据使用固定 item_extent 和 overscan。",
                 VirtualList::new_with_context(app.virtual_rows.clone(), virtual_row)
+                    .key("demo-virtual-fixed")
                     .item_layout(ItemLayout::Fixed {
                         item_extent: dp(32.0),
                         spacing: dp(2.0),
@@ -471,6 +507,7 @@ fn virtual_list_component(app: &App) -> Element<App> {
                 "测量行高",
                 "List 可用 Measured layout 处理高度更灵活的行。",
                 List::sections(contact_sections(), contact_row)
+                    .key("demo-virtual-measured")
                     .width(pct(100.0))
                     .height(dp(260.0))
                     .item_layout(ItemLayout::Measured {

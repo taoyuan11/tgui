@@ -1,4 +1,30 @@
 use super::*;
+use crate::ui::widget::ScrollRegion;
+
+fn scrollbar_region_axis_hit(
+    region: &ScrollRegion,
+    axis: ScrollbarAxis,
+    cursor_position: Point,
+) -> bool {
+    match axis {
+        ScrollbarAxis::Horizontal => region
+            .horizontal_thumb
+            .map(|thumb| thumb.contains(cursor_position))
+            .unwrap_or(false),
+        ScrollbarAxis::Vertical => region
+            .vertical_thumb
+            .map(|thumb| thumb.contains(cursor_position))
+            .unwrap_or(false),
+    }
+}
+
+fn scrollbar_axis_thumb_area(region: &ScrollRegion, axis: ScrollbarAxis) -> Option<f32> {
+    let thumb = match axis {
+        ScrollbarAxis::Horizontal => region.horizontal_thumb?,
+        ScrollbarAxis::Vertical => region.vertical_thumb?,
+    };
+    Some(thumb.width.get() * thumb.height.get())
+}
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) -> bool {
@@ -120,32 +146,46 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn scrollbar_thumb_hit(&mut self) -> Option<ScrollbarHandle> {
         let cursor_position = self.cursor_position?;
         let scroll_regions = self.scroll_regions();
-        scroll_regions.iter().rev().find_map(|region| {
-            if region.visible_frame.is_empty() || !region.visible_frame.contains(cursor_position) {
-                return None;
-            }
-            if region
-                .vertical_thumb
-                .map(|thumb: Rect| thumb.contains(cursor_position))
-                .unwrap_or(false)
-            {
-                return Some(ScrollbarHandle {
-                    id: region.id,
-                    axis: ScrollbarAxis::Vertical,
-                });
-            }
-            if region
-                .horizontal_thumb
-                .map(|thumb: Rect| thumb.contains(cursor_position))
-                .unwrap_or(false)
-            {
-                return Some(ScrollbarHandle {
-                    id: region.id,
-                    axis: ScrollbarAxis::Horizontal,
-                });
-            }
-            None
-        })
+        scroll_regions
+            .iter()
+            .filter_map(|region| {
+                if region.visible_frame.is_empty()
+                    || !region.visible_frame.contains(cursor_position)
+                {
+                    return None;
+                }
+                if region
+                    .vertical_thumb
+                    .map(|thumb: Rect| thumb.contains(cursor_position))
+                    .unwrap_or(false)
+                {
+                    let thumb = region.vertical_thumb?;
+                    return Some((
+                        ScrollbarHandle {
+                            id: region.id,
+                            axis: ScrollbarAxis::Vertical,
+                        },
+                        thumb.width.get() * thumb.height.get(),
+                    ));
+                }
+                if region
+                    .horizontal_thumb
+                    .map(|thumb: Rect| thumb.contains(cursor_position))
+                    .unwrap_or(false)
+                {
+                    let thumb = region.horizontal_thumb?;
+                    return Some((
+                        ScrollbarHandle {
+                            id: region.id,
+                            axis: ScrollbarAxis::Horizontal,
+                        },
+                        thumb.width.get() * thumb.height.get(),
+                    ));
+                }
+                None
+            })
+            .min_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(handle, _)| handle)
     }
 
     pub(super) fn begin_scrollbar_drag(&mut self) -> bool {
@@ -190,7 +230,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             max_offset,
         });
         self.hovered_scrollbar = Some(handle);
-        self.invalidate_scene_with_reason("begin_scrollbar_drag");
+        self.invalidate_computed_scene();
         true
     }
 
@@ -247,10 +287,71 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if (previous.x - next_offset.x).abs() > 0.01 || (previous.y - next_offset.y).abs() > 0.01 {
             self.touch_scroll_inertia_states.remove(&drag.handle.id);
             self.set_scroll_offset(drag.handle.id, next_offset);
+            self.rebind_active_scrollbar_drag_if_needed(drag, next_offset);
             return true;
         }
 
         false
+    }
+
+    fn rebind_active_scrollbar_drag_if_needed(&mut self, drag: ScrollbarDrag, next_offset: Point) {
+        let scroll_regions = self.computed_scene().scroll_regions.clone();
+        if scroll_regions
+            .iter()
+            .any(|region| region.id == drag.handle.id)
+        {
+            return;
+        }
+
+        let Some(region) = scroll_regions
+            .iter()
+            .filter(|region| {
+                !region.visible_frame.is_empty()
+                    && region.visible_frame.contains(drag.start_cursor)
+                    && scrollbar_region_axis_hit(region, drag.handle.axis, drag.start_cursor)
+            })
+            .min_by(|a, b| {
+                scrollbar_axis_thumb_area(a, drag.handle.axis)
+                    .unwrap_or(f32::MAX)
+                    .total_cmp(&scrollbar_axis_thumb_area(b, drag.handle.axis).unwrap_or(f32::MAX))
+            })
+            .copied()
+        else {
+            return;
+        };
+
+        let (track, thumb, max_offset) = match drag.handle.axis {
+            ScrollbarAxis::Horizontal => (
+                region.horizontal_track,
+                region.horizontal_thumb,
+                region.max_offset().x,
+            ),
+            ScrollbarAxis::Vertical => (
+                region.vertical_track,
+                region.vertical_thumb,
+                region.max_offset().y,
+            ),
+        };
+        let (Some(track), Some(thumb)) = (track, thumb) else {
+            return;
+        };
+
+        self.scroll_states.remove(&drag.handle.id);
+        self.touch_scroll_inertia_states.remove(&drag.handle.id);
+        self.touch_scroll_inertia_states.remove(&region.id);
+        self.active_scrollbar_drag = Some(ScrollbarDrag {
+            handle: ScrollbarHandle {
+                id: region.id,
+                axis: drag.handle.axis,
+            },
+            start_cursor: drag.start_cursor,
+            start_scroll_offset: drag.start_scroll_offset,
+            track,
+            thumb,
+            max_offset,
+        });
+        self.hovered_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
+        self.set_scroll_offset(region.id, next_offset);
     }
 
     pub(in crate::runtime) fn handle_canvas_drag(&mut self) -> bool {
@@ -294,7 +395,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
         self.sync_scrollbar_hover();
-        self.invalidate_scene_with_reason("end_scrollbar_drag");
+        self.invalidate_computed_scene();
         true
     }
 

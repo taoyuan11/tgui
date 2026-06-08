@@ -495,6 +495,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 external_portal_revision: self.external_portal_revision,
                 hovered_scrollbar: self.hovered_scrollbar,
                 active_scrollbar,
+                layout_valid: true,
                 computed_valid: true,
                 dependencies: {
                     let mut dependencies = DependencyGraph::default();

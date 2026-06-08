@@ -20,6 +20,7 @@ pub(super) fn resolved_child_elements_with_previous<'a, 'b, VM>(
         .collect();
 
     let mut resolved = Vec::new();
+    let mut resolved_index = 0usize;
     let mut spans = child_source_spans;
     for child_source in child_sources {
         // Static children are borrowed straight from the source tree; only
@@ -32,7 +33,13 @@ pub(super) fn resolved_child_elements_with_previous<'a, 'b, VM>(
                     spans.push(children.len());
                 }
                 resolved.extend(children.iter().map(|child| {
-                    let previous_child = lookup_previous(child, &previous_by_key, &previous_by_id);
+                    let previous_child = lookup_previous(
+                        child,
+                        &previous_by_key,
+                        &previous_by_id,
+                        previous_children.get(resolved_index),
+                    );
+                    resolved_index += 1;
                     (Cow::Borrowed(child), previous_child)
                 }));
             }
@@ -42,7 +49,13 @@ pub(super) fn resolved_child_elements_with_previous<'a, 'b, VM>(
                     spans.push(source_children.len());
                 }
                 resolved.extend(source_children.into_iter().map(|child| {
-                    let previous_child = lookup_previous(&child, &previous_by_key, &previous_by_id);
+                    let previous_child = lookup_previous(
+                        &child,
+                        &previous_by_key,
+                        &previous_by_id,
+                        previous_children.get(resolved_index),
+                    );
+                    resolved_index += 1;
                     (Cow::Owned(child), previous_child)
                 }));
             }
@@ -55,12 +68,20 @@ fn lookup_previous<'a, VM>(
     child: &Element<VM>,
     previous_by_key: &HashMap<WidgetKey, &'a ResolvedElement<VM>>,
     previous_by_id: &HashMap<WidgetId, &'a ResolvedElement<VM>>,
+    previous_at_position: Option<&'a ResolvedElement<VM>>,
 ) -> Option<&'a ResolvedElement<VM>> {
     child
         .key
         .as_ref()
         .and_then(|key| previous_by_key.get(key).copied())
         .or_else(|| previous_by_id.get(&child.id).copied())
+        .or_else(|| {
+            child
+                .key
+                .is_none()
+                .then_some(previous_at_position)
+                .flatten()
+        })
 }
 
 pub(super) fn resolve_subtree_from_source_path<'a, VM: 'static>(

@@ -34,7 +34,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.animation_epoch,
             ));
         }
-        self.cached_scene = None;
+        if let Some(cached) = self.cached_scene.as_mut() {
+            cached.layout_valid = false;
+            cached.computed_valid = false;
+        }
         self.text_input_regions.clear();
     }
 

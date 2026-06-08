@@ -46,7 +46,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .or_else(|| self.widget_tree.as_ref().map(|tree| tree.has_virtual()))
             .unwrap_or(false);
         let virtual_scroll_matches = !has_virtual || cached.scroll_epoch == self.scroll_epoch;
-        cached.viewport == viewport
+        cached.layout_valid
+            && cached.viewport == viewport
             && cached.units == units
             && cached.theme_epoch == self.theme_store.version()
             && cached.style_sheet_version == self.config.style_sheet.version()
@@ -68,6 +69,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let mut reasons = Vec::new();
         if !cached.computed_valid {
             reasons.push("computed_valid");
+        }
+        if !cached.layout_valid {
+            reasons.push("layout_valid");
         }
         if cached.viewport != viewport {
             reasons.push("viewport");
@@ -153,6 +157,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let focused_input = self.focused_text_input_id_cached(&cached.computed);
         let stable_shell = focused_input.is_some()
             && cached.computed_valid
+            && cached.layout_valid
             && cached.layout.is_some()
             && cached.viewport == viewport
             && cached.units == units

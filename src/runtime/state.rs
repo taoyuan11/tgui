@@ -46,6 +46,7 @@ pub(super) struct CachedScene<VM> {
     pub(super) external_portal_revision: u64,
     pub(super) hovered_scrollbar: Option<ScrollbarHandle>,
     pub(super) active_scrollbar: Option<ScrollbarHandle>,
+    pub(super) layout_valid: bool,
     pub(super) computed_valid: bool,
     pub(super) layout: Option<ResolvedSceneLayout<VM>>,
     pub(super) computed: ComputedScene<VM>,
