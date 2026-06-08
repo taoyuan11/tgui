@@ -2,10 +2,6 @@ use super::super::*;
 use super::centered_text_frame;
 use std::sync::Arc;
 
-pub(crate) fn default_select_menu_transition() -> crate::animation::Transition {
-    crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(160))
-}
-
 pub(crate) fn measure_select_content(
     selected_label: Option<&str>,
     placeholder: &Value<String>,
@@ -64,6 +60,7 @@ pub(crate) fn push_select_primitives(
     widget_id: WidgetId,
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
+    transition: Option<Transition>,
 ) {
     let arrow_width = dp(24.0);
     let text_frame = Rect::new(
@@ -72,6 +69,20 @@ pub(crate) fn push_select_primitives(
         (frame.width - arrow_width).max(Dp::ZERO),
         frame.height,
     );
+    let text_color = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::TextColor,
+        },
+        if selected_label.is_some() {
+            select_style.text
+        } else {
+            select_style.placeholder
+        },
+        transition,
+        now,
+    );
+
     match selected_label {
         Some(label) => push_select_text(
             &select_display_text(text_from_content(label), select_style),
@@ -83,7 +94,7 @@ pub(crate) fn push_select_primitives(
             now,
             scene,
             padding,
-            select_style.text,
+            text_color,
             opacity,
             widget_id,
             clip_rect,
@@ -100,7 +111,7 @@ pub(crate) fn push_select_primitives(
             now,
             scene,
             padding,
-            select_style.placeholder,
+            text_color,
             opacity,
             widget_id,
             clip_rect,
@@ -119,10 +130,14 @@ pub(crate) fn push_select_primitives(
         font_manager,
         select_style,
         units,
+        animations,
+        now,
         scene,
         opacity,
+        widget_id,
         clip_rect,
         clip_mask,
+        transition,
     );
 }
 
@@ -234,10 +249,14 @@ pub(crate) fn push_select_icon(
     font_manager: &FontManager,
     select_style: &ResolvedSelectStyle,
     units: UnitContext,
+    animations: &mut AnimationEngine,
+    now: std::time::Instant,
     scene: &mut ScenePrimitives,
     opacity: f32,
+    widget_id: WidgetId,
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
+    transition: Option<Transition>,
 ) {
     let font_size = units
         .resolve_sp(select_style.text_style.size)
@@ -267,12 +286,22 @@ pub(crate) fn push_select_icon(
     );
     icon_frame.y += dp(3.0);
 
+    let arrow_color = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::SelectArrowColor,
+        },
+        select_style.arrow,
+        transition,
+        now,
+    );
+
     scene.push_text(TextPrimitive {
         content: Arc::from(SELECT_ARROW_ICON.to_string()),
         rich_spans: None,
         frame: icon_frame,
         quad: None,
-        color: select_style.arrow.with_alpha_factor(opacity),
+        color: arrow_color.with_alpha_factor(opacity),
         force_color: true,
         font_family: Some(Arc::from(resolved.primary_font)),
         font_size,

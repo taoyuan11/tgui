@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use crate::animation::Transition;
 use crate::foundation::color::Color;
 use crate::ui::layout::Value;
 use crate::ui::theme::{Shadow, StyleContext, Theme, WidgetState};
@@ -489,6 +492,26 @@ pub(super) fn resolve_stateful_widget_color(
     state: WidgetState,
 ) -> Color {
     value.resolve(state).resolve()
+}
+
+pub(super) fn default_state_transition(theme: &Theme, reduced_motion: bool) -> Option<Transition> {
+    if reduced_motion {
+        None
+    } else {
+        Some(Transition::ease_out(Duration::from_millis(
+            theme.motion.fast_ms,
+        )))
+    }
+}
+
+pub(super) fn default_motion_transition(theme: &Theme, reduced_motion: bool) -> Option<Transition> {
+    if reduced_motion {
+        None
+    } else {
+        Some(Transition::ease_in_out(Duration::from_millis(
+            theme.motion.normal_ms,
+        )))
+    }
 }
 
 pub(super) fn base_interaction_state(mut state: WidgetState) -> WidgetState {

@@ -19,7 +19,7 @@ impl<VM> ResolvedElement<VM> {
                 property: WidgetProperty::TextColor,
             },
             resolve_stateful_widget_color(&button_style.foreground, visual.widget_state),
-            Some(Transition::default()),
+            default_state_transition(context.theme, context.reduced_motion),
             context.now,
         );
         let label_text = text_with_typography(label.clone(), &button_style.text_style);
@@ -82,6 +82,7 @@ impl<VM> ResolvedElement<VM> {
             context.animations,
             context.now,
             &mut computed.scene,
+            default_state_transition(context.theme, context.reduced_motion),
         );
         if !visual.disabled {
             let focus = context.build_focus_meta(self.id, &self.focus, &self.interactions, true);
@@ -138,6 +139,7 @@ impl<VM> ResolvedElement<VM> {
             context.animations,
             context.now,
             &mut computed.scene,
+            default_state_transition(context.theme, context.reduced_motion),
         );
         if !visual.disabled {
             let focus = context.build_focus_meta(self.id, &self.focus, &self.interactions, true);
@@ -211,6 +213,7 @@ impl<VM> ResolvedElement<VM> {
             context.animations,
             &mut computed.scene,
             context.now,
+            default_motion_transition(context.theme, context.reduced_motion),
         );
         if !visual.disabled {
             let focus = context.build_focus_meta(self.id, &self.focus, &self.interactions, true);

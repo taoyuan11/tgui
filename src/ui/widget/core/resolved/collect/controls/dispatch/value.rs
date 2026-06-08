@@ -581,6 +581,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             context.now,
             &mut computed.scene,
             context.media,
+            default_state_transition(context.theme, context.reduced_motion),
         );
         if !visual.disabled {
             let focus = context.build_focus_meta(self.id, &self.focus, &self.interactions, true);
@@ -635,7 +636,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 property: WidgetProperty::SelectMenuOpen,
             },
             if active { 1.0 } else { 0.0 },
-            Some(default_select_menu_transition()),
+            default_motion_transition(context.theme, context.reduced_motion),
             context.now,
         );
         let select_style = visual
@@ -660,6 +661,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             self.id,
             visual.primitive_clip,
             visual.primitive_clip_mask,
+            default_state_transition(context.theme, context.reduced_motion),
         );
         if (active || menu_progress > f32::EPSILON) && !visual.disabled {
             computed.register_widget_overlay_anchor(self.id, visual.frame);
@@ -890,8 +892,20 @@ impl<VM: 'static> ResolvedElement<VM> {
         } else {
             Cow::Borrowed(resolved_value.as_ref())
         };
-        let mut text = text_with_typography("", &input_style.text_style);
-        text.color = Some(Value::Static(input_style.text));
+        let text = text_with_typography("", &input_style.text_style);
+        let input_text_color = context.animations.resolve_color(
+            crate::animation::AnimationKey::Widget {
+                id: self.id.raw(),
+                property: WidgetProperty::TextColor,
+            },
+            if resolved_value.is_empty() {
+                input_style.placeholder
+            } else {
+                input_style.text
+            },
+            default_state_transition(context.theme, context.reduced_motion),
+            context.now,
+        );
         let precomputed_layout = if resolved_value.is_empty() {
             None
         } else if focused {
@@ -923,7 +937,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             context
                 .focused_text_state
                 .filter(|_| context.focused_input == Some(self.id)),
-            input_style.placeholder,
+            input_text_color,
             input_style.selection,
             input_style.caret,
             visual.opacity,

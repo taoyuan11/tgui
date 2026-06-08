@@ -1,9 +1,5 @@
 use super::super::*;
 
-pub(crate) fn default_switch_transition() -> crate::animation::Transition {
-    crate::animation::Transition::ease_in_out(std::time::Duration::from_millis(180))
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn push_switch_primitives(
     background_frame: Rect,
@@ -19,6 +15,7 @@ pub(crate) fn push_switch_primitives(
     animations: &mut AnimationEngine,
     scene: &mut ScenePrimitives,
     now: std::time::Instant,
+    transition: Option<Transition>,
 ) {
     let inner = background_frame.inset(padding);
     if inner.width <= Dp::ZERO || inner.height <= Dp::ZERO {
@@ -37,7 +34,7 @@ pub(crate) fn push_switch_primitives(
             property: WidgetProperty::SwitchThumbOffset,
         },
         if checked { travel } else { Dp::ZERO },
-        Some(default_switch_transition()),
+        transition,
         now,
     );
     let thumb_color = animations.resolve_color(
@@ -50,7 +47,7 @@ pub(crate) fn push_switch_primitives(
         } else {
             inactive_thumb_color
         },
-        Some(default_switch_transition()),
+        transition,
         now,
     );
 

@@ -66,7 +66,7 @@ impl<VM> ResolvedElement<VM> {
                         property: WidgetProperty::BorderColor,
                     },
                     button_style.border_color,
-                    Some(Transition::default()),
+                    default_state_transition(context.theme, context.reduced_motion),
                     context.now,
                 )
             }
@@ -81,7 +81,7 @@ impl<VM> ResolvedElement<VM> {
                         property: WidgetProperty::BorderColor,
                     },
                     select_style.border,
-                    Some(Transition::default()),
+                    default_state_transition(context.theme, context.reduced_motion),
                     context.now,
                 )
             }
@@ -96,7 +96,7 @@ impl<VM> ResolvedElement<VM> {
                         property: WidgetProperty::BorderColor,
                     },
                     input_style.border,
-                    Some(Transition::default()),
+                    default_state_transition(context.theme, context.reduced_motion),
                     context.now,
                 )
             }
@@ -106,11 +106,20 @@ impl<VM> ResolvedElement<VM> {
                     .as_ref()
                     .expect("switch style should be resolved for switch widgets");
                 let visual_state = base_interaction_state(widget_state);
-                if checked.resolve() {
+                let color = if checked.resolve() {
                     resolve_stateful_widget_color(&style.border_checked, visual_state)
                 } else {
                     resolve_stateful_widget_color(&style.border, visual_state)
-                }
+                };
+                context.animations.resolve_color(
+                    crate::animation::AnimationKey::Widget {
+                        id: self.id.raw(),
+                        property: WidgetProperty::BorderColor,
+                    },
+                    color,
+                    default_state_transition(context.theme, context.reduced_motion),
+                    context.now,
+                )
             }
             ResolvedWidgetKind::Slider { .. } => Color::TRANSPARENT,
             _ => Color::TRANSPARENT,
@@ -139,7 +148,7 @@ impl<VM> ResolvedElement<VM> {
                     property: WidgetProperty::Background,
                 },
                 color,
-                Some(Transition::default()),
+                default_state_transition(context.theme, context.reduced_motion),
                 context.now,
             );
         }
@@ -159,7 +168,7 @@ impl<VM> ResolvedElement<VM> {
                     property: WidgetProperty::Background,
                 },
                 color,
-                Some(Transition::default()),
+                default_state_transition(context.theme, context.reduced_motion),
                 context.now,
             );
         }
@@ -175,23 +184,41 @@ impl<VM> ResolvedElement<VM> {
                         property: WidgetProperty::Background,
                     },
                     button_style.background,
-                    Some(Transition::default()),
+                    default_state_transition(context.theme, context.reduced_motion),
                     context.now,
                 )
             }
             ResolvedWidgetKind::Select { .. } => {
-                styles
+                let background = styles
                     .select_style
                     .as_ref()
                     .expect("select style should be resolved for select widgets")
-                    .background
+                    .background;
+                context.animations.resolve_color(
+                    crate::animation::AnimationKey::Widget {
+                        id: self.id.raw(),
+                        property: WidgetProperty::Background,
+                    },
+                    background,
+                    default_state_transition(context.theme, context.reduced_motion),
+                    context.now,
+                )
             }
             ResolvedWidgetKind::TextEditor { .. } => {
-                styles
+                let background = styles
                     .input_style
                     .as_ref()
                     .expect("input style should be resolved for input widgets")
-                    .background
+                    .background;
+                context.animations.resolve_color(
+                    crate::animation::AnimationKey::Widget {
+                        id: self.id.raw(),
+                        property: WidgetProperty::Background,
+                    },
+                    background,
+                    default_state_transition(context.theme, context.reduced_motion),
+                    context.now,
+                )
             }
             ResolvedWidgetKind::Switch {
                 checked,
@@ -223,7 +250,7 @@ impl<VM> ResolvedElement<VM> {
                             .unwrap_or(resolve_stateful_widget_color(&style.track, visual_state))
                     }
                 },
-                Some(default_switch_transition()),
+                default_motion_transition(context.theme, context.reduced_motion),
                 context.now,
             ),
             ResolvedWidgetKind::Slider { .. } => Color::TRANSPARENT,

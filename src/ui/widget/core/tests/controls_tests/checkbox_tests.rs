@@ -225,7 +225,7 @@ fn checkbox_validation_invalid_uses_theme_error_border() {
 }
 
 #[test]
-fn checkbox_checked_content_switches_without_animation() {
+fn checkbox_checked_content_uses_default_transition() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -271,16 +271,60 @@ fn checkbox_checked_content_switches_without_animation() {
     );
     let checked_style =
         default_checkbox_style(&theme, crate::ui::theme::WidgetState::default(), true);
-    let checked_fill = checked
+    let immediate_checked_fill = checked
         .primitives
         .shapes
         .iter()
-        .find(|shape| shape.stroke_width == 0.0 && shape.color == checked_style.background)
-        .expect("checked fill should render immediately");
+        .find(|shape| shape.stroke_width == 0.0)
+        .expect("checkbox fill should render");
     let control_size = UnitContext::default().resolve_dp(checked_style.size);
-    assert_eq!(checked_fill.rect.width, control_size);
-    assert_eq!(checked_fill.rect.height, control_size);
-    assert!(!animations.has_active_animations());
+    assert_eq!(immediate_checked_fill.rect.width, control_size);
+    assert_eq!(immediate_checked_fill.rect.height, control_size);
+    assert_ne!(immediate_checked_fill.color, checked_style.background);
+    assert!(animations.has_active_animations());
+
+    let mut sampled_transition = false;
+    let mut settled_checked = false;
+    for _ in 0..18 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let rendered = checked_tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let fill = rendered
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| shape.stroke_width == 0.0)
+            .expect("checkbox fill should keep rendering");
+        if fill.color != immediate_checked_fill.color && fill.color != checked_style.background {
+            sampled_transition = true;
+        }
+        let checkmark_alpha = rendered
+            .primitives
+            .texts
+            .iter()
+            .find(|text| text.content.as_ref() == super::CHECKBOX_CHECKMARK_ICON)
+            .map(|text| text.color.a)
+            .unwrap_or(0);
+        if fill.color == checked_style.background && checkmark_alpha == checked_style.checkmark.a {
+            settled_checked = true;
+            break;
+        }
+    }
+    assert!(sampled_transition);
+    assert!(settled_checked);
 
     let unchecked = unchecked_tree.render_output(
         &font_manager,
@@ -297,9 +341,149 @@ fn checkbox_checked_content_switches_without_animation() {
         None,
         false,
     );
-    assert!(unchecked.primitives.shapes.iter().all(|shape| {
-        shape.stroke_width == 0.0 && shape.color != checked_style.background
-            || shape.stroke_width > 0.0
+    let immediate_unchecked_fill = unchecked
+        .primitives
+        .shapes
+        .iter()
+        .find(|shape| shape.stroke_width == 0.0)
+        .expect("checkbox fill should render while unchecking");
+    assert_eq!(immediate_unchecked_fill.color, checked_style.background);
+    assert!(animations.has_active_animations());
+
+    let unchecked_style =
+        default_checkbox_style(&theme, crate::ui::theme::WidgetState::default(), false);
+    let mut settled_unchecked = false;
+    for _ in 0..18 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let rendered = unchecked_tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let fill = rendered
+            .primitives
+            .shapes
+            .iter()
+            .find(|shape| shape.stroke_width == 0.0)
+            .expect("checkbox fill should keep rendering while unchecking");
+        let has_checkmark = rendered.primitives.texts.iter().any(|text| {
+            text.content.as_ref() == super::CHECKBOX_CHECKMARK_ICON && text.color.a > 0
+        });
+        if fill.color == unchecked_style.background && !has_checkmark {
+            settled_unchecked = true;
+            break;
+        }
+    }
+    assert!(settled_unchecked);
+}
+
+#[test]
+fn checkbox_checked_content_respects_reduced_motion() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let checkbox: Element<()> = Checkbox::new(false).into();
+    let checkbox_id = checkbox.id;
+    let unchecked_tree: WidgetTree<()> = WidgetTree::new(checkbox.clone());
+
+    unchecked_tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        true,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 80.0, 40.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let mut checked_checkbox: Element<()> = Checkbox::new(true).into();
+    checked_checkbox.id = checkbox_id;
+    let checked_tree: WidgetTree<()> = WidgetTree::new(checked_checkbox);
+    let checked = checked_tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        true,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 80.0, 40.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let checked_style =
+        default_checkbox_style(&theme, crate::ui::theme::WidgetState::default(), true);
+    let checked_fill = checked
+        .primitives
+        .shapes
+        .iter()
+        .find(|shape| shape.stroke_width == 0.0)
+        .expect("checked checkbox fill should render immediately");
+    assert_eq!(checked_fill.color, checked_style.background);
+    let checkmark = checked
+        .primitives
+        .texts
+        .iter()
+        .find(|text| text.content.as_ref() == super::CHECKBOX_CHECKMARK_ICON)
+        .expect("checked checkbox should render checkmark immediately");
+    assert_eq!(checkmark.color, checked_style.checkmark);
+    assert!(!animations.has_active_animations());
+
+    let unchecked = unchecked_tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        true,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 80.0, 40.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let unchecked_style =
+        default_checkbox_style(&theme, crate::ui::theme::WidgetState::default(), false);
+    let unchecked_fill = unchecked
+        .primitives
+        .shapes
+        .iter()
+        .find(|shape| shape.stroke_width == 0.0)
+        .expect("unchecked checkbox fill should render immediately");
+    assert_eq!(unchecked_fill.color, unchecked_style.background);
+    assert!(unchecked.primitives.texts.iter().all(|text| {
+        text.content.as_ref() != super::CHECKBOX_CHECKMARK_ICON || text.color.a == 0
     }));
     assert!(!animations.has_active_animations());
 }

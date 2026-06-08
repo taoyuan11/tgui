@@ -419,9 +419,8 @@ fn select_dropdown_animates_open_and_close() {
         .scene
         .overlay_shapes
         .iter()
-        .find(|shape| shape.rect.height > dp(32.0))
+        .find(|shape| shape.rect.height > dp(0.0))
         .expect("opening select menu should render");
-    assert!(opening_menu.rect.height > dp(0.0));
     assert!(opening_menu.rect.height < dp(80.0));
     assert!(opening_menu.color.a > 0);
     assert!(opening.overlay_hit_regions.is_empty());

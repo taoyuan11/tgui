@@ -79,6 +79,7 @@ pub(crate) fn push_slider_primitives(
     now: std::time::Instant,
     scene: &mut ScenePrimitives,
     media: &MediaManager,
+    transition: Option<Transition>,
 ) -> SliderGeometry {
     let mut geometry = slider_geometry(frame, slider_style, show_value_label, units);
     let track_radius = (geometry.track_rect.height.get() * 0.5)
@@ -93,9 +94,46 @@ pub(crate) fn push_slider_primitives(
     let thumb_offset = Dp::new(geometry.track_rect.width.get() * normalized);
     let active_extent = Dp::new(geometry.track_rect.width.get() * normalized);
 
+    let track_color = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::SliderTrackColor,
+        },
+        slider_style.track,
+        transition,
+        now,
+    );
+    let active_track_color = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::SliderActiveTrackColor,
+        },
+        slider_style.active_track,
+        transition,
+        now,
+    );
+    let thumb_color = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::SliderThumbColor,
+        },
+        slider_style.thumb,
+        transition,
+        now,
+    );
+    let tick_color = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::SliderTickColor,
+        },
+        slider_style.tick,
+        transition,
+        now,
+    );
+
     scene.push_shape(RenderPrimitive {
         rect: geometry.track_rect,
-        color: slider_style.track.with_alpha_factor(opacity),
+        color: track_color.with_alpha_factor(opacity),
         corner_radius: track_radius,
         stroke_width: 0.0,
         clip_rect,
@@ -110,7 +148,7 @@ pub(crate) fn push_slider_primitives(
                 active_extent.min(geometry.track_rect.width),
                 geometry.track_rect.height,
             ),
-            color: slider_style.active_track.with_alpha_factor(opacity),
+            color: active_track_color.with_alpha_factor(opacity),
             corner_radius: track_radius,
             stroke_width: 0.0,
             clip_rect,
@@ -138,7 +176,7 @@ pub(crate) fn push_slider_primitives(
                 geometry.track_rect.y + ((geometry.track_rect.height - tick_height).max(0.0) * 0.5);
             scene.push_shape(RenderPrimitive {
                 rect: Rect::new(x, y, tick_width, tick_height),
-                color: slider_style.tick.with_alpha_factor(opacity),
+                color: tick_color.with_alpha_factor(opacity),
                 corner_radius: (tick_width.min(tick_height).get() * 0.5).max(0.0),
                 stroke_width: 0.0,
                 clip_rect,
@@ -164,7 +202,7 @@ pub(crate) fn push_slider_primitives(
     }
     scene.push_shape(RenderPrimitive {
         rect: geometry.thumb_rect,
-        color: slider_style.thumb.with_alpha_factor(opacity),
+        color: thumb_color.with_alpha_factor(opacity),
         corner_radius: thumb_radius,
         stroke_width: 0.0,
         clip_rect,
@@ -173,7 +211,7 @@ pub(crate) fn push_slider_primitives(
     if thumb_border_width > 0.0 {
         scene.push_shape(RenderPrimitive {
             rect: geometry.thumb_rect,
-            color: slider_style.track.with_alpha_factor(opacity),
+            color: track_color.with_alpha_factor(opacity),
             corner_radius: thumb_radius,
             stroke_width: thumb_border_width,
             clip_rect,
@@ -228,6 +266,7 @@ pub(crate) fn push_checkbox_primitives(
     animations: &mut AnimationEngine,
     now: std::time::Instant,
     scene: &mut ScenePrimitives,
+    transition: Option<Transition>,
 ) {
     let box_size = units.resolve_dp(checkbox_style.size);
     let box_frame = Rect::new(
@@ -237,9 +276,48 @@ pub(crate) fn push_checkbox_primitives(
         box_size,
     );
     let radius = units.resolve_dp(checkbox_style.radius);
+    let background = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::CheckboxBackground,
+        },
+        checkbox_style.background,
+        transition,
+        now,
+    );
+    let border = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::CheckboxBorder,
+        },
+        checkbox_style.border,
+        transition,
+        now,
+    );
+    let checkmark_opacity = animations
+        .resolve_f32(
+            crate::animation::AnimationKey::Widget {
+                id: widget_id.raw(),
+                property: WidgetProperty::CheckboxCheckmarkOpacity,
+            },
+            if checked { 1.0 } else { 0.0 },
+            transition,
+            now,
+        )
+        .clamp(0.0, 1.0);
+    let checkmark_color = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::CheckboxCheckmarkColor,
+        },
+        checkbox_style.checkmark,
+        transition,
+        now,
+    );
+
     scene.push_shape(RenderPrimitive {
         rect: box_frame,
-        color: checkbox_style.background.with_alpha_factor(opacity),
+        color: background.with_alpha_factor(opacity),
         corner_radius: radius,
         stroke_width: 0.0,
         clip_rect,
@@ -250,7 +328,7 @@ pub(crate) fn push_checkbox_primitives(
         scene,
         box_frame,
         border_width,
-        checkbox_style.border.with_alpha_factor(opacity),
+        border.with_alpha_factor(opacity),
         radius,
         clip_rect,
         clip_mask,
@@ -263,11 +341,12 @@ pub(crate) fn push_checkbox_primitives(
         opacity,
     );
 
-    if checked {
+    if checkmark_opacity > f32::EPSILON {
         push_checkbox_checkmark_primitives(
             box_frame,
             checkbox_style,
-            opacity,
+            opacity * checkmark_opacity,
+            checkmark_color,
             font_manager,
             units,
             clip_rect,
@@ -312,6 +391,7 @@ pub(crate) fn push_checkbox_checkmark_primitives(
     box_frame: Rect,
     checkbox_style: &ResolvedCheckboxStyle,
     opacity: f32,
+    checkmark_color: Color,
     font_manager: &FontManager,
     units: UnitContext,
     clip_rect: Option<Rect>,
@@ -352,7 +432,7 @@ pub(crate) fn push_checkbox_checkmark_primitives(
         rich_spans: None,
         frame: icon_frame,
         quad: None,
-        color: checkbox_style.checkmark.with_alpha_factor(opacity),
+        color: checkmark_color.with_alpha_factor(opacity),
         force_color: true,
         font_family: Some(Arc::from(resolved.primary_font)),
         font_size,
@@ -384,6 +464,7 @@ pub(crate) fn push_radio_primitives(
     animations: &mut AnimationEngine,
     now: std::time::Instant,
     scene: &mut ScenePrimitives,
+    transition: Option<Transition>,
 ) {
     let size = units.resolve_dp(radio_style.size);
     let control_frame = Rect::new(
@@ -396,9 +477,48 @@ pub(crate) fn push_radio_primitives(
         .resolve_dp(radio_style.radius)
         .min(size * 0.5)
         .max(0.0);
+    let background = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::RadioBackground,
+        },
+        radio_style.background,
+        transition,
+        now,
+    );
+    let border = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::RadioBorder,
+        },
+        radio_style.border,
+        transition,
+        now,
+    );
+    let indicator_opacity = animations
+        .resolve_f32(
+            crate::animation::AnimationKey::Widget {
+                id: widget_id.raw(),
+                property: WidgetProperty::RadioIndicatorOpacity,
+            },
+            if checked { 1.0 } else { 0.0 },
+            transition,
+            now,
+        )
+        .clamp(0.0, 1.0);
+    let indicator_color = animations.resolve_color(
+        crate::animation::AnimationKey::Widget {
+            id: widget_id.raw(),
+            property: WidgetProperty::RadioIndicatorColor,
+        },
+        radio_style.indicator,
+        transition,
+        now,
+    );
+
     scene.push_shape(RenderPrimitive {
         rect: control_frame,
-        color: radio_style.background.with_alpha_factor(opacity),
+        color: background.with_alpha_factor(opacity),
         corner_radius: radius,
         stroke_width: 0.0,
         clip_rect,
@@ -408,7 +528,7 @@ pub(crate) fn push_radio_primitives(
         scene,
         control_frame,
         units.resolve_dp(radio_style.border_width),
-        radio_style.border.with_alpha_factor(opacity),
+        border.with_alpha_factor(opacity),
         radius,
         clip_rect,
         clip_mask,
@@ -421,7 +541,7 @@ pub(crate) fn push_radio_primitives(
         opacity,
     );
 
-    if checked {
+    if indicator_opacity > f32::EPSILON {
         let inset = dp(size * 0.28);
         let indicator_frame = control_frame.inset(Insets::all(inset));
         if indicator_frame.width > Dp::ZERO && indicator_frame.height > Dp::ZERO {
@@ -430,7 +550,7 @@ pub(crate) fn push_radio_primitives(
                 .max(0.0);
             scene.push_overlay_shape(RenderPrimitive {
                 rect: indicator_frame,
-                color: radio_style.indicator.with_alpha_factor(opacity),
+                color: indicator_color.with_alpha_factor(opacity * indicator_opacity),
                 corner_radius: indicator_radius,
                 stroke_width: 0.0,
                 clip_rect,
