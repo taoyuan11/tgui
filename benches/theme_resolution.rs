@@ -2,20 +2,20 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use tgui::core::Color;
-use tgui::theme::{Stateful, Theme, ThemeMode, ThemeSet, ThemeStore, WidgetState};
+use tgui::theme::{StateValue, Theme, ThemeMode, ThemeSet, ThemeStore, WidgetState};
 
-fn make_color_stateful() -> Stateful<Color> {
-    Stateful {
-        normal: Color::rgb(20, 20, 20),
-        hovered: Color::rgb(40, 40, 40),
-        pressed: Color::rgb(60, 60, 60),
-        disabled: Color::rgb(120, 120, 120),
-    }
+fn make_color_state_value() -> StateValue<Color> {
+    StateValue::interactive(
+        Color::rgb(20, 20, 20),
+        Color::rgb(40, 40, 40),
+        Color::rgb(60, 60, 60),
+        Color::rgb(120, 120, 120),
+    )
 }
 
-fn bench_stateful_resolve(c: &mut Criterion) {
-    let mut group = c.benchmark_group("stateful_resolve");
-    let stateful = make_color_stateful();
+fn bench_state_value_resolve(c: &mut Criterion) {
+    let mut group = c.benchmark_group("state_value_resolve");
+    let state_value = make_color_state_value();
 
     let states = [
         ("normal", WidgetState::default()),
@@ -45,7 +45,7 @@ fn bench_stateful_resolve(c: &mut Criterion) {
 
     for (label, state) in states {
         group.bench_function(BenchmarkId::new("color", label), |b| {
-            b.iter(|| black_box(stateful.resolve(black_box(state))));
+            b.iter(|| black_box(state_value.resolve(black_box(state))));
         });
     }
 
@@ -123,7 +123,7 @@ fn bench_theme_construction(c: &mut Criterion) {
 
 criterion_group!(
     theme_resolution_benches,
-    bench_stateful_resolve,
+    bench_state_value_resolve,
     bench_theme_set_resolve,
     bench_theme_store_set_mode,
     bench_theme_construction,

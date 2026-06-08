@@ -3,6 +3,29 @@ use crate::ui::widget::canvas::CanvasHitGeometry;
 use crate::ui::widget::common;
 use crate::ui::widget::common::ContainerLayout;
 
+fn should_skip_fully_clipped_child<VM: 'static>(
+    child: &ResolvedElement<VM>,
+    child_layout: &LayoutNode,
+    origin: Point,
+    clip_rect: Rect,
+    context: &CollectContext<'_, '_>,
+) -> bool {
+    if !child.can_skip_when_fully_clipped() {
+        return false;
+    }
+
+    let Ok(layout) = context.taffy.layout(child_layout.node) else {
+        return false;
+    };
+    let frame = Rect::new(
+        origin.x + layout.location.x,
+        origin.y + layout.location.y,
+        layout.size.width,
+        layout.size.height,
+    );
+    frame.fully_outside(clip_rect)
+}
+
 impl<VM: 'static> ResolvedElement<VM> {
     pub(super) fn collect_layout_media_kind(
         &self,
@@ -89,14 +112,24 @@ impl<VM: 'static> ResolvedElement<VM> {
                     vertical_thumb: scrollbar_geometry.vertical_thumb,
                 });
                 let before_children = computed.clone();
+                let child_origin = Point {
+                    x: visual.frame.x - scroll_offset.x,
+                    y: visual.frame.y - scroll_offset.y,
+                };
                 for (child, child_layout) in children.iter().zip(layout_node.children.iter()) {
+                    if should_skip_fully_clipped_child(
+                        child,
+                        child_layout,
+                        child_origin,
+                        child_clip_rect,
+                        context,
+                    ) {
+                        continue;
+                    }
                     let child_id = child.collect_subtree_cache(
                         child_layout,
                         VisualContext {
-                            origin: Point {
-                                x: visual.frame.x - scroll_offset.x,
-                                y: visual.frame.y - scroll_offset.y,
-                            },
+                            origin: child_origin,
                             opacity: visual.opacity,
                             clip_rect: child_clip_rect,
                             clip_mask: child_clip_mask,
@@ -245,18 +278,30 @@ impl<VM: 'static> ResolvedElement<VM> {
                 let mut measured_extents = Vec::new();
                 let mut widget_ids_by_key = Vec::new();
                 let mut invalidate_layout = false;
+                let child_origin = Point::new(
+                    visual.background_frame.x - scroll_offset.x,
+                    visual.background_frame.y - scroll_offset.y,
+                );
                 for ((child, child_layout), meta) in children
                     .iter()
                     .zip(layout_node.children.iter())
                     .zip(child_meta.iter())
                 {
+                    if !item_layout.is_measured()
+                        && should_skip_fully_clipped_child(
+                            child,
+                            child_layout,
+                            child_origin,
+                            child_clip_rect,
+                            context,
+                        )
+                    {
+                        continue;
+                    }
                     let child_id = child.collect_subtree_cache(
                         child_layout,
                         VisualContext {
-                            origin: Point::new(
-                                visual.background_frame.x - scroll_offset.x,
-                                visual.background_frame.y - scroll_offset.y,
-                            ),
+                            origin: child_origin,
                             opacity: visual.opacity,
                             clip_rect: child_clip_rect,
                             clip_mask: child_clip_mask,

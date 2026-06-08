@@ -402,21 +402,11 @@ impl<VM> ComputedScene<VM> {
     pub(crate) fn finalize_overlay_layers(&mut self) {
         for layer in crate::runtime::overlay::OverlayLayer::ALL {
             let bucket = std::mem::take(&mut self.overlay_layers[layer.index()]);
-            for blur in bucket.backdrop_blurs {
-                self.scene.backdrop_blurs.push(blur);
-            }
-            for shape in bucket.shapes {
-                self.scene.overlay_shapes.push(shape);
-            }
-            for tex in bucket.textures {
-                self.scene.overlay_textures.push(tex);
-            }
-            for mesh in bucket.meshes {
-                self.scene.overlay_meshes.push(mesh);
-            }
-            for text in bucket.texts {
-                self.scene.overlay_texts.push(text);
-            }
+            self.scene.backdrop_blurs.extend(bucket.backdrop_blurs);
+            self.scene.overlay_shapes.extend(bucket.shapes);
+            self.scene.overlay_textures.extend(bucket.textures);
+            self.scene.overlay_meshes.extend(bucket.meshes);
+            self.scene.overlay_texts.extend(bucket.texts);
             self.scene.overlay_commands.extend(bucket.commands);
             self.overlay_hit_regions.extend(bucket.hits);
             self.overlay_close_handlers.extend(bucket.close_handlers);

@@ -68,6 +68,58 @@ pub(super) fn prepare_nested_scene_root<VM>(
 }
 
 impl<VM: 'static> ResolvedElement<VM> {
+    pub(super) fn can_skip_when_fully_clipped(&self) -> bool {
+        if !self.clip_cull_safe_self() {
+            return false;
+        }
+
+        match &self.kind {
+            ResolvedWidgetKind::Text { text, .. } => !text.user_select,
+            ResolvedWidgetKind::Container {
+                layout, children, ..
+            } => {
+                layout.overflow_x != Overflow::Scroll
+                    && layout.overflow_y != Overflow::Scroll
+                    && children
+                        .iter()
+                        .all(ResolvedElement::can_skip_when_fully_clipped)
+            }
+            _ => false,
+        }
+    }
+
+    fn clip_cull_safe_self(&self) -> bool {
+        let has_runtime_overlay = self.tooltip.is_some()
+            || self.popover.is_some()
+            || self.menu.is_some()
+            || self.context_menu.is_some()
+            || self.modal.is_some()
+            || self.drawer.is_some();
+        let has_runtime_role = self.tab_trigger.is_some()
+            || self.list_item.is_some()
+            || self.tree_root.is_some()
+            || self.tree_node.is_some()
+            || self.data_grid_root.is_some()
+            || self.data_grid_cell.is_some()
+            || self.data_grid_header.is_some()
+            || self.data_grid_resize_handle.is_some()
+            || self.splitter_handle.is_some()
+            || self.carousel_auto_play.is_some();
+
+        !self.interactions.has_any()
+            && !self.lifecycle_events.has_any()
+            && !self.media_events.has_any()
+            && self.focus.focusable.is_none()
+            && self.focus.tab_index.is_none()
+            && self.focus.scope.is_none()
+            && !has_runtime_overlay
+            && !has_runtime_role
+            && self.visual.shadow.is_none()
+            && matches!(&self.visual.background_blur, Value::Static(value) if *value == Dp::ZERO)
+            && matches!(&self.visual.offset, Value::Static(value) if *value == Point::ZERO)
+            && matches!(&self.visual.scale, Value::Static(value) if *value == 1.0)
+    }
+
     /// 收集 `self` 子树的场景 chunk,把结果**移动**进 `chunks[self.id]`,
     /// 并返回该节点的 `WidgetId`。
     ///

@@ -210,6 +210,7 @@ impl WidgetBenchmarkContext {
             &Default::default(),
             None,
             None,
+            &Default::default(),
         );
         self.store_scene_cache(collected);
     }

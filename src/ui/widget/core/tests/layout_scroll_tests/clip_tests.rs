@@ -218,6 +218,84 @@ fn rounded_overflow_clips_children_with_parent_corner_mask() {
 }
 
 #[test]
+fn scroll_collect_skips_fully_clipped_plain_subtrees() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let mut content = Flex::new(Axis::Vertical).width(dp(200.0));
+    let mut offscreen_row_ids = Vec::new();
+
+    for row in 0..10 {
+        let row_element: Element<()> = Stack::new()
+            .height(dp(40.0))
+            .child(Text::new(format!("row {row}")))
+            .into();
+        if row >= 5 {
+            offscreen_row_ids.push(row_element.id);
+        }
+        content = content.child(row_element);
+    }
+
+    let viewport = Rect::new(0.0, 0.0, 240.0, 120.0);
+    let tree = WidgetTree::new(
+        Stack::new()
+            .size(dp(200.0), dp(120.0))
+            .overflow_y(Overflow::Scroll)
+            .child(content),
+    );
+    let now = Instant::now();
+    let layout = tree.build_scene_layout_at(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        now,
+    );
+    let default_style_sheet = crate::ui::widget::StyleSheet::default();
+    let collected = tree.collect_scene_cache_from_layout_with_focus_value_at(
+        &font_manager,
+        &layout,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        false,
+        now,
+        &HashMap::new(),
+        None,
+        None,
+        &default_style_sheet,
+    );
+
+    assert!(
+        offscreen_row_ids
+            .iter()
+            .all(|id| !collected.chunks.contains_key(id)
+                && !collected.visual_contexts.contains_key(id)),
+        "fully clipped plain rows should not allocate scene cache chunks"
+    );
+}
+
+#[test]
 fn painted_stack_overlay_occludes_button_hit() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
