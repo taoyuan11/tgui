@@ -23,6 +23,16 @@ const CODE_SPINNER_REDUCED: &str = r#"Switch::new(app.reduced_motion.signal())
         app.reduced_motion.set(enabled);
     }))"#;
 
+const CODE_SKELETON_LINES: &str = r#"Flex::vertical().gap(dp(6.0)).child(el![
+    Skeleton::line().width(dp(180.0)),
+    Skeleton::lines(2),
+])"#;
+
+const CODE_SKELETON_CARD: &str = r#"Flex::vertical().gap(dp(10.0)).child(el![
+    Skeleton::line().width(dp(220.0)),
+    Skeleton::lines(3),
+])"#;
+
 const CODE_TOAST_KINDS: &str = r#"app.toast_queue.push(
     Toast::new("文件已成功保存到云端")
         .title("保存成功")
@@ -58,10 +68,11 @@ const CODE_NOTIFICATION_ACTION: &str = r#"ctx.notifications().send_with_actions(
 pub(crate) fn page(app: &App) -> Element<App> {
     demo_section::page(
         "Feedback",
-        "反馈页面展示进度、加载、应用内提示和系统通知。",
+        "反馈页面展示进度、加载、骨架屏、应用内提示和系统通知。",
         vec![
             progress_component(app),
             spinner_component(app),
+            skeleton_component(app),
             toast_component(app),
             notification_component(app),
         ],
@@ -143,6 +154,36 @@ fn spinner_component(app: &App) -> Element<App> {
                     .style_full(styles::status_style),
                 ]),
                 CODE_SPINNER_REDUCED,
+            ),
+        ],
+    )
+}
+
+fn skeleton_component(app: &App) -> Element<App> {
+    demo_section::component_doc(
+        app,
+        "Skeleton",
+        "Skeleton 用于异步内容加载占位，减少页面跳动并保持结构感。",
+        vec![
+            UsageDemo::new(
+                "skeleton/lines",
+                "文本骨架",
+                "多行骨架适合列表、摘要和详情加载态。",
+                Flex::vertical().gap(dp(6.0)).child(el![
+                    Skeleton::line().width(dp(180.0)),
+                    Skeleton::lines(2),
+                ]),
+                CODE_SKELETON_LINES,
+            ),
+            UsageDemo::new(
+                "skeleton/card",
+                "内容块骨架",
+                "组合不同宽度的 line 可以模拟卡片或面板内容。",
+                Flex::vertical().gap(dp(10.0)).child(el![
+                    Skeleton::line().width(dp(220.0)),
+                    Skeleton::lines(3),
+                ]),
+                CODE_SKELETON_CARD,
             ),
         ],
     )

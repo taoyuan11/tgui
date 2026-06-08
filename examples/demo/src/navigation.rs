@@ -9,7 +9,6 @@ pub(crate) enum DemoPage {
     Feedback,
     Overlays,
     Data,
-    P3,
     MediaCanvas,
 }
 
@@ -21,7 +20,7 @@ pub(crate) struct NavigationItem {
     pub accent: u32,
 }
 
-pub(crate) const NAV_ITEMS: [NavigationItem; 7] = [
+pub(crate) const NAV_ITEMS: [NavigationItem; 6] = [
     NavigationItem {
         page: DemoPage::Basics,
         title: "Basics",
@@ -56,13 +55,6 @@ pub(crate) const NAV_ITEMS: [NavigationItem; 7] = [
         description: "Lists, tabs, tables",
         badge: "D",
         accent: 0x22C55EFF,
-    },
-    NavigationItem {
-        page: DemoPage::P3,
-        title: "P3 Widgets",
-        description: "Badges, rich text, combo",
-        badge: "P3",
-        accent: 0x0EA5E9FF,
     },
     NavigationItem {
         page: DemoPage::MediaCanvas,

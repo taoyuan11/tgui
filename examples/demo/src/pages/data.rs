@@ -72,17 +72,62 @@ const CODE_TABLE_ALIAS: &str = r#"Table::new(sorted_rows(app), columns(app))
     .density(DataGridDensity::Compact)
     .row_height(dp(34.0))"#;
 
+const CODE_DATA_NAVIGATION: &str = r#"Breadcrumb::new(vec![
+    BreadcrumbItem::new("Workspace"),
+    BreadcrumbItem::new("Components"),
+    BreadcrumbItem::new("Data"),
+])
+
+Pagination::new(app.pagination_page.signal(), 12usize)
+    .page_size(app.pagination_page_size.signal())
+    .on_change(...)"#;
+
 pub(crate) fn page(app: &App) -> Element<App> {
     demo_section::page(
         "Data",
-        "数据页面展示 tabs、列表、虚拟滚动、树和表格型数据控件。",
+        "数据页面展示导航、tabs、列表、虚拟滚动、树和表格型数据控件。",
         vec![
+            navigation_component(app),
             tabs_component(app),
             list_component(app),
             virtual_list_component(app),
             tree_component(app),
             data_grid_component(app),
         ],
+    )
+}
+
+fn navigation_component(app: &App) -> Element<App> {
+    demo_section::component_doc(
+        app,
+        "Breadcrumb / Pagination",
+        "Breadcrumb 和 Pagination 覆盖常见路径导航与分页控制。",
+        vec![UsageDemo::new(
+            "data/navigation",
+            "路径与分页",
+            "分页事件由 ViewModel 回写当前页和 page size。",
+            Flex::vertical().gap(dp(12.0)).child(el![
+                Breadcrumb::new(vec![
+                    BreadcrumbItem::new("Workspace").on_click(Command::new(|app: &mut App| {
+                        app.component_status.set("点击了 Workspace".to_string());
+                    })),
+                    BreadcrumbItem::new("Components"),
+                    BreadcrumbItem::new("Data"),
+                ]),
+                Pagination::new(app.pagination_page.signal(), 12usize)
+                    .page_size(app.pagination_page_size.signal())
+                    .on_change(ValueCommand::new(|app: &mut App, change: PaginationChange| {
+                        app.pagination_page.set(change.page);
+                        app.pagination_page_size.set(change.page_size);
+                        app.component_status.set(format!(
+                            "分页: page={}, page_size={}",
+                            change.page, change.page_size
+                        ));
+                    })),
+                Text::new(app.component_status.signal()).style_full(styles::status_style),
+            ]),
+            CODE_DATA_NAVIGATION,
+        )],
     )
 }
 

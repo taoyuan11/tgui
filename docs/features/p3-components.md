@@ -61,7 +61,7 @@ RichText::markdown("### Markdown sample\n- **Bold** text\n- [Link](https://examp
 Breadcrumb::new(vec![
     BreadcrumbItem::new("Workspace").on_click(Command::new(App::go_workspace)),
     BreadcrumbItem::new("Components"),
-    BreadcrumbItem::new("P3 Widgets"),
+    BreadcrumbItem::new("Data"),
 ])
 
 Pagination::new(app.page.signal(), 12usize)

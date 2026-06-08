@@ -62,6 +62,13 @@ const CODE_SELECT_BASIC: &str = r#"Select::new(options, app.select_action.signal
 const CODE_SELECT_DISABLED: &str = r#"SelectOption::new("delete".to_string(), "删除".to_string())
     .disable(true)"#;
 
+const CODE_COMBOBOX_BASIC: &str = r#"Combobox::new(app.combobox_text.clone(), options)
+    .open(app.combobox_open.signal())
+    .selected_key(app.combobox_selected.signal())
+    .on_change(ValueCommand::new(|app: &mut App, change| {
+        app.combobox_selected.set(change.selected_key);
+    }))"#;
+
 const CODE_SLIDER_BASIC: &str = r#"Slider::new(app.slider_value.signal(), 0.0, 100.0)
     .step(5.0)
     .show_value_label(true)
@@ -71,6 +78,12 @@ const CODE_SLIDER_CONTROLLED: &str = r#"Slider::new(app.slider_value.signal(), 0
     .on_change(ValueCommand::new(|app: &mut App, value| {
         app.slider_value.set(value);
         app.audio_controller.set_volume(value / 100.0);
+    }))"#;
+
+const CODE_RATING_BASIC: &str = r#"Rating::new(app.rating_value.signal())
+    .half()
+    .on_change(ValueCommand::new(|app: &mut App, change| {
+        app.rating_value.set(change.value);
     }))"#;
 
 const CODE_DATE_PICKER: &str = r#"DatePicker::new(app.demo_date_text.clone(), app.demo_date.signal(), app.demo_date_month.signal())
@@ -127,7 +140,9 @@ pub(crate) fn page(app: &App) -> Element<App> {
             checkbox_component(app),
             radio_component(app),
             select_component(app),
+            combobox_component(app),
             slider_component(app),
+            rating_component(app),
             date_picker_component(app),
             time_picker_component(app),
             number_input_component(app),
@@ -373,6 +388,34 @@ fn select_component(app: &App) -> Element<App> {
     )
 }
 
+fn combobox_component(app: &App) -> Element<App> {
+    demo_section::component_doc(
+        app,
+        "Combobox / AutoComplete",
+        "Combobox 组合输入框和本地选项过滤，AutoComplete 复用同一 API。",
+        vec![UsageDemo::new(
+            "combobox/local-filter",
+            "本地搜索选择",
+            "输入文本会对本地 options 做大小写不敏感过滤。",
+            Flex::vertical().gap(dp(8.0)).child(el![
+                Combobox::new(app.combobox_text.clone(), combo_options())
+                    .open(app.combobox_open.signal())
+                    .selected_key(app.combobox_selected.signal())
+                    .placeholder("Search component")
+                    .on_open_change(ValueCommand::new(|app: &mut App, open| {
+                        app.combobox_open.set(open);
+                    }))
+                    .on_change(ValueCommand::new(|app: &mut App, change: ComboboxChange| {
+                        app.combobox_selected.set(change.selected_key.clone());
+                        app.component_status.set(format!("Combobox: {}", change.text));
+                    })),
+                Text::new(app.component_status.signal()).style_full(styles::status_style),
+            ]),
+            CODE_COMBOBOX_BASIC,
+        )],
+    )
+}
+
 fn slider_component(app: &App) -> Element<App> {
     demo_section::component_doc(
         app,
@@ -414,6 +457,29 @@ fn slider_component(app: &App) -> Element<App> {
                 CODE_SLIDER_CONTROLLED,
             ),
         ],
+    )
+}
+
+fn rating_component(app: &App) -> Element<App> {
+    demo_section::component_doc(
+        app,
+        "Rating",
+        "Rating 适合评分输入和只读评分展示，支持半星步长。",
+        vec![UsageDemo::new(
+            "rating/half-step",
+            "半星评分",
+            "点击或键盘调整评分，变更会写回 ViewModel。",
+            Flex::vertical().gap(dp(8.0)).child(el![
+                Rating::new(app.rating_value.signal()).half().on_change(ValueCommand::new(
+                    |app: &mut App, change: RatingChange| {
+                        app.rating_value.set(change.value);
+                        app.component_status.set(format!("评分: {:.1}", change.value));
+                    },
+                )),
+                Text::new(app.component_status.signal()).style_full(styles::status_style),
+            ]),
+            CODE_RATING_BASIC,
+        )],
     )
 }
 
@@ -632,4 +698,15 @@ fn form_component(app: &App) -> Element<App> {
             ),
         ],
     )
+}
+
+fn combo_options() -> Vec<ComboboxOption> {
+    vec![
+        ComboboxOption::new("badge", "Badge"),
+        ComboboxOption::new("avatar", "Avatar"),
+        ComboboxOption::new("rich-text", "RichText"),
+        ComboboxOption::new("combobox", "Combobox"),
+        ComboboxOption::new("splitter", "Splitter"),
+        ComboboxOption::new("carousel", "Carousel"),
+    ]
 }

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use crate::app::{App, audio_status_text};
 use crate::demo_section::{self, UsageDemo};
@@ -12,6 +12,12 @@ const CODE_IMAGE_PATH: &str = r#"Image::from_path(demo_image_path())
 const CODE_IMAGE_EVENTS: &str = r#"Image::from_path(demo_image_path())
     .on_success(Command::new(|app: &mut App| {
         app.toast_status.set("图片加载完成".to_string());
+    }))"#;
+
+const CODE_CAROUSEL: &str = r#"Carousel::new(slides, app.carousel_index.signal())
+    .auto_play(Duration::from_secs(4))
+    .on_change(ValueCommand::new(|app: &mut App, index| {
+        app.carousel_index.set(index);
     }))"#;
 
 const CODE_CANVAS_GRADIENT: &str = r#"Canvas::new(CanvasRecorder::build(|canvas| {
@@ -56,13 +62,44 @@ const CODE_VIDEO_SURFACE: &str = r#"VideoSurface::new(app.video_player.controlle
 pub(crate) fn page(app: &App) -> Element<App> {
     demo_section::page(
         "Media & Canvas",
-        "媒体页面展示图片、Canvas，以及默认不加载本机资源的音视频控制器。",
+        "媒体页面展示图片、Carousel、Canvas，以及默认不加载本机资源的音视频控制器。",
         vec![
             image_component(app),
+            carousel_component(app),
             canvas_component(app),
             audio_component(app),
             video_component(app),
         ],
+    )
+}
+
+fn carousel_component(app: &App) -> Element<App> {
+    demo_section::component_doc(
+        app,
+        "Carousel",
+        "Carousel 用于在一组内容面板之间切换，支持受控 index 和自动播放。",
+        vec![UsageDemo::new(
+            "carousel/controlled",
+            "受控轮播",
+            "按钮、指示器和自动播放都会通过 on_change 回写当前 index。",
+            Flex::vertical().gap(dp(8.0)).child(el![
+                Carousel::new(
+                    vec![
+                        carousel_slide("Overview", "Badge / Avatar / Card"),
+                        carousel_slide("Forms", "Combobox / Rating"),
+                        carousel_slide("Content", "RichText / Carousel"),
+                    ],
+                    app.carousel_index.signal(),
+                )
+                .auto_play(Duration::from_secs(4))
+                .on_change(ValueCommand::new(|app: &mut App, index| {
+                    app.carousel_index.set(index);
+                    app.component_status.set(format!("Carousel index: {index}"));
+                })),
+                Text::new(app.component_status.signal()).style_full(styles::status_style),
+            ]),
+            CODE_CAROUSEL,
+        )],
     )
 }
 
@@ -208,6 +245,26 @@ fn video_component(app: &App) -> Element<App> {
             ),
         ],
     )
+}
+
+fn carousel_slide(title: &'static str, subtitle: &'static str) -> Element<App> {
+    Stack::new()
+        .height(dp(110.0))
+        .center()
+        .style_full(|ctx| {
+            let mut style = ContainerStyle::default_for_theme(ctx.theme);
+            style.surface.background = Some(ctx.theme.colors.surface_high.into());
+            style.surface.border_radius = Some(ctx.theme.radius.lg.into());
+            style
+        })
+        .child(
+            Flex::vertical()
+                .gap(dp(4.0))
+                .align(Align::Center)
+                .child(Text::new(title).style_full(styles::usage_title_style))
+                .child(Text::new(subtitle).style_full(styles::status_style)),
+        )
+        .into()
 }
 
 fn demo_image_path() -> PathBuf {

@@ -349,7 +349,7 @@
 
 ## 优先级 P3 —— 视觉与体验完善
 
-> **进度**：[功能完整] 23-35 已按独立组件模块落地，公开到 `tgui::widgets` / `prelude`，样式接入 `ComponentThemes` / `StyleSheet`，并新增 `examples/demo` 的 P3 页面与 `docs/components_p3.md`。实现优先复用现有 `Stack` / `Flex` / `Text` / `Image` / `Button` / `Input` / `Popover` / `VirtualList` 等基础设施；`Combobox` / `AutoComplete` v1 为本地 options 过滤。
+> **进度**：[功能完整] 23-35 已按独立组件模块落地，公开到 `tgui::widgets` / `prelude`，样式接入 `ComponentThemes` / `StyleSheet`，并在 `examples/demo` 中按类型分布到 Basics / Forms / Feedback / Data / Media & Canvas 页面，同时新增 `docs/components_p3.md`。实现优先复用现有 `Stack` / `Flex` / `Text` / `Image` / `Button` / `Input` / `Popover` / `VirtualList` 等基础设施；`Combobox` / `AutoComplete` v1 为本地 options 过滤。
 
 ### 23. Badge
 - **作用**：数字角标 / 红点，挂在 Avatar、按钮、Tab 等上。
