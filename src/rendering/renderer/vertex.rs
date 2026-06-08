@@ -412,6 +412,7 @@ impl TextVertex {
         _physical_width: f32,
         _physical_height: f32,
         scale_factor: f32,
+        opacity: f32,
     ) -> [Self; 6] {
         let quad = [
             crate::ui::widget::Point::new(rect.x, rect.y),
@@ -428,7 +429,7 @@ impl TextVertex {
             _physical_width,
             _physical_height,
             scale_factor,
-            1.0,
+            opacity,
         )
     }
 
@@ -516,6 +517,7 @@ mod tests {
             physical_width,
             physical_height,
             scale_factor,
+            1.0,
         );
 
         let expected = [
@@ -531,5 +533,23 @@ mod tests {
             assert!((vertex.position[0] - x).abs() < 1e-5);
             assert!((vertex.position[1] - y).abs() < 1e-5);
         }
+    }
+
+    #[test]
+    fn quad_preserves_opacity() {
+        let quad = TextVertex::quad(
+            Rect::new(0.0, 0.0, 100.0, 50.0),
+            100.0,
+            50.0,
+            None,
+            0.0,
+            None,
+            100.0,
+            50.0,
+            1.0,
+            0.25,
+        );
+
+        assert!(quad.iter().all(|vertex| vertex.opacity == 0.25));
     }
 }

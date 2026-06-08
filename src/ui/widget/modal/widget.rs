@@ -214,7 +214,6 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
             .position_absolute()
             .left(Dp::ZERO)
             .top(Dp::ZERO)
-            .opacity(visibility_value.clone())
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_modal_style_with_sheet(
                     backdrop_style.as_ref(),
@@ -229,7 +228,8 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                 s.surface.border_width = Some(Dp::ZERO.into());
                 s.surface.border_radius = Some(Dp::ZERO.into());
                 s
-            });
+            })
+            .opacity(visibility_value.clone());
         if close_on_backdrop_click {
             if let Some(close_cmd) = close_command.clone() {
                 backdrop = backdrop.on_click(close_cmd);
@@ -244,8 +244,6 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
         let modal_style_for_card = style.clone();
         let title_value_for_render = title.clone();
         let mut card: Flex<VM> = Flex::new(Axis::Vertical)
-            .opacity(visibility_value.clone())
-            .scale(scale_value)
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_modal_style_with_sheet(
                     modal_style_for_card.as_ref(),
@@ -261,7 +259,9 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                 s.surface.border_radius = Some(resolved.radius.clone());
                 s.surface.shadow = Some(resolved.shadow.into());
                 s
-            });
+            })
+            .opacity(visibility_value.clone())
+            .scale(scale_value);
         // 计算尺寸 / margin / padding：style 在 builder 阶段一次性解析。
         card = card
             .min_width(resolved_style_for_layout.min_width)

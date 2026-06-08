@@ -18,6 +18,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.hovered_widgets
             .retain(|hovered| match hovered.target_id {
                 HoverTargetId::Widget(id) => !removed_ids.contains(&id),
+                HoverTargetId::SplitterHandle { widget_id, .. } => {
+                    !removed_ids.contains(&widget_id)
+                }
                 HoverTargetId::SelectOption { widget_id, .. } => !removed_ids.contains(&widget_id),
                 HoverTargetId::CanvasItem { widget_id, .. } => !removed_ids.contains(&widget_id),
             });
@@ -79,6 +82,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .as_ref()
             .map(|pending| match pending.target_id {
                 HoverTargetId::Widget(id) => removed_ids.contains(&id),
+                HoverTargetId::SplitterHandle { .. } => false,
                 HoverTargetId::SelectOption { widget_id, .. } => removed_ids.contains(&widget_id),
                 HoverTargetId::CanvasItem { widget_id, .. } => removed_ids.contains(&widget_id),
             })

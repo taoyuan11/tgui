@@ -205,6 +205,7 @@ fn default_select_style(
 mod binding_scope_tests;
 mod button_switch_slider_tests;
 mod canvas_tests;
+mod collapse_tests;
 mod command_video_tests;
 mod controls_tests;
 mod dependency_tests;

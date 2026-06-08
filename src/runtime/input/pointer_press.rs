@@ -453,16 +453,27 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if let Some((context_menu_id, position)) = context_menu_open {
                 let _ = self.open_context_menu_at(context_menu_id, position);
             } else if button == CanvasMouseButton::Left {
-                let target_id = HoverTargetId::Widget(id);
+                let target_id = HoverTargetId::SplitterHandle {
+                    widget_id: id,
+                    axis: state.axis,
+                    index: state.index,
+                    pane_count: state.sizes.len(),
+                };
                 if self.pending_click_matches_target(target_id, now) {
                     self.pending_click = None;
+                    self.cancel_splitter_resize();
                     let _ = self.reset_splitter_from_hit(&state);
                 } else {
                     self.pending_click = Some(PendingClick {
                         target_id,
                         deadline: now + super::super::DOUBLE_CLICK_THRESHOLD,
                         position: self.cursor_position.unwrap_or(Point::ZERO),
-                        command: None,
+                        command: interactions.on_click.clone().map(ClickHandler::Command),
+                        splitter: Some(PendingSplitterClick {
+                            axis: state.axis,
+                            index: state.index,
+                            pane_count: state.sizes.len(),
+                        }),
                     });
                     let _ = self.begin_splitter_resize(&state, pair_extent, button);
                 }
@@ -1052,6 +1063,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         deadline: now + super::super::DOUBLE_CLICK_THRESHOLD,
                         position: self.cursor_position.unwrap_or(Point::ZERO),
                         command: Some(handler),
+                        splitter: None,
                     });
                 }
             } else {

@@ -169,6 +169,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 "unhandled widget kind in collect_subtree_cache_tracked"
             );
         }
+        self.clear_closed_modal_interactions(&mut computed);
         let before_overlays = computed.clone();
 
         self.emit_tooltip_if_visible(context, &mut computed, &visual);

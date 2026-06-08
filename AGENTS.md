@@ -225,9 +225,11 @@ README 中提到的一些示例名称未必都在当前工作区存在；维护�
 
 ```bash
 cargo check
-cargo test
+CARGO_PROFILE_TEST_DEBUG=0 cargo test
 cargo fmt
 ```
+
+跑测试时需要加上 `CARGO_PROFILE_TEST_DEBUG=0`，避免 macOS 下 test binary 因调试信息过大链接失败。
 
 按 feature 检查：
 
@@ -239,7 +241,7 @@ cargo check --features video-static
 运行某个测试：
 
 ```bash
-cargo test <test_name>
+CARGO_PROFILE_TEST_DEBUG=0 cargo test <test_name>
 ```
 
 运行某个示例：

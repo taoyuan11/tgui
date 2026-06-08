@@ -124,7 +124,7 @@ fn usage_demo(app: &App, demo: UsageDemo, layout: DemoLayout) -> Element<App> {
         .child(
             Flex::vertical()
                 .gap(dp(4.0))
-                .child(Text::new(demo.title).style_full(styles::usage_title_style))
+                .child(Text::new(demo.title).style_full(styles::usage_title_style).user_select(true))
                 .child(Text::new(demo.description).style_full(styles::status_style)),
         )
         .child(

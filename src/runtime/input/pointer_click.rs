@@ -9,7 +9,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(pending) = self.pending_click.as_ref() else {
             return false;
         };
-        if pending.target_id != target_id || pending.deadline <= now {
+        if !click_targets_match(pending.target_id, target_id) || pending.deadline <= now {
             return false;
         }
         let Some(position) = self.cursor_position else {
@@ -66,6 +66,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 deadline: now + super::super::DOUBLE_CLICK_THRESHOLD,
                 position: self.cursor_position.unwrap_or(Point::ZERO),
                 command: interactions.on_click.map(ClickHandler::Command),
+                splitter: None,
             });
         } else if let Some(command) = interactions.on_click {
             self.execute_command(&command);
@@ -113,6 +114,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .on_click
                     .clone()
                     .map(|command| ClickHandler::Canvas(command, context, Some(button))),
+                splitter: None,
             });
             return true;
         }
@@ -167,5 +169,29 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
         self.end_canvas_drag();
+    }
+}
+
+fn click_targets_match(left: HoverTargetId, right: HoverTargetId) -> bool {
+    match (left, right) {
+        (
+            HoverTargetId::SplitterHandle {
+                axis: left_axis,
+                index: left_index,
+                pane_count: left_pane_count,
+                ..
+            },
+            HoverTargetId::SplitterHandle {
+                axis: right_axis,
+                index: right_index,
+                pane_count: right_pane_count,
+                ..
+            },
+        ) => {
+            left_axis == right_axis
+                && left_index == right_index
+                && left_pane_count == right_pane_count
+        }
+        _ => left == right,
     }
 }

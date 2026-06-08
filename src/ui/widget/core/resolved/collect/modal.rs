@@ -29,6 +29,21 @@ use super::CollectVisualState;
 const MODAL_OVERLAY_TAG: u64 = 0x4D4F44414C5F4944; // "MODAL_ID"
 
 impl<VM> ResolvedElement<VM> {
+    pub(super) fn clear_closed_modal_interactions(&self, computed: &mut ComputedScene<VM>) {
+        let Some(modal) = &self.modal else { return };
+        if modal.open.resolve() {
+            return;
+        }
+
+        computed.hit_regions.clear();
+        computed.overlay_hit_regions.clear();
+        computed.overlay_close_handlers.clear();
+        computed.scroll_regions.clear();
+        computed.focus_scopes.clear();
+        computed.ime_cursor_area = None;
+        computed.overlay_layers = Default::default();
+    }
+
     pub(super) fn emit_modal_close_overlay_if_open(
         &self,
         context: &mut CollectContext<'_, '_>,

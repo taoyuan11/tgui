@@ -90,6 +90,7 @@ impl Renderer {
                         physical_width,
                         physical_height,
                         scale_factor,
+                        1.0,
                     );
                     let fullscreen_offset =
                         self.vertex_pool.allocate(bytemuck::cast_slice(&fullscreen));
@@ -223,6 +224,7 @@ impl Renderer {
                                     physical_width,
                                     physical_height,
                                     scale_factor,
+                                    texture.opacity,
                                 )
                             },
                             |quad| {
@@ -267,6 +269,7 @@ impl Renderer {
                                     physical_width,
                                     physical_height,
                                     scale_factor,
+                                    texture.opacity,
                                 )
                             },
                             |quad| {
@@ -294,6 +297,10 @@ impl Renderer {
                     }
                 }
                 RenderCommand::Text(text) => {
+                    let opacity = text.color.a as f32 / 255.0;
+                    if opacity <= 0.0 {
+                        continue;
+                    }
                     if let Some(bind_group) = self.text_bind_group_for(text, font_manager)? {
                         let snapped_frame = self.snap_text_rect(text.frame);
                         let vertices = text.quad.map_or_else(
@@ -308,6 +315,7 @@ impl Renderer {
                                     physical_width,
                                     physical_height,
                                     scale_factor,
+                                    opacity,
                                 )
                             },
                             |quad| {
@@ -320,7 +328,7 @@ impl Renderer {
                                     physical_width,
                                     physical_height,
                                     scale_factor,
-                                    1.0,
+                                    opacity,
                                 )
                             },
                         );

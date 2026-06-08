@@ -49,8 +49,8 @@ use self::state::{
     ActiveTabReorder, ActiveTreeDrag, CachedScene, CanvasPointerContext, ClickHandler,
     ClipboardService, DeferredMouseClick, DispatchedLifecycleState, DispatchedMediaState,
     FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
-    PendingClick, PendingLifecycleEvent, PendingMediaEvent, ScrollbarDrag, SliderDrag,
-    SmoothScrollState, TextInputBufferState, TextInputSessionConfig, TextSelectionDrag,
+    PendingClick, PendingLifecycleEvent, PendingMediaEvent, PendingSplitterClick, ScrollbarDrag,
+    SliderDrag, SmoothScrollState, TextInputBufferState, TextInputSessionConfig, TextSelectionDrag,
     TooltipState, TouchScrollDrag, TouchScrollInertiaState,
 };
 use self::theme::{resolve_theme, resolve_window_theme};

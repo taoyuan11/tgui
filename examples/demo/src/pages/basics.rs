@@ -72,12 +72,19 @@ const CODE_SHADOW_LAYOUT: &str = r#"Flex::horizontal().gap(dp(18.0)).child(el![
 ])"#;
 
 const CODE_DISCLOSURE: &str = r#"Collapse::new("Runtime notes", Text::new("内容区域"))
-    .expanded(app.collapse_open.signal())
+    .expanded(app.collapse_open.signal().animated(Transition::ease_in_out(
+        std::time::Duration::from_millis(180),
+    )))
     .on_change(ValueCommand::new(|app: &mut App, open| {
         app.collapse_open.set(open);
     }))
 
-Accordion::new(items, app.accordion_key.signal())"#;
+Accordion::new(
+    items,
+    app.accordion_key.signal().animated(Transition::ease_in_out(
+        std::time::Duration::from_millis(180),
+    )),
+)"#;
 
 const CODE_SPLITTER: &str = r#"ResizablePanels::new(
     vec![Pane::new(left), Pane::new(right)],
@@ -267,6 +274,8 @@ fn divider_component(app: &App) -> Element<App> {
 }
 
 fn disclosure_layout_component(app: &App) -> Element<App> {
+    let disclosure_transition = Transition::ease_in_out(std::time::Duration::from_millis(180));
+
     demo_section::component_doc(
         app,
         "Disclosure / Resizable Layout",
@@ -282,7 +291,7 @@ fn disclosure_layout_component(app: &App) -> Element<App> {
                         Text::new("Collapse 内容由调用方提供，可以放文本、表单或列表。")
                             .style_full(styles::status_style),
                     )
-                    .expanded(app.collapse_open.signal())
+                    .expanded(app.collapse_open.signal().animated(disclosure_transition))
                     .on_change(ValueCommand::new(|app: &mut App, open| {
                         app.collapse_open.set(open);
                     })),
@@ -299,7 +308,7 @@ fn disclosure_layout_component(app: &App) -> Element<App> {
                                 Text::new("CollapseStyle 可通过 Theme components 覆盖。"),
                             ),
                         ],
-                        app.accordion_key.signal(),
+                        app.accordion_key.signal().animated(disclosure_transition),
                     )
                     .on_change(ValueCommand::new(|app: &mut App, key| {
                         app.accordion_key.set(key);

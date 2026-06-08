@@ -30,8 +30,8 @@ use super::{
     canvas_mouse_button, cursor_icon, is_primary_shortcut_modifier, mouse_scroll_delta,
     text_cursor_index_at_point, BoundRuntimeHandler, CanvasPointerContext, ClickHandler,
     FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
-    PendingClick, ScrollbarDrag, SliderDrag, SmoothScrollState, TextSelectionDrag, TouchScrollDrag,
-    TouchScrollInertiaState,
+    PendingClick, PendingSplitterClick, ScrollbarDrag, SliderDrag, SmoothScrollState,
+    TextSelectionDrag, TouchScrollDrag, TouchScrollInertiaState,
 };
 use crate::foundation::binding::TextChange;
 use crate::foundation::view_model::{Command, ValueCommand};
@@ -214,6 +214,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn flush_pending_click_if_due(&mut self, now: Instant) {
+        if self.pending_click_waits_for_splitter_release() {
+            return;
+        }
         let should_flush = self
             .pending_click
             .as_ref()
@@ -228,6 +231,30 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.execute_click_handler(&command, self.cursor_position);
             }
         }
+    }
+
+    pub(super) fn pending_click_deadline(&self) -> Option<Instant> {
+        if self.pending_click_waits_for_splitter_release() {
+            None
+        } else {
+            self.pending_click.as_ref().map(|pending| pending.deadline)
+        }
+    }
+
+    fn pending_click_waits_for_splitter_release(&self) -> bool {
+        let Some(pending_splitter) = self
+            .pending_click
+            .as_ref()
+            .and_then(|pending| pending.splitter)
+        else {
+            return false;
+        };
+        let Some(active) = self.active_splitter_resize.as_ref() else {
+            return false;
+        };
+        active.axis == pending_splitter.axis
+            && active.index == pending_splitter.index
+            && active.start_sizes.len() == pending_splitter.pane_count
     }
 
     pub(super) fn handle_keyboard_input(&mut self, event: &KeyEvent) -> bool {

@@ -131,7 +131,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let animation_deadline = self.animation_engine.next_frame_deadline(now);
         let controller_deadline = self.animations.next_frame_deadline(now);
-        let click_deadline = self.pending_click.as_ref().map(|pending| pending.deadline);
+        let click_deadline = self.pending_click_deadline();
         let gesture_deadline = self
             .active_gesture
             .as_ref()

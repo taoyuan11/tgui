@@ -507,6 +507,7 @@ mod modal_tests;
 mod popover_tests;
 mod portal_tests;
 mod scroll_tests;
+mod splitter_tests;
 mod table_tests;
 mod tabs_tests;
 mod text_input_tests;

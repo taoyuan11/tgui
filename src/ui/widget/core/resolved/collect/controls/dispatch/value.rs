@@ -344,8 +344,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         let indeterminate = indeterminate.resolve();
         let phase = if indeterminate {
             if context.reduced_motion {
-                ((1.0 - progress_style.indeterminate_segment_ratio.clamp(0.1, 1.0)) * 0.5)
-                    .clamp(0.0, 1.0)
+                0.5
             } else {
                 let key = crate::animation::AnimationKey::Widget {
                     id: self.id.raw(),

@@ -1,15 +1,25 @@
+use std::time::Duration;
+
+use crate::animation::Transition;
 use crate::foundation::view_model::{Command, ValueCommand};
+use crate::text::font::ICON_FONT_FAMILY;
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{LayoutStyle, Value};
+use crate::ui::layout::{Insets, LayoutStyle, Length, Overflow, Value};
 use crate::ui::theme::Theme;
+use crate::ui::unit::{dp, sp, Dp};
 
 use super::common::VisualStyle;
 use super::core::Element;
 use super::p3_support::{
     impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
 };
-use super::style::{ButtonStyle, CollapseStyle, ContainerStyle, StyleResolver, StyleSheet};
-use super::{Button, Flex, Stack, WidgetKey};
+use super::style::{CollapseStyle, ContainerStyle, StyleResolver, StyleSheet, TextWidgetStyle};
+use super::{BuiltinIcon, CursorStyle, Flex, Stack, Text, WidgetKey};
+
+const COLLAPSE_HEADER_MIN_HEIGHT: Dp = dp(40.0);
+const COLLAPSE_ICON_SIZE: Dp = dp(20.0);
+const COLLAPSE_PANEL_MAX_HEIGHT: Dp = dp(320.0);
+const COLLAPSE_TRANSITION_MS: u64 = 180;
 
 pub struct Collapse<VM> {
     title: Value<String>,
@@ -72,11 +82,41 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
     fn from(collapse: Collapse<VM>) -> Self {
         let layout_style = resolve_collapse_style_for_layout(collapse.style.as_ref());
         let expanded = collapse.expanded.resolve();
+        let progress = collapse_progress_value(collapse.expanded.clone());
         let on_change = collapse.on_change.clone();
         let header_style = collapse.style.clone();
         let header_identity = collapse.visual.clone();
-        let header = Button::new(collapse.title.clone())
-            .secondary()
+        let icon_name = if expanded {
+            BuiltinIcon::ChevronUp.name()
+        } else {
+            BuiltinIcon::ChevronDown.name()
+        };
+        let header_icon = Text::new(icon_name)
+            .size(COLLAPSE_ICON_SIZE, COLLAPSE_ICON_SIZE)
+            .style_full_with_style_sheet({
+                let header_style = header_style.clone();
+                move |context, style_sheet, visual, state| {
+                    let resolved = resolve_collapse_style_with_sheet(
+                        header_style.as_ref(),
+                        context,
+                        style_sheet,
+                        visual,
+                        state,
+                    );
+                    let mut text = TextWidgetStyle::default_for_theme(context.theme);
+                    text.color = resolved.header_foreground.clone();
+                    text.typography.font_family = Some(ICON_FONT_FAMILY.to_string());
+                    text.typography.size = sp(COLLAPSE_ICON_SIZE.get());
+                    text.typography.line_height = Some(sp(COLLAPSE_ICON_SIZE.get()));
+                    text
+                }
+            });
+        let header = Flex::horizontal()
+            .width(Length::Percent(1.0))
+            .min_height(COLLAPSE_HEADER_MIN_HEIGHT)
+            .padding(layout_style.padding)
+            .gap(dp(8.0))
+            .align(crate::ui::layout::Align::Center)
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_collapse_style_with_sheet(
                     header_style.as_ref(),
@@ -85,46 +125,65 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
                     visual,
                     state,
                 );
-                let mut button = ButtonStyle::default_for_theme(
-                    context.theme,
-                    crate::ui::widget::common::ButtonVariantKind::Secondary,
-                );
-                button.background = resolved.header_background;
-                button.foreground =
-                    crate::ui::theme::StateValue::new(resolved.header_foreground.clone());
-                button.text_style = resolved.text_style;
-                button
+                let mut container = ContainerStyle::default_for_theme(context.theme);
+                container.surface.background = Some(resolved.header_background.resolve(state));
+                container
             })
+            .cursor(CursorStyle::Pointer)
+            .focusable(true)
             .on_click(Command::new_with_context(move |vm, context| {
                 if let Some(command) = on_change.as_ref() {
                     command.execute_with_context(vm, !expanded, context);
                 }
-            }));
+            }))
+            .child(
+                Text::new(collapse.title.clone())
+                    .style_full_with_style_sheet({
+                        let header_style = collapse.style.clone();
+                        move |context, style_sheet, visual, state| {
+                            let resolved = resolve_collapse_style_with_sheet(
+                                header_style.as_ref(),
+                                context,
+                                style_sheet,
+                                visual,
+                                state,
+                            );
+                            let mut text = TextWidgetStyle::default_for_theme(context.theme);
+                            text.color = resolved.header_foreground.clone();
+                            text.typography = resolved.text_style.clone();
+                            text
+                        }
+                    })
+                    .grow(1.0),
+            )
+            .child(header_icon);
         let mut children: Vec<Element<VM>> =
             vec![with_visual_identity(header.into(), &header_identity)];
-        if expanded {
-            let style = collapse.style.clone();
-            let panel_identity = collapse.visual.clone();
-            children.push(with_visual_identity(
-                Stack::new()
-                    .padding(layout_style.padding)
-                    .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
-                        let resolved = resolve_collapse_style_with_sheet(
-                            style.as_ref(),
-                            context,
-                            style_sheet,
-                            visual,
-                            state,
-                        );
-                        let mut container = ContainerStyle::default_for_theme(context.theme);
-                        container.surface.background = Some(resolved.panel_background);
-                        container
-                    })
-                    .child(collapse.content)
-                    .into(),
-                &panel_identity,
-            ));
-        }
+        let style = collapse.style.clone();
+        let panel_identity = collapse.visual.clone();
+        let panel_padding = collapse_progress_padding(progress.clone(), layout_style.padding);
+        children.push(with_visual_identity(
+            Stack::new()
+                .overflow(Overflow::Hidden)
+                .padding(panel_padding)
+                .max_height(collapse_progress_max_height(progress.clone()))
+                .opacity(progress)
+                .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                    let resolved = resolve_collapse_style_with_sheet(
+                        style.as_ref(),
+                        context,
+                        style_sheet,
+                        visual,
+                        state,
+                    );
+                    let mut container = ContainerStyle::default_for_theme(context.theme);
+                    container.surface.background = Some(resolved.panel_background);
+                    container
+                })
+                .child(collapse.content)
+                .into(),
+            &panel_identity,
+        ));
         let style = collapse.style.clone();
         let mut root: Element<VM> = Flex::vertical()
             .gap(layout_style.gap)
@@ -227,19 +286,18 @@ impl<VM> Accordion<VM> {
 
 impl<VM: 'static> From<Accordion<VM>> for Element<VM> {
     fn from(accordion: Accordion<VM>) -> Self {
-        let current = accordion.expanded_key.resolve();
         let layout_style = resolve_collapse_style_for_layout(accordion.style.as_ref());
         let items = accordion
             .items
             .into_iter()
             .map(|item| {
                 let key = item.key.clone();
-                let expanded = current.as_ref() == Some(&item.key);
+                let expanded = accordion_item_expanded_value(&accordion.expanded_key, &item.key);
                 let on_change = accordion.on_change.clone();
                 Collapse {
                     title: item.title,
                     content: item.content,
-                    expanded: Value::Static(expanded),
+                    expanded,
                     on_change: Some(ValueCommand::new_with_context(move |vm, next, context| {
                         if let Some(command) = on_change.as_ref() {
                             command.execute_with_context(
@@ -307,4 +365,61 @@ fn resolve_collapse_style_for_layout(
     let theme = Theme::default();
     let context = StyleContext::from_theme(&theme);
     resolve_collapse_style(style, &context)
+}
+
+fn collapse_progress_value(expanded: Value<bool>) -> Value<f32> {
+    match expanded {
+        Value::Static(expanded) => Value::Static(if expanded { 1.0 } else { 0.0 }),
+        Value::Signal(signal) => {
+            let progress = signal.map(|expanded| if expanded { 1.0 } else { 0.0 });
+            if progress.transition().is_some() {
+                Value::Signal(progress)
+            } else {
+                Value::Signal(progress.animated(default_collapse_transition()))
+            }
+        }
+    }
+}
+
+fn accordion_item_expanded_value(expanded_key: &Value<Option<String>>, key: &str) -> Value<bool> {
+    match expanded_key {
+        Value::Static(current) => Value::Static(current.as_deref() == Some(key)),
+        Value::Signal(signal) => {
+            let key = key.to_string();
+            Value::Signal(signal.map(move |current| current.as_ref() == Some(&key)))
+        }
+    }
+}
+
+fn collapse_progress_max_height(progress: Value<f32>) -> Value<Length> {
+    match progress {
+        Value::Static(value) => Value::Static(collapse_panel_max_height(value)),
+        Value::Signal(signal) => Value::Signal(signal.map(collapse_panel_max_height)),
+    }
+}
+
+fn collapse_progress_padding(progress: Value<f32>, padding: Insets) -> Value<Insets> {
+    let map = move |value: f32| {
+        let clamped = value.clamp(0.0, 1.0);
+        Insets {
+            left: padding.left,
+            top: Dp::new(padding.top.get() * clamped),
+            right: padding.right,
+            bottom: Dp::new(padding.bottom.get() * clamped),
+        }
+    };
+    match progress {
+        Value::Static(value) => Value::Static(map(value)),
+        Value::Signal(signal) => Value::Signal(signal.map(map)),
+    }
+}
+
+fn collapse_panel_max_height(progress: f32) -> Length {
+    Length::Px(Dp::new(
+        COLLAPSE_PANEL_MAX_HEIGHT.get() * progress.clamp(0.0, 1.0),
+    ))
+}
+
+fn default_collapse_transition() -> Transition {
+    Transition::ease_in_out(Duration::from_millis(COLLAPSE_TRANSITION_MS))
 }

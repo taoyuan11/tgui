@@ -88,16 +88,30 @@ pub(crate) fn push_progress_bar_primitives(
             let segment_width = Dp::new(track_rect.width.get() * segment_ratio)
                 .max(dp(8.0))
                 .min(track_rect.width);
-            let travel = (track_rect.width - segment_width).max(Dp::ZERO);
-            let x = track_rect.x + Dp::new(travel.get() * phase.clamp(0.0, 1.0));
-            scene.push_shape(RenderPrimitive {
-                rect: Rect::new(x, track_rect.y, segment_width, track_rect.height),
-                color: fill_color,
-                corner_radius: radius,
-                stroke_width: 0.0,
-                clip_rect: Some(track_rect),
-                clip_mask,
-            });
+            let travel = track_rect.width + segment_width;
+            let x = track_rect.x - segment_width + Dp::new(travel.get() * phase.clamp(0.0, 1.0));
+            let segment_clip_rect = match clip_rect {
+                Some(clip) => clip.intersect(track_rect),
+                None => Some(track_rect),
+            };
+            let segment_clip_mask = if radius > 0.0 {
+                Some(ClipMask {
+                    rect: track_rect,
+                    corner_radius: radius,
+                })
+            } else {
+                clip_mask
+            };
+            if let Some(segment_clip_rect) = segment_clip_rect {
+                scene.push_shape(RenderPrimitive {
+                    rect: Rect::new(x, track_rect.y, segment_width, track_rect.height),
+                    color: fill_color,
+                    corner_radius: radius,
+                    stroke_width: 0.0,
+                    clip_rect: Some(segment_clip_rect),
+                    clip_mask: segment_clip_mask,
+                });
+            }
         } else {
             let fill_width =
                 Dp::new(track_rect.width.get() * value.clamp(0.0, 1.0)).min(track_rect.width);

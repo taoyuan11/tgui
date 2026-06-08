@@ -418,6 +418,7 @@ impl Renderer {
             self.config.width as f32,
             self.config.height as f32,
             self.scale_factor,
+            1.0,
         );
         let vertex_buffer = self
             .device

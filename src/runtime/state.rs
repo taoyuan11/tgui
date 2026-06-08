@@ -2,6 +2,7 @@ use crate::foundation::binding::{DependencyGraph, TextChange, TextChangeSet};
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::platform::event::FingerId;
 use crate::text::font::{FontWeight, TextLayoutInfo};
+use crate::ui::layout::Axis;
 use crate::ui::theme::Density;
 use crate::ui::unit::{Dp, UnitContext};
 #[cfg(feature = "audio")]
@@ -125,6 +126,12 @@ impl TextInputBufferState {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum HoverTargetId {
     Widget(WidgetId),
+    SplitterHandle {
+        widget_id: WidgetId,
+        axis: Axis,
+        index: usize,
+        pane_count: usize,
+    },
     SelectOption {
         widget_id: WidgetId,
         option_index: usize,
@@ -246,6 +253,14 @@ pub(super) struct PendingClick<VM> {
     pub(super) deadline: Instant,
     pub(super) position: Point,
     pub(super) command: Option<ClickHandler<VM>>,
+    pub(super) splitter: Option<PendingSplitterClick>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PendingSplitterClick {
+    pub(super) axis: Axis,
+    pub(super) index: usize,
+    pub(super) pane_count: usize,
 }
 
 pub(super) struct DeferredMouseClick<VM> {
@@ -490,7 +505,6 @@ pub(super) struct ActiveSplitterResize<VM> {
     pub(super) constraints: Vec<(f32, f32)>,
     pub(super) current_sizes: Vec<f32>,
     pub(super) moved: bool,
-    pub(super) step: f32,
     pub(super) on_resize: Option<ValueCommand<VM, crate::ui::widget::SplitterResize>>,
 }
 

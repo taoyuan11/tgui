@@ -535,7 +535,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
 
             if self.reconcile_auto_focus_after_scene_update() {
-                self.invalidate_scene_with_reason("auto_focus_first");
+                self.invalidate_computed_scene();
                 return self.computed_scene();
             }
 
@@ -588,6 +588,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     let mut state = states.get(id);
                     state.hovered = true;
                     states.set(id, state);
+                }
+                HoverTargetId::SplitterHandle { widget_id, .. } => {
+                    let mut state = states.get(widget_id);
+                    state.hovered = true;
+                    states.set(widget_id, state);
                 }
                 HoverTargetId::SelectOption {
                     widget_id,

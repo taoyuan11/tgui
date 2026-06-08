@@ -50,9 +50,26 @@ fn modal_closed_renders_minimal() {
         false,
     );
 
-    // 关闭状态下，主场景文字应不包含 modal 内的 title / content / action 文本
-    // （opacity=0 时这些 widget 仍可能进入 scene 但 alpha=0；用 overlay_texts 判断也可，
-    //  我们只要求 close handler 未注册，且 overlay 层无渲染）。
+    // 关闭状态下，modal 内的 title / content / action 文本不能可见。
+    let labels: Vec<&str> = rendered
+        .primitives
+        .texts
+        .iter()
+        .filter(|t| t.color.a > 0)
+        .map(|t| t.content.as_ref())
+        .collect();
+    assert!(
+        !labels.iter().any(|t| *t == "Closed Title"),
+        "closed modal title should not be visible, got {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|t| *t == "Hidden content"),
+        "closed modal content should not be visible, got {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|t| *t == "OK"),
+        "closed modal action should not be visible, got {labels:?}"
+    );
     assert!(
         rendered.primitives.overlay_texts.is_empty(),
         "closed modal should not emit overlay texts, got {:?}",

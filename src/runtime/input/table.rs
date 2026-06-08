@@ -47,6 +47,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             deadline: now + super::super::DOUBLE_CLICK_THRESHOLD,
             position: self.cursor_position.unwrap_or(Point::ZERO),
             command: None,
+            splitter: None,
         });
         let extend = self.modifiers.shift_key();
         let toggle = is_primary_shortcut_modifier(self.modifiers);

@@ -40,7 +40,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             constraints: state.constraints.clone(),
             current_sizes: state.sizes.clone(),
             moved: false,
-            step: state.step,
             on_resize: state.on_resize.clone(),
         });
         self.invalidate_scene_with_reason("begin_splitter_resize");
@@ -87,33 +86,44 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             active.current_sizes = next_sizes;
             active.moved = true;
         }
+        self.clear_pending_splitter_click(axis, index, start_sizes.len());
         self.invalidate_scene_with_reason("splitter_resize");
         true
     }
 
     pub(super) fn end_splitter_resize(&mut self) -> bool {
-        let Some(active) = self.active_splitter_resize.take() else {
+        if self.active_splitter_resize.take().is_none() {
             return false;
         };
-        if !active.moved {
-            let next_sizes = splitter_adjusted_sizes(
-                &active.start_sizes,
-                &active.constraints,
-                active.index,
-                active.step,
-            );
-            if let Some(command) = active.on_resize.as_ref() {
-                self.execute_value_command(
-                    command,
-                    SplitterResize {
-                        index: active.index,
-                        sizes: next_sizes,
-                    },
-                );
-            }
-        }
         self.invalidate_scene_with_reason("end_splitter_resize");
         true
+    }
+
+    pub(super) fn cancel_splitter_resize(&mut self) -> bool {
+        if self.active_splitter_resize.take().is_none() {
+            return false;
+        }
+        self.invalidate_scene_with_reason("cancel_splitter_resize");
+        true
+    }
+
+    fn clear_pending_splitter_click(
+        &mut self,
+        axis: crate::ui::layout::Axis,
+        index: usize,
+        pane_count: usize,
+    ) {
+        let should_clear = self
+            .pending_click
+            .as_ref()
+            .and_then(|pending| pending.splitter)
+            .map(|pending| {
+                pending.axis == axis && pending.index == index && pending.pane_count == pane_count
+            })
+            .unwrap_or(false);
+        if should_clear {
+            self.pending_click = None;
+        }
     }
 
     pub(in crate::runtime) fn reset_splitter_from_hit(

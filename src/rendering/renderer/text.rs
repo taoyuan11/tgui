@@ -117,11 +117,15 @@ impl Renderer {
             let (offset_x, offset_y) = text_offsets(text, &buffer, width as f32, height as f32);
 
             let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
-            let requested_rgba = text.color.to_rgba8();
+            let raster_color = TguiColor {
+                a: 255,
+                ..text.color
+            };
+            let requested_rgba = raster_color.to_rgba8();
             buffer.draw(
                 font_system,
                 &mut self.text_system.swash_cache,
-                color_to_text(text.color),
+                color_to_text(raster_color),
                 |x, y, w, h, color| {
                     let x = x + offset_x;
                     let y = y + offset_y;
