@@ -20,7 +20,7 @@ impl CardStyle {
             border: Value::Static(theme.colors.outline_muted),
             border_width: theme.border.thin,
             radius: theme.radius.lg,
-            shadow: theme.elevation.sm.clone(),
+            shadow: theme.elevation.none.clone(),
             padding: Insets::all(theme.spacing.md),
             gap: theme.spacing.sm,
         }

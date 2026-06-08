@@ -17,7 +17,7 @@ impl RichTextStyle {
         Self {
             foreground: Value::Static(theme.colors.on_surface),
             link: Value::Static(theme.colors.primary),
-            code_background: Value::Static(theme.colors.surface_high),
+            code_background: Value::Static(theme.colors.surface_low),
             code_foreground: Value::Static(theme.colors.on_surface),
             blockquote_border: Value::Static(theme.colors.outline),
             text_style: theme.typography.body.clone(),

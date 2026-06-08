@@ -2,15 +2,16 @@ use crate::foundation::color::Color;
 use crate::ui::layout::Value;
 use crate::ui::theme::{StateValue, Theme};
 
-const HOVER_LIGHTEN: f32 = 0.1;
-const SURFACE_HOVER_LIGHTEN: f32 = 0.06;
-const BORDER_HOVER_LIGHTEN: f32 = 0.12;
-const SCROLLBAR_HOVER_LIGHTEN: f32 = 0.18;
+const HOVER_LIGHTEN: f32 = 0.08;
+const SURFACE_HOVER_LIGHTEN: f32 = 0.045;
+const BORDER_HOVER_LIGHTEN: f32 = 0.09;
+const SCROLLBAR_HOVER_LIGHTEN: f32 = 0.14;
 
 #[derive(Clone)]
 pub(crate) struct Palette {
     pub(crate) primary: Color,
     pub(crate) on_primary: Color,
+    pub(crate) primary_container: Color,
     pub(crate) error: Color,
     pub(crate) on_error: Color,
     pub(crate) surface: Color,
@@ -33,6 +34,7 @@ pub(crate) fn palette_from_theme(theme: &Theme) -> Palette {
     Palette {
         primary: colors.primary,
         on_primary: colors.on_primary,
+        primary_container: colors.primary_container,
         error: colors.error,
         on_error: colors.on_error,
         surface: colors.surface,
@@ -45,15 +47,15 @@ pub(crate) fn palette_from_theme(theme: &Theme) -> Palette {
         disabled_surface: colors.disabled,
         disabled_content: colors.on_disabled,
         text_primary: colors.on_surface,
-        scrollbar_track: colors.surface_low,
+        scrollbar_track: colors.surface_low.with_alpha_factor(0.72),
         scrollbar_thumb: stateful_colors(
-            colors.outline.with_alpha_factor(0.72),
+            colors.outline.with_alpha_factor(0.64),
             colors.outline.lighten(SCROLLBAR_HOVER_LIGHTEN),
             colors.outline.darken(SCROLLBAR_HOVER_LIGHTEN),
             colors.disabled,
         )
         .map(|value| value.resolve()),
-        switch_track: colors.outline,
+        switch_track: colors.outline.with_alpha_factor(0.86),
     }
 }
 

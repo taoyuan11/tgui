@@ -20,7 +20,7 @@ impl ProgressBarStyle {
         let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            track_color: Value::Static(palette.surface_low),
+            track_color: Value::Static(palette.outline_muted.with_alpha_factor(0.56)),
             fill_color: Value::Static(palette.primary),
             label_color: Value::Static(palette.on_surface),
             radius: Value::Static(theme.radius.full),

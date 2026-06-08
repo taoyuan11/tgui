@@ -25,8 +25,8 @@ impl InputStyle {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
                 palette.surface_low,
-                palette.surface_low,
-                palette.surface_low,
+                palette.surface,
+                palette.surface_high,
                 palette.disabled_surface,
             ),
             text: stateful_single(
@@ -42,9 +42,9 @@ impl InputStyle {
                 palette.disabled_content,
             ),
             border: stateful_colors(
+                palette.outline_muted,
                 palette.outline,
-                palette.outline,
-                palette.outline,
+                palette.primary,
                 palette.disabled_surface,
             ),
             selection: Some(Value::Static(theme.colors.selection)),

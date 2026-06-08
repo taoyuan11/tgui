@@ -18,6 +18,7 @@ fn theme_tokens_drive_default_component_styles() {
     theme.colors.primary = Color::hexa(0x2468ACFF);
     theme.colors.on_primary = Color::hexa(0xFEFEFEFF);
     theme.colors.surface = Color::hexa(0x102030FF);
+    theme.colors.surface_overlay = Color::hexa(0x102030F5);
     theme.colors.surface_low = Color::hexa(0x203040FF);
     theme.colors.surface_high = Color::hexa(0x304050FF);
     theme.colors.on_surface = Color::hexa(0xE6EDF5FF);
@@ -59,7 +60,10 @@ fn theme_tokens_drive_default_component_styles() {
 
     let select = SelectStyle::default_for_theme(&theme);
     assert_eq!(normal_color(&select.background), theme.colors.surface_low);
-    assert_eq!(select.menu_background.resolve(), theme.colors.surface);
+    assert_eq!(
+        select.menu_background.resolve(),
+        theme.colors.surface_overlay
+    );
     assert_eq!(
         select.selected_option_background.resolve(),
         theme.colors.primary_container
@@ -73,7 +77,10 @@ fn theme_tokens_drive_default_component_styles() {
 
     let progress = ProgressBarStyle::default_for_theme(&theme);
     assert_eq!(progress.fill_color.resolve(), theme.colors.primary);
-    assert_eq!(progress.track_color.resolve(), theme.colors.surface_low);
+    assert_eq!(
+        progress.track_color.resolve(),
+        theme.colors.outline_muted.with_alpha_factor(0.56)
+    );
 
     let tabs = TabsStyle::default_for_theme(&theme);
     assert_eq!(tabs.indicator_color.resolve(), theme.colors.primary);
@@ -83,7 +90,7 @@ fn theme_tokens_drive_default_component_styles() {
     let list = ListStyle::default_for_theme(&theme);
     assert_eq!(
         list.item_selected_background.resolve(),
-        theme.colors.primary.with_alpha_factor(0.16)
+        theme.colors.primary_container.with_alpha_factor(0.64)
     );
     assert_eq!(list.item_radius, theme.radius.md);
 
@@ -96,7 +103,7 @@ fn theme_tokens_drive_default_component_styles() {
     assert_eq!(tree.item_radius, theme.radius.md);
 
     let grid = DataGridStyle::default_for_theme(&theme);
-    assert_eq!(grid.cell_focused_border.resolve(), theme.colors.primary);
+    assert_eq!(grid.cell_focused_border.resolve(), theme.colors.focus_ring);
     assert_eq!(grid.header_background.resolve(), theme.colors.surface_low);
     assert_eq!(
         grid.surface.background.as_ref().unwrap().resolve(),

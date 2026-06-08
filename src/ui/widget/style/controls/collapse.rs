@@ -19,8 +19,8 @@ impl CollapseStyle {
         Self {
             header_background: stateful_colors(
                 Color::TRANSPARENT,
-                palette.surface_high.lighten(surface_hover_lighten()),
-                palette.surface_high.darken(surface_hover_lighten()),
+                palette.primary_container.with_alpha_factor(0.34),
+                palette.primary_container.with_alpha_factor(0.5),
                 Color::TRANSPARENT,
             ),
             header_foreground: Value::Static(theme.colors.on_surface),

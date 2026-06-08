@@ -346,7 +346,7 @@ impl DataGridStyle {
         Self {
             surface: WidgetSurfaceStyle {
                 background: Some(Value::Static(theme.colors.surface)),
-                border_color: Some(Value::Static(theme.colors.outline)),
+                border_color: Some(Value::Static(theme.colors.outline_muted)),
                 border_width: Some(Value::Static(theme.border.thin)),
                 border_radius: Some(Value::Static(theme.radius.md)),
                 ..WidgetSurfaceStyle::default()
@@ -360,9 +360,13 @@ impl DataGridStyle {
             header_text: Value::Static(palette.on_surface),
             row_background: Value::Static(Color::TRANSPARENT),
             zebra_background: Value::Static(theme.colors.surface_low.with_alpha_factor(0.48)),
-            row_hover_background: Value::Static(theme.colors.surface_high.with_alpha_factor(0.72)),
-            row_selected_background: Value::Static(theme.colors.primary.with_alpha_factor(0.14)),
-            cell_focused_border: Value::Static(theme.colors.primary),
+            row_hover_background: Value::Static(
+                theme.colors.primary_container.with_alpha_factor(0.34),
+            ),
+            row_selected_background: Value::Static(
+                theme.colors.primary_container.with_alpha_factor(0.62),
+            ),
+            cell_focused_border: Value::Static(theme.colors.focus_ring),
             cell_editing_background: Value::Static(theme.colors.surface),
             grid_line: Value::Static(theme.colors.outline_muted),
             resize_handle: Value::Static(theme.colors.outline),

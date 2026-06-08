@@ -113,8 +113,8 @@ impl ButtonStyle {
             ButtonVariantKind::Secondary => (
                 stateful_colors(
                     palette.surface,
-                    palette.surface.lighten(surface_hover_lighten()),
-                    palette.surface.darken(surface_hover_lighten()),
+                    palette.surface_high,
+                    palette.surface_high.darken(surface_hover_lighten()),
                     palette.disabled_surface,
                 ),
                 stateful_single(
@@ -124,7 +124,7 @@ impl ButtonStyle {
                     palette.disabled_content,
                 ),
                 stateful_colors(
-                    palette.outline,
+                    palette.outline_muted,
                     palette.primary.lighten(hover_lighten()),
                     palette.primary.darken(hover_lighten()),
                     palette.disabled_surface,
@@ -216,8 +216,8 @@ impl CheckboxStyle {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_single(
                 palette.surface_low,
-                palette.surface_low,
-                palette.surface_low,
+                palette.surface_high,
+                palette.surface_high,
                 palette.disabled_surface,
             ),
             background_checked: stateful_single(
@@ -227,7 +227,7 @@ impl CheckboxStyle {
                 palette.disabled_surface,
             ),
             border: stateful_single(
-                palette.outline,
+                palette.outline_muted,
                 palette.primary,
                 palette.primary,
                 palette.disabled_surface,
@@ -285,18 +285,18 @@ impl RadioStyle {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
                 palette.surface_low,
-                palette.surface_low,
+                palette.surface_high,
                 palette.surface_low.darken(surface_hover_lighten()),
                 palette.disabled_surface,
             ),
             background_checked: stateful_colors(
                 palette.surface_low,
-                palette.surface_low.lighten(surface_hover_lighten()),
+                palette.surface_high,
                 palette.surface_low.darken(surface_hover_lighten()),
                 palette.disabled_surface,
             ),
             border: stateful_colors(
-                palette.outline,
+                palette.outline_muted,
                 palette.outline.lighten(border_hover_lighten()),
                 palette.outline.darken(border_hover_lighten()),
                 palette.disabled_surface,
@@ -428,8 +428,8 @@ impl SelectStyle {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
                 palette.surface_low,
-                palette.surface_low,
-                palette.surface_low,
+                palette.surface,
+                palette.surface_high,
                 palette.disabled_surface,
             ),
             text: stateful_single(
@@ -445,9 +445,9 @@ impl SelectStyle {
                 palette.disabled_content,
             ),
             border: stateful_colors(
+                palette.outline_muted,
                 palette.outline,
-                palette.outline,
-                palette.outline.darken(border_hover_lighten()),
+                palette.primary,
                 palette.disabled_surface,
             ),
             focus_ring: None,
@@ -457,11 +457,11 @@ impl SelectStyle {
                 palette.on_surface,
                 palette.disabled_content,
             ),
-            menu_background: Value::Static(palette.surface),
+            menu_background: Value::Static(theme.colors.surface_overlay),
             option_background: stateful_colors(
                 Color::TRANSPARENT,
-                palette.surface_high.lighten(surface_hover_lighten()),
-                palette.surface_high.darken(surface_hover_lighten()),
+                palette.primary_container.with_alpha_factor(0.46),
+                palette.primary_container.with_alpha_factor(0.62),
                 Color::TRANSPARENT,
             ),
             selected_option_background: Value::Static(theme.colors.primary_container),
@@ -597,7 +597,7 @@ impl MenuStyle {
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: Value::Static(theme.colors.surface),
-            border: Value::Static(theme.colors.outline),
+            border: Value::Static(theme.colors.outline_muted),
             border_width: Value::Static(theme.border.thin),
             radius: Value::Static(theme.radius.md),
             shadow: theme.elevation.md.clone(),
@@ -608,8 +608,8 @@ impl MenuStyle {
             item_min_height: theme.spacing.xl,
             item_background: stateful_colors(
                 Color::TRANSPARENT,
-                palette.surface_high.lighten(surface_hover_lighten()),
-                palette.surface_high.darken(surface_hover_lighten()),
+                palette.primary_container.with_alpha_factor(0.42),
+                palette.primary_container.with_alpha_factor(0.58),
                 Color::TRANSPARENT,
             ),
             item_foreground: stateful_single(
@@ -679,8 +679,8 @@ impl MenuBarStyle {
             entry_min_width: theme.spacing.xxl + theme.spacing.sm,
             entry_background: stateful_colors(
                 Color::TRANSPARENT,
-                palette.surface_high.lighten(surface_hover_lighten()),
-                palette.surface_high.darken(surface_hover_lighten()),
+                palette.primary_container.with_alpha_factor(0.34),
+                palette.primary_container.with_alpha_factor(0.5),
                 Color::TRANSPARENT,
             ),
             entry_foreground: stateful_single(
@@ -728,11 +728,11 @@ impl TabsStyle {
             panel_background: Value::Static(theme.colors.surface),
             tab_background: stateful_colors(
                 Color::TRANSPARENT,
-                palette.surface_high.lighten(surface_hover_lighten()),
-                palette.surface_high.darken(surface_hover_lighten()),
+                palette.primary_container.with_alpha_factor(0.34),
+                palette.primary_container.with_alpha_factor(0.5),
                 Color::TRANSPARENT,
             ),
-            active_tab_background: Value::Static(theme.colors.surface_high),
+            active_tab_background: Value::Static(theme.colors.surface),
             tab_foreground: stateful_single(
                 palette.on_surface_muted,
                 palette.on_surface,
@@ -798,7 +798,7 @@ pub struct ModalStyle {
 impl ModalStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
         Self {
-            backdrop_color: Value::Static(Color::rgba(0, 0, 0, 0x80)),
+            backdrop_color: Value::Static(theme.colors.scrim),
             surface: WidgetSurfaceStyle::default(),
             background: Value::Static(theme.colors.surface),
             border: Value::Static(theme.colors.outline_muted),
@@ -934,7 +934,7 @@ pub struct DrawerStyle {
 impl DrawerStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
         Self {
-            backdrop_color: Value::Static(Color::rgba(0, 0, 0, 0x80)),
+            backdrop_color: Value::Static(theme.colors.scrim),
             surface: WidgetSurfaceStyle::default(),
             background: Value::Static(theme.colors.surface),
             border: Value::Static(theme.colors.outline_muted),

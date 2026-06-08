@@ -17,7 +17,7 @@ impl ComboboxStyle {
             menu_width: dp(260.0),
             option_height: theme.spacing.xl,
             max_visible_options: 6,
-            highlight: Value::Static(theme.colors.primary_container),
+            highlight: Value::Static(theme.colors.primary_container.with_alpha_factor(0.72)),
             empty_foreground: Value::Static(theme.colors.on_surface_muted),
         }
     }

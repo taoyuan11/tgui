@@ -59,8 +59,8 @@ impl Theme {
         let border = BorderScale::default();
         let focus_ring = FocusRingStyle {
             enabled: true,
-            color: colors.primary.lighten(0.18),
-            width: border.thin,
+            color: colors.focus_ring,
+            width: border.normal,
             gap: spacing.xxs,
         };
         let elevation = ElevationScale::default();

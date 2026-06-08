@@ -79,23 +79,23 @@ impl Default for ElevationScale {
             sm: Shadow {
                 offset_x: Dp::ZERO,
                 offset_y: dp(2.0),
-                blur: dp(8.0),
+                blur: dp(6.0),
                 spread: Dp::ZERO,
-                color: Color::hexa(0x00000024),
+                color: Color::hexa(0x0000001F),
             },
             md: Shadow {
                 offset_x: Dp::ZERO,
-                offset_y: dp(8.0),
-                blur: dp(24.0),
+                offset_y: dp(6.0),
+                blur: dp(18.0),
                 spread: dp(-4.0),
-                color: Color::hexa(0x00000033),
+                color: Color::hexa(0x00000029),
             },
             lg: Shadow {
                 offset_x: Dp::ZERO,
-                offset_y: dp(14.0),
-                blur: dp(36.0),
+                offset_y: dp(10.0),
+                blur: dp(30.0),
                 spread: dp(-6.0),
-                color: Color::hexa(0x00000040),
+                color: Color::hexa(0x00000036),
             },
         }
     }
