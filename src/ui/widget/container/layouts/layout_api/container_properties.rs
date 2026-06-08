@@ -23,6 +23,7 @@ macro_rules! impl_container_properties {
                 Self(self.0.style_full(resolver))
             }
 
+            #[allow(dead_code)] // Some container variants expose this shared hook only for composed widgets.
             pub(crate) fn style_full_with_style_sheet(
                 self,
                 resolver: impl Fn(

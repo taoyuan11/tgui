@@ -17,6 +17,5 @@ mod widget;
 pub use contextmenu::ContextMenu;
 pub(crate) use descriptor::{ContextMenuDescriptor, MenuDescriptor, MenuItemState};
 pub use menubar::{MenuBar, MenuBarEntry};
-pub(crate) use types::MenuBarGroupId;
 pub use types::{ChordKey, KeyChord, MenuIcon, MenuItem, MenuItemKind};
 pub use widget::Menu;

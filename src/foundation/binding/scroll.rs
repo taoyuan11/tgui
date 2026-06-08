@@ -52,10 +52,6 @@ impl ScrollViewController {
         Self::from_invalidation(ctx.invalidation().clone())
     }
 
-    pub(crate) fn new_legacy() -> Self {
-        Self::from_invalidation(InvalidationSignal::new())
-    }
-
     fn from_invalidation(invalidation: InvalidationSignal) -> Self {
         Self {
             inner: Arc::new(ScrollViewControllerInner {

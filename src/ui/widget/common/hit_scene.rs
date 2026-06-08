@@ -51,6 +51,7 @@ impl Default for FocusScopeOptions {
     }
 }
 
+#[allow(dead_code)] // Single-key variants are kept for widgets that should not handle both keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DefaultActivation {
     None,
@@ -154,8 +155,6 @@ pub(crate) enum MeasureContext {
     },
     ProgressBar {
         id: WidgetId,
-        value: Value<f32>,
-        indeterminate: Value<bool>,
         show_label: bool,
         label: Option<Value<String>>,
         style: ProgressBarStyle,
@@ -164,8 +163,6 @@ pub(crate) enum MeasureContext {
         id: WidgetId,
         style: SpinnerStyle,
         size_override: Option<Value<Dp>>,
-        thickness_override: Option<Value<Dp>>,
-        track_override: Option<bool>,
     },
     Divider {
         id: WidgetId,
@@ -187,8 +184,6 @@ pub(crate) enum MeasureContext {
 pub(crate) struct LayoutNode {
     pub node: TaffyNodeId,
     pub children: Vec<LayoutNode>,
-    pub absolute_offset: Option<Point>,
-    pub absolute_size: Option<(Dp, Dp)>,
 }
 
 pub(crate) enum HitInteraction<VM> {

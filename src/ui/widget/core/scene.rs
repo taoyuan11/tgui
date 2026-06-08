@@ -11,8 +11,8 @@ use crate::text::font::{FontManager, TextLayoutInfo};
 use crate::ui::theme::{StyleContext, Theme};
 use crate::ui::unit::UnitContext;
 use crate::ui::widget::common::{
-    ClipMask, ComputedScene, FocusScopeState, FocusTargetMeta, LifecycleEventState, MeasureContext,
-    Point, Rect, ScrollbarHandle, TextEditState, WidgetId, WidgetStateMap,
+    ClipMask, ComputedScene, FocusTargetMeta, LifecycleEventState, MeasureContext, Point, Rect,
+    ScrollbarHandle, TextEditState, WidgetId, WidgetStateMap,
 };
 use crate::ui::widget::VirtualCacheState;
 
@@ -69,24 +69,6 @@ pub(crate) struct CollectContext<'a, 'b> {
 impl<'a, 'b> CollectContext<'a, 'b> {
     pub(crate) fn focus_scope_path(&self) -> Vec<WidgetId> {
         self.focus.scope_path.clone()
-    }
-
-    pub(crate) fn register_focus_scope(
-        &mut self,
-        computed: &mut ComputedScene<impl Sized>,
-        scope_id: WidgetId,
-        options: crate::ui::widget::FocusScopeOptions,
-    ) -> Vec<WidgetId> {
-        let mut path = self.focus.scope_path.clone();
-        path.push(scope_id);
-        let active = options.is_active();
-        computed.register_focus_scope(FocusScopeState {
-            scope_id,
-            path: path.clone(),
-            options,
-            active,
-        });
-        path
     }
 
     pub(crate) fn next_focus_order(&mut self) -> usize {

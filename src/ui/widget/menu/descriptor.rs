@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::StyleContext;
 use crate::ui::layout::Value;
-use crate::ui::widget::overlay::{Alignment, FlipPolicy, Placement};
+use crate::ui::widget::overlay::{FlipPolicy, Placement};
 use crate::ui::widget::style::{MenuStyle, StyleResolver};
 
 use super::types::{KeyChord, MenuBarGroupId, MenuIcon, MenuItem, MenuItemKind};
@@ -130,21 +130,6 @@ impl<VM> Clone for MenuDescriptor<VM> {
 }
 
 impl<VM> MenuDescriptor<VM> {
-    pub(crate) fn new(items: Vec<MenuItem<VM>>) -> Self {
-        Self {
-            items: items.into_iter().map(MenuItemState::from_public).collect(),
-            open: Some(Value::Static(false)),
-            on_open_change: None,
-            placement: Placement::bottom().align(Alignment::Start),
-            flip_policy: FlipPolicy::FlipSide,
-            disabled: Value::Static(false),
-            style: None,
-            menubar_group: None,
-            menubar_index: None,
-            menubar_set_active: None,
-        }
-    }
-
     pub(crate) fn scope<RootVm: 'static>(
         self,
         selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
@@ -208,15 +193,6 @@ impl<VM> Clone for ContextMenuDescriptor<VM> {
 }
 
 impl<VM> ContextMenuDescriptor<VM> {
-    pub(crate) fn new(items: Vec<MenuItem<VM>>) -> Self {
-        Self {
-            items: items.into_iter().map(MenuItemState::from_public).collect(),
-            on_open_change: None,
-            disabled: Value::Static(false),
-            style: None,
-        }
-    }
-
     pub(crate) fn scope<RootVm: 'static>(
         self,
         selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
@@ -234,15 +210,5 @@ impl<VM> ContextMenuDescriptor<VM> {
             disabled: self.disabled,
             style: self.style,
         }
-    }
-
-    /// 按当前主题解析最终样式。
-    pub(crate) fn resolved_style(&self, context: &StyleContext<'_>) -> MenuStyle {
-        let mut base = MenuStyle::default_for_theme(context.theme);
-        context.theme.components.menu.apply(&mut base, context);
-        self.style
-            .as_ref()
-            .map(|resolver| resolver.resolve_from(base.clone(), context))
-            .unwrap_or(base)
     }
 }

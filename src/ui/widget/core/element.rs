@@ -444,34 +444,6 @@ impl<VM> Element<VM> {
         self
     }
 
-    /// 给 Element 挂上 Menu 描述符。trigger widget（通常是 Button）的点击/键盘
-    /// 激活会自动切换 `open` 状态；overlay 在 collect 阶段以 Menu 层渲染。
-    pub(crate) fn with_menu_descriptor(
-        mut self,
-        descriptor: crate::ui::widget::menu::MenuDescriptor<VM>,
-    ) -> Self {
-        self.menu = Some(Box::new(descriptor));
-        self
-    }
-
-    /// 给 Element 挂上 ContextMenu 描述符。runtime 自动接长按 / 右键事件，弹出
-    /// 锚定到 pointer 位置的 overlay。
-    pub(crate) fn with_context_menu_descriptor(
-        mut self,
-        descriptor: crate::ui::widget::menu::ContextMenuDescriptor<VM>,
-    ) -> Self {
-        self.context_menu = Some(Box::new(descriptor));
-        self
-    }
-
-    pub(crate) fn with_popover_descriptor(
-        mut self,
-        descriptor: crate::ui::widget::popover::PopoverDescriptor<VM>,
-    ) -> Self {
-        self.popover = Some(Box::new(descriptor));
-        self
-    }
-
     pub(crate) fn with_tab_trigger_state(
         mut self,
         trigger: crate::ui::widget::common::TabTriggerState<VM>,

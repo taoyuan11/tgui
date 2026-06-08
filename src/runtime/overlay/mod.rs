@@ -22,4 +22,4 @@ pub use placement::{
 pub use solver::solve_placement;
 
 pub(crate) use close::OverlayCloseHandle;
-pub(crate) use overlay::{Overlay, OverlayBackdrop, OverlayContent, OverlayPrimitive, PortalEntry};
+pub(crate) use overlay::{Overlay, OverlayContent, OverlayPrimitive, PortalEntry};

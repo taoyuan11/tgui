@@ -23,6 +23,7 @@ pub(crate) use windows::{
     prepare_platform_notifications,
 };
 
+#[cfg(target_os = "windows")]
 fn validate_app_id(app_id: Option<&str>) -> Result<&str, NotificationError> {
     app_id
         .filter(|value| !value.trim().is_empty())
@@ -34,14 +35,7 @@ fn validate_app_id(app_id: Option<&str>) -> Result<&str, NotificationError> {
         })
 }
 
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn prepare_platform_notifications(
-    _app_id: Option<&str>,
-    _display_name: &str,
-) -> Result<(), NotificationError> {
-    Ok(())
-}
-
+#[cfg(any(target_os = "windows", test))]
 pub(crate) fn sanitize_windows_shortcut_file_name(app_id: &str) -> String {
     let sanitized: String = app_id
         .chars()

@@ -139,11 +139,12 @@ pub use list::{
 pub use menu::{
     ChordKey, ContextMenu, KeyChord, Menu, MenuBar, MenuBarEntry, MenuIcon, MenuItem, MenuItemKind,
 };
-pub(crate) use menu::{ContextMenuDescriptor, MenuDescriptor, MenuItemState};
+pub(crate) use menu::{ContextMenuDescriptor, MenuItemState};
 pub use modal::{Modal, ModalAction};
 pub use number_input::{
     NumberInput, NumberInputChange, NumberInputChangeTrigger, NumberInputStyle,
 };
+#[allow(unused_imports)] // Public overlay aliases are part of the widgets API surface.
 pub use overlay::{
     Alignment as OverlayAlignment, Anchor as OverlayAnchor, AnchorKey as OverlayAnchorKey,
     AnchorSource as OverlayAnchorSource, FlipPolicy as OverlayFlipPolicy, OverlayId, OverlayLayer,

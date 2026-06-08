@@ -60,16 +60,12 @@ impl<VM> ResolvedElement<VM> {
                 style: style.clone(),
             },
             ResolvedWidgetKind::ProgressBar {
-                value,
-                indeterminate,
                 show_label,
                 label,
                 style,
                 ..
             } => MeasureContext::ProgressBar {
                 id: self.id,
-                value: value.clone(),
-                indeterminate: indeterminate.clone(),
                 show_label: *show_label,
                 label: label.clone(),
                 style: style.clone(),
@@ -77,15 +73,11 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Spinner {
                 style,
                 size_override,
-                thickness_override,
-                track_override,
                 ..
             } => MeasureContext::Spinner {
                 id: self.id,
                 style: style.clone(),
                 size_override: size_override.clone(),
-                thickness_override: thickness_override.clone(),
-                track_override: *track_override,
             },
             ResolvedWidgetKind::Divider {
                 orientation,
@@ -210,8 +202,6 @@ impl<VM> ResolvedElement<VM> {
         Ok(LayoutNode {
             node,
             children: child_layouts,
-            absolute_offset: None,
-            absolute_size: None,
         })
     }
 

@@ -337,6 +337,10 @@ struct ScopeChildVm {
     selected_key: String,
     selected_value: String,
     canvas_hits: usize,
+    #[allow(
+        dead_code,
+        reason = "shared test fixture covers context-scoped commands in submodules"
+    )]
     context_hits: usize,
 }
 
@@ -344,6 +348,10 @@ struct ScopeChildVm {
 struct ScopeRootVm {
     child: ScopeChildVm,
     other: ScopeChildVm,
+    #[allow(
+        dead_code,
+        reason = "shared test fixture asserts command scoping stays off the root"
+    )]
     root_count: i32,
 }
 

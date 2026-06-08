@@ -53,6 +53,7 @@ impl<VM> Overlay<VM> {
         self
     }
 
+    #[allow(dead_code)] // Reserved for overlays that offset along the cross axis.
     pub(crate) fn cross_offset(mut self, cross_offset: impl Into<crate::ui::unit::Dp>) -> Self {
         self.options.cross_offset = cross_offset.into();
         self
@@ -98,6 +99,7 @@ impl<VM> Overlay<VM> {
         self
     }
 
+    #[allow(dead_code)] // Reserved for scrim/blur overlays.
     pub(crate) fn backdrop(mut self, backdrop: OverlayBackdrop) -> Self {
         self.backdrop = Some(backdrop);
         self
@@ -226,11 +228,14 @@ pub(crate) enum OverlayPrimitive {
     Texture(TexturePrimitive),
     Mesh(MeshPrimitive),
     BackdropBlur(BackdropBlurPrimitive),
+    #[allow(dead_code)] // Reserved for overlay-local render commands.
     Command(RenderCommand),
 }
 
 #[derive(Clone, Copy)]
 pub(crate) enum OverlayBackdrop {
+    #[allow(dead_code)] // Reserved for modal-style scrims.
     Scrim { primitive: RenderPrimitive },
+    #[allow(dead_code)] // Reserved for backdrop blur overlays.
     Blur { primitive: BackdropBlurPrimitive },
 }

@@ -309,7 +309,6 @@ pub(crate) fn emit_menu_layer<VM>(
                 }
                 row_metrics.push(RowMetrics::Item {
                     label,
-                    text_w,
                     text_h,
                     height: cell_h,
                     shortcut: shortcut_text,
@@ -397,7 +396,6 @@ pub(crate) fn emit_menu_layer<VM>(
             }
             RowMetrics::Item {
                 label,
-                text_w: _,
                 text_h,
                 height,
                 shortcut,
@@ -736,7 +734,6 @@ enum RowMetrics {
     },
     Item {
         label: String,
-        text_w: Dp,
         text_h: Dp,
         height: Dp,
         shortcut: Option<String>,

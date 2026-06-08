@@ -414,8 +414,6 @@ fn measure_node_tracked(
             )
         }
         Some(MeasureContext::ProgressBar {
-            value: _,
-            indeterminate: _,
             show_label,
             label,
             style,

@@ -6,8 +6,6 @@
 //! Modal 打开后按 Tab 第一次落到主按钮，按 Enter 触发其 `on_click`（依赖
 //! `DefaultActivation::EnterAndSpace`）。
 
-use std::sync::Arc;
-
 use crate::foundation::view_model::Command;
 use crate::ui::layout::Value;
 
@@ -62,23 +60,5 @@ impl<VM> ModalAction<VM> {
     pub fn disable(mut self, disabled: impl Into<Value<bool>>) -> Self {
         self.disabled = disabled.into();
         self
-    }
-}
-
-impl<VM> ModalAction<VM> {
-    /// 把 `Command<VM>` scope 到父 view model。配合 `Modal::scope` / 嵌套使用。
-    pub(crate) fn scope<RootVm: 'static>(
-        self,
-        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
-    ) -> ModalAction<RootVm>
-    where
-        VM: 'static,
-    {
-        ModalAction {
-            label: self.label,
-            on_click: self.on_click.map(|cmd| cmd.scope(selector)),
-            primary: self.primary,
-            disabled: self.disabled,
-        }
     }
 }

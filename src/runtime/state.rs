@@ -296,10 +296,8 @@ pub(super) struct ActiveGestureSession<VM> {
     pub(super) finger_id: Option<FingerId>,
     pub(super) start_position: Point,
     pub(super) current_position: Point,
-    pub(super) pressed_at: Instant,
     pub(super) long_press_deadline: Option<Instant>,
     pub(super) edge_candidate: Option<GestureEdge>,
-    pub(super) scroll_can_x: bool,
     pub(super) scroll_can_y: bool,
     pub(super) axis_lock: Option<GestureAxisLock>,
     pub(super) active_kind: Option<GestureRuntimeKind>,
@@ -376,7 +374,6 @@ impl<VM> ActiveGestureSession<VM> {
 
 pub(super) struct ActivePinchSession<VM> {
     pub(super) widget_id: WidgetId,
-    pub(super) target_id: HoverTargetId,
     pub(super) recognizer: GestureRecognizer<VM>,
     pub(super) source: GestureSource,
     pub(super) finger_ids: [FingerId; 2],

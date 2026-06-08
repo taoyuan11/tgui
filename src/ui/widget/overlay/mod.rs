@@ -9,13 +9,4 @@ pub(crate) mod collect {
     pub(crate) use crate::runtime::overlay::collect::emit_overlay;
 }
 
-pub(crate) mod overlay {
-    pub(crate) use crate::runtime::overlay::{
-        Overlay, OverlayBackdrop, OverlayContent, OverlayPrimitive,
-    };
-}
-
-pub(crate) use crate::runtime::overlay::OverlayCloseHandle;
-pub(crate) use crate::runtime::overlay::{
-    Overlay, OverlayBackdrop, OverlayContent, OverlayPrimitive,
-};
+pub(crate) use crate::runtime::overlay::{Overlay, OverlayContent, OverlayPrimitive};

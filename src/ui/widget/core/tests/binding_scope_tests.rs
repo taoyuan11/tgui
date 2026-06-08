@@ -188,26 +188,17 @@ fn hit_testing_tracks_currently_resolved_children() {
 #[derive(Default)]
 struct ScopeChildVm {
     count: i32,
-    checked: bool,
-    selected_key: String,
-    selected_value: String,
-    canvas_hits: usize,
     context_hits: usize,
 }
 
 #[derive(Default)]
 struct ScopeRootVm {
     child: ScopeChildVm,
-    other: ScopeChildVm,
     root_count: i32,
 }
 
 fn scope_child(root: &mut ScopeRootVm) -> &mut ScopeChildVm {
     &mut root.child
-}
-
-fn scope_other(root: &mut ScopeRootVm) -> &mut ScopeChildVm {
-    &mut root.other
 }
 
 #[test]

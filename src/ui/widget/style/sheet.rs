@@ -444,6 +444,7 @@ macro_rules! style_sheet_methods {
                     self.$method(StyleSelector::style_id(style_id), mutator)
                 }
 
+                #[allow(dead_code)] // Generated hooks are used according to enabled widget features.
                 pub(crate) fn $apply_method(
                     &self,
                     style: &mut $style,
@@ -457,6 +458,7 @@ macro_rules! style_sheet_methods {
                     }
                 }
 
+                #[allow(dead_code)] // Generated hooks are used according to enabled widget features.
                 pub(crate) fn $apply_state_method(
                     &self,
                     style: &mut $style,

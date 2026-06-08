@@ -26,6 +26,7 @@ use crate::ui::widget::{
 use super::BoundRuntimeHandler;
 
 /// 单个 menu 的可点选项快照。
+#[allow(dead_code)] // Kept for menu keyboard navigation hit-rect dispatch.
 pub(super) struct MenuKeyboardItem<VM> {
     pub option_index: usize,
     pub rect: Rect,
@@ -194,6 +195,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     /// 扫描当前 cached scene 拿出某 menu 的所有可点选 items（按 option_index 升序）。
     /// 仅返回非 Disabled 的项；Separator / Disabled item 会被自动过滤掉。
+    #[allow(dead_code)] // Kept for menu keyboard navigation hit-rect dispatch.
     pub(super) fn menu_keyboard_items(&self, menu_id: WidgetId) -> Vec<MenuKeyboardItem<VM>> {
         let Some(cached) = self.cached_scene.as_ref() else {
             return Vec::new();

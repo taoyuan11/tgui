@@ -136,6 +136,7 @@ pub(super) fn apply_local_style_with_state<T: Clone>(
         .unwrap_or(base)
 }
 
+#[cfg(test)]
 pub(super) fn resolved_button_style(
     style: Option<&super::super::style::StyleResolver<WidgetButtonStyle>>,
     context: &StyleContext<'_>,
@@ -159,16 +160,6 @@ pub(super) fn button_style_base(
     base
 }
 
-pub(super) fn resolved_checkbox_style(
-    style: Option<&super::super::style::StyleResolver<WidgetCheckboxStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> WidgetCheckboxStyle {
-    let base = checkbox_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
-}
-
 pub(super) fn checkbox_style_base(
     context: &StyleContext<'_>,
     style_sheet: &crate::ui::widget::StyleSheet,
@@ -178,16 +169,6 @@ pub(super) fn checkbox_style_base(
     context.theme.components.checkbox.apply(&mut base, context);
     style_sheet.apply_checkbox(&mut base, context, visual);
     base
-}
-
-pub(super) fn resolved_radio_style(
-    style: Option<&super::super::style::StyleResolver<WidgetRadioStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> WidgetRadioStyle {
-    let base = radio_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn radio_style_base(
@@ -201,16 +182,6 @@ pub(super) fn radio_style_base(
     base
 }
 
-pub(super) fn resolved_switch_style(
-    style: Option<&super::super::style::StyleResolver<super::super::style::SwitchStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> super::super::style::SwitchStyle {
-    let base = switch_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
-}
-
 pub(super) fn switch_style_base(
     context: &StyleContext<'_>,
     style_sheet: &crate::ui::widget::StyleSheet,
@@ -220,16 +191,6 @@ pub(super) fn switch_style_base(
     context.theme.components.switch.apply(&mut base, context);
     style_sheet.apply_switch(&mut base, context, visual);
     base
-}
-
-pub(super) fn resolved_select_style(
-    style: Option<&super::super::style::StyleResolver<WidgetSelectStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> WidgetSelectStyle {
-    let base = select_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn select_style_base(
@@ -243,16 +204,6 @@ pub(super) fn select_style_base(
     base
 }
 
-pub(super) fn resolved_slider_style(
-    style: Option<&super::super::style::StyleResolver<WidgetSliderStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> WidgetSliderStyle {
-    let base = slider_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
-}
-
 pub(super) fn slider_style_base(
     context: &StyleContext<'_>,
     style_sheet: &crate::ui::widget::StyleSheet,
@@ -262,16 +213,6 @@ pub(super) fn slider_style_base(
     context.theme.components.slider.apply(&mut base, context);
     style_sheet.apply_slider(&mut base, context, visual);
     base
-}
-
-pub(super) fn resolved_progress_bar_style(
-    style: Option<&super::super::style::StyleResolver<WidgetProgressBarStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> WidgetProgressBarStyle {
-    let base = progress_bar_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn progress_bar_style_base(
@@ -289,16 +230,6 @@ pub(super) fn progress_bar_style_base(
     base
 }
 
-pub(super) fn resolved_spinner_style(
-    style: Option<&super::super::style::StyleResolver<WidgetSpinnerStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> WidgetSpinnerStyle {
-    let base = spinner_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
-}
-
 pub(super) fn spinner_style_base(
     context: &StyleContext<'_>,
     style_sheet: &crate::ui::widget::StyleSheet,
@@ -308,16 +239,6 @@ pub(super) fn spinner_style_base(
     context.theme.components.spinner.apply(&mut base, context);
     style_sheet.apply_spinner(&mut base, context, visual);
     base
-}
-
-pub(super) fn resolved_divider_style(
-    style: Option<&super::super::style::StyleResolver<WidgetDividerStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> WidgetDividerStyle {
-    let base = divider_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn divider_style_base(
@@ -331,16 +252,6 @@ pub(super) fn divider_style_base(
     base
 }
 
-pub(super) fn resolved_input_style(
-    style: Option<&super::super::style::StyleResolver<WidgetInputStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> WidgetInputStyle {
-    let base = input_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
-}
-
 pub(super) fn input_style_base(
     context: &StyleContext<'_>,
     style_sheet: &crate::ui::widget::StyleSheet,
@@ -350,16 +261,6 @@ pub(super) fn input_style_base(
     context.theme.components.input.apply(&mut base, context);
     style_sheet.apply_input(&mut base, context, visual);
     base
-}
-
-pub(super) fn resolved_textarea_style(
-    style: Option<&super::super::style::StyleResolver<WidgetTextareaStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> WidgetTextareaStyle {
-    let base = textarea_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn textarea_style_base(
@@ -391,16 +292,6 @@ pub(super) fn input_style_from_textarea_style(style: WidgetTextareaStyle) -> Wid
     }
 }
 
-pub(super) fn resolved_container_style(
-    style: Option<&super::super::style::StyleResolver<super::super::style::ContainerStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> super::super::style::ContainerStyle {
-    let base = container_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
-}
-
 pub(super) fn container_style_base(
     context: &StyleContext<'_>,
     style_sheet: &crate::ui::widget::StyleSheet,
@@ -410,16 +301,6 @@ pub(super) fn container_style_base(
     context.theme.components.container.apply(&mut base, context);
     style_sheet.apply_container(&mut base, context, visual);
     base
-}
-
-pub(super) fn resolved_image_style(
-    style: Option<&super::super::style::StyleResolver<super::super::style::ImageStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> super::super::style::ImageStyle {
-    let base = image_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 pub(super) fn image_style_base(
@@ -433,16 +314,6 @@ pub(super) fn image_style_base(
     base
 }
 
-pub(super) fn resolved_canvas_style(
-    style: Option<&super::super::style::StyleResolver<super::super::style::CanvasStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> super::super::style::CanvasStyle {
-    let base = canvas_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
-}
-
 pub(super) fn canvas_style_base(
     context: &StyleContext<'_>,
     style_sheet: &crate::ui::widget::StyleSheet,
@@ -454,16 +325,6 @@ pub(super) fn canvas_style_base(
     base
 }
 
-pub(super) fn resolved_text_widget_style(
-    style: Option<&super::super::style::StyleResolver<TextWidgetStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> TextWidgetStyle {
-    let base = text_widget_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
-}
-
 pub(super) fn text_widget_style_base(
     context: &StyleContext<'_>,
     style_sheet: &crate::ui::widget::StyleSheet,
@@ -473,17 +334,6 @@ pub(super) fn text_widget_style_base(
     context.theme.components.text.apply(&mut base, context);
     style_sheet.apply_text(&mut base, context, visual);
     base
-}
-
-#[cfg(feature = "video")]
-pub(super) fn resolved_video_surface_style(
-    style: Option<&super::super::style::StyleResolver<WidgetVideoSurfaceStyle>>,
-    context: &StyleContext<'_>,
-    style_sheet: &crate::ui::widget::StyleSheet,
-    visual: &VisualStyle,
-) -> WidgetVideoSurfaceStyle {
-    let base = video_surface_style_base(context, style_sheet, visual);
-    apply_local_style(style, base, context, style_sheet, visual)
 }
 
 #[cfg(feature = "video")]

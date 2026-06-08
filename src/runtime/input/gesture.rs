@@ -52,7 +52,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let edge_candidate = self.detect_gesture_edge(cursor_position, viewport, &recognizer);
-        let (scroll_can_x, scroll_can_y) = self.scroll_region_axes_at(cursor_position);
+        let (_, scroll_can_y) = self.scroll_region_axes_at(cursor_position);
         let long_press_deadline = recognizer
             .on_long_press
             .as_ref()
@@ -65,10 +65,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             finger_id: gesture_finger,
             start_position: cursor_position,
             current_position: cursor_position,
-            pressed_at: now,
             long_press_deadline,
             edge_candidate,
-            scroll_can_x,
             scroll_can_y,
             axis_lock: None,
             active_kind: None,
@@ -469,7 +467,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.end_touch_scroll_drag();
         self.active_pinch = Some(ActivePinchSession {
             widget_id: session.widget_id,
-            target_id: session.target_id,
             recognizer: session.recognizer,
             source: GestureSource::Touch,
             finger_ids: [first_finger_id, second_finger_id],

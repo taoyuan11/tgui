@@ -246,11 +246,27 @@ pub(crate) struct VirtualItemPlacement {
 
 #[derive(Clone, Debug)]
 pub(crate) struct VirtualWindowPlan {
+    #[allow(
+        dead_code,
+        reason = "retained for lifecycle snapshots and debug tooling"
+    )]
     pub(crate) total_items: usize,
+    #[allow(
+        dead_code,
+        reason = "retained for lifecycle snapshots and debug tooling"
+    )]
     pub(crate) visible_range: Range<usize>,
     pub(crate) placements: Vec<VirtualItemPlacement>,
     pub(crate) total_main_extent: Dp,
+    #[allow(
+        dead_code,
+        reason = "retained for lifecycle snapshots and debug tooling"
+    )]
     pub(crate) viewport_hint: VirtualViewportHint,
+    #[allow(
+        dead_code,
+        reason = "retained for lifecycle snapshots and debug tooling"
+    )]
     pub(crate) bootstrap: bool,
 }
 

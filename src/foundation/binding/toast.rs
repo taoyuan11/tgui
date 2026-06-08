@@ -53,6 +53,7 @@ impl<VM> ToastAction<VM> {
         }
     }
 
+    #[allow(dead_code)] // Preserved for nested ViewModel toast actions.
     pub(crate) fn scope<RootVm: 'static>(
         self,
         selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
@@ -134,6 +135,7 @@ impl<VM> Toast<VM> {
         self
     }
 
+    #[allow(dead_code)] // Preserved for nested ViewModel toast queues.
     pub(crate) fn scope<RootVm: 'static>(
         self,
         selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,

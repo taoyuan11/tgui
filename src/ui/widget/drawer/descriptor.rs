@@ -74,17 +74,6 @@ impl<VM> DrawerDescriptor<VM> {
         }
     }
 
-    /// 按当前主题解析最终样式。
-    pub(crate) fn resolved_style(&self, context: &StyleContext<'_>) -> DrawerStyle {
-        let style_sheet = StyleSheet::default();
-        self.resolved_style_with_sheet(
-            context,
-            &style_sheet,
-            &VisualStyle::default(),
-            WidgetState::default(),
-        )
-    }
-
     pub(crate) fn resolved_style_with_sheet(
         &self,
         context: &StyleContext<'_>,
