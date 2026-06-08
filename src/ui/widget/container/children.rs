@@ -82,6 +82,8 @@ where
 {
     #[allow(private_interfaces)]
     fn into_child_source(self) -> ChildSource<VM> {
-        ChildSource::Dynamic(std::sync::Arc::new(move || self.get().into_elements()))
+        ChildSource::Dynamic(std::sync::Arc::new(move || {
+            self.get_uncached().into_elements()
+        }))
     }
 }

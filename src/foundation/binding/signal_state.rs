@@ -239,6 +239,18 @@ impl<T: Clone> Signal<T> {
         value
     }
 
+    pub(crate) fn get_uncached(&self) -> T {
+        record_dependency_read(self.dependency);
+        let value = self.reader.read();
+        let mut cache = self.cache.lock();
+        cache.revision = self.invalidation.revision();
+        cache.dependency_revision = self
+            .dependency
+            .and_then(|dependency| self.invalidation.dependency_revision(dependency));
+        cache.value = Some(value.clone());
+        value
+    }
+
     /// 将信号标记为可动画属性。
     ///
     /// 参数:

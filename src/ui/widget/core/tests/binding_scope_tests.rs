@@ -56,6 +56,71 @@ fn binding_driven_children_relayout_when_child_count_changes() {
 }
 
 #[test]
+fn mapped_dynamic_children_recompute_when_nested_state_changes() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let context = test_context();
+    let page = context.state("p3".to_string());
+    let label = context.state("before".to_string());
+    let label_for_page = label.clone();
+    let tree = WidgetTree::new(
+        Stack::<()>::new().child(
+            page.signal()
+                .map(move |_page| -> Element<()> { Text::new(label_for_page.get()).into() }),
+        ),
+    );
+
+    let mut animations = AnimationEngine::default();
+    let initial = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let texts = initial
+        .primitives
+        .texts
+        .iter()
+        .map(|text| text.content.as_ref())
+        .collect::<Vec<_>>();
+    assert!(texts.contains(&"before"));
+
+    label.set("after".to_string());
+    let updated = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let texts = updated
+        .primitives
+        .texts
+        .iter()
+        .map(|text| text.content.as_ref())
+        .collect::<Vec<_>>();
+    assert!(texts.contains(&"after"));
+}
+
+#[test]
 fn hit_testing_tracks_currently_resolved_children() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
