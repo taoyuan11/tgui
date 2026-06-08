@@ -197,7 +197,12 @@ fn opaque_signal_dirty_update_falls_back_to_full_scene_invalidation() {
     invalidation.mark_dirty();
     handler.request_redraw_if_dirty(Instant::now());
 
-    assert!(handler.cached_scene.is_none());
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("global invalidation should retain cache shell");
+    assert!(!cached.layout_valid);
+    assert!(!cached.computed_valid);
 }
 
 #[test]

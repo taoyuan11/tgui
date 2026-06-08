@@ -151,6 +151,11 @@ fn changing_selected_state_moves_active_tab_indicator() {
 
     selected.set("three".to_string());
     handler.request_redraw_if_dirty(Instant::now());
+    let event_loop = TestEventLoop;
+    handler.drive_animations(
+        &event_loop,
+        Instant::now() + Duration::from_millis(handler.theme.motion.fast_ms.saturating_add(20)),
+    );
 
     assert_eq!(active_tab_key(&mut handler).as_deref(), Some("three"));
 }

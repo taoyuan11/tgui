@@ -288,11 +288,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             for patch in patches {
                 let new_ids: HashSet<_> = patch.cache.chunks.keys().copied().collect();
                 for old_id in &patch.old_ids {
+                    cached.lifecycle_states.remove(old_id);
                     if !new_ids.contains(old_id) {
                         cached.scene_chunks.remove(old_id);
                         cached.scene_chunk_parts.remove(old_id);
                         cached.visual_contexts.remove(old_id);
-                        cached.lifecycle_states.remove(old_id);
                     }
                 }
                 cached.scene_chunks.extend(patch.cache.chunks);

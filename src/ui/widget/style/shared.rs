@@ -319,10 +319,13 @@ mod tests {
 
         let style = ContainerStyle::default_for_theme(&theme);
 
-        assert_eq!(style.scrollbar.track_color, Some(theme.colors.surface_low));
+        assert_eq!(
+            style.scrollbar.track_color,
+            Some(theme.colors.surface_low.with_alpha_factor(0.72))
+        );
         assert_eq!(
             style.scrollbar.thumb_color,
-            Some(theme.colors.outline.with_alpha_factor(0.72))
+            Some(theme.colors.outline.with_alpha_factor(0.64))
         );
         assert_eq!(style.scrollbar.radius, Some(theme.radius.full));
     }
