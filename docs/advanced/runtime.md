@@ -26,6 +26,12 @@
 
 文本输入相关逻辑集中在 `TextController`、共享 widget 基础设施和 runtime input 模块。修改输入、选择、IME、滚动或 caret 行为时，需要同时考虑 UTF-8 边界、选区、横向滚动和 invalidation。
 
+## Overlay、Portal 与手势
+
+浮层定位由 runtime overlay 引擎统一处理，`Tooltip`、`Popover`、菜单、picker、combobox 和 `Portal` 都会经过同一套 placement / flip / close / focus 路径。`Portal` 可以把内容投递到当前窗口或其它运行时管理窗口的 overlay layer。
+
+手势识别通过 `GestureRecognizer` 附着到 `Element`，运行时会把长按、双击/双触、滑动、边缘滑动和双指缩放转成 `ValueCommand` 事件。详见[交互与 Portal](/features/interaction-portal)。
+
 ## 缓存与失效
 
 状态写入、媒体加载完成、主题变化、布局相关属性变化和动画推进都会触发不同粒度的失效。共享核心模块会尽量复用 layout、scene 和资源缓存，避免不必要的整树重建。

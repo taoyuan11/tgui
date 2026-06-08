@@ -4,15 +4,16 @@
 
 ## 基础组件
 
-- 文本与媒体：`Text`、`Image`、`Canvas`。
-- 输入控件：`Input`、`Textarea`、`Checkbox`、`Radio`、`Select`、`Slider`、`Switch`、`Calendar`、`DatePicker`、`TimePicker`、`NumberInput`、`ColorPicker`、`Upload`。
-- 反馈控件：`ProgressBar`、`Spinner`、toast / snackbar。
-- 结构控件：`Tabs` / `TabView`、`List`、`DataGrid` / `Table`、`Tree`。
+- 文本与媒体：`Text`、`RichText`、`Image`、`Icon`、`Canvas`、`Carousel`。
+- 输入控件：`Input`、`Textarea`、`Checkbox`、`Radio` / `RadioGroup`、`Select`、`Combobox` / `AutoComplete`、`Slider`、`Switch`、`Rating`、`Calendar`、`DatePicker`、`TimePicker`、`NumberInput`、`ColorPicker`、`Upload`。
+- 反馈控件：`ProgressBar`、`Spinner`、`Badge`、`Skeleton`、toast / snackbar。
+- 结构与导航控件：`Tabs` / `TabView`、`Breadcrumb`、`Pagination`、`Card`、`Collapse` / `Accordion`、`Splitter` / `ResizablePanels`、`List`、`DataGrid` / `Table`、`Tree`。
 - 浮层控件：`Tooltip`、`Popover`、`Menu`、`ContextMenu`、`MenuBar`、`Modal`、`Drawer`。
-- P3 体验组件：`Badge`、`Avatar` / `AvatarGroup`、`Skeleton`、`Collapse` / `Accordion`、`Splitter` / `ResizablePanels`、`Breadcrumb`、`Pagination`、`Card`、`Rating`、`Icon`、`RichText`、`Carousel`、`AutoComplete` / `Combobox`。
+- 交互与 Portal：`GestureRecognizer`、`Portal`、`LayerStack`、`PortalAnchor`、`OverlayPlacement`。
+- 头像与标识：`Avatar` / `AvatarGroup`。
 - 音视频：`Audio`、`VideoSurface`，需要启用对应 feature。
 
-增强表单控件见[表单增强控件](/features/input-controls)，P3 组件见[P3 体验组件](/features/p3-components)。
+增强表单控件见[表单增强控件](/features/input-controls)，高级交互见[交互与 Portal](/features/interaction-portal)。
 
 ## 常见 builder 能力
 
@@ -24,7 +25,7 @@
 
 ## 浮层
 
-运行时提供统一的 overlay anchoring 引擎。`Tooltip`、`Popover`、`Select`、菜单组件、`DatePicker`、`TimePicker`、`ColorPicker` 和 `Combobox` 共享锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力。
+运行时提供统一的 overlay anchoring 引擎。`Tooltip`、`Popover`、`Select`、菜单组件、`DatePicker`、`TimePicker`、`ColorPicker`、`Combobox` 和 `Portal` 共享锚点定位、自动翻转、脱离父级裁剪、关闭与回焦能力。
 
 ## 数据密集界面
 
