@@ -33,7 +33,7 @@ pub(crate) fn push_media_texture_or_placeholder<VM>(
             quad: None,
             uv_rect: None,
             corner_radius: content_corner_radius,
-            opacity: 1.0,
+            opacity: opacity.clamp(0.0, 1.0),
             clip_rect,
             clip_mask,
         });

@@ -231,7 +231,7 @@ fn role_for_widget<VM>(resolved: &ResolvedElement<VM>) -> Role {
         | ResolvedWidgetKind::Virtual { .. }
         | ResolvedWidgetKind::Portal { .. } => Role::GenericContainer,
         ResolvedWidgetKind::Text { .. } => Role::TextRun,
-        ResolvedWidgetKind::Image { .. } => Role::Image,
+        ResolvedWidgetKind::Image { .. } | ResolvedWidgetKind::Icon { .. } => Role::Image,
         ResolvedWidgetKind::Canvas { .. } => Role::Canvas,
         ResolvedWidgetKind::Button { .. } => Role::Button,
         ResolvedWidgetKind::Checkbox { .. } => Role::CheckBox,

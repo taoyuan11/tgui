@@ -117,19 +117,24 @@ fn checked_checkbox_renders_checked_background_and_checkmark() {
         .shapes
         .iter()
         .any(|shape| shape.color == checked_style.background));
+    let box_fill = rendered
+        .primitives
+        .shapes
+        .iter()
+        .find(|shape| shape.stroke_width == 0.0 && shape.color == checked_style.background)
+        .expect("checked checkbox should render checked fill");
     let checkmark = rendered
         .primitives
-        .texts
+        .textures
         .iter()
-        .find(|text| text.content.as_ref() == super::CHECKBOX_CHECKMARK_ICON)
+        .find(|texture| texture.opacity > 0.0)
         .expect("checked checkbox should render checkmark icon");
-    assert_eq!(checkmark.color, Color::WHITE);
-    assert!(checkmark.force_color);
-    assert!(checkmark.font_family.is_some());
     let checkmark_center_x = checkmark.frame.x + checkmark.frame.width / 2.0;
     let checkmark_center_y = checkmark.frame.y + checkmark.frame.height / 2.0;
-    assert!((checkmark_center_x - Dp::new(8.0)).abs().get() < 0.01);
-    assert!((checkmark_center_y - Dp::new(21.0)).abs().get() < 0.01);
+    let box_center_x = box_fill.rect.x + box_fill.rect.width / 2.0;
+    let box_center_y = box_fill.rect.y + box_fill.rect.height / 2.0;
+    assert!((checkmark_center_x - box_center_x).abs().get() < 0.01);
+    assert!((checkmark_center_y - box_center_y).abs().get() < 0.01);
 }
 
 #[test]
@@ -313,12 +318,11 @@ fn checkbox_checked_content_uses_default_transition() {
         }
         let checkmark_alpha = rendered
             .primitives
-            .texts
+            .textures
             .iter()
-            .find(|text| text.content.as_ref() == super::CHECKBOX_CHECKMARK_ICON)
-            .map(|text| text.color.a)
-            .unwrap_or(0);
-        if fill.color == checked_style.background && checkmark_alpha == checked_style.checkmark.a {
+            .map(|texture| texture.opacity)
+            .fold(0.0, f32::max);
+        if fill.color == checked_style.background && checkmark_alpha >= 1.0 {
             settled_checked = true;
             break;
         }
@@ -376,9 +380,11 @@ fn checkbox_checked_content_uses_default_transition() {
             .iter()
             .find(|shape| shape.stroke_width == 0.0)
             .expect("checkbox fill should keep rendering while unchecking");
-        let has_checkmark = rendered.primitives.texts.iter().any(|text| {
-            text.content.as_ref() == super::CHECKBOX_CHECKMARK_ICON && text.color.a > 0
-        });
+        let has_checkmark = rendered
+            .primitives
+            .textures
+            .iter()
+            .any(|texture| texture.opacity > 0.0);
         if fill.color == unchecked_style.background && !has_checkmark {
             settled_unchecked = true;
             break;
@@ -448,11 +454,11 @@ fn checkbox_checked_content_respects_reduced_motion() {
     assert_eq!(checked_fill.color, checked_style.background);
     let checkmark = checked
         .primitives
-        .texts
+        .textures
         .iter()
-        .find(|text| text.content.as_ref() == super::CHECKBOX_CHECKMARK_ICON)
+        .find(|texture| texture.opacity > 0.0)
         .expect("checked checkbox should render checkmark immediately");
-    assert_eq!(checkmark.color, checked_style.checkmark);
+    assert_eq!(checkmark.opacity, 1.0);
     assert!(!animations.has_active_animations());
 
     let unchecked = unchecked_tree.render_output_with_widget_state(
@@ -482,9 +488,7 @@ fn checkbox_checked_content_respects_reduced_motion() {
         .find(|shape| shape.stroke_width == 0.0)
         .expect("unchecked checkbox fill should render immediately");
     assert_eq!(unchecked_fill.color, unchecked_style.background);
-    assert!(unchecked.primitives.texts.iter().all(|text| {
-        text.content.as_ref() != super::CHECKBOX_CHECKMARK_ICON || text.color.a == 0
-    }));
+    assert!(unchecked.primitives.textures.is_empty());
     assert!(!animations.has_active_animations());
 }
 
@@ -543,11 +547,7 @@ fn focused_unchecked_checkbox_keeps_default_box_colors() {
         .any(|shape| shape.stroke_width == theme.focus_ring.width.get()
             && shape.color == theme.focus_ring.color
             && shape.rect.width > dp(16.0)));
-    assert!(rendered
-        .primitives
-        .texts
-        .iter()
-        .all(|text| text.content.as_ref() != super::CHECKBOX_CHECKMARK_ICON));
+    assert!(rendered.primitives.textures.is_empty());
 }
 
 #[test]

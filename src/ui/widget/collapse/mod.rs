@@ -2,19 +2,21 @@ use std::time::Duration;
 
 use crate::animation::Transition;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::text::font::ICON_FONT_FAMILY;
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Insets, LayoutStyle, Length, Overflow, Value};
 use crate::ui::theme::Theme;
-use crate::ui::unit::{dp, sp, Dp};
+use crate::ui::unit::{dp, Dp};
 
 use super::common::VisualStyle;
 use super::core::Element;
+use super::icon::SvgIconId;
 use super::p3_support::{
     impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
 };
-use super::style::{CollapseStyle, ContainerStyle, StyleResolver, StyleSheet, TextWidgetStyle};
-use super::{BuiltinIcon, CursorStyle, Flex, Stack, Text, WidgetKey};
+use super::style::{
+    CollapseStyle, ContainerStyle, IconStyle, StyleResolver, StyleSheet, TextWidgetStyle,
+};
+use super::{CursorStyle, Flex, Icon, Stack, Text, WidgetKey};
 
 const COLLAPSE_HEADER_MIN_HEIGHT: Dp = dp(40.0);
 const COLLAPSE_ICON_SIZE: Dp = dp(20.0);
@@ -86,12 +88,12 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
         let on_change = collapse.on_change.clone();
         let header_style = collapse.style.clone();
         let header_identity = collapse.visual.clone();
-        let icon_name = if expanded {
-            BuiltinIcon::ChevronUp.name()
+        let icon_source = if expanded {
+            SvgIconId::ChevronUp
         } else {
-            BuiltinIcon::ChevronDown.name()
+            SvgIconId::ChevronDown
         };
-        let header_icon = Text::new(icon_name)
+        let header_icon = Icon::internal(icon_source)
             .size(COLLAPSE_ICON_SIZE, COLLAPSE_ICON_SIZE)
             .style_full_with_style_sheet({
                 let header_style = header_style.clone();
@@ -103,12 +105,10 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
                         visual,
                         state,
                     );
-                    let mut text = TextWidgetStyle::default_for_theme(context.theme);
-                    text.color = resolved.header_foreground.clone();
-                    text.typography.font_family = Some(ICON_FONT_FAMILY.to_string());
-                    text.typography.size = sp(COLLAPSE_ICON_SIZE.get());
-                    text.typography.line_height = Some(sp(COLLAPSE_ICON_SIZE.get()));
-                    text
+                    let mut icon = IconStyle::default_for_theme(context.theme);
+                    icon.color = resolved.header_foreground.clone();
+                    icon.size = COLLAPSE_ICON_SIZE;
+                    icon
                 }
             });
         let header = Flex::horizontal()

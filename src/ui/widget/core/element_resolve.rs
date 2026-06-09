@@ -397,6 +397,7 @@ impl<VM: 'static> Element<VM> {
                     },
                 }
             }
+            WidgetKind::Icon { icon } => ResolvedWidgetKind::Icon { icon: icon.clone() },
             WidgetKind::Canvas {
                 scene,
                 item_interactions,

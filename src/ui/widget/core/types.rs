@@ -160,6 +160,9 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         image: image::Image,
         runtime_style: ResolvedRuntimeSurfaceStyle<ImageStyle>,
     },
+    Icon {
+        icon: crate::ui::widget::icon::BuiltinSvgIcon,
+    },
     Canvas {
         scene: Value<CanvasScene>,
         item_interactions: common::CanvasItemInteractionHandlers<VM>,
@@ -477,6 +480,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 image: image.clone(),
                 runtime_style: runtime_style.clone(),
             },
+            Self::Icon { icon } => Self::Icon { icon: icon.clone() },
             Self::Canvas {
                 scene,
                 item_interactions,

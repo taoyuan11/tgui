@@ -1,6 +1,4 @@
 use super::super::*;
-use super::centered_text_frame;
-use std::sync::Arc;
 
 pub(crate) fn measure_select_content(
     selected_label: Option<&str>,
@@ -51,6 +49,7 @@ pub(crate) fn push_select_primitives(
     select_style: &ResolvedSelectStyle,
     font_manager: &FontManager,
     theme: &Theme,
+    media: &MediaManager,
     units: UnitContext,
     animations: &mut AnimationEngine,
     now: std::time::Instant,
@@ -127,7 +126,7 @@ pub(crate) fn push_select_primitives(
             arrow_width.min(frame.width),
             frame.height,
         ),
-        font_manager,
+        media,
         select_style,
         units,
         animations,
@@ -246,7 +245,7 @@ pub(crate) fn push_select_text(
 
 pub(crate) fn push_select_icon(
     frame: Rect,
-    font_manager: &FontManager,
+    media: &MediaManager,
     select_style: &ResolvedSelectStyle,
     units: UnitContext,
     animations: &mut AnimationEngine,
@@ -263,28 +262,13 @@ pub(crate) fn push_select_icon(
         .min(frame.width.get())
         .min(frame.height.get())
         .max(1.0);
-    let line_height = font_size;
-    let letter_spacing = 0.0;
-    let text_request = TextFontRequest {
-        preferred_font: Some(ICON_FONT_FAMILY),
-        weight: select_style.text_style.weight,
-    };
-    let resolved = font_manager.resolve_text(SELECT_ARROW_ICON, text_request.clone());
-    let layout = font_manager.measure_text_layout(
-        SELECT_ARROW_ICON,
-        text_request,
-        font_size,
-        line_height,
-        letter_spacing,
+    let icon_size = Dp::new(font_size);
+    let icon_frame = Rect::new(
+        frame.x + ((frame.width - icon_size).max(Dp::ZERO) * 0.5),
+        frame.y + ((frame.height - icon_size).max(Dp::ZERO) * 0.5) + dp(3.0),
+        icon_size,
+        icon_size,
     );
-    let mut icon_frame = centered_text_frame(
-        frame,
-        layout.width.max(font_size),
-        layout.height.max(line_height),
-        line_height,
-        true,
-    );
-    icon_frame.y += dp(3.0);
 
     let arrow_color = animations.resolve_color(
         crate::animation::AnimationKey::Widget {
@@ -296,23 +280,16 @@ pub(crate) fn push_select_icon(
         now,
     );
 
-    scene.push_text(TextPrimitive {
-        content: Arc::from(SELECT_ARROW_ICON.to_string()),
-        rich_spans: None,
-        frame: icon_frame,
-        quad: None,
-        color: arrow_color.with_alpha_factor(opacity),
-        force_color: true,
-        font_family: Some(Arc::from(resolved.primary_font)),
-        font_size,
-        font_weight: select_style.text_style.weight,
-        line_height,
-        letter_spacing,
-        wrap: crate::ui::widget::CanvasTextWrap::None,
-        overflow: crate::ui::widget::CanvasTextOverflow::Clip,
-        horizontal_align: crate::ui::widget::CanvasTextHorizontalAlign::Start,
-        vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Start,
+    crate::ui::widget::icon::push_svg_icon_texture(
+        scene,
+        media,
+        units,
+        crate::ui::widget::icon::SvgIconId::ChevronDown,
+        arrow_color,
+        icon_frame,
+        opacity,
+        None,
         clip_rect,
         clip_mask,
-    });
+    );
 }

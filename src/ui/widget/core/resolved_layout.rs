@@ -15,6 +15,7 @@ impl<VM> ResolvedElement<VM> {
                 id: self.id,
                 image: image.clone(),
             },
+            ResolvedWidgetKind::Icon { .. } => MeasureContext::None,
             ResolvedWidgetKind::Canvas { scene, .. } => MeasureContext::Canvas {
                 id: self.id,
                 scene: scene.clone(),

@@ -42,8 +42,12 @@ fn calendar_renders_month_grid_and_today_action() {
 
     assert!(labels.contains(&"June 2026"));
     assert!(labels.contains(&"Today"));
-    assert!(labels.contains(&"chevron_left"));
-    assert!(labels.contains(&"chevron_right"));
+    assert!(!labels.contains(&"chevron_left"));
+    assert!(!labels.contains(&"chevron_right"));
+    assert!(
+        rendered.primitives.textures.len() >= 2,
+        "calendar navigation icons should render as SVG textures"
+    );
     assert!(labels.iter().filter(|label| **label == "6").count() >= 1);
     assert!(computed.hit_regions.iter().all(|region| {
         !matches!(region.interaction, HitInteraction::Widget { .. })
@@ -98,9 +102,9 @@ fn date_and_time_pickers_emit_popover_content_when_open() {
         .collect::<Vec<_>>();
 
     assert!(overlay_labels.contains(&"June 2026"));
-    assert!(overlay_labels.contains(&"schedule"));
     assert!(overlay_labels.contains(&"09:00"));
     assert!(overlay_labels.contains(&"10:00"));
+    assert!(!overlay_labels.contains(&"schedule"));
     let panel_background_count = rendered
         .primitives
         .overlay_shapes
@@ -120,8 +124,12 @@ fn date_and_time_pickers_emit_popover_content_when_open() {
         .iter()
         .map(|text| text.content.as_ref())
         .collect::<Vec<_>>();
-    assert!(trigger_labels.contains(&"calendar_today"));
-    assert!(trigger_labels.contains(&"schedule"));
+    assert!(!trigger_labels.contains(&"calendar_today"));
+    assert!(!trigger_labels.contains(&"schedule"));
+    assert!(
+        rendered.primitives.textures.len() + rendered.primitives.overlay_textures.len() >= 4,
+        "picker trigger and navigation icons should render as SVG textures"
+    );
 }
 
 #[test]
@@ -256,9 +264,13 @@ fn color_picker_open_renders_channel_sliders_and_swatches() {
         .chain(rendered.primitives.overlay_texts.iter())
         .map(|text| text.content.as_ref())
         .collect::<Vec<_>>();
-    assert!(labels.contains(&"palette"));
-    assert!(labels.contains(&"keyboard_arrow_down"));
     assert!(labels.contains(&"Current color"));
+    assert!(!labels.contains(&"palette"));
+    assert!(!labels.contains(&"keyboard_arrow_down"));
+    assert!(
+        rendered.primitives.textures.len() + rendered.primitives.overlay_textures.len() >= 2,
+        "color picker icons should render as SVG textures"
+    );
     let panel_background_count = rendered
         .primitives
         .overlay_shapes
@@ -330,7 +342,10 @@ fn upload_renders_drop_handler_queue_progress_and_remove_action() {
         .collect::<Vec<_>>();
     assert!(labels.contains(&"queued.pdf"));
     assert!(labels.contains(&"Uploading 50%"));
-    assert!(labels.contains(&"upload_file"));
+    assert!(!labels.contains(&"upload_file"));
+    assert!(!labels.contains(&"description"));
+    assert!(!labels.contains(&"pending"));
+    assert!(!labels.contains(&"delete"));
     let upload_badge = rendered
         .primitives
         .shapes
@@ -342,9 +357,16 @@ fn upload_renders_drop_handler_queue_progress_and_remove_action() {
         .expect("upload badge should render");
     let upload_icon = rendered
         .primitives
-        .texts
+        .textures
         .iter()
-        .find(|text| text.content.as_ref() == "upload_file")
+        .find(|texture| {
+            let badge_center_x = upload_badge.rect.x + upload_badge.rect.width * 0.5;
+            let badge_center_y = upload_badge.rect.y + upload_badge.rect.height * 0.5;
+            let icon_center_x = texture.frame.x + texture.frame.width * 0.5;
+            let icon_center_y = texture.frame.y + texture.frame.height * 0.5;
+            (icon_center_x - badge_center_x).abs() <= dp(0.5)
+                && (icon_center_y - badge_center_y).abs() <= dp(0.5)
+        })
         .expect("upload icon should render");
     let badge_center_x = upload_badge.rect.x + upload_badge.rect.width * 0.5;
     let badge_center_y = upload_badge.rect.y + upload_badge.rect.height * 0.5;
@@ -358,12 +380,7 @@ fn upload_renders_drop_handler_queue_progress_and_remove_action() {
         upload_icon.frame
     );
     assert!(
-        labels
-            .iter()
-            .filter(|label| **label == "description")
-            .count()
-            >= 2
+        rendered.primitives.textures.len() >= 7,
+        "upload badge, file, status, and remove icons should render as SVG textures"
     );
-    assert!(labels.iter().filter(|label| **label == "pending").count() >= 2);
-    assert!(labels.iter().filter(|label| **label == "delete").count() >= 2);
 }

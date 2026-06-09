@@ -1,19 +1,23 @@
 use std::sync::Arc;
 
 use crate::media::{MediaBytes, MediaSource};
-use crate::text::font::ICON_FONT_FAMILY;
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{LayoutStyle, Value};
+use crate::ui::layout::{LayoutStyle, Length, Value};
 use crate::ui::theme::Theme;
 use crate::ui::unit::sp;
 
+mod svg;
+
 use super::common::VisualStyle;
+use super::common::WidgetKind;
 use super::core::Element;
 use super::p3_support::{
     impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
 };
 use super::style::{IconStyle, ImageStyle, StyleResolver, StyleSheet, TextWidgetStyle};
-use super::{Image, Text, WidgetKey};
+use super::{Image, Text, WidgetId, WidgetKey};
+
+pub(crate) use svg::{push_svg_icon_texture, SvgIconId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum IconSource {
@@ -52,30 +56,42 @@ impl BuiltinIcon {
         match self {
             Self::ChevronLeft => "chevron_left",
             Self::ChevronRight => "chevron_right",
-            Self::ChevronUp => "keyboard_arrow_up",
-            Self::ChevronDown => "keyboard_arrow_down",
+            Self::ChevronUp => "chevron_up",
+            Self::ChevronDown => "chevron_down",
             Self::Close => "close",
             Self::Check => "check",
-            Self::MoreHorizontal => "more_horiz",
+            Self::MoreHorizontal => "more_horizontal",
             Self::Search => "search",
             Self::Star => "star",
             Self::StarHalf => "star_half",
-            Self::User => "person",
+            Self::User => "user",
             Self::Image => "image",
-            Self::Plus => "add",
-            Self::Minus => "remove",
+            Self::Plus => "plus",
+            Self::Minus => "minus",
             Self::Info => "info",
-            Self::Success => "check_circle",
+            Self::Success => "success",
             Self::Warning => "warning",
             Self::Error => "error",
-            Self::Calendar => "calendar_today",
-            Self::Clock => "schedule",
+            Self::Calendar => "calendar",
+            Self::Clock => "clock",
         }
     }
 }
 
+#[derive(Clone)]
+enum IconSourceKind {
+    Public(IconSource),
+    Internal(SvgIconId),
+}
+
+#[derive(Clone)]
+pub(crate) struct BuiltinSvgIcon {
+    pub(crate) source: SvgIconId,
+    pub(crate) style: Option<StyleResolver<IconStyle>>,
+}
+
 pub struct Icon<VM> {
-    source: IconSource,
+    source: IconSourceKind,
     style: Option<StyleResolver<IconStyle>>,
     layout: LayoutStyle,
     visual: VisualStyle,
@@ -88,6 +104,7 @@ impl<VM> Icon<VM> {
         Self::new(IconSource::Builtin(icon))
     }
 
+    #[deprecated(note = "font-based named icons were removed; use Icon::builtin or Icon::svg")]
     pub fn named(name: impl Into<Value<String>>) -> Self {
         Self::new(IconSource::Named(name.into()))
     }
@@ -108,7 +125,18 @@ impl<VM> Icon<VM> {
 
     fn new(source: IconSource) -> Self {
         Self {
-            source,
+            source: IconSourceKind::Public(source),
+            style: None,
+            layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
+            key: None,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    pub(crate) fn internal(source: SvgIconId) -> Self {
+        Self {
+            source: IconSourceKind::Internal(source),
             style: None,
             layout: LayoutStyle::default(),
             visual: VisualStyle::default(),
@@ -136,6 +164,17 @@ impl<VM> Icon<VM> {
         self
     }
 
+    pub(crate) fn style_full_with_style_sheet(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> IconStyle
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full_with_style_sheet(resolver));
+        self
+    }
+
     impl_p3_layout_api!(layout);
 }
 
@@ -143,22 +182,19 @@ impl<VM: 'static> From<Icon<VM>> for Element<VM> {
     fn from(icon: Icon<VM>) -> Self {
         let layout_style = resolve_icon_style_for_layout(icon.style.as_ref());
         let mut root: Element<VM> = match icon.source {
-            IconSource::Builtin(icon_source) => icon_text(
-                Value::Static(icon_source.name().to_string()),
-                icon.style.clone(),
-                icon.visual.clone(),
-                true,
-            ),
-            IconSource::Named(name) => {
-                icon_text(name, icon.style.clone(), icon.visual.clone(), true)
+            IconSourceKind::Internal(source) => icon_svg(source, icon.style.clone()),
+            IconSourceKind::Public(IconSource::Builtin(icon_source)) => {
+                icon_svg(icon_source.into(), icon.style.clone())
             }
-            IconSource::Glyph(ch) => icon_text(
+            IconSourceKind::Public(IconSource::Named(name)) => {
+                icon_text(name, icon.style.clone(), icon.visual.clone())
+            }
+            IconSourceKind::Public(IconSource::Glyph(ch)) => icon_text(
                 Value::Static(ch.to_string()),
                 icon.style.clone(),
                 icon.visual.clone(),
-                false,
             ),
-            IconSource::Svg(bytes) => {
+            IconSourceKind::Public(IconSource::Svg(bytes)) => {
                 let style = icon.style.clone();
                 with_visual_identity(
                     Image::new(MediaSource::bytes(bytes))
@@ -185,11 +221,50 @@ impl<VM: 'static> From<Icon<VM>> for Element<VM> {
     }
 }
 
+fn icon_svg<VM: 'static>(
+    source: SvgIconId,
+    style: Option<StyleResolver<IconStyle>>,
+) -> Element<VM> {
+    let layout_style = resolve_icon_style_for_layout(style.as_ref());
+    let mut layout = LayoutStyle::default();
+    layout.width = Some(Value::Static(Length::Px(layout_style.size)));
+    layout.height = Some(Value::Static(Length::Px(layout_style.size)));
+    Element {
+        id: WidgetId::next(),
+        key: None,
+        layout,
+        focus: Default::default(),
+        visual: VisualStyle::default(),
+        interactions: Default::default(),
+        lifecycle_events: Default::default(),
+        media_events: Default::default(),
+        background: None,
+        tooltip: None,
+        popover: None,
+        menu: None,
+        context_menu: None,
+        modal: None,
+        drawer: None,
+        tab_trigger: None,
+        list_item: None,
+        tree_root: None,
+        tree_node: None,
+        data_grid_root: None,
+        data_grid_cell: None,
+        data_grid_header: None,
+        data_grid_resize_handle: None,
+        splitter_handle: None,
+        carousel_auto_play: None,
+        kind: WidgetKind::Icon {
+            icon: BuiltinSvgIcon { source, style },
+        },
+    }
+}
+
 fn icon_text<VM: 'static>(
     name: Value<String>,
     style: Option<StyleResolver<IconStyle>>,
     visual_identity: VisualStyle,
-    icon_font: bool,
 ) -> Element<VM> {
     with_visual_identity(
         Text::new(name)
@@ -205,9 +280,6 @@ fn icon_text<VM: 'static>(
                 text.color = resolved.color;
                 text.typography.size = sp(resolved.size.get());
                 text.typography.line_height = Some(sp(resolved.size.get()));
-                if icon_font {
-                    text.typography.font_family = Some(ICON_FONT_FAMILY.to_string());
-                }
                 text
             })
             .into(),
@@ -229,7 +301,7 @@ fn resolve_icon_style(
     )
 }
 
-fn resolve_icon_style_with_sheet(
+pub(crate) fn resolve_icon_style_with_sheet(
     style: Option<&StyleResolver<IconStyle>>,
     context: &StyleContext<'_>,
     style_sheet: &StyleSheet,

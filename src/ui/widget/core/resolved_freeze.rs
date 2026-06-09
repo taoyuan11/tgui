@@ -289,6 +289,9 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             freeze_image(&mut image);
             LifecycleWidgetKind::Image { image }
         }
+        ResolvedWidgetKind::Icon { icon } => LifecycleWidgetKind::Icon {
+            source: icon.source,
+        },
         ResolvedWidgetKind::Canvas { scene, .. } => {
             let mut scene = scene.clone();
             freeze_value(&mut scene);

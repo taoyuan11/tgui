@@ -77,6 +77,7 @@ impl<VM> ResolvedElement<VM> {
             visual.primitive_clip,
             visual.overflow_clip,
             visual.primitive_clip_mask,
+            context.media,
             context.font_manager,
             context.theme,
             context.units,

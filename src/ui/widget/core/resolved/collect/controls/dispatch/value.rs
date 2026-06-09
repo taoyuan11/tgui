@@ -653,6 +653,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             select_style,
             context.font_manager,
             context.theme,
+            context.media,
             context.units,
             context.animations,
             context.now,

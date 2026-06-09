@@ -138,6 +138,7 @@ pub(crate) fn default_layout_padding<VM>(element: &ResolvedElement<VM>, _theme: 
         #[cfg(feature = "audio")]
         ResolvedWidgetKind::Audio { .. } => Insets::ZERO,
         ResolvedWidgetKind::Image { .. } => Insets::ZERO,
+        ResolvedWidgetKind::Icon { .. } => Insets::ZERO,
         ResolvedWidgetKind::Canvas { .. } => Insets::ZERO,
         ResolvedWidgetKind::ToastHost { .. } => Insets::ZERO,
         ResolvedWidgetKind::Portal { .. } => Insets::ZERO,

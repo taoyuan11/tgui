@@ -23,7 +23,7 @@ use crate::media::{
     media_placeholder_color, media_placeholder_label, resolve_media_rect, ContentFit,
     IntrinsicSize, MediaManager, RasterRequest,
 };
-use crate::text::font::{FontManager, TextFontRequest, TextLayoutInfo, ICON_FONT_FAMILY};
+use crate::text::font::{FontManager, TextFontRequest, TextLayoutInfo};
 use crate::ui::layout::{
     Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, PositionType, Track, Value, Wrap,
 };
@@ -115,6 +115,3 @@ pub(super) const CARET_END_GAP: f32 = 1.0;
 
 /// Default intrinsic width for selects when no explicit width is set.
 const SELECT_DEFAULT_WIDTH: f32 = 160.0;
-
-const CHECKBOX_CHECKMARK_ICON: &str = "check";
-const SELECT_ARROW_ICON: &str = "keyboard_arrow_down";

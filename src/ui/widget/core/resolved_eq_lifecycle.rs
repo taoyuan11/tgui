@@ -37,6 +37,7 @@ impl PartialEq for LifecycleWidgetKind {
                     && left.fit == right.fit
                     && left.cursor_style == right.cursor_style
             }
+            (Self::Icon { source: left }, Self::Icon { source: right }) => left == right,
             (Self::Canvas { scene: left }, Self::Canvas { scene: right }) => left == right,
             #[cfg(feature = "video")]
             (

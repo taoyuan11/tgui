@@ -642,10 +642,20 @@ fn toast_close_button_aligns_to_card_trailing_edge() {
         .expect("toast card background should render");
     let close_icon = computed
         .scene
+        .overlay_textures
+        .iter()
+        .max_by(|left, right| {
+            left.frame
+                .x
+                .partial_cmp(&right.frame.x)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .expect("toast close icon should render");
+    assert!(!computed
+        .scene
         .overlay_texts
         .iter()
-        .find(|text| text.content.as_ref() == "\u{e5cd}")
-        .expect("toast close icon should render");
+        .any(|text| text.content.as_ref() == "\u{e5cd}"));
 
     assert!(
         close_icon.frame.x > card_rect.right() - dp(48.0),

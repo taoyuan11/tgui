@@ -8,10 +8,11 @@ use crate::ui::unit::{dp, sp, Dp};
 use crate::ui::widget::button::Button;
 use crate::ui::widget::container::{Flex, Stack};
 use crate::ui::widget::core::measure_node;
+use crate::ui::widget::icon::{Icon, SvgIconId};
 use crate::ui::widget::overlay::{
     collect::emit_overlay, Anchor, Overlay, OverlayContent, OverlayId, OverlayLayer, Placement,
 };
-use crate::ui::widget::style::{ContainerStyle, TextWidgetStyle, ToastStyle};
+use crate::ui::widget::style::{ContainerStyle, IconStyle, TextWidgetStyle, ToastStyle};
 use crate::ui::widget::text::Text;
 use crate::ui::widget::{
     ComputedScene, CursorStyle, DefaultActivation, Element, HitGeometry, HitInteraction, HitRegion,
@@ -776,22 +777,27 @@ fn build_toast_card<VM: 'static>(
     let close_element: Element<VM> = if show_close {
         let dismiss_queue = queue.clone();
         let close_fg = foreground.with_alpha_factor(0.6);
-        let close_hover = foreground.with_alpha_factor(0.8);
-        let close_pressed = foreground;
-        Button::new("\u{e5cd}") // close icon
-            .ghost()
-            .style_full(move |_| {
-                let mut button_style = close_style.clone();
-                button_style.text_style.font_family = Some("tgui-icons".to_string());
-                button_style.text_style.size = sp(14.0);
-                button_style.foreground = crate::ui::theme::StateValue::interactive(
-                    close_fg.into(),
-                    close_hover.into(),
-                    close_pressed.into(),
-                    close_fg.with_alpha_factor(0.5).into(),
-                );
-                button_style
+        Stack::new()
+            .size(dp(32.0), dp(32.0))
+            .center()
+            .style_full(move |context| {
+                let button_style = close_style.clone();
+                let mut container = ContainerStyle::default_for_theme(context.theme);
+                container.surface.background = Some(button_style.background.normal);
+                container.surface.border_color = Some(button_style.border.normal);
+                container.surface.border_width = Some(button_style.border_width);
+                container.surface.border_radius = Some(button_style.radius);
+                container.surface.shadow = button_style.surface.shadow;
+                container
             })
+            .child(
+                Icon::internal(SvgIconId::Close)
+                    .size(dp(14.0), dp(14.0))
+                    .style(move |icon_style: &mut IconStyle, _context| {
+                        icon_style.color = Value::Static(close_fg);
+                        icon_style.size = dp(14.0);
+                    }),
+            )
             .on_click(Command::new(move |_vm| {
                 dismiss_queue.dismiss(id);
             }))

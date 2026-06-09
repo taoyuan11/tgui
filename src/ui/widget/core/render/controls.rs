@@ -1,6 +1,6 @@
 use super::super::*;
 use super::{
-    centered_text_frame, push_border_primitives, push_focus_ring_primitives, push_text_primitives,
+    push_border_primitives, push_focus_ring_primitives, push_text_primitives,
     rounded_rect_shadow_texture, RoundedRectShadowSpec,
 };
 use crate::ui::widget::common;
@@ -261,6 +261,7 @@ pub(crate) fn push_checkbox_primitives(
     clip_rect: Option<Rect>,
     focus_clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
+    media: &MediaManager,
     font_manager: &FontManager,
     theme: &Theme,
     units: UnitContext,
@@ -350,7 +351,7 @@ pub(crate) fn push_checkbox_primitives(
             checkbox_style,
             opacity * checkmark_opacity,
             checkmark_color,
-            font_manager,
+            media,
             units,
             clip_rect,
             clip_mask,
@@ -395,7 +396,7 @@ pub(crate) fn push_checkbox_checkmark_primitives(
     checkbox_style: &ResolvedCheckboxStyle,
     opacity: f32,
     checkmark_color: Color,
-    font_manager: &FontManager,
+    media: &MediaManager,
     units: UnitContext,
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
@@ -406,49 +407,25 @@ pub(crate) fn push_checkbox_checkmark_primitives(
         .min(box_frame.width.get())
         .min(box_frame.height.get())
         .max(1.0);
-    let line_height = font_size;
-    let letter_spacing = 0.0;
-    let text_request = TextFontRequest {
-        preferred_font: Some(ICON_FONT_FAMILY),
-        weight: checkbox_style.text_style.weight,
-    };
-    let resolved = font_manager.resolve_text(CHECKBOX_CHECKMARK_ICON, text_request.clone());
-    let layout = font_manager.measure_text_layout(
-        CHECKBOX_CHECKMARK_ICON,
-        text_request,
-        font_size,
-        line_height,
-        letter_spacing,
+    let icon_size = Dp::new(font_size);
+    let icon_frame = Rect::new(
+        box_frame.x + ((box_frame.width - icon_size).max(Dp::ZERO) * 0.5),
+        box_frame.y + ((box_frame.height - icon_size).max(Dp::ZERO) * 0.5),
+        icon_size,
+        icon_size,
     );
-    let mut icon_frame = centered_text_frame(
-        box_frame,
-        layout.width.max(font_size),
-        layout.height.max(line_height),
-        line_height,
-        true,
-    );
-
-    icon_frame.y += dp(1.0);
-
-    scene.push_text(TextPrimitive {
-        content: Arc::from(CHECKBOX_CHECKMARK_ICON.to_string()),
-        rich_spans: None,
-        frame: icon_frame,
-        quad: None,
-        color: checkmark_color.with_alpha_factor(opacity),
-        force_color: true,
-        font_family: Some(Arc::from(resolved.primary_font)),
-        font_size,
-        font_weight: checkbox_style.text_style.weight,
-        line_height,
-        letter_spacing,
-        wrap: crate::ui::widget::CanvasTextWrap::None,
-        overflow: crate::ui::widget::CanvasTextOverflow::Clip,
-        horizontal_align: crate::ui::widget::CanvasTextHorizontalAlign::Start,
-        vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Start,
+    crate::ui::widget::icon::push_svg_icon_texture(
+        scene,
+        media,
+        units,
+        crate::ui::widget::icon::SvgIconId::Check,
+        checkmark_color,
+        icon_frame,
+        opacity,
+        None,
         clip_rect,
         clip_mask,
-    });
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

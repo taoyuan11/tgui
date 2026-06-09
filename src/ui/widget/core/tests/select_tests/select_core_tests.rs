@@ -38,9 +38,14 @@ fn select_renders_placeholder_and_arrow_when_unselected() {
         .any(|text| text.content.as_ref() == "Choose one"));
     assert!(rendered
         .primitives
+        .textures
+        .iter()
+        .any(|texture| texture.frame.x > dp(140.0) && texture.opacity > 0.0));
+    assert!(rendered
+        .primitives
         .texts
         .iter()
-        .any(|text| text.content.as_ref() == SELECT_ARROW_ICON && text.force_color));
+        .all(|text| text.content.as_ref() != "keyboard_arrow_down"));
 }
 
 #[test]

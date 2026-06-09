@@ -3,7 +3,6 @@ use super::{
     centered_text_frame, media_loading_fill_color, resolve_button_style,
     resolve_stateful_widget_color, resolved_button_style, resolved_text_metrics,
     text_with_typography, HitInteraction, ResolvedWidgetKind, TextInputLayoutOverride, CARET_WIDTH,
-    CHECKBOX_CHECKMARK_ICON, SELECT_ARROW_ICON,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -210,6 +209,7 @@ mod command_video_tests;
 mod controls_tests;
 mod dependency_tests;
 mod drawer_tests;
+mod icon_tests;
 mod input_controls_tests;
 mod layout_scroll_tests;
 mod list_tests;

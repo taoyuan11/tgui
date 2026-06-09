@@ -6,9 +6,6 @@ use cosmic_text::FontSystem;
 
 use super::platform::face_family_name;
 
-pub(crate) const ICON_FONT_FAMILY: &str = "tgui-icons";
-const ICON_FONT_BYTES: &[u8] = include_bytes!("../../assets/iconfont.ttf");
-
 /// 表示文本渲染使用的字重。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FontWeight {
@@ -52,12 +49,10 @@ pub(crate) struct FontCatalog {
 
 impl Default for FontCatalog {
     fn default() -> Self {
-        let mut catalog = Self {
+        Self {
             named_fonts: Vec::new(),
             default_font: None,
-        };
-        catalog.register_font(ICON_FONT_FAMILY, ICON_FONT_BYTES);
-        catalog
+        }
     }
 }
 

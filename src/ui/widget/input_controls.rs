@@ -7,19 +7,19 @@ use crate::foundation::binding::{TextChangeSet, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::form::ValidationVisualState;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::text::font::ICON_FONT_FAMILY;
 use crate::theme::{FontWeight, ResolvedThemeMode, StyleContext, Theme};
 use crate::ui::layout::{fr, Align, Insets, Justify, Value, Wrap};
 use crate::ui::theme::{StateValue, TextStyle};
 use crate::ui::unit::{dp, sp, Dp};
 
 use super::common::ButtonVariantKind;
+use super::icon::SvgIconId;
 use super::style::{
     ButtonStyle, ContainerStyle, InputStyle, PopoverStyle, SelectStyle, StyleResolver,
     TextWidgetStyle,
 };
 use super::{
-    Button, CursorStyle, Element, FileDropEvent, Flex, Grid, Input, Popover, ProgressBar,
+    Button, CursorStyle, Element, FileDropEvent, Flex, Grid, Icon, Input, Popover, ProgressBar,
     ScrollView, Slider, Stack, Text,
 };
 
@@ -40,20 +40,20 @@ const MONTHS: [&str; 12] = [
 ];
 const FIELD_HEIGHT: Dp = dp(40.0);
 const PANEL_PADDING: Dp = dp(12.0);
-const ICON_CALENDAR: &str = "calendar_today";
-const ICON_TIME: &str = "schedule";
-const ICON_COLOR: &str = "palette";
-const ICON_EXPAND: &str = "keyboard_arrow_down";
-const ICON_PREVIOUS: &str = "chevron_left";
-const ICON_NEXT: &str = "chevron_right";
-const ICON_ADD: &str = "add";
-const ICON_REMOVE: &str = "remove";
-const ICON_UPLOAD: &str = "upload_file";
-const ICON_DELETE: &str = "delete";
-const ICON_FILE: &str = "description";
-const ICON_DONE: &str = "check_circle";
-const ICON_ERROR: &str = "error";
-const ICON_PENDING: &str = "pending";
+const ICON_CALENDAR: SvgIconId = SvgIconId::Calendar;
+const ICON_TIME: SvgIconId = SvgIconId::Clock;
+const ICON_COLOR: SvgIconId = SvgIconId::Palette;
+const ICON_EXPAND: SvgIconId = SvgIconId::ChevronDown;
+const ICON_PREVIOUS: SvgIconId = SvgIconId::ChevronLeft;
+const ICON_NEXT: SvgIconId = SvgIconId::ChevronRight;
+const ICON_ADD: SvgIconId = SvgIconId::Plus;
+const ICON_REMOVE: SvgIconId = SvgIconId::Minus;
+const ICON_UPLOAD: SvgIconId = SvgIconId::Upload;
+const ICON_DELETE: SvgIconId = SvgIconId::Delete;
+const ICON_FILE: SvgIconId = SvgIconId::File;
+const ICON_DONE: SvgIconId = SvgIconId::Success;
+const ICON_ERROR: SvgIconId = SvgIconId::Error;
+const ICON_PENDING: SvgIconId = SvgIconId::Pending;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CalendarStyle {
@@ -1261,7 +1261,7 @@ fn picker_input_trigger<VM: 'static>(
     validation: Value<ValidationVisualState>,
     disabled: Value<bool>,
     width: Dp,
-    icon: &'static str,
+    icon: SvgIconId,
     open: Value<bool>,
     on_open_change: Option<ValueCommand<VM, bool>>,
     on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
@@ -1282,15 +1282,19 @@ fn picker_input_trigger<VM: 'static>(
         input = input.on_click(command);
     }
 
-    let icon = Button::new(icon)
-        .secondary()
-        .size(FIELD_HEIGHT, FIELD_HEIGHT)
-        .style_full(input_icon_button_style)
-        .disable(disabled);
     let icon: Element<VM> = if let Some(command) = toggle {
-        icon.on_click(command).into()
+        secondary_icon_button(icon, FIELD_HEIGHT, FIELD_HEIGHT, disabled, command)
     } else {
-        icon.into()
+        Stack::new()
+            .size(FIELD_HEIGHT, FIELD_HEIGHT)
+            .center()
+            .style_full(input_icon_surface_style)
+            .opacity(disabled_opacity(disabled))
+            .child(styled_icon(icon, dp(20.0), |context| {
+                let (_, _, _, muted, _, _, _) = mode_colors(context);
+                muted
+            }))
+            .into()
     };
 
     Flex::horizontal()
@@ -1333,14 +1337,14 @@ fn color_picker_trigger<VM: 'static>(
             CursorStyle::Pointer
         })
         .opacity(disabled_opacity(disabled))
-        .child(material_icon(ICON_COLOR, sp(18.0)))
+        .child(themed_icon(ICON_COLOR, dp(18.0)))
         .child(color_preview_box::<VM>(color.clone(), dp(24.0)))
         .child(
             Text::new(color_label(color))
                 .grow(1.0)
                 .style_full(label_text_style),
         )
-        .child(material_icon(ICON_EXPAND, sp(20.0)));
+        .child(themed_icon(ICON_EXPAND, dp(20.0)));
     if let Some(command) = toggle {
         overlay = overlay.on_click(command);
     }
@@ -1368,10 +1372,87 @@ fn open_toggle_command<VM: 'static>(
     })
 }
 
-fn material_icon(name: &'static str, size: crate::ui::unit::Sp) -> Text {
-    Text::new(name)
-        .size(Dp::new(size.0), Dp::new(size.0))
-        .style_full(move |context| icon_text_style(context, size))
+fn themed_icon<VM: 'static>(icon: SvgIconId, size: Dp) -> Icon<VM> {
+    Icon::internal(icon)
+        .size(size, size)
+        .style(move |style, context| {
+            let (_, _, _, muted, _, _, _) = mode_colors(context);
+            style.color = Value::Static(muted);
+            style.size = size;
+        })
+}
+
+fn styled_icon<VM: 'static>(
+    icon: SvgIconId,
+    size: Dp,
+    color: impl Fn(&StyleContext<'_>) -> Color + Send + Sync + 'static,
+) -> Icon<VM> {
+    Icon::internal(icon)
+        .size(size, size)
+        .style(move |style, context| {
+            style.color = Value::Static(color(context));
+            style.size = size;
+        })
+}
+
+fn ghost_icon_button<VM: 'static>(
+    icon: SvgIconId,
+    size: Dp,
+    disabled: impl Into<Value<bool>>,
+    command: Command<VM>,
+) -> Element<VM> {
+    let disabled = disabled.into();
+    Stack::new()
+        .size(size, size)
+        .center()
+        .style_full(icon_surface_style)
+        .opacity(disabled_opacity(disabled.clone()))
+        .cursor(if disabled.resolve() {
+            CursorStyle::NotAllowed
+        } else {
+            CursorStyle::Pointer
+        })
+        .child(styled_icon(icon, dp(20.0), |context| {
+            let (_, _, _, muted, _, _, _) = mode_colors(context);
+            muted
+        }))
+        .on_click(guard_disabled_command(disabled, command))
+        .into()
+}
+
+fn secondary_icon_button<VM: 'static>(
+    icon: SvgIconId,
+    width: Dp,
+    height: Dp,
+    disabled: impl Into<Value<bool>>,
+    command: Command<VM>,
+) -> Element<VM> {
+    let disabled = disabled.into();
+    Stack::new()
+        .width(width)
+        .height(height)
+        .center()
+        .style_full(input_icon_surface_style)
+        .opacity(disabled_opacity(disabled.clone()))
+        .cursor(if disabled.resolve() {
+            CursorStyle::NotAllowed
+        } else {
+            CursorStyle::Pointer
+        })
+        .child(styled_icon(icon, dp(20.0), |context| {
+            let (_, _, _, muted, _, _, _) = mode_colors(context);
+            muted
+        }))
+        .on_click(guard_disabled_command(disabled, command))
+        .into()
+}
+
+fn guard_disabled_command<VM: 'static>(disabled: Value<bool>, command: Command<VM>) -> Command<VM> {
+    Command::new_with_context(move |vm, ctx| {
+        if !disabled.resolve() {
+            command.execute_with_context(vm, ctx);
+        }
+    })
 }
 
 fn color_preview_box<VM: 'static>(color: Value<Color>, size: Dp) -> Element<VM> {
@@ -1398,9 +1479,13 @@ fn upload_badge<VM: 'static>() -> Element<VM> {
         .center()
         .style_full(accent_badge_style)
         .child(
-            Text::new(ICON_UPLOAD)
+            Icon::internal(ICON_UPLOAD)
                 .size(icon_box, icon_box)
-                .style_full(upload_icon_text_style),
+                .style(move |style, context| {
+                    let (_, primary, _, _, _, _, _) = mode_colors(context);
+                    style.color = Value::Static(primary);
+                    style.size = icon_box;
+                }),
         )
         .into()
 }
@@ -1410,7 +1495,7 @@ fn file_badge<VM: 'static>() -> Element<VM> {
         .size(dp(34.0), dp(34.0))
         .center()
         .style_full(subtle_badge_style)
-        .child(material_icon(ICON_FILE, sp(20.0)))
+        .child(themed_icon(ICON_FILE, dp(20.0)))
         .into()
 }
 
@@ -1530,7 +1615,7 @@ fn calendar_element<VM: 'static>(
             Button::new("Today")
                 .secondary()
                 .height(dp(32.0))
-                .style_full(calendar_today_button_style)
+                .style_full(today_button_style)
                 .disable(disabled)
                 .on_click(Command::new_with_context(move |vm, ctx| {
                     if let Some(command) = on_change.as_ref() {
@@ -1551,18 +1636,17 @@ fn calendar_element<VM: 'static>(
 }
 
 fn calendar_nav_button<VM: 'static>(
-    label: &'static str,
+    icon: SvgIconId,
     display_month: NaiveDate,
     trigger: CalendarChangeTrigger,
     disabled: bool,
     on_change: Option<ValueCommand<VM, CalendarSelectionChange>>,
-) -> Button<VM> {
-    Button::new(label)
-        .ghost()
-        .size(dp(32.0), dp(32.0))
-        .style_full(icon_button_style)
-        .disable(disabled)
-        .on_click(Command::new_with_context(move |vm, ctx| {
+) -> Element<VM> {
+    ghost_icon_button(
+        icon,
+        dp(32.0),
+        Value::Static(disabled),
+        Command::new_with_context(move |vm, ctx| {
             if let Some(command) = on_change.as_ref() {
                 command.execute_with_context(
                     vm,
@@ -1574,7 +1658,8 @@ fn calendar_nav_button<VM: 'static>(
                     ctx,
                 );
             }
-        }))
+        }),
+    )
 }
 
 fn time_picker_content<VM: 'static>(
@@ -1635,7 +1720,7 @@ fn time_picker_content<VM: 'static>(
             Flex::horizontal()
                 .align(Align::Center)
                 .gap(dp(8.0))
-                .child(material_icon(ICON_TIME, sp(18.0)))
+                .child(themed_icon(ICON_TIME, dp(18.0)))
                 .child(Text::new("Select time").style_full(label_text_style)),
         )
         .child(
@@ -1649,7 +1734,7 @@ fn time_picker_content<VM: 'static>(
 }
 
 fn number_step_button<VM: 'static>(
-    label: &'static str,
+    icon: SvgIconId,
     trigger: NumberInputChangeTrigger,
     delta: f64,
     controller: TextController,
@@ -1659,14 +1744,13 @@ fn number_step_button<VM: 'static>(
     disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, NumberInputChange>>,
     width: Dp,
-) -> Button<VM> {
-    Button::new(label)
-        .secondary()
-        .width(width)
-        .height(FIELD_HEIGHT)
-        .style_full(icon_button_style)
-        .disable(disabled)
-        .on_click(Command::new_with_context(move |vm, ctx| {
+) -> Element<VM> {
+    secondary_icon_button(
+        icon,
+        width,
+        FIELD_HEIGHT,
+        disabled,
+        Command::new_with_context(move |vm, ctx| {
             let current = parse_number(&controller.text(), min, max)
                 .or_else(|| value.resolve())
                 .unwrap_or(0.0);
@@ -1684,7 +1768,8 @@ fn number_step_button<VM: 'static>(
                     ctx,
                 );
             }
-        }))
+        }),
+    )
 }
 
 fn color_picker_content<VM: 'static>(
@@ -1867,18 +1952,11 @@ fn upload_row<VM: 'static>(
             Flex::horizontal()
                 .align(Align::Center)
                 .gap(dp(6.0))
-                .child(material_icon(status_icon, sp(16.0)))
+                .child(themed_icon(status_icon, dp(16.0)))
                 .child(Text::new(status).style_full(muted_text_style)),
         );
     if let Some(command) = remove {
-        footer = footer.child(
-            Button::new(ICON_DELETE)
-                .ghost()
-                .size(dp(32.0), dp(32.0))
-                .style_full(icon_button_style)
-                .disable(disabled)
-                .on_click(command),
-        );
+        footer = footer.child(ghost_icon_button(ICON_DELETE, dp(32.0), disabled, command));
     }
     Flex::vertical()
         .width(style.width)
@@ -2111,7 +2189,7 @@ fn upload_status_text(status: &UploadStatus) -> String {
     }
 }
 
-fn upload_status_icon(status: &UploadStatus) -> &'static str {
+fn upload_status_icon(status: &UploadStatus) -> SvgIconId {
     match status {
         UploadStatus::Queued | UploadStatus::Uploading { .. } => ICON_PENDING,
         UploadStatus::Complete => ICON_DONE,
@@ -2171,6 +2249,28 @@ fn input_panel_style(context: &StyleContext<'_>) -> ContainerStyle {
     style
 }
 
+fn icon_surface_style(context: &StyleContext<'_>) -> ContainerStyle {
+    let button = icon_button_style(context);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
+    style.surface.background = Some(button.background.normal);
+    style.surface.border_color = Some(button.border.normal);
+    style.surface.border_width = Some(button.border_width);
+    style.surface.border_radius = Some(button.radius);
+    style.surface.shadow = button.surface.shadow;
+    style
+}
+
+fn input_icon_surface_style(context: &StyleContext<'_>) -> ContainerStyle {
+    let button = input_icon_button_style(context);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
+    style.surface.background = Some(button.background.normal);
+    style.surface.border_color = Some(button.border.normal);
+    style.surface.border_width = Some(button.border_width);
+    style.surface.border_radius = Some(button.radius);
+    style.surface.shadow = button.surface.shadow;
+    style
+}
+
 fn color_trigger_accessible_button_style(context: &StyleContext<'_>) -> ButtonStyle {
     let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Secondary);
     style.foreground = value_color(
@@ -2203,39 +2303,12 @@ fn picker_popover_content_style(context: &StyleContext<'_>) -> ContainerStyle {
     style
 }
 
-fn icon_text_style(context: &StyleContext<'_>, size: crate::ui::unit::Sp) -> TextWidgetStyle {
-    let (_, _, _, muted, _, _, _) = mode_colors(context);
-    let mut style = TextWidgetStyle::default_for_theme(context.theme);
-    style.color = Value::Static(muted);
-    style.typography = TextStyle {
-        font_family: Some(ICON_FONT_FAMILY.to_string()),
-        size,
-        line_height: Some(size),
-        weight: FontWeight::Regular,
-        letter_spacing: Some(sp(0.0)),
-    };
-    style
-}
-
-fn upload_icon_text_style(context: &StyleContext<'_>) -> TextWidgetStyle {
-    let mut style = icon_text_style(context, sp(26.0));
-    style.typography.line_height = Some(sp(18.0));
-    style
-}
-
 fn icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
     let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Ghost);
     style.radius = Value::Static(dp(8.0));
     style.padding_x = dp(0.0);
     style.padding_y = dp(0.0);
     style.min_height = dp(32.0);
-    style.text_style = TextStyle {
-        font_family: Some(ICON_FONT_FAMILY.to_string()),
-        size: sp(20.0),
-        line_height: Some(sp(20.0)),
-        weight: FontWeight::Regular,
-        letter_spacing: Some(sp(0.0)),
-    };
     style
 }
 
@@ -2245,13 +2318,6 @@ fn input_icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
     style.padding_x = dp(0.0);
     style.padding_y = dp(0.0);
     style.min_height = FIELD_HEIGHT;
-    style.text_style = TextStyle {
-        font_family: Some(ICON_FONT_FAMILY.to_string()),
-        size: sp(20.0),
-        line_height: Some(sp(20.0)),
-        weight: FontWeight::Regular,
-        letter_spacing: Some(sp(0.0)),
-    };
     style
 }
 
@@ -2357,7 +2423,7 @@ fn calendar_day_button_style(
     style
 }
 
-fn calendar_today_button_style(context: &StyleContext<'_>) -> ButtonStyle {
+fn today_button_style(context: &StyleContext<'_>) -> ButtonStyle {
     let mut style = time_option_button_style(context);
     style.min_height = dp(34.0);
     style

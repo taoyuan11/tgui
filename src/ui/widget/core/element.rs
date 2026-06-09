@@ -105,6 +105,7 @@ impl<VM> Element<VM> {
             #[cfg(feature = "audio")]
             WidgetKind::Audio { audio } => WidgetKind::Audio { audio },
             WidgetKind::Image { image } => WidgetKind::Image { image },
+            WidgetKind::Icon { icon } => WidgetKind::Icon { icon },
             WidgetKind::Canvas {
                 scene,
                 item_interactions,

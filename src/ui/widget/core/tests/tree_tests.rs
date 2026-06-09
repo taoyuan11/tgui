@@ -140,7 +140,7 @@ fn tree_selected_row_emits_selected_background() {
 }
 
 #[test]
-fn tree_chrome_uses_material_icons_for_disclosure_and_checks() {
+fn tree_chrome_uses_svg_textures_for_disclosure_and_checks() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let theme = Theme::default();
@@ -175,29 +175,16 @@ fn tree_chrome_uses_material_icons_for_disclosure_and_checks() {
         .map(|text| text.content.as_ref())
         .collect::<Vec<_>>();
 
-    assert!(texts.contains(&"keyboard_arrow_right"));
-    assert!(texts.contains(&"check_box"));
-    assert!(texts.contains(&"check_box_outline_blank"));
-    assert!(texts.contains(&"indeterminate_check_box"));
+    assert!(!texts.contains(&"keyboard_arrow_right"));
+    assert!(!texts.contains(&"check_box"));
+    assert!(!texts.contains(&"check_box_outline_blank"));
+    assert!(!texts.contains(&"indeterminate_check_box"));
     assert!(!texts
         .iter()
         .any(|text| matches!(*text, ">" | "v" | "[x]" | "[ ]" | "[-]")));
     assert!(
-        rendered
-            .primitives
-            .texts
-            .iter()
-            .filter(|text| {
-                matches!(
-                    text.content.as_ref(),
-                    "keyboard_arrow_right"
-                        | "check_box"
-                        | "check_box_outline_blank"
-                        | "indeterminate_check_box"
-                )
-            })
-            .all(|text| text.font_family.is_some()),
-        "Tree chrome icons should resolve through the bundled icon font"
+        rendered.primitives.textures.len() >= 5,
+        "Tree chrome icons should render as SVG textures"
     );
 }
 
@@ -232,10 +219,10 @@ fn tree_expanded_disclosure_icon_is_rotated() {
     assert!(
         rendered
             .primitives
-            .texts
+            .textures
             .iter()
-            .any(|text| { text.content.as_ref() == "keyboard_arrow_right" && text.quad.is_some() }),
-        "expanded Tree disclosure should render as an animated rotated Material icon"
+            .any(|texture| texture.quad.is_some()),
+        "expanded Tree disclosure should keep its rotation as a texture quad"
     );
 }
 

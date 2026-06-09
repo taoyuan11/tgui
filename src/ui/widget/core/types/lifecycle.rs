@@ -44,6 +44,9 @@ pub(crate) enum LifecycleWidgetKind {
     Image {
         image: image::Image,
     },
+    Icon {
+        source: crate::ui::widget::icon::SvgIconId,
+    },
     Canvas {
         scene: Value<CanvasScene>,
     },
@@ -201,6 +204,7 @@ impl Clone for LifecycleWidgetKind {
             Self::Image { image } => Self::Image {
                 image: image.clone(),
             },
+            Self::Icon { source } => Self::Icon { source: *source },
             Self::Canvas { scene } => Self::Canvas {
                 scene: scene.clone(),
             },

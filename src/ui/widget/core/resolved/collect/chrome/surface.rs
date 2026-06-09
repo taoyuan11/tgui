@@ -1,14 +1,10 @@
 use super::*;
 use crate::ui::widget::common::TreeNodeState;
+use crate::ui::widget::icon::SvgIconId;
 use crate::ui::widget::DefaultActivation;
 use crate::ui::widget::TreeCheckState;
-use std::sync::Arc;
 use std::time::Duration;
 
-const TREE_DISCLOSURE_ICON: &str = "keyboard_arrow_right";
-const TREE_CHECKED_ICON: &str = "check_box";
-const TREE_UNCHECKED_ICON: &str = "check_box_outline_blank";
-const TREE_INDETERMINATE_ICON: &str = "indeterminate_check_box";
 const TREE_DISCLOSURE_TRANSITION_MS: u64 = 160;
 const TREE_CHECKBOX_TRANSITION_MS: u64 = 140;
 
@@ -429,8 +425,8 @@ fn push_tree_node_chrome_primitives<VM>(
             target_rotation,
             TREE_DISCLOSURE_TRANSITION_MS,
         );
-        push_tree_icon_text(
-            TREE_DISCLOSURE_ICON,
+        push_tree_svg_icon(
+            SvgIconId::ChevronRight,
             disclosure_slot,
             context.units.resolve_sp(tree_node.disclosure_icon_size),
             icon_color,
@@ -459,19 +455,19 @@ fn push_tree_node_chrome_primitives<VM>(
                 scene,
             );
         }
-        let (glyph, target_state, color) = match tree_node.check_state {
+        let (icon, target_state, color) = match tree_node.check_state {
             TreeCheckState::Checked => (
-                TREE_CHECKED_ICON,
+                SvgIconId::CheckboxChecked,
                 1.0,
                 tree_node.checkbox_checked_color.resolve(),
             ),
             TreeCheckState::Indeterminate => (
-                TREE_INDETERMINATE_ICON,
+                SvgIconId::CheckboxIndeterminate,
                 0.5,
                 tree_node.checkbox_indeterminate_color.resolve(),
             ),
             TreeCheckState::Unchecked => (
-                TREE_UNCHECKED_ICON,
+                SvgIconId::CheckboxUnchecked,
                 0.0,
                 tree_node.checkbox_unchecked_color.resolve(),
             ),
@@ -494,8 +490,8 @@ fn push_tree_node_chrome_primitives<VM>(
         } else {
             color
         };
-        push_tree_icon_text(
-            glyph,
+        push_tree_svg_icon(
+            icon,
             checkbox_slot,
             context.units.resolve_sp(tree_node.checkbox_icon_size),
             color,
@@ -567,8 +563,8 @@ fn push_tree_icon_hover_background(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn push_tree_icon_text(
-    content: &'static str,
+fn push_tree_svg_icon(
+    icon: SvgIconId,
     slot: Rect,
     requested_font_size: f32,
     color: Color,
@@ -593,31 +589,19 @@ fn push_tree_icon_text(
         frame_size,
         frame_size,
     );
-    let request = TextFontRequest {
-        preferred_font: Some(ICON_FONT_FAMILY),
-        weight: crate::text::font::FontWeight::Regular,
-    };
-    let resolved = context.font_manager.resolve_text(content, request);
     let transformed = rotation.abs() > f32::EPSILON || (scale - 1.0).abs() > f32::EPSILON;
-    scene.push_text(TextPrimitive {
-        content: Arc::from(content.to_string()),
-        rich_spans: None,
+    crate::ui::widget::icon::push_svg_icon_texture(
+        scene,
+        context.media,
+        context.units,
+        icon,
+        color,
         frame,
-        quad: transformed.then(|| tree_icon_quad(frame, rotation, scale)),
-        color: color.with_alpha_factor(opacity),
-        force_color: true,
-        font_family: Some(Arc::from(resolved.primary_font)),
-        font_size,
-        font_weight: crate::text::font::FontWeight::Regular,
-        line_height: font_size,
-        letter_spacing: 0.0,
-        wrap: crate::ui::widget::CanvasTextWrap::None,
-        overflow: crate::ui::widget::CanvasTextOverflow::Clip,
-        horizontal_align: crate::ui::widget::CanvasTextHorizontalAlign::Center,
-        vertical_align: crate::ui::widget::CanvasTextVerticalAlign::Center,
-        clip_rect: visual.primitive_clip,
-        clip_mask: visual.primitive_clip_mask,
-    });
+        opacity,
+        transformed.then(|| tree_icon_quad(frame, rotation, scale)),
+        visual.primitive_clip,
+        visual.primitive_clip_mask,
+    );
 }
 
 fn tree_icon_quad(frame: Rect, rotation: f32, scale: f32) -> [Point; 4] {

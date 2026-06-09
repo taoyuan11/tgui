@@ -496,6 +496,42 @@ impl<VM: 'static> ResolvedElement<VM> {
                 );
                 true
             }
+            ResolvedWidgetKind::Icon { icon } => {
+                let resolved = crate::ui::widget::icon::resolve_icon_style_with_sheet(
+                    icon.style.as_ref(),
+                    &context.style_context,
+                    context.style_sheet,
+                    &self.visual,
+                    visual.widget_state,
+                );
+                let side = context
+                    .units
+                    .resolve_dp(resolved.size)
+                    .min(visual.background_frame.width.get())
+                    .min(visual.background_frame.height.get())
+                    .max(0.0);
+                let frame = Rect::new(
+                    visual.background_frame.x
+                        + ((visual.background_frame.width - dp(side)).max(Dp::ZERO) * 0.5),
+                    visual.background_frame.y
+                        + ((visual.background_frame.height - dp(side)).max(Dp::ZERO) * 0.5),
+                    side,
+                    side,
+                );
+                crate::ui::widget::icon::push_svg_icon_texture(
+                    &mut computed.scene,
+                    context.media,
+                    context.units,
+                    icon.source,
+                    resolved.color.resolve(),
+                    frame,
+                    visual.opacity,
+                    None,
+                    visual.primitive_clip,
+                    visual.primitive_clip_mask,
+                );
+                true
+            }
             ResolvedWidgetKind::Canvas {
                 scene,
                 item_interactions,

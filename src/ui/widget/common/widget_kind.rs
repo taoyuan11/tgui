@@ -168,6 +168,9 @@ pub(crate) enum WidgetKind<VM> {
     Image {
         image: Image,
     },
+    Icon {
+        icon: crate::ui::widget::icon::BuiltinSvgIcon,
+    },
     Canvas {
         scene: Value<CanvasScene>,
         item_interactions: CanvasItemInteractionHandlers<VM>,
@@ -1028,6 +1031,7 @@ impl<VM> Clone for WidgetKind<VM> {
             Self::Image { image } => Self::Image {
                 image: image.clone(),
             },
+            Self::Icon { icon } => Self::Icon { icon: icon.clone() },
             Self::Canvas {
                 scene,
                 item_interactions,
