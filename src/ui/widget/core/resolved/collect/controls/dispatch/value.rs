@@ -241,6 +241,7 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
             origin: Point::ZERO,
             opacity,
             clip_rect: Rect::new(Dp::ZERO, Dp::ZERO, menu_width, full_height),
+            overflow_clip_rect: None,
             clip_mask: None,
         },
         &mut local_context,

@@ -28,6 +28,8 @@ pub(crate) fn push_focus_ring_primitives(
     border_radius: f32,
     focus_ring: Option<&crate::theme::FocusRingStyle>,
     opacity: f32,
+    clip_rect: Option<Rect>,
+    clip_mask: Option<ClipMask>,
 ) {
     let Some(focus_ring) = focus_ring else {
         return;
@@ -57,8 +59,8 @@ pub(crate) fn push_focus_ring_primitives(
         color: focus_ring.color.with_alpha_factor(opacity),
         corner_radius: border_radius + expansion,
         stroke_width: width,
-        clip_rect: None,
-        clip_mask: None,
+        clip_rect,
+        clip_mask,
     });
 }
 

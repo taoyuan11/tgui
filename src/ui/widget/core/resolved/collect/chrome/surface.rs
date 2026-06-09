@@ -163,6 +163,8 @@ impl<VM> ResolvedElement<VM> {
             visual.border_radius.get(),
             focus_ring.as_ref(),
             visual.opacity,
+            visual.overflow_clip,
+            visual.primitive_clip_mask,
         );
 
         if let Some(tree_node) = self.tree_node.as_ref() {

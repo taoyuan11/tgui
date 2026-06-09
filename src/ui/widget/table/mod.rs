@@ -1122,7 +1122,6 @@ where
         header = header.child(cell);
     }
     let mut header: Element<VM> = header.into();
-    header.background = Some(style.header_background.clone());
     apply_data_grid_header_container_style(&mut header, style_resolver);
     header
 }
@@ -1155,13 +1154,6 @@ where
 {
     let selected = selected_keys.resolve().contains(&row_key);
     let disabled_now = disabled.resolve();
-    let row_background = if selected {
-        style.row_selected_background.clone()
-    } else if row_index % 2 == 1 {
-        style.zebra_background.clone()
-    } else {
-        style.row_background.clone()
-    };
     let mut row_element = Flex::horizontal().width(total_width).height(row_height);
     let pin_offsets = column_pin_offsets(columns.as_ref());
     for (column_index, column) in columns.iter().enumerate() {
@@ -1246,7 +1238,6 @@ where
         row_element = row_element.child(cell);
     }
     let mut row_element: Element<VM> = row_element.into();
-    row_element.background = Some(row_background);
     apply_data_grid_row_container_style(&mut row_element, style_resolver, selected, row_index);
     row_element
 }

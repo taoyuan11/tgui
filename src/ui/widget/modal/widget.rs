@@ -26,7 +26,7 @@ use std::time::Duration;
 use crate::animation::Transition;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
-use crate::ui::layout::{pct, Align, Axis, Insets, Value};
+use crate::ui::layout::{pct, Align, Axis, Insets, Overflow, Value};
 use crate::ui::theme::{StyleContext, WidgetState};
 use crate::ui::unit::Dp;
 use crate::ui::widget::button::Button;
@@ -261,7 +261,8 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                 s
             })
             .opacity(visibility_value.clone())
-            .scale(scale_value);
+            .scale(scale_value)
+            .overflow(Overflow::Hidden);
         // 计算尺寸 / margin / padding：style 在 builder 阶段一次性解析。
         card = card
             .min_width(resolved_style_for_layout.min_width)

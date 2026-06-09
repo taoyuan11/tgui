@@ -74,6 +74,14 @@ impl<VM: 'static> ResolvedElement<VM> {
                     layout.overflow_x,
                     layout.overflow_y,
                 );
+                let child_overflow_clip_rect =
+                    if matches!(layout.overflow_x, Overflow::Hidden | Overflow::Scroll)
+                        || matches!(layout.overflow_y, Overflow::Hidden | Overflow::Scroll)
+                    {
+                        Some(child_clip_rect)
+                    } else {
+                        visual_context.overflow_clip_rect
+                    };
                 let child_clip_mask = apply_overflow_clip_mask(
                     visual_context.clip_mask,
                     visual.background_frame,
@@ -132,6 +140,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                             origin: child_origin,
                             opacity: visual.opacity,
                             clip_rect: child_clip_rect,
+                            overflow_clip_rect: child_overflow_clip_rect,
                             clip_mask: child_clip_mask,
                         },
                         context,
@@ -242,6 +251,14 @@ impl<VM: 'static> ResolvedElement<VM> {
                     *overflow_x,
                     *overflow_y,
                 );
+                let child_overflow_clip_rect =
+                    if matches!(*overflow_x, Overflow::Hidden | Overflow::Scroll)
+                        || matches!(*overflow_y, Overflow::Hidden | Overflow::Scroll)
+                    {
+                        Some(child_clip_rect)
+                    } else {
+                        visual_context.overflow_clip_rect
+                    };
                 let child_clip_mask = apply_overflow_clip_mask(
                     visual_context.clip_mask,
                     visual.background_frame,
@@ -304,6 +321,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                             origin: child_origin,
                             opacity: visual.opacity,
                             clip_rect: child_clip_rect,
+                            overflow_clip_rect: child_overflow_clip_rect,
                             clip_mask: child_clip_mask,
                         },
                         context,

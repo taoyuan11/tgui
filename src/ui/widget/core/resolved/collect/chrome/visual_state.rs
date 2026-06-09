@@ -110,6 +110,7 @@ impl<VM> ResolvedElement<VM> {
             background_radius: Dp::new(background_radius),
             runtime_visual,
             primitive_clip: Some(visual_context.clip_rect),
+            overflow_clip: visual_context.overflow_clip_rect,
             primitive_clip_mask: visual_context.clip_mask,
             disabled,
             widget_state,

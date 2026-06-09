@@ -110,6 +110,7 @@ pub(crate) struct VisualContext {
     pub(crate) origin: Point,
     pub(crate) opacity: f32,
     pub(crate) clip_rect: Rect,
+    pub(crate) overflow_clip_rect: Option<Rect>,
     pub(crate) clip_mask: Option<ClipMask>,
 }
 
@@ -118,6 +119,7 @@ pub(crate) struct VisualContextSnapshot {
     pub(crate) origin: Point,
     pub(crate) opacity: f32,
     pub(crate) clip_rect: Rect,
+    pub(crate) overflow_clip_rect: Option<Rect>,
     pub(crate) clip_mask: Option<ClipMask>,
 }
 
@@ -127,6 +129,7 @@ impl From<VisualContext> for VisualContextSnapshot {
             origin: value.origin,
             opacity: value.opacity,
             clip_rect: value.clip_rect,
+            overflow_clip_rect: value.overflow_clip_rect,
             clip_mask: value.clip_mask,
         }
     }
@@ -138,6 +141,7 @@ impl From<VisualContextSnapshot> for VisualContext {
             origin: value.origin,
             opacity: value.opacity,
             clip_rect: value.clip_rect,
+            overflow_clip_rect: value.overflow_clip_rect,
             clip_mask: value.clip_mask,
         }
     }

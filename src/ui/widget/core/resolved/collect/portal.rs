@@ -211,6 +211,7 @@ pub(crate) fn collect_portal_content_scene<VM: 'static>(
                         origin: crate::ui::widget::Point::ZERO,
                         opacity: 1.0,
                         clip_rect: local_bounds,
+                        overflow_clip_rect: None,
                         clip_mask: None,
                     },
                     &mut local_context,

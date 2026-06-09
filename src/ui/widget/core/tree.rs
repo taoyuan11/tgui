@@ -783,6 +783,7 @@ impl<VM: 'static> WidgetTree<VM> {
                             },
                             opacity: 1.0,
                             clip_rect: viewport,
+                            overflow_clip_rect: None,
                             clip_mask: None,
                         },
                         &mut context,

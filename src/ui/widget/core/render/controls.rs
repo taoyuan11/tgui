@@ -259,6 +259,7 @@ pub(crate) fn push_checkbox_primitives(
     opacity: f32,
     widget_id: WidgetId,
     clip_rect: Option<Rect>,
+    focus_clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
     font_manager: &FontManager,
     theme: &Theme,
@@ -339,6 +340,8 @@ pub(crate) fn push_checkbox_primitives(
         radius,
         checkbox_style.focus_ring.as_ref(),
         opacity,
+        focus_clip_rect,
+        clip_mask,
     );
 
     if checkmark_opacity > f32::EPSILON {
@@ -457,6 +460,7 @@ pub(crate) fn push_radio_primitives(
     opacity: f32,
     widget_id: WidgetId,
     clip_rect: Option<Rect>,
+    focus_clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
     font_manager: &FontManager,
     theme: &Theme,
@@ -539,6 +543,8 @@ pub(crate) fn push_radio_primitives(
         radius,
         radio_style.focus_ring.as_ref(),
         opacity,
+        focus_clip_rect,
+        clip_mask,
     );
 
     if indicator_opacity > f32::EPSILON {

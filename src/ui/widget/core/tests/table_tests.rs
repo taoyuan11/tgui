@@ -202,6 +202,46 @@ fn data_grid_defaults_render_readably_in_dark_theme() {
 }
 
 #[test]
+fn data_grid_header_background_follows_current_theme() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::light();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::new(
+            vec![DataGridRow::keyed("a", "Alpha".to_string())],
+            columns(),
+        )
+        .size(dp(240.0), dp(120.0)),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(
+        rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.color == theme.colors.surface_low),
+        "DataGrid header should follow the current theme background"
+    );
+}
+
+#[test]
 fn data_grid_supports_sections_empty_loading_and_density() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();

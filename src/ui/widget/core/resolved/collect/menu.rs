@@ -352,16 +352,33 @@ pub(crate) fn emit_menu_layer<VM>(
     // Background container shape: occupies the full overlay rect.
     let bg_rect = Rect::new(Dp::ZERO, Dp::ZERO, overlay_w, overlay_h);
     let mut primitives = Vec::new();
-    primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Shape(
-        RenderPrimitive {
-            rect: bg_rect,
-            color: style.background.resolve(),
-            corner_radius: style.radius.resolve().get(),
-            stroke_width: style.border_width.resolve().get(),
-            clip_rect: None,
-            clip_mask: None,
-        },
-    ));
+    let background = style.background.resolve();
+    if background.a > 0 {
+        primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Shape(
+            RenderPrimitive {
+                rect: bg_rect,
+                color: background,
+                corner_radius: style.radius.resolve().get(),
+                stroke_width: 0.0,
+                clip_rect: None,
+                clip_mask: None,
+            },
+        ));
+    }
+    let border = style.border.resolve();
+    let border_width = style.border_width.resolve().get();
+    if border.a > 0 && border_width > 0.0 {
+        primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Shape(
+            RenderPrimitive {
+                rect: bg_rect,
+                color: border,
+                corner_radius: style.radius.resolve().get(),
+                stroke_width: border_width,
+                clip_rect: None,
+                clip_mask: None,
+            },
+        ));
+    }
 
     let mut hits = Vec::with_capacity(menu.items.len());
     let menu_id = element.id;

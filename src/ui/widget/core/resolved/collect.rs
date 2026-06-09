@@ -33,6 +33,7 @@ struct CollectVisualState {
     background_radius: Dp,
     runtime_visual: VisualStyle,
     primitive_clip: Option<Rect>,
+    overflow_clip: Option<Rect>,
     primitive_clip_mask: Option<ClipMask>,
     disabled: bool,
     widget_state: WidgetState,

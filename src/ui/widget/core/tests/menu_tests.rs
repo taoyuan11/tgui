@@ -1,6 +1,8 @@
 pub(super) use super::*;
 
-use crate::ui::widget::{Button, ContextMenu, Menu, MenuBar, MenuIcon, MenuItem, RenderCommand};
+use crate::ui::widget::{
+    Button, ContextMenu, Menu, MenuBar, MenuIcon, MenuItem, MenuStyle, RenderCommand,
+};
 
 const SIMPLE_MENU_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#2f80ed"/></svg>"##;
 
@@ -104,6 +106,56 @@ fn menu_open_true_emits_items_in_overlay() {
     assert!(
         labels.iter().any(|t| *t == "Ctrl+N"),
         "shortcut hint 'Ctrl+N' should be rendered, got {labels:?}"
+    );
+}
+
+#[test]
+fn menu_open_true_emits_filled_background_and_separate_border() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Menu::new(Button::new("File").size(dp(80.0), dp(28.0)))
+            .items(vec![MenuItem::new("New")])
+            .open(true),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 400.0, 400.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let style = MenuStyle::default_for_theme(&theme);
+    let background = style.background.resolve();
+    let border = style.border.resolve();
+    let border_width = style.border_width.resolve().get();
+    assert!(
+        rendered.primitives.overlay_shapes.iter().any(|shape| {
+            shape.color == background
+                && shape.color.a > 0
+                && shape.stroke_width == 0.0
+                && shape.rect.width >= style.min_width
+        }),
+        "open menu should render a filled background shape, got {} overlay shapes",
+        rendered.primitives.overlay_shapes.len()
+    );
+    assert!(
+        rendered.primitives.overlay_shapes.iter().any(|shape| {
+            shape.color == border && (shape.stroke_width - border_width).abs() < f32::EPSILON
+        }),
+        "open menu should render border separately from the background"
     );
 }
 

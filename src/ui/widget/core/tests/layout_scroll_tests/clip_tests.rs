@@ -218,6 +218,87 @@ fn rounded_overflow_clips_children_with_parent_corner_mask() {
 }
 
 #[test]
+fn rounded_overflow_clips_child_focus_ring_overlay() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let button: Element<()> = Button::new("Save")
+        .size(dp(80.0), dp(36.0))
+        .position_absolute()
+        .left(dp(10.0))
+        .top(dp(38.0))
+        .into();
+    let button_id = button.id;
+    let tree = WidgetTree::new(
+        Stack::<()>::new()
+            .size(dp(100.0), dp(64.0))
+            .style_full(|ctx| {
+                container_style(
+                    ctx,
+                    Some(crate::foundation::color::Color::WHITE),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(dp(16.0)),
+                    None,
+                )
+            })
+            .overflow(Overflow::Hidden)
+            .child(button),
+    );
+    let mut widget_states = WidgetStateMap::default();
+    widget_states.set(
+        button_id,
+        crate::ui::theme::WidgetState {
+            focused: true,
+            ..Default::default()
+        },
+    );
+
+    let rendered = tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &widget_states,
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 100.0, 64.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let focus_ring = rendered
+        .primitives
+        .overlay_shapes
+        .iter()
+        .find(|primitive| primitive.stroke_width == theme.focus_ring.width.get())
+        .expect("focused child button should render a focus ring");
+    assert!(
+        focus_ring.rect.bottom() > dp(64.0),
+        "test setup should place the focus ring beyond the clipping edge"
+    );
+    assert_eq!(focus_ring.clip_rect, Some(Rect::new(0.0, 0.0, 100.0, 64.0)));
+    assert_eq!(
+        focus_ring.clip_mask,
+        Some(ClipMask {
+            rect: Rect::new(0.0, 0.0, 100.0, 64.0),
+            corner_radius: 16.0,
+        })
+    );
+}
+
+#[test]
 fn scroll_collect_skips_fully_clipped_plain_subtrees() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
