@@ -208,3 +208,79 @@ fn fill_mode_none_hides_values_outside_range() {
     )
     .is_none());
 }
+
+#[test]
+fn refresh_skips_settled_slots_without_reporting_change() {
+    // 已稳定(无活动动画)的槽位在 refresh 中必须被跳过,且永不报告变化。
+    let mut engine = AnimationEngine::default();
+    let transition = Transition::linear(Duration::from_millis(100));
+    let start = Instant::now();
+    engine.resolve_f32(key(WidgetProperty::Opacity), 0.0, Some(transition), start);
+    // 槽位已稳定:任意未来时刻 refresh 都不应报告变化,也无活动动画。
+    let refresh = engine.refresh(start + Duration::from_secs(10));
+    assert!(!refresh.changed);
+    assert!(!engine.has_active_animations());
+}
+
+#[test]
+fn idle_settled_slot_below_cap_is_retained_and_still_animates() {
+    // 回归保护:软上限以下,长时间空闲的已稳定槽位绝不能被回收 —— 否则后续目标
+    // 变化时会丢失过渡(直接跳变)。
+    let mut engine = AnimationEngine::default();
+    let transition = Transition::linear(Duration::from_millis(100));
+    let start = Instant::now();
+    engine.resolve_f32(key(WidgetProperty::Opacity), 0.0, Some(transition), start);
+
+    // 长时间空闲后 refresh(远超 GC TTL),但槽位数远低于软上限 → 不应回收。
+    let later = start + super::engine::SLOT_GC_TTL + Duration::from_secs(3600);
+    let _ = engine.refresh(later);
+    assert_eq!(engine.debug_total_slots(), 1);
+
+    // 空闲后目标变化:必须从 0.0 平滑过渡而非跳变。
+    engine.resolve_f32(key(WidgetProperty::Opacity), 1.0, Some(transition), later);
+    let mid = engine.resolve_f32(
+        key(WidgetProperty::Opacity),
+        1.0,
+        Some(transition),
+        later + Duration::from_millis(50),
+    );
+    assert!(mid > 0.0 && mid < 1.0, "expected mid-transition value, got {mid}");
+    assert!(engine.has_active_animations());
+}
+
+#[test]
+fn over_cap_reclaims_stale_settled_slots_but_keeps_recent() {
+    use super::engine::{SLOT_GC_SOFT_CAP, SLOT_GC_TTL};
+    let mut engine = AnimationEngine::default();
+    let start = Instant::now();
+
+    // 用「无过渡」即时稳定的槽位填到软上限以上,全部 last_touch=start。
+    for id in 0..(SLOT_GC_SOFT_CAP as u64 + 4) {
+        engine.resolve_f32(
+            AnimationKey::Widget {
+                id,
+                property: WidgetProperty::Opacity,
+            },
+            1.0,
+            None,
+            start,
+        );
+    }
+    assert!(engine.debug_total_slots() > SLOT_GC_SOFT_CAP);
+
+    // 一个「存活」槽位在更晚时刻被触达。
+    let later = start + SLOT_GC_TTL + Duration::from_secs(1);
+    engine.resolve_f32(
+        AnimationKey::Widget {
+            id: 9_999_999,
+            property: WidgetProperty::Opacity,
+        },
+        1.0,
+        None,
+        later,
+    );
+
+    // 此刻 refresh 触发回收:陈旧的已稳定槽位被回收,仅保留刚触达的存活槽位。
+    let _ = engine.refresh(later);
+    assert_eq!(engine.debug_total_slots(), 1);
+}

@@ -12,6 +12,13 @@ use super::spec::{Keyframes, Transition};
 
 const THEME_DURATION_MS: u64 = 240;
 
+/// 槽位回收软上限:槽位总数超过此值才会尝试回收陈旧的已稳定槽位。常规应用
+/// 远低于此值,因此不触发任何回收、零行为变化。
+pub(crate) const SLOT_GC_SOFT_CAP: usize = 8192;
+/// 已稳定槽位在超过软上限后,`last_touch` 早于此时长即视为陈旧(对应已销毁
+/// widget)可回收。取值足够宽松,确保仅短暂未重收集的存活 widget 不被误回收。
+pub(crate) const SLOT_GC_TTL: Duration = Duration::from_secs(10);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum WidgetProperty {
     Background,
@@ -235,14 +242,19 @@ struct SlotState<T> {
     displayed: T,
     target: T,
     animation: Option<ActiveAnimation<T>>,
+    /// 最近一次被 `resolve`(即 collect 阶段触达该 widget 属性)的时间。用于在槽位
+    /// 总数超过软上限时回收长期未触达的「已稳定」槽位(对应已销毁的 widget),
+    /// 避免长会话中动态创建/销毁的 widget 让槽位表无界增长。
+    last_touch: Instant,
 }
 
 impl<T: Animatable> SlotState<T> {
-    fn settled(value: T) -> Self {
+    fn settled(value: T, now: Instant) -> Self {
         Self {
             displayed: value.clone(),
             target: value,
             animation: None,
+            last_touch: now,
         }
     }
 
@@ -311,17 +323,21 @@ impl<T: Animatable> AnimationStore<T> {
     ) -> T {
         let Some(transition) = transition.filter(|transition| !transition.duration().is_zero())
         else {
-            self.slots.insert(key, SlotState::settled(target.clone()));
+            self.slots.insert(key, SlotState::settled(target.clone(), now));
             return target;
         };
 
         let state = self
             .slots
             .entry(key)
-            .or_insert_with(|| SlotState::settled(target.clone()));
+            .or_insert_with(|| SlotState::settled(target.clone(), now));
+        // widget 本帧被解析,刷新触达时间,使其免于槽位回收。
+        state.last_touch = now;
 
-        let current = state.sample(now);
+        // 仅在目标变化时,才需要先把动画推进到「当前显示值」作为新动画起点;
+        // 目标未变(占绝大多数 resolve 调用)时跳过这次额外采样 + 克隆,末尾统一采样。
         if state.target != target {
+            let current = state.sample(now);
             state.target = target.clone();
             if current != target {
                 state.displayed = current.clone();
@@ -343,6 +359,12 @@ impl<T: Animatable> AnimationStore<T> {
     fn refresh(&mut self, now: Instant) -> AnimationRefresh {
         let mut refresh = AnimationRefresh::default();
         for (key, state) in self.slots.iter_mut() {
+            // 「已稳定」(无活动动画)的槽位采样必然返回 `displayed` 不变,不可能产生变化 ——
+            // 直接跳过,使每帧 refresh 的成本正比于「活动动画数」而非「槽位总数」,
+            // 同时省掉每个已稳定槽位每帧两次 `displayed.clone()`。
+            if state.animation.is_none() {
+                continue;
+            }
             let before = state.displayed.clone();
             if state.sample(now) != before {
                 refresh.changed = true;
@@ -358,7 +380,21 @@ impl<T: Animatable> AnimationStore<T> {
                 }
             }
         }
+        if self.slots.len() > SLOT_GC_SOFT_CAP {
+            self.gc_stale_settled_slots(now);
+        }
         refresh
+    }
+
+    /// 当槽位总数超过软上限时,回收长期未被 `resolve` 触达的已稳定槽位 ——
+    /// 这些几乎必然对应已从树中销毁的 widget(全局自增 id 不复用)。仍存活的
+    /// widget 每次 collect 都会刷新 `last_touch`,因此永不会被误回收;活动动画
+    /// 槽位也始终保留。常规应用槽位数远低于上限,完全不触发,无任何行为变化。
+    fn gc_stale_settled_slots(&mut self, now: Instant) {
+        self.slots.retain(|_, state| {
+            state.animation.is_some()
+                || now.saturating_duration_since(state.last_touch) < SLOT_GC_TTL
+        });
     }
 
     fn has_active(&self) -> bool {
@@ -513,6 +549,15 @@ impl AnimationEngine {
 
     pub(crate) fn next_frame_deadline(&self, now: Instant) -> Option<Instant> {
         self.has_active_animations().then_some(now + FRAME_INTERVAL)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_total_slots(&self) -> usize {
+        self.colors.slots.len()
+            + self.floats.slots.len()
+            + self.dps.slots.len()
+            + self.points.slots.len()
+            + self.insets.slots.len()
     }
 }
 
