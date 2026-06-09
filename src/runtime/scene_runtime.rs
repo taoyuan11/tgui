@@ -460,7 +460,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             };
             self.next_tooltip_wakeup_deadline = collected.next_tooltip_wakeup;
             self.next_toast_wakeup_deadline = collected.next_toast_wakeup;
-            let mut computed = collected.computed.clone();
+            // `collected.computed` 此后不再被单独使用(只有这份工作副本会被存入
+            // CachedScene),因此直接移动而非克隆整棵根场景 —— 省掉每次场景重建一次
+            // 的全场景深拷贝。`collected` 的其余字段在下方按字段分别 move 进 CachedScene,
+            // 与这里的部分 move 互不冲突。
+            let mut computed = collected.computed;
             self.append_external_portals_to_computed(&mut computed, now);
             let virtual_layout_invalidated = self.sync_virtual_state_updates(&computed);
             if virtual_layout_invalidated {
