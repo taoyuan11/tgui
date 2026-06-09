@@ -223,7 +223,14 @@ impl<VM: 'static> ResolvedElement<VM> {
             );
         }
         self.clear_closed_modal_interactions(&mut computed);
-        let before_overlays = computed.clone();
+        // `before_overlays` 仅在 `Container`/`Virtual` 节点上被消费(用于把 overlay 增量
+        // 并入 `chunk_parts.after_children`)。叶子节点占节点总数绝大多数,为它们克隆整份
+        // `computed` 是纯浪费 —— 因此把这次快照限定到带子节点的 kind。
+        let is_container_like = matches!(
+            self.kind,
+            ResolvedWidgetKind::Container { .. } | ResolvedWidgetKind::Virtual { .. }
+        );
+        let before_overlays = is_container_like.then(|| computed.clone());
 
         self.emit_tooltip_if_visible(context, &mut computed, &visual);
         self.emit_popover_overlay_if_visible(context, &mut computed, &visual);
@@ -233,10 +240,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         self.emit_toast_overlay_if_visible(context, &mut computed, &visual);
         self.emit_portal_if_open(context, &mut computed, &visual);
 
-        if matches!(
-            self.kind,
-            ResolvedWidgetKind::Container { .. } | ResolvedWidgetKind::Virtual { .. }
-        ) {
+        if let Some(before_overlays) = before_overlays {
             let overlay_delta = computed.delta_since(&before_overlays);
             if let Some(parts) = caches.chunk_parts.get_mut(&self.id) {
                 parts.after_children.extend(&overlay_delta);
@@ -255,10 +259,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             // `before_children: computed.clone()`)直接跳过,消除逐帧重收集里最大的单项独占开销
             // (n=1000 长列表约 22%)。即便未来出现意外读取,`recompose` 的 `chunk_parts.get(&id)?`
             // 会得到 `None` 并安全回退到整帧重收集,绝不会产生错误渲染。
-            if matches!(
-                self.kind,
-                ResolvedWidgetKind::Container { .. } | ResolvedWidgetKind::Virtual { .. }
-            ) {
+            if is_container_like {
                 caches
                     .chunk_parts
                     .entry(self.id)

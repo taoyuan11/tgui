@@ -162,7 +162,9 @@ impl<VM: 'static> ResolvedElement<VM> {
                     context,
                     computed,
                 );
-                let after_child_subtrees = computed.clone();
+                // `after_children` 仅承载子树收集之后追加的内容(滚动条),它本身就等价于
+                // `computed.delta_since(子树之后的快照)` —— 因此无需克隆整份累积场景再做 delta。
+                // 对长列表滚动容器,这次克隆会拷贝其全部子节点的图元(每帧一次),代价高昂。
                 let mut after_children = ComputedScene::default();
                 if show_scrollbar {
                     push_scrollbar_primitives(
@@ -178,7 +180,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                     );
                 }
                 computed.extend(&after_children);
-                let after_children = computed.delta_since(&after_child_subtrees);
                 caches.chunk_parts.insert(
                     self.id,
                     SceneChunkParts {
@@ -365,8 +366,12 @@ impl<VM: 'static> ResolvedElement<VM> {
                         computed.extend(child_chunk);
                     }
                 }
-                let after_child_subtrees = computed.clone();
-                computed
+                // `after_children` 收集子树之后追加的所有内容(虚拟状态更新 + 滚动条),
+                // 直接构建即可,无需克隆整份累积场景再 `delta_since`。虚拟状态更新此前推入
+                // `computed` 且位于快照之后,因此原本就被 delta 纳入 `after_children`;这里
+                // 直接写入 `after_children`,再 extend 回 `computed`,行为一致且省掉全场景克隆。
+                let mut after_children = ComputedScene::default();
+                after_children
                     .virtual_state_updates
                     .push(crate::ui::widget::VirtualSceneStateUpdate {
                         widget_id: self.id,
@@ -378,7 +383,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                         widget_ids_by_key,
                         invalidate_layout,
                     });
-                let mut after_children = ComputedScene::default();
                 push_scrollbar_primitives(
                     &mut after_children.scene,
                     context.theme,
@@ -391,7 +395,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                     context.active_scrollbar,
                 );
                 computed.extend(&after_children);
-                let after_children = computed.delta_since(&after_child_subtrees);
                 caches.chunk_parts.insert(
                     self.id,
                     SceneChunkParts {
