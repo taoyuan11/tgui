@@ -49,6 +49,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         .min()
     }
 
+    pub(super) fn set_control_flow_for_deadline(
+        &self,
+        event_loop: &dyn ActiveEventLoop,
+        deadline: Option<Instant>,
+    ) {
+        if let Some(deadline) = deadline {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+    }
+
+    pub(super) fn schedule_next_deadline(
+        &self,
+        event_loop: &dyn ActiveEventLoop,
+        now: Instant,
+    ) -> Option<Instant> {
+        let deadline = self.next_deadline(now);
+        self.set_control_flow_for_deadline(event_loop, deadline);
+        deadline
+    }
+
     pub(super) fn text_edit_state(&self, id: WidgetId) -> Option<&TextEditState> {
         self.text_edit_states.get(&id)
     }

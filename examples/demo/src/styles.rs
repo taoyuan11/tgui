@@ -11,21 +11,31 @@ pub(crate) fn text_style(ctx: &StyleContext<'_>, size: Sp) -> TextWidgetStyle {
     style
 }
 
+fn primary_text_color(mode: ResolvedThemeMode) -> Color {
+    match mode {
+        ResolvedThemeMode::Light => Color::hexa(0x0F172AFF),
+        ResolvedThemeMode::Dark => Color::hexa(0xF8FAFCFF),
+    }
+}
+
 pub(crate) fn title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
     let mut style = text_style(ctx, sp(28.0));
     style.typography.weight = FontWeight::SemiBold;
+    style.color = primary_text_color(ctx.mode).into();
     style
 }
 
 pub(crate) fn section_title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
     let mut style = text_style(ctx, sp(20.0));
     style.typography.weight = FontWeight::SemiBold;
+    style.color = primary_text_color(ctx.mode).into();
     style
 }
 
 pub(crate) fn usage_title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
     let mut style = text_style(ctx, sp(16.0));
     style.typography.weight = FontWeight::SemiBold;
+    style.color = primary_text_color(ctx.mode).into();
     style
 }
 
@@ -389,4 +399,25 @@ pub(crate) fn modern_toast_style(ctx: &StyleContext<'_>) -> ToastStyle {
     style.max_width = dp(320.0);
     style.stack_gap = dp(12.0);
     style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usage_title_style_changes_between_theme_modes() {
+        let light = Theme::light();
+        let dark = Theme::dark();
+        let light_color = usage_title_style(&StyleContext::from_theme(&light))
+            .color
+            .resolve();
+        let dark_color = usage_title_style(&StyleContext::from_theme(&dark))
+            .color
+            .resolve();
+
+        assert_eq!(light_color, Color::hexa(0x0F172AFF));
+        assert_eq!(dark_color, Color::hexa(0xF8FAFCFF));
+        assert_ne!(light_color, dark_color);
+    }
 }

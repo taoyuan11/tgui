@@ -1,4 +1,5 @@
 use super::*;
+use crate::foundation::view_model::ValueCommand;
 use crate::ui::widget::{
     Calendar, ColorPicker, DatePicker, NumberInput, PopoverStyle, TimePicker, Upload, UploadFile,
     UploadFileId, UploadStatus,
@@ -74,12 +75,12 @@ fn date_and_time_pickers_emit_popover_content_when_open() {
             )
             .child(
                 TimePicker::new("09:30", NaiveTime::from_hms_opt(9, 30, 0))
-                    .minute_step(60)
-                    .open(true),
+                    .open(true)
+                    .on_open_change(ValueCommand::new(|_: &mut (), _: bool| {})),
             ),
     );
 
-    let rendered = tree.render_output(
+    let computed = tree.compute_scene(
         &font_manager,
         &theme,
         &media,
@@ -94,6 +95,7 @@ fn date_and_time_pickers_emit_popover_content_when_open() {
         None,
         false,
     );
+    let rendered = computed.rendered();
     let overlay_labels = rendered
         .primitives
         .overlay_texts
@@ -102,9 +104,23 @@ fn date_and_time_pickers_emit_popover_content_when_open() {
         .collect::<Vec<_>>();
 
     assert!(overlay_labels.contains(&"June 2026"));
-    assert!(overlay_labels.contains(&"09:00"));
-    assert!(overlay_labels.contains(&"10:00"));
+    assert!(overlay_labels.contains(&"Hour"));
+    assert!(overlay_labels.contains(&"Minute"));
+    assert!(overlay_labels.contains(&"09"));
+    assert!(overlay_labels.contains(&"30"));
+    assert!(overlay_labels.contains(&"Done"));
+    assert!(!overlay_labels.contains(&"09:00"));
+    assert!(!overlay_labels.contains(&"10:00"));
     assert!(!overlay_labels.contains(&"schedule"));
+    let overlay_widget_hits = computed
+        .overlay_hit_regions
+        .iter()
+        .filter(|region| matches!(region.interaction, HitInteraction::Widget { .. }))
+        .count();
+    assert!(
+        overlay_widget_hits >= 12,
+        "date and time picker overlays should expose clickable day, wheel, and done controls"
+    );
     let panel_background_count = rendered
         .primitives
         .overlay_shapes

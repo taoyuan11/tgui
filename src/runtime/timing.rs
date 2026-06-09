@@ -146,11 +146,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .then_some(now + super::TOUCH_SCROLL_INERTIA_FRAME);
         let next_deadline = self.next_deadline(now);
 
-        if let Some(deadline) = next_deadline {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        } else {
-            event_loop.set_control_flow(ControlFlow::Wait);
-        }
+        self.set_control_flow_for_deadline(event_loop, next_deadline);
 
         if let Some(started_at) = started_at {
             if animation_refresh.changed || animation_deadline.is_some() {

@@ -84,6 +84,45 @@ fn radio_label_extends_measure_and_hit_region() {
 }
 
 #[test]
+fn radio_label_registers_text_color_animation_key() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let radio: Element<()> = Radio::new(false).label("Email").into();
+    let radio_id = radio.id;
+    let tree: WidgetTree<()> = WidgetTree::new(radio);
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 160.0, 40.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered
+        .primitives
+        .texts
+        .iter()
+        .any(|text| text.content.as_ref() == "Email"));
+    assert!(
+        animations.contains_key(crate::animation::AnimationKey::Widget {
+            id: radio_id.raw(),
+            property: crate::animation::WidgetProperty::TextColor,
+        })
+    );
+}
+
+#[test]
 fn checked_radio_renders_indicator() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

@@ -87,6 +87,45 @@ fn checkbox_label_extends_measure_and_hit_region() {
 }
 
 #[test]
+fn checkbox_label_registers_text_color_animation_key() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let checkbox: Element<()> = Checkbox::new(false).label("Accept").into();
+    let checkbox_id = checkbox.id;
+    let tree: WidgetTree<()> = WidgetTree::new(checkbox);
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 160.0, 40.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered
+        .primitives
+        .texts
+        .iter()
+        .any(|text| text.content.as_ref() == "Accept"));
+    assert!(
+        animations.contains_key(crate::animation::AnimationKey::Widget {
+            id: checkbox_id.raw(),
+            property: crate::animation::WidgetProperty::TextColor,
+        })
+    );
+}
+
+#[test]
 fn checked_checkbox_renders_checked_background_and_checkmark() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

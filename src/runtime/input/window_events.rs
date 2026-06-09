@@ -338,20 +338,31 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 let _ = self.end_gesture_session(gesture_finger, true);
                 self.end_touch_scroll_drag();
             }
-            WindowEvent::RedrawRequested => match self.render_current_frame() {
-                Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
-                Ok(RenderStatus::ReconfigureSurface) => {
-                    if let Some(renderer) = self.renderer.as_mut() {
-                        renderer.reconfigure();
+            WindowEvent::RedrawRequested => {
+                let rendered = match self.render_current_frame() {
+                    Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => true,
+                    Ok(RenderStatus::ReconfigureSurface) => {
+                        if let Some(renderer) = self.renderer.as_mut() {
+                            renderer.reconfigure();
+                        }
+                        match self.render_current_frame() {
+                            Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => true,
+                            Ok(RenderStatus::ReconfigureSurface) => true,
+                            Err(error) => {
+                                self.fail(event_loop, error);
+                                false
+                            }
+                        }
                     }
-                    match self.render_current_frame() {
-                        Ok(RenderStatus::Rendered | RenderStatus::SkipFrame) => {}
-                        Ok(RenderStatus::ReconfigureSurface) => {}
-                        Err(error) => self.fail(event_loop, error),
+                    Err(error) => {
+                        self.fail(event_loop, error);
+                        false
                     }
+                };
+                if rendered {
+                    self.schedule_next_deadline(event_loop, Instant::now());
                 }
-                Err(error) => self.fail(event_loop, error),
-            },
+            }
             _ => {}
         }
 

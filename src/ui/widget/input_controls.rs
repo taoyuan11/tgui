@@ -20,7 +20,7 @@ use super::style::{
 };
 use super::{
     Button, CursorStyle, Element, FileDropEvent, Flex, Grid, Icon, Input, Popover, ProgressBar,
-    ScrollView, Slider, Stack, Text,
+    Slider, Stack, Text,
 };
 
 const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -46,6 +46,8 @@ const ICON_COLOR: SvgIconId = SvgIconId::Palette;
 const ICON_EXPAND: SvgIconId = SvgIconId::ChevronDown;
 const ICON_PREVIOUS: SvgIconId = SvgIconId::ChevronLeft;
 const ICON_NEXT: SvgIconId = SvgIconId::ChevronRight;
+const ICON_UP: SvgIconId = SvgIconId::ChevronUp;
+const ICON_DOWN: SvgIconId = SvgIconId::ChevronDown;
 const ICON_ADD: SvgIconId = SvgIconId::Plus;
 const ICON_REMOVE: SvgIconId = SvgIconId::Minus;
 const ICON_UPLOAD: SvgIconId = SvgIconId::Upload;
@@ -619,7 +621,7 @@ impl<VM> TimePicker<VM> {
             disabled: Value::Static(false),
             validation: Value::Static(ValidationVisualState::default()),
             placeholder: Value::Static("Select time".to_string()),
-            minute_step: 15,
+            minute_step: 1,
             on_change: None,
             on_open_change: None,
             style: None,
@@ -1671,46 +1673,50 @@ fn time_picker_content<VM: 'static>(
     on_open_change: Option<ValueCommand<VM, bool>>,
     style: TimePickerStyle,
 ) -> Element<VM> {
-    let mut chips = Flex::horizontal()
-        .wrap(Wrap::Wrap)
-        .gap(dp(8.0))
-        .padding(Insets::all(dp(2.0)));
-    let mut minute = 0u32;
-    let step = minute_step.max(1);
-    while minute < 24 * 60 {
-        let time = NaiveTime::from_hms_opt(minute / 60, minute % 60, 0).unwrap_or(NaiveTime::MIN);
-        let command = on_change.clone();
-        let open_command = on_open_change.clone();
-        let controller = controller.clone();
-        let mut button = Button::new(format_time(time))
-            .width(style.option_width)
-            .height(dp(32.0))
-            .disable(disabled);
-        if selected == Some(time) {
-            button = button
-                .primary()
-                .style_full(time_option_selected_button_style);
-        } else {
-            button = button.secondary().style_full(time_option_button_style);
-        }
-        chips = chips.child(button.on_click(Command::new_with_context(move |vm, ctx| {
-            let text = format_time(time);
-            controller.set_text(text.clone());
-            if let Some(command) = command.as_ref() {
-                command.execute_with_context(
-                    vm,
-                    TimePickerChange {
-                        time: Some(time),
-                        text,
-                    },
-                    ctx,
-                );
-            }
-            if let Some(command) = open_command.as_ref() {
-                command.execute_with_context(vm, false, ctx);
-            }
-        })));
-        minute += step;
+    let current = selected
+        .or_else(|| parse_time(&controller.text()))
+        .unwrap_or(NaiveTime::MIN);
+    let minute_values = minute_values_for_step(minute_step);
+    let hour_values = (0..24).collect::<Vec<_>>();
+    let hour_index = value_index(&hour_values, current.hour());
+    let minute_index = value_index(&minute_values, current.minute());
+    let hour = hour_values[hour_index];
+    let minute = minute_values[minute_index];
+    let column_width = style.option_width.max(dp(96.0));
+    let hour_column = time_wheel_column(
+        "Hour",
+        TimePickerUnit::Hour,
+        &hour_values,
+        hour_index,
+        hour,
+        minute,
+        controller.clone(),
+        disabled,
+        on_change.clone(),
+        column_width,
+    );
+    let minute_column = time_wheel_column(
+        "Minute",
+        TimePickerUnit::Minute,
+        &minute_values,
+        minute_index,
+        hour,
+        minute,
+        controller,
+        disabled,
+        on_change,
+        column_width,
+    );
+
+    let mut done_button = Button::new("Done")
+        .primary()
+        .width(style.width)
+        .height(dp(36.0))
+        .disable(disabled || on_open_change.is_none());
+    if let Some(command) = on_open_change {
+        done_button = done_button.on_click(Command::new_with_context(move |vm, ctx| {
+            command.execute_with_context(vm, false, ctx);
+        }));
     }
 
     Flex::vertical()
@@ -1724,13 +1730,218 @@ fn time_picker_content<VM: 'static>(
                 .child(Text::new("Select time").style_full(label_text_style)),
         )
         .child(
-            ScrollView::new()
-                .height(dp(238.0))
-                .show_scrollbar(true)
-                .style_full(transparent_panel_style)
-                .child(chips),
+            Flex::horizontal()
+                .width(style.width)
+                .align(Align::Center)
+                .justify(Justify::Center)
+                .gap(dp(12.0))
+                .child(hour_column)
+                .child(Text::new(":").style_full(time_wheel_separator_style))
+                .child(minute_column),
         )
+        .child(done_button)
         .into()
+}
+
+#[derive(Clone, Copy)]
+enum TimePickerUnit {
+    Hour,
+    Minute,
+}
+
+fn time_wheel_column<VM: 'static>(
+    label: &'static str,
+    unit: TimePickerUnit,
+    values: &[u32],
+    selected_index: usize,
+    current_hour: u32,
+    current_minute: u32,
+    controller: TextController,
+    disabled: bool,
+    on_change: Option<ValueCommand<VM, TimePickerChange>>,
+    width: Dp,
+) -> Element<VM> {
+    let previous_index = previous_index(selected_index, values.len());
+    let next_index = next_index(selected_index, values.len());
+    let previous = values[previous_index];
+    let selected = values[selected_index];
+    let next = values[next_index];
+    Flex::vertical()
+        .width(width)
+        .align(Align::Center)
+        .gap(dp(6.0))
+        .child(Text::new(label).style_full(muted_text_style))
+        .child(ghost_icon_button(
+            ICON_UP,
+            dp(32.0),
+            disabled,
+            time_wheel_select_command(
+                unit,
+                previous,
+                current_hour,
+                current_minute,
+                controller.clone(),
+                disabled,
+                on_change.clone(),
+            ),
+        ))
+        .child(time_wheel_value_button(
+            previous,
+            false,
+            width,
+            disabled,
+            time_wheel_select_command(
+                unit,
+                previous,
+                current_hour,
+                current_minute,
+                controller.clone(),
+                disabled,
+                on_change.clone(),
+            ),
+        ))
+        .child(time_wheel_value_button(
+            selected,
+            true,
+            width,
+            disabled,
+            time_wheel_select_command(
+                unit,
+                selected,
+                current_hour,
+                current_minute,
+                controller.clone(),
+                disabled,
+                on_change.clone(),
+            ),
+        ))
+        .child(time_wheel_value_button(
+            next,
+            false,
+            width,
+            disabled,
+            time_wheel_select_command(
+                unit,
+                next,
+                current_hour,
+                current_minute,
+                controller.clone(),
+                disabled,
+                on_change.clone(),
+            ),
+        ))
+        .child(ghost_icon_button(
+            ICON_DOWN,
+            dp(32.0),
+            disabled,
+            time_wheel_select_command(
+                unit,
+                next,
+                current_hour,
+                current_minute,
+                controller,
+                disabled,
+                on_change,
+            ),
+        ))
+        .into()
+}
+
+fn time_wheel_value_button<VM: 'static>(
+    value: u32,
+    selected: bool,
+    width: Dp,
+    disabled: bool,
+    command: Command<VM>,
+) -> Button<VM> {
+    let button = Button::new(format!("{value:02}"))
+        .width(width)
+        .height(if selected { dp(44.0) } else { dp(34.0) })
+        .disable(disabled)
+        .on_click(command);
+    if selected {
+        button
+            .primary()
+            .style_full(time_wheel_selected_button_style)
+    } else {
+        button
+            .secondary()
+            .style_full(time_wheel_option_button_style)
+    }
+}
+
+fn time_wheel_select_command<VM: 'static>(
+    unit: TimePickerUnit,
+    value: u32,
+    current_hour: u32,
+    current_minute: u32,
+    controller: TextController,
+    disabled: bool,
+    on_change: Option<ValueCommand<VM, TimePickerChange>>,
+) -> Command<VM> {
+    Command::new_with_context(move |vm, ctx| {
+        if disabled {
+            return;
+        }
+        let (hour, minute) = match unit {
+            TimePickerUnit::Hour => (value, current_minute),
+            TimePickerUnit::Minute => (current_hour, value),
+        };
+        let time = NaiveTime::from_hms_opt(hour, minute, 0).unwrap_or(NaiveTime::MIN);
+        let text = format_time(time);
+        controller.set_text(text.clone());
+        if let Some(command) = on_change.as_ref() {
+            command.execute_with_context(
+                vm,
+                TimePickerChange {
+                    time: Some(time),
+                    text,
+                },
+                ctx,
+            );
+        }
+    })
+}
+
+fn minute_values_for_step(step: u32) -> Vec<u32> {
+    let step = step.clamp(1, 60);
+    let mut values = Vec::new();
+    let mut minute = 0u32;
+    while minute < 60 {
+        values.push(minute);
+        minute += step;
+    }
+    values
+}
+
+fn value_index(values: &[u32], value: u32) -> usize {
+    values
+        .iter()
+        .position(|item| *item == value)
+        .or_else(|| {
+            values
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, item)| item.abs_diff(value))
+                .map(|(index, _)| index)
+        })
+        .unwrap_or(0)
+}
+
+fn previous_index(index: usize, len: usize) -> usize {
+    if len == 0 || index == 0 {
+        len.saturating_sub(1)
+    } else {
+        index - 1
+    }
+}
+
+fn next_index(index: usize, len: usize) -> usize {
+    if len == 0 || index + 1 >= len {
+        0
+    } else {
+        index + 1
+    }
 }
 
 fn number_step_button<VM: 'static>(
@@ -2285,15 +2496,6 @@ fn color_trigger_accessible_button_style(context: &StyleContext<'_>) -> ButtonSt
     style
 }
 
-fn transparent_panel_style(context: &StyleContext<'_>) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for_theme(context.theme);
-    style.surface.background = Some(Value::Static(Color::TRANSPARENT));
-    style.surface.border_color = Some(Value::Static(Color::TRANSPARENT));
-    style.surface.border_width = Some(Value::Static(dp(0.0)));
-    style.surface.shadow = None;
-    style
-}
-
 fn picker_popover_content_style(context: &StyleContext<'_>) -> ContainerStyle {
     let popover = PopoverStyle::default_for_theme(context.theme);
     let mut style = ContainerStyle::default_for_theme(context.theme);
@@ -2343,6 +2545,39 @@ fn time_option_selected_button_style(context: &StyleContext<'_>) -> ButtonStyle 
     style.background = value_color(primary, primary.lighten(0.08), primary.darken(0.08), muted);
     style.foreground = value_color(Color::WHITE, Color::WHITE, Color::WHITE, muted);
     style.border = value_color(primary, primary.lighten(0.08), primary.darken(0.08), muted);
+    style
+}
+
+fn time_wheel_option_button_style(context: &StyleContext<'_>) -> ButtonStyle {
+    let mut style = time_option_button_style(context);
+    style.text_style = TextStyle {
+        font_family: None,
+        size: sp(15.0),
+        line_height: Some(sp(20.0)),
+        weight: FontWeight::Medium,
+        letter_spacing: Some(sp(0.0)),
+    };
+    style
+}
+
+fn time_wheel_selected_button_style(context: &StyleContext<'_>) -> ButtonStyle {
+    let mut style = time_option_selected_button_style(context);
+    style.text_style = TextStyle {
+        font_family: None,
+        size: sp(22.0),
+        line_height: Some(sp(26.0)),
+        weight: FontWeight::SemiBold,
+        letter_spacing: Some(sp(0.0)),
+    };
+    style.min_height = dp(44.0);
+    style
+}
+
+fn time_wheel_separator_style(context: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = label_text_style(context);
+    style.typography.size = sp(22.0);
+    style.typography.line_height = Some(sp(26.0));
+    style.typography.weight = FontWeight::SemiBold;
     style
 }
 

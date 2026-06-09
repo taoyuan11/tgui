@@ -186,7 +186,6 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
         ));
         let style = collapse.style.clone();
         let mut root: Element<VM> = Flex::vertical()
-            .gap(layout_style.gap)
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_collapse_style_with_sheet(
                     style.as_ref(),

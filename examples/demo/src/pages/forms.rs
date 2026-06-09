@@ -94,7 +94,6 @@ const CODE_DATE_PICKER: &str = r#"DatePicker::new(app.demo_date_text.clone(), ap
 
 const CODE_TIME_PICKER: &str = r#"TimePicker::new(app.demo_time_text.clone(), app.demo_time.signal())
     .open(app.demo_time_open.signal())
-    .minute_step(30)
     .on_open_change(ValueCommand::new(App::set_demo_time_open))
     .on_change(ValueCommand::new(App::set_demo_time))"#;
 
@@ -513,15 +512,14 @@ fn time_picker_component(app: &App) -> Element<App> {
     demo_section::component_doc(
         app,
         "TimePicker",
-        "TimePicker 提供可输入文本框和时间选项弹层，适合固定步进的时间选择。",
+        "TimePicker 提供可输入文本框和闹钟式时间弹层，可自由设置小时和分钟。",
         vec![UsageDemo::new(
             "time-picker/basic",
             "时间选择",
-            "示例使用 30 分钟步进，选中项会回写 ViewModel。",
+            "示例使用 24 小时制，可逐项调整小时和分钟并回写 ViewModel。",
             Flex::vertical().gap(dp(8.0)).child(el![
                 TimePicker::new(app.demo_time_text.clone(), app.demo_time.signal())
                     .open(app.demo_time_open.signal())
-                    .minute_step(30)
                     .on_open_change(ValueCommand::new(App::set_demo_time_open))
                     .on_change(ValueCommand::new(App::set_demo_time)),
                 Text::new(app.profile_status.signal()).style_full(styles::status_style),

@@ -78,3 +78,24 @@ fn collapsed_collapse_keeps_panel_content_for_exit_animation() {
         Some(Value::Static(Length::Px(value))) if value == Dp::ZERO
     ));
 }
+
+#[test]
+fn collapse_header_and_panel_are_flush() {
+    let layout = collapse_layout(true);
+    let children = resolved_children(&layout.resolved_root);
+
+    assert_eq!(children.len(), 2);
+
+    let header = layout
+        .widget_bounds(children[0].id)
+        .expect("header should have layout bounds");
+    let panel = layout
+        .widget_bounds(children[1].id)
+        .expect("panel should have layout bounds");
+
+    assert_eq!(
+        header.bottom(),
+        panel.y,
+        "collapse trigger and panel should not leave a hover gap"
+    );
+}

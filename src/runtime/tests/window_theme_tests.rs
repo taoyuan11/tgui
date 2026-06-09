@@ -87,3 +87,98 @@ fn bound_theme_set_updates_current_theme_without_mode_change() {
     handler.sync_theme_binding();
     assert_eq!(handler.theme, updated_light);
 }
+
+#[derive(Debug, Default)]
+struct CapturingEventLoop {
+    control_flow: Mutex<Option<ControlFlow>>,
+}
+
+impl ActiveEventLoop for CapturingEventLoop {
+    fn create_proxy(&self) -> EventLoopProxy {
+        panic!("not needed in runtime tests")
+    }
+
+    fn create_window(
+        &self,
+        _window_attributes: WindowAttributes,
+    ) -> Result<Box<dyn Window>, RequestError> {
+        panic!("not needed in runtime tests")
+    }
+
+    fn create_custom_cursor(
+        &self,
+        _custom_cursor: CustomCursorSource,
+    ) -> Result<CustomCursor, RequestError> {
+        panic!("not needed in runtime tests")
+    }
+
+    fn available_monitors(&self) -> Box<dyn Iterator<Item = MonitorHandle>> {
+        Box::new(std::iter::empty())
+    }
+
+    fn primary_monitor(&self) -> Option<MonitorHandle> {
+        None
+    }
+
+    fn listen_device_events(&self, _allowed: DeviceEvents) {}
+
+    fn system_theme(&self) -> Option<WindowTheme> {
+        None
+    }
+
+    fn set_control_flow(&self, control_flow: ControlFlow) {
+        *self
+            .control_flow
+            .lock()
+            .expect("control flow lock poisoned") = Some(control_flow);
+    }
+
+    fn control_flow(&self) -> ControlFlow {
+        self.control_flow
+            .lock()
+            .expect("control flow lock poisoned")
+            .unwrap_or(ControlFlow::Wait)
+    }
+
+    fn exit(&self) {}
+
+    fn exiting(&self) -> bool {
+        false
+    }
+
+    fn owned_display_handle(&self) -> OwnedDisplayHandle {
+        OwnedDisplayHandle::new(Arc::new(TestDisplayHandle))
+    }
+
+    fn rwh_06_handle(&self) -> &dyn HasDisplayHandle {
+        static DISPLAY: TestDisplayHandle = TestDisplayHandle;
+        &DISPLAY
+    }
+}
+
+#[test]
+fn schedule_next_deadline_tracks_theme_animations_created_during_scene_collection() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(WidgetTree::new(Text::new("theme"))),
+        invalidation,
+        test_config_with_theme(ThemeSelection::Mode(ThemeMode::Light), ThemeSet::default()),
+    );
+
+    let _ = handler.computed_scene();
+    handler.apply_theme(Theme::dark());
+    let _ = handler.computed_scene();
+
+    let event_loop = CapturingEventLoop::default();
+    let now = Instant::now();
+    let deadline = handler
+        .schedule_next_deadline(&event_loop, now)
+        .expect("active theme animation should schedule another frame");
+
+    assert!(deadline > now);
+    match event_loop.control_flow() {
+        ControlFlow::WaitUntil(scheduled) => assert_eq!(scheduled, deadline),
+        other => panic!("expected WaitUntil control flow, got {other:?}"),
+    }
+}

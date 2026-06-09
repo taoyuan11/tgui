@@ -361,6 +361,15 @@ pub(crate) fn push_checkbox_primitives(
 
     if let Some(label) = label {
         let label = checkbox_label_with_theme(label, checkbox_style);
+        let label_color = animations.resolve_color(
+            crate::animation::AnimationKey::Widget {
+                id: widget_id.raw(),
+                property: WidgetProperty::TextColor,
+            },
+            checkbox_style.label,
+            transition,
+            now,
+        );
         let label_x = box_frame.right() + checkbox_style.label_gap;
         let label_frame = Rect::new(
             label_x,
@@ -382,7 +391,7 @@ pub(crate) fn push_checkbox_primitives(
             Insets::ZERO,
             None,
             None,
-            checkbox_style.label,
+            label_color,
             opacity,
             widget_id,
             clip_rect,
@@ -544,6 +553,15 @@ pub(crate) fn push_radio_primitives(
 
     if let Some(label) = label {
         let label = radio_label_with_theme(label, radio_style);
+        let label_color = animations.resolve_color(
+            crate::animation::AnimationKey::Widget {
+                id: widget_id.raw(),
+                property: WidgetProperty::TextColor,
+            },
+            radio_style.label,
+            transition,
+            now,
+        );
         let label_x = control_frame.right() + radio_style.label_gap;
         let label_frame = Rect::new(
             label_x,
@@ -565,7 +583,7 @@ pub(crate) fn push_radio_primitives(
             Insets::ZERO,
             None,
             None,
-            radio_style.label,
+            label_color,
             opacity,
             widget_id,
             clip_rect,
