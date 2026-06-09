@@ -83,7 +83,9 @@ mod imp {
         NODE_COUNT.with(|cell| cell.set(cell.get() + 1));
     }
 
-    /// 启用探针并清零累计。
+    /// 启用探针并清零累计。仅被 `#[ignore]` 的画像测试使用,故同时按 `test` 门控,
+    /// 避免非测试的 `cargo check --features collect-profile` 报「未使用」警告。
+    #[cfg(test)]
     pub(crate) fn reset() {
         ENABLED.with(|cell| cell.set(true));
         VISUAL_STATE.with(|cell| cell.set(Duration::ZERO));
@@ -94,7 +96,9 @@ mod imp {
         NODE_COUNT.with(|cell| cell.set(0));
     }
 
-    /// 读出累计并关闭探针。
+    /// 读出累计并关闭探针。仅被 `#[ignore]` 的画像测试使用,故同时按 `test` 门控,
+    /// 避免非测试的 `cargo check --features collect-profile` 报「未使用」警告。
+    #[cfg(test)]
     pub(crate) fn snapshot() -> super::PhaseBreakdown {
         let ms = |cell: &'static std::thread::LocalKey<Cell<Duration>>| {
             cell.with(|cell| cell.get().as_secs_f64() * 1000.0)
@@ -114,11 +118,12 @@ mod imp {
 
 pub(crate) use imp::{record_node, timed};
 
-#[cfg(feature = "collect-profile")]
+#[cfg(all(feature = "collect-profile", test))]
 pub(crate) use imp::{reset, snapshot};
 
-/// 各相位累计（毫秒）+ 被收集节点数。
-#[cfg(feature = "collect-profile")]
+/// 各相位累计（毫秒）+ 被收集节点数。仅被 `#[ignore]` 的画像测试使用,故同时按
+/// `test` 门控,避免非测试的 `cargo check --features collect-profile` 报「未使用」警告。
+#[cfg(all(feature = "collect-profile", test))]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct PhaseBreakdown {
     pub visual_state_ms: f64,
