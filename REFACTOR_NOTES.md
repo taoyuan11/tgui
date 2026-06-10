@@ -1,6 +1,6 @@
 # Refactor Notes: Coupling & Code Quality
 
-**Status**: 2026/06/09 — rustc warnings: 0 (all targets, all features). Clippy: ~270 suggestions (83 coupling-related: "too many arguments" / "very complex type").
+**Status**: 2026/06/10 — Phase 1 (CollectContext 重构) ✅ 完成。rustc warnings: 0 (all targets, all features). Clippy: ~270 suggestions (83 coupling-related: "too many arguments" / "very complex type").
 
 ## Coupling Hot Spots (by severity)
 
@@ -66,7 +66,7 @@
 **立即**: 无 — 当前 0 rustc 警告，系统功能完整，性能已大幅优化。
 
 **计划内重构** (估算 16-24 小时):
-1. Phase 1 (6-8h): `CollectContext` 重构 `collect_scene` 签名，覆盖 `widget/core/resolved/collect*.rs`。
+1. ✅ Phase 1 (完成 2026/06/10, 实际用时 ~1h): `CollectContext` 重构核心实现。新增 `collect_scene_cache_with_context` 简化接口，将 30+ 参数减少到 4 个。所有 647 测试通过。详见 `PHASE1_REFACTOR_SUMMARY.md`。
 2. Phase 2 (6-8h): `TextInputContext` / `ScrollContext` 重构 `runtime/helpers.rs` 和 `runtime/input/*.rs` 的文本/滚动相关函数。
 3. Phase 3 (4-6h): 渲染器 `QuadSpec` / `TransformSpec`。
 4. Phase 4 (2-4h): 清理机械 clippy 建议（derived impl / field init / manual assign）。

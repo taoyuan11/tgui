@@ -726,94 +726,47 @@ impl<VM: 'static> WidgetTree<VM> {
     ) -> CollectedSceneCache<VM> {
         let next_tooltip_wakeup: std::cell::Cell<Option<Instant>> = std::cell::Cell::new(None);
         let next_toast_wakeup: std::cell::Cell<Option<Instant>> = std::cell::Cell::new(None);
-        let ((mut computed, lifecycle_states, chunks, chunk_parts, visual_contexts), dependencies) =
-            with_widget_stack(|| {
-                with_dependency_collection(|| {
-                    let cap = layout.resolved_root.estimated_node_count();
-                    let mut lifecycle_states = HashMap::with_capacity(cap / 4);
-                    let mut chunks = HashMap::with_capacity(cap);
-                    let mut chunk_parts = HashMap::with_capacity(cap / 2);
-                    let mut visual_contexts = HashMap::with_capacity(cap);
-                    let style_context = crate::ui::theme::StyleContext::from_theme(theme)
-                        .with_reduced_motion(reduced_motion)
-                        .with_text_scale(layout.units.font_scale());
-                    let mut context = CollectContext {
-                        taffy: &layout.taffy,
-                        font_manager,
-                        theme,
-                        style_context,
-                        style_sheet,
-                        media,
-                        focused_input,
-                        focused_text_state,
-                        focused_text_value,
-                        focused_text_layout,
-                        text_layout_overrides,
-                        active_slider_value,
-                        caret_visible,
-                        selected_text,
-                        selected_text_state,
-                        hovered_scrollbar,
-                        active_scrollbar,
-                        widget_states,
-                        select_open_states,
-                        menu_open_states,
-                        menubar_active_states,
-                        context_menu_anchor_states,
-                        scroll_offsets,
-                        virtual_states,
-                        viewport,
-                        units: layout.units,
-                        animations,
-                        reduced_motion,
-                        now,
-                        focus: super::scene::FocusCollectState::default(),
-                        tooltip_hover_started_at,
-                        next_tooltip_wakeup: &next_tooltip_wakeup,
-                        next_toast_wakeup: &next_toast_wakeup,
-                        active_tooltip,
-                        active_hover_popover,
-                    };
-                    let root_id = layout.resolved_root.collect_subtree_cache(
-                        &layout.layout_root,
-                        VisualContext {
-                            origin: Point {
-                                x: viewport.x,
-                                y: viewport.y,
-                            },
-                            opacity: 1.0,
-                            clip_rect: viewport,
-                            overflow_clip_rect: None,
-                            clip_mask: None,
-                        },
-                        &mut context,
-                        &mut lifecycle_states,
-                        &mut chunks,
-                        &mut chunk_parts,
-                        &mut visual_contexts,
-                    );
-                    let computed = chunks.get(&root_id).cloned().unwrap_or_default();
-                    (
-                        computed,
-                        lifecycle_states,
-                        chunks,
-                        chunk_parts,
-                        visual_contexts,
-                    )
-                })
-            });
-        computed.finalize_portals(viewport);
-        computed.dependencies = dependencies.clone();
-        CollectedSceneCache {
-            computed,
-            lifecycle_states,
-            chunks,
-            chunk_parts,
-            visual_contexts,
-            dependencies,
-            next_tooltip_wakeup: next_tooltip_wakeup.get(),
-            next_toast_wakeup: next_toast_wakeup.get(),
-        }
+        let style_context = crate::ui::theme::StyleContext::from_theme(theme)
+            .with_reduced_motion(reduced_motion)
+            .with_text_scale(layout.units.font_scale());
+        let context = CollectContext {
+            taffy: &layout.taffy,
+            font_manager,
+            theme,
+            style_context,
+            style_sheet,
+            media,
+            focused_input,
+            focused_text_state,
+            focused_text_value,
+            focused_text_layout,
+            text_layout_overrides,
+            active_slider_value,
+            caret_visible,
+            selected_text,
+            selected_text_state,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            select_open_states,
+            menu_open_states,
+            menubar_active_states,
+            context_menu_anchor_states,
+            scroll_offsets,
+            virtual_states,
+            viewport,
+            units: layout.units,
+            animations,
+            reduced_motion,
+            now,
+            focus: super::scene::FocusCollectState::default(),
+            tooltip_hover_started_at,
+            next_tooltip_wakeup: &next_tooltip_wakeup,
+            next_toast_wakeup: &next_toast_wakeup,
+            active_tooltip,
+            active_hover_popover,
+        };
+        self.collect_scene_cache_with_context(layout, context, &next_tooltip_wakeup, &next_toast_wakeup)
     }
 
     #[cfg(test)]
@@ -867,6 +820,71 @@ impl<VM: 'static> WidgetTree<VM> {
             None,
         )
         .computed
+    }
+
+    /// 简化的场景收集接口：接受已构建的 CollectContext。
+    ///
+    /// 此函数是 Phase 1 重构的核心：将 30+ 参数的函数签名简化为接受预构建的上下文。
+    /// 调用点负责构建 CollectContext，这样可以：
+    /// - 减少函数签名膨胀
+    /// - 让参数组织更清晰（按职责分组）
+    /// - 便于未来扩展（新增上下文字段不影响所有调用点）
+    pub(crate) fn collect_scene_cache_with_context(
+        &self,
+        layout: &ResolvedSceneLayout<VM>,
+        mut context: CollectContext<'_, '_>,
+        next_tooltip_wakeup: &std::cell::Cell<Option<Instant>>,
+        next_toast_wakeup: &std::cell::Cell<Option<Instant>>,
+    ) -> CollectedSceneCache<VM> {
+        let viewport = context.viewport;
+        let ((mut computed, lifecycle_states, chunks, chunk_parts, visual_contexts), dependencies) =
+            with_widget_stack(|| {
+                with_dependency_collection(|| {
+                    let cap = layout.resolved_root.estimated_node_count();
+                    let mut lifecycle_states = HashMap::with_capacity(cap / 4);
+                    let mut chunks = HashMap::with_capacity(cap);
+                    let mut chunk_parts = HashMap::with_capacity(cap / 2);
+                    let mut visual_contexts = HashMap::with_capacity(cap);
+                    let root_id = layout.resolved_root.collect_subtree_cache(
+                        &layout.layout_root,
+                        VisualContext {
+                            origin: Point {
+                                x: viewport.x,
+                                y: viewport.y,
+                            },
+                            opacity: 1.0,
+                            clip_rect: viewport,
+                            overflow_clip_rect: None,
+                            clip_mask: None,
+                        },
+                        &mut context,
+                        &mut lifecycle_states,
+                        &mut chunks,
+                        &mut chunk_parts,
+                        &mut visual_contexts,
+                    );
+                    let computed = chunks.get(&root_id).cloned().unwrap_or_default();
+                    (
+                        computed,
+                        lifecycle_states,
+                        chunks,
+                        chunk_parts,
+                        visual_contexts,
+                    )
+                })
+            });
+        computed.finalize_portals(viewport);
+        computed.dependencies = dependencies.clone();
+        CollectedSceneCache {
+            computed,
+            lifecycle_states,
+            chunks,
+            chunk_parts,
+            visual_contexts,
+            dependencies,
+            next_tooltip_wakeup: next_tooltip_wakeup.get(),
+            next_toast_wakeup: next_toast_wakeup.get(),
+        }
     }
 }
 
