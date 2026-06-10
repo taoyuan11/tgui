@@ -1,181 +1,64 @@
-# tgui 视频组件最佳实践
+# tgui 视频能力现状与维护说明
 
-## 1. 目标
+本文基于当前工作区代码更新，用来记录 `tgui` 视频能力的实际 API、内部链路和仍未实现的边界。旧文档中很多内容是早期设计建议；当前代码已经落地了 `video` feature、`VideoController`、`VideoSurface` 和 FFmpeg 后端，因此这里以现状为准。
 
-本文档定义在 `tgui` 中实现视频组件时的推荐设计方式，目标是：
+## 1. 当前定位
 
-* 与现有 `MVVM + 响应式状态 + 声明式 Widget Tree` 架构保持一致
-* 与 `wgpu` 渲染链路保持统一
-* 为 desktop、Android、OHOS 预留稳定的跨平台扩展点
-* 避免把“播放器逻辑”“平台解码”“UI 控件”“渲染上传”耦合在一起
-* 先稳定 API，再逐步扩展硬件解码、流媒体、字幕、全屏等能力
+视频能力目前是可选功能：
 
----
+```toml
+[dependencies]
+tgui = { version = "0.2.0", features = ["video"] }
+```
 
-## 2. 为什么视频组件不能直接照搬 `Image`
+`Cargo.toml` 中的相关 feature：
 
-`tgui` 当前已经具备 `Image` 组件，并支持本地文件和 `http/https` 资源加载，还暴露了 `on_loading / on_success / on_error` 之类的媒体加载回调。与此同时，框架整体是围绕 `Application`、`Observable<T>`、`Binding<T>`、`Command`、布局容器和核心控件来组织的。
+* `video = ["audio"]`
+* `video-static = ["video", "ffmpeg-next/static"]`
 
-但视频和图片在本质上不同：
+启用 `video` 后，公共 API 会通过 `tgui::video`、`tgui::prelude` 和部分 `tgui::widgets` re-export 暴露。当前公开类型包括：
 
-* `Image` 是一次性资源加载
-* `Video` 是持续运行的状态机
-* `Image` 不涉及音频同步
-* `Video` 需要解码、缓冲、时钟推进、帧刷新、前后台恢复、播放控制
+* `VideoController`
+* `VideoSurface`
+* `VideoSource`
+* `VideoPlaybackState`
+* `VideoMetrics`
+* `VideoSize`
 
-因此，**不推荐把视频做成“Image 的增强版”**。
-最佳实践是：
+当前已经实现的是低层视频 surface 与控制器组合；还没有内建的完整 `Video` 播放器控件，也没有默认 controls、poster、looping 或 autoplay 组件。
 
-> **上层做成声明式 `Video` Widget，下层拆分为 `Controller` 与 `Backend`，视频帧统一进入 `wgpu texture` 渲染链。**
+## 2. 当前架构
 
----
+实际链路如下：
 
-## 3. 推荐的总体架构
+1. ViewModel 持有 `VideoController`，通过 `ViewModelContext` 创建。
+2. 用户代码调用 `controller.load(VideoSource)`、`play`、`pause`、`seek` 等方法。
+3. `VideoController` 把命令转发给内部 `VideoBackend`，并通过 `State` / `Signal` 暴露播放状态。
+4. `VideoSurface` 参与 widget tree、布局、样式解析、命中测试和媒体事件派发。
+5. scene 收集阶段根据 `VideoSurface` 的实际布局尺寸设置目标 `RasterRequest`，并在有当前帧时生成 `VideoTexturePrimitive`，否则生成 loading/error/idle placeholder。
+6. FFmpeg 后端在线程中打开媒体、解码视频和音频，把视频帧缩放并转换成 RGBA `TextureFrame`。
+7. 渲染器使用普通 texture cache 上传 `TextureFrame`；同一视频流尺寸不变时通过 revision 更新 GPU texture。
 
-建议将视频能力拆成三层：
+这里的后端 trait 目前是 `pub(crate)`，不是外部可插拔的公共扩展点。若以后要支持第三方后端，需要先设计稳定的 public backend API。
 
-### 3.1 `Video` Widget 层
+## 3. 平台和后端状态
 
-职责：
+当前代码中的视频后端是 `src/video/backend/ffmpeg/` 下的 FFmpeg 实现。它会懒启动两个后台线程：
 
-* 参与布局
-* 参与样式系统
-* 参与事件系统
-* 组合控制栏、加载态、错误态、封面图等 UI
+* decode worker：打开输入、解复用、解码视频/音频、填充缓冲队列。
+* present worker：处理控制命令、推进播放状态、按时钟展示帧、更新 metrics 和 surface snapshot。
 
-这一层应该表现得像普通 `Widget` 一样，支持与现有组件一致的链式 API，例如：
+音频输出复用 `audio` feature 的共享输出能力；如果视频没有音频流，则使用软件时钟推进视频。
 
-* `width / height / fill_width`
-* `background / border / border_radius / opacity`
-* `offset / overflow`
-* `on_click / on_mouse_move`
+当前没有 Android / OHOS / 原生平台视频后端。`VideoBackend` trait 中预留了 `on_surface_lost`、`on_surface_restored`、`on_app_background`、`on_app_foreground` 默认空实现，但目前没有移动端后端落地。
 
-### 3.2 `VideoController` 层
+Windows 启用 `video` feature 时，`build.rs` 会额外链接 `strmiids` 和 `mfuuid`。
 
-职责：
+## 4. 公共 API
 
-* 管理播放状态
-* 提供播放命令
-* 向 ViewModel 和 Widget 暴露响应式状态
+### 4.1 `VideoSource`
 
-这是视频能力与 `MVVM` 体系结合的关键层。
-
-### 3.3 `VideoBackend` 层
-
-职责：
-
-* 打开媒体源
-* 解析音视频流
-* 解码音频 / 视频
-* 管理缓冲与同步
-* 输出视频帧
-* 输出音频
-* 处理平台生命周期差异
-
-这一层不直接关心 UI 布局，只提供播放器能力。
-
----
-
-## 4. 推荐的核心原则
-
-## 4.1 原则一：UI 与解码分离
-
-不要在 `Video` widget 内直接处理：
-
-* demux
-* decode
-* audio output
-* seek pipeline
-* 网络缓冲
-
-这些逻辑都应该放到 `VideoBackend` 中。
-
-`Video` widget 只负责：
-
-* 展示当前帧
-* 展示当前播放状态
-* 将用户操作转成 `Controller` 调用
-
----
-
-## 4.2 原则二：播放器状态必须是响应式的
-
-`tgui` 当前以 `Observable<T>`、`Binding<T>`、`Command` 为核心，这意味着视频状态也应该走同样的机制，而不是自行维护一套独立的 UI 通知系统。
-
-推荐暴露以下状态：
-
-* `playback_state`
-* `current_position`
-* `duration`
-* `buffered_position`
-* `volume`
-* `muted`
-* `playback_rate`
-* `video_size`
-* `error`
-
-这些都应当能自然接到：
-
-* `Text`
-* 进度条
-* 播放/暂停按钮
-* 加载动画
-* 错误提示 UI
-
-另外，建议把“什么时候可以播放”和“最多继续缓冲到哪里”拆成两个概念：
-
-* `buffer target`：达到后表示已经可播放/可恢复播放
-* `memory limit`：达到后继续缓冲停止增长，但不裁掉已缓冲内容
-
----
-
-## 4.3 原则三：视频帧统一走 `wgpu texture`
-
-`tgui` 已经是以 `wgpu` 为底层渲染引擎的 GUI 框架。视频最推荐的接入方式是：
-
-> **解码得到视频帧 → 转换或上传为 GPU texture → 由 `Video` widget 在当前渲染流程中绘制。**
-
-这样做的好处：
-
-* 渲染体系统一
-* 容易支持圆角、透明度、裁剪、叠加层
-* 控制栏、字幕、封面、错误层都可以与 widget tree 直接组合
-* 桌面、Android、OHOS 的表现更容易保持一致
-
-不推荐将平台原生视频视图直接嵌入主 widget tree，因为那通常会带来：
-
-* 样式不一致
-* 圆角和裁剪困难
-* 悬浮控件叠加复杂
-* 不同平台行为分裂
-
----
-
-## 4.4 原则四：平台差异通过 Backend 抽象，而不是渗透到 Widget API
-
-`tgui` 当前已明确支持 Android 和 OHOS，并且这两个平台已经有各自的 runtime / surface / 字体 / 生命周期适配路径。视频组件也应遵循这一方向，而不是假设所有平台共用一套实现。
-
-推荐做法：
-
-* 对外只有统一的 `Video` / `VideoController` API
-* 对内通过 `VideoBackend` trait 做平台分发
-
-例如：
-
-* Desktop：先使用 `ffmpeg` 后端
-* Android：后续接原生解码后端
-* OHOS：后续接原生媒体能力或平台适配后端
-
-这样可以保证：
-
-* UI 层 API 长期稳定
-* 平台能力逐步增强时不需要大改上层使用方式
-
----
-
-## 5. 推荐的数据模型
-
-## 5.1 视频源
+当前定义：
 
 ```rust
 pub enum VideoSource {
@@ -184,21 +67,29 @@ pub enum VideoSource {
         url: String,
         headers: Vec<(String, String)>,
     },
-    Bytes(std::sync::Arc<[u8]>),
 }
 ```
 
-建议第一版至少支持：
+已支持：
 
-* `File`
-* `Url`
+* 本地文件：`VideoSource::File(path)`
+* URL：`VideoSource::url(url)`
+* URL 请求头：`with_header` / `with_headers`
 
-`Bytes` 可用于内存流、加密流或上层自定义数据源。
+尚未支持：
 
-对于需要鉴权、来源校验或 Cookie 的网络视频，可以给 `Url` 同时带上自定义请求头。例如：
+* `Bytes`
+* 自定义 reader
+* HLS / DASH 层面的专用 API
+
+注意：`impl From<String>` 和 `impl From<&str>` 当前会创建 `VideoSource::Url`，不会自动判断本地路径。加载本地文件时应显式使用 `VideoSource::File(PathBuf::from(path))`。
+
+示例：
 
 ```rust
-let source = VideoSource::url("https://example.com/demo.mp4")
+let file = VideoSource::File(std::path::PathBuf::from("demo.mp4"));
+
+let url = VideoSource::url("https://example.com/demo.mp4")
     .with_header("Authorization", "Bearer <token>")
     .with_headers([
         ("Referer", "https://example.com/player"),
@@ -206,12 +97,14 @@ let source = VideoSource::url("https://example.com/demo.mp4")
     ]);
 ```
 
----
+实际可播放格式取决于本机 FFmpeg 构建和可用解码器。代码不会把能力限制为 MP4/H264/AAC；后端会使用 FFmpeg 的 best stream/decoder 逻辑，并对 AV1 优先尝试 `libdav1d`、`libaom-av1`、`av1`。
 
-## 5.2 播放状态
+### 4.2 `VideoPlaybackState`
+
+当前状态枚举：
 
 ```rust
-pub enum PlaybackState {
+pub enum VideoPlaybackState {
     Idle,
     Loading,
     Ready,
@@ -223,11 +116,11 @@ pub enum PlaybackState {
 }
 ```
 
-不建议只用 `bool is_playing`，因为视频远不止“播放/暂停”两态。
+不要把播放状态简化成 `bool is_playing`。UI 层需要区分 loading、ready、buffering、ended 和 error。
 
----
+### 4.3 `VideoMetrics`
 
-## 5.3 播放指标
+当前指标：
 
 ```rust
 pub struct VideoMetrics {
@@ -239,475 +132,251 @@ pub struct VideoMetrics {
 }
 ```
 
----
+`position()`、`duration()` 和 `buffered_position()` 会启用 metrics 观测。未读取这些 Signal 时，后端会避免持续写 metrics，减少不必要的 invalidation。
 
-## 5.4 控制器
+### 4.4 `VideoController`
 
-```rust
-pub struct VideoController {
-    // 内部持有响应式状态与后端句柄
-}
-```
-
-建议至少提供：
+当前控制器方法包括：
 
 ```rust
 impl VideoController {
+    pub fn new(ctx: &ViewModelContext) -> Self;
+
+    pub fn load(&self, source: VideoSource) -> Result<(), TguiError>;
     pub fn play(&self);
+    pub fn replay(&self);
     pub fn pause(&self);
     pub fn seek(&self, position: std::time::Duration);
     pub fn set_volume(&self, volume: f32);
     pub fn set_muted(&self, muted: bool);
     pub fn set_buffer_memory_limit_bytes(&self, bytes: u64);
-    pub fn set_rate(&self, rate: f32);
 
-    pub fn playback_state(&self) -> tgui::mvvm::Binding<PlaybackState>;
-    pub fn position(&self) -> tgui::mvvm::Binding<std::time::Duration>;
-    pub fn duration(&self) -> tgui::mvvm::Binding<Option<std::time::Duration>>;
-    pub fn muted(&self) -> tgui::mvvm::Binding<bool>;
+    pub fn playback_state(&self) -> Signal<VideoPlaybackState>;
+    pub fn position(&self) -> Signal<std::time::Duration>;
+    pub fn duration(&self) -> Signal<Option<std::time::Duration>>;
+    pub fn buffered_position(&self) -> Signal<Option<std::time::Duration>>;
+    pub fn volume(&self) -> Signal<f32>;
+    pub fn muted(&self) -> Signal<bool>;
+    pub fn video_size(&self) -> Signal<VideoSize>;
+    pub fn error(&self) -> Signal<Option<String>>;
 }
 ```
 
----
+当前没有 `set_rate`，也没有 autoplay、looping 或完整播放列表 API。`play()` 在当前状态为 `Ended` 时会走 `replay()`，即 seek 到开头后再播放。
 
-## 6. 推荐的 Widget API 设计
+音量会被 clamp 到 `0.0..=1.0`。默认缓冲内存限制是 `100 * 1024 * 1024` bytes，可通过 `set_buffer_memory_limit_bytes` 调整。内存限制用于限制继续缓冲，不表示会主动裁剪已经缓冲的内容。
 
-推荐让 `Video` 保持和现有 `tgui` 控件一致的 builder 风格。README 中当前控件和容器都采用链式声明式 API，这一点应继续保持。
+## 5. `VideoSurface` Widget
 
-示例：
+`VideoSurface` 是当前唯一内建的视频显示 widget。它只负责显示视频帧或 placeholder，不提供播放按钮、进度条、音量条等 controls。
 
-```rust
-Video::new(controller.clone())
-    .source(VideoSource::File("demo.mp4".into()))
-    .autoplay(false)
-    .looping(false)
-    .muted(false)
-    .controls(true)
-    .poster(ImageSource::File("cover.jpg".into()))
-    .fit(ContentFit::Contain)
-    .border_radius(16.0)
-    .fill_width()
-    .height(320.0)
-```
+支持的主要 builder 能力：
 
-推荐暴露的配置项：
+* 布局：`size`、`width`、`height`、`min_*`、`max_*`、`aspect_ratio`、`margin`、`padding`、`grow`、`shrink`、`basis`、grid row/column、absolute inset。
+* 样式：`style`、`style_full`、`cursor`。
+* 交互：`on_click`、`on_double_click`、`on_mouse_enter`、`on_mouse_leave`、`on_mouse_move`。
+* 生命周期：`on_mount`、`on_unmount`、`on_update`。
+* 媒体事件：`on_loading`、`on_success`、`on_error`。
 
-* `source(...)`
-* `autoplay(...)`
-* `looping(...)`
-* `muted(...)`
-* `controls(...)`
-* `poster(...)`
-* `fit(...)`
-* `show_loading(...)`
-* `show_error_overlay(...)`
-
----
-
-## 7. 推荐的内部模块划分
-
-建议采用如下模块组织：
-
-```text
-tgui-video/
-├─ mod.rs
-├─ controller.rs
-├─ widget.rs
-├─ backend/
-│  ├─ mod.rs
-│  ├─ ffmpeg.rs
-│  ├─ android.rs
-│  └─ ohos.rs
-├─ render/
-│  ├─ frame.rs
-│  ├─ texture_cache.rs
-│  └─ uploader.rs
-├─ audio/
-│  ├─ mod.rs
-│  └─ output.rs
-└─ types.rs
-```
-
-### 各模块职责
-
-* `controller.rs`
-  响应式状态、命令入口、对外 API
-
-* `widget.rs`
-  `Video` / `VideoSurface` / 控制栏组合
-
-* `backend/*`
-  不同平台的实际播放实现
-
-* `render/*`
-  帧缓存、像素格式转换、纹理上传
-
-* `audio/*`
-  音频输出抽象
-
-* `types.rs`
-  `VideoSource`、`PlaybackState`、`VideoMetrics`、错误类型等
-
----
-
-## 8. UI 层的最佳实践
-
-## 8.1 视频显示层与控制层分开
-
-推荐拆成两个组件：
-
-### `VideoSurface`
-
-只负责显示视频帧，不带控制按钮。
-
-### `Video`
-
-通过 `Stack` 组合：
-
-* `VideoSurface`
-* 封面图
-* 加载态
-* 中间播放按钮
-* 底部控制栏
-* 错误提示层
-
-因为 `tgui` 已经具备 `Stack / Flex / Text / Button / Container` 等构件，这种组合方式最符合现有设计。
-
----
-
-## 8.2 控制栏不要写死在底层渲染器里
-
-不要让底层 renderer 直接负责：
-
-* 进度条
-* 播放按钮
-* 时间文本
-* 音量条
-
-这些应该由普通 widget 组合出来。原因是：
-
-* 更容易定制样式
-* 更容易换皮肤
-* 更方便做桌面端和移动端不同交互
-* 更符合声明式 UI 的设计习惯
-
----
-
-## 8.3 布局稳定性优先
-
-README 中提到 `Image` 在媒体加载时为了避免布局跳变，推荐显式设置尺寸或 `aspect_ratio(...)`。视频组件也应遵循同样原则。
-
-最佳实践：
-
-* 在媒体真正 ready 前，优先使用固定高度或宽高比
-* 有 `poster` 时先显示封面
-* 没有封面时显示占位背景与 loading 状态
-* 第一帧就绪后再切换到视频纹理
-
----
-
-## 9. 后端实现的最佳实践
-
-## 9.1 先做桌面后端验证 API
-
-第一阶段建议优先只做 desktop：
-
-* 文件输入
-* MP4（H264/AAC）
-* 播放 / 暂停 / seek
-* 音量 / 静音
-* 首帧显示
-* 状态回调
-* 错误处理
-
-先把这些 API 跑通，再推广到 Android / OHOS。
-
----
-
-## 9.2 统一后端 trait
-
-建议定义后端接口：
+`ContentFit` 不通过 `VideoSurface::fit(...)` 设置；当前应通过 `VideoSurfaceStyle` 设置：
 
 ```rust
-pub trait VideoBackend: Send + Sync {
-    fn load(&self, source: VideoSource) -> Result<(), VideoError>;
-    fn play(&self);
-    fn pause(&self);
-    fn seek(&self, position: std::time::Duration);
-    fn set_volume(&self, volume: f32);
-    fn set_muted(&self, muted: bool);
-    fn set_rate(&self, rate: f32);
-    fn poll_frame(&self) -> Option<VideoFrame>;
-}
+use tgui::media::ContentFit;
+use tgui::widgets::VideoSurfaceStyle;
+
+VideoSurface::new(controller.clone())
+    .size(dp(360.0), dp(202.0))
+    .style(|style: &mut VideoSurfaceStyle, _| {
+        style.fit = ContentFit::Contain;
+    })
 ```
 
-说明：
+没有当前帧时，`VideoSurface` 会根据状态渲染 loading、error 或 idle placeholder。加载成功并有当前帧后，scene 中会生成 `VideoTexturePrimitive`，由渲染器按普通 sprite 路径绘制。
 
-* `Widget` 不依赖具体后端
-* `Controller` 也尽量不依赖具体后端
-* 平台切换只影响 backend 创建逻辑
+## 6. 推荐使用方式
 
----
-
-## 9.3 线程模型建议
-
-不要在 UI 线程里做解码。
-
-推荐最小线程模型：
-
-* 一个媒体读取/解复用任务
-* 一个视频解码任务
-* 一个音频输出任务
-* UI 线程只做：
-
-    * 读取最新帧
-    * 上传 texture
-    * 请求重绘
-
-推荐原则：
-
-* UI 线程只拿“当前应该显示的最新帧”
-* 不要让 UI 线程阻塞等待解码
-* 避免在 widget render 阶段执行 IO 和重 CPU 任务
-
----
-
-## 9.4 生命周期处理要提前设计
-
-README 已说明 Android 与 OHOS 都涉及 surface lifecycle / 前后台恢复等运行时能力。视频组件必须预留这些钩子，否则后续移动端会非常难补。
-
-建议后端抽象中至少考虑：
-
-* `on_surface_lost`
-* `on_surface_restored`
-* `on_app_background`
-* `on_app_foreground`
-
-哪怕第一版暂时只是 desktop，也建议接口先留好。
-
----
-
-## 10. ViewModel 层的最佳实践
-
-推荐在 ViewModel 中持有 `VideoController`，而不是让 widget 自己偷偷创建播放器状态。
-
-示例：
+ViewModel 中持有 `VideoController`，UI 中用普通 widget 组合控制栏：
 
 ```rust
+use std::path::PathBuf;
+
+use tgui::core::dp;
+use tgui::layout::Axis;
+use tgui::mvvm::{Command, Signal, TextController, ViewModelContext};
+use tgui::video::{VideoController, VideoPlaybackState, VideoSource, VideoSurface};
+use tgui::widgets::{Button, Element, Flex, Input, Text};
+
 struct PlayerVm {
-    player: tgui::video::VideoController,
+    controller: VideoController,
+    source: TextController,
 }
 
 impl PlayerVm {
-    fn new(ctx: &tgui::mvvm::ViewModelContext) -> Self {
-        let player = tgui::video::VideoController::new(ctx);
-        player.set_buffer_memory_limit_bytes(160 * 1024 * 1024);
+    fn new(ctx: &ViewModelContext) -> Self {
+        let controller = VideoController::new(ctx);
+        controller.set_volume(0.7);
         Self {
-            player,
+            controller,
+            source: ctx.text_controller(""),
         }
     }
 
-    fn play(&mut self) {
-        self.player.play();
+    fn status(&self) -> Signal<String> {
+        self.controller.playback_state().map(|state| match state {
+            VideoPlaybackState::Idle => "等待加载".to_string(),
+            VideoPlaybackState::Loading => "加载中".to_string(),
+            VideoPlaybackState::Ready => "准备播放".to_string(),
+            VideoPlaybackState::Playing => "播放中".to_string(),
+            VideoPlaybackState::Paused => "已暂停".to_string(),
+            VideoPlaybackState::Buffering => "缓冲中".to_string(),
+            VideoPlaybackState::Ended => "播放结束".to_string(),
+            VideoPlaybackState::Error(error) => format!("播放失败: {error}"),
+        })
     }
 
-    fn pause(&mut self) {
-        self.player.pause();
+    fn load_from_input(&mut self) {
+        let source = self.source.text();
+        let source = source.trim();
+        if source.starts_with("http://") || source.starts_with("https://") {
+            let _ = self.controller.load(VideoSource::url(source));
+        } else {
+            let _ = self
+                .controller
+                .load(VideoSource::File(PathBuf::from(source)));
+        }
     }
 
-    fn view(&self) -> tgui::widgets::Element<Self> {
-        tgui::video::Video::new(self.player.clone())
-            .source(tgui::video::VideoSource::File("demo.mp4".into()))
-            .controls(true)
-            .height(320.0)
-            .fill_width()
+    fn view(&self) -> Element<Self> {
+        Flex::new(Axis::Vertical)
+            .gap(dp(8.0))
+            .child(Input::new(self.source.clone()).placeholder("视频文件路径或 URL"))
+            .child(Button::new("加载").on_click(Command::new(Self::load_from_input)))
+            .child(VideoSurface::new(self.controller.clone()).size(dp(360.0), dp(202.0)))
+            .child(
+                Flex::new(Axis::Horizontal)
+                    .gap(dp(8.0))
+                    .child(Button::new("播放").on_click(Command::new(|vm: &mut Self| {
+                        vm.controller.play();
+                    })))
+                    .child(Button::new("暂停").on_click(Command::new(|vm: &mut Self| {
+                        vm.controller.pause();
+                    }))),
+            )
+            .child(Text::new(self.status()))
             .into()
     }
 }
 ```
 
-这样做的优点：
+当前 `examples/demo` 的媒体页就是这种模式：输入路径或 URL 后显式加载，`VideoSurface` 固定尺寸展示，播放/暂停由 `VideoController` 控制。
 
-* 与现有 `MVVM` 设计统一
-* 状态和命令都可测试
-* 可以很方便做多播放器页面
-* 更容易实现“播放器状态和业务状态联动”
+运行示例：
 
----
+```bash
+cargo run --manifest-path examples/demo/Cargo.toml
+```
 
-## 11. 第一版推荐功能边界
+## 7. 当前实现边界
 
-为了保证实现质量，第一版建议只做以下内容：
+已实现：
 
-### 必做
+* `video` / `video-static` feature。
+* `VideoController`、`VideoSurface` 和相关类型导出。
+* 本地文件和 FFmpeg 可打开的 URL。
+* URL headers。
+* 首帧展示。
+* 播放、暂停、结束后 replay。
+* seek。
+* 音量、静音。
+* duration、position、buffered、video size、error Signal。
+* loading、ready、playing、paused、buffering、ended、error 状态。
+* 基于 FFmpeg 的视频解码、音频解码/输出和音频主时钟同步。
+* 无音频流时的软件时钟。
+* 根据布局目标尺寸设置 raster request，输出 RGBA `TextureFrame`。
+* `wgpu` texture cache 上传和 revision 更新。
+* `VideoSurfaceStyle` 与 theme/style sheet 集成。
 
-* 本地文件播放
-* 桌面平台
-* MP4 容器
-* 播放 / 暂停
-* seek
-* 当前时间 / 总时长
-* 静音 / 音量
-* 错误态
-* 首帧展示
-* `ContentFit`
+未实现或不应写成已支持：
 
-### 选做
+* 高层 `Video` 组合控件。
+* 默认 controls。
+* poster。
+* autoplay。
+* looping。
+* 倍速 / `set_rate`。
+* 字幕、多音轨、多字幕轨。
+* 全屏、画中画。
+* HLS / DASH 的专用流媒体抽象。
+* 硬件解码调度。
+* `VideoSource::Bytes`。
+* Android / OHOS / 原生移动端后端。
+* 外部可插拔 backend public API。
 
-* `autoplay`
-* `looping`
-* `poster`
-* `on_ended`
-* `on_error`
+## 8. 维护注意事项
 
-### 暂缓
+视频相关代码横跨多个高风险路径：
 
-* HLS / DASH
-* 字幕
-* 全屏
-* 画中画
-* 倍速
-* 视频滤镜
-* 硬解码能力调度
-* 多音轨 / 多字幕轨
+* `src/video/controller.rs`
+* `src/video/types.rs`
+* `src/video/backend/mod.rs`
+* `src/video/backend/ffmpeg/`
+* `src/ui/widget/video.rs`
+* `src/ui/widget/core/render/media.rs`
+* `src/ui/widget/core/resolved/collect/layout_media.rs`
+* `src/rendering/renderer/texture.rs`
+* `src/rendering/renderer/prepare.rs`
 
----
+修改时需要特别注意：
 
-## 12. 常见错误设计
+* 不要在 UI 线程执行 demux、decode 或阻塞 IO。
+* `VideoSurface` render/collect 阶段只应读取 snapshot、设置 target raster、生成 primitive。
+* 后端更新当前帧后必须通过 shared invalidation 请求重绘，否则画面不会刷新。
+* seek 会新开 generation，旧 generation 的解码帧必须被忽略。
+* metrics 是惰性观测；新增指标时要考虑未订阅时的写入成本。
+* 缓冲策略同时受音频缓冲、视频队列、EOF 和内存限制影响，避免只改一侧。
+* `TextureFrame` 的 `id` / `revision` 语义影响 texture cache 复用，视频帧更新应保持同一 stream id、递增 revision。
+* `VideoSurface` 的 placeholder、loading、error 路径也要覆盖测试，不要只测有帧路径。
+* 公共 API 变更要同步检查 `src/lib.rs` 的 `tgui::video`、`prelude` 和 `widgets` re-export。
 
-以下做法不推荐：
+## 9. 建议测试和检查
 
-### 12.1 把视频当作 `Image` 的扩展
+文档变更不需要跑完整测试。代码变更建议至少按影响面选择：
 
-问题：
+```bash
+cargo check --features video
+CARGO_PROFILE_TEST_DEBUG=0 cargo test --features video video
+CARGO_PROFILE_TEST_DEBUG=0 cargo test --features video command_video_tests
+CARGO_PROFILE_TEST_DEBUG=0 cargo test --features video audio_video_tests
+```
 
-* 状态模型太弱
-* 无法自然表示 buffering / ended / seek 等行为
-* 后期必然返工
+涉及 FFmpeg 链接或真实播放链路时，还应在桌面环境运行 `examples/demo` 并实际加载一个本地视频或 URL。
 
-### 12.2 在 Widget 内直接启动完整播放器
+视频 benchmark 位于 `benches/video_pipeline`，需要：
 
-问题：
+```bash
+cargo bench --features bench-support,video --bench video_pipeline
+```
 
-* UI 与后端耦合严重
-* 状态难以测试
-* 生命周期难处理
+## 10. FFmpeg 链接方式
 
-### 12.3 直接嵌平台原生视频视图
-
-问题：
-
-* 与 `wgpu` 渲染链断裂
-* 样式、裁剪、叠加层困难
-* 跨平台行为不一致
-
-### 12.4 只暴露 `is_playing: bool`
-
-问题：
-
-* 难以表达真实状态机
-* 业务逻辑会不断出现例外判断
-
----
-
-## 13. 推荐的实施路线
-
-## 阶段一：API 定型
-
-目标：
-
-* 完成 `VideoSource`
-* 完成 `PlaybackState`
-* 完成 `VideoController`
-* 完成 `Video` / `VideoSurface` widget 结构
-* 用 mock backend 跑通 UI
-
-## 阶段二：桌面最小可用实现
-
-目标：
-
-* 本地 MP4 播放
-* 解码视频帧
-* 上传 `wgpu texture`
-* 音频输出
-* 支持播放 / 暂停 / seek
-
-## 阶段三：网络流与稳定性
-
-目标：
-
-* URL 输入
-* buffering 状态
-* 错误恢复
-* 更多格式支持
-
-## 阶段四：移动端适配
-
-目标：
-
-* Android backend
-* OHOS backend
-* surface lifecycle
-* 前后台恢复
-* 触控交互优化
-
----
-
-## 14. 推荐结论
-
-在 `tgui` 中实现视频组件的最佳实践是：
-
-1. **将视频设计成声明式 `Video` Widget**
-2. **将播放状态与命令抽离为 `VideoController`**
-3. **将解码与平台能力抽离为 `VideoBackend`**
-4. **将视频帧统一接入 `wgpu texture` 渲染**
-5. **将控制栏作为普通 widget 组合实现，而不是写死在底层**
-6. **先做桌面最小能力，先稳定 API，再扩展移动端与高级特性**
-
-这条路线最符合 `tgui` 当前的响应式 MVVM 架构、统一样式系统、GPU 渲染链路和跨平台目标。
-
----
-
-## 15. 实现状态（2026-04-18）
-
-本轮已完成：
-
-* [x] 新增 `video` feature，并将视频能力挂到该 feature 下
-* [x] 新增 `video-static` feature，可将 FFmpeg 切换为静态链接
-* [x] 新增 `VideoSource`、`PlaybackState`、`VideoMetrics`、`VideoSize`
-* [x] 新增 `VideoController`
-* [x] 新增 `VideoSurface`
-* [x] 将 `VideoSurface` 接入 widget tree、测量逻辑与 `wgpu texture` 渲染链
-* [x] 新增 desktop `FfmpegVideoBackend`
-* [x] 支持本地文件与 `http/https` 直链 MP4
-* [x] 支持首帧、播放、暂停、seek、音量、静音、错误态
-* [x] 接入基础音频输出与音频主时钟同步
-* [x] 增加最小桌面示例 `examples/video_surface`
-
-本轮暂未实现：
-
-* [ ] 默认 controls 组合组件 `Video`
-* [ ] HLS / DASH
-* [ ] 字幕 / 多音轨 / 多字幕轨
-* [ ] 全屏 / 画中画 / 倍速
-* [ ] Android / OHOS backend
-
-## 16. FFmpeg 链接方式
-
-默认启用 `video` feature 时，`tgui` 会沿用 `ffmpeg-next` 的常规链接方式。
-
-如果调用方希望把 FFmpeg 库静态链接进最终可执行程序，可以启用：
+默认启用 `video` feature 时，`tgui` 沿用 `ffmpeg-next` 的常规链接方式：
 
 ```toml
 [dependencies]
-tgui = { version = "0.1.4", features = ["video-static"] }
+tgui = { version = "0.2.0", features = ["video"] }
+```
+
+如果调用方希望静态链接 FFmpeg，可以启用：
+
+```toml
+[dependencies]
+tgui = { version = "0.2.0", features = ["video-static"] }
 ```
 
 说明：
 
-* `video-static` 会自动包含 `video`
-* 它会把 `ffmpeg-next/static` 传递给上游依赖
-* 这会把 FFmpeg 的链接类型切换为静态链接，避免运行时再额外分发对应动态库
-* 构建环境仍然需要能提供 FFmpeg 的静态库和头文件
-
+* `video-static` 会自动包含 `video`。
+* 它会把 `ffmpeg-next/static` 传递给上游依赖。
+* 构建环境仍然需要提供 FFmpeg 静态库和头文件。
+* 实际支持的容器和 codec 仍取决于链接到的 FFmpeg 构建。
 
