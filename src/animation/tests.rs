@@ -244,7 +244,10 @@ fn idle_settled_slot_below_cap_is_retained_and_still_animates() {
         Some(transition),
         later + Duration::from_millis(50),
     );
-    assert!(mid > 0.0 && mid < 1.0, "expected mid-transition value, got {mid}");
+    assert!(
+        mid > 0.0 && mid < 1.0,
+        "expected mid-transition value, got {mid}"
+    );
     assert!(engine.has_active_animations());
 }
 

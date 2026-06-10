@@ -323,7 +323,8 @@ impl<T: Animatable> AnimationStore<T> {
     ) -> T {
         let Some(transition) = transition.filter(|transition| !transition.duration().is_zero())
         else {
-            self.slots.insert(key, SlotState::settled(target.clone(), now));
+            self.slots
+                .insert(key, SlotState::settled(target.clone(), now));
             return target;
         };
 

@@ -371,9 +371,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                 // `computed` 且位于快照之后,因此原本就被 delta 纳入 `after_children`;这里
                 // 直接写入 `after_children`,再 extend 回 `computed`,行为一致且省掉全场景克隆。
                 let mut after_children = ComputedScene::default();
-                after_children
-                    .virtual_state_updates
-                    .push(crate::ui::widget::VirtualSceneStateUpdate {
+                after_children.virtual_state_updates.push(
+                    crate::ui::widget::VirtualSceneStateUpdate {
                         widget_id: self.id,
                         viewport_hint: crate::ui::widget::r#virtual::VirtualViewportHint {
                             width: visual.background_frame.width,
@@ -382,7 +381,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                         measured_extents,
                         widget_ids_by_key,
                         invalidate_layout,
-                    });
+                    },
+                );
                 push_scrollbar_primitives(
                     &mut after_children.scene,
                     context.theme,

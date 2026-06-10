@@ -766,7 +766,12 @@ impl<VM: 'static> WidgetTree<VM> {
             active_tooltip,
             active_hover_popover,
         };
-        self.collect_scene_cache_with_context(layout, context, &next_tooltip_wakeup, &next_toast_wakeup)
+        self.collect_scene_cache_with_context(
+            layout,
+            context,
+            &next_tooltip_wakeup,
+            &next_toast_wakeup,
+        )
     }
 
     #[cfg(test)]
