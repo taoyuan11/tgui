@@ -5,7 +5,7 @@ use super::{Align, Insets, PositionType, Value};
 use crate::ui::layout::Length;
 
 /// 滚动条的视觉样式定义。
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ScrollbarStyle {
     pub thumb_color: Option<Color>,
     pub hover_thumb_color: Option<Color>,
@@ -112,21 +112,6 @@ impl ScrollbarStyle {
     pub fn min_thumb_length(mut self, min_thumb_length: Dp) -> Self {
         self.min_thumb_length = Some(min_thumb_length);
         self
-    }
-}
-
-impl Default for ScrollbarStyle {
-    fn default() -> Self {
-        Self {
-            thumb_color: None,
-            hover_thumb_color: None,
-            active_thumb_color: None,
-            track_color: None,
-            thickness: None,
-            radius: None,
-            insets: None,
-            min_thumb_length: None,
-        }
     }
 }
 

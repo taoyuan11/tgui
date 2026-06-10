@@ -369,8 +369,10 @@ fn reduced_motion_defaults_and_window_binding_override() {
     let mut config = test_config();
     config.reduced_motion = false;
     let state = State::new(true, invalidation.clone());
-    let mut bindings = WindowBindings::default();
-    bindings.reduced_motion = Some(state.signal());
+    let bindings = WindowBindings {
+        reduced_motion: Some(state.signal()),
+        ..Default::default()
+    };
 
     let (dialog_dispatcher, dialog_receiver) = async_dialog_channel();
     let (notification_dispatcher, notification_receiver) = async_notification_channel();

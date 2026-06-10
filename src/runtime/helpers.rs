@@ -7,11 +7,11 @@ use crate::text::font::{FontManager, TextFontRequest, TextLayoutInfo};
 use crate::ui::theme::Theme;
 use crate::ui::unit::{sp, Sp, UnitContext};
 use crate::ui::widget::{
-    text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
-    CanvasMouseButton, CursorStyle, Point, Rect, Text, TextInputContentGeometry,
+    text_input_content_geometry, CanvasMouseButton, CursorStyle, Point, Rect, Text,
+    TextInputContentGeometry,
 };
 
-use super::input;
+use super::input::{self, ScrollContext, TextInputContext};
 
 pub(super) fn is_primary_shortcut_modifier(modifiers: ModifiersState) -> bool {
     #[cfg(target_os = "macos")]
@@ -81,17 +81,14 @@ pub(super) fn input_text_layout(
     font_manager: &FontManager,
     theme: &Theme,
     units: UnitContext,
-    text_style: &Text,
-    current_text: &str,
-    multiline: bool,
-    auto_wrap: bool,
+    input: TextInputContext<'_>,
     wrap_width: f32,
 ) -> (TextLayoutInfo, f32, f32) {
     let (text_request, font_size, line_height, letter_spacing) =
-        resolved_input_text_metrics(theme, units, text_style);
-    let layout = if multiline && auto_wrap {
+        resolved_input_text_metrics(theme, units, input.text_style);
+    let layout = if input.multiline && input.auto_wrap {
         font_manager.measure_text_layout_wrapped(
-            current_text,
+            input.text,
             text_request,
             font_size,
             line_height,
@@ -100,7 +97,7 @@ pub(super) fn input_text_layout(
         )
     } else {
         font_manager.measure_text_layout(
-            current_text,
+            input.text,
             text_request,
             font_size,
             line_height,
@@ -152,43 +149,27 @@ pub(super) fn text_cursor_index_at_point(
     font_manager: &FontManager,
     theme: &Theme,
     units: UnitContext,
-    frame: Rect,
-    padding: crate::ui::layout::Insets,
-    text_style: &Text,
-    current_text: &str,
-    multiline: bool,
-    auto_wrap: bool,
-    show_scrollbar: bool,
-    scroll: Point,
+    input: TextInputContext<'_>,
+    scroll: ScrollContext,
     point: Point,
 ) -> usize {
-    if current_text.is_empty() {
+    if input.text.is_empty() {
         return 0;
     }
 
-    let content_viewport =
-        text_input_content_viewport(frame, padding, multiline, show_scrollbar, theme, units);
+    let content_viewport = input.content_viewport(theme, units);
     let (layout, _font_size, line_height) = input_text_layout(
         font_manager,
         theme,
         units,
-        text_style,
-        current_text,
-        multiline,
-        auto_wrap,
-        text_input_layout_width(
-            content_viewport,
-            multiline,
-            auto_wrap,
-            input::INPUT_CARET_WIDTH,
-        ),
+        input,
+        input.layout_width(content_viewport),
     );
     text_cursor_index_from_layout_at_point(
         &layout,
         line_height,
         content_viewport,
-        multiline,
-        auto_wrap,
+        input,
         scroll,
         point,
     )
@@ -198,22 +179,21 @@ pub(super) fn text_cursor_index_from_layout_at_point(
     layout: &TextLayoutInfo,
     line_height: f32,
     content_viewport: Rect,
-    multiline: bool,
-    auto_wrap: bool,
-    scroll: Point,
+    input: TextInputContext<'_>,
+    scroll: ScrollContext,
     point: Point,
 ) -> usize {
     let TextInputContentGeometry { content_frame, .. } = text_input_content_geometry(
         layout,
         line_height,
         content_viewport,
-        multiline,
-        auto_wrap,
-        scroll,
+        input.multiline,
+        input.auto_wrap,
+        scroll.offset,
         input::INPUT_CARET_WIDTH,
     );
     let local_x = (point.x - content_frame.x).max(0.0);
-    if multiline {
+    if input.multiline {
         let local_y = (point.y - content_frame.y).max(0.0);
         layout.index_for_point(local_x.get(), local_y.get())
     } else {

@@ -182,8 +182,10 @@ impl<VM> Switch<VM> {
     /// # 返回值
     /// 返回一个新的开关组件。
     pub fn new(checked: impl Into<Value<bool>>) -> Self {
-        let mut interactions = InteractionHandlers::default();
-        interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+        let interactions = InteractionHandlers {
+            cursor_style: Some(Value::Static(CursorStyle::Pointer)),
+            ..Default::default()
+        };
 
         Self {
             element: Element {

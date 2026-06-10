@@ -130,10 +130,12 @@ fn emit_drawer_backdrop_hit_regions<VM: 'static>(
         return;
     };
 
-    let mut interactions = InteractionHandlers::default();
-    interactions.on_click = Some(Command::new_with_context(move |vm, ctx| {
-        on_open_change.execute_with_context(vm, false, ctx);
-    }));
+    let interactions = InteractionHandlers {
+        on_click: Some(Command::new_with_context(move |vm, ctx| {
+            on_open_change.execute_with_context(vm, false, ctx);
+        })),
+        ..Default::default()
+    };
 
     let viewport = context.viewport;
     let panel = drawer_panel_rect(computed, viewport, drawer, context);

@@ -314,30 +314,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn scroll_multiline_text_input(
         &mut self,
         widget_id: WidgetId,
-        value: &str,
-        frame: Rect,
-        padding: crate::ui::layout::Insets,
-        text_style: &Text,
-        auto_wrap: bool,
-        show_scrollbar: bool,
+        input: TextInputContext<'_>,
+        scroll: ScrollContext,
         scroll_delta: Point,
     ) -> bool {
-        let content_viewport = crate::ui::widget::text_input_content_viewport(
-            frame,
-            padding,
-            true,
-            show_scrollbar,
-            &self.theme,
-            self.unit_context(),
-        );
+        let content_viewport = input.content_viewport(&self.theme, self.unit_context());
         if content_viewport.is_empty()
             || (scroll_delta.x.abs() <= f32::EPSILON && scroll_delta.y.abs() <= f32::EPSILON)
         {
             return false;
         }
 
-        let (_, _, line_height, _) =
-            super::super::resolved_input_text_metrics(&self.theme, self.unit_context(), text_style);
+        let (_, _, line_height, _) = super::super::resolved_input_text_metrics(
+            &self.theme,
+            self.unit_context(),
+            input.text_style,
+        );
         let layout = self
             .text_input_layout_snapshot(widget_id)
             .cloned()
@@ -346,16 +338,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     &self.font_manager,
                     &self.theme,
                     self.unit_context(),
-                    text_style,
-                    value,
-                    true,
-                    auto_wrap,
-                    crate::ui::widget::text_input_layout_width(
-                        content_viewport,
-                        true,
-                        auto_wrap,
-                        super::INPUT_CARET_WIDTH,
-                    ),
+                    TextInputContext {
+                        multiline: true,
+                        ..input
+                    },
+                    input.layout_width(content_viewport),
                 );
                 layout
             });
@@ -364,14 +351,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             line_height,
             content_viewport,
             true,
-            auto_wrap,
-            self.scroll_states
-                .get(&widget_id)
-                .copied()
-                .unwrap_or(Point::ZERO),
+            input.auto_wrap,
+            scroll.offset,
             super::INPUT_CARET_WIDTH,
         );
-        let max_scroll_x = if auto_wrap {
+        let max_scroll_x = if input.auto_wrap {
             Dp::ZERO
         } else {
             (geometry.content_width - content_viewport.width).max(0.0)
@@ -381,13 +365,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        let current = self
-            .scroll_states
-            .get(&widget_id)
-            .copied()
-            .unwrap_or(Point::ZERO);
+        let current = scroll.offset;
         let next = Point::new(
-            if auto_wrap {
+            if input.auto_wrap {
                 Dp::ZERO
             } else {
                 (current.x - scroll_delta.x).clamp(Dp::ZERO, max_scroll_x)

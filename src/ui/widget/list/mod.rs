@@ -296,8 +296,10 @@ where
         rows: Vec<ListRow<T, VM>>,
         render: impl Fn(ListItemContext<T>) -> Element<VM> + Send + Sync + 'static,
     ) -> Self {
-        let mut interactions = InteractionHandlers::default();
-        interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+        let interactions = InteractionHandlers {
+            cursor_style: Some(Value::Static(CursorStyle::Pointer)),
+            ..Default::default()
+        };
         let render = Arc::new(render);
         Self {
             rows,

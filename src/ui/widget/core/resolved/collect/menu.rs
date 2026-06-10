@@ -267,7 +267,7 @@ pub(crate) fn emit_menu_layer<VM>(
             MenuItemKind::Separator => {
                 let h = style.separator_height + style.item_padding.top + style.item_padding.bottom;
                 row_metrics.push(RowMetrics::Separator { height: h });
-                total_height = total_height + h;
+                total_height += h;
             }
             MenuItemKind::Action | MenuItemKind::Checkable | MenuItemKind::Submenu => {
                 let label = item.label.as_ref().map(|l| l.resolve()).unwrap_or_default();
@@ -314,11 +314,11 @@ pub(crate) fn emit_menu_layer<VM>(
                     shortcut: shortcut_text,
                     shortcut_w,
                 });
-                total_height = total_height + cell_h;
+                total_height += cell_h;
             }
         }
     }
-    total_height = total_height + style.padding.top + style.padding.bottom;
+    total_height += style.padding.top + style.padding.bottom;
 
     let shortcut_pad = if any_shortcut {
         style.shortcut_gap
@@ -409,7 +409,7 @@ pub(crate) fn emit_menu_layer<VM>(
                         clip_mask: None,
                     },
                 ));
-                cursor_y = cursor_y + height;
+                cursor_y += height;
             }
             RowMetrics::Item {
                 label,
@@ -658,7 +658,7 @@ pub(crate) fn emit_menu_layer<VM>(
                 {
                     submenu_candidates.push((index, item_rect));
                 }
-                cursor_y = cursor_y + height;
+                cursor_y += height;
             }
         }
     }

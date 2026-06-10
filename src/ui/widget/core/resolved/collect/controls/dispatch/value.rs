@@ -278,8 +278,10 @@ fn select_option_row_element<VM>(
     on_open_change: Option<ValueCommand<VM, bool>>,
     style: common::SelectOptionRowStyle,
 ) -> Element<VM> {
-    let mut interactions = InteractionHandlers::default();
-    interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+    let interactions = InteractionHandlers {
+        cursor_style: Some(Value::Static(CursorStyle::Pointer)),
+        ..Default::default()
+    };
     Element {
         id: WidgetId::next(),
         key: Some(WidgetKey::from(option_index)),
@@ -809,8 +811,10 @@ impl<VM: 'static> ResolvedElement<VM> {
             option_clip_mask,
         ));
 
-        let mut option_interactions = InteractionHandlers::default();
-        option_interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+        let option_interactions = InteractionHandlers {
+            cursor_style: Some(Value::Static(CursorStyle::Pointer)),
+            ..Default::default()
+        };
         computed.hit_regions.push(HitRegion {
             rect: visual.frame,
             clip_rect: visual.primitive_clip,

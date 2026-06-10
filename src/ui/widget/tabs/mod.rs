@@ -14,18 +14,13 @@ use crate::ui::widget::Stack;
 const TABS_MORE_VISIBLE_BUDGET: usize = 4;
 
 /// Tab strip overflow behavior.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TabsOverflowMode {
     /// Keep the strip scrollable when tab triggers exceed the available space.
+    #[default]
     Scroll,
     /// Move lower-priority triggers into an uncontrolled More menu.
     More,
-}
-
-impl Default for TabsOverflowMode {
-    fn default() -> Self {
-        Self::Scroll
-    }
 }
 
 /// Payload emitted when a reorderable tab trigger is dragged onto another tab.

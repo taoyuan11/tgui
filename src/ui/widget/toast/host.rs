@@ -59,8 +59,10 @@ impl<VM> ToastHost<VM> {
 
 impl<VM> From<ToastHost<VM>> for Element<VM> {
     fn from(value: ToastHost<VM>) -> Self {
-        let mut interactions = InteractionHandlers::default();
-        interactions.cursor_style = Some(Value::Static(CursorStyle::Default));
+        let interactions = InteractionHandlers {
+            cursor_style: Some(Value::Static(CursorStyle::Default)),
+            ..Default::default()
+        };
         let style = value.style;
         Element {
             id: WidgetId::next(),

@@ -4,8 +4,7 @@ use std::time::{Duration, Instant};
 use crate::foundation::binding::TextController;
 use crate::log::text_profile_enabled;
 use crate::ui::widget::{
-    ComputedScene, HitInteraction, Point, Rect, Text, TextEditState, TextInputLayoutOverride,
-    WidgetId,
+    ComputedScene, HitInteraction, Point, TextEditState, TextInputLayoutOverride, WidgetId,
 };
 use cosmic_text::{Editor, Metrics, Wrap};
 
@@ -14,8 +13,8 @@ use super::text_input::{
     refresh_session_buffer, text_edit_display_text, update_session_layout_snapshot,
 };
 use super::{
-    text_cursor_index_at_point, BoundRuntimeHandler, TextInputFlushData, TextInputRegionData,
-    INPUT_CARET_WIDTH,
+    text_cursor_index_at_point, BoundRuntimeHandler, ScrollContext, TextInputContext,
+    TextInputFlushData, TextInputRegionData, INPUT_CARET_WIDTH,
 };
 
 mod runtime;
@@ -67,9 +66,9 @@ pub(super) fn text_replacement_bounds(
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
-    pub(super) fn text_input_session_config<'a>(
+    pub(super) fn text_input_session_config(
         &self,
-        region: &'a TextInputRegionData<VM>,
+        region: &TextInputRegionData<VM>,
     ) -> (
         super::super::TextInputSessionConfig,
         Option<String>,
@@ -228,7 +227,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(crate) fn text_input_session_config_signature_for_test(
         &mut self,
         widget_id: WidgetId,
-        frame: Rect,
+        frame: crate::ui::widget::Rect,
     ) -> Option<(u64, f32)> {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
@@ -296,32 +295,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn text_input_cursor_index_at_point(
         &self,
         widget_id: WidgetId,
-        frame: Rect,
-        padding: crate::ui::layout::Insets,
-        text_style: &Text,
-        current_text: &str,
-        multiline: bool,
-        auto_wrap: bool,
-        show_scrollbar: bool,
-        scroll: Point,
+        input: TextInputContext<'_>,
+        scroll: ScrollContext,
         point: Point,
     ) -> usize {
-        if current_text.is_empty() {
+        if input.text.is_empty() {
             return 0;
         }
 
-        let (_, _, line_height, _) =
-            super::super::resolved_input_text_metrics(&self.theme, self.unit_context(), text_style);
-        let content_viewport = crate::ui::widget::text_input_content_viewport(
-            frame,
-            padding,
-            multiline,
-            show_scrollbar,
+        let (_, _, line_height, _) = super::super::resolved_input_text_metrics(
             &self.theme,
             self.unit_context(),
+            input.text_style,
         );
+        let content_viewport = input.content_viewport(&self.theme, self.unit_context());
         if let Some(layout) = self.text_input_buffers.get(&widget_id).and_then(|session| {
-            (session.display_text == current_text)
+            (session.display_text == input.text)
                 .then_some(session.layout_snapshot.as_ref())
                 .flatten()
         }) {
@@ -329,8 +318,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 layout,
                 line_height,
                 content_viewport,
-                multiline,
-                auto_wrap,
+                input,
                 scroll,
                 point,
             );
@@ -340,13 +328,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             &self.font_manager,
             &self.theme,
             self.unit_context(),
-            frame,
-            padding,
-            text_style,
-            current_text,
-            multiline,
-            auto_wrap,
-            show_scrollbar,
+            input,
             scroll,
             point,
         )

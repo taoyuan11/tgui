@@ -22,7 +22,8 @@ use self::surface::{
 use self::targets::RendererTargets;
 use self::types::*;
 use self::vertex::{
-    physical_mesh_clip_mask_data, BrushVertex, CompositeVertex, MeshVertex, RectVertex, TextVertex,
+    physical_mesh_clip_mask_data, BrushVertex, BrushVertexSpec, CompositeQuadSpec, CompositeVertex,
+    MeshVertex, RectVertex, TextQuadSpec, TextTransformSpec, TextVertex, VertexViewport,
 };
 use crate::application::MsaaMode;
 use crate::foundation::color::Color as TguiColor;
@@ -156,7 +157,7 @@ impl Renderer {
         if self.config.width == 0 || self.config.height == 0 {
             return Ok(RenderStatus::SkipFrame);
         }
-        let (logical_width, logical_height) = self.logical_viewport_size();
+        let viewport = self.vertex_viewport();
 
         let active_texture_keys = active_texture_keys(scene);
         self.texture_cache
@@ -181,24 +182,9 @@ impl Renderer {
         // 推进到下一个轮转池缓冲并清空 staging；prepare_commands 会 bump-allocate 进来。
         self.vertex_pool.begin_frame();
 
-        let command_buffers = self.prepare_commands(
-            &scene.commands,
-            font_manager,
-            logical_width,
-            logical_height,
-            self.config.width as f32,
-            self.config.height as f32,
-            self.scale_factor,
-        )?;
-        let overlay_buffers = self.prepare_commands(
-            &scene.overlay_commands,
-            font_manager,
-            logical_width,
-            logical_height,
-            self.config.width as f32,
-            self.config.height as f32,
-            self.scale_factor,
-        )?;
+        let command_buffers = self.prepare_commands(&scene.commands, font_manager, viewport)?;
+        let overlay_buffers =
+            self.prepare_commands(&scene.overlay_commands, font_manager, viewport)?;
         // 两次 prepare 的顶点数据都已进 staging，这里一次性上传到 GPU。
         self.vertex_pool.flush(&self.device, &self.queue);
         let color_attachment_view = view.clone();

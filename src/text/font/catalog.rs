@@ -7,10 +7,11 @@ use cosmic_text::FontSystem;
 use super::platform::face_family_name;
 
 /// 表示文本渲染使用的字重。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum FontWeight {
     Thin,
     Light,
+    #[default]
     Regular,
     Medium,
     SemiBold,
@@ -35,25 +36,10 @@ impl FontWeight {
     }
 }
 
-impl Default for FontWeight {
-    fn default() -> Self {
-        Self::Regular
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct FontCatalog {
     named_fonts: Vec<NamedFont>,
     pub(crate) default_font: Option<String>,
-}
-
-impl Default for FontCatalog {
-    fn default() -> Self {
-        Self {
-            named_fonts: Vec::new(),
-            default_font: None,
-        }
-    }
 }
 
 impl FontCatalog {

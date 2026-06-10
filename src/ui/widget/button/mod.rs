@@ -181,8 +181,10 @@ impl<VM> Button<VM> {
     /// # 返回值
     /// 返回一个新的按钮组件。
     pub fn new(label: impl Into<Value<String>>) -> Self {
-        let mut interactions = InteractionHandlers::default();
-        interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+        let interactions = InteractionHandlers {
+            cursor_style: Some(Value::Static(CursorStyle::Pointer)),
+            ..Default::default()
+        };
         Self {
             element: Element {
                 id: WidgetId::next(),

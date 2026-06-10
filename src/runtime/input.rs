@@ -47,13 +47,16 @@ use crate::text::rope_buffer::RopeBuffer;
 use crate::ui::unit::{Dp, UnitContext};
 use crate::ui::widget::{
     CanvasItemInteractionHandlers, CanvasMouseButton, HitInteraction, InteractionHandlers, Point,
-    Rect, ScrollbarAxis, ScrollbarHandle, Text, TextEditState, WidgetId, WidgetTree,
+    Rect, ScrollbarAxis, ScrollbarHandle, TextEditState, WidgetId, WidgetTree,
 };
 pub(super) const INPUT_CARET_WIDTH: f32 = 2.0;
 use self::platform_keys::is_key_physically_pressed;
 use self::session::text_replacement_bounds;
 use self::text_input::{refresh_session_buffer, text_edit_display_text};
-pub(super) use self::text_input::{TextInputFlushData, TextInputFlushOutcome, TextInputRegionData};
+pub(super) use self::text_input::{
+    ScrollContext, TextInputContext, TextInputFlushData, TextInputFlushOutcome,
+    TextInputRegionData, TextInputSnapshot,
+};
 use crate::platform::backend::event_loop::ActiveEventLoop;
 use crate::rendering::renderer::RenderStatus;
 

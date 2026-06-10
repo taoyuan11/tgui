@@ -49,16 +49,11 @@ use super::placement::DrawerPlacement;
 const DRAWER_SLIDE_DURATION_MS: u64 = 250;
 
 /// Drawer presentation mode.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DrawerMode {
+    #[default]
     Overlay,
     Push,
-}
-
-impl Default for DrawerMode {
-    fn default() -> Self {
-        Self::Overlay
-    }
 }
 
 /// 从屏幕边缘滑出的侧边栏 builder。

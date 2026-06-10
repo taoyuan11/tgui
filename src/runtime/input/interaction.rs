@@ -85,16 +85,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     continue;
                 }
                 let value = self.text_input_current_value(id, &controller);
-                if self.scroll_multiline_text_input(
-                    id,
-                    &value,
+                let input = TextInputContext {
                     frame,
                     padding,
-                    &text_style,
+                    text_style: &text_style,
+                    text: &value,
+                    multiline: true,
                     auto_wrap,
                     show_scrollbar,
-                    scroll_delta,
-                ) {
+                };
+                let scroll =
+                    ScrollContext::new(self.scroll_states.get(&id).copied().unwrap_or(Point::ZERO));
+                if self.scroll_multiline_text_input(id, input, scroll, scroll_delta) {
                     return true;
                 }
             }

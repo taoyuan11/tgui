@@ -107,19 +107,21 @@ fn rasterize_canvas_shadow(
     }
 
     if let Some(stroke) = stroke {
-        let mut stroke_style = tiny_skia::Stroke::default();
-        stroke_style.width = stroke.width.get().max(0.0) * scale_factor;
-        stroke_style.line_cap = match stroke.line_cap {
-            CanvasStrokeCap::Butt => tiny_skia::LineCap::Butt,
-            CanvasStrokeCap::Square => tiny_skia::LineCap::Square,
-            CanvasStrokeCap::Round => tiny_skia::LineCap::Round,
+        let mut stroke_style = tiny_skia::Stroke {
+            width: stroke.width.get().max(0.0) * scale_factor,
+            line_cap: match stroke.line_cap {
+                CanvasStrokeCap::Butt => tiny_skia::LineCap::Butt,
+                CanvasStrokeCap::Square => tiny_skia::LineCap::Square,
+                CanvasStrokeCap::Round => tiny_skia::LineCap::Round,
+            },
+            line_join: match stroke.line_join {
+                CanvasStrokeJoin::Miter => tiny_skia::LineJoin::Miter,
+                CanvasStrokeJoin::Bevel => tiny_skia::LineJoin::Bevel,
+                CanvasStrokeJoin::Round => tiny_skia::LineJoin::Round,
+            },
+            miter_limit: stroke.miter_limit.max(0.0),
+            ..Default::default()
         };
-        stroke_style.line_join = match stroke.line_join {
-            CanvasStrokeJoin::Miter => tiny_skia::LineJoin::Miter,
-            CanvasStrokeJoin::Bevel => tiny_skia::LineJoin::Bevel,
-            CanvasStrokeJoin::Round => tiny_skia::LineJoin::Round,
-        };
-        stroke_style.miter_limit = stroke.miter_limit.max(0.0);
         if let Some(pattern) = stroke
             .dash_pattern
             .as_ref()

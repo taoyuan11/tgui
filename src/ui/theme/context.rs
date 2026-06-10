@@ -1,29 +1,19 @@
 use super::{ResolvedThemeMode, Theme};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Density {
     Compact,
+    #[default]
     Comfortable,
     Spacious,
 }
 
-impl Default for Density {
-    fn default() -> Self {
-        Self::Comfortable
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ControlSize {
     Small,
+    #[default]
     Medium,
     Large,
-}
-
-impl Default for ControlSize {
-    fn default() -> Self {
-        Self::Medium
-    }
 }
 
 #[derive(Clone, Copy)]

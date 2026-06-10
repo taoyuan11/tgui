@@ -13,18 +13,13 @@ use super::style::{
 };
 use super::{Stack, Text, WidgetKey};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BadgePlacement {
     TopStart,
+    #[default]
     TopEnd,
     BottomStart,
     BottomEnd,
-}
-
-impl Default for BadgePlacement {
-    fn default() -> Self {
-        Self::TopEnd
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

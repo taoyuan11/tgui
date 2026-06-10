@@ -353,8 +353,10 @@ where
     where
         I: Into<TreeNode<T>>,
     {
-        let mut interactions = InteractionHandlers::default();
-        interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+        let interactions = InteractionHandlers {
+            cursor_style: Some(Value::Static(CursorStyle::Pointer)),
+            ..Default::default()
+        };
         Self {
             nodes: nodes.into_iter().map(Into::into).collect(),
             render: Arc::new(render),

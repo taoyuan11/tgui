@@ -696,7 +696,9 @@ pub(super) fn default_select_menu_option_color(theme: &Theme, state: WidgetState
 
 pub(super) fn default_select_disabled_text_color(theme: &Theme) -> Color {
     let style = WidgetSelectStyle::default_for_theme(theme);
-    let mut state = WidgetState::default();
-    state.disabled = true;
+    let state = WidgetState {
+        disabled: true,
+        ..Default::default()
+    };
     resolve_stateful_widget_color(&style.text, state)
 }

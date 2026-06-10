@@ -85,12 +85,8 @@ fn bench_dp_and_point_interpolate(c: &mut Criterion) {
         b.iter(|| {
             let mut acc = dp(0.0);
             for progress in PROGRESS_SAMPLES {
-                acc = acc
-                    + tgui::animation::Animatable::interpolate(
-                        &from_dp,
-                        &to_dp,
-                        black_box(progress),
-                    );
+                acc +=
+                    tgui::animation::Animatable::interpolate(&from_dp, &to_dp, black_box(progress));
             }
             black_box(acc)
         });
@@ -104,7 +100,7 @@ fn bench_dp_and_point_interpolate(c: &mut Criterion) {
             let mut sum_x = dp(0.0);
             for progress in PROGRESS_SAMPLES {
                 let value = Point::interpolate(&from_point, &to_point, black_box(progress));
-                sum_x = sum_x + value.x;
+                sum_x += value.x;
             }
             black_box(sum_x)
         });
@@ -118,7 +114,7 @@ fn bench_dp_and_point_interpolate(c: &mut Criterion) {
             let mut acc = dp(0.0);
             for progress in PROGRESS_SAMPLES {
                 let value = Insets::interpolate(&from_insets, &to_insets, black_box(progress));
-                acc = acc + value.left;
+                acc += value.left;
             }
             black_box(acc)
         });

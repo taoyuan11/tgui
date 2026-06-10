@@ -6,8 +6,8 @@ use crate::ui::unit::Dp;
 use crate::ui::widget::{BrushPrimitiveData, CanvasCompositePrimitive, Rect, RenderCommand};
 
 use super::{
-    physical_mesh_clip_mask_data, BrushVertex, CompositeVertex, MeshVertex, RectVertex, Renderer,
-    TextVertex,
+    physical_mesh_clip_mask_data, BrushVertex, BrushVertexSpec, CompositeQuadSpec, CompositeVertex,
+    MeshVertex, RectVertex, Renderer, TextQuadSpec, TextTransformSpec, TextVertex, VertexViewport,
 };
 
 pub(super) struct PreparedRect {
@@ -66,11 +66,7 @@ impl Renderer {
         &mut self,
         commands: &[RenderCommand],
         font_manager: &FontManager,
-        logical_width: f32,
-        logical_height: f32,
-        physical_width: f32,
-        physical_height: f32,
-        scale_factor: f32,
+        viewport: VertexViewport,
     ) -> Result<PreparedCommands, TguiError> {
         let mut prepared = Vec::with_capacity(commands.len());
 
@@ -81,25 +77,29 @@ impl Renderer {
                         continue;
                     }
                     let fullscreen = TextVertex::quad(
-                        Rect::new(0.0, 0.0, logical_width, logical_height),
-                        logical_width,
-                        logical_height,
-                        None,
-                        0.0,
-                        None,
-                        physical_width,
-                        physical_height,
-                        scale_factor,
-                        1.0,
+                        TextQuadSpec {
+                            rect: Rect::new(
+                                0.0,
+                                0.0,
+                                viewport.logical_size[0],
+                                viewport.logical_size[1],
+                            ),
+                            uv_rect: None,
+                            corner_radius: 0.0,
+                            clip_mask: None,
+                            opacity: 1.0,
+                        },
+                        viewport,
                     );
                     let fullscreen_offset =
                         self.vertex_pool.allocate(bytemuck::cast_slice(&fullscreen));
                     let vertices = CompositeVertex::quad(
-                        primitive.rect,
-                        logical_width,
-                        logical_height,
-                        primitive.corner_radius,
-                        primitive.clip_mask,
+                        CompositeQuadSpec {
+                            rect: primitive.rect,
+                            corner_radius: primitive.corner_radius,
+                            clip_mask: primitive.clip_mask,
+                        },
+                        viewport,
                     );
                     let composite_offset =
                         self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
@@ -120,13 +120,13 @@ impl Renderer {
                     else {
                         continue;
                     };
-                    let vertices = BrushVertex::from_primitive(
-                        primitive.rect,
-                        primitive.corner_radius,
-                        brush_data,
-                        physical_width,
-                        physical_height,
-                        scale_factor,
+                    let vertices = BrushVertex::from_spec(
+                        BrushVertexSpec {
+                            rect: primitive.rect,
+                            corner_radius: primitive.corner_radius,
+                            brush_data,
+                        },
+                        viewport,
                     );
                     let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     prepared.push(PreparedCommand::Brush(PreparedBrush {
@@ -140,11 +140,12 @@ impl Renderer {
                         continue;
                     }
                     let vertices = CompositeVertex::quad(
-                        primitive.bounds,
-                        logical_width,
-                        logical_height,
-                        0.0,
-                        primitive.clip_mask,
+                        CompositeQuadSpec {
+                            rect: primitive.bounds,
+                            corner_radius: 0.0,
+                            clip_mask: primitive.clip_mask,
+                        },
+                        viewport,
                     );
                     let composite_offset =
                         self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
@@ -158,12 +159,7 @@ impl Renderer {
                     if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
                         continue;
                     }
-                    let vertices = RectVertex::from_primitive(
-                        *primitive,
-                        physical_width,
-                        physical_height,
-                        scale_factor,
-                    );
+                    let vertices = RectVertex::from_primitive(*primitive, viewport);
                     let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     prepared.push(PreparedCommand::Rect(PreparedRect {
                         clip_rect: primitive.clip_rect,
@@ -179,9 +175,7 @@ impl Renderer {
                         .vertices
                         .iter()
                         .copied()
-                        .map(|vertex| {
-                            MeshVertex::from_scene_vertex(vertex, logical_width, logical_height)
-                        })
+                        .map(|vertex| MeshVertex::from_scene_vertex(vertex, viewport))
                         .collect();
                     let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     let clip_buffer =
@@ -190,7 +184,7 @@ impl Renderer {
                                 label: Some("tgui-mesh-clip-uniform"),
                                 contents: bytemuck::bytes_of(&physical_mesh_clip_mask_data(
                                     primitive.clip_mask,
-                                    scale_factor,
+                                    viewport.scale_factor,
                                 )),
                                 usage: wgpu::BufferUsages::UNIFORM,
                             });
@@ -215,29 +209,27 @@ impl Renderer {
                         let vertices = texture.quad.map_or_else(
                             || {
                                 TextVertex::quad(
-                                    texture.frame,
-                                    logical_width,
-                                    logical_height,
-                                    texture.uv_rect,
-                                    texture.corner_radius,
-                                    texture.clip_mask,
-                                    physical_width,
-                                    physical_height,
-                                    scale_factor,
-                                    texture.opacity,
+                                    TextQuadSpec {
+                                        rect: texture.frame,
+                                        uv_rect: texture.uv_rect,
+                                        corner_radius: texture.corner_radius,
+                                        clip_mask: texture.clip_mask,
+                                        opacity: texture.opacity,
+                                    },
+                                    viewport,
                                 )
                             },
                             |quad| {
                                 TextVertex::transformed(
-                                    texture.frame,
-                                    quad,
-                                    texture.uv_rect,
-                                    texture.corner_radius,
-                                    texture.clip_mask,
-                                    physical_width,
-                                    physical_height,
-                                    scale_factor,
-                                    texture.opacity,
+                                    TextTransformSpec {
+                                        rect: texture.frame,
+                                        quad,
+                                        uv_rect: texture.uv_rect,
+                                        corner_radius: texture.corner_radius,
+                                        clip_mask: texture.clip_mask,
+                                        opacity: texture.opacity,
+                                    },
+                                    viewport,
                                 )
                             },
                         );
@@ -260,29 +252,27 @@ impl Renderer {
                         let vertices = texture.quad.map_or_else(
                             || {
                                 TextVertex::quad(
-                                    texture.frame,
-                                    logical_width,
-                                    logical_height,
-                                    texture.uv_rect,
-                                    texture.corner_radius,
-                                    texture.clip_mask,
-                                    physical_width,
-                                    physical_height,
-                                    scale_factor,
-                                    texture.opacity,
+                                    TextQuadSpec {
+                                        rect: texture.frame,
+                                        uv_rect: texture.uv_rect,
+                                        corner_radius: texture.corner_radius,
+                                        clip_mask: texture.clip_mask,
+                                        opacity: texture.opacity,
+                                    },
+                                    viewport,
                                 )
                             },
                             |quad| {
                                 TextVertex::transformed(
-                                    texture.frame,
-                                    quad,
-                                    texture.uv_rect,
-                                    texture.corner_radius,
-                                    texture.clip_mask,
-                                    physical_width,
-                                    physical_height,
-                                    scale_factor,
-                                    texture.opacity,
+                                    TextTransformSpec {
+                                        rect: texture.frame,
+                                        quad,
+                                        uv_rect: texture.uv_rect,
+                                        corner_radius: texture.corner_radius,
+                                        clip_mask: texture.clip_mask,
+                                        opacity: texture.opacity,
+                                    },
+                                    viewport,
                                 )
                             },
                         );
@@ -306,29 +296,27 @@ impl Renderer {
                         let vertices = text.quad.map_or_else(
                             || {
                                 TextVertex::quad(
-                                    snapped_frame,
-                                    logical_width,
-                                    logical_height,
-                                    None,
-                                    0.0,
-                                    text.clip_mask,
-                                    physical_width,
-                                    physical_height,
-                                    scale_factor,
-                                    opacity,
+                                    TextQuadSpec {
+                                        rect: snapped_frame,
+                                        uv_rect: None,
+                                        corner_radius: 0.0,
+                                        clip_mask: text.clip_mask,
+                                        opacity,
+                                    },
+                                    viewport,
                                 )
                             },
                             |quad| {
                                 TextVertex::transformed(
-                                    snapped_frame,
-                                    quad,
-                                    None,
-                                    0.0,
-                                    text.clip_mask,
-                                    physical_width,
-                                    physical_height,
-                                    scale_factor,
-                                    opacity,
+                                    TextTransformSpec {
+                                        rect: snapped_frame,
+                                        quad,
+                                        uv_rect: None,
+                                        corner_radius: 0.0,
+                                        clip_mask: text.clip_mask,
+                                        opacity,
+                                    },
+                                    viewport,
                                 )
                             },
                         );
@@ -378,6 +366,17 @@ impl Renderer {
         (
             self.config.width as f32 / self.scale_factor,
             self.config.height as f32 / self.scale_factor,
+        )
+    }
+
+    pub(super) fn vertex_viewport(&self) -> VertexViewport {
+        let (logical_width, logical_height) = self.logical_viewport_size();
+        VertexViewport::new(
+            logical_width,
+            logical_height,
+            self.config.width as f32,
+            self.config.height as f32,
+            self.scale_factor,
         )
     }
 

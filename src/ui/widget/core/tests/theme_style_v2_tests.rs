@@ -129,8 +129,10 @@ fn style_precedence_keeps_local_mutator_above_theme_components_and_stylesheet() 
         style.padding_x = dp(12.0);
     });
     let context = StyleContext::from_theme(&theme);
-    let mut visual = VisualStyle::default();
-    visual.style_id = Some("save".to_string());
+    let visual = VisualStyle {
+        style_id: Some("save".to_string()),
+        ..Default::default()
+    };
 
     let sheet = StyleSheet::new()
         .button(ButtonSelector::primary(), |style, _| {
@@ -165,15 +167,19 @@ fn surface_style_fills_empty_visual_fields_without_overriding_explicit_builder_v
     let theme_background = Color::hexa(0xEECCAAFF);
 
     let mut background = Some(Value::Static(explicit_background));
-    let mut visual = VisualStyle::default();
-    visual.border_radius = Some(Value::Static(explicit_radius));
-    visual.opacity = Value::Static(explicit_opacity);
+    let mut visual = VisualStyle {
+        border_radius: Some(Value::Static(explicit_radius)),
+        opacity: Value::Static(explicit_opacity),
+        ..Default::default()
+    };
 
-    let mut surface = WidgetSurfaceStyle::default();
-    surface.background = Some(Value::Static(theme_background));
-    surface.border_radius = Some(Value::Static(dp(4.0)));
-    surface.border_width = Some(Value::Static(dp(2.0)));
-    surface.opacity = Value::Static(0.9);
+    let surface = WidgetSurfaceStyle {
+        background: Some(Value::Static(theme_background)),
+        border_radius: Some(Value::Static(dp(4.0))),
+        border_width: Some(Value::Static(dp(2.0))),
+        opacity: Value::Static(0.9),
+        ..Default::default()
+    };
 
     apply_surface_style(&mut background, &mut visual, &surface);
 

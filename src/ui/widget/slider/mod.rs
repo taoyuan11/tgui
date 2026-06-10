@@ -185,8 +185,10 @@ impl<VM> Slider<VM> {
     /// 返回一个新的滑块组件；如果 `min > max`，会按原语义自动交换二者。
     pub fn new(value: impl Into<Value<f32>>, min: f32, max: f32) -> Self {
         let (min, max) = if min <= max { (min, max) } else { (max, min) };
-        let mut interactions = InteractionHandlers::default();
-        interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+        let interactions = InteractionHandlers {
+            cursor_style: Some(Value::Static(CursorStyle::Pointer)),
+            ..Default::default()
+        };
 
         Self {
             element: Element {

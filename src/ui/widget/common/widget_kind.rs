@@ -319,8 +319,9 @@ pub(crate) struct SelectOptionRowStyle {
     pub clip_mask: Option<ClipMask>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TabPlacement {
+    #[default]
     Top,
     Bottom,
     Left,
@@ -328,27 +329,16 @@ pub enum TabPlacement {
 }
 
 /// 分隔线的朝向。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DividerOrientation {
+    #[default]
     Horizontal,
     Vertical,
-}
-
-impl Default for DividerOrientation {
-    fn default() -> Self {
-        Self::Horizontal
-    }
 }
 
 impl DividerOrientation {
     pub(crate) fn is_horizontal(self) -> bool {
         matches!(self, Self::Horizontal)
-    }
-}
-
-impl Default for TabPlacement {
-    fn default() -> Self {
-        Self::Top
     }
 }
 

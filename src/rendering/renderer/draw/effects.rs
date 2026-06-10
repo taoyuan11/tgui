@@ -6,7 +6,9 @@ use crate::ui::widget::{CanvasBlendMode, Rect};
 
 use super::super::prepare::{PreparedBackdropBlur, PreparedCanvasComposite};
 use super::super::surface::surface_clear_color;
-use super::super::{BlurUniform, CompositeUniform, OffscreenTarget, Renderer, TextVertex};
+use super::super::{
+    BlurUniform, CompositeUniform, OffscreenTarget, Renderer, TextQuadSpec, TextVertex,
+};
 
 impl Renderer {
     pub(super) fn apply_backdrop_blur_to_target(
@@ -224,11 +226,7 @@ impl Renderer {
         let content_prepared = self.prepare_commands(
             &composite.primitive.content_commands,
             font_manager,
-            self.config.width as f32 / self.scale_factor,
-            self.config.height as f32 / self.scale_factor,
-            self.config.width as f32,
-            self.config.height as f32,
-            self.scale_factor,
+            self.vertex_viewport(),
         )?;
         self.vertex_pool.flush(&self.device, &self.queue);
         let mut composite_cleared = true;
@@ -243,15 +241,8 @@ impl Renderer {
 
         if let Some(mask_commands) = composite.primitive.mask_commands.as_ref() {
             self.clear_offscreen_target(encoder, &composite_mask_target);
-            let mask_prepared = self.prepare_commands(
-                mask_commands,
-                font_manager,
-                self.config.width as f32 / self.scale_factor,
-                self.config.height as f32 / self.scale_factor,
-                self.config.width as f32,
-                self.config.height as f32,
-                self.scale_factor,
-            )?;
+            let mask_prepared =
+                self.prepare_commands(mask_commands, font_manager, self.vertex_viewport())?;
             self.vertex_pool.flush(&self.device, &self.queue);
             let mut mask_cleared = true;
             self.execute_prepared_commands_to_target(
@@ -404,21 +395,19 @@ impl Renderer {
             entries: &bind_group_entries,
         });
         let quad = TextVertex::quad(
-            Rect::new(
-                0.0,
-                0.0,
-                self.config.width as f32 / self.scale_factor,
-                self.config.height as f32 / self.scale_factor,
-            ),
-            self.config.width as f32 / self.scale_factor,
-            self.config.height as f32 / self.scale_factor,
-            None,
-            0.0,
-            None,
-            self.config.width as f32,
-            self.config.height as f32,
-            self.scale_factor,
-            1.0,
+            TextQuadSpec {
+                rect: Rect::new(
+                    0.0,
+                    0.0,
+                    self.config.width as f32 / self.scale_factor,
+                    self.config.height as f32 / self.scale_factor,
+                ),
+                uv_rect: None,
+                corner_radius: 0.0,
+                clip_mask: None,
+                opacity: 1.0,
+            },
+            self.vertex_viewport(),
         );
         let vertex_buffer = self
             .device

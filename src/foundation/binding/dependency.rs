@@ -204,8 +204,10 @@ pub(crate) fn with_dependency_collection<R>(f: impl FnOnce() -> R) -> (R, Depend
     let result = f();
     let graph = DEPENDENCY_TRACKER.with(|tracker| {
         let mut tracker = tracker.borrow_mut();
-        let mut graph = DependencyGraph::default();
-        graph.global_owners = std::mem::take(&mut tracker.global_owners);
+        let mut graph = DependencyGraph {
+            global_owners: std::mem::take(&mut tracker.global_owners),
+            ..Default::default()
+        };
         for (dependency, owner) in tracker.records.drain(..) {
             graph
                 .dependencies

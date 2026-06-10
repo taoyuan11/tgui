@@ -5,11 +5,88 @@ use crate::foundation::binding::TextChangeSet;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::log::text_profile_enabled;
 use crate::text::font::{build_layout_info_from_buffer, FontManager, TextFontRequest};
-use crate::ui::widget::{Rect, Text, TextEditState};
+use crate::ui::layout::Insets;
+use crate::ui::theme::Theme;
+use crate::ui::unit::UnitContext;
+use crate::ui::widget::{Point, Rect, Text, TextEditState};
 use cosmic_text::Edit;
 
 use super::text_replacement_bounds;
+use super::INPUT_CARET_WIDTH;
 use super::{super::TextInputBufferState, super::TextInputSessionConfig};
+
+#[derive(Clone, Copy)]
+pub(in crate::runtime) struct TextInputContext<'a> {
+    pub(in crate::runtime) frame: Rect,
+    pub(in crate::runtime) padding: Insets,
+    pub(in crate::runtime) text_style: &'a Text,
+    pub(in crate::runtime) text: &'a str,
+    pub(in crate::runtime) multiline: bool,
+    pub(in crate::runtime) auto_wrap: bool,
+    pub(in crate::runtime) show_scrollbar: bool,
+}
+
+impl<'a> TextInputContext<'a> {
+    pub(in crate::runtime) fn content_viewport(&self, theme: &Theme, units: UnitContext) -> Rect {
+        crate::ui::widget::text_input_content_viewport(
+            self.frame,
+            self.padding,
+            self.multiline,
+            self.show_scrollbar,
+            theme,
+            units,
+        )
+    }
+
+    pub(in crate::runtime) fn layout_width(&self, content_viewport: Rect) -> f32 {
+        crate::ui::widget::text_input_layout_width(
+            content_viewport,
+            self.multiline,
+            self.auto_wrap,
+            INPUT_CARET_WIDTH,
+        )
+    }
+}
+
+#[derive(Clone)]
+pub(in crate::runtime) struct TextInputSnapshot {
+    pub(in crate::runtime) frame: Rect,
+    pub(in crate::runtime) padding: Insets,
+    pub(in crate::runtime) text_style: Text,
+    pub(in crate::runtime) text: String,
+    pub(in crate::runtime) multiline: bool,
+    pub(in crate::runtime) auto_wrap: bool,
+    pub(in crate::runtime) show_scrollbar: bool,
+}
+
+impl TextInputSnapshot {
+    pub(in crate::runtime) fn as_context(&self) -> TextInputContext<'_> {
+        TextInputContext {
+            frame: self.frame,
+            padding: self.padding,
+            text_style: &self.text_style,
+            text: &self.text,
+            multiline: self.multiline,
+            auto_wrap: self.auto_wrap,
+            show_scrollbar: self.show_scrollbar,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::runtime) struct ScrollContext {
+    pub(in crate::runtime) offset: Point,
+}
+
+impl ScrollContext {
+    pub(in crate::runtime) const ZERO: Self = Self {
+        offset: Point::ZERO,
+    };
+
+    pub(in crate::runtime) fn new(offset: Point) -> Self {
+        Self { offset }
+    }
+}
 
 pub(crate) struct TextInputRegionData<VM> {
     pub(crate) controller: crate::foundation::binding::TextController,
@@ -21,6 +98,20 @@ pub(crate) struct TextInputRegionData<VM> {
     pub(crate) show_scrollbar: bool,
     pub(crate) on_change: Option<Command<VM>>,
     pub(crate) on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
+}
+
+impl<VM> TextInputRegionData<VM> {
+    pub(in crate::runtime) fn context<'a>(&'a self, text: &'a str) -> TextInputContext<'a> {
+        TextInputContext {
+            frame: self.frame,
+            padding: self.padding,
+            text_style: &self.text_style,
+            text,
+            multiline: self.multiline,
+            auto_wrap: self.auto_wrap,
+            show_scrollbar: self.show_scrollbar,
+        }
+    }
 }
 
 impl<VM> Clone for TextInputRegionData<VM> {

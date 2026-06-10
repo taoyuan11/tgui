@@ -380,27 +380,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn begin_text_selection(
         &mut self,
         widget_id: WidgetId,
-        frame: Rect,
-        padding: crate::ui::layout::Insets,
-        text_style: Text,
-        text: String,
-        multiline: bool,
-        auto_wrap: bool,
-        show_scrollbar: bool,
+        input: TextInputSnapshot,
         cursor: usize,
     ) {
         self.selected_text = Some(widget_id);
         self.active_text_selection = Some(TextSelectionDrag {
             widget_id,
-            frame,
-            padding,
-            text_style: text_style.clone(),
-            text: text.clone(),
-            multiline,
-            auto_wrap,
-            show_scrollbar,
+            input: input.clone(),
         });
-        self.update_text_edit_state(widget_id, &text, |state| {
+        self.update_text_edit_state(widget_id, &input.text, |state| {
             state.cursor = cursor;
             state.anchor = cursor;
             state.composition = None;
@@ -416,39 +404,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(point) = self.cursor_position else {
             return false;
         };
+        let input = drag.input.as_context();
         let cursor = self.text_input_cursor_index_at_point(
             drag.widget_id,
-            drag.frame,
-            drag.padding,
-            &drag.text_style,
-            &drag.text,
-            drag.multiline,
-            drag.auto_wrap,
-            drag.show_scrollbar,
-            self.scroll_states
-                .get(&drag.widget_id)
-                .copied()
-                .unwrap_or(Point::ZERO),
+            input,
+            ScrollContext::new(
+                self.scroll_states
+                    .get(&drag.widget_id)
+                    .copied()
+                    .unwrap_or(Point::ZERO),
+            ),
             point,
         );
         self.selected_text = Some(drag.widget_id);
-        let changed = self.update_text_edit_state(drag.widget_id, &drag.text, |state| {
+        let changed = self.update_text_edit_state(drag.widget_id, input.text, |state| {
             state.cursor = cursor;
             state.composition = None;
         });
         if changed {
             if let Some(state) = self.text_edit_states.get(&drag.widget_id).cloned() {
-                self.ensure_text_input_caret_visible(
-                    drag.widget_id,
-                    drag.frame,
-                    drag.padding,
-                    &drag.text_style,
-                    drag.multiline,
-                    drag.auto_wrap,
-                    drag.show_scrollbar,
-                    &drag.text,
-                    &state,
-                );
+                self.ensure_text_input_caret_visible(drag.widget_id, input, &state);
             }
             self.reset_caret_blink();
         }

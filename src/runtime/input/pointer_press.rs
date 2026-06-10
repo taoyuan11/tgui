@@ -644,17 +644,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             Option<Command<VM>>,
             Option<ClickHandler<VM>>,
             Option<(WidgetId, bool, Option<ValueCommand<VM, bool>>)>,
-            Option<(
-                WidgetId,
-                Rect,
-                crate::ui::layout::Insets,
-                Text,
-                String,
-                bool,
-                bool,
-                bool,
-                usize,
-            )>,
+            Option<(WidgetId, TextInputSnapshot, usize)>,
             Option<(
                 WidgetId,
                 Option<ValueCommand<VM, f32>>,
@@ -701,19 +691,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 text,
             } => {
                 let multiline = text.contains('\n');
+                let input = TextInputSnapshot {
+                    frame,
+                    padding,
+                    text_style,
+                    text,
+                    multiline,
+                    auto_wrap: false,
+                    show_scrollbar: false,
+                };
                 let cursor = pointer_position.map(|point| {
                     text_cursor_index_at_point(
                         &self.font_manager,
                         &self.theme,
                         self.unit_context(),
-                        frame,
-                        padding,
-                        &text_style,
-                        &text,
-                        multiline,
-                        false,
-                        false,
-                        Point::ZERO,
+                        input.as_context(),
+                        ScrollContext::ZERO,
                         point,
                     )
                 });
@@ -724,11 +717,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     None,
                     interactions.on_click.clone().map(ClickHandler::Command),
                     None,
-                    cursor.map(|cursor| {
-                        (
-                            id, frame, padding, text_style, text, multiline, false, false, cursor,
-                        )
-                    }),
+                    cursor.map(|cursor| (id, input, cursor)),
                     None,
                 )
             }
@@ -841,30 +830,25 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 None,
                 pointer_position.map(|point| {
                     let value = self.text_input_current_value(id, &controller);
-                    let scroll = self.scroll_states.get(&id).copied().unwrap_or(Point::ZERO);
-                    let cursor = self.text_input_cursor_index_at_point(
-                        id,
-                        frame,
-                        padding,
-                        &text_style,
-                        &value,
-                        multiline,
-                        auto_wrap,
-                        show_scrollbar,
-                        scroll,
-                        point,
-                    );
-                    (
-                        id,
+                    let input = TextInputSnapshot {
                         frame,
                         padding,
                         text_style,
-                        value,
+                        text: value,
                         multiline,
                         auto_wrap,
                         show_scrollbar,
-                        cursor,
-                    )
+                    };
+                    let scroll = ScrollContext::new(
+                        self.scroll_states.get(&id).copied().unwrap_or(Point::ZERO),
+                    );
+                    let cursor = self.text_input_cursor_index_at_point(
+                        id,
+                        input.as_context(),
+                        scroll,
+                        point,
+                    );
+                    (id, input, cursor)
                 }),
                 None,
             ),
@@ -991,29 +975,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        if let Some((
-            widget_id,
-            frame,
-            padding,
-            text_style,
-            text,
-            multiline,
-            auto_wrap,
-            show_scrollbar,
-            cursor,
-        )) = selectable_text
-        {
-            self.begin_text_selection(
-                widget_id,
-                frame,
-                padding,
-                text_style,
-                text,
-                multiline,
-                auto_wrap,
-                show_scrollbar,
-                cursor,
-            );
+        if let Some((widget_id, input, cursor)) = selectable_text {
+            self.begin_text_selection(widget_id, input, cursor);
         }
 
         if let Some(handler) = click_handler {

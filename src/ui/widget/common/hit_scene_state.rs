@@ -258,8 +258,10 @@ impl<VM> Default for ComputedScene<VM> {
 
 impl<VM> ComputedScene<VM> {
     pub(crate) fn delta_since(&self, base: &ComputedScene<VM>) -> ComputedScene<VM> {
-        let mut delta = ComputedScene::default();
-        delta.scene = self.scene.delta_since(&base.scene);
+        let mut delta = ComputedScene {
+            scene: self.scene.delta_since(&base.scene),
+            ..Default::default()
+        };
         delta.hit_regions.extend(
             self.hit_regions
                 .iter()

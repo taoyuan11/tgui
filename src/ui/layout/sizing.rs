@@ -1,8 +1,9 @@
 use crate::ui::unit::Dp;
 
 /// 表示布局长度的基础单位。
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Length {
+    #[default]
     Auto,
     Px(Dp),
     Percent(f32),
@@ -11,12 +12,6 @@ pub enum Length {
 impl Length {
     /// 自动尺寸常量。
     pub const AUTO: Self = Self::Auto;
-}
-
-impl Default for Length {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl From<Dp> for Length {
@@ -50,18 +45,13 @@ impl From<u32> for Length {
 }
 
 /// 表示网格轨道尺寸的类型。
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Track {
+    #[default]
     Auto,
     Px(Dp),
     Percent(f32),
     Fr(f32),
-}
-
-impl Default for Track {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl From<Dp> for Track {

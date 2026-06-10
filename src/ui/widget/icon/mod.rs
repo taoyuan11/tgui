@@ -226,9 +226,11 @@ fn icon_svg<VM: 'static>(
     style: Option<StyleResolver<IconStyle>>,
 ) -> Element<VM> {
     let layout_style = resolve_icon_style_for_layout(style.as_ref());
-    let mut layout = LayoutStyle::default();
-    layout.width = Some(Value::Static(Length::Px(layout_style.size)));
-    layout.height = Some(Value::Static(Length::Px(layout_style.size)));
+    let layout = LayoutStyle {
+        width: Some(Value::Static(Length::Px(layout_style.size))),
+        height: Some(Value::Static(Length::Px(layout_style.size))),
+        ..Default::default()
+    };
     Element {
         id: WidgetId::next(),
         key: None,

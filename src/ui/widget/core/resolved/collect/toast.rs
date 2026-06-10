@@ -244,9 +244,9 @@ fn build_toast_scene<VM: 'static>(
 
                     expanded_height = expanded_y + expanded_size.1;
                     if index + 1 < rendered_len {
-                        expanded_y = expanded_y + expanded_size.1 + style.stack_gap;
+                        expanded_y += expanded_size.1 + style.stack_gap;
                     } else {
-                        expanded_y = expanded_y + expanded_size.1;
+                        expanded_y += expanded_size.1;
                     }
                 }
 
@@ -694,14 +694,16 @@ fn push_toast_stack_hover_region<VM: 'static>(
 
     let expand_queue = queue.clone();
     let collapse_queue = queue;
-    let mut interactions = InteractionHandlers::default();
-    interactions.cursor_style = Some(Value::Static(CursorStyle::Default));
-    interactions.on_mouse_enter = Some(Command::new(move |_vm| {
-        expand_queue.set_stack_expanded(true);
-    }));
-    interactions.on_mouse_leave = Some(Command::new(move |_vm| {
-        collapse_queue.set_stack_expanded(false);
-    }));
+    let interactions = InteractionHandlers {
+        cursor_style: Some(Value::Static(CursorStyle::Default)),
+        on_mouse_enter: Some(Command::new(move |_vm| {
+            expand_queue.set_stack_expanded(true);
+        })),
+        on_mouse_leave: Some(Command::new(move |_vm| {
+            collapse_queue.set_stack_expanded(false);
+        })),
+        ..Default::default()
+    };
 
     computed.hit_regions.insert(
         0,

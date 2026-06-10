@@ -124,28 +124,23 @@ fn textarea_click_tracks_visual_wrap_for_overflowing_initial_content() {
             .expect("textarea hit region should exist")
     };
 
-    let content_viewport = crate::ui::widget::text_input_content_viewport(
+    let input_context = input::TextInputContext {
         frame,
         padding,
-        true,
-        true,
-        &handler.theme,
-        handler.unit_context(),
-    );
+        text_style: &text_style,
+        text: value,
+        multiline: true,
+        auto_wrap: true,
+        show_scrollbar: true,
+    };
+    let content_viewport = input_context.content_viewport(&handler.theme, handler.unit_context());
+    let layout_width = input_context.layout_width(content_viewport);
     let (layout, _font_size, _line_height) = super::input_text_layout(
         &handler.font_manager,
         &handler.theme,
         handler.unit_context(),
-        &text_style,
-        value,
-        true,
-        true,
-        crate::ui::widget::text_input_layout_width(
-            content_viewport,
-            true,
-            true,
-            super::input::INPUT_CARET_WIDTH,
-        ),
+        input_context,
+        layout_width,
     );
     assert!(
         layout.line_count() > 1,
@@ -208,14 +203,20 @@ fn textarea_click_reuses_live_session_layout_snapshot() {
     let _ = handler.sync_text_input_buffer(text_id);
     let inner = frame.inset(padding);
     let alternate_text = "a\nb\nc";
+    let input_context = input::TextInputContext {
+        frame,
+        padding,
+        text_style: &text_style,
+        text: alternate_text,
+        multiline: true,
+        auto_wrap: false,
+        show_scrollbar: true,
+    };
     let (alternate_layout, _font_size, _line_height) = super::input_text_layout(
         &handler.font_manager,
         &handler.theme,
         handler.unit_context(),
-        &text_style,
-        alternate_text,
-        true,
-        false,
+        input_context,
         inner.width.get(),
     );
     let sample_line = 2usize;

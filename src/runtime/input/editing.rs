@@ -100,13 +100,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .unwrap_or_default();
             self.ensure_text_input_caret_visible(
                 widget_id,
-                region.frame,
-                region.padding,
-                &region.text_style,
-                region.multiline,
-                region.auto_wrap,
-                region.show_scrollbar,
-                &canonical_value,
+                region.context(&canonical_value),
                 &state,
             );
         }
@@ -244,13 +238,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.refresh_text_input_session_display(widget_id, &region, &current_value, &state);
                 self.ensure_text_input_caret_visible(
                     widget_id,
-                    region.frame,
-                    region.padding,
-                    &region.text_style,
-                    region.multiline,
-                    region.auto_wrap,
-                    region.show_scrollbar,
-                    &current_value,
+                    region.context(&current_value),
                     &state,
                 );
             }
@@ -276,13 +264,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.refresh_text_input_session_display(widget_id, &region, &current_value, &state);
                 self.ensure_text_input_caret_visible(
                     widget_id,
-                    region.frame,
-                    region.padding,
-                    &region.text_style,
-                    region.multiline,
-                    region.auto_wrap,
-                    region.show_scrollbar,
-                    &current_value,
+                    region.context(&current_value),
                     &state,
                 );
             }

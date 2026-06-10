@@ -185,8 +185,10 @@ impl<VM> Input<VM> {
     /// # 返回值
     /// 返回新的单行输入组件实例。
     pub fn new(controller: impl Into<TextController>) -> Self {
-        let mut interactions = InteractionHandlers::default();
-        interactions.cursor_style = Some(Value::Static(CursorStyle::Text));
+        let interactions = InteractionHandlers {
+            cursor_style: Some(Value::Static(CursorStyle::Text)),
+            ..Default::default()
+        };
         let controller = controller.into();
 
         Self {

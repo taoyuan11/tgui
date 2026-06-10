@@ -49,17 +49,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             },
         );
         if let Some(state) = self.text_edit_states.get(&widget_id).cloned() {
-            self.ensure_text_input_caret_visible(
-                widget_id,
-                region.frame,
-                region.padding,
-                &region.text_style,
-                region.multiline,
-                region.auto_wrap,
-                region.show_scrollbar,
-                &current_value,
-                &state,
-            );
+            self.ensure_text_input_caret_visible(widget_id, region.context(&current_value), &state);
         }
         self.reset_caret_blink();
         self.sync_ime_state();
@@ -69,60 +59,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn ensure_text_input_caret_visible(
         &mut self,
         widget_id: WidgetId,
-        frame: Rect,
-        padding: crate::ui::layout::Insets,
-        text_style: &Text,
-        multiline: bool,
-        auto_wrap: bool,
-        show_scrollbar: bool,
-        text: &str,
+        input: TextInputContext<'_>,
         state: &TextEditState,
     ) {
-        let content_viewport = crate::ui::widget::text_input_content_viewport(
-            frame,
-            padding,
-            multiline,
-            show_scrollbar,
+        let content_viewport = input.content_viewport(&self.theme, self.unit_context());
+        let (_, _, line_height, _) = super::super::resolved_input_text_metrics(
             &self.theme,
             self.unit_context(),
+            input.text_style,
         );
-        let (_, _, line_height, _) =
-            super::super::resolved_input_text_metrics(&self.theme, self.unit_context(), text_style);
         let layout_owned;
-        let (layout, caret) = if state.composition.is_none() {
-            let layout = self
-                .text_input_buffers
-                .get(&widget_id)
-                .and_then(|session| session.layout_snapshot.as_ref());
-            let layout = if let Some(layout) = layout {
-                layout
-            } else {
-                let (layout, _, _) = super::super::input_text_layout(
-                    &self.font_manager,
-                    &self.theme,
-                    self.unit_context(),
-                    text_style,
-                    text,
-                    multiline,
-                    auto_wrap,
-                    crate::ui::widget::text_input_layout_width(
-                        content_viewport,
-                        multiline,
-                        auto_wrap,
-                        INPUT_CARET_WIDTH,
-                    ),
-                );
-                layout_owned = layout;
-                &layout_owned
-            };
-            (layout, state.cursor.min(text.len()))
-        } else {
-            let composition = state
-                .composition
-                .as_ref()
-                .expect("composition should exist");
-            let display_text = text_edit_display_text(text, state);
-            let start = composition.replace_range.0.min(text.len());
+        let (layout, caret) = if let Some(composition) = state.composition.as_ref() {
+            let display_text = text_edit_display_text(input.text, state);
+            let start = composition.replace_range.0.min(input.text.len());
             let caret_offset = composition
                 .cursor
                 .map(|(_, end)| end.min(composition.text.len()))
@@ -140,26 +89,40 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     &self.font_manager,
                     &self.theme,
                     self.unit_context(),
-                    text_style,
-                    display_text.as_ref(),
-                    multiline,
-                    auto_wrap,
-                    crate::ui::widget::text_input_layout_width(
-                        content_viewport,
-                        multiline,
-                        auto_wrap,
-                        INPUT_CARET_WIDTH,
-                    ),
+                    TextInputContext {
+                        text: display_text.as_ref(),
+                        ..input
+                    },
+                    input.layout_width(content_viewport),
                 );
                 layout_owned = layout;
                 &layout_owned
             };
             (layout, caret.min(display_text.len()))
+        } else {
+            let layout = self
+                .text_input_buffers
+                .get(&widget_id)
+                .and_then(|session| session.layout_snapshot.as_ref());
+            let layout = if let Some(layout) = layout {
+                layout
+            } else {
+                let (layout, _, _) = super::super::input_text_layout(
+                    &self.font_manager,
+                    &self.theme,
+                    self.unit_context(),
+                    input,
+                    input.layout_width(content_viewport),
+                );
+                layout_owned = layout;
+                &layout_owned
+            };
+            (layout, state.cursor.min(input.text.len()))
         };
         let caret_x = layout.x_for_index(caret);
         let caret_y = layout.top_for_index(caret);
         let caret_h = layout.line_height_for_index(caret).max(line_height);
-        let max_x = if multiline && auto_wrap {
+        let max_x = if input.multiline && input.auto_wrap {
             (layout.width - content_viewport.width.get()).max(0.0)
         } else {
             (layout.width + INPUT_CARET_WIDTH - content_viewport.width.get()).max(0.0)
@@ -170,7 +133,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             state.scroll_y.clamp(0.0, max_y),
         );
 
-        if multiline {
+        if input.multiline {
             if caret_y < next_scroll.y.get() {
                 next_scroll.y = Dp::new(caret_y);
             } else if caret_y + caret_h > next_scroll.y.get() + content_viewport.height.get() {
@@ -179,7 +142,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        if !multiline || !auto_wrap {
+        if !input.multiline || !input.auto_wrap {
             let caret_right = caret_x + INPUT_CARET_WIDTH;
             if caret_x < next_scroll.x.get() {
                 next_scroll.x = Dp::new(caret_x);
@@ -244,10 +207,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     &self.font_manager,
                     &self.theme,
                     self.unit_context(),
-                    &text_style,
-                    &current_value,
-                    true,
-                    region.auto_wrap,
+                    TextInputContext {
+                        frame,
+                        padding,
+                        text_style: &text_style,
+                        text: &current_value,
+                        multiline: true,
+                        auto_wrap: region.auto_wrap,
+                        show_scrollbar: region.show_scrollbar,
+                    },
                     inner.width.get(),
                 );
                 layout
@@ -281,13 +249,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.text_edit_states.insert(widget_id, next_state.clone());
         self.ensure_text_input_caret_visible(
             widget_id,
-            frame,
-            padding,
-            &text_style,
-            true,
-            region.auto_wrap,
-            region.show_scrollbar,
-            &current_value,
+            TextInputContext {
+                frame,
+                padding,
+                text_style: &text_style,
+                text: &current_value,
+                multiline: true,
+                auto_wrap: region.auto_wrap,
+                show_scrollbar: region.show_scrollbar,
+            },
             &next_state,
         );
         self.reset_caret_blink();
@@ -320,17 +290,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             },
         );
         if let Some(state) = self.text_edit_states.get(&widget_id).cloned() {
-            self.ensure_text_input_caret_visible(
-                widget_id,
-                region.frame,
-                region.padding,
-                &region.text_style,
-                region.multiline,
-                region.auto_wrap,
-                region.show_scrollbar,
-                &self.text_input_current_value(widget_id, &region.controller),
-                &state,
-            );
+            let current_value = self.text_input_current_value(widget_id, &region.controller);
+            self.ensure_text_input_caret_visible(widget_id, region.context(&current_value), &state);
         }
         self.selected_text = Some(widget_id);
         self.reset_caret_blink();

@@ -205,8 +205,10 @@ impl<VM, K, V> Select<VM, K, V> {
     where
         O: Into<SelectOption<K, V>>,
     {
-        let mut interactions = InteractionHandlers::default();
-        interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+        let interactions = InteractionHandlers {
+            cursor_style: Some(Value::Static(CursorStyle::Pointer)),
+            ..Default::default()
+        };
 
         Self {
             key: None,

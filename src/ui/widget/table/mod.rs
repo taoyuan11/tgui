@@ -525,8 +525,10 @@ where
         rows: Vec<DataGridVirtualRow<T, VM>>,
         columns: Vec<DataGridColumn<T, VM>>,
     ) -> Self {
-        let mut interactions = InteractionHandlers::default();
-        interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+        let interactions = InteractionHandlers {
+            cursor_style: Some(Value::Static(CursorStyle::Pointer)),
+            ..Default::default()
+        };
         Self {
             rows,
             columns,

@@ -13,14 +13,15 @@ use crate::ui::widget::{
     CanvasWheelEvent, ComputedScene, DoubleTapEvent, EdgeSwipeEvent, GestureEdge, GesturePhase,
     GestureRecognizer, GestureSource, LifecycleEventState, LongPressEvent, MediaEventPhase,
     MediaEventState, PinchGestureEvent, Point, Rect, ResolvedSceneLayout, SceneChunkParts,
-    ScrollbarHandle, SwipeAxis, SwipeDirection, SwipeGestureEvent, Text, VisualContextSnapshot,
-    WidgetId,
+    ScrollbarHandle, SwipeAxis, SwipeDirection, SwipeGestureEvent, VisualContextSnapshot, WidgetId,
 };
 use cosmic_text::Editor;
 use ropey::Rope;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
+
+use super::input::TextInputSnapshot;
 
 pub(super) const SMOOTH_SCROLL_EPSILON: f32 = 0.1;
 pub(super) const SMOOTH_SCROLL_LERP: f32 = 0.28;
@@ -644,13 +645,7 @@ pub(super) struct SmoothScrollState {
 #[derive(Clone)]
 pub(super) struct TextSelectionDrag {
     pub(super) widget_id: WidgetId,
-    pub(super) frame: Rect,
-    pub(super) padding: crate::ui::layout::Insets,
-    pub(super) text_style: Text,
-    pub(super) text: String,
-    pub(super) multiline: bool,
-    pub(super) auto_wrap: bool,
-    pub(super) show_scrollbar: bool,
+    pub(super) input: TextInputSnapshot,
 }
 
 pub(super) enum PendingMediaEvent<VM> {
