@@ -38,6 +38,12 @@ pub(crate) enum SvgIconId {
     CheckboxChecked,
     CheckboxUnchecked,
     CheckboxIndeterminate,
+    PlayArrow,
+    Pause,
+    VolumeUp,
+    VolumeDown,
+    VolumeOff,
+    VolumeMute,
 }
 
 impl From<BuiltinIcon> for SvgIconId {
@@ -277,6 +283,21 @@ fn icon_paths(icon: SvgIconId) -> &'static [SvgPath] {
         SvgIconId::CheckboxIndeterminate => svg_paths![
             SvgPath::stroke("M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"),
             SvgPath::stroke("M8 12h8"),
+        ],
+        SvgIconId::PlayArrow => svg_paths![SvgPath::fill("M8 5v14l11-7z")],
+        SvgIconId::Pause => svg_paths![SvgPath::fill("M6 5h4v14H6zm8 0h4v14h-4z")],
+        SvgIconId::VolumeUp => svg_paths![
+            SvgPath::stroke("M4 9v6h4l5 5V4L8 9z"),
+            SvgPath::stroke("M15.5 8.5a5 5 0 0 1 0 7M18 6a9 9 0 0 1 0 12"),
+        ],
+        SvgIconId::VolumeDown => svg_paths![
+            SvgPath::stroke("M4 9v6h4l5 5V4L8 9z"),
+            SvgPath::stroke("M15.5 8.5a5 5 0 0 1 0 7"),
+        ],
+        SvgIconId::VolumeOff => svg_paths![SvgPath::stroke("M4 9v6h4l5 5V4L8 9z")],
+        SvgIconId::VolumeMute => svg_paths![
+            SvgPath::stroke("M4 9v6h4l5 5V4L8 9z"),
+            SvgPath::stroke("M17 8l6 8M23 8l-6 8"),
         ],
     }
 }
