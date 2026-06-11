@@ -9,6 +9,7 @@ use super::common::{
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
+use super::slider_shared::SliderOrientation;
 use super::style::{SliderStyle, StyleResolver};
 
 /// 滑块组件。
@@ -222,6 +223,7 @@ impl<VM> Slider<VM> {
                     min,
                     max,
                     step: 1.0,
+                    orientation: SliderOrientation::Horizontal,
                     show_ticks: false,
                     show_value_label: false,
                     tick_count: None,
@@ -250,6 +252,23 @@ impl<VM> Slider<VM> {
             *target = step;
         }
         self
+    }
+
+    /// 设置滑块方向。
+    pub fn orientation(mut self, orientation: SliderOrientation) -> Self {
+        if let WidgetKind::Slider {
+            orientation: target,
+            ..
+        } = &mut self.element.kind
+        {
+            *target = orientation;
+        }
+        self
+    }
+
+    /// 切换为竖向滑块。
+    pub fn vertical(self) -> Self {
+        self.orientation(SliderOrientation::Vertical)
     }
 
     /// 设置是否显示刻度。

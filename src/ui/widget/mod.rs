@@ -167,6 +167,7 @@ pub use scroll_view::ScrollView;
 pub use select::{Select, SelectOption};
 pub use skeleton::{Skeleton, SkeletonShape};
 pub use slider::Slider;
+pub use slider_shared::SliderOrientation;
 pub use spinner::Spinner;
 pub(crate) use splitter::{splitter_adjusted_sizes, splitter_reset_sizes};
 pub use splitter::{Pane, ResizablePanels, Splitter, SplitterAxis, SplitterResize};

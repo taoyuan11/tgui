@@ -80,6 +80,17 @@ const CODE_SLIDER_CONTROLLED: &str = r#"Slider::new(app.slider_value.signal(), 0
         app.audio_controller.set_volume(value / 100.0);
     }))"#;
 
+const CODE_SLIDER_VERTICAL: &str = r#"Slider::new(app.slider_value.signal(), 0.0, 100.0)
+    .vertical()
+    .height(dp(180.0))
+    .step(5.0)
+    .show_ticks(true)
+    .show_value_label(true)
+    .format_value(|value| format!("{value:.0}%"))
+    .on_change(ValueCommand::new(|app: &mut App, value| {
+        app.slider_value.set(value);
+    }))"#;
+
 const CODE_RATING_BASIC: &str = r#"Rating::new(app.rating_value.signal())
     .half()
     .on_change(ValueCommand::new(|app: &mut App, change| {
@@ -454,6 +465,30 @@ fn slider_component(app: &App) -> Element<App> {
                     .style_full(styles::status_style),
                 ]),
                 CODE_SLIDER_CONTROLLED,
+            ),
+            UsageDemo::new(
+                "slider/vertical",
+                "竖向滑块",
+                "底部为最小值，顶部为最大值，适合音量、亮度等纵向控制。",
+                Flex::horizontal().gap(dp(16.0)).align(Align::Center).child(el![
+                    Slider::new(app.slider_value.signal(), 0.0, 100.0)
+                        .vertical()
+                        .height(dp(180.0))
+                        .step(5.0)
+                        .show_ticks(true)
+                        .show_value_label(true)
+                        .format_value(|value| format!("{value:.0}%"))
+                        .on_change(ValueCommand::new(|app: &mut App, value| {
+                            app.slider_value.set(value);
+                        })),
+                    Text::new(
+                        app.slider_value
+                            .signal()
+                            .map(|value| format!("当前值: {value:.0}%"))
+                    )
+                    .style_full(styles::status_style),
+                ]),
+                CODE_SLIDER_VERTICAL,
             ),
         ],
     )

@@ -406,12 +406,21 @@ fn measure_node_tracked(
             theme,
             units,
         ),
-        Some(MeasureContext::Slider { style, .. }) => {
+        Some(MeasureContext::Slider {
+            style, orientation, ..
+        }) => {
             let style = resolve_slider_style(style, Default::default(), theme);
-            (
-                units.resolve_dp(style.min_width),
-                units.resolve_dp(style.min_height),
-            )
+            if orientation.is_horizontal() {
+                (
+                    units.resolve_dp(style.min_width),
+                    units.resolve_dp(style.min_height),
+                )
+            } else {
+                (
+                    units.resolve_dp(style.min_height),
+                    units.resolve_dp(style.min_width),
+                )
+            }
         }
         Some(MeasureContext::ProgressBar {
             show_label,

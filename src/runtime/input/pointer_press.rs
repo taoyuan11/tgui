@@ -652,6 +652,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 f32,
                 f32,
                 f32,
+                crate::ui::widget::SliderOrientation,
                 Rect,
                 f32,
             )>,
@@ -785,6 +786,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 min,
                 max,
                 step,
+                orientation,
                 track_rect,
                 ..
             } => (
@@ -802,6 +804,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     min,
                     max,
                     step,
+                    orientation,
                     track_rect,
                     value,
                 )),
@@ -967,6 +970,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             min,
             max,
             step,
+            orientation,
             track_rect,
             current_value,
         )) = slider_drag
@@ -979,10 +983,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     min,
                     max,
                     step,
+                    orientation,
                     track_rect,
                     current_value,
                 );
-                let value = self.slider_value_for_position(position, track_rect, min, max, step);
+                let value = self.slider_value_for_position(
+                    position,
+                    track_rect,
+                    orientation,
+                    min,
+                    max,
+                    step,
+                );
                 if (value - current_value).abs() > f32::EPSILON {
                     if on_change_end.is_some() {
                         if let Some(active) = self.active_slider_drag.as_mut() {

@@ -3,7 +3,7 @@ use super::{
     push_border_primitives, push_focus_ring_primitives, push_text_primitives,
     rounded_rect_shadow_texture, RoundedRectShadowSpec,
 };
-use crate::ui::widget::common;
+use crate::ui::widget::{common, SliderOrientation};
 
 #[derive(Clone, Copy)]
 pub(crate) struct SliderGeometry {
@@ -14,13 +14,18 @@ pub(crate) struct SliderGeometry {
 pub(crate) fn slider_geometry(
     frame: Rect,
     slider_style: &ResolvedSliderStyle,
+    orientation: SliderOrientation,
     show_value_label: bool,
     units: UnitContext,
 ) -> SliderGeometry {
     let thumb_size = units.resolve_dp(slider_style.thumb_size).max(0.0);
-    let track_height = units
+    let track_thickness = units
         .resolve_dp(slider_style.track_height)
-        .min(frame.height.get())
+        .min(if orientation.is_horizontal() {
+            frame.height.get()
+        } else {
+            frame.width.get()
+        })
         .max(1.0);
     let label_height = if show_value_label {
         slider_style
@@ -37,18 +42,34 @@ pub(crate) fn slider_geometry(
         0.0
     };
     let track_available_top = frame.y + Dp::new(label_height + label_gap);
-    let track_available_height = (frame.bottom() - track_available_top).max(track_height);
-    let track_y = track_available_top + ((track_available_height - track_height).max(0.0) * 0.5);
+    let track_available_height = (frame.bottom() - track_available_top).max(track_thickness);
     let half_thumb = Dp::new(thumb_size * 0.5);
-    let track_x = frame.x + half_thumb.min(frame.width * 0.5);
-    let track_width = (frame.width - (half_thumb * 2.0)).max(0.0);
-    let track_rect = Rect::new(track_x, track_y, track_width, track_height);
-    let thumb_rect = Rect::new(
-        track_rect.x,
-        track_rect.y + (track_rect.height * 0.5) - half_thumb,
-        thumb_size,
-        thumb_size,
-    );
+    let (track_rect, thumb_rect) = if orientation.is_horizontal() {
+        let track_y =
+            track_available_top + ((track_available_height - track_thickness).max(0.0) * 0.5);
+        let track_x = frame.x + half_thumb.min(frame.width * 0.5);
+        let track_width = (frame.width - (half_thumb * 2.0)).max(0.0);
+        let track_rect = Rect::new(track_x, track_y, track_width, track_thickness);
+        let thumb_rect = Rect::new(
+            track_rect.x,
+            track_rect.y + (track_rect.height * 0.5) - half_thumb,
+            thumb_size,
+            thumb_size,
+        );
+        (track_rect, thumb_rect)
+    } else {
+        let track_x = frame.x + ((frame.width - Dp::new(track_thickness)).max(0.0) * 0.5);
+        let track_y = track_available_top + half_thumb.min(track_available_height * 0.5);
+        let track_height = (track_available_height - (half_thumb * 2.0)).max(0.0);
+        let track_rect = Rect::new(track_x, track_y, track_thickness, track_height);
+        let thumb_rect = Rect::new(
+            track_rect.x + (track_rect.width * 0.5) - half_thumb,
+            track_rect.bottom() - half_thumb,
+            thumb_size,
+            thumb_size,
+        );
+        (track_rect, thumb_rect)
+    };
 
     SliderGeometry {
         track_rect,
@@ -63,6 +84,7 @@ pub(crate) fn push_slider_primitives(
     min: f32,
     max: f32,
     step: f32,
+    orientation: SliderOrientation,
     show_ticks: bool,
     show_value_label: bool,
     tick_count: usize,
@@ -81,8 +103,13 @@ pub(crate) fn push_slider_primitives(
     media: &MediaManager,
     transition: Option<Transition>,
 ) -> SliderGeometry {
-    let mut geometry = slider_geometry(frame, slider_style, show_value_label, units);
-    let track_radius = (geometry.track_rect.height.get() * 0.5)
+    let mut geometry = slider_geometry(frame, slider_style, orientation, show_value_label, units);
+    let track_thickness = geometry
+        .track_rect
+        .width
+        .get()
+        .min(geometry.track_rect.height.get());
+    let track_radius = (track_thickness * 0.5)
         .min(units.resolve_dp(slider_style.radius))
         .max(0.0);
     let thumb_radius = (geometry.thumb_rect.width.get() * 0.5)
@@ -91,8 +118,16 @@ pub(crate) fn push_slider_primitives(
     let normalized = common::slider_normalized_value(value, min, max, step).clamp(0.0, 1.0);
     // Slider values can update every pointer move while dragging. Animating the thumb/fill
     // makes the visual position lag behind the cursor, so keep these updates immediate.
-    let thumb_offset = Dp::new(geometry.track_rect.width.get() * normalized);
-    let active_extent = Dp::new(geometry.track_rect.width.get() * normalized);
+    let thumb_offset = if orientation.is_horizontal() {
+        Dp::new(geometry.track_rect.width.get() * normalized)
+    } else {
+        Dp::new(geometry.track_rect.height.get() * (1.0 - normalized))
+    };
+    let active_extent = if orientation.is_horizontal() {
+        Dp::new(geometry.track_rect.width.get() * normalized)
+    } else {
+        Dp::new(geometry.track_rect.height.get() * normalized)
+    };
 
     let track_color = animations.resolve_color(
         crate::animation::AnimationKey::Widget {
@@ -141,13 +176,24 @@ pub(crate) fn push_slider_primitives(
     });
 
     if active_extent > Dp::ZERO {
-        scene.push_shape(RenderPrimitive {
-            rect: Rect::new(
+        let rect = if orientation.is_horizontal() {
+            Rect::new(
                 geometry.track_rect.x,
                 geometry.track_rect.y,
                 active_extent.min(geometry.track_rect.width),
                 geometry.track_rect.height,
-            ),
+            )
+        } else {
+            let height = active_extent.min(geometry.track_rect.height);
+            Rect::new(
+                geometry.track_rect.x,
+                geometry.track_rect.bottom() - height,
+                geometry.track_rect.width,
+                height,
+            )
+        };
+        scene.push_shape(RenderPrimitive {
+            rect,
             color: active_track_color.with_alpha_factor(opacity),
             corner_radius: track_radius,
             stroke_width: 0.0,
@@ -156,24 +202,51 @@ pub(crate) fn push_slider_primitives(
         });
     }
 
-    geometry.thumb_rect.x =
-        (geometry.track_rect.x + thumb_offset - (geometry.thumb_rect.width * 0.5)).clamp(
-            frame.x,
-            (frame.right() - geometry.thumb_rect.width).max(frame.x),
-        );
+    if orientation.is_horizontal() {
+        geometry.thumb_rect.x =
+            (geometry.track_rect.x + thumb_offset - (geometry.thumb_rect.width * 0.5)).clamp(
+                frame.x,
+                (frame.right() - geometry.thumb_rect.width).max(frame.x),
+            );
+    } else {
+        let min_y = geometry.track_rect.y - (geometry.thumb_rect.height * 0.5);
+        let max_y = geometry.track_rect.bottom() - (geometry.thumb_rect.height * 0.5);
+        let min_y = min_y.max(frame.y);
+        let max_y = max_y
+            .min((frame.bottom() - geometry.thumb_rect.height).max(frame.y))
+            .max(min_y);
+        geometry.thumb_rect.y = (geometry.track_rect.y + thumb_offset
+            - (geometry.thumb_rect.height * 0.5))
+            .clamp(min_y, max_y);
+    }
     let thumb_border_width = units
         .resolve_dp(slider_style.border_width)
         .max(0.0)
         .min((geometry.thumb_rect.width.get() * 0.5).max(0.0));
     if show_ticks && tick_count >= 2 {
-        let tick_height = units.resolve_dp(slider_style.tick_size).max(1.0);
-        let tick_width = (geometry.track_rect.height * 0.5).max(1.0);
+        let tick_main = Dp::new(units.resolve_dp(slider_style.tick_size).max(1.0));
+        let tick_cross = (Dp::new(track_thickness) * 0.5).max(1.0);
         for index in 0..tick_count {
             let normalized = index as f32 / (tick_count.saturating_sub(1)) as f32;
-            let x = geometry.track_rect.x + Dp::new(geometry.track_rect.width.get() * normalized)
-                - (tick_width * 0.5);
-            let y =
-                geometry.track_rect.y + ((geometry.track_rect.height - tick_height).max(0.0) * 0.5);
+            let (x, y, tick_width, tick_height) = if orientation.is_horizontal() {
+                let tick_width = tick_cross;
+                let tick_height = tick_main;
+                let x = geometry.track_rect.x
+                    + Dp::new(geometry.track_rect.width.get() * normalized)
+                    - (tick_width * 0.5);
+                let y = geometry.track_rect.y
+                    + ((geometry.track_rect.height - tick_height).max(0.0) * 0.5);
+                (x, y, tick_width, tick_height)
+            } else {
+                let tick_width = tick_main;
+                let tick_height = tick_cross;
+                let x = geometry.track_rect.x
+                    + ((geometry.track_rect.width - tick_width).max(0.0) * 0.5);
+                let y = geometry.track_rect.y
+                    + Dp::new(geometry.track_rect.height.get() * (1.0 - normalized))
+                    - (tick_height * 0.5);
+                (x, y, tick_width, tick_height)
+            };
             scene.push_shape(RenderPrimitive {
                 rect: Rect::new(x, y, tick_width, tick_height),
                 color: tick_color.with_alpha_factor(opacity),

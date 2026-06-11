@@ -150,6 +150,96 @@ fn slider_default_thumb_renders_outline_for_light_theme_visibility() {
 }
 
 #[test]
+fn vertical_slider_renders_bottom_up_fill_and_hit_geometry() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let track = Color::hexa(0x334155FF);
+    let active_track = Color::hexa(0x22C55EFF);
+    let thumb = Color::hexa(0xF97316FF);
+    let element: Element<()> = Slider::new(75.0, 0.0, 100.0)
+        .vertical()
+        .size(dp(48.0), dp(220.0))
+        .style_full(move |ctx| {
+            let mut style = SliderStyle::default_for_theme(ctx.theme);
+            style.track = stateful(track.into());
+            style.active_track = stateful(active_track.into());
+            style.thumb = stateful(thumb.into());
+            style.thumb_shadow = None;
+            style
+        })
+        .into();
+    let widget_id = element.id;
+    let tree = WidgetTree::new(element);
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 64.0, 240.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let computed = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 64.0, 240.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let (track_rect, thumb_rect) = computed
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            super::HitInteraction::Slider {
+                id,
+                track_rect,
+                thumb_rect,
+                ..
+            } if *id == widget_id => Some((*track_rect, *thumb_rect)),
+            _ => None,
+        })
+        .expect("slider hit region should exist");
+    assert!(track_rect.height > track_rect.width);
+
+    let thumb_center_y = thumb_rect.y + thumb_rect.height * 0.5;
+    let normalized_from_bottom =
+        ((track_rect.bottom() - thumb_center_y).get() / track_rect.height.get()).clamp(0.0, 1.0);
+    assert!((normalized_from_bottom - 0.75).abs() <= 0.01);
+
+    let active_shape = rendered
+        .primitives
+        .shapes
+        .iter()
+        .find(|shape| shape.color == active_track)
+        .expect("vertical slider should render active fill");
+    let expected_active_height = track_rect.height.get() * 0.75;
+    assert!((active_shape.rect.height.get() - expected_active_height).abs() <= 0.01);
+    assert!(
+        (active_shape.rect.y.get() - (track_rect.bottom().get() - expected_active_height)).abs()
+            <= 0.01
+    );
+    assert_eq!(active_shape.rect.width, track_rect.width);
+}
+
+#[test]
 fn slider_renders_custom_colors() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

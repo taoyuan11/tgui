@@ -9,7 +9,7 @@ use crate::ui::widget::r#virtual::{
 use crate::ui::widget::style::{
     CanvasStyle, ContainerStyle, ImageStyle, TextWidgetStyle, WidgetSurfaceStyle,
 };
-use crate::ui::widget::{common, image};
+use crate::ui::widget::{common, image, SliderOrientation};
 
 pub struct Element<VM> {
     pub(crate) id: WidgetId,
@@ -234,6 +234,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         min: f32,
         max: f32,
         step: f32,
+        orientation: SliderOrientation,
         show_ticks: bool,
         show_value_label: bool,
         tick_count: Option<usize>,
@@ -610,6 +611,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 min,
                 max,
                 step,
+                orientation,
                 show_ticks,
                 show_value_label,
                 tick_count,
@@ -625,6 +627,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 min: *min,
                 max: *max,
                 step: *step,
+                orientation: *orientation,
                 show_ticks: *show_ticks,
                 show_value_label: *show_value_label,
                 tick_count: *tick_count,

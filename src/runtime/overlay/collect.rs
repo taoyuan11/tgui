@@ -105,6 +105,7 @@ fn translate_hit_interaction<VM>(
             min,
             max,
             step,
+            orientation,
             track_rect,
             thumb_rect,
         } => HitInteraction::Slider {
@@ -116,6 +117,7 @@ fn translate_hit_interaction<VM>(
             min,
             max,
             step,
+            orientation,
             track_rect: translate_rect(track_rect, origin),
             thumb_rect: translate_rect(thumb_rect, origin),
         },

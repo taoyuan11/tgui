@@ -56,9 +56,12 @@ impl<VM> ResolvedElement<VM> {
                 style: style.clone(),
             },
             ResolvedWidgetKind::SelectOptionRow { .. } => MeasureContext::None,
-            ResolvedWidgetKind::Slider { style, .. } => MeasureContext::Slider {
+            ResolvedWidgetKind::Slider {
+                style, orientation, ..
+            } => MeasureContext::Slider {
                 id: self.id,
                 style: style.clone(),
+                orientation: *orientation,
             },
             ResolvedWidgetKind::ProgressBar {
                 show_label,
@@ -220,8 +223,15 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::Select { .. } if self.layout.min_width.is_none() => {
                 Dimension::from_length(0.0)
             }
-            ResolvedWidgetKind::Slider { style, .. } if self.layout.min_width.is_none() => {
-                Dimension::from_length(style.min_width.get())
+            ResolvedWidgetKind::Slider {
+                style, orientation, ..
+            } if self.layout.min_width.is_none() => {
+                let width = if orientation.is_horizontal() {
+                    style.min_width
+                } else {
+                    style.min_height
+                };
+                Dimension::from_length(width.get())
             }
             ResolvedWidgetKind::ToastHost { .. } | ResolvedWidgetKind::Portal { .. } => {
                 Dimension::from_length(0.0)
@@ -258,6 +268,15 @@ impl<VM> ResolvedElement<VM> {
         } else {
             height
         };
+        let default_min_height = match &self.kind {
+            ResolvedWidgetKind::Slider {
+                style, orientation, ..
+            } if !orientation.is_horizontal() && self.layout.min_height.is_none() => {
+                Dimension::from_length(style.min_width.get())
+            }
+            _ => Dimension::AUTO,
+        };
+
         let mut style = TaffyStyle {
             size: TaffySize {
                 width: width.unwrap_or(Dimension::AUTO),
@@ -293,7 +312,7 @@ impl<VM> ResolvedElement<VM> {
                             units,
                         )
                     })
-                    .unwrap_or(Dimension::AUTO),
+                    .unwrap_or(default_min_height),
             },
             max_size: TaffySize {
                 width: self

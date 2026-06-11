@@ -3,6 +3,7 @@ use crate::ui::widget::r#virtual::{
     ItemLayout, VirtualArrangement, VirtualResolvedItemMeta, VirtualWindowPlan,
 };
 use crate::ui::widget::style::ContainerStyle;
+use crate::ui::widget::SliderOrientation;
 
 pub(crate) struct LifecycleSnapshot {
     pub(crate) id: WidgetId,
@@ -104,6 +105,7 @@ pub(crate) enum LifecycleWidgetKind {
         min: f32,
         max: f32,
         step: f32,
+        orientation: SliderOrientation,
         show_ticks: bool,
         show_value_label: bool,
         tick_count: Option<usize>,
@@ -300,6 +302,7 @@ impl Clone for LifecycleWidgetKind {
                 min,
                 max,
                 step,
+                orientation,
                 show_ticks,
                 show_value_label,
                 tick_count,
@@ -312,6 +315,7 @@ impl Clone for LifecycleWidgetKind {
                 min: *min,
                 max: *max,
                 step: *step,
+                orientation: *orientation,
                 show_ticks: *show_ticks,
                 show_value_label: *show_value_label,
                 tick_count: *tick_count,

@@ -187,6 +187,7 @@ impl PartialEq for LifecycleWidgetKind {
                     min: left_min,
                     max: left_max,
                     step: left_step,
+                    orientation: left_orientation,
                     show_ticks: left_show_ticks,
                     show_value_label: left_show_value_label,
                     tick_count: left_tick_count,
@@ -200,6 +201,7 @@ impl PartialEq for LifecycleWidgetKind {
                     min: right_min,
                     max: right_max,
                     step: right_step,
+                    orientation: right_orientation,
                     show_ticks: right_show_ticks,
                     show_value_label: right_show_value_label,
                     tick_count: right_tick_count,
@@ -213,6 +215,7 @@ impl PartialEq for LifecycleWidgetKind {
                     && left_min == right_min
                     && left_max == right_max
                     && left_step == right_step
+                    && left_orientation == right_orientation
                     && left_show_ticks == right_show_ticks
                     && left_show_value_label == right_show_value_label
                     && left_tick_count == right_tick_count

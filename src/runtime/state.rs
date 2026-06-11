@@ -523,6 +523,7 @@ pub(super) struct SliderDrag<VM> {
     pub(super) min: f32,
     pub(super) max: f32,
     pub(super) step: f32,
+    pub(super) orientation: crate::ui::widget::SliderOrientation,
     pub(super) track_rect: Rect,
     pub(super) current_value: f32,
     pub(super) committed_value: Option<f32>,

@@ -152,6 +152,7 @@ pub(crate) enum MeasureContext {
     Slider {
         id: WidgetId,
         style: crate::ui::widget::SliderStyle,
+        orientation: SliderOrientation,
     },
     ProgressBar {
         id: WidgetId,
@@ -293,6 +294,7 @@ pub(crate) enum HitInteraction<VM> {
         min: f32,
         max: f32,
         step: f32,
+        orientation: SliderOrientation,
         track_rect: Rect,
         thumb_rect: Rect,
     },
@@ -509,6 +511,7 @@ impl<VM> Clone for HitInteraction<VM> {
                 min,
                 max,
                 step,
+                orientation,
                 track_rect,
                 thumb_rect,
             } => Self::Slider {
@@ -520,6 +523,7 @@ impl<VM> Clone for HitInteraction<VM> {
                 min: *min,
                 max: *max,
                 step: *step,
+                orientation: *orientation,
                 track_rect: *track_rect,
                 thumb_rect: *thumb_rect,
             },

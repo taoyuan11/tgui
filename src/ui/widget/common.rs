@@ -42,7 +42,7 @@ use super::canvas::{
     CanvasTextVerticalAlign, CanvasTextWrap, CanvasWheelEvent,
 };
 use super::image::Image;
-pub(crate) use super::slider_shared::SliderValueFormatter;
+pub(crate) use super::slider_shared::{SliderOrientation, SliderValueFormatter};
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle;
 use super::style::{

@@ -20,15 +20,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         &self,
         position: Point,
         track_rect: Rect,
+        orientation: crate::ui::widget::SliderOrientation,
         min: f32,
         max: f32,
         step: f32,
     ) -> f32 {
-        if track_rect.width <= Dp::ZERO {
-            return min;
-        }
-        let normalized =
-            ((position.x - track_rect.x).get() / track_rect.width.get()).clamp(0.0, 1.0);
+        let normalized = if orientation.is_horizontal() {
+            if track_rect.width <= Dp::ZERO {
+                return min;
+            }
+            ((position.x - track_rect.x).get() / track_rect.width.get()).clamp(0.0, 1.0)
+        } else {
+            if track_rect.height <= Dp::ZERO {
+                return min;
+            }
+            ((track_rect.bottom() - position.y).get() / track_rect.height.get()).clamp(0.0, 1.0)
+        };
         crate::ui::widget::slider_value_from_normalized(normalized, min, max, step)
     }
 
@@ -62,6 +69,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         min: f32,
         max: f32,
         step: f32,
+        orientation: crate::ui::widget::SliderOrientation,
         track_rect: Rect,
         current_value: f32,
     ) -> bool {
@@ -72,6 +80,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             min,
             max,
             step,
+            orientation,
             track_rect,
             current_value,
             committed_value: None,
@@ -90,10 +99,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let min = drag.min;
         let max = drag.max;
         let step = drag.step;
+        let orientation = drag.orientation;
         let current_value = drag.current_value;
         let on_change = drag.on_change.clone();
         let on_change_end = drag.on_change_end.clone();
-        let value = self.slider_value_for_position(position, track_rect, min, max, step);
+        let value =
+            self.slider_value_for_position(position, track_rect, orientation, min, max, step);
         if (value - current_value).abs() <= f32::EPSILON {
             return false;
         }
