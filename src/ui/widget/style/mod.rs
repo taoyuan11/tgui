@@ -9,7 +9,7 @@ pub use controls::{
     IconStyle, InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PaginationStyle, PopoverStyle,
     ProgressBarStyle, RadioStyle, RatingStyle, RichTextStyle, SelectStyle, SkeletonStyle,
     SliderStyle, SpinnerStyle, SplitterStyle, SwitchStyle, TabsStyle, TextareaStyle, ToastStyle,
-    TooltipStyle,
+    TooltipStyle, VideoStyle,
 };
 pub use shared::{
     CanvasStyle, ContainerStyle, FocusRingOverride, ImageStyle, TextWidgetStyle, VideoSurfaceStyle,

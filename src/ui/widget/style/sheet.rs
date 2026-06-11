@@ -12,7 +12,7 @@ use super::{
     IconStyle, ImageStyle, InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PaginationStyle,
     PopoverStyle, ProgressBarStyle, RadioStyle, RatingStyle, RichTextStyle, SelectStyle,
     SkeletonStyle, SliderStyle, SpinnerStyle, SplitterStyle, SwitchStyle, TabsStyle,
-    TextWidgetStyle, TextareaStyle, ToastStyle, TooltipStyle, VideoSurfaceStyle,
+    TextWidgetStyle, TextareaStyle, ToastStyle, TooltipStyle, VideoStyle, VideoSurfaceStyle,
 };
 use crate::ui::widget::{DataGridStyle, ListStyle, TreeStyle};
 
@@ -213,6 +213,7 @@ pub struct StyleSheet {
     container_rules: Vec<Rule<ContainerStyle>>,
     image_rules: Vec<Rule<ImageStyle>>,
     canvas_rules: Vec<Rule<CanvasStyle>>,
+    video_rules: Vec<Rule<VideoStyle>>,
     video_surface_rules: Vec<Rule<VideoSurfaceStyle>>,
     button_rules: Vec<ButtonRule>,
     checkbox_rules: Vec<Rule<CheckboxStyle>>,
@@ -279,6 +280,7 @@ impl fmt::Debug for StyleSheet {
             .field("icon_rules", &self.icon_rules.len())
             .field("rich_text_rules", &self.rich_text_rules.len())
             .field("carousel_rules", &self.carousel_rules.len())
+            .field("video_rules", &self.video_rules.len())
             .field("combobox_rules", &self.combobox_rules.len())
             .finish()
     }
@@ -298,6 +300,7 @@ impl StyleSheet {
             && self.container_rules.is_empty()
             && self.image_rules.is_empty()
             && self.canvas_rules.is_empty()
+            && self.video_rules.is_empty()
             && self.video_surface_rules.is_empty()
             && self.button_rules.is_empty()
             && self.checkbox_rules.is_empty()
@@ -482,6 +485,7 @@ style_sheet_methods! {
     container, container_class, container_id, apply_container, apply_container_state, container_rules, ContainerStyle,
     image, image_class, image_id, apply_image, apply_image_state, image_rules, ImageStyle,
     canvas, canvas_class, canvas_id, apply_canvas, apply_canvas_state, canvas_rules, CanvasStyle,
+    video, video_class, video_id, apply_video, apply_video_state, video_rules, VideoStyle,
     video_surface, video_surface_class, video_surface_id, apply_video_surface, apply_video_surface_state, video_surface_rules, VideoSurfaceStyle,
     checkbox, checkbox_class, checkbox_id, apply_checkbox, apply_checkbox_state, checkbox_rules, CheckboxStyle,
     radio, radio_class, radio_id, apply_radio, apply_radio_state, radio_rules, RadioStyle,

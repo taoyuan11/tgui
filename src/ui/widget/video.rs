@@ -1,9 +1,13 @@
+use std::time::Duration;
+
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::ContentFit;
-use crate::theme::StyleContext;
-use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
-use crate::video::VideoController;
+use crate::theme::{StyleContext, WidgetState};
+use crate::ui::layout::{pct, Align, Insets, LayoutStyle, Overflow, Value};
+use crate::ui::theme::{StateValue, Theme};
+use crate::ui::unit::dp;
+use crate::video::{VideoController, VideoPlaybackState};
 
 use super::common::{
     CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
@@ -11,7 +15,15 @@ use super::common::{
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
-use super::style::{StyleResolver, VideoSurfaceStyle};
+use super::icon::{Icon, SvgIconId};
+use super::p3_support::{
+    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
+};
+use super::style::{
+    ContainerStyle, IconStyle, ProgressBarStyle, SliderStyle, StyleResolver, StyleSheet,
+    TextWidgetStyle, VideoStyle, VideoSurfaceStyle,
+};
+use super::{Flex, IntoTextContent, ProgressBar, Slider, Stack, Text};
 
 #[derive(Clone)]
 pub struct VideoSurface {
@@ -396,6 +408,696 @@ impl VideoSurface {
             },
         }
     }
+}
+
+pub struct Video<VM> {
+    controller: VideoController,
+    show_controls: Value<bool>,
+    show_status: Value<bool>,
+    show_volume: Value<bool>,
+    fit: ContentFit,
+    style: Option<StyleResolver<VideoStyle>>,
+    layout: LayoutStyle,
+    visual: VisualStyle,
+    key: Option<WidgetKey>,
+    media_events: MediaEventHandlers<VM>,
+}
+
+impl<VM> Video<VM> {
+    pub fn new(controller: VideoController) -> Self {
+        Self {
+            controller,
+            show_controls: Value::Static(true),
+            show_status: Value::Static(true),
+            show_volume: Value::Static(true),
+            fit: ContentFit::Contain,
+            style: None,
+            layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
+            key: None,
+            media_events: MediaEventHandlers::default(),
+        }
+    }
+
+    impl_p3_layout_api!(layout);
+
+    pub fn show_controls(mut self, show_controls: impl Into<Value<bool>>) -> Self {
+        self.show_controls = show_controls.into();
+        self
+    }
+
+    pub fn show_status(mut self, show_status: impl Into<Value<bool>>) -> Self {
+        self.show_status = show_status.into();
+        self
+    }
+
+    pub fn show_volume(mut self, show_volume: impl Into<Value<bool>>) -> Self {
+        self.show_volume = show_volume.into();
+        self
+    }
+
+    pub fn fit(mut self, fit: ContentFit) -> Self {
+        self.fit = fit;
+        self
+    }
+
+    pub fn style(
+        mut self,
+        mutator: impl Fn(&mut VideoStyle, &StyleContext<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::mutate(
+            |context| VideoStyle::default_for_theme(context.theme),
+            mutator,
+        ));
+        self
+    }
+
+    pub fn style_full(
+        mut self,
+        resolver: impl Fn(&StyleContext<'_>) -> VideoStyle + Send + Sync + 'static,
+    ) -> Self {
+        self.style = Some(StyleResolver::full(resolver));
+        self
+    }
+
+    pub fn on_loading(mut self, command: Command<VM>) -> Self {
+        self.media_events.on_loading = Some(command);
+        self
+    }
+
+    pub fn on_success(mut self, command: Command<VM>) -> Self {
+        self.media_events.on_success = Some(command);
+        self
+    }
+
+    pub fn on_error(mut self, command: ValueCommand<VM, String>) -> Self {
+        self.media_events.on_error = Some(command);
+        self
+    }
+}
+
+impl<VM: 'static> From<Video<VM>> for Element<VM> {
+    fn from(video: Video<VM>) -> Self {
+        let layout_style = resolve_video_style_for_layout(video.style.as_ref());
+        let controller = video.controller.clone();
+        let show_controls = video.show_controls.resolve();
+        let show_status = video.show_status.resolve();
+        let show_volume = video.show_volume.resolve();
+        let fit = video.fit;
+
+        let mut surface: Element<VM> = VideoSurface::new(controller.clone())
+            .size(pct(100.0), pct(100.0))
+            .style(move |style, _| {
+                style.fit = fit;
+                style.surface.background = Some(Color::hexa(0x000000FF).into());
+                style.surface.border_radius = Some(Value::Static(layout_style.radius));
+            })
+            .into();
+        surface.media_events = video.media_events.clone();
+
+        let root_style = video.style.clone();
+        let mut root = Stack::new()
+            .size(
+                layout_style.default_surface_width,
+                layout_style.default_surface_height,
+            )
+            .aspect_ratio(16.0 / 9.0)
+            .padding(layout_style.padding)
+            .overflow(Overflow::Hidden)
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_video_style_with_sheet(
+                    root_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
+                let mut container = ContainerStyle::default_for_theme(context.theme);
+                container.surface = resolved.surface.clone();
+                container.surface.background = Some(resolved.background);
+                container.surface.border_color = Some(resolved.border);
+                container.surface.border_width = Some(Value::Static(resolved.border_width));
+                container.surface.border_radius = Some(Value::Static(resolved.radius));
+                container
+            })
+            .child(surface);
+
+        if show_controls {
+            root = root.child(video_controls(
+                controller.clone(),
+                show_volume,
+                video.style.clone(),
+                video.visual.clone(),
+            ));
+        }
+
+        if show_status {
+            root = root.child(status_overlay(
+                controller.clone(),
+                video.style.clone(),
+                video.visual.clone(),
+            ));
+        }
+
+        let mut root: Element<VM> = root.into();
+        root.key = video.key;
+        root = with_visual_identity(root, &video.visual);
+        root.layout = merge_layout(root.layout, video.layout);
+        root
+    }
+}
+
+fn video_controls<VM: 'static>(
+    controller: VideoController,
+    show_volume: bool,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual: VisualStyle,
+) -> Element<VM> {
+    let layout_style = resolve_video_style_for_layout(style.as_ref());
+    let progress = progress_signal(&controller);
+    let buffered = buffered_signal(&controller);
+    let seek_disabled = controller
+        .duration()
+        .map(|duration| duration.map(|duration| duration.is_zero()).unwrap_or(true));
+
+    let play_controller = controller.clone();
+    let play_disabled: Value<bool> = controller
+        .playback_state()
+        .map(playback_button_disabled)
+        .into();
+    let play_icon_style = style.clone();
+    let play_icon_visual = visual.clone();
+    let play_icon = controller.playback_state().map(move |state| {
+        vec![video_icon(
+            playback_button_icon(state.clone()),
+            play_icon_style.clone(),
+            play_icon_visual.clone(),
+            playback_button_disabled(state),
+        )]
+    });
+    let play_button = icon_button(
+        play_icon,
+        play_disabled,
+        style.clone(),
+        Command::new(move |_| match play_controller.playback_state().get() {
+            VideoPlaybackState::Playing => play_controller.pause(),
+            VideoPlaybackState::Ended => play_controller.replay(),
+            VideoPlaybackState::Loading
+            | VideoPlaybackState::Buffering
+            | VideoPlaybackState::Error(_) => {}
+            _ => play_controller.play(),
+        }),
+    );
+
+    let seek_controller = controller.clone();
+    let seek_end_controller = controller.clone();
+    let seek = Slider::new(progress, 0.0, 1.0)
+        .step(0.001)
+        .width(pct(100.0))
+        .height(layout_style.progress_hit_height)
+        .disable(seek_disabled)
+        .style_full_with_style_sheet(video_slider_style(style.clone(), visual.clone()))
+        .on_change(ValueCommand::new(move |_, fraction| {
+            seek_to_fraction(&seek_controller, fraction);
+        }))
+        .on_change_end(ValueCommand::new(move |_, fraction| {
+            seek_to_fraction(&seek_end_controller, fraction);
+        }));
+
+    let progress_track = Stack::new()
+        .width(pct(100.0))
+        .height(layout_style.progress_hit_height)
+        .center()
+        .child(
+            ProgressBar::new(buffered)
+                .show_label(false)
+                .width(pct(100.0))
+                .height(layout_style.progress_height)
+                .style_full_with_style_sheet(video_progress_style(style.clone(), visual.clone())),
+        )
+        .child(seek);
+
+    let mut controls = Flex::horizontal()
+        .width(pct(100.0))
+        .align(Align::Center)
+        .gap(layout_style.controls_gap)
+        .child(play_button)
+        .child(time_text(controller.clone(), style.clone(), visual.clone()))
+        .child(Stack::<VM>::new().grow(1.0));
+
+    if show_volume {
+        let mute_controller = controller.clone();
+        let volume_for_icon = controller.volume();
+        let mute_icon_style = style.clone();
+        let mute_icon_visual = visual.clone();
+        let mute_icon = controller.muted().map(move |muted| {
+            vec![video_icon(
+                volume_button_icon(muted, volume_for_icon.get()),
+                mute_icon_style.clone(),
+                mute_icon_visual.clone(),
+                false,
+            )]
+        });
+        let mute = icon_button(
+            mute_icon,
+            Value::Static(false),
+            style.clone(),
+            Command::new(move |_| {
+                let muted = mute_controller.muted().get();
+                mute_controller.set_muted(!muted);
+            }),
+        );
+
+        let volume_controller = controller.clone();
+        let volume = Slider::new(controller.volume(), 0.0, 1.0)
+            .step(0.01)
+            .width(layout_style.volume_width)
+            .height(layout_style.control_button_size)
+            .style_full_with_style_sheet(video_slider_style(style.clone(), visual.clone()))
+            .on_change(ValueCommand::new(move |_, volume| {
+                volume_controller.set_volume(volume);
+            }));
+
+        controls = controls.child(mute).child(volume);
+    }
+
+    Flex::vertical()
+        .width(pct(100.0))
+        .position_absolute()
+        .left(dp(0.0))
+        .right(dp(0.0))
+        .bottom(dp(0.0))
+        .padding(layout_style.overlay_padding)
+        .gap(layout_style.overlay_gap)
+        .style_full_with_style_sheet(video_overlay_style(style.clone()))
+        .child(progress_track)
+        .child(controls)
+        .into()
+}
+
+fn time_text<VM: 'static>(
+    controller: VideoController,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual_identity: VisualStyle,
+) -> Element<VM> {
+    let duration = controller.duration();
+    let text = controller.position().map(move |position| {
+        format!(
+            "{} / {}",
+            format_duration(position),
+            duration
+                .get()
+                .map(format_duration)
+                .unwrap_or_else(|| "--:--".to_string())
+        )
+    });
+    styled_video_text(text, style, visual_identity, |style| {
+        (style.time_text_style.clone(), style.time_text_color.clone())
+    })
+}
+
+fn status_overlay<VM: 'static>(
+    controller: VideoController,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual_identity: VisualStyle,
+) -> Element<VM> {
+    let layout_style = resolve_video_style_for_layout(style.as_ref());
+    let text = status_text(controller, style.clone(), visual_identity);
+    Stack::new()
+        .position_absolute()
+        .left(dp(12.0))
+        .top(dp(12.0))
+        .padding(layout_style.status_padding)
+        .style_full_with_style_sheet(video_status_style(style))
+        .child(text)
+        .into()
+}
+
+fn status_text<VM: 'static>(
+    controller: VideoController,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual_identity: VisualStyle,
+) -> Element<VM> {
+    let text = controller.playback_state().map(video_status_text);
+    styled_video_text(text, style, visual_identity, |style| {
+        (
+            style.status_text_style.clone(),
+            style.status_text_color.clone(),
+        )
+    })
+}
+
+fn styled_video_text<VM: 'static>(
+    text: impl IntoTextContent,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual_identity: VisualStyle,
+    text_style: fn(&VideoStyle) -> (crate::ui::theme::TextStyle, Value<Color>),
+) -> Element<VM> {
+    with_visual_identity(
+        Text::new(text)
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_video_style_with_sheet(
+                    style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
+                let mut text = TextWidgetStyle::default_for_theme(context.theme);
+                let (typography, color) = text_style(&resolved);
+                text.typography = typography;
+                text.color = color;
+                text
+            })
+            .into(),
+        &visual_identity,
+    )
+}
+
+fn icon_button<VM: 'static>(
+    icon: impl super::container::IntoChildren<VM>,
+    disabled: Value<bool>,
+    style: Option<StyleResolver<VideoStyle>>,
+    command: Command<VM>,
+) -> Element<VM> {
+    let layout_style = resolve_video_style_for_layout(style.as_ref());
+    Stack::new()
+        .size(
+            layout_style.control_button_size,
+            layout_style.control_button_size,
+        )
+        .center()
+        .style_full_with_style_sheet(video_icon_button_style(style))
+        .opacity(disabled_opacity(
+            disabled.clone(),
+            layout_style.control_disabled_opacity,
+        ))
+        .cursor(disabled_cursor(disabled.clone()))
+        .child(icon)
+        .on_click(guard_disabled_command(disabled, command))
+        .into()
+}
+
+fn video_icon<VM: 'static>(
+    icon: SvgIconId,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual_identity: VisualStyle,
+    disabled: bool,
+) -> Element<VM> {
+    let layout_style = resolve_video_style_for_layout(style.as_ref());
+    with_visual_identity(
+        Icon::internal(icon)
+            .size(
+                layout_style.control_icon_size,
+                layout_style.control_icon_size,
+            )
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_video_style_with_sheet(
+                    style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
+                let mut icon = IconStyle::default_for_theme(context.theme);
+                icon.size = resolved.control_icon_size;
+                icon.color = if disabled {
+                    resolved.control_icon_disabled_color
+                } else {
+                    resolved.control_icon_color
+                };
+                icon
+            })
+            .into(),
+        &visual_identity,
+    )
+}
+
+fn video_overlay_style(
+    style: Option<StyleResolver<VideoStyle>>,
+) -> impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> ContainerStyle
+       + Send
+       + Sync
+       + 'static {
+    move |context, style_sheet, visual, state| {
+        let resolved =
+            resolve_video_style_with_sheet(style.as_ref(), context, style_sheet, visual, state);
+        let mut container = ContainerStyle::default_for_theme(context.theme);
+        container.surface.background = Some(resolved.overlay_background);
+        container
+    }
+}
+
+fn video_status_style(
+    style: Option<StyleResolver<VideoStyle>>,
+) -> impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> ContainerStyle
+       + Send
+       + Sync
+       + 'static {
+    move |context, style_sheet, visual, state| {
+        let resolved =
+            resolve_video_style_with_sheet(style.as_ref(), context, style_sheet, visual, state);
+        let mut container = ContainerStyle::default_for_theme(context.theme);
+        container.surface.background = Some(resolved.status_background);
+        container.surface.border_radius = Some(Value::Static(context.theme.radius.full));
+        container
+    }
+}
+
+fn video_icon_button_style(
+    style: Option<StyleResolver<VideoStyle>>,
+) -> impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> ContainerStyle
+       + Send
+       + Sync
+       + 'static {
+    move |context, style_sheet, visual, state| {
+        let _ = resolve_video_style_with_sheet(style.as_ref(), context, style_sheet, visual, state);
+        let mut container = ContainerStyle::default_for_theme(context.theme);
+        if state.hovered || state.pressed {
+            container.surface.background = Some(Color::hexa(0xFFFFFF24).into());
+        }
+        container.surface.border_radius = Some(Value::Static(context.theme.radius.full));
+        container
+    }
+}
+
+fn video_progress_style(
+    style: Option<StyleResolver<VideoStyle>>,
+    visual_identity: VisualStyle,
+) -> impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> ProgressBarStyle
+       + Send
+       + Sync
+       + 'static {
+    move |context, style_sheet, _visual, state| {
+        let resolved = resolve_video_style_with_sheet(
+            style.as_ref(),
+            context,
+            style_sheet,
+            &visual_identity,
+            state,
+        );
+        let mut progress = ProgressBarStyle::default_for_theme(context.theme);
+        progress.track_color = resolved.progress_track_color;
+        progress.fill_color = resolved.progress_buffered_color;
+        progress.height = resolved.progress_height;
+        progress.radius = Value::Static(context.theme.radius.full);
+        progress
+    }
+}
+
+fn video_slider_style(
+    style: Option<StyleResolver<VideoStyle>>,
+    visual_identity: VisualStyle,
+) -> impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> SliderStyle
+       + Send
+       + Sync
+       + 'static {
+    move |context, style_sheet, _visual, state| {
+        let resolved = resolve_video_style_with_sheet(
+            style.as_ref(),
+            context,
+            style_sheet,
+            &visual_identity,
+            state,
+        );
+        let mut slider = SliderStyle::default_for_theme(context.theme);
+        slider.track = StateValue::new(resolved.progress_track_color.clone());
+        slider.active_track = StateValue::new(resolved.progress_active_color.clone());
+        slider.thumb = StateValue::new(resolved.progress_thumb_color.clone());
+        slider.thumb_shadow = None;
+        slider.track_height = resolved.progress_height;
+        slider.thumb_size = dp(12.0);
+        slider.radius = Value::Static(context.theme.radius.full);
+        slider.border_width = Value::Static(dp(0.0));
+        slider.min_width = dp(0.0);
+        slider.min_height = resolved.progress_hit_height;
+        slider
+    }
+}
+
+fn guard_disabled_command<VM: 'static>(disabled: Value<bool>, command: Command<VM>) -> Command<VM> {
+    Command::new_with_context(move |vm, ctx| {
+        if !disabled.resolve() {
+            command.execute_with_context(vm, ctx);
+        }
+    })
+}
+
+fn disabled_opacity(disabled: Value<bool>, opacity: f32) -> Value<f32> {
+    match disabled {
+        Value::Static(disabled) => Value::Static(if disabled { opacity } else { 1.0 }),
+        Value::Signal(disabled) => {
+            Value::Signal(disabled.map(move |disabled| if disabled { opacity } else { 1.0 }))
+        }
+    }
+}
+
+fn disabled_cursor(disabled: Value<bool>) -> Value<CursorStyle> {
+    match disabled {
+        Value::Static(disabled) => Value::Static(if disabled {
+            CursorStyle::NotAllowed
+        } else {
+            CursorStyle::Pointer
+        }),
+        Value::Signal(disabled) => Value::Signal(disabled.map(|disabled| {
+            if disabled {
+                CursorStyle::NotAllowed
+            } else {
+                CursorStyle::Pointer
+            }
+        })),
+    }
+}
+
+fn progress_signal(controller: &VideoController) -> Value<f32> {
+    let duration = controller.duration();
+    controller
+        .position()
+        .map(move |position| duration_fraction(position, duration.get()))
+        .into()
+}
+
+fn buffered_signal(controller: &VideoController) -> Value<f32> {
+    let duration = controller.duration();
+    controller
+        .buffered_position()
+        .map(move |buffered| match buffered {
+            Some(buffered) => duration_fraction(buffered, duration.get()),
+            None => 0.0,
+        })
+        .into()
+}
+
+fn seek_to_fraction(controller: &VideoController, fraction: f32) {
+    let Some(duration) = controller.duration().get() else {
+        return;
+    };
+    if duration.is_zero() {
+        return;
+    }
+    let seconds = duration.as_secs_f64() * fraction.clamp(0.0, 1.0) as f64;
+    controller.seek(Duration::from_secs_f64(seconds));
+}
+
+fn duration_fraction(position: Duration, duration: Option<Duration>) -> f32 {
+    let Some(duration) = duration else {
+        return 0.0;
+    };
+    if duration.is_zero() {
+        return 0.0;
+    }
+    (position.as_secs_f64() / duration.as_secs_f64()).clamp(0.0, 1.0) as f32
+}
+
+fn format_duration(duration: Duration) -> String {
+    let total = duration.as_secs();
+    let seconds = total % 60;
+    let minutes = (total / 60) % 60;
+    let hours = total / 3600;
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
+}
+
+fn playback_button_icon(state: VideoPlaybackState) -> SvgIconId {
+    match state {
+        VideoPlaybackState::Playing => SvgIconId::Pause,
+        _ => SvgIconId::PlayArrow,
+    }
+}
+
+fn playback_button_disabled(state: VideoPlaybackState) -> bool {
+    matches!(
+        state,
+        VideoPlaybackState::Loading | VideoPlaybackState::Buffering | VideoPlaybackState::Error(_)
+    )
+}
+
+fn volume_button_icon(muted: bool, volume: f32) -> SvgIconId {
+    if muted {
+        SvgIconId::VolumeMute
+    } else if volume <= 0.0 {
+        SvgIconId::VolumeOff
+    } else if volume < 0.5 {
+        SvgIconId::VolumeDown
+    } else {
+        SvgIconId::VolumeUp
+    }
+}
+
+fn video_status_text(state: VideoPlaybackState) -> String {
+    match state {
+        VideoPlaybackState::Idle => "Idle".to_string(),
+        VideoPlaybackState::Loading => "Loading".to_string(),
+        VideoPlaybackState::Ready => "Ready".to_string(),
+        VideoPlaybackState::Playing => "Playing".to_string(),
+        VideoPlaybackState::Paused => "Paused".to_string(),
+        VideoPlaybackState::Buffering => "Buffering".to_string(),
+        VideoPlaybackState::Ended => "Ended".to_string(),
+        VideoPlaybackState::Error(error) => format!("Error: {error}"),
+    }
+}
+
+fn resolve_video_style(
+    style: Option<&StyleResolver<VideoStyle>>,
+    context: &StyleContext<'_>,
+) -> VideoStyle {
+    let style_sheet = StyleSheet::default();
+    resolve_video_style_with_sheet(
+        style,
+        context,
+        &style_sheet,
+        &VisualStyle::default(),
+        WidgetState::default(),
+    )
+}
+
+fn resolve_video_style_with_sheet(
+    style: Option<&StyleResolver<VideoStyle>>,
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> VideoStyle {
+    resolve_component_style_with_sheet(
+        style,
+        context,
+        style_sheet,
+        visual,
+        state,
+        VideoStyle::default_for_theme(context.theme),
+        |base, context| context.theme.components.video.apply(base, context),
+        |sheet, base, context, visual| sheet.apply_video(base, context, visual),
+        |sheet, base, context, visual, state| sheet.apply_video_state(base, context, visual, state),
+    )
+}
+
+fn resolve_video_style_for_layout(style: Option<&StyleResolver<VideoStyle>>) -> VideoStyle {
+    let theme = Theme::default();
+    let context = StyleContext::from_theme(&theme);
+    resolve_video_style(style, &context)
 }
 
 impl<VM> From<VideoSurface> for Element<VM> {

@@ -648,6 +648,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             Option<(
                 WidgetId,
                 Option<ValueCommand<VM, f32>>,
+                Option<ValueCommand<VM, f32>>,
                 f32,
                 f32,
                 f32,
@@ -779,6 +780,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 id,
                 interactions,
                 on_change,
+                on_change_end,
                 value,
                 min,
                 max,
@@ -793,7 +795,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 interactions.on_click.clone().map(ClickHandler::Command),
                 None,
                 None,
-                Some((id, on_change.clone(), min, max, step, track_rect, value)),
+                Some((
+                    id,
+                    on_change.clone(),
+                    on_change_end.clone(),
+                    min,
+                    max,
+                    step,
+                    track_rect,
+                    value,
+                )),
             ),
             HitInteraction::SelectTrigger {
                 id,
@@ -949,12 +960,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.pressed_widget = Some(widget_id);
 
-        if let Some((slider_id, on_change, min, max, step, track_rect, current_value)) = slider_drag
+        if let Some((
+            slider_id,
+            on_change,
+            on_change_end,
+            min,
+            max,
+            step,
+            track_rect,
+            current_value,
+        )) = slider_drag
         {
             if let Some(position) = pointer_position {
                 self.begin_slider_drag(
                     slider_id,
                     on_change.clone(),
+                    on_change_end.clone(),
                     min,
                     max,
                     step,
@@ -967,6 +988,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 {
                     if let Some(active) = self.active_slider_drag.as_mut() {
                         active.current_value = value;
+                        active.committed_value = Some(value);
                     }
                     if !self.patch_active_slider_scene(Instant::now()) {
                         self.invalidate_computed_scene();

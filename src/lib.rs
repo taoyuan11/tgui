@@ -277,7 +277,8 @@ pub mod prelude {
     };
     #[cfg(feature = "video")]
     pub use crate::video::{
-        VideoController, VideoMetrics, VideoPlaybackState, VideoSize, VideoSource, VideoSurface,
+        Video, VideoController, VideoMetrics, VideoPlaybackState, VideoSize, VideoSource,
+        VideoSurface,
     };
     pub use crate::widgets::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,
@@ -311,8 +312,8 @@ pub mod prelude {
         TreeExpandChange, TreeExpandTrigger, TreeNode, TreeNodeAction, TreeNodeContext,
         TreeSelectionChange, TreeSelectionMode, TreeSelectionTrigger, TreeStyle, Upload,
         UploadFile, UploadFileId, UploadRejection, UploadRemove, UploadSelection, UploadStatus,
-        UploadStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection, VirtualList,
-        VirtualViewport, WidgetCommand, WidgetEventResult, WidgetKey, WidgetStyleExt,
+        UploadStyle, VideoStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection,
+        VirtualList, VirtualViewport, WidgetCommand, WidgetEventResult, WidgetKey, WidgetStyleExt,
         WidgetSurfaceStyle, WidgetTree,
     };
     pub use crate::widgets::{
@@ -383,8 +384,8 @@ pub mod widgets {
         TreeExpandChange, TreeExpandTrigger, TreeNode, TreeNodeAction, TreeNodeContext,
         TreeSelectionChange, TreeSelectionMode, TreeSelectionTrigger, TreeStyle, Upload,
         UploadFile, UploadFileId, UploadRejection, UploadRemove, UploadSelection, UploadStatus,
-        UploadStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection, VirtualList,
-        VirtualViewport, WidgetCommand, WidgetEventResult, WidgetKey, WidgetStyleExt,
+        UploadStyle, VideoStyle, VideoSurfaceStyle, VirtualArrangement, VirtualDirection,
+        VirtualList, VirtualViewport, WidgetCommand, WidgetEventResult, WidgetKey, WidgetStyleExt,
         WidgetSurfaceStyle, WidgetTree,
     };
     pub use crate::ui::widget::{
@@ -398,5 +399,5 @@ pub mod widgets {
         SplitterStyle,
     };
     #[cfg(feature = "video")]
-    pub use crate::video::VideoSurface;
+    pub use crate::video::{Video, VideoSurface};
 }

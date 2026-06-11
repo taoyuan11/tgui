@@ -519,11 +519,13 @@ pub(super) struct ActiveDataGridColumnReorder<VM> {
 pub(super) struct SliderDrag<VM> {
     pub(super) widget_id: WidgetId,
     pub(super) on_change: Option<ValueCommand<VM, f32>>,
+    pub(super) on_change_end: Option<ValueCommand<VM, f32>>,
     pub(super) min: f32,
     pub(super) max: f32,
     pub(super) step: f32,
     pub(super) track_rect: Rect,
     pub(super) current_value: f32,
+    pub(super) committed_value: Option<f32>,
 }
 
 #[derive(Clone)]

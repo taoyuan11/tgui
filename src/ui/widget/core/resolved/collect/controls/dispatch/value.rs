@@ -535,6 +535,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             tick_count,
             value_formatter,
             on_change,
+            on_change_end,
             ..
         } = &self.kind
         else {
@@ -598,6 +599,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                     id: self.id,
                     interactions: self.interactions.clone(),
                     on_change: on_change.clone(),
+                    on_change_end: on_change_end.clone(),
                     value: display_value,
                     min: *min,
                     max: *max,

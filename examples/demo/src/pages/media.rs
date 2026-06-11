@@ -56,8 +56,9 @@ Button::new("加载").on_click(Command::new(|app: &mut App| {
     app.video_player.load_from_input();
 }))"#;
 
-const CODE_VIDEO_SURFACE: &str = r#"VideoSurface::new(app.video_player.controller.clone())
-    .size(dp(360.0), dp(202.0))"#;
+const CODE_VIDEO_PLAYER: &str = r#"Video::new(app.video_player.controller.clone())
+    .width(dp(520.0))
+    .fit(ContentFit::Contain)"#;
 
 pub(crate) fn page(app: &App) -> Element<App> {
     demo_section::page(
@@ -207,7 +208,7 @@ fn video_component(app: &App) -> Element<App> {
     demo_section::component_doc(
         app,
         "Video",
-        "VideoSurface 参与布局和渲染；默认只显示空 surface 与安全加载控件。",
+        "Video 是浏览器式内置控制栏播放器；默认不加载任何本机资源，用户显式输入后再加载。",
         vec![
             UsageDemo::new(
                 "video/safe-load",
@@ -225,23 +226,13 @@ fn video_component(app: &App) -> Element<App> {
                 CODE_VIDEO_SAFE_LOAD,
             ),
             UsageDemo::new(
-                "video/surface",
-                "视频 Surface",
-                "VideoSurface 保持固定宽高，播放控制由 VideoController 提供。",
-                Flex::vertical().gap(dp(8.0)).child(el![
-                    VideoSurface::new(app.video_player.controller.clone())
-                        .size(dp(360.0), dp(202.0)),
-                    Flex::horizontal().gap(dp(8.0)).child(el![
-                        Button::new("播放").on_click(Command::new(|app: &mut App| {
-                            app.video_player.controller.play();
-                        })),
-                        Button::new("暂停").on_click(Command::new(|app: &mut App| {
-                            app.video_player.controller.pause();
-                        })),
-                    ]),
-                    Text::new(app.video_player.playback_status()).style_full(styles::status_style),
-                ]),
-                CODE_VIDEO_SURFACE,
+                "video/player",
+                "浏览器式播放器",
+                "Video 在画面底部覆盖 SVG 图标控制栏，组合播放、seek、缓冲、时间、音量和状态文本。",
+                Video::new(app.video_player.controller.clone())
+                    .width(dp(520.0))
+                    .fit(ContentFit::Contain),
+                CODE_VIDEO_PLAYER,
             ),
         ],
     )

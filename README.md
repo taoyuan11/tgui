@@ -76,7 +76,7 @@ pnpm --dir docs preview
 - 菜单组件：`Menu`（按钮触发的下拉操作菜单）、`ContextMenu`（长按 / 鼠标右键触发的浮层菜单）、`MenuBar`（顶部主菜单条）；统一 `MenuItem` 模型支持图标占位、勾选项、子菜单标识、快捷键提示文本、分隔线、禁用项
 - 画布：`Canvas`、`CanvasRecorder`、渐变/阴影/混合/裁剪/文字与图片绘制
 - 音频：`Audio`、`AudioController`、`AudioSource`（需启用 `audio` feature）
-- 视频：`VideoSurface`、`VideoController`、`VideoSource`（需启用 `video` feature）
+- 视频：`Video`、`VideoSurface`、`VideoController`、`VideoSource`（需启用 `video` feature）
 
 ### 样式与基础类型
 
@@ -746,11 +746,14 @@ controller.load(source)?;
 
 启用 `video` feature 后可使用：
 
+- `video::Video`
 - `video::VideoController`
 - `video::VideoSurface`
 - `video::VideoSource`
 - `video::VideoPlaybackState`
 - `video::VideoMetrics`
+
+`Video` 是浏览器式内置控制栏播放器，组合了画面、底部 SVG 图标控制栏、播放/暂停、seek、缓冲、时间、音量/静音和状态文本；`VideoSurface` 是更低层的画面 surface，适合自定义控制栏。
 
 网络视频如果需要自定义请求头，可以把 header 直接挂在 `VideoSource` 上：
 

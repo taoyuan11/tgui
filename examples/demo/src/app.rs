@@ -65,10 +65,6 @@ impl VideoPlayer {
         }
     }
 
-    pub(crate) fn playback_status(&self) -> Signal<String> {
-        self.controller.playback_state().map(video_status_text)
-    }
-
     pub(crate) fn load_from_input(&mut self) {
         let source = self.source.text();
         let source = source.trim();
@@ -962,18 +958,6 @@ pub(crate) fn audio_status_text(state: AudioPlaybackState) -> String {
     }
 }
 
-fn video_status_text(state: VideoPlaybackState) -> String {
-    match state {
-        VideoPlaybackState::Idle => "视频状态: 等待".to_string(),
-        VideoPlaybackState::Loading => "视频状态: 加载中".to_string(),
-        VideoPlaybackState::Ready => "视频状态: 准备".to_string(),
-        VideoPlaybackState::Playing => "视频状态: 播放中".to_string(),
-        VideoPlaybackState::Paused => "视频状态: 暂停中".to_string(),
-        VideoPlaybackState::Buffering => "视频状态: 缓冲中".to_string(),
-        VideoPlaybackState::Ended => "视频状态: 播放结束".to_string(),
-        VideoPlaybackState::Error(error) => format!("视频状态: 出错: {error}"),
-    }
-}
 
 fn seed_upload_files() -> Vec<UploadFile> {
     vec![

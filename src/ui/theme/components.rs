@@ -10,7 +10,8 @@ use crate::ui::widget::{
     DrawerStyle, IconStyle, ImageStyle, InputStyle, ListStyle, MenuBarStyle, MenuStyle, ModalStyle,
     PaginationStyle, PopoverStyle, ProgressBarStyle, RadioStyle, RatingStyle, RichTextStyle,
     SelectStyle, SkeletonStyle, SliderStyle, SpinnerStyle, SplitterStyle, SwitchStyle, TabsStyle,
-    TextWidgetStyle, TextareaStyle, ToastStyle, TooltipStyle, TreeStyle, VideoSurfaceStyle,
+    TextWidgetStyle, TextareaStyle, ToastStyle, TooltipStyle, TreeStyle, VideoStyle,
+    VideoSurfaceStyle,
 };
 
 static NEXT_COMPONENT_RULE_ID: AtomicU64 = AtomicU64::new(1);
@@ -110,6 +111,7 @@ pub struct ComponentThemes {
     pub container: ComponentStyle<ContainerStyle>,
     pub image: ComponentStyle<ImageStyle>,
     pub canvas: ComponentStyle<CanvasStyle>,
+    pub video: ComponentStyle<VideoStyle>,
     pub video_surface: ComponentStyle<VideoSurfaceStyle>,
     pub button: ComponentStyle<ButtonStyle>,
     pub checkbox: ComponentStyle<CheckboxStyle>,
@@ -169,6 +171,7 @@ component_theme_methods! {
     container: container: ContainerStyle,
     image: image: ImageStyle,
     canvas: canvas: CanvasStyle,
+    video: video: VideoStyle,
     video_surface: video_surface: VideoSurfaceStyle,
     button: button: ButtonStyle,
     checkbox: checkbox: CheckboxStyle,

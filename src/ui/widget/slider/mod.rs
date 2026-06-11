@@ -227,6 +227,7 @@ impl<VM> Slider<VM> {
                     tick_count: None,
                     value_formatter: None,
                     on_change: None,
+                    on_change_end: None,
                     disabled: Value::Static(false),
                     validation: Value::Static(ValidationVisualState::default()),
                     style: None,
@@ -340,6 +341,16 @@ impl<VM> Slider<VM> {
     pub fn on_change(mut self, command: ValueCommand<VM, f32>) -> Self {
         if let WidgetKind::Slider { on_change, .. } = &mut self.element.kind {
             *on_change = Some(command);
+        }
+        self
+    }
+
+    /// 设置拖动提交回调。
+    ///
+    /// 该回调在滑块拖动结束时触发，适合 seek、网络请求等较重操作。
+    pub fn on_change_end(mut self, command: ValueCommand<VM, f32>) -> Self {
+        if let WidgetKind::Slider { on_change_end, .. } = &mut self.element.kind {
+            *on_change_end = Some(command);
         }
         self
     }

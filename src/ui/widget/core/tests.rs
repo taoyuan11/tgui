@@ -37,7 +37,9 @@ use crate::video::backend::{
     BackendSharedState, VideoBackend, DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
 };
 #[cfg(feature = "video")]
-use crate::video::{VideoController, VideoMetrics, VideoPlaybackState, VideoSize, VideoSurface};
+use crate::video::{
+    Video, VideoController, VideoMetrics, VideoPlaybackState, VideoSize, VideoSurface,
+};
 
 const ONE_BY_ONE_GIF: &[u8] = &[
     0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,

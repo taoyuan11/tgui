@@ -34,11 +34,12 @@
 
 启用 `video` feature 后可使用：
 
+- `Video`
 - `VideoSurface`
 - `VideoController`
 - `VideoSource`
 
-`VideoSurface` 参与布局和渲染，适合把视频画面作为普通 UI 区域嵌入应用。视频 feature 会带上音频能力。
+`Video` 是浏览器式内置控制栏播放器，组合了画面、底部 SVG 图标控制栏、播放/暂停、seek、缓冲、时间、音量/静音和状态文本。`VideoSurface` 参与布局和渲染，适合把视频画面作为普通 UI 区域嵌入应用并自行组合控制栏。视频 feature 会带上音频能力。
 
 ## 资源预算
 

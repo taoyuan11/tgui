@@ -58,6 +58,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         &mut self,
         widget_id: WidgetId,
         on_change: Option<ValueCommand<VM, f32>>,
+        on_change_end: Option<ValueCommand<VM, f32>>,
         min: f32,
         max: f32,
         step: f32,
@@ -67,11 +68,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.active_slider_drag = Some(SliderDrag {
             widget_id,
             on_change,
+            on_change_end,
             min,
             max,
             step,
             track_rect,
             current_value,
+            committed_value: None,
         });
         true
     }
@@ -89,11 +92,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let step = drag.step;
         let current_value = drag.current_value;
         let on_change = drag.on_change.clone();
+        let on_change_end = drag.on_change_end.clone();
         let value = self.slider_value_for_position(position, track_rect, min, max, step);
         if (value - current_value).abs() <= f32::EPSILON {
             return false;
         }
-        let changed = self.apply_slider_value(on_change.as_ref(), value, min, max, step, false);
+        let changed = if on_change_end.is_some() {
+            true
+        } else {
+            self.apply_slider_value(on_change.as_ref(), value, min, max, step, false)
+        };
         if changed {
             if let Some(active) = self.active_slider_drag.as_mut() {
                 active.current_value = value;
@@ -107,8 +115,25 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn end_slider_drag(&mut self) -> bool {
-        if self.active_slider_drag.take().is_none() {
+        let Some(drag) = self.active_slider_drag.take() else {
             return false;
+        };
+        let value = crate::ui::widget::slider_resolve_value(
+            drag.current_value,
+            drag.min,
+            drag.max,
+            drag.step,
+        );
+        let already_committed = drag
+            .committed_value
+            .map(|committed| (committed - value).abs() <= f32::EPSILON)
+            .unwrap_or(false);
+        if let Some(command) = drag.on_change_end.as_ref() {
+            if already_committed {
+                self.invalidate_scene_with_reason("end_slider_drag");
+                return true;
+            }
+            self.execute_value_command(command, value);
         }
         self.invalidate_scene_with_reason("end_slider_drag");
         true

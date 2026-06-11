@@ -3,7 +3,7 @@ mod types;
 
 pub(crate) mod backend;
 
-pub use crate::ui::widget::VideoSurface;
+pub use crate::ui::widget::{Video, VideoStyle, VideoSurface};
 pub use controller::VideoController;
 pub(crate) use types::VideoSurfaceSnapshot;
 pub use types::{VideoMetrics, VideoPlaybackState, VideoSize, VideoSource};

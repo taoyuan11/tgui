@@ -16,6 +16,7 @@ mod skeleton;
 mod slider;
 mod spinner;
 mod splitter;
+mod video;
 
 use crate::foundation::color::Color;
 use crate::theme::{FontWeight, ResolvedThemeMode};
@@ -48,6 +49,7 @@ pub use self::skeleton::SkeletonStyle;
 pub use self::slider::SliderStyle;
 pub use self::spinner::SpinnerStyle;
 pub use self::splitter::SplitterStyle;
+pub use self::video::VideoStyle;
 
 /// 按钮 widget 的样式定义。
 #[derive(Clone, Debug, PartialEq)]

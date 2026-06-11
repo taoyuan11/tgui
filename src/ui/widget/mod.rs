@@ -177,7 +177,7 @@ pub use style::{
     InputStyle, MenuBarStyle, MenuStyle, ModalStyle, PaginationStyle, PopoverStyle,
     ProgressBarStyle, RadioStyle, RatingStyle, RichTextStyle, SelectStyle, SkeletonStyle,
     SliderStyle, SpinnerStyle, SplitterStyle, StyleSelector, StyleSheet, SwitchStyle, TabsStyle,
-    TextWidgetStyle, TextareaStyle, ToastStyle, TooltipStyle, VideoSurfaceStyle,
+    TextWidgetStyle, TextareaStyle, ToastStyle, TooltipStyle, VideoStyle, VideoSurfaceStyle,
     WidgetSurfaceStyle,
 };
 pub use switch::Switch;
@@ -205,4 +205,4 @@ pub use upload::{
     UploadStyle,
 };
 #[cfg(feature = "video")]
-pub use video::VideoSurface;
+pub use video::{Video, VideoSurface};

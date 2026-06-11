@@ -11,7 +11,7 @@
 - 浮层控件：`Tooltip`、`Popover`、`Menu`、`ContextMenu`、`MenuBar`、`Modal`、`Drawer`。
 - 交互与 Portal：`GestureRecognizer`、`Portal`、`LayerStack`、`PortalAnchor`、`OverlayPlacement`。
 - 头像与标识：`Avatar` / `AvatarGroup`。
-- 音视频：`Audio`、`VideoSurface`，需要启用对应 feature。
+- 音视频：`Audio`、`Video`、`VideoSurface`，需要启用对应 feature。
 
 增强表单控件见[表单增强控件](/features/input-controls)，高级交互见[交互与 Portal](/features/interaction-portal)。
 
