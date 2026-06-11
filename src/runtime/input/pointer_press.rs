@@ -983,15 +983,29 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     current_value,
                 );
                 let value = self.slider_value_for_position(position, track_rect, min, max, step);
-                if (value - current_value).abs() > f32::EPSILON
-                    && self.apply_slider_value(on_change.as_ref(), value, min, max, step, false)
-                {
-                    if let Some(active) = self.active_slider_drag.as_mut() {
-                        active.current_value = value;
-                        active.committed_value = Some(value);
-                    }
-                    if !self.patch_active_slider_scene(Instant::now()) {
-                        self.invalidate_computed_scene();
+                if (value - current_value).abs() > f32::EPSILON {
+                    if on_change_end.is_some() {
+                        if let Some(active) = self.active_slider_drag.as_mut() {
+                            active.current_value = value;
+                        }
+                        if !self.patch_active_slider_scene(Instant::now()) {
+                            self.invalidate_computed_scene();
+                        }
+                    } else if self.apply_slider_value(
+                        on_change.as_ref(),
+                        value,
+                        min,
+                        max,
+                        step,
+                        false,
+                    ) {
+                        if let Some(active) = self.active_slider_drag.as_mut() {
+                            active.current_value = value;
+                            active.committed_value = Some(value);
+                        }
+                        if !self.patch_active_slider_scene(Instant::now()) {
+                            self.invalidate_computed_scene();
+                        }
                     }
                 }
             }

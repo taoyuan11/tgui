@@ -61,7 +61,7 @@ impl VideoController {
     }
 
     pub fn replay(&self) {
-        self.inner.backend.seek(Duration::ZERO);
+        self.seek(Duration::ZERO);
         self.inner.backend.play();
     }
 
@@ -70,6 +70,9 @@ impl VideoController {
     }
 
     pub fn seek(&self, position: Duration) {
+        let mut metrics = self.inner.shared.metrics.get();
+        metrics.position = position;
+        self.inner.shared.metrics.set(metrics);
         self.inner.backend.seek(position);
     }
 
@@ -290,6 +293,35 @@ mod tests {
         assert_eq!(commands.volumes, vec![0.25]);
         assert_eq!(commands.muteds, vec![true]);
         assert_eq!(commands.buffer_memory_limits, vec![32 * 1024 * 1024]);
+    }
+
+    #[test]
+    fn seek_updates_position_signal_immediately() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        shared.metrics.set(VideoMetrics {
+            duration: Some(Duration::from_secs(30)),
+            position: Duration::from_secs(3),
+            buffered: Some(Duration::from_secs(12)),
+            video_width: 16,
+            video_height: 9,
+        });
+        let backend = Arc::new(MockBackend::new());
+        let commands = backend.commands.clone();
+        let controller = VideoController::from_parts(shared, backend);
+
+        controller.seek(Duration::from_secs(9));
+
+        assert_eq!(controller.position().get(), Duration::from_secs(9));
+        assert_eq!(controller.duration().get(), Some(Duration::from_secs(30)));
+        assert_eq!(
+            controller.buffered_position().get(),
+            Some(Duration::from_secs(12))
+        );
+        assert_eq!(
+            commands.lock().expect("commands lock poisoned").seeks,
+            vec![Duration::from_secs(9)]
+        );
     }
 
     #[test]

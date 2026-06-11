@@ -510,6 +510,7 @@ mod modal_tests;
 mod popover_tests;
 mod portal_tests;
 mod scroll_tests;
+mod slider_tests;
 mod splitter_tests;
 mod table_tests;
 mod tabs_tests;
