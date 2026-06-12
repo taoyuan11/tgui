@@ -24,12 +24,14 @@ impl<VM> ResolvedElement<VM> {
         let widget_state = self.collect_widget_state(disabled, context);
         let (runtime_background, runtime_visual) =
             self.resolve_runtime_visual(widget_state, context);
-        let offset = runtime_visual.offset.resolve_widget(
-            context.animations,
-            self.id,
-            WidgetProperty::Offset,
-            context.now,
-        );
+        let offset = track_property_scope(PropertySlot::Offset, || {
+            runtime_visual.offset.resolve_widget(
+                context.animations,
+                self.id,
+                WidgetProperty::Offset,
+                context.now,
+            )
+        });
         let frame = Rect::new(
             layout_frame.x + offset.x,
             layout_frame.y + offset.y,
@@ -40,14 +42,16 @@ impl<VM> ResolvedElement<VM> {
         let scale = if context.reduced_motion {
             runtime_visual.scale.resolve().clamp(0.01, 16.0)
         } else {
-            runtime_visual.scale.resolve_widget_clamped(
-                context.animations,
-                self.id,
-                WidgetProperty::Scale,
-                context.now,
-                0.01,
-                16.0,
-            )
+            track_property_scope(PropertySlot::Scale, || {
+                runtime_visual.scale.resolve_widget_clamped(
+                    context.animations,
+                    self.id,
+                    WidgetProperty::Scale,
+                    context.now,
+                    0.01,
+                    16.0,
+                )
+            })
         };
         let frame = if (scale - 1.0).abs() > f32::EPSILON {
             let width = frame.width * scale;
@@ -62,25 +66,29 @@ impl<VM> ResolvedElement<VM> {
             frame
         };
         let opacity = visual_context.opacity
-            * runtime_visual.opacity.resolve_widget_clamped(
-                context.animations,
-                self.id,
-                WidgetProperty::Opacity,
-                context.now,
-                0.0,
-                1.0,
-            )
+            * track_property_scope(PropertySlot::Opacity, || {
+                runtime_visual.opacity.resolve_widget_clamped(
+                    context.animations,
+                    self.id,
+                    WidgetProperty::Opacity,
+                    context.now,
+                    0.0,
+                    1.0,
+                )
+            })
             * if disabled { 0.55 } else { 1.0 };
         let styles = self.resolve_collect_styles(widget_state, context);
-        let border_width = self
-            .resolve_collect_border_width(&runtime_visual, &styles, context)
-            .max(0.0);
-        let border_radius = self
-            .resolve_collect_border_radius(&runtime_visual, &styles, context)
-            .max(0.0);
+        let border_width = track_property_scope(PropertySlot::BorderWidth, || {
+            self.resolve_collect_border_width(&runtime_visual, &styles, context)
+        })
+        .max(0.0);
+        let border_radius = track_property_scope(PropertySlot::BorderRadius, || {
+            self.resolve_collect_border_radius(&runtime_visual, &styles, context)
+        })
+        .max(0.0);
         let validation_color = self.collect_validation_color(context.theme);
-        let border_color = self
-            .resolve_collect_border_color(
+        let border_color = track_property_scope(PropertySlot::BorderColor, || {
+            self.resolve_collect_border_color(
                 &runtime_visual,
                 widget_state,
                 opacity,
@@ -88,16 +96,18 @@ impl<VM> ResolvedElement<VM> {
                 &styles,
                 context,
             )
-            .with_alpha_factor(opacity);
-        let background = self
-            .resolve_collect_background(
+        })
+        .with_alpha_factor(opacity);
+        let background = track_property_scope(PropertySlot::Background, || {
+            self.resolve_collect_background(
                 runtime_background.as_ref(),
                 widget_state,
                 opacity,
                 &styles,
                 context,
             )
-            .with_alpha_factor(opacity);
+        })
+        .with_alpha_factor(opacity);
         let background_inset = border_width
             .min((frame.width * 0.5).get())
             .min((frame.height * 0.5).get());

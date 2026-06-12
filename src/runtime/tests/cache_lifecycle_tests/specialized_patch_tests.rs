@@ -459,3 +459,80 @@ fn action_stats_records_scene_subtree_patch_for_color_change() {
         "single deep-leaf color change should record exactly one scene_subtree_patch hit"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 · 纯滚动快路径（transform-only-scroll）
+//
+// 核心断言与 Phase 1 一致：无论走纯滚动快路径还是整帧重收集，最终 `cached.computed`
+// 的渲染命令流都逐项等价。快路径只是把「整树重收集」收窄成「只重收集滚动子树」，
+// 用同一个 collect 函数，因此结果必须 byte-identical。探针确认确实走了快路径。
+// ---------------------------------------------------------------------------
+
+/// 构造一个内容溢出、可纵向滚动的容器，内部放三个不同色块以便指纹比对。
+fn scrollable_color_tree() -> WidgetTree<TestVm> {
+    fn block(hex: u32) -> Element<TestVm> {
+        Stack::new()
+            .size(dp(40.0), dp(40.0))
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(hex).into());
+                style
+            })
+            .into()
+    }
+    let content: Element<TestVm> = Flex::vertical()
+        .child(block(0x111111FF))
+        .child(block(0x222222FF))
+        .child(block(0x333333FF))
+        .into();
+    let scroller: Element<TestVm> = ScrollView::new()
+        .size(dp(60.0), dp(60.0))
+        .child(content)
+        .into();
+    WidgetTree::new(scroller)
+}
+
+#[test]
+fn pure_scroll_patch_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let tree = scrollable_color_tree();
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    // 找到滚动容器 id（场景里恰有一个 scroll_region）。
+    let scroll_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| {
+            cached
+                .computed
+                .scroll_regions
+                .first()
+                .map(|region| region.id)
+        })
+        .expect("scrollable container should emit a scroll region");
+
+    #[cfg(feature = "transform-only-scroll")]
+    crate::runtime::scene_runtime::scroll_fast_path_probe::reset();
+
+    // 滚动该容器，再求场景。
+    handler.set_scroll_offset(scroll_id, Point::new(dp(0.0), dp(15.0)));
+    let after_patch = shape_fingerprints(handler.computed_scene());
+
+    // 特性开启时，断言确实走了纯滚动快路径（而非回退整帧重收集）。
+    #[cfg(feature = "transform-only-scroll")]
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::hits(),
+        1,
+        "scroll should hit the pure-scroll fast path exactly once"
+    );
+
+    // 强制一次从零的全量重收集作为真值。
+    handler.invalidate_computed_scene();
+    let after_full = shape_fingerprints(handler.computed_scene());
+
+    assert_eq!(
+        after_patch, after_full,
+        "pure-scroll patched scene must be item-identical to a fresh full recollect"
+    );
+}

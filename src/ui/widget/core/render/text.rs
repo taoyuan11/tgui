@@ -47,7 +47,11 @@ pub(crate) fn push_text_primitives(
     let color = text
         .color
         .as_ref()
-        .map(|color| color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now))
+        .map(|color| {
+            track_property_scope(PropertySlot::TextColor, || {
+                color.resolve_widget(animations, widget_id, WidgetProperty::TextColor, now)
+            })
+        })
         .unwrap_or(fallback_color);
     let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
     let inner = frame.inset(padding);

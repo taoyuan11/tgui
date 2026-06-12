@@ -19,7 +19,10 @@
   `src/runtime/action_stats.rs`（action 命中计数器，`bench-support` 门控、关闭零成本）、
   `collect_profile.rs` 的 `record_node_visible`（recollect/visible 比值探针）。正式基线见附录 A.2。
 - ✅ **Phase 1**（命令区间 splice）：**已实施**（2026-06-12）。落地内容见下方 Phase 1 章节「实施记录」。
-- ⬜ **Phase 2–4**：未开始。
+- ✅ **Phase 2**（属性级依赖归因）：**已实施**（2026-06-12）。落地内容见下方 Phase 2 章节「实施记录」。
+- 🟡 **Phase 3**（GPU 区间增量上传）：**CPU 可证安全部分已实施**（2026-06-12，feature `incremental-upload`，**默认关闭**）。落地内容见下方 Phase 3 章节「实施记录」。**GPU 视觉验证未完成**——本机无 GPU 设备，renderer 无法 headless 构造，路线图要求的「实跑示例 + 截图比对」需在真实硬件上补做后才能决定是否设为默认。
+- 🟡 **Phase 4**（滚动 transform-only 快路径）：**CPU 可证等价部分已实施**（2026-06-12，feature `transform-only-scroll`，**默认关闭**）。落地内容见下方 Phase 4 章节「实施记录」。已落地「纯滚动帧 → 仅重收集滚动子树」的安全快路径（与整帧重收集逐项等价、已单测）；路线图描述的「每-draw 平移 uniform + 收集不剔除 + draw 阶段视口裁剪」GPU 可见变体属最高风险，需真实硬件验证，未实施。
+- ✅ **Phase 5**（收尾、文档与发布）：**已实施**（2026-06-12）。落地内容见下方 Phase 5 章节「实施记录」。feature gate 默认值已定稿、文档已同步、全 feature 矩阵 `cargo check` 通过、crate 打包清单已核对。
 - 该实验会话留下的两条**方向性结论**仍然有效，已纳入路线图正文：
   1. 单属性更新成本随树规模**超线性**增长（祖先链 recompose 是主因）——印证 Phase 1 的必要性；
   2. 定高滚动容器下 collect 的节点游走已是视口受限的（recollect/visible ≈ 1.0），Phase 4 的收益重心应在**避免每帧重跑 layout / epoch 全量 pass**，而非减少收集节点数（详见附录 A.2 注记）。
@@ -125,6 +128,10 @@
 
 **回退：** feature-gate `fine-grained-splice`（默认开，可关）；splice 任何前置条件不满足即落回 recompose。
 
+---
+
+### Phase 2 · 属性级依赖归因（2–3 周，🔴 高风险，触碰绑定内核）
+
 **目标：** 当前 `DependencyOwner = {widget_id, phase}`，失效只能定位到「哪个 widget 的哪个阶段」，无法知道「改的是颜色还是文本还是 transform」。终极形态要直写单属性，必须知道脏的是哪个属性 → 才能只改对应 primitive 字段。
 
 **核心思路：** 在 `record_dependency_read` 记录依赖时，附带一个轻量「属性槽」标识（如 `PropertySlot { kind: Fill | Opacity | Transform | Text | … }`）。绑定属性时（`impl Into<Value<T>>` 的解析处）把当前正在解析的属性种类压入 owner 栈，使 Signal 读取被归因到具体属性。
@@ -140,9 +147,28 @@
 
 **回退：** `property` 为 `Option`，全 `None` 时行为与现状完全一致；feature-gate `property-deps`。
 
----
+#### 实施记录（2026-06-12）
 
-### Phase 3 · GPU 顶点脏区间增量上传（3–4 周，🔴 高风险，触碰 renderer）
+落地与上文设计一致，并贯彻了「正确性优先、归因失败安全退化」的红线。一处与原计划的**取舍说明**：属性作用域只包裹**场景阶段已确定为视觉属性**的解析点（在 `collect` 路径内），而非在 `element_resolve.rs` / `style.rs` 的每个 `impl Into<Value<T>>` 入口铺设——后者会把作用域散落到布局/结构阶段且难以与 `PropertySlot` 一一对应。当前覆盖的属性槽已足以支撑 Phase 4 的 transform-only / 单属性直写；未覆盖的视觉属性自然落在裸 `Scene` owner 上，安全退化为整 widget 失效。
+
+- `src/foundation/binding/dependency.rs`：`PropertySlot`（`Background` / `BorderColor` / `BorderWidth` / `BorderRadius` / `Opacity` / `Offset` / `Scale` / `TextColor`）；`DependencyOwner` 增 `property: Option<PropertySlot>`（`property-deps` 关闭时恒 `None`）。`track_property_scope(slot, f)`：复制栈顶 owner、把 `property` 设为 `slot` 后压栈，`f` 内的 `Signal` 读取即被归因；`f` 返回自动弹栈恢复外层 owner。栈空（无外层作用域）时不引入任何 owner，与 `record_dependency_read` 的「无作用域即不记录」语义一致。`property-deps` **关闭**时 `track_property_scope` 编译为 `#[inline(always)]` 直接调 `f()`，不触碰作用域栈——逐字节透明。
+- `src/ui/widget/core/resolved/collect/chrome/visual_state.rs`：`offset` / `scale` / `opacity` / `border_width` / `border_radius` / `border_color` / `background` 七处解析各包一层对应 `PropertySlot` 作用域。
+- `src/ui/widget/core/render/text.rs`：`push_text_primitives` 中 `text.color` 的 `resolve_widget` 包 `TextColor` 作用域。
+- `src/foundation/binding/mod.rs` / `src/ui/widget/core/mod.rs`：导出 `track_property_scope` / `PropertySlot`，经既有 `super::*` 链传播到各 collect 子模块。
+
+**安全退化的本质（兜底红线）：** 失效消费侧 `scene_patch_invalidation.rs` 当前**只读 `owner.widget_id` + `owner.phase`**，从不读 `property`。因此引入属性槽对失效决策**零行为影响**——属性元信息只是被记录下来供 Phase 4 消费，今天每个属性仍退化为整 widget 的 `Scene` 失效。这从结构上保证「绝不漏更新」：归因正确则未来可精细化，归因缺失/错误也至多回到现状粒度。
+
+**测试（`src/foundation/binding/tests.rs`）：**
+- `property_scope_attributes_signal_read_to_slot`（`property-deps` 门控）：`Background` 作用域内的信号读取被归因到 `Some(Background)`，且不残留裸 `Scene` owner。
+- `property_scope_restores_outer_owner_after_drop`（`property-deps` 门控）：作用域退出后读取归因回外层 `property: None` owner，验证嵌套压/弹栈正确。
+- `property_scope_is_transparent_when_feature_disabled`（`not(property-deps)` 门控）：关闭归因时 owner 恒 `None`，与归因前等价。
+- `property_scope_without_outer_scope_records_nothing`（两配置通用）：栈空时不引入 owner、不退化为 global。
+
+全套测试：默认 658 通过、`--features property-deps` 659 通过（门控测试差异），**0 回归**。feature 矩阵（默认 / `--no-default-features` / `property-deps` / `no-default + property-deps` / `audio` / `video` / `video-static` / `video,property-deps`）均 `cargo check` 通过；`cargo fmt --check` 干净。
+
+> ⚠️ 本机注记：测试沿用 Phase 1 的规避方式 `CARGO_PROFILE_DEV_DEBUG=0 cargo test`（macOS Mach-O 重定位上限，committed master 既有环境问题，与本改动无关）。
+
+**回退：** `property` 为 `Option`，全 `None` 时行为与现状完全一致；feature-gate `property-deps`（**默认不开启**，作为可选归因增强）。
 
 **目标：** 即便场景命令原地 splice 了（Phase 1），renderer 当前仍每帧 `prepare` 整张命令表成顶点再 draw（`prepare.rs`）。终极形态要求只重新生成 + 上传变化命令对应的那一段顶点。
 
@@ -158,6 +184,20 @@
 **验证：** 用 `/verify` 或 `skills/run` 实跑示例（`examples/canvas`、含动画的示例），肉眼 + 截图比对；`src/rendering/renderer/tests.rs` 补区间上传正确性。改色 / 改文本 / 滚动三种场景各验证一遍。
 
 **回退：** feature-gate `incremental-upload`；关闭即回到整表 prepare（现状）。
+
+#### 实施记录（2026-06-12）
+
+落地了**可证安全、可单测的核心**：逐帧顶点池 flush 时的「脏区间增量上传」。范围比原计划保守——没有引入 `widget_id/command_index → 顶点区间` 映射，也没有跨帧复用 `PreparedCommand`（这两项与 Phase 1 的 `command_spans` 对接、且强依赖 GPU 视觉验证）；而是在**已有的整段上传出口**处做字节级 diff，把「每帧整表 `write_buffer`」压成「只上传变化区间」。这一层独立成立、对上层零侵入，且正确性可在无 GPU 环境穷举单测。
+
+- `src/rendering/renderer/vertex_pool.rs`：`VertexBufferPool` 新增 `last_uploaded: [Vec<u8>; 3]`——各轮转缓冲「上次写入 GPU 的字节镜像」。`flush` 在 `incremental-upload` 开启时：① 缓冲刚扩容重建（GPU 内容未定义）→ 整段写并重置镜像；② 否则用纯函数 `dirty_range(new, old)` 求本帧 staging 相对镜像的变化区间 `[start,end)`，按 `COPY_BUFFER_ALIGNMENT` 对齐后只 `write_buffer` 这一段，完全相同则**跳过上传**；③ 无论整写还是区间写，写后把镜像 `clone` 为本帧 staging——保证镜像与 GPU 缓冲 `[0..write_len]` **逐字节一致**。关闭特性时编译为原来的整段 `write_buffer`，逐字节透明。
+- **三缓冲安全性：** 镜像按槽位（`current`）维护，第 N 帧只与「同一槽位上次写入的内容」（即 N−3 帧）做 diff、只覆盖该槽位。该槽位的 GPU 数据此刻已被 GPU 读完（在途帧 ≤ 3），对它部分覆盖无读写竞态——与原整写的安全性论证一致。
+- **渲染等价性：** 写后缓冲 `[0..write_len]` 与本帧 staging 逐字节相同，draw 阶段按本帧 `allocate` 返回的 offset/count 取 slice，绝不读取 `write_len` 之外的陈旧尾字节——故输出与整写**完全一致**。
+
+**测试（`dirty_range_tests`，`incremental-upload` 门控）：** 7 个纯函数单测穷举边界——完全相同→`None`（跳过）、空镜像→整段、单字节中间变化、首末 diff 之间连续覆盖、变长尾部追加（含前缀也变的情形）、变短只在公共区间内变化、变短但公共前缀全同→`None`。全部通过。
+
+> ⚠️ **GPU 视觉验证未完成（关键遗留）：** 路线图明确要求本阶段「用 `/verify` / `skills/run` 实跑示例，改色/改文本/滚动三种场景肉眼 + 截图比对」。本机无 GPU 设备、renderer 需真实 adapter 无法 headless 构造，该验证**未能在本环境完成**。`dirty_range` 逻辑已被穷举单测覆盖，且整写/区间写的 GPU 字节等价性有论证，但「设为默认开启」必须等真实硬件视觉验证通过后再决定。当前 `incremental-upload` **默认关闭**。
+
+**回退：** feature-gate `incremental-upload`（**默认关闭**）；关闭即回到整段 `write_buffer`（现状），逐字节透明。
 
 ---
 
@@ -183,6 +223,23 @@
 
 **回退：** feature-gate `transform-only-scroll` / `transform-only-anim`，各自独立；任一组合不支持即回退整树 recollect。
 
+#### 实施记录（2026-06-12）
+
+落地了**可证等价、可单测的子里程碑「先滚动」的安全部分**，并对 GPU 可见的激进变体保持克制。关键认识改变了实现取舍：附录 A.2 与 collect 代码表明，滚动当前把 `-scroll_offset` **烘焙进每个子图元坐标**、并裁剪掉完全离屏的子节点（`should_skip_fully_clipped_child`）。因此「平移缓存子树图元」是**不正确的近似**——被裁掉的离屏子节点不在缓存 chunk 里，平移无法让它们重新出现。真正既正确又高覆盖的快路径不是「平移图元」，而是「**只重收集滚动子树**」：复用已存在且已测的 `patch_cached_scene_for_roots`，把作用域从整树收窄到滚动容器子树，用**同一个 collect 函数**重算几何，结果与整帧重收集**逐项等价**。
+
+- `src/runtime/mod.rs` / `input/interaction.rs`：新增 `scroll_dirty_widgets: HashSet<WidgetId>`，在唯一的滚动写入口 `set_scroll_offset` 累积发生过偏移变化的容器；纯滚动快路径命中后清空，整帧重收集后也清空（已被全树重算覆盖）。
+- `src/runtime/cache_support.rs`：把 `scene_cache_matches` 拆出 `scene_cache_fields_match_ignoring_scroll`（除 `scroll_epoch`/`computed_valid` 外所有匹配字段），供快路径复用，避免字段列表漂移。
+- `src/runtime/scene_runtime.rs`：`try_pure_scroll_fast_path`——仅当本帧失配**只有** `scroll_epoch`（其余字段全匹配、`layout_valid`、不含 virtual）时，取实际发生滚动且仍在树中的脏容器，经 `highest_layout_roots_smallvec` 取最高根（**嵌套滚动安全**：祖孙同脏只取最高根，重收集整棵子树含内层），调 `patch_cached_scene_for_roots(roots, now, /*sync_runtime_scene_state*/ true)` 完成子树重收集 + Phase 1 splice，并同步 `scroll_epoch` 等运行时状态。任一前置不满足 / patch 失败即返回 false，落回 `computed_scene` 下方的整帧重收集。接入点在文本输入 patch 之后、`!cache_valid` 整帧分支之前。
+- **virtual 容器排除**：virtual 滚动会改变窗口化 plan（结构性），`layout.contains_virtual()` 时直接不走快路径。
+
+**正确性依据：** 快路径与整帧重收集调用**同一个收集函数**，仅作用域不同；`patch_resolved_roots` 用最新 `scroll_states` 重解析子树几何（含 `child_origin = frame − scroll_offset` 平移与离屏裁剪），故对滚动子树逐项等价，对树其余部分（未变）保持缓存。这不是近似，是「只重算受影响子树」的精确等价。
+
+**测试（`pure_scroll_patch_matches_full_recollect`，`specialized_patch_tests.rs`）：** 构造内容溢出、可纵向滚动的容器（三个色块），`set_scroll_offset` 后求场景，断言：① 探针确认**确实命中纯滚动快路径**恰一次（避免假阳性「只验证了回退」）；② 快路径结果与随后强制的一次从零全量重收集**逐项等价**。特性关闭时同一测试经整帧重收集路径通过（探针断言被 cfg 关掉），证明降级链正确。
+
+> ⚠️ **GPU 可见变体未实施 + 收益边界：** 路线图原描述的「给滚动子树施加一个**平移 uniform**、shader/draw 阶段按容器偏移、收集不剔除、Container-arm 视口裁剪」是最高风险的 GPU 可见改动，且需真实硬件视觉验证（嵌套滚动 + clip + portal 错位极易出错）——本环境无 GPU，**未实施**。已落地的子树重收集快路径**避免了整树重收集**（O(滚动子树) 而非 O(总节点)），但仍会重跑该子树的 collect；它不消除 collect、而是收窄 collect 作用域。属性动画 transform-only（`transform-only-anim`）同理依赖 GPU 验证，**未实施**。
+
+**回退：** feature-gate `transform-only-scroll`（**默认关闭**）；任一前置不满足即回退整树 recollect，行为与未开启时逐字节一致。
+
 ---
 
 ### Phase 5 · 收尾、文档与发布（1–2 周）
@@ -192,6 +249,27 @@
 - 全 feature 矩阵检查：`cargo check` / `--features audio` / `video` / `video-static`。
 - 跑 `publish.bat` 流程前确认本文件与新增 doc 已加入 `Cargo.toml` 的 `exclude`（避免进 crate）。
 - 性能回归基线：Phase 0 的 bench 对比，单属性更新应从「子树 + 祖先重合成 + 整表 prepare」降到「单区间 splice + 单区间上传」；滚动应从「整树重收集」降到「transform uniform」。
+
+#### 实施记录（2026-06-12）
+
+收尾阶段四件事均落地，并贯彻「默认值决策 = 只把可证安全、已全量单测的快路径设默认，GPU 可见 / 需真机验证的保持默认关闭」的原则。
+
+**① feature gate 默认值定稿。** `Cargo.toml` `default = ["fine-grained-splice"]`：
+- `fine-grained-splice`：**默认开启**。它是 CPU 可证安全的纯连接合成模型快路径，`cached.computed` 与 recompose 路径逐字节等价，开关两态各有单测，无 GPU 依赖——满足「性能路径默认开、保留逃生口（`--no-default-features`）」。
+- `property-deps` / `incremental-upload` / `transform-only-scroll`：**默认关闭**。`property-deps` 是为后续单属性直写预留的归因增强，开启不改当前失效粒度（消费侧仍按 widget 失效），作为可选项更稳妥；`incremental-upload` 的 GPU 字节上传路径与 `transform-only-scroll` 的 GPU 可见变体均需真实硬件视觉验证（本机无 GPU），按路线图风险登记必须「先补视觉验证再设默认」，故保持 opt-in。
+
+**② 文档同步。**
+- `AGENTS.md`：修正过期的 `default = []` → `default = ["fine-grained-splice"]`，新增「细粒度响应式渲染管线」整节（四条快路径的目标 / 兜底红线 / 代码锚点 / feature 状态），并把 `exclude` 维护注记更新为含 `docs/*` 与本文件。
+- `CLAUDE.md`：新增「细粒度响应式渲染管线（高风险区）」节与 feature 矩阵检查命令；修正 `exclude` 说明与失效的 `docs/canvas.md` 引用（实际为 `docs/features/canvas.md`），补 `docs/advanced/performance.md` 引用。
+- `README.md`：可选 feature 列表新增性能 feature 段。
+- `docs/advanced/performance.md`：新增「增量渲染管线（细粒度响应式）」节（feature 对照表 + 何时开启 + 状态）。
+- `CHANGELOG.md`：`[Unreleased]` 新增 `### Added` 段记录四条快路径，`### Changed` 记录 `exclude` 变更。
+
+**③ crate 打包清单核对。** 此前 `cargo package --list` 显示**整套 vitepress 文档站点**（`docs/package.json` / `pnpm-lock.yaml` / `.vitepress/config.mts` / 17 个 `.md`）与本路线图都会进 crate。已在 `Cargo.toml` `exclude` 新增 `docs/*` 与 `FINE_GRAINED_ROADMAP.md`，打包清单从 584 → 562 文件，`docs/` 与 ROADMAP 归零，`README.md` / `CHANGELOG.md` 保留。
+
+**④ 全 feature 矩阵 + 测试验证。** `cargo check` 全绿：默认 / `--no-default-features` / `audio` / `video` / `video-static` / `property-deps` / `incremental-upload` / `transform-only-scroll` / 三 gate 同开 / `--no-default-features` + 三 gate 同开。`cargo fmt --check` 干净。全套测试经 `CARGO_PROFILE_DEV_DEBUG=0 cargo test` 通过、0 回归（沿用前几阶段的 macOS Mach-O 重定位上限规避，committed master 既有环境问题）。
+
+> 性能回归基线对比项（路线图验收标准 1–3）中，「单区间 GPU 上传」与「滚动 transform uniform」依赖 `incremental-upload` 的 GPU 路径与 `transform-only-scroll` 的 GPU 可见变体，二者均待真机视觉验证，故这部分客观判据在本环境**未能闭环**；已落地部分（splice 跳过祖先重合成、纯滚动只重收集子树）的 CPU 侧等价性已由单测覆盖。
 
 ## 3. 里程碑与依赖关系
 

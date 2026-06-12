@@ -112,6 +112,7 @@ impl WidgetId {
         DependencyOwner {
             widget_id: self.0,
             phase,
+            property: None,
         }
     }
 }

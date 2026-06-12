@@ -26,6 +26,7 @@ fn text_signal_records_layout_and_scene_dependencies() {
     assert!(layout.dependencies().contains_owner(DependencyOwner {
         widget_id: widget_id.raw(),
         phase: DependencyPhase::Layout,
+        property: None,
     }));
 
     let computed = tree.collect_scene_from_layout(
@@ -51,6 +52,7 @@ fn text_signal_records_layout_and_scene_dependencies() {
     assert!(computed.dependencies.contains_owner(DependencyOwner {
         widget_id: widget_id.raw(),
         phase: DependencyPhase::Scene,
+        property: None,
     }));
 }
 
@@ -87,6 +89,7 @@ fn dynamic_children_signal_records_structure_dependency() {
     assert!(layout.dependencies().contains_owner(DependencyOwner {
         widget_id: widget_id.raw(),
         phase: DependencyPhase::Structure,
+        property: None,
     }));
 }
 
@@ -199,6 +202,7 @@ fn canvas_items_signal_records_layout_and_scene_dependencies() {
     assert!(layout.dependencies().contains_owner(DependencyOwner {
         widget_id: widget_id.raw(),
         phase: DependencyPhase::Layout,
+        property: None,
     }));
 
     let computed = tree.collect_scene_from_layout(
@@ -225,6 +229,7 @@ fn canvas_items_signal_records_layout_and_scene_dependencies() {
     assert!(computed.dependencies.contains_owner(DependencyOwner {
         widget_id: widget_id.raw(),
         phase: DependencyPhase::Scene,
+        property: None,
     }));
 }
 
@@ -423,6 +428,7 @@ fn textarea_show_scrollbar_signal_only_records_scene_dependency() {
     assert!(computed.dependencies.contains_owner(DependencyOwner {
         widget_id: widget_id.raw(),
         phase: DependencyPhase::Scene,
+        property: None,
     }));
 }
 

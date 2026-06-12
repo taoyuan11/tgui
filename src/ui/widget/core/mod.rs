@@ -14,8 +14,8 @@ use crate::animation::{AnimationEngine, Transition, WidgetProperty};
 #[cfg(feature = "audio")]
 use crate::audio::Audio as PublicAudio;
 use crate::foundation::binding::{
-    track_dependency_scope, with_dependency_collection, DependencyGraph, DependencyPhase,
-    TextChangeSet, TextController,
+    track_dependency_scope, track_property_scope, with_dependency_collection, DependencyGraph,
+    DependencyPhase, PropertySlot, TextChangeSet, TextController,
 };
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};

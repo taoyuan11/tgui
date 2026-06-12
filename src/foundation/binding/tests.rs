@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 use crate::animation::{AnimationCoordinator, Transition};
 
 use super::{
-    track_dependency_scope, with_dependency_collection, DependencyOwner, DependencyPhase,
-    DirtyDependencySet, InvalidationSignal, Signal, State, Toast, ToastQueue, ViewModelContext,
+    track_dependency_scope, track_property_scope, with_dependency_collection, DependencyOwner,
+    DependencyPhase, DirtyDependencySet, InvalidationSignal, PropertySlot, Signal, State, Toast,
+    ToastQueue, ViewModelContext,
 };
 
 fn context() -> ViewModelContext {
@@ -152,6 +153,7 @@ fn mapped_signal_reads_are_tracked_without_global_fallback() {
     let owner = DependencyOwner {
         widget_id: 1,
         phase: DependencyPhase::Scene,
+        property: None,
     };
 
     let (_, graph) = with_dependency_collection(|| track_dependency_scope(owner, || mapped.get()));
@@ -189,6 +191,7 @@ fn opaque_signal_reads_fall_back_to_global_dependency() {
     let owner = DependencyOwner {
         widget_id: 2,
         phase: DependencyPhase::Layout,
+        property: None,
     };
 
     let (_, graph) = with_dependency_collection(|| track_dependency_scope(owner, || signal.get()));
@@ -306,4 +309,117 @@ fn toast_queue_pause_and_resume_preserve_remaining_time() {
     let resumed = queue.snapshot().pop().expect("toast should exist");
     assert!(!resumed.paused);
     assert_eq!(resumed.deadline, Some(now + Duration::from_secs(7)));
+}
+
+// Phase 2 · 属性级依赖归因（property-deps）
+
+#[cfg(feature = "property-deps")]
+#[test]
+fn property_scope_attributes_signal_read_to_slot() {
+    let ctx = context();
+    let fill = ctx.state(7);
+    let signal = fill.signal();
+    let owner = DependencyOwner {
+        widget_id: 11,
+        phase: DependencyPhase::Scene,
+        property: None,
+    };
+
+    let (_, graph) = with_dependency_collection(|| {
+        track_dependency_scope(owner, || {
+            track_property_scope(PropertySlot::Background, || signal.get())
+        })
+    });
+
+    // 归因开启时，该信号读取被记到 Background 属性槽，而非裸 Scene owner。
+    let owners = graph.all_owners();
+    assert!(
+        owners.contains(&DependencyOwner {
+            widget_id: 11,
+            phase: DependencyPhase::Scene,
+            property: Some(PropertySlot::Background),
+        }),
+        "signal read inside Background scope should be attributed to Background slot: {owners:?}"
+    );
+    assert!(
+        !owners.contains(&owner),
+        "no bare (property: None) Scene owner should remain for the attributed read"
+    );
+}
+
+#[cfg(feature = "property-deps")]
+#[test]
+fn property_scope_restores_outer_owner_after_drop() {
+    let ctx = context();
+    let inside = ctx.state(1);
+    let outside = ctx.state(2);
+    let inside_signal = inside.signal();
+    let outside_signal = outside.signal();
+    let owner = DependencyOwner {
+        widget_id: 22,
+        phase: DependencyPhase::Scene,
+        property: None,
+    };
+
+    let (_, graph) = with_dependency_collection(|| {
+        track_dependency_scope(owner, || {
+            track_property_scope(PropertySlot::Opacity, || inside_signal.get());
+            // 退出属性作用域后，外层 owner 应恢复，读取归因回 property: None。
+            outside_signal.get()
+        })
+    });
+
+    let owners = graph.all_owners();
+    assert!(owners.contains(&DependencyOwner {
+        widget_id: 22,
+        phase: DependencyPhase::Scene,
+        property: Some(PropertySlot::Opacity),
+    }));
+    assert!(
+        owners.contains(&owner),
+        "read after the property scope drops should fall back to the bare Scene owner: {owners:?}"
+    );
+}
+
+#[cfg(not(feature = "property-deps"))]
+#[test]
+fn property_scope_is_transparent_when_feature_disabled() {
+    let ctx = context();
+    let fill = ctx.state(7);
+    let signal = fill.signal();
+    let owner = DependencyOwner {
+        widget_id: 33,
+        phase: DependencyPhase::Scene,
+        property: None,
+    };
+
+    let (_, graph) = with_dependency_collection(|| {
+        track_dependency_scope(owner, || {
+            track_property_scope(PropertySlot::Background, || signal.get())
+        })
+    });
+
+    // 归因关闭时，track_property_scope 完全透明：owner 恒为 property: None，
+    // 行为与未引入属性槽前逐字节一致——这是「绝不漏更新」的安全退化。
+    let owners = graph.all_owners();
+    assert!(
+        owners.contains(&owner),
+        "with property-deps off, the read must stay attributed to the bare Scene owner: {owners:?}"
+    );
+    assert!(owners.iter().all(|o| o.property.is_none()));
+}
+
+#[test]
+fn property_scope_without_outer_scope_records_nothing() {
+    let ctx = context();
+    let value = ctx.state(1);
+    let signal = value.signal();
+
+    // 无外层 owner 时（栈空），属性作用域不引入任何 owner，与 record_dependency_read
+    // 的「无作用域即不记录」语义一致。
+    let (_, graph) =
+        with_dependency_collection(|| track_property_scope(PropertySlot::Scale, || signal.get()));
+
+    assert!(graph.all_owners().is_empty());
+    assert!(!graph.has_global_dependency());
 }

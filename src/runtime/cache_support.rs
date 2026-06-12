@@ -12,6 +12,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if !cached.computed_valid {
             return false;
         }
+        cached.scroll_epoch == self.scroll_epoch
+            && self.scene_cache_fields_match_ignoring_scroll(
+                cached,
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+            )
+    }
+
+    /// 除 `scroll_epoch`（与 `computed_valid`）外的所有场景缓存匹配字段。
+    /// `scene_cache_matches` 与 Phase 4 的「纯滚动帧」检测共用，避免字段列表漂移。
+    pub(in crate::runtime) fn scene_cache_fields_match_ignoring_scroll(
+        &self,
+        cached: &CachedScene<VM>,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+    ) -> bool {
         cached.viewport == viewport
             && cached.units == units
             && cached.focused_widget == self.focused_widget_id()
@@ -25,7 +45,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && cached.reduced_motion == self.reduced_motion
             && cached.text_scale_bits == units.font_scale().to_bits()
             && cached.animation_epoch == self.animation_epoch
-            && cached.scroll_epoch == self.scroll_epoch
             && cached.hover_epoch == self.hover_epoch
             && cached.text_input_epoch == self.text_input_epoch
             && cached.external_portal_revision == self.external_portal_revision

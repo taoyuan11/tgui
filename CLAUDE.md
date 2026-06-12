@@ -22,6 +22,15 @@ cargo check --features video
 cargo check --features video-static
 ```
 
+细粒度响应式渲染管线的 feature gate（见下方「细粒度响应式渲染管线」与根目录 `FINE_GRAINED_ROADMAP.md`）。改失效/场景拼接/顶点上传/滚动快路径时，把每个 gate 单开、再与 `--no-default-features` 组合跑：
+
+```bash
+cargo check --features property-deps
+cargo check --features incremental-upload
+cargo check --features transform-only-scroll
+cargo check --no-default-features          # 关掉默认的 fine-grained-splice，验证回退路径仍编译
+```
+
 Benchmarks 在 `benches/`，需要 `bench-support` feature：
 
 ```bash
@@ -58,6 +67,17 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 - `src/media/`：图片、SVG 栅格化、URL/本地/内存加载、纹理缓存、shadow 缓存。网络层用 `reqwest` blocking + rustls ring。
 - `src/notification/`、`src/dialog/`、`src/audio/`、`src/video/`、`src/platform/`：对应章节的运行时服务和平台后端。
 
+## 细粒度响应式渲染管线（高风险区）
+
+失效/渲染管线在「细粒度依赖跟踪 + 保留式分块场景图」之上加了一组**分级降级、各带 feature gate**的快路径（路线图：根目录 `FINE_GRAINED_ROADMAP.md`，不进 crate）。三条红线：**保留 pull 模型缩短半径**、**任一快路径前置不满足必须干净回退**到子树 patch → 整帧重收集（绝不渲染错误）、**正确性优先**（每条快路径都有「与全量重收集逐项等价」+「回退路径」两类单测）。
+
+- `fine-grained-splice`（**默认开启**）：叶子 scene-only 改动时把新 chunk 原地 splice 进各祖先 chunk 稳定区间，跳过祖先链 recompose。必须同时覆盖主渲染流（含并行数组）+ `hit_regions` + `scroll_regions`（每个 Container 无条件 push 一条 ScrollRegion）。z-order 是正确性红线。锚点：`scene_primitives.rs`、`hit_scene_state.rs`、`scene_layout.rs`、`runtime/scene_patch.rs`。
+- `property-deps`（默认关）：属性级依赖归因（`PropertySlot`）。**兜底**：失效消费侧只读 `widget_id + phase`，未识别属性退化为整 widget 失效 → 绝不漏更新。锚点：`foundation/binding/dependency.rs`、`resolved/collect/chrome/visual_state.rs`、`render/text.rs`。
+- `incremental-upload`（默认关，**GPU 视觉验证未完成**）：顶点池 flush 按字节 diff 只上传脏区间。triple-buffer 保证部分覆盖安全。设默认前须真机截图比对。锚点：`rendering/renderer/vertex_pool.rs`。
+- `transform-only-scroll`（默认关）：纯滚动帧只重收集滚动子树（嵌套取最高根、排除 virtual），复用 `patch_cached_scene_for_roots`，逐项等价。锚点：`runtime/mod.rs`、`input/interaction.rs`、`cache_support.rs`、`scene_runtime.rs`。
+
+> 改这条管线务必跑全 feature 矩阵（默认 / `--no-default-features` / 各 gate 单开 / `audio` / `video` / `video-static`），并补两类单测。本机测试用 `CARGO_PROFILE_DEV_DEBUG=0 cargo test` 规避 macOS Mach-O 重定位上限（committed master 既有问题，与改动无关）。
+
 ## 启动模型
 
 仅支持 MVVM 启动路径，即使是静态 UI 也要显式定义 ViewModel：
@@ -80,7 +100,7 @@ Application::new()
 - **Windows + `video` feature**：`build.rs` 会额外链接 `strmiids` 和 `mfuuid`；本机要装好 FFmpeg 链接环境，否则 `cargo check --features video` 也过不了。
 - **Windows 通知**：必须 `Application::app_id(...)`，否则通知身份初始化失败。
 - **透明 / 无边框窗口**：`decorations(false)` 通常要配 `clear_color(Color::TRANSPARENT)`；renderer 根据 clear color alpha 选 surface alpha mode（Windows 优先 DX12 / DXGI visual swapchain）。
-- **公共 API 变更**：同步改 `src/lib.rs` 的 re-export、`README.md`、相关示例。`Cargo.toml` 的 `exclude` 把 `examples/*`、`*.png`、`.github/*`、`AGENTS.md`、`skills/*` 排除出 crate，发布前要确认资源不会进 crate。
+- **公共 API 变更**：同步改 `src/lib.rs` 的 re-export、`README.md`、相关示例。`Cargo.toml` 的 `exclude` 把 `examples/*`、`docs/*`（独立 vitepress 站点）、`*.png`、`.github/*`、`AGENTS.md`、`CLAUDE.md`、`FINE_GRAINED_ROADMAP.md`、`skills/*` 排除出 crate，发布前用 `cargo package --allow-dirty --list` 确认资源/文档不会进 crate。
 - **平台代码**：桌面平台路径要 `cfg` 严格隔离；新增平台能力优先走 `src/platform/` 的后端抽象。
 - **文本输入**：改 `Input` / `Textarea` / IME / 选择 / 滚动 时，要把 `TextController`、`src/ui/widget/common.rs`、`src/ui/widget/core/`、`src/runtime/input/` 当成同一套基础设施一起改，不要只动一处。注意 UTF-8 边界、IME composition、caret 可见性、横向滚动。
 - **未跟踪文件 `Video.md`**：根目录这个文件是工作中的笔记，不要在没有明确请求时删除/重命名/覆盖。
@@ -99,4 +119,5 @@ Application::new()
 
 - `AGENTS.md`：完整中文上下文，包含模块逐项说明、组件 API 链式约定、动画两套体系（声明式过渡 vs 时间线）、媒体/通知/音视频/平台细节、维护注意事项和推荐阅读顺序。
 - `README.md`：面向使用者的公开 API 介绍、示例和 quick start。
-- `docs/canvas.md`：Canvas / retained scene 详解。
+- `docs/features/canvas.md`：Canvas / retained scene 详解。
+- `docs/advanced/performance.md`：性能观察点、ResourceBudget、细粒度增量渲染管线说明。

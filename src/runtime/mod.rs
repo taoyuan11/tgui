@@ -356,6 +356,10 @@ pub struct BoundRuntimeHandler<VM> {
     external_portal_requests: Vec<ExternalPortalRequest<VM>>,
     external_portal_revision: u64,
     scroll_epoch: u64,
+    /// Phase 4（`transform-only-scroll`）：自上次场景更新以来发生过滚动偏移变化的容器集合。
+    /// 在唯一的滚动写入口 `set_scroll_offset` 累积,被纯滚动快路径消费后清空。关闭特性时不维护。
+    #[cfg(feature = "transform-only-scroll")]
+    scroll_dirty_widgets: HashSet<WidgetId>,
     text_input_epoch: u64,
     media_event_states: HashMap<WidgetId, DispatchedMediaState>,
     lifecycle_event_states: HashMap<WidgetId, DispatchedLifecycleState<VM>>,
@@ -495,6 +499,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             external_portal_requests: Vec::new(),
             external_portal_revision: 0,
             scroll_epoch: 0,
+            #[cfg(feature = "transform-only-scroll")]
+            scroll_dirty_widgets: HashSet::new(),
             text_input_epoch: 0,
             media_event_states: HashMap::new(),
             lifecycle_event_states: HashMap::new(),

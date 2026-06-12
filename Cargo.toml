@@ -16,9 +16,13 @@ exclude = [
     "*.png",
     ".github/*",
     "examples/*",
+    # docs/ 是独立的 vitepress 站点（含 node_modules / package.json / pnpm-lock /
+    # .vitepress 构建配置），属于面向网站的文档工程，不应进入 crate。
+    "docs/*",
     "AGENTS.md",
     "CLAUDE.md",
     "PRODUCTION_READINESS.md",
+    "FINE_GRAINED_ROADMAP.md",
     "Video.md",
     "publish.bat",
     "skills/*"
@@ -50,6 +54,32 @@ collect-profile = ["bench-support"]
 # 跳过「祖先链 recompose_scene_chunk 向上重合成到根」。任一前置条件不满足即干净回退到
 # 现有 recompose 路径,绝不产生错误渲染。默认开启,可关闭作为逃生口。
 fine-grained-splice = []
+# Phase 2（细粒度响应式）：属性级依赖归因。开启后,场景阶段解析每个视觉属性
+# （background / border color/width/radius / opacity / offset / scale / text color …）时
+# 会把当前正在解析的属性种类（PropertySlot）压入依赖作用域,使 Signal 读取被归因到
+# 「哪个 widget 的哪个属性」,而不仅是「哪个 widget 的 Scene 阶段」。这为 Phase 4 的
+# transform-only / 单属性直写快路径提供归因信息。关闭时 DependencyOwner.property 恒为
+# None,行为与现状逐字节一致。失效消费侧（scene_patch_invalidation）当前只读 widget_id
+# + phase,任何未被属性作用域包裹或未识别的读取都安全退化为整 widget 的 Scene 失效——
+# 这是「绝不漏更新」的兜底红线。默认不开启,作为可选归因增强。
+property-deps = []
+# Phase 3（细粒度响应式）：GPU 顶点的「脏区间增量上传」。开启后,逐帧顶点池在 flush 时
+# 不再无条件把整段 staging 重写到轮转缓冲,而是与「该轮转缓冲上次写入的内容」做字节级 diff,
+# 只 write_buffer 变化的那一段（按 COPY_BUFFER_ALIGNMENT 对齐），完全相同则跳过上传。
+# 因为轮转缓冲是 triple-buffered（第 N 帧的缓冲第 N+3 帧才复用,GPU 早已读完）,对该缓冲做
+# 部分覆盖是安全的;且无论整写还是区间写,覆盖后缓冲的字节内容逐字节一致 —— 渲染结果不变,
+# 这是「绝不渲染错误」的兜底。配合 Phase 1 splice:改一个深层叶子的颜色时,只有该叶子那一段
+# 顶点字节变化,本特性把每帧整表上传压成单区间上传。默认不开启,需在真实 GPU 上视觉验证后
+# 再决定是否设为默认。关闭时 flush 行为与现状逐字节一致。
+incremental-upload = []
+# Phase 4（细粒度响应式）：滚动/动画 transform-only 快路径的「纯滚动帧」分类与 CPU 平移
+# 基础设施。开启后,运行时会识别「本帧只有 scroll_epoch 变化、其余一切不变」的纯滚动帧,
+# 并在滚动子树未发生 overflow 裁剪剔除（内容全量收集、无 should_skip_fully_clipped_child
+# 命中）时,用「对缓存子树图元施加滚动增量平移 + Phase 1 splice 原地覆盖」绕开整树重收集;
+# 任一前置不满足（发生裁剪剔除 / 嵌套滚动 / 含 overlay / 偏移越界）即干净回退到现有整帧
+# 重收集,绝不产生错位。默认不开启:高价值的「每-draw 平移 uniform + 收集不剔除 + draw 阶段
+# 视口裁剪」变体属 GPU 可见改动,需在真实硬件上验证后再推进,本特性先落地可证安全的 CPU 部分。
+transform-only-scroll = []
 
 [dependencies]
 accesskit = "0.24"

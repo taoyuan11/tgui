@@ -2,6 +2,26 @@ use super::*;
 use crate::foundation::binding::ScrollRequestMode;
 use crate::foundation::binding::{ScrollRequest, ScrollViewController};
 use crate::ui::unit::Dp;
+
+/// 测试探针：记录纯滚动快路径命中次数，让测试能断言「确实走了滚动快路径而非整帧重收集」。
+/// 仅测试构建编译，热路径零成本。
+#[cfg(all(test, feature = "transform-only-scroll"))]
+pub(in crate::runtime) mod scroll_fast_path_probe {
+    use std::cell::Cell;
+    thread_local! {
+        static HITS: Cell<u64> = const { Cell::new(0) };
+    }
+    pub(in crate::runtime) fn record_hit() {
+        HITS.with(|h| h.set(h.get() + 1));
+    }
+    pub(in crate::runtime) fn reset() {
+        HITS.with(|h| h.set(0));
+    }
+    pub(in crate::runtime) fn hits() -> u64 {
+        HITS.with(Cell::get)
+    }
+}
+
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn apply_scroll_view_controller_state(
         &mut self,
@@ -90,6 +110,80 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             state.widget_ids_by_key = update.widget_ids_by_key.iter().cloned().collect();
         }
         layout_invalidated
+    }
+
+    /// Phase 4 纯滚动快路径。仅当本帧的缓存失配**只有** `scroll_epoch`（其余字段全部匹配、
+    /// 布局缓存仍有效、不含 virtual）时尝试：把发生滚动的容器作为 patch 根，复用既有且已测的
+    /// `patch_cached_scene_for_roots`（子树作用域重收集 + Phase 1 splice）绕开整树重收集。
+    ///
+    /// 关键正确性：这里调用的 collect 与整帧重收集是**同一个收集函数**，只是作用域收窄到
+    /// 滚动子树。`patch_resolved_roots` 会用最新 `scroll_states` 重新解析子树几何（含
+    /// `child_origin = frame - scroll_offset` 平移与 `should_skip_fully_clipped_child` 裁剪），
+    /// 因此结果与整帧重收集**逐项等价**——这不是「平移缓存图元」的近似，而是「只重收集受影响
+    /// 子树」的精确等价。任一前置不满足 / patch 失败即返回 false，调用方落回整帧重收集。
+    ///
+    /// 嵌套滚动安全：若一次滚动同时脏了祖孙两个滚动容器，`highest_layout_roots_smallvec`
+    /// 只取最高根，重收集其整棵子树（含内层滚动），不会漏更新内层。
+    #[cfg(feature = "transform-only-scroll")]
+    fn try_pure_scroll_fast_path(
+        &mut self,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+        now: Instant,
+    ) -> bool {
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
+        };
+        // 必须：缓存仍 computed_valid、layout_valid，且除 scroll_epoch 外一切匹配，
+        // 且确实是 scroll_epoch 发生了变化（否则该路径无事可做，交给常规匹配判定）。
+        if !cached.computed_valid || !cached.layout_valid {
+            return false;
+        }
+        if cached.scroll_epoch == self.scroll_epoch {
+            return false;
+        }
+        if !self.scene_cache_fields_match_ignoring_scroll(
+            cached,
+            viewport,
+            units,
+            caret_visible,
+            active_scrollbar,
+        ) {
+            return false;
+        }
+        let Some(layout) = cached.layout.as_ref() else {
+            return false;
+        };
+        // virtual 容器滚动会改变窗口化 plan（结构性），不在纯滚动快路径覆盖范围。
+        if layout.contains_virtual() {
+            return false;
+        }
+        // 收集本帧实际发生滚动、且仍在当前布局树中的脏容器。
+        let mut affected: HashSet<WidgetId> = HashSet::new();
+        for widget_id in self.scroll_dirty_widgets.iter().copied() {
+            if layout.path_for(widget_id).is_some() {
+                affected.insert(widget_id);
+            }
+        }
+        if affected.is_empty() {
+            return false;
+        }
+        let roots = self.highest_layout_roots_smallvec(layout, &affected);
+        if roots.is_empty() {
+            return false;
+        }
+        let roots = roots.to_vec();
+        if !self.patch_cached_scene_for_roots(&roots, now, true) {
+            // patch 失败：保持 cached 未被破坏（patch 在失败前不写 computed），落回整帧重收集。
+            return false;
+        }
+        // patch 以 sync_runtime_scene_state=true 同步了 scroll_epoch 等运行时状态。
+        self.scroll_dirty_widgets.clear();
+        #[cfg(test)]
+        scroll_fast_path_probe::record_hit();
+        true
     }
 
     pub(in crate::runtime) fn computed_scene(&mut self) -> &ComputedScene<VM> {
@@ -185,6 +279,31 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .expect("text input scene patch should preserve cached scene")
                     .computed;
             }
+        }
+
+        // Phase 4 纯滚动快路径：仅 scroll_epoch 变化时,只重收集滚动子树而非整树。
+        // 命中即直接返回已更新的 cached.computed；不命中(前置不满足/patch 失败)
+        // 落回下方常规 `!cache_valid` 整帧重收集,行为与未开启特性时完全一致。
+        #[cfg(feature = "transform-only-scroll")]
+        if !cache_valid
+            && layout_cache_valid
+            && self.try_pure_scroll_fast_path(viewport, units, caret_visible, active_scrollbar, now)
+        {
+            if let Some(started_at) = started_at {
+                log_text_profile(
+                    "textarea_computed_scene",
+                    started_at.elapsed(),
+                    format!(
+                        "path=pure_scroll_patch cache_valid={} layout_cache_valid={} cache_mismatch={}",
+                        cache_valid, layout_cache_valid, cache_mismatch
+                    ),
+                );
+            }
+            return &self
+                .cached_scene
+                .as_ref()
+                .expect("pure scroll patch should preserve cached scene")
+                .computed;
         }
 
         let widget_states = self.widget_state_map(active_scrollbar);
@@ -516,6 +635,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 scene_chunk_parts: collected.chunk_parts,
                 visual_contexts: collected.visual_contexts,
             });
+            // 整帧重收集已用最新 scroll_states 重算全树并把 cached.scroll_epoch 同步到当前,
+            // 任何积压的滚动脏标记都已被该重收集覆盖,清空避免下帧误判。
+            #[cfg(feature = "transform-only-scroll")]
+            self.scroll_dirty_widgets.clear();
             if let Some(cached) = self.cached_scene.as_ref() {
                 let bindings = if let Some(layout) = cached.layout.as_ref() {
                     cached
