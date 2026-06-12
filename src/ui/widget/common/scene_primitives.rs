@@ -379,6 +379,139 @@ impl ScenePrimitives {
         self.overlay_commands
             .extend(other.overlay_commands.iter().cloned());
     }
+
+    /// 各渲染流当前的命令数量快照。Phase 1 splice 快路径用它在
+    /// 「祖先链向上 `extend` 拼接」的纯连接模型下，给每个子树在根扁平场景里
+    /// 定位出稳定的命令区间起点。
+    #[cfg(feature = "fine-grained-splice")]
+    pub(crate) fn counts(&self) -> SceneCounts {
+        SceneCounts {
+            backdrop_blurs: self.backdrop_blurs.len(),
+            brushes: self.brushes.len(),
+            canvas_composites: self.canvas_composites.len(),
+            shapes: self.shapes.len(),
+            meshes: self.meshes.len(),
+            textures: self.textures.len(),
+            #[cfg(feature = "video")]
+            video_textures: self.video_textures.len(),
+            texts: self.texts.len(),
+            commands: self.commands.len(),
+            overlay_shapes: self.overlay_shapes.len(),
+            overlay_textures: self.overlay_textures.len(),
+            overlay_meshes: self.overlay_meshes.len(),
+            overlay_texts: self.overlay_texts.len(),
+            overlay_commands: self.overlay_commands.len(),
+        }
+    }
+
+    /// 把 `chunk` 的各主渲染流原地覆盖到 `self` 从 `offset` 起、长度为 `chunk` 流长度的
+    /// 区间上。调用方必须保证 `offset + chunk.len == old_chunk.len`（数量一致，纯属性变化），
+    /// 否则区间越界返回 `false`、`self` 不被修改，调用方回退到 recompose。
+    ///
+    /// 仅覆盖主渲染流（overlay_* 由 finalize 阶段独立维护，splice 快路径只在子树
+    /// 不含 overlay 内容时启用，见 `ComputedScene::is_simple_for_splice`）。
+    #[cfg(feature = "fine-grained-splice")]
+    pub(crate) fn splice_in_place(
+        &mut self,
+        offset: &SceneCounts,
+        chunk: &ScenePrimitives,
+    ) -> bool {
+        fn overwrite<T: Clone>(dst: &mut [T], start: usize, src: &[T]) -> bool {
+            let Some(end) = start.checked_add(src.len()) else {
+                return false;
+            };
+            if end > dst.len() {
+                return false;
+            }
+            dst[start..end].clone_from_slice(src);
+            true
+        }
+        overwrite(
+            &mut self.backdrop_blurs,
+            offset.backdrop_blurs,
+            &chunk.backdrop_blurs,
+        ) && overwrite(&mut self.brushes, offset.brushes, &chunk.brushes)
+            && overwrite(
+                &mut self.canvas_composites,
+                offset.canvas_composites,
+                &chunk.canvas_composites,
+            )
+            && overwrite(&mut self.shapes, offset.shapes, &chunk.shapes)
+            && overwrite(&mut self.meshes, offset.meshes, &chunk.meshes)
+            && overwrite(&mut self.textures, offset.textures, &chunk.textures)
+            && {
+                #[cfg(feature = "video")]
+                {
+                    overwrite(
+                        &mut self.video_textures,
+                        offset.video_textures,
+                        &chunk.video_textures,
+                    )
+                }
+                #[cfg(not(feature = "video"))]
+                {
+                    true
+                }
+            }
+            && overwrite(&mut self.texts, offset.texts, &chunk.texts)
+            && overwrite(&mut self.commands, offset.commands, &chunk.commands)
+    }
+}
+
+/// 每个渲染流的命令数量。既用作 splice 的区间起点偏移（沿 root→target 路径累加），
+/// 也用作 splice 资格判定的「数量一致性」对比。
+#[cfg(feature = "fine-grained-splice")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct SceneCounts {
+    pub backdrop_blurs: usize,
+    pub brushes: usize,
+    pub canvas_composites: usize,
+    pub shapes: usize,
+    pub meshes: usize,
+    pub textures: usize,
+    #[cfg(feature = "video")]
+    pub video_textures: usize,
+    pub texts: usize,
+    pub commands: usize,
+    pub overlay_shapes: usize,
+    pub overlay_textures: usize,
+    pub overlay_meshes: usize,
+    pub overlay_texts: usize,
+    pub overlay_commands: usize,
+}
+
+#[cfg(feature = "fine-grained-splice")]
+impl SceneCounts {
+    /// 累加另一段的各流数量（offset 沿子树路径向前推进时用）。
+    pub(crate) fn add_assign(&mut self, other: &SceneCounts) {
+        self.backdrop_blurs += other.backdrop_blurs;
+        self.brushes += other.brushes;
+        self.canvas_composites += other.canvas_composites;
+        self.shapes += other.shapes;
+        self.meshes += other.meshes;
+        self.textures += other.textures;
+        #[cfg(feature = "video")]
+        {
+            self.video_textures += other.video_textures;
+        }
+        self.texts += other.texts;
+        self.commands += other.commands;
+        self.overlay_shapes += other.overlay_shapes;
+        self.overlay_textures += other.overlay_textures;
+        self.overlay_meshes += other.overlay_meshes;
+        self.overlay_texts += other.overlay_texts;
+        self.overlay_commands += other.overlay_commands;
+    }
+
+    /// 该段是否完全没有 overlay 流内容。splice 快路径要求子树不产生 overlay/portal，
+    /// 否则 `finalize_portals` / `finalize_overlay_layers` 会改变流偏移，原地覆盖不成立。
+    pub(crate) fn has_no_overlay(&self) -> bool {
+        self.overlay_shapes == 0
+            && self.overlay_textures == 0
+            && self.overlay_meshes == 0
+            && self.overlay_texts == 0
+            && self.overlay_commands == 0
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

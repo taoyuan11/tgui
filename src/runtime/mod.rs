@@ -1,4 +1,5 @@
 mod accessibility;
+mod action_stats;
 mod application_handler;
 mod binding_sync;
 mod bootstrap;

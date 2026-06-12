@@ -34,6 +34,9 @@ mod imp {
 
     #[inline(always)]
     pub(crate) fn record_node() {}
+
+    #[inline(always)]
+    pub(crate) fn record_node_visible() {}
 }
 
 #[cfg(feature = "collect-profile")]
@@ -50,6 +53,7 @@ mod imp {
         static TEXT: Cell<Duration> = const { Cell::new(Duration::ZERO) };
         static BOOKKEEPING: Cell<Duration> = const { Cell::new(Duration::ZERO) };
         static NODE_COUNT: Cell<u64> = const { Cell::new(0) };
+        static VISIBLE_NODE_COUNT: Cell<u64> = const { Cell::new(0) };
     }
 
     fn slot(phase: Phase) -> &'static std::thread::LocalKey<Cell<Duration>> {
@@ -83,6 +87,17 @@ mod imp {
         NODE_COUNT.with(|cell| cell.set(cell.get() + 1));
     }
 
+    /// 统计一个其 frame 与视口相交的「可见」节点。与 `record_node`（重收集节点总数）
+    /// 配对，给出 `recollect/visible` 比值：≈1 表示重收集贴近可见集合，远大于 1 表示
+    /// 大量浪费在视口外子树。
+    #[inline]
+    pub(crate) fn record_node_visible() {
+        if !ENABLED.with(Cell::get) {
+            return;
+        }
+        VISIBLE_NODE_COUNT.with(|cell| cell.set(cell.get() + 1));
+    }
+
     /// 启用探针并清零累计。仅被 `#[ignore]` 的画像测试使用,故同时按 `test` 门控,
     /// 避免非测试的 `cargo check --features collect-profile` 报「未使用」警告。
     #[cfg(test)]
@@ -94,6 +109,7 @@ mod imp {
         TEXT.with(|cell| cell.set(Duration::ZERO));
         BOOKKEEPING.with(|cell| cell.set(Duration::ZERO));
         NODE_COUNT.with(|cell| cell.set(0));
+        VISIBLE_NODE_COUNT.with(|cell| cell.set(0));
     }
 
     /// 读出累计并关闭探针。仅被 `#[ignore]` 的画像测试使用,故同时按 `test` 门控,
@@ -110,13 +126,14 @@ mod imp {
             text_ms: ms(&TEXT),
             bookkeeping_ms: ms(&BOOKKEEPING),
             node_count: NODE_COUNT.with(Cell::get),
+            visible_node_count: VISIBLE_NODE_COUNT.with(Cell::get),
         };
         ENABLED.with(|cell| cell.set(false));
         breakdown
     }
 }
 
-pub(crate) use imp::{record_node, timed};
+pub(crate) use imp::{record_node, record_node_visible, timed};
 
 #[cfg(all(feature = "collect-profile", test))]
 pub(crate) use imp::{reset, snapshot};
@@ -132,4 +149,5 @@ pub(crate) struct PhaseBreakdown {
     pub text_ms: f64,
     pub bookkeeping_ms: f64,
     pub node_count: u64,
+    pub visible_node_count: u64,
 }

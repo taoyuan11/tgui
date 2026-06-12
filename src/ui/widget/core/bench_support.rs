@@ -110,6 +110,35 @@ impl WidgetBenchmarkContext {
         }
     }
 
+    /// Phase 0 单属性更新基准的入口：模拟「改一个深层叶子的视觉属性」走的子树 patch ——
+    /// 重收集该叶子自己的 chunk，再沿祖先链 `recompose_scene_chunk` 向上合成到根
+    /// （即运行时 `scene_subtree_patch` 的核心成本）。返回是否成功 patch（失败表示
+    /// 走了回退，bench 不应把这种样本计入）。预期在 `single_property_update` bench 中与
+    /// `recollect_scene_only`（整树重收集，对照上界）对比。
+    #[allow(dead_code)]
+    pub fn patch_single_deep_leaf_scene(&mut self, tree: &WidgetTree<()>, now: Instant) -> bool {
+        if self.cached_scene.is_none() {
+            self.sync_cache(tree, now, true);
+        }
+        let Some(layout) = self.cached_layout.as_ref() else {
+            return false;
+        };
+        let Some(leaf) = Self::deepest_leaf_id(layout) else {
+            return false;
+        };
+        self.patch_scene_roots(&[leaf], false)
+    }
+
+    /// 找到布局里深度最大的叶子 widget id（无子节点）。用于把单属性更新的成本
+    /// 集中在「最深 → 根」的最长祖先链上，复现 roadmap 描述的超线性 patch 场景。
+    #[allow(dead_code)]
+    fn deepest_leaf_id(layout: &ResolvedSceneLayout<()>) -> Option<WidgetId> {
+        layout
+            .all_widget_ids()
+            .filter(|id| layout.subtree_widget_ids(*id).len() == 1)
+            .max_by_key(|id| layout.depth_of(*id))
+    }
+
     #[allow(dead_code)]
     pub fn run_layout(&mut self, tree: &WidgetTree<()>, now: Instant) -> WidgetBenchmarkStats {
         self.sync_cache(tree, now, false);
@@ -537,11 +566,18 @@ mod tests {
             let wall_ms = wall.elapsed().as_secs_f64() * 1000.0 / RUNS as f64;
             let b = crate::ui::widget::core::collect_profile::snapshot();
             let per = |total: f64| total / RUNS as f64;
+            let nodes = b.node_count / RUNS as u64;
+            let visible = b.visible_node_count / RUNS as u64;
+            let ratio = if visible == 0 {
+                f64::INFINITY
+            } else {
+                nodes as f64 / visible as f64
+            };
             println!(
-                "n={node_count}: wall={wall_ms:.2}ms/frame nodes={} \
+                "n={node_count}: wall={wall_ms:.2}ms/frame nodes={nodes} visible={visible} \
+                 recollect/visible={ratio:.2} \
                  visual_state={:.2}ms surface={:.2}ms kind_body(incl recursion)={:.2}ms \
                  text={:.2}ms bookkeeping={:.2}ms",
-                b.node_count / RUNS as u64,
                 per(b.visual_state_ms),
                 per(b.surface_ms),
                 per(b.kind_body_ms),

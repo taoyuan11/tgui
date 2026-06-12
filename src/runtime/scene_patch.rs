@@ -1,5 +1,24 @@
 use super::*;
 
+/// 测试探针：记录 splice 快路径成功命中的次数，让测试能断言「确实走了 splice 而非
+/// 回退到 recompose」。仅在测试构建里编译，热路径零成本。
+#[cfg(all(test, feature = "fine-grained-splice"))]
+pub(in crate::runtime) mod splice_probe {
+    use std::cell::Cell;
+    thread_local! {
+        static HITS: Cell<u64> = const { Cell::new(0) };
+    }
+    pub(in crate::runtime) fn record_hit() {
+        HITS.with(|h| h.set(h.get() + 1));
+    }
+    pub(in crate::runtime) fn reset() {
+        HITS.with(|h| h.set(0));
+    }
+    pub(in crate::runtime) fn hits() -> u64 {
+        HITS.with(Cell::get)
+    }
+}
+
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn patch_cached_layout_for_roots(
         &mut self,
@@ -285,6 +304,32 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .dependencies
                 .remove_widget_phase_owners(&scene_owner_ids, DependencyPhase::Scene);
 
+            // Phase 1 splice 资格判定：必须在「存入新 chunk」之前读取旧 root chunk。
+            // 仅当单 root patch、且该 subtree 的合并 chunk 新旧各流命令数量完全一致、
+            // 且新旧都不含 overlay/portal/scroll/focus 等结构性内容时，才记下 splice 计划。
+            // 任一条件不满足 → splice_plan 为 None，走原 recompose。
+            #[cfg(feature = "fine-grained-splice")]
+            let splice_plan: Option<(WidgetId, ComputedScene<VM>)> =
+                if roots.len() == 1 && patches.len() == 1 {
+                    let target = roots[0];
+                    match (
+                        patches[0].cache.chunks.get(&target),
+                        cached.scene_chunks.get(&target),
+                    ) {
+                        (Some(new_chunk), Some(old_chunk))
+                            if new_chunk.is_simple_for_splice()
+                                && old_chunk.is_simple_for_splice()
+                                && new_chunk.scene_counts() == old_chunk.scene_counts()
+                                && new_chunk.hit_regions.len() == old_chunk.hit_regions.len() =>
+                        {
+                            Some((target, new_chunk.clone()))
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+
             for patch in patches {
                 let new_ids: HashSet<_> = patch.cache.chunks.keys().copied().collect();
                 for old_id in &patch.old_ids {
@@ -305,16 +350,64 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let mut ancestors = ancestor_ids.into_iter().collect::<Vec<_>>();
             ancestors.sort_by_key(|widget_id| std::cmp::Reverse(layout.depth_of(*widget_id)));
             ancestor_count = ancestors.len();
-            for ancestor in ancestors {
-                if layout
-                    .recompose_scene_chunk(
-                        ancestor,
-                        &cached.scene_chunk_parts,
-                        &mut cached.scene_chunks,
-                    )
-                    .is_none()
-                {
-                    return false;
+
+            // Phase 1 splice 快路径：把目标子树的新 chunk 原地覆盖进每个严格祖先 chunk
+            // 的稳定区间，跳过「逐级 recompose 向上重合成」。纯连接模型下，这与 recompose
+            // 的结果逐字节等价（只有目标子树的字节变化，且新旧数量一致 → 后续偏移不动）。
+            // 任一前置不满足（缺 chunk_parts / 子 chunk / 偏移越界）即 return false，
+            // 由调用方 invalidate_computed_scene() 安全回退整帧重收集。
+            #[cfg(feature = "fine-grained-splice")]
+            let did_splice = if let Some((target, new_chunk)) = splice_plan.as_ref() {
+                match layout.scene_splice_ancestor_offsets(
+                    *target,
+                    &cached.scene_chunk_parts,
+                    &cached.scene_chunks,
+                ) {
+                    Some(offsets) => {
+                        let mut ok = true;
+                        for (ancestor_id, offset, hit_offset, scroll_offset) in &offsets {
+                            let Some(ancestor_chunk) = cached.scene_chunks.get_mut(ancestor_id)
+                            else {
+                                ok = false;
+                                break;
+                            };
+                            if !ancestor_chunk.splice_chunk_in_place(
+                                offset,
+                                *hit_offset,
+                                *scroll_offset,
+                                new_chunk,
+                            ) {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        if !ok {
+                            return false;
+                        }
+                        #[cfg(test)]
+                        splice_probe::record_hit();
+                        true
+                    }
+                    None => false,
+                }
+            } else {
+                false
+            };
+            #[cfg(not(feature = "fine-grained-splice"))]
+            let did_splice = false;
+
+            if !did_splice {
+                for ancestor in ancestors {
+                    if layout
+                        .recompose_scene_chunk(
+                            ancestor,
+                            &cached.scene_chunk_parts,
+                            &mut cached.scene_chunks,
+                        )
+                        .is_none()
+                    {
+                        return false;
+                    }
                 }
             }
             if let Some(recompose_started_at) = recompose_started_at {

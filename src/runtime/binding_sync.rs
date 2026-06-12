@@ -146,6 +146,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let bindings_redraw = self.sync_bindings(now);
             let invalidation_action =
                 self.invalidate_cached_scene_for_dependencies(dirty_kind, &dirty_dependencies, now);
+            super::action_stats::record(invalidation_action);
             let requested_redraw = bindings_redraw || invalidation_action != "unrelated";
 
             if requested_redraw {

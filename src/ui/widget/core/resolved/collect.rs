@@ -191,11 +191,15 @@ impl<VM: 'static> ResolvedElement<VM> {
                 active: scope.is_active(),
             });
         }
-        use super::super::collect_profile::{record_node, timed, Phase};
+        use super::super::collect_profile::{record_node, record_node_visible, timed, Phase};
         record_node();
         let visual = timed(Phase::VisualState, || {
             self.resolve_collect_visual_state(layout_node, visual_context, context)
         });
+        // 节点 frame 与视口相交即记一次「可见」，配合 `record_node` 给出 recollect/visible 比值。
+        if visual.frame.intersect(context.viewport).is_some() {
+            record_node_visible();
+        }
         timed(Phase::Surface, || {
             self.push_surface_primitives_and_base_hit_regions(&mut computed, context, &visual)
         });

@@ -29,7 +29,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = []
+default = ["fine-grained-splice"]
 audio = ["dep:ffmpeg-next", "dep:cpal"]
 video = ["audio"]
 video-static = ["video", "ffmpeg-next/static"]
@@ -43,6 +43,13 @@ mimalloc = ["dep:mimalloc"]
 # 基准只开 bench-support,probe 编译成 inline 空操作,热路径零成本、不污染基准数字。
 # 需要相位画像时单独开启 collect-profile(它自动带上 bench-support)。
 collect-profile = ["bench-support"]
+# Phase 1（细粒度响应式）：叶子/子树 scene-only patch 的「场景命令原地拼接」快路径。
+# 当一次 scene patch 命中单个 root、且新旧 chunk 的各流命令数量完全一致、且子树不含
+# overlay/portal/scroll/focus/anchor/carousel/virtual/ime 等会改变后续偏移或需要 finalize
+# 的内容时,直接把新 chunk 原地 splice 进 `cached.computed` 与各祖先 chunk 的稳定区间,
+# 跳过「祖先链 recompose_scene_chunk 向上重合成到根」。任一前置条件不满足即干净回退到
+# 现有 recompose 路径,绝不产生错误渲染。默认开启,可关闭作为逃生口。
+fine-grained-splice = []
 
 [dependencies]
 accesskit = "0.24"
@@ -131,6 +138,11 @@ required-features = ["bench-support"]
 
 [[bench]]
 name = "widget_core_layout"
+harness = false
+required-features = ["bench-support"]
+
+[[bench]]
+name = "single_property_update"
 harness = false
 required-features = ["bench-support"]
 

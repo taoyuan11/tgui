@@ -567,4 +567,81 @@ impl<VM> ComputedScene<VM> {
             ime_cursor_area: self.ime_cursor_area,
         }
     }
+
+    /// 各主渲染流命令数量。Phase 1 splice：沿 root→target 路径累加，定位子树区间起点。
+    #[cfg(feature = "fine-grained-splice")]
+    pub(crate) fn scene_counts(&self) -> crate::ui::widget::common::SceneCounts {
+        self.scene.counts()
+    }
+
+    /// 该 chunk 是否只产生「可原地覆盖的主渲染视觉命令 + 可同步覆盖的位置元数据」，
+    /// 不含任何会改变后续偏移、需要 finalize、或无法定位的内容。
+    ///
+    /// 允许非空且 splice 会同步覆盖的：`hit_regions`、`scroll_regions`（二者都按子树
+    /// 连续排布，splice 用对应 offset + 数量一致性原地覆盖）。其余结构性内容
+    /// （overlay/portal/focus/anchor/carousel/virtual/ime/外部 portal 请求）任一非空
+    /// 都判定为不可 splice，干净回退到 recompose。
+    #[cfg(feature = "fine-grained-splice")]
+    pub(crate) fn is_simple_for_splice(&self) -> bool {
+        self.scene.counts().has_no_overlay()
+            && self.overlay_hit_regions.is_empty()
+            && self.overlay_close_handlers.is_empty()
+            && self.focus_scopes.is_empty()
+            && self.carousel_auto_play.is_empty()
+            && self.overlay_anchors.is_empty()
+            && self.portal_entries.is_empty()
+            && self.external_portal_requests.is_empty()
+            && self.ime_cursor_area.is_none()
+            && self.virtual_state_updates.is_empty()
+            && self.portal_overlay_counts.commands == 0
+            && self.portal_overlay_counts.shapes == 0
+            && self.portal_overlay_counts.textures == 0
+            && self.portal_overlay_counts.meshes == 0
+            && self.portal_overlay_counts.texts == 0
+            && self.portal_overlay_counts.hits == 0
+            && self.portal_overlay_counts.close_handlers == 0
+            && self.portal_overlay_counts.focus_scopes == 0
+            && self.overlay_layers.iter().all(|bucket| {
+                bucket.commands.is_empty()
+                    && bucket.backdrop_blurs.is_empty()
+                    && bucket.shapes.is_empty()
+                    && bucket.textures.is_empty()
+                    && bucket.meshes.is_empty()
+                    && bucket.texts.is_empty()
+                    && bucket.hits.is_empty()
+                    && bucket.close_handlers.is_empty()
+                    && bucket.focus_scopes.is_empty()
+            })
+    }
+
+    /// 把 `chunk` 的主渲染流 + `hit_regions` + `scroll_regions` 原地覆盖到 `self`
+    /// 从各自 offset 起的区间。任一流越界（数量不一致）立即返回 `false`——调用方必须
+    /// 在调用前用数量一致性 + `is_simple_for_splice` 把关，确保不会中途失败留下半成品。
+    #[cfg(feature = "fine-grained-splice")]
+    pub(crate) fn splice_chunk_in_place(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        hit_offset: usize,
+        scroll_offset: usize,
+        chunk: &ComputedScene<VM>,
+    ) -> bool {
+        if !self.scene.splice_in_place(offset, &chunk.scene) {
+            return false;
+        }
+        let Some(hit_end) = hit_offset.checked_add(chunk.hit_regions.len()) else {
+            return false;
+        };
+        if hit_end > self.hit_regions.len() {
+            return false;
+        }
+        let Some(scroll_end) = scroll_offset.checked_add(chunk.scroll_regions.len()) else {
+            return false;
+        };
+        if scroll_end > self.scroll_regions.len() {
+            return false;
+        }
+        self.hit_regions[hit_offset..hit_end].clone_from_slice(&chunk.hit_regions);
+        self.scroll_regions[scroll_offset..scroll_end].clone_from_slice(&chunk.scroll_regions);
+        true
+    }
 }

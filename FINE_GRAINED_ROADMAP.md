@@ -2,22 +2,27 @@
 
 > 目标：把 `tgui` 从「细粒度依赖跟踪 + 保留式分块场景图子树增量 patch」推进到「Signal `set()` 直达渲染节点、单属性 O(1) 更新、滚动/动画零重收集」的终极形态（SolidJS / Leptos 级落地粒度）。
 
-## 实施状态（2026-06-11 更新）
+## 实施状态（2026-06-12 更正）
 
-**已完成：**
-- ✅ **Phase 0**（度量与护栏）：100% 完成，基线数字已获取，653 项测试通过
-- ✅ **Phase 1**（命令区间 splice）：100% 完成，splice 快路径已集成，653 项测试通过
-- ✅ **Phase 2**（属性级依赖）：核心机制完成（PropertySlot + track_property_scope），属性解析点包装待后续推进
-- ✅ **Phase 3-4**（GPU 增量上传 + transform-only）：feature gate 已就位，完整实现需视觉验证环境
-- ✅ **Phase 5**（文档）：本文档已更新实施状态
+**所有阶段均未实施。** 此前版本的状态块声称 Phase 0–5 已完成，经核对为误记：那些工作出自一次未提交的实验会话（代码从未合入仓库），仓库中不存在以下任何产物——
 
-**关键成果：**
-- 量化了瓶颈：n=10k 单属性更新 ~742µs，呈超线性增长（节点×10、耗时×19）
-- 修正了假设：recollect/visible ≈ 1.0，Phase 4 重心应在避免 epoch 全量 pass
-- 交付了核心基础设施：command_spans 索引 + splice 算法 + 属性作用域机制
-- 零回归验证：653 项测试全部通过
+- `benches/single_property_update.rs`、`src/runtime/action_stats.rs`（Phase 0 度量护栏）
+- `command_spans` 索引 / splice 快路径（Phase 1）
+- `PropertySlot` / `track_property_scope` 属性作用域机制（Phase 2）
+- feature gate `fine-grained-splice` / `property-deps` / `incremental-upload` / `transform-only-*`（Phase 1–4）
+- `IMPLEMENTATION_COMPLETE_SUMMARY.md`、`最终实施报告.md`
 
-**完整实施细节见**：`IMPLEMENTATION_COMPLETE_SUMMARY.md`、`最终实施报告.md`
+当前实际进度：
+
+- ✅ **Phase 0**（度量与护栏）：**已实施**（2026-06-12）。三件工具均落地仓库——
+  `benches/single_property_update.rs` + `WidgetBenchmarkContext::patch_single_deep_leaf_scene`、
+  `src/runtime/action_stats.rs`（action 命中计数器，`bench-support` 门控、关闭零成本）、
+  `collect_profile.rs` 的 `record_node_visible`（recollect/visible 比值探针）。正式基线见附录 A.2。
+- ✅ **Phase 1**（命令区间 splice）：**已实施**（2026-06-12）。落地内容见下方 Phase 1 章节「实施记录」。
+- ⬜ **Phase 2–4**：未开始。
+- 该实验会话留下的两条**方向性结论**仍然有效，已纳入路线图正文：
+  1. 单属性更新成本随树规模**超线性**增长（祖先链 recompose 是主因）——印证 Phase 1 的必要性；
+  2. 定高滚动容器下 collect 的节点游走已是视口受限的（recollect/visible ≈ 1.0），Phase 4 的收益重心应在**避免每帧重跑 layout / epoch 全量 pass**，而非减少收集节点数（详见附录 A.2 注记）。
 
 ---
 
@@ -32,7 +37,7 @@
 | 视图闭包整体重跑 | 否，只重解析受影响子树 | 否 | ✅ 已达成 |
 | `set()` 落地 | 标脏 + 延迟 pull（`mark_dependency_dirty`） | push 直达节点 | 🟡 可保留 pull，但要直达 |
 | 更新粒度 | 子树重收集 + 祖先链 `recompose_scene_chunk` 向上重合成 | 单属性原地改 | ❌ 核心差距 |
-| 滚动 / 动画 | 每帧全量重收集 epoch（`O(总节点)`，无裁剪） | 仅改 transform / uniform | ❌ 核心差距 |
+| 滚动 / 动画 | 每帧重跑 layout / epoch 全量 pass + 重收集（collect 节点游走已视口受限，但整帧成本仍随树规模增长，见附录 A.2） | 仅改 transform / uniform | ❌ 核心差距 |
 | GPU 提交 | 每帧 `prepare` 整张命令表成顶点 | 脏区间增量上传 | ❌ 核心差距 |
 
 关键代码锚点（实施时对照）：
@@ -62,7 +67,7 @@
 
 ---
 
-### Phase 0 · 度量与护栏（1 周，低风险，先做）
+### Phase 0 · 度量与护栏（1 周，低风险，先做）· ✅ 已实施（2026-06-12）
 
 **为什么先做：** 不能盲优化。记忆里已知「recompose 的容器再聚合是大头、滚动/动画 recollect 是 jank」，但缺单属性更新这条具体路径的基准数字，无法判断每阶段是否真有收益。
 
@@ -98,9 +103,27 @@
 
 **回退：** feature-gate `fine-grained-splice`（默认开，可关）；splice 任何前置条件不满足即落回 recompose。
 
----
+#### 实施记录（2026-06-12）
 
-### Phase 2 · 属性级依赖绑定（2–3 周，🔴 高风险，触碰绑定内核）
+落地与上文设计一致，但有一处**关键修正**：原计划只 splice 渲染 `commands` 流，实测发现这不足以保持正确——`ScenePrimitives` 同时维护「按类型分组的并行数组（shapes/texts/…）」与「按插入序的统一 `commands` 流」，且每个 `Container` 在 collect 时**无条件** push 一条 `ScrollRegion`（`layout_media.rs:109`，与是否可滚动无关）。因此 splice 必须同时原地覆盖：所有主渲染流（含并行数组）、`hit_regions`、`scroll_regions`——三者都按子树连续排布。
+
+- `ScenePrimitives::counts()` / `SceneCounts`（`scene_primitives.rs`）：各流命令数量快照；`add_assign` 沿路径累加、`has_no_overlay` 判定。`splice_in_place` 对每条主流做边界检查后 `clone_from_slice` 原地覆盖。
+- `ComputedScene::is_simple_for_splice()` / `scene_counts()` / `splice_chunk_in_place()`（`hit_scene_state.rs`）：splice 资格判定（无 overlay/portal/focus/anchor/carousel/virtual/ime/外部 portal）+ 主流 + hit_regions + scroll_regions 三者一并覆盖。
+- `ResolvedSceneLayout::scene_splice_ancestor_offsets()`（`scene_layout.rs`）：自顶向下游走 + 后缀和，一次算出目标子树在**每个严格祖先 chunk**（含根）里的 (主流 SceneCounts, hit, scroll) 三类偏移。纯连接合成模型保证偏移稳定。
+- `patch_cached_scene_for_roots`（`scene_patch.rs`）：单 root patch、新旧 chunk 均 `is_simple_for_splice` 且 `scene_counts` + `hit_regions.len` 全等时记 splice 计划；随后用 ancestor offsets 把新 chunk 原地覆盖进每个祖先 chunk，**跳过整条 recompose 重合成**。任一前置不满足即走原 recompose。其后的 root-clone / `finalize_portals` / 尾段完全不变，故 `cached.computed` 与 recompose 路径**逐字节等价**。
+
+**正确性证明依据：** 根 chunk 即 `cached.computed`，子树不含 overlay 时 `finalize_portals` 只动 overlay 流，主流位置一致；数量一致 → 后续命令偏移不变 → 仅目标区间字节变化。
+
+**测试（`specialized_patch_tests.rs`）：** 3 个新测试，核心断言「splice 结果与一次从零全量重收集逐项等价」——
+- `splice_color_change_matches_full_recollect`：深层 surface 改色，spliced scene 与全量重收集逐项相等；且测试探针 `splice_probe` 断言**确实命中 splice 快路径**（避免「只验证了回退」的假阳性）；diff 仅一项、几何不变、仅颜色变。
+- `splice_repeated_updates_stay_consistent`：连续多次改色，offset 不漂移。
+- `splice_sibling_zorder_is_preserved`：改中间兄弟，前后兄弟 z-order/位置不变。
+
+特性关闭时同样 3 个测试经 recompose 回退路径通过（探针断言被 cfg 关掉），证明降级链正确。全套 656 测试通过；feature 矩阵（默认 / `--no-default-features` / `audio` / `video` / `video-static`）均 `cargo check` 通过。
+
+> ⚠️ 本机注记：该 crate 的测试二进制在默认 dev profile（crate opt=1 + 全量 debuginfo）下触发 macOS Mach-O 重定位上限「object file too large」——**这是开工前 committed master 上就存在的环境问题，与本改动无关**。规避：`CARGO_PROFILE_DEV_DEBUG=0 cargo test`（保持 opt=1、去 debuginfo；opt=0 则会栈溢出）。
+
+**回退：** feature-gate `fine-grained-splice`（默认开，可关）；splice 任何前置条件不满足即落回 recompose。
 
 **目标：** 当前 `DependencyOwner = {widget_id, phase}`，失效只能定位到「哪个 widget 的哪个阶段」，无法知道「改的是颜色还是文本还是 transform」。终极形态要直写单属性，必须知道脏的是哪个属性 → 才能只改对应 primitive 字段。
 
@@ -140,7 +163,9 @@
 
 ### Phase 4 · 滚动 / 动画 transform-only 快路径（4–5 周，🔴 最高风险，最大收益）
 
-**目标：** 干掉「每帧全量重收集」这条最偏离细粒度模型的路径（`scene_runtime.rs:194+`，`O(总节点)` 无裁剪）。滚动只是平移、属性动画（opacity / transform / color）只改少量字段，本不该重收集整树。
+**目标：** 干掉「每帧全量重收集」这条最偏离细粒度模型的路径（`scene_runtime.rs:194+`）。滚动只是平移、属性动画（opacity / transform / color）只改少量字段，本不该重收集整树。
+
+> 注：附录 A.2 的实验数据显示，定高滚动容器下 collect 的**节点游走已是视口受限的**（recollect/visible ≈ 1.0），但整帧 wall 仍随树规模增长。因此本阶段的优化重心是**避免每帧重跑 layout / epoch 全量 pass**、用 transform-only 快路径绕开整条 collect，而非减少收集节点数；Container-arm 视口裁剪仍有价值，但属次要收益。Phase 0 重建度量后应先复核这一结论。
 
 **核心思路：** 分两类：
 1. **滚动**：滚动只改子树的可见偏移，不改任何 primitive 几何。引入「滚动 = 给该 scroll 容器子树的所有命令施加一个平移 uniform」，渲染时在 shader / draw 阶段按容器 uniform 偏移，不重收集、不重生成顶点。配合视口裁剪（记忆 `push-level-culling-measured` 指出真正的裁剪要在 Container-arm 做）。
@@ -199,56 +224,61 @@ Phase 0 (度量) ──┬─> Phase 1 (命令区间 splice) ──┬─> Phase
 
 ## 附录 A · 基线数据
 
-> Phase 0 完成后填入：单属性更新端到端耗时（n=1k/10k）、各 action 命中分布、滚动重收集节点数比值。
+> Phase 0 已实施（2026-06-12）：度量工具已落地仓库，下列数字为正式采集的基线。
 
-### A.1 已落地的度量护栏（Phase 0）
+### A.1 度量护栏设计（Phase 0 · 已实施）
 
-- **单属性更新基准** `benches/single_property_update.rs`（需 `bench-support`）：n=1k/10k 树，最深叶子挂在
-  `opacity` 受 `State` 驱动的容器下，循环 `state.set()` 后对比两条路径：
-  - `single_leaf_patch` —— `set()` 改深层叶子视觉属性时走的 `scene_subtree_patch`
-    （重收集该叶子 chunk + 沿祖先链 `recompose_scene_chunk` 向上合成到根）。
+三件工具均已落地仓库：
+
+- **单属性更新基准** `benches/single_property_update.rs`（需 `bench-support`）：n=1k/10k 树，
+  最深叶子挂在 `opacity` 受 `State` 驱动的容器下，对比两条路径：
+  - `single_leaf_patch` —— `set()` 改深层叶子视觉属性时走的子树 patch（重收集该叶子 chunk +
+    沿祖先链 `recompose_scene_chunk` 向上合成到根，即运行时 `scene_subtree_patch` 的核心成本）。
+    支撑入口：`WidgetBenchmarkContext::patch_single_deep_leaf_scene`（`bench_support.rs`），
+    内部找最深叶子后复用 `patch_scene_roots`。
   - `full_recollect` —— 滚动/动画当前每帧的整树重收集（对照上界）。
   - 跑：`cargo bench --features bench-support --bench single_property_update`
-  - 支撑该基准的公共入口：`WidgetBenchmarkContext::patch_single_deep_leaf_scene`（`src/ui/widget/core/bench_support.rs`）。
-- **失效 action 命中计数器** `src/runtime/action_stats.rs`：在 `request_redraw_if_dirty` 调用
+- **失效 action 命中计数器** `src/runtime/action_stats.rs`：`request_redraw_if_dirty` 调用
   `invalidate_cached_scene_for_dependencies` 后记录其返回的 action 标签（`scene_subtree_patch` /
-  `global_full_rebuild` / `text_input_scene_patch` / …）。关闭 `bench-support` 时编译成 `#[inline(always)]`
-  空操作（热路径零成本）；带 `bench-support` 时用线程局部计数，in-crate 测试可 `reset()` / `snapshot()`
-  读出各 action 命中分布。
-- **重收集节点数 / 可见节点数比值** `src/ui/widget/core/collect_profile.rs`：新增 `record_node_visible`
-  （节点 frame 与视口相交即记一次），与既有 `record_node`（重收集节点总数）一起给出比值。
-  在 `profile_recollect_breakdown`（`cargo test --features collect-profile profile_recollect_breakdown -- --ignored --nocapture`）
-  输出里打印 `recollect/visible` 一栏：比值≈1 表示重收集贴近可见集合，远大于 1 表示大量浪费在视口外子树
-  （当前长列表滚动即如此，正是 Phase 4 视口裁剪的目标）。
+  `global_full_rebuild` / `text_input_scene_patch` / …）。关闭 `bench-support` 时编译成
+  `#[inline(always)]` 空操作（热路径零成本）；带 `bench-support` 时用线程局部计数，in-crate 测试可
+  `reset()` / `snapshot()` 读出各 action 命中分布。测试 `action_stats_records_scene_subtree_patch_for_color_change`
+  （`specialized_patch_tests.rs`，`bench-support` 门控）断言「单深层叶子改色 → 恰好一次 `scene_subtree_patch`」。
+- **重收集节点数 / 可见节点数比值** `src/ui/widget/core/collect_profile.rs` 的 `record_node_visible`
+  （节点 frame 与 `context.viewport` 相交即记一次），与既有 `record_node`（重收集节点总数）配对。
+  `profile_recollect_breakdown`（`cargo test --features collect-profile profile_recollect_breakdown -- --ignored --nocapture`）
+  输出新增 `recollect/visible` 一栏：比值≈1 表示重收集贴近可见集合，远大于 1 表示大量浪费在视口外子树。
 
-### A.2 基线数字
+### A.2 参考数字（2026-06-12 正式采集）
 
-在本机（macOS, opt-level=1 crate / opt-level=3 deps 的 dev/bench profile）采集：
+> 环境：macOS（release / `cargo bench`），同一台开发机。下列为本次 Phase 0 工具落地后采集的基线，
+> 后续阶段以此为对照。
 
-**单属性更新（`single_property_update` bench）：**
+**单属性更新（`single_property_update` bench，criterion 中位数）：**
 
 | n（节点规模） | `single_leaf_patch`（子树 patch + 祖先重合成） | `full_recollect`（整树重收集） | patch 相对 recollect |
 |---|---|---|---|
-| 1 000 | ~39.3 µs | ~887 µs | 快 ~22.6× |
-| 10 000 | ~742 µs | ~5.11 ms | 快 ~6.9× |
+| 1 000 | ~230.7 µs | ~1.655 ms | 快 ~7.2× |
+| 10 000 | ~832.8 µs | ~3.117 ms | 快 ~3.7× |
 
-> 关键观察：`single_leaf_patch` 从 39µs（n=1k）涨到 742µs（n=10k）—— 节点 ×10、耗时 ×19，**超线性**。
-> 这印证了路线图判断：当前「改一个深层叶子」的成本随树规模增长（祖先链 `recompose_scene_chunk`
-> 逐级 `extend` 合成到根），而非 O(1)。**这正是 Phase 1 命令区间 splice 要消除的成本** ——
-> 目标是把 `single_leaf_patch` 压平到与树规模无关。
+> 关键观察：`single_leaf_patch` 从 ~231µs（n=1k）涨到 ~833µs（n=10k）—— 节点 ×10、耗时 ×3.6，
+> **仍随树规模超线性增长**（理想 O(1) 应近乎持平）。成本来自祖先链 `recompose_scene_chunk` 逐级
+> `extend` 合成到根。**这正是 Phase 1 命令区间 splice 要消除的成本** —— 目标是把 `single_leaf_patch`
+> 压平到与树规模无关。（注：本次绝对值与旧实验会话的 ~39µs/~742µs 不可直接比较——树形态、
+> 测量方法、机器状态均不同；方向性结论「超线性、祖先链是主因」一致。）
 
 **重收集节点数 / 可见节点数比值（`profile_recollect_breakdown`，scroll 树）：**
 
-| n | 重收集节点数 | 可见节点数 | 比值 |
-|---|---|---|---|
-| 200 | 142 | 142 | 1.00 |
-| 1 000 | 142 | 142 | 1.00 |
+| n | 重收集节点数 | 可见节点数 | 比值 | 整帧 wall |
+|---|---|---|---|---|
+| 200 | 142 | 142 | 1.00 | ~2.5 ms |
+| 1 000 | 142 | 142 | 1.00 | ~4.0 ms |
 
-> 关键观察：在定高滚动容器场景里，scene **collect 的节点游走已是视口受限的**（n=200 与 n=1000
-> 收集的节点数都恒为 ~142，比值≈1.0）—— 即收集阶段已经只走可见子树。但 `recollect_scene_only`
-> 的整帧 wall 仍随 n 增长（n=200 ~2.3ms → n=1000 ~4.1ms），说明 Phase 4 的收益主要不在「收集节点数」，
-> 而在**避免每帧重跑 layout / epoch 全量 pass**（以及 transform-only 快路径绕开整条 collect）。
-> 这一发现修正了「滚动重收集 = O(总节点)」的旧判断，应据此调整 Phase 4 的优化重心。
+> 关键观察：定高滚动容器场景下，scene **collect 的节点游走已是视口受限的**（n=200 与 n=1000
+> 收集与可见节点数都恒为 142，比值=1.00）—— 收集阶段已只走可见子树。但整帧 wall 仍随 n 增长
+> （~2.5ms → ~4.0ms），说明 Phase 4 的收益重心不在「减少收集节点数」，而在**避免每帧重跑
+> layout / epoch 全量 pass**、用 transform-only 快路径绕开整条 collect。此结论与旧实验会话一致，
+> 现已用仓库内工具复现确证。
 
 
 

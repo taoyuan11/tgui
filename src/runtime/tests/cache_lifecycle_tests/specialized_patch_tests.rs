@@ -262,3 +262,200 @@ fn select_portal_repositions_and_clears_after_scene_patch() {
     assert!(hidden_scene.scene.overlay_shapes.is_empty());
     assert!(hidden_scene.overlay_close_handlers.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Phase 1 · 场景命令原地拼接（fine-grained-splice）
+//
+// 这些测试的核心断言不是「splice 是否被走到」，而是「无论走 splice 还是 recompose，
+// 最终 `cached.computed` 的渲染命令流（顺序 + 内容）都与一次从零的全量重收集逐项等价」。
+// 这把 Phase 1 的正确性红线（z-order 不变、只有目标区间变化、失败能干净回退）钉死。
+// ---------------------------------------------------------------------------
+
+/// 从扁平场景里按渲染顺序抽取每个 shape 的 (rect, color)，用于逐项比对。
+fn shape_fingerprints<VM>(
+    computed: &crate::ui::widget::ComputedScene<VM>,
+) -> Vec<(Dp, Dp, Dp, Dp, Color)> {
+    computed
+        .scene
+        .shapes
+        .iter()
+        .map(|s| (s.rect.x, s.rect.y, s.rect.width, s.rect.height, s.color))
+        .collect()
+}
+
+/// 构造「容器 > [兄弟0, 目标surface, 兄弟2]」的树，目标的背景色受 `state` 驱动。
+/// 改色只改一个 shape 的颜色、不增删命令 —— 命中 splice 快路径的典型场景。
+fn nested_color_tree(color_state: &State<Color>) -> WidgetTree<TestVm> {
+    let target_bg = color_state.signal();
+    let sibling0: Element<TestVm> = Stack::new()
+        .size(dp(20.0), dp(20.0))
+        .style_full(|ctx| {
+            let mut style = ContainerStyle::default_for_theme(ctx.theme);
+            style.surface.background = Some(Color::hexa(0x111111FF).into());
+            style
+        })
+        .into();
+    let target: Element<TestVm> = Stack::new()
+        .size(dp(20.0), dp(20.0))
+        .style_full(move |ctx| {
+            let mut style = ContainerStyle::default_for_theme(ctx.theme);
+            style.surface.background = Some(target_bg.clone().into());
+            style
+        })
+        .into();
+    let sibling2: Element<TestVm> = Stack::new()
+        .size(dp(20.0), dp(20.0))
+        .style_full(|ctx| {
+            let mut style = ContainerStyle::default_for_theme(ctx.theme);
+            style.surface.background = Some(Color::hexa(0x333333FF).into());
+            style
+        })
+        .into();
+    // 再包一层容器，确保目标位于「根 → 中间容器 → 目标」的深层位置，
+    // 这样 splice 必须正确覆盖多个祖先 chunk（含根）才能等价。
+    let inner: Element<TestVm> = Stack::new().child([sibling0, target, sibling2]).into();
+    let root: Element<TestVm> = Stack::new().child(inner).into();
+    WidgetTree::new(root)
+}
+
+#[test]
+fn splice_color_change_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let color = context.state(Color::hexa(0xFF0000FF));
+    let tree = nested_color_tree(&color);
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    let before = shape_fingerprints(handler.computed_scene());
+
+    // 改色 → 走失效决策（命中 scene_subtree_patch，特性开启时内部尝试 splice）。
+    #[cfg(feature = "fine-grained-splice")]
+    crate::runtime::scene_patch::splice_probe::reset();
+    color.set(Color::hexa(0x00FF00FF));
+    handler.request_redraw_if_dirty(Instant::now());
+    // 确认确实走了 splice 快路径，而非回退到 recompose——否则本测试只验证了回退正确性。
+    #[cfg(feature = "fine-grained-splice")]
+    assert_eq!(
+        crate::runtime::scene_patch::splice_probe::hits(),
+        1,
+        "color change should hit the splice fast path exactly once"
+    );
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("scene patch keeps cache shell");
+    assert!(cached.computed_valid);
+    let after_patch = shape_fingerprints(&cached.computed);
+
+    // 强制一次从零的全量重收集，作为「真值」。
+    handler.invalidate_computed_scene();
+    let after_full = shape_fingerprints(handler.computed_scene());
+
+    // 1) patch 结果与全量重收集逐项等价（顺序 + rect + color）。
+    assert_eq!(
+        after_patch, after_full,
+        "spliced scene must be byte-identical to a fresh full recollect"
+    );
+    // 2) 命令数量不变（纯属性变化）。
+    assert_eq!(before.len(), after_patch.len());
+    // 3) 确有且仅有目标那一项颜色发生变化，其余 shape 不动（z-order/内容不变）。
+    let diffs: Vec<usize> = before
+        .iter()
+        .zip(after_patch.iter())
+        .enumerate()
+        .filter(|(_, (a, b))| a != b)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(
+        diffs.len(),
+        1,
+        "exactly one shape should change, got {diffs:?}"
+    );
+    let changed = diffs[0];
+    // 变化项只有颜色变，几何不变。
+    assert_eq!(before[changed].0, after_patch[changed].0);
+    assert_eq!(before[changed].1, after_patch[changed].1);
+    assert_eq!(before[changed].4, Color::hexa(0xFF0000FF));
+    assert_eq!(after_patch[changed].4, Color::hexa(0x00FF00FF));
+}
+
+#[test]
+fn splice_repeated_updates_stay_consistent() {
+    // 连续多次改色：splice 在 counts 不变下原地覆盖，offset 不应漂移。
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let color = context.state(Color::hexa(0xFF0000FF));
+    let tree = nested_color_tree(&color);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    for hex in [0x00FF00FF_u32, 0x0000FFFF, 0xFFFF00FF, 0x00FFFFFF] {
+        color.set(Color::hexa(hex));
+        handler.request_redraw_if_dirty(Instant::now());
+        let after_patch =
+            shape_fingerprints(&handler.cached_scene.as_ref().expect("cache shell").computed);
+        handler.invalidate_computed_scene();
+        let after_full = shape_fingerprints(handler.computed_scene());
+        assert_eq!(
+            after_patch, after_full,
+            "spliced scene diverged from full recollect after setting {hex:#010x}"
+        );
+        assert!(after_patch
+            .iter()
+            .any(|(_, _, _, _, c)| *c == Color::hexa(hex)));
+    }
+}
+
+#[test]
+fn splice_sibling_zorder_is_preserved() {
+    // 改中间兄弟的颜色，前后兄弟（更低/更高 z-order）的命令位置与内容必须不变。
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let color = context.state(Color::hexa(0xFF0000FF));
+    let tree = nested_color_tree(&color);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let before = shape_fingerprints(handler.computed_scene());
+
+    color.set(Color::hexa(0x00FF00FF));
+    handler.request_redraw_if_dirty(Instant::now());
+    let after = shape_fingerprints(&handler.cached_scene.as_ref().expect("cache shell").computed);
+
+    // 兄弟0（固定 0x111111）与兄弟2（固定 0x333333）必须仍在场景中、且保持原相对顺序。
+    let s0 = Color::hexa(0x111111FF);
+    let s2 = Color::hexa(0x333333FF);
+    let pos = |fps: &[(Dp, Dp, Dp, Dp, Color)], c: Color| {
+        fps.iter().position(|(_, _, _, _, col)| *col == c)
+    };
+    let (b0, b2) = (pos(&before, s0), pos(&before, s2));
+    let (a0, a2) = (pos(&after, s0), pos(&after, s2));
+    assert!(b0.is_some() && b2.is_some() && a0.is_some() && a2.is_some());
+    assert_eq!(b0, a0, "sibling0 z-order/position changed");
+    assert_eq!(b2, a2, "sibling2 z-order/position changed");
+    assert!(b0 < b2 && a0 < a2, "sibling relative order must be stable");
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn action_stats_records_scene_subtree_patch_for_color_change() {
+    // Phase 0 度量护栏：改一个深层叶子的颜色，失效决策应命中 `scene_subtree_patch`，
+    // 且 action_stats 计数器把该命中记一次（用于单属性更新的命中分布基线）。
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let color = context.state(Color::hexa(0xFF0000FF));
+    let tree = nested_color_tree(&color);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    crate::runtime::action_stats::reset();
+    color.set(Color::hexa(0x00FF00FF));
+    handler.request_redraw_if_dirty(Instant::now());
+    let snapshot = crate::runtime::action_stats::snapshot();
+
+    assert_eq!(
+        snapshot,
+        vec![("scene_subtree_patch", 1)],
+        "single deep-leaf color change should record exactly one scene_subtree_patch hit"
+    );
+}

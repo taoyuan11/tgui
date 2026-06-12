@@ -301,6 +301,70 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         })
     }
 
+    /// Phase 1 splice 支撑：计算 `target` 子树在它**每一个严格祖先** chunk 里的命令区间
+    /// 起点（主渲染流 SceneCounts 偏移 + hit_regions 偏移），从树根到 `target` 父节点。
+    ///
+    /// 纯连接合成模型下，`target` 在某祖先 `A` 的 chunk 里的偏移 =
+    /// 沿 `A → target` 路径上，每级 `before_children 数量 + 该级目标子节点之前的兄弟子树数量` 之和。
+    /// 用一次自顶向下游走收集每级「局部贡献」，再取后缀和即得各祖先的偏移。
+    /// 返回向量按祖先深度**递增**排列（根在前），其中根的偏移同时适用于 `cached.computed`
+    /// （子树不含 overlay 时，`finalize_portals` 只动 overlay 流，主流逐字节一致）。
+    ///
+    /// 返回 `None` 表示路径上任一节点缺 `chunk_parts` / 子 chunk / 非容器，调用方回退 recompose。
+    #[cfg(feature = "fine-grained-splice")]
+    pub(crate) fn scene_splice_ancestor_offsets(
+        &self,
+        target: WidgetId,
+        chunk_parts: &HashMap<WidgetId, SceneChunkParts<VM>>,
+        chunks: &HashMap<WidgetId, ComputedScene<VM>>,
+    ) -> Option<
+        Vec<(
+            WidgetId,
+            crate::ui::widget::common::SceneCounts,
+            usize,
+            usize,
+        )>,
+    > {
+        use crate::ui::widget::common::SceneCounts;
+        let path = self.path_for(target)?.to_vec();
+        // 每级（每个严格祖先）相对其下一级的局部贡献：(id, 主流数量, hit 数, scroll 数)。
+        let mut locals: Vec<(WidgetId, SceneCounts, usize, usize)> = Vec::with_capacity(path.len());
+        let mut node = &self.resolved_root;
+        for &child_index in &path {
+            let parts = chunk_parts.get(&node.id)?;
+            let mut local = parts.before_children.scene_counts();
+            let mut local_hits = parts.before_children.hit_regions.len();
+            let mut local_scrolls = parts.before_children.scroll_regions.len();
+            let children = match &node.kind {
+                ResolvedWidgetKind::Container { children, .. }
+                | ResolvedWidgetKind::Virtual { children, .. } => children,
+                _ => return None,
+            };
+            for sibling in children.iter().take(child_index) {
+                let sibling_chunk = chunks.get(&sibling.id)?;
+                local.add_assign(&sibling_chunk.scene_counts());
+                local_hits += sibling_chunk.hit_regions.len();
+                local_scrolls += sibling_chunk.scroll_regions.len();
+            }
+            locals.push((node.id, local, local_hits, local_scrolls));
+            node = children.get(child_index)?;
+        }
+        // 后缀和：祖先 a_i 处目标的偏移 = Σ_{j>=i} locals[j]。
+        let mut offsets: Vec<(WidgetId, SceneCounts, usize, usize)> =
+            Vec::with_capacity(locals.len());
+        let mut acc = SceneCounts::default();
+        let mut acc_hits = 0usize;
+        let mut acc_scrolls = 0usize;
+        for (ancestor_id, local, local_hits, local_scrolls) in locals.iter().rev() {
+            acc.add_assign(local);
+            acc_hits += local_hits;
+            acc_scrolls += local_scrolls;
+            offsets.push((*ancestor_id, acc, acc_hits, acc_scrolls));
+        }
+        offsets.reverse();
+        Some(offsets)
+    }
+
     pub(crate) fn recompose_scene_chunk(
         &self,
         widget_id: WidgetId,
