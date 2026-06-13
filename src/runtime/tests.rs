@@ -31,10 +31,11 @@ use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
 use crate::ui::widget::{
     Button, Canvas, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent, CanvasRecorder,
-    CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Checkbox,
-    ContainerStyle, CursorStyle, DataGrid, DataGridColumn, DataGridRow, Flex, FocusScopeOptions,
-    HitInteraction, Input, Point, Rect, ScrollView, Select, SelectOption, Slider, Switch, Text,
-    TextEditState, Textarea, Tooltip, VirtualCacheState, WidgetKey, WidgetTree,
+    CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Carousel,
+    Checkbox, ContainerStyle, CursorStyle, DataGrid, DataGridColumn, DataGridRow, Flex,
+    FocusScopeOptions, HitInteraction, Input, Point, Rect, ScrollView, Select, SelectOption,
+    Slider, Switch, Text, TextEditState, Textarea, Tooltip, VirtualCacheState, WidgetKey,
+    WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle};
@@ -68,9 +69,28 @@ use crate::video::{
 #[derive(Default)]
 struct TestVm;
 
+#[derive(Default)]
+struct CarouselRuntimeVm {
+    selected: usize,
+    changes: Vec<usize>,
+}
+
 impl crate::foundation::view_model::ViewModel for TestVm {
     fn new(_context: &ViewModelContext) -> Self {
         Self
+    }
+
+    fn view(&self) -> Element<Self>
+    where
+        Self: Sized,
+    {
+        Stack::new().into()
+    }
+}
+
+impl crate::foundation::view_model::ViewModel for CarouselRuntimeVm {
+    fn new(_context: &ViewModelContext) -> Self {
+        Self::default()
     }
 
     fn view(&self) -> Element<Self>
@@ -363,6 +383,35 @@ fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
         visual_contexts: Default::default(),
         dependencies: DependencyGraph::default(),
     }
+}
+
+#[test]
+fn carousel_auto_play_advances_after_interval() {
+    let invalidation = InvalidationSignal::new();
+    let items: Vec<Element<CarouselRuntimeVm>> =
+        vec![Text::new("first").into(), Text::new("second").into()];
+    let tree = WidgetTree::new(
+        Carousel::new(items, 0usize)
+            .auto_play(Duration::from_millis(10))
+            .on_change(ValueCommand::new(|vm: &mut CarouselRuntimeVm, selected| {
+                vm.selected = selected;
+                vm.changes.push(selected);
+            })),
+    );
+    let mut handler = test_handler_with_vm(CarouselRuntimeVm::default(), Some(tree), invalidation);
+    let now = Instant::now();
+
+    assert!(!handler.drive_carousel_auto_play(now));
+    assert_eq!(
+        handler.next_carousel_wakeup_deadline,
+        Some(now + Duration::from_millis(10))
+    );
+    assert!(!handler.drive_carousel_auto_play(now + Duration::from_millis(5)));
+    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(10)));
+
+    let view_model = handler.view_model.lock().unwrap();
+    assert_eq!(view_model.selected, 1);
+    assert_eq!(view_model.changes, vec![1]);
 }
 
 #[test]

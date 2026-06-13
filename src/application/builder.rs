@@ -131,8 +131,23 @@ where
 
     /// 构建运行时并启动应用事件循环。
     pub fn run(self) -> Result<(), TguiError> {
-        let (config, view_model, windows, invalidation, animations) = self.into_runtime_parts();
+        // CRITICAL: Windows threads default to 1MB stack, which is insufficient for
+        // deep widget trees and scene graph construction in debug builds. Use stacker
+        // to immediately allocate a larger stack (16MB) for the entire application runtime.
+        // This is completely transparent to users - no build.rs or config needed.
+        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+        {
+            const APP_STACK_SIZE: usize = 16 * 1024 * 1024; // 16MB
+            stacker::grow(APP_STACK_SIZE, || self.run_inner())
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+        {
+            self.run_inner()
+        }
+    }
 
+    fn run_inner(self) -> Result<(), TguiError> {
+        let (config, view_model, windows, invalidation, animations) = self.into_runtime_parts();
         BoundRuntime::new(config, view_model, windows, invalidation, animations)?.run()
     }
 

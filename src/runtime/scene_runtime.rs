@@ -933,7 +933,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.prune_text_input_buffers(&computed);
             self.sync_text_input_regions_from_computed(&computed);
             self.sync_visible_text_input_buffers(&computed);
-            self.cached_scene = Some(CachedScene {
+            self.cached_scene = Some(Box::new(CachedScene {
                 viewport,
                 units,
                 focused_widget,
@@ -972,7 +972,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 scene_chunks: collected.chunks,
                 scene_chunk_parts: collected.chunk_parts,
                 visual_contexts: collected.visual_contexts,
-            });
+            }));
             // 整帧重收集已用最新 scroll_states 重算全树并把 cached.scroll_epoch 同步到当前,
             // 任何积压的滚动脏标记都已被该重收集覆盖,清空避免下帧误判。
             #[cfg(feature = "transform-only-scroll")]
@@ -1096,9 +1096,5 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.apply_menu_keyboard_cursor_to_states(&mut states);
         states
-    }
-
-    pub(in crate::runtime) fn scroll_regions(&mut self) -> Vec<ScrollRegion> {
-        self.computed_scene().scroll_regions.to_vec()
     }
 }

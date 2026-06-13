@@ -16,7 +16,9 @@ pub(crate) fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
         const WIDGET_STACK_SIZE: usize = 8 * 1024 * 1024;
-        const WIDGET_STACK_RED_ZONE: usize = WIDGET_STACK_SIZE;
+        // CRITICAL: Red zone must be smaller than Windows default stack (1MB)
+        // to trigger stack extension before overflow
+        const WIDGET_STACK_RED_ZONE: usize = 512 * 1024; // 512KB red zone
         return stacker::maybe_grow(WIDGET_STACK_RED_ZONE, WIDGET_STACK_SIZE, f);
     }
 

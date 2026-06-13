@@ -102,7 +102,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        let scroll_regions = self.scroll_regions();
+        // CRITICAL: Use cached scroll_regions to avoid triggering computed_scene()
+        // during mouse wheel handling, which causes stack overflow on Windows
+        let scroll_regions = if let Some(cached) = self.cached_scene.as_ref() {
+            cached.computed.scroll_regions.clone()
+        } else {
+            return false; // No cached scene, cannot scroll
+        };
+
         for region in scroll_regions.iter().rev().copied() {
             if region.visible_frame.is_empty() || !region.visible_frame.contains(cursor_position) {
                 continue;
@@ -147,7 +154,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     pub(super) fn scrollbar_thumb_hit(&mut self) -> Option<ScrollbarHandle> {
         let cursor_position = self.cursor_position?;
-        let scroll_regions = self.scroll_regions();
+        // CRITICAL: Use cached scroll_regions to avoid stack overflow
+        let scroll_regions = self.cached_scene.as_ref()?.computed.scroll_regions.as_slice();
         scroll_regions
             .iter()
             .filter_map(|region| {
@@ -197,7 +205,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(cursor_position) = self.cursor_position else {
             return false;
         };
-        let scroll_regions = self.scroll_regions();
+        // CRITICAL: Use cached scroll_regions to avoid stack overflow
+        let scroll_regions = if let Some(cached) = self.cached_scene.as_ref() {
+            &cached.computed.scroll_regions
+        } else {
+            return false;
+        };
         let Some(region) = scroll_regions
             .iter()
             .copied()
@@ -297,7 +310,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn rebind_active_scrollbar_drag_if_needed(&mut self, drag: ScrollbarDrag, next_offset: Point) {
-        let scroll_regions = self.computed_scene().scroll_regions.clone();
+        // CRITICAL: Do NOT call computed_scene() here - it causes stack overflow on Windows
+        // during scroll drag events. Use cached scene if available, otherwise skip rebind.
+        let scroll_regions = if let Some(cached) = self.cached_scene.as_ref() {
+            cached.computed.scroll_regions.clone()
+        } else {
+            return; // No cached scene available, skip rebind
+        };
         if scroll_regions
             .iter()
             .any(|region| region.id == drag.handle.id)

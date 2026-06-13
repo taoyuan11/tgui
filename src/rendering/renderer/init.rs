@@ -6,7 +6,7 @@ impl Renderer {
         window: Arc<dyn Window>,
         clear_color: TguiColor,
         requested_msaa_mode: MsaaMode,
-    ) -> Result<Self, TguiError> {
+    ) -> Result<Box<Self>, TguiError> {
         let size = window.surface_size();
         let instance = create_instance(clear_color);
         let surface = create_surface(&instance, window.clone())?;
@@ -81,7 +81,7 @@ impl Renderer {
         let targets = RendererTargets::new(&device, &config, msaa_sample_count);
         let vertex_pool = super::vertex_pool::VertexBufferPool::new(&device);
 
-        Ok(Self {
+        Ok(Box::new(Self {
             window,
             surface,
             device,
@@ -118,6 +118,6 @@ impl Renderer {
             vertex_pool,
             #[cfg(feature = "transform-only-scroll-gpu")]
             push_constants_supported,
-        })
+        }))
     }
 }

@@ -30,11 +30,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        let Some(region) = self.scroll_regions().into_iter().rev().find(|region| {
-            !region.visible_frame.is_empty()
-                && region.visible_frame.contains(cursor_position)
-                && (region.can_scroll_x() || region.can_scroll_y())
-        }) else {
+        // CRITICAL: Use cached scroll_regions to avoid triggering computed_scene()
+        // during input handling, which causes stack overflow on Windows
+        let region = {
+            let scroll_regions = if let Some(cached) = self.cached_scene.as_ref() {
+                &cached.computed.scroll_regions
+            } else {
+                return false; // No cached scene, cannot start scroll
+            };
+
+            let region = scroll_regions.iter().rev().find(|region| {
+                !region.visible_frame.is_empty()
+                    && region.visible_frame.contains(cursor_position)
+                    && (region.can_scroll_x() || region.can_scroll_y())
+            });
+
+            // Copy the region data before releasing the borrow
+            region.copied()
+        };
+
+        let Some(region) = region else {
             return false;
         };
 

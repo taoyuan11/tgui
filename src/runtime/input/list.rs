@@ -345,8 +345,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn scroll_region_for_widget(&mut self, widget_id: WidgetId) -> Option<ScrollRegion> {
-        self.scroll_regions()
-            .into_iter()
+        // CRITICAL: Use cached scroll_regions to avoid stack overflow
+        let scroll_regions = self.cached_scene.as_ref()?.computed.scroll_regions.as_slice();
+        scroll_regions
+            .iter()
+            .copied()
             .find(|region| region.id == widget_id)
     }
 

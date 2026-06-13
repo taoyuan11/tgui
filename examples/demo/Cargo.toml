@@ -14,7 +14,6 @@ tgui = { path = "../..", features = [
     "transform-only-scroll",
     "transform-only-scroll-gpu",
     "collect-profile",
-    "mimalloc"
 ]
 }
 

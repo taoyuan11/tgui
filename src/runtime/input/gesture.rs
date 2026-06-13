@@ -615,8 +615,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn scroll_region_axes_at(&mut self, position: Point) -> (bool, bool) {
-        self.scroll_regions()
-            .into_iter()
+        // CRITICAL: Use cached scroll_regions to avoid stack overflow
+        let scroll_regions = if let Some(cached) = self.cached_scene.as_ref() {
+            &cached.computed.scroll_regions
+        } else {
+            return (false, false);
+        };
+        scroll_regions
+            .iter()
             .rev()
             .find(|region| {
                 !region.visible_frame.is_empty() && region.visible_frame.contains(position)

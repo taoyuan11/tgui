@@ -119,7 +119,8 @@ fn resolve_dynamic_children<VM>(
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
         const CHILD_RESOLVER_STACK_SIZE: usize = 8 * 1024 * 1024;
-        const CHILD_RESOLVER_STACK_RED_ZONE: usize = CHILD_RESOLVER_STACK_SIZE;
+        // CRITICAL: Red zone must be smaller than Windows default stack (1MB)
+        const CHILD_RESOLVER_STACK_RED_ZONE: usize = 512 * 1024;
         stacker::maybe_grow(
             CHILD_RESOLVER_STACK_RED_ZONE,
             CHILD_RESOLVER_STACK_SIZE,
@@ -136,7 +137,24 @@ fn resolve_dynamic_children<VM>(
 impl<VM> Clone for ChildSource<VM> {
     fn clone(&self) -> Self {
         match self {
-            Self::Static(children) => Self::Static(children.clone()),
+            Self::Static(children) => {
+                // CRITICAL: Deep container nesting can cause stack overflow on Windows (1MB stack)
+                // when cloning recursively. Use stacker to extend stack for deep clones.
+                #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+                {
+                    const CLONE_STACK_SIZE: usize = 8 * 1024 * 1024;
+                    const CLONE_STACK_RED_ZONE: usize = 512 * 1024;
+                    Self::Static(stacker::maybe_grow(
+                        CLONE_STACK_RED_ZONE,
+                        CLONE_STACK_SIZE,
+                        || children.clone(),
+                    ))
+                }
+                #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+                {
+                    Self::Static(children.clone())
+                }
+            }
             Self::Dynamic(resolver) => Self::Dynamic(resolver.clone()),
         }
     }
@@ -991,11 +1009,30 @@ impl<VM> Clone for WidgetKind<VM> {
                 layout,
                 children,
                 style,
-            } => Self::Container {
-                layout: layout.clone(),
-                children: children.clone(),
-                style: style.clone(),
-            },
+            } => {
+                // CRITICAL: Deep container nesting can cause stack overflow on Windows (1MB stack)
+                // when cloning recursively. Use stacker to extend stack for deep clones.
+                #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+                {
+                    const CLONE_STACK_SIZE: usize = 8 * 1024 * 1024;
+                    const CLONE_STACK_RED_ZONE: usize = 512 * 1024;
+                    stacker::maybe_grow(CLONE_STACK_RED_ZONE, CLONE_STACK_SIZE, || {
+                        Self::Container {
+                            layout: layout.clone(),
+                            children: children.clone(),
+                            style: style.clone(),
+                        }
+                    })
+                }
+                #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+                {
+                    Self::Container {
+                        layout: layout.clone(),
+                        children: children.clone(),
+                        style: style.clone(),
+                    }
+                }
+            }
             Self::Virtual {
                 arrangement,
                 item_layout,

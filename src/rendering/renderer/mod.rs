@@ -152,7 +152,7 @@ impl Renderer {
         window: Arc<dyn Window>,
         clear_color: TguiColor,
         requested_msaa_mode: MsaaMode,
-    ) -> Result<Self, TguiError> {
+    ) -> Result<Box<Self>, TguiError> {
         pollster::block_on(Self::new_async(window, clear_color, requested_msaa_mode))
     }
 

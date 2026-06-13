@@ -25,7 +25,8 @@ fn build_root_element<VM>(root_view: &RootViewFactory<VM>, view_model: &VM) -> E
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
         const ROOT_VIEW_STACK_SIZE: usize = 8 * 1024 * 1024;
-        const ROOT_VIEW_STACK_RED_ZONE: usize = ROOT_VIEW_STACK_SIZE;
+        // CRITICAL: Red zone must be smaller than Windows default stack (1MB)
+        const ROOT_VIEW_STACK_RED_ZONE: usize = 512 * 1024;
         stacker::maybe_grow(ROOT_VIEW_STACK_RED_ZONE, ROOT_VIEW_STACK_SIZE, || {
             root_view(view_model)
         })
