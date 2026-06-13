@@ -8,9 +8,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 tgui = { path = "../..", features = [
     "audio",
     "video",
-    "fine-grained-splice",
     "property-deps",
-    "incremental-upload",
     "transform-only-scroll",
     "transform-only-scroll-gpu",
     "collect-profile",

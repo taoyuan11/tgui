@@ -585,8 +585,7 @@ impl<VM> ComputedScene<VM> {
         }
     }
 
-    /// 各主渲染流命令数量。Phase 1 splice：沿 root→target 路径累加，定位子树区间起点。
-    #[cfg(feature = "fine-grained-splice")]
+    /// 各主渲染流命令数量。Splice：沿 root→target 路径累加，定位子树区间起点。
     pub(crate) fn scene_counts(&self) -> crate::ui::widget::common::SceneCounts {
         self.scene.counts()
     }
@@ -598,7 +597,6 @@ impl<VM> ComputedScene<VM> {
     /// 连续排布，splice 用对应 offset + 数量一致性原地覆盖）。其余结构性内容
     /// （overlay/portal/focus/anchor/carousel/virtual/ime/外部 portal 请求）任一非空
     /// 都判定为不可 splice，干净回退到 recompose。
-    #[cfg(feature = "fine-grained-splice")]
     pub(crate) fn is_simple_for_splice(&self) -> bool {
         self.scene.counts().has_no_overlay()
             && self.overlay_hit_regions.is_empty()
@@ -634,7 +632,6 @@ impl<VM> ComputedScene<VM> {
     /// 把 `chunk` 的主渲染流 + `hit_regions` + `scroll_regions` 原地覆盖到 `self`
     /// 从各自 offset 起的区间。任一流越界（数量不一致）立即返回 `false`——调用方必须
     /// 在调用前用数量一致性 + `is_simple_for_splice` 把关，确保不会中途失败留下半成品。
-    #[cfg(feature = "fine-grained-splice")]
     pub(crate) fn splice_chunk_in_place(
         &mut self,
         offset: &crate::ui::widget::common::SceneCounts,

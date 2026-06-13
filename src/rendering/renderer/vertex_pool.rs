@@ -35,10 +35,9 @@ pub(super) struct VertexBufferPool {
     current: usize,
     /// 本帧的 CPU 端 staging，bump-allocate 写入，帧末一次性上传。
     staging: Vec<u8>,
-    /// Phase 3：各轮转缓冲「上次写入到 GPU 的字节内容」镜像。flush 时与本帧 staging 做
+    /// 各轮转缓冲「上次写入到 GPU 的字节内容」镜像。flush 时与本帧 staging 做
     /// 字节级 diff，只上传变化区间。缓冲被扩容重建、或上次 flush 跳过时，对应镜像清空
     /// （视作全新缓冲，下次必然走整段上传），保证镜像与 GPU 内容严格一致。
-    #[cfg(feature = "incremental-upload")]
     last_uploaded: [Vec<u8>; POOL_FRAME_COUNT],
 }
 
@@ -50,7 +49,6 @@ impl VertexBufferPool {
             capacities: [INITIAL_CAPACITY; POOL_FRAME_COUNT],
             current: 0,
             staging: Vec::with_capacity(INITIAL_CAPACITY as usize),
-            #[cfg(feature = "incremental-upload")]
             last_uploaded: std::array::from_fn(|_| Vec::new()),
         }
     }
@@ -104,49 +102,38 @@ impl VertexBufferPool {
             grew = true;
         }
 
-        #[cfg(feature = "incremental-upload")]
-        {
-            // 新建的缓冲 GPU 内容未定义，必须整段写并重置镜像；否则与上次写入做字节级 diff，
-            // 只上传变化区间（按 ALIGNMENT 对齐）。无论整写还是区间写，写后缓冲 [0..write_len]
-            // 都与 staging 逐字节一致 —— 渲染结果不变。
-            let dirty = if grew {
-                Some((0u64, write_len))
-            } else {
-                Self::dirty_range(&self.staging, &self.last_uploaded[self.current]).map(
-                    |(start, end)| {
-                        let aligned_start = (start as u64) / ALIGNMENT * ALIGNMENT;
-                        let aligned_end = (end as u64).div_ceil(ALIGNMENT) * ALIGNMENT;
-                        (aligned_start, aligned_end.min(write_len))
-                    },
-                )
-            };
-            if let Some((start, end)) = dirty {
-                if end > start {
-                    queue.write_buffer(
-                        &self.buffers[self.current],
-                        start,
-                        &self.staging[start as usize..end as usize],
-                    );
-                }
+        // 新建的缓冲 GPU 内容未定义，必须整段写并重置镜像；否则与上次写入做字节级 diff，
+        // 只上传变化区间（按 ALIGNMENT 对齐）。无论整写还是区间写，写后缓冲 [0..write_len]
+        // 都与 staging 逐字节一致 —— 渲染结果不变。
+        let dirty = if grew {
+            Some((0u64, write_len))
+        } else {
+            Self::dirty_range(&self.staging, &self.last_uploaded[self.current]).map(
+                |(start, end)| {
+                    let aligned_start = (start as u64) / ALIGNMENT * ALIGNMENT;
+                    let aligned_end = (end as u64).div_ceil(ALIGNMENT) * ALIGNMENT;
+                    (aligned_start, aligned_end.min(write_len))
+                },
+            )
+        };
+        if let Some((start, end)) = dirty {
+            if end > start {
+                queue.write_buffer(
+                    &self.buffers[self.current],
+                    start,
+                    &self.staging[start as usize..end as usize],
+                );
             }
-            // 镜像精确记录我们保证写入 GPU 缓冲 [0..write_len] 的内容。
-            self.last_uploaded[self.current].clear();
-            self.last_uploaded[self.current].extend_from_slice(&self.staging);
-            return;
         }
-
-        #[cfg(not(feature = "incremental-upload"))]
-        {
-            let _ = grew;
-            queue.write_buffer(&self.buffers[self.current], 0, &self.staging);
-        }
+        // 镜像精确记录我们保证写入 GPU 缓冲 [0..write_len] 的内容。
+        self.last_uploaded[self.current].clear();
+        self.last_uploaded[self.current].extend_from_slice(&self.staging);
     }
 
     /// 计算 `new` 相对 `old` 的变化字节区间 `[start, end)`（未对齐，相对 `new` 起点）。
     /// 完全相同（含长度相同）返回 `None`（调用方跳过上传）。长度不同的尾部计入变化区间：
     /// `new` 更长时尾部是新增内容必须写入；`new` 更短时多余的 GPU 旧字节不会被 draw 读取，
     /// 故 `end` 不超过 `new.len()`。纯函数，便于单测穷举边界。
-    #[cfg(feature = "incremental-upload")]
     fn dirty_range(new: &[u8], old: &[u8]) -> Option<(usize, usize)> {
         let common = new.len().min(old.len());
         let mut first = None;
@@ -174,7 +161,7 @@ impl VertexBufferPool {
     }
 }
 
-#[cfg(all(test, feature = "incremental-upload"))]
+#[cfg(test)]
 mod dirty_range_tests {
     use super::VertexBufferPool;
 

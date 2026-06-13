@@ -313,7 +313,6 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
     /// （子树不含 overlay 时，`finalize_portals` 只动 overlay 流，主流逐字节一致）。
     ///
     /// 返回 `None` 表示路径上任一节点缺 `chunk_parts` / 子 chunk / 非容器，调用方回退 recompose。
-    #[cfg(feature = "fine-grained-splice")]
     pub(crate) fn scene_splice_ancestor_offsets(
         &self,
         target: WidgetId,

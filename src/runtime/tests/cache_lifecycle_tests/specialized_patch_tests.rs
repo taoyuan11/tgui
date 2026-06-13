@@ -329,13 +329,13 @@ fn splice_color_change_matches_full_recollect() {
     let _ = handler.computed_scene();
     let before = shape_fingerprints(handler.computed_scene());
 
-    // 改色 → 走失效决策（命中 scene_subtree_patch，特性开启时内部尝试 splice）。
-    #[cfg(feature = "fine-grained-splice")]
+    // 改色 → 走失效决策（命中 scene_subtree_patch，内部尝试 splice）。
+    #[cfg(test)]
     crate::runtime::scene_patch::splice_probe::reset();
     color.set(Color::hexa(0x00FF00FF));
     handler.request_redraw_if_dirty(Instant::now());
     // 确认确实走了 splice 快路径，而非回退到 recompose——否则本测试只验证了回退正确性。
-    #[cfg(feature = "fine-grained-splice")]
+    #[cfg(test)]
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         1,

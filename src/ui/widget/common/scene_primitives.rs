@@ -468,10 +468,9 @@ impl ScenePrimitives {
         }
     }
 
-    /// 各渲染流当前的命令数量快照。Phase 1 splice 快路径用它在
+    /// 各渲染流当前的命令数量快照。Splice 快路径用它在
     /// 「祖先链向上 `extend` 拼接」的纯连接模型下，给每个子树在根扁平场景里
     /// 定位出稳定的命令区间起点。
-    #[cfg(feature = "fine-grained-splice")]
     pub(crate) fn counts(&self) -> SceneCounts {
         SceneCounts {
             backdrop_blurs: self.backdrop_blurs.len(),
@@ -498,7 +497,6 @@ impl ScenePrimitives {
     ///
     /// 仅覆盖主渲染流（overlay_* 由 finalize 阶段独立维护，splice 快路径只在子树
     /// 不含 overlay 内容时启用，见 `ComputedScene::is_simple_for_splice`）。
-    #[cfg(feature = "fine-grained-splice")]
     pub(crate) fn splice_in_place(
         &mut self,
         offset: &SceneCounts,
@@ -562,7 +560,6 @@ impl ScenePrimitives {
 
 /// 每个渲染流的命令数量。既用作 splice 的区间起点偏移（沿 root→target 路径累加），
 /// 也用作 splice 资格判定的「数量一致性」对比。
-#[cfg(feature = "fine-grained-splice")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SceneCounts {
     pub backdrop_blurs: usize,
@@ -582,7 +579,6 @@ pub(crate) struct SceneCounts {
     pub overlay_commands: usize,
 }
 
-#[cfg(feature = "fine-grained-splice")]
 impl SceneCounts {
     /// 累加另一段的各流数量（offset 沿子树路径向前推进时用）。
     pub(crate) fn add_assign(&mut self, other: &SceneCounts) {
