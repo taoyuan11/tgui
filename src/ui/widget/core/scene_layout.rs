@@ -263,6 +263,8 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     next_toast_wakeup: &next_toast_wakeup,
                     active_tooltip,
                     active_hover_popover,
+                    #[cfg(feature = "transform-only-scroll-gpu")]
+                    gpu_scroll_container: None,
                 };
                 let root_id = self.resolved_at_path(path).collect_subtree_cache(
                     self.layout_at_path(path),

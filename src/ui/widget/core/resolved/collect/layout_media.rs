@@ -10,6 +10,11 @@ fn should_skip_fully_clipped_child<VM: 'static>(
     clip_rect: Rect,
     context: &CollectContext<'_, '_>,
 ) -> bool {
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    if context.gpu_scroll_container.is_some() {
+        return false;
+    }
+
     if !child.can_skip_when_fully_clipped() {
         return false;
     }
@@ -111,6 +116,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                     content_viewport: visual.background_frame,
                     visible_frame,
                     content_bounds,
+                    #[cfg(feature = "transform-only-scroll-gpu")]
+                    gpu_base_scroll_offset: scroll_offset,
                     scroll_offset,
                     overflow_x: layout.overflow_x,
                     overflow_y: layout.overflow_y,
@@ -124,6 +131,12 @@ impl<VM: 'static> ResolvedElement<VM> {
                     x: visual.frame.x - scroll_offset.x,
                     y: visual.frame.y - scroll_offset.y,
                 };
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                let previous_gpu_scroll_container = context.gpu_scroll_container;
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                {
+                    context.gpu_scroll_container = Some(self.id);
+                }
                 for (child, child_layout) in children.iter().zip(layout_node.children.iter()) {
                     if should_skip_fully_clipped_child(
                         child,
@@ -162,6 +175,10 @@ impl<VM: 'static> ResolvedElement<VM> {
                     context,
                     computed,
                 );
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                {
+                    context.gpu_scroll_container = previous_gpu_scroll_container;
+                }
                 // `after_children` 仅承载子树收集之后追加的内容(滚动条),它本身就等价于
                 // `computed.delta_since(子树之后的快照)` —— 因此无需克隆整份累积场景再做 delta。
                 // 对长列表滚动容器,这次克隆会拷贝其全部子节点的图元(每帧一次),代价高昂。
@@ -284,6 +301,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                     content_viewport: visual.background_frame,
                     visible_frame,
                     content_bounds,
+                    #[cfg(feature = "transform-only-scroll-gpu")]
+                    gpu_base_scroll_offset: scroll_offset,
                     scroll_offset,
                     overflow_x: *overflow_x,
                     overflow_y: *overflow_y,
@@ -300,6 +319,12 @@ impl<VM: 'static> ResolvedElement<VM> {
                     visual.background_frame.x - scroll_offset.x,
                     visual.background_frame.y - scroll_offset.y,
                 );
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                let previous_gpu_scroll_container = context.gpu_scroll_container;
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                {
+                    context.gpu_scroll_container = Some(self.id);
+                }
                 for ((child, child_layout), meta) in children
                     .iter()
                     .zip(layout_node.children.iter())
@@ -365,6 +390,10 @@ impl<VM: 'static> ResolvedElement<VM> {
                     if let Some(child_chunk) = caches.chunks.get(&child_id) {
                         computed.extend(child_chunk);
                     }
+                }
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                {
+                    context.gpu_scroll_container = previous_gpu_scroll_container;
                 }
                 // `after_children` 收集子树之后追加的所有内容(虚拟状态更新 + 滚动条),
                 // 直接构建即可,无需克隆整份累积场景再 `delta_since`。虚拟状态更新此前推入
@@ -461,6 +490,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                             text_style: text.clone(),
                             text: text.content.resolve(),
                         },
+                        #[cfg(feature = "transform-only-scroll-gpu")]
+                        gpu_scroll_container: context.gpu_scroll_container,
                     });
                 }
                 true
@@ -643,6 +674,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                                             .collect::<Vec<_>>()
                                             .into(),
                                     },
+                                    #[cfg(feature = "transform-only-scroll-gpu")]
+                                    gpu_scroll_container: context.gpu_scroll_container,
                                 });
                             }
                         }
@@ -737,6 +770,8 @@ fn push_splitter_handle_hit_regions<VM: 'static>(
                 interactions: child.interactions.clone(),
                 pair_extent,
             },
+            #[cfg(feature = "transform-only-scroll-gpu")]
+            gpu_scroll_container: context.gpu_scroll_container,
         });
     }
 }

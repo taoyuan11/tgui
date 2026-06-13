@@ -227,6 +227,10 @@ impl Renderer {
             &composite.primitive.content_commands,
             font_manager,
             self.vertex_viewport(),
+            #[cfg(feature = "transform-only-scroll-gpu")]
+            &[], // canvas composite 内容不受滚动影响
+            #[cfg(feature = "transform-only-scroll-gpu")]
+            &[],
         )?;
         self.vertex_pool.flush(&self.device, &self.queue);
         let mut composite_cleared = true;
@@ -241,8 +245,15 @@ impl Renderer {
 
         if let Some(mask_commands) = composite.primitive.mask_commands.as_ref() {
             self.clear_offscreen_target(encoder, &composite_mask_target);
-            let mask_prepared =
-                self.prepare_commands(mask_commands, font_manager, self.vertex_viewport())?;
+            let mask_prepared = self.prepare_commands(
+                mask_commands,
+                font_manager,
+                self.vertex_viewport(),
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                &[], // mask 不受滚动影响
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                &[],
+            )?;
             self.vertex_pool.flush(&self.device, &self.queue);
             let mut mask_cleared = true;
             self.execute_prepared_commands_to_target(
@@ -433,6 +444,8 @@ impl Renderer {
             multiview_mask: None,
         });
         pass.set_pipeline(&self.text_pipeline);
+        #[cfg(feature = "transform-only-scroll-gpu")]
+        self.set_scroll_translate(&mut pass, None);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.set_bind_group(0, &bind_group, &[]);
         pass.draw(0..quad.len() as u32, 0..1);

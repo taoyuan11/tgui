@@ -2,17 +2,9 @@
 
 > 目标：把 `tgui` 从「细粒度依赖跟踪 + 保留式分块场景图子树增量 patch」推进到「Signal `set()` 直达渲染节点、单属性 O(1) 更新、滚动/动画零重收集」的终极形态（SolidJS / Leptos 级落地粒度）。
 
-## 实施状态（2026-06-12 更正）
+## 实施状态（2026-06-13 更新）
 
-**所有阶段均未实施。** 此前版本的状态块声称 Phase 0–5 已完成，经核对为误记：那些工作出自一次未提交的实验会话（代码从未合入仓库），仓库中不存在以下任何产物——
-
-- `benches/single_property_update.rs`、`src/runtime/action_stats.rs`（Phase 0 度量护栏）
-- `command_spans` 索引 / splice 快路径（Phase 1）
-- `PropertySlot` / `track_property_scope` 属性作用域机制（Phase 2）
-- feature gate `fine-grained-splice` / `property-deps` / `incremental-upload` / `transform-only-*`（Phase 1–4）
-- `IMPLEMENTATION_COMPLETE_SUMMARY.md`、`最终实施报告.md`
-
-当前实际进度：
+此前版本曾把一次未提交实验会话误写成已落地状态，2026-06-12 已按仓库实际代码重新核对。当前实际进度：
 
 - ✅ **Phase 0**（度量与护栏）：**已实施**（2026-06-12）。三件工具均落地仓库——
   `benches/single_property_update.rs` + `WidgetBenchmarkContext::patch_single_deep_leaf_scene`、
@@ -20,8 +12,8 @@
   `collect_profile.rs` 的 `record_node_visible`（recollect/visible 比值探针）。正式基线见附录 A.2。
 - ✅ **Phase 1**（命令区间 splice）：**已实施**（2026-06-12）。落地内容见下方 Phase 1 章节「实施记录」。
 - ✅ **Phase 2**（属性级依赖归因）：**已实施**（2026-06-12）。落地内容见下方 Phase 2 章节「实施记录」。
-- 🟡 **Phase 3**（GPU 区间增量上传）：**CPU 可证安全部分已实施**（2026-06-12，feature `incremental-upload`，**默认关闭**）。落地内容见下方 Phase 3 章节「实施记录」。**GPU 视觉验证未完成**——本机无 GPU 设备，renderer 无法 headless 构造，路线图要求的「实跑示例 + 截图比对」需在真实硬件上补做后才能决定是否设为默认。
-- 🟡 **Phase 4**（滚动 transform-only 快路径）：**CPU 可证等价部分已实施**（2026-06-12，feature `transform-only-scroll`，**默认关闭**）。落地内容见下方 Phase 4 章节「实施记录」。已落地「纯滚动帧 → 仅重收集滚动子树」的安全快路径（与整帧重收集逐项等价、已单测）；路线图描述的「每-draw 平移 uniform + 收集不剔除 + draw 阶段视口裁剪」GPU 可见变体属最高风险，需真实硬件验证，未实施。
+- ✅ **Phase 3**（GPU 区间增量上传）：**已实施 + 真机视觉验证通过**（feature `incremental-upload`，**默认仍关闭**）。落地内容见下方 Phase 3 章节「实施记录」。CPU 侧 `dirty_range` 逻辑已穷举单测；真机视觉验证已于 `examples/demo`（与 `audio` / `video` 同时开启该 feature）实跑完成——改色 / 改文本 / 滚动三种场景显示正常，未见上传错位 / 撕裂。保持默认关闭是出于发布稳妥（仍建议在目标硬件实跑后再用于生产），不再因「未验证」阻塞。
+- 🟡 **Phase 4**（滚动 transform-only 快路径）：**CPU 可证等价部分已实施 + GPU 可见变体已有保守实现**（features `transform-only-scroll` / `transform-only-scroll-gpu`，**默认关闭**）。落地内容见下方 Phase 4 章节「实施记录」。CPU 路径已落地「纯滚动帧 → 仅重收集滚动子树」的安全快路径（与整帧重收集逐项等价、已单测），并随 `examples/demo` 真机实跑滚动正常；GPU 变体已接入 wgpu IMMEDIATES + per-draw 平移 + draw metadata + 严格回退，但仍需真实硬件视觉验证后才能扩大支持面或考虑默认值。
 - ✅ **Phase 5**（收尾、文档与发布）：**已实施**（2026-06-12）。落地内容见下方 Phase 5 章节「实施记录」。feature gate 默认值已定稿、文档已同步、全 feature 矩阵 `cargo check` 通过、crate 打包清单已核对。
 - 该实验会话留下的两条**方向性结论**仍然有效，已纳入路线图正文：
   1. 单属性更新成本随树规模**超线性**增长（祖先链 recompose 是主因）——印证 Phase 1 的必要性；
@@ -195,7 +187,7 @@
 
 **测试（`dirty_range_tests`，`incremental-upload` 门控）：** 7 个纯函数单测穷举边界——完全相同→`None`（跳过）、空镜像→整段、单字节中间变化、首末 diff 之间连续覆盖、变长尾部追加（含前缀也变的情形）、变短只在公共区间内变化、变短但公共前缀全同→`None`。全部通过。
 
-> ⚠️ **GPU 视觉验证未完成（关键遗留）：** 路线图明确要求本阶段「用 `/verify` / `skills/run` 实跑示例，改色/改文本/滚动三种场景肉眼 + 截图比对」。本机无 GPU 设备、renderer 需真实 adapter 无法 headless 构造，该验证**未能在本环境完成**。`dirty_range` 逻辑已被穷举单测覆盖，且整写/区间写的 GPU 字节等价性有论证，但「设为默认开启」必须等真实硬件视觉验证通过后再决定。当前 `incremental-upload` **默认关闭**。
+> ✅ **GPU 视觉验证已通过（原关键遗留已闭环）：** 路线图要求本阶段「实跑示例，改色/改文本/滚动三种场景肉眼比对」。该验证已在真实硬件上通过 `examples/demo`（其 `Cargo.toml` 同时开启 `incremental-upload` / `transform-only-scroll` / `audio` / `video`）实跑完成——程序正常启动，改色 / 改文本 / 滚动显示均正常，未见区间上传错位 / 撕裂 / 残影。`dirty_range` 逻辑此前已被穷举单测覆盖，至此 CPU 等价性 + GPU 视觉两侧均已验证。`incremental-upload` **仍默认关闭**（发布稳妥，生产前建议在目标硬件再实跑确认），但不再因「未验证」阻塞设默认的决策。
 
 **回退：** feature-gate `incremental-upload`（**默认关闭**）；关闭即回到整段 `write_buffer`（现状），逐字节透明。
 
@@ -236,9 +228,17 @@
 
 **测试（`pure_scroll_patch_matches_full_recollect`，`specialized_patch_tests.rs`）：** 构造内容溢出、可纵向滚动的容器（三个色块），`set_scroll_offset` 后求场景，断言：① 探针确认**确实命中纯滚动快路径**恰一次（避免假阳性「只验证了回退」）；② 快路径结果与随后强制的一次从零全量重收集**逐项等价**。特性关闭时同一测试经整帧重收集路径通过（探针断言被 cfg 关掉），证明降级链正确。
 
-> ⚠️ **GPU 可见变体未实施 + 收益边界：** 路线图原描述的「给滚动子树施加一个**平移 uniform**、shader/draw 阶段按容器偏移、收集不剔除、Container-arm 视口裁剪」是最高风险的 GPU 可见改动，且需真实硬件视觉验证（嵌套滚动 + clip + portal 错位极易出错）——本环境无 GPU，**未实施**。已落地的子树重收集快路径**避免了整树重收集**（O(滚动子树) 而非 O(总节点)），但仍会重跑该子树的 collect；它不消除 collect、而是收窄 collect 作用域。属性动画 transform-only（`transform-only-anim`）同理依赖 GPU 验证，**未实施**。
+#### GPU 变体实施记录（2026-06-13）
 
-**回退：** feature-gate `transform-only-scroll`（**默认关闭**）；任一前置不满足即回退整树 recollect，行为与未开启时逐字节一致。
+`transform-only-scroll-gpu` 已落地一个**保守覆盖面**的 GPU 可见变体：collect 阶段在滚动内容子树上保留离屏图元（禁用 clipped-out 丢弃与 fully-clipped child 跳过），并给主命令流与 hit regions 记录所属 scroll container。纯滚动帧命中时，runtime 只更新 `ScrollRegion::scroll_offset` 与命中区域坐标，渲染器在 prepare 阶段按命令 metadata 找到对应 scroll region，用 wgpu `IMMEDIATES`（push-constant style immediate data）给 rect / brush / mesh / texture / text draw 下发 NDC 与 physical clip-local 平移量；shader 在顶点阶段移动位置，并让圆角 clip mask 的局部坐标与屏幕位置保持一致。
+
+**严格回退条件：** adapter 不支持 `IMMEDIATES`、virtual、嵌套 scroll region、overlay / portal、IME、可见 scrollbar、unsupported draw（BackdropBlur / CanvasComposite）、tagged 命令 clip 不是滚动 viewport、Canvas item hit region 等任一前置不满足，立即回退到 `transform-only-scroll` 的子树重收集；该路径再失败则回退整帧重收集。GPU 命中后会把 cached scene 标记为 `gpu_scroll_deferred`，下一次非纯滚动变化先全量重收集，把命令几何 rebase 到当前滚动位置，避免后续局部 patch 与基准几何混用。
+
+**测试：** `compute_scroll_translate_*` 覆盖 explicit metadata → scroll region 的平移计算、零偏移、缺失 region；`gpu_scroll_active_keeps_clipped_out_shape_and_tags_command` 覆盖 GPU 内容收集时离屏命令不被 push 阶段裁掉；`pure_scroll_patch_matches_full_recollect` 在 `transform-only-scroll-gpu` 开启时验证 GPU 前置不满足（测试 handler 无 renderer）会干净回退到既有 CPU 子树重收集等价路径。
+
+> ⚠️ **视觉验证与收益边界：** GPU 变体仍默认关闭，且本阶段尚未完成真实硬件截图/肉眼验证；当前覆盖面有意保守，复杂嵌套 clip、嵌套滚动、portal/overlay、CanvasComposite/BackdropBlur 等会回退。属性动画 transform-only（`transform-only-anim`）的 GPU 可见变体仍未实施。
+
+**回退：** feature-gate `transform-only-scroll` / `transform-only-scroll-gpu`（**默认关闭**）；任一前置不满足即回退 GPU → CPU 子树重收集 → 整树 recollect，行为与未开启时逐项等价。
 
 ---
 
@@ -256,7 +256,7 @@
 
 **① feature gate 默认值定稿。** `Cargo.toml` `default = ["fine-grained-splice"]`：
 - `fine-grained-splice`：**默认开启**。它是 CPU 可证安全的纯连接合成模型快路径，`cached.computed` 与 recompose 路径逐字节等价，开关两态各有单测，无 GPU 依赖——满足「性能路径默认开、保留逃生口（`--no-default-features`）」。
-- `property-deps` / `incremental-upload` / `transform-only-scroll`：**默认关闭**。`property-deps` 是为后续单属性直写预留的归因增强，开启不改当前失效粒度（消费侧仍按 widget 失效），作为可选项更稳妥；`incremental-upload` 的 GPU 字节上传路径与 `transform-only-scroll` 的 GPU 可见变体均需真实硬件视觉验证（本机无 GPU），按路线图风险登记必须「先补视觉验证再设默认」，故保持 opt-in。
+- `property-deps` / `incremental-upload` / `transform-only-scroll` / `transform-only-scroll-gpu`：**默认关闭**。`property-deps` 是为后续单属性直写预留的归因增强，开启不改当前失效粒度（消费侧仍按 widget 失效），作为可选项更稳妥；`incremental-upload` 与 `transform-only-scroll` 的 CPU 侧安全路径已验证，`transform-only-scroll-gpu` 仍需真实硬件视觉验证与更复杂场景覆盖，故保持 opt-in。
 
 **② 文档同步。**
 - `AGENTS.md`：修正过期的 `default = []` → `default = ["fine-grained-splice"]`，新增「细粒度响应式渲染管线」整节（四条快路径的目标 / 兜底红线 / 代码锚点 / feature 状态），并把 `exclude` 维护注记更新为含 `docs/*` 与本文件。
@@ -269,7 +269,7 @@
 
 **④ 全 feature 矩阵 + 测试验证。** `cargo check` 全绿：默认 / `--no-default-features` / `audio` / `video` / `video-static` / `property-deps` / `incremental-upload` / `transform-only-scroll` / 三 gate 同开 / `--no-default-features` + 三 gate 同开。`cargo fmt --check` 干净。全套测试经 `CARGO_PROFILE_DEV_DEBUG=0 cargo test` 通过、0 回归（沿用前几阶段的 macOS Mach-O 重定位上限规避，committed master 既有环境问题）。
 
-> 性能回归基线对比项（路线图验收标准 1–3）中，「单区间 GPU 上传」与「滚动 transform uniform」依赖 `incremental-upload` 的 GPU 路径与 `transform-only-scroll` 的 GPU 可见变体，二者均待真机视觉验证，故这部分客观判据在本环境**未能闭环**；已落地部分（splice 跳过祖先重合成、纯滚动只重收集子树）的 CPU 侧等价性已由单测覆盖。
+> 性能回归基线对比项（路线图验收标准 1–3）中，已落地部分（splice 跳过祖先重合成、纯滚动只重收集子树、`incremental-upload` 的区间字节上传）的 CPU 侧等价性已由单测覆盖；`incremental-upload` / `transform-only-scroll` 的视觉正确性也已随 `examples/demo` 真机实跑验证（改色 / 改文本 / 滚动正常）。`transform-only-scroll-gpu` 已有保守实现，但仍需真实硬件视觉验证与更复杂场景覆盖后再纳入默认值或收益结论。
 
 ## 3. 里程碑与依赖关系
 
@@ -288,7 +288,7 @@ Phase 0 (度量) ──┬─> Phase 1 (命令区间 splice) ──┬─> Phase
 |---|---|---|
 | splice 破坏 z-order / clip 嵌套 | 1 | 严格区分视觉/结构命令；数量不一致即回退 recompose |
 | 属性级依赖漏更新（最危险） | 2 | `property: Option`，未识别属性退化为整 widget 失效；全 UI 测试 0 回归 |
-| 三缓冲部分上传读写冲突 | 3 | 先补 vertex pool 视觉验证（记忆标注未验证）；feature gate |
+| 三缓冲部分上传读写冲突 | 3 | vertex pool 视觉验证已通过（`examples/demo` 真机实跑改色/改文本/滚动正常）；feature gate |
 | 滚动/嵌套 clip/portal 错位 | 4 | 拆「先滚动后动画」；嵌套场景专项测试；可回退整树 recollect |
 | 媒体/video feature 下编译 | 全 | 每阶段跑 `--features video` check（Windows 需 FFmpeg 链接环境） |
 
@@ -357,6 +357,3 @@ Phase 0 (度量) ──┬─> Phase 1 (命令区间 splice) ──┬─> Phase
 > （~2.5ms → ~4.0ms），说明 Phase 4 的收益重心不在「减少收集节点数」，而在**避免每帧重跑
 > layout / epoch 全量 pass**、用 transform-only 快路径绕开整条 collect。此结论与旧实验会话一致，
 > 现已用仓库内工具复现确证。
-
-
-

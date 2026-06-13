@@ -64,13 +64,15 @@ Application::new()
 | --- | --- | --- | --- |
 | `fine-grained-splice` | **开启** | 叶子/子树 scene-only 改动（如改色）时，把新场景 chunk 原地拼接进根扁平场景与各祖先 chunk 的稳定区间，跳过祖先链向上重合成。命令数量或结构变化即回退。 | 可证安全，已全量单测 |
 | `property-deps` | 关闭 | 属性级依赖归因：把 Signal 读取归因到具体视觉属性（背景 / 边框 / 不透明度 / 偏移 / 缩放 / 文本色），为单属性直写提供信息。未识别属性安全退化为整 widget 失效。 | 可选归因增强 |
-| `incremental-upload` | 关闭 | 逐帧顶点池只上传相对上次写入发生变化的字节区间（triple-buffer 下安全），完全相同则跳过上传。 | CPU 逻辑已单测；GPU 视觉验证待真机完成后再决定默认 |
+| `incremental-upload` | 关闭 | 逐帧顶点池只上传相对上次写入发生变化的字节区间（triple-buffer 下安全），完全相同则跳过上传。 | CPU 逻辑已单测；真机视觉验证已通过（`examples/demo` 开启该 feature 实跑，改色 / 改文本 / 滚动均正常） |
 | `transform-only-scroll` | 关闭 | 纯滚动帧（仅滚动偏移变化）只重收集滚动子树而非整树（嵌套滚动取最高根、排除虚拟列表）。 | 与全量重收集逐项等价，已单测 |
+| `transform-only-scroll-gpu` | 关闭 | 在 `transform-only-scroll` 基础上，对满足严格前置条件的纯滚动帧保留滚动内容的离屏命令，并用 wgpu IMMEDIATES 在 draw 阶段平移 tagged draw，绕开滚动子树 collect。 | 保守实现，前置不满足即回退；仍需真实硬件视觉验证 |
 
 何时开启：
 
 - 绝大多数应用直接用默认即可——`fine-grained-splice` 已把「改一个深层叶子属性」的失效成本从「重收集子树 + 祖先链重合成到根」降为「单区间原地拼接」。
-- `incremental-upload` / `transform-only-scroll` 是面向「长列表高频滚动 / 高频属性动画」的进阶开关，目前默认关闭、需要时显式开启；其中 `incremental-upload` 的 GPU 路径建议在目标硬件上实跑验证后再用于生产。
+- `incremental-upload` / `transform-only-scroll` 是面向「长列表高频滚动 / 高频属性动画」的进阶开关，目前默认关闭、需要时显式开启。两者已在真机上随 `examples/demo` 实跑验证（与 `audio` / `video` 同时开启，改色 / 改文本 / 滚动均正常），保持 opt-in 是出于稳妥而非未验证。
+- `transform-only-scroll-gpu` 更激进：需要 adapter 支持 wgpu IMMEDIATES，且遇到 virtual、嵌套滚动、overlay/portal、IME、可见 scrollbar、复杂 clip 或 composite 会回退。建议只在目标硬件视觉验证通过后使用。
 - `property-deps` 是为后续单属性直写预留的归因增强，开启不改变当前失效粒度（消费侧仍按 widget 失效），可安全开启而无回归风险。
 
 > 性能数字与基线方法见仓库根目录的 `FINE_GRAINED_ROADMAP.md`（不随 crate 发布）；相关基准为 `single_property_update`（需 `bench-support`）。

@@ -49,6 +49,8 @@ pub(super) struct CachedScene<VM> {
     pub(super) active_scrollbar: Option<ScrollbarHandle>,
     pub(super) layout_valid: bool,
     pub(super) computed_valid: bool,
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(super) gpu_scroll_deferred: bool,
     pub(super) layout: Option<ResolvedSceneLayout<VM>>,
     pub(super) computed: ComputedScene<VM>,
     pub(super) lifecycle_states: HashMap<WidgetId, LifecycleEventState<VM>>,

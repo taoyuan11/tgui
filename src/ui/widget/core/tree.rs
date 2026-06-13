@@ -765,6 +765,8 @@ impl<VM: 'static> WidgetTree<VM> {
             next_toast_wakeup: &next_toast_wakeup,
             active_tooltip,
             active_hover_popover,
+            #[cfg(feature = "transform-only-scroll-gpu")]
+            gpu_scroll_container: None,
         };
         self.collect_scene_cache_with_context(
             layout,

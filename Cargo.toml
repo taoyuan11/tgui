@@ -80,6 +80,16 @@ incremental-upload = []
 # 重收集,绝不产生错位。默认不开启:高价值的「每-draw 平移 uniform + 收集不剔除 + draw 阶段
 # 视口裁剪」变体属 GPU 可见改动,需在真实硬件上验证后再推进,本特性先落地可证安全的 CPU 部分。
 transform-only-scroll = []
+# Phase 4（细粒度响应式）：滚动 transform-only 的「GPU 平移 uniform」变体。这是 transform-only-scroll
+# 的进阶形态——不再每个滚动帧重收集滚动子树,而是让 collect 在「未滚动」坐标系一次性收集滚动容器
+# 的**全部**内容（含离屏,不再 should_skip_fully_clipped_child 剔除）,之后每个纯滚动帧仅通过 wgpu
+# immediate data（push-constant style）在 draw 阶段给该子树施加一个平移量,离屏内容由 GPU scissor
+# 丢弃,完全绕开 collect。圆角 clip 的局部坐标随内容一起平移以避免 mask 脱钩。前置不满足（含
+# virtual / 嵌套 scroll / overlay 或 portal / scrollbar 或 IME / unsupported clip 或 composite /
+# 运行时 adapter 不支持 IMMEDIATES）即干净回退到 transform-only-scroll 的子树重收集或整帧重收集。
+# 需启用 wgpu IMMEDIATES 原生特性（桌面 Metal / DX12 / Vulkan 支持,WebGL 不支持）,故默认不开启,
+# 且在 adapter 不支持时运行时安全降级。
+transform-only-scroll-gpu = ["transform-only-scroll"]
 
 [dependencies]
 accesskit = "0.24"

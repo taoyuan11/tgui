@@ -11,6 +11,8 @@ pub(crate) struct ScrollRegion {
     pub content_viewport: Rect,
     pub visible_frame: Rect,
     pub content_bounds: Rect,
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub gpu_base_scroll_offset: Point,
     pub scroll_offset: Point,
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
@@ -257,6 +259,21 @@ impl<VM> Default for ComputedScene<VM> {
 }
 
 impl<VM> ComputedScene<VM> {
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(crate) fn fill_gpu_scroll_container(&mut self, id: WidgetId) {
+        self.scene.fill_gpu_scroll_container(id);
+        for hit in &mut self.hit_regions {
+            if hit.gpu_scroll_container.is_none() {
+                hit.gpu_scroll_container = Some(id);
+            }
+        }
+        for hit in &mut self.overlay_hit_regions {
+            if hit.gpu_scroll_container.is_none() {
+                hit.gpu_scroll_container = Some(id);
+            }
+        }
+    }
+
     pub(crate) fn delta_since(&self, base: &ComputedScene<VM>) -> ComputedScene<VM> {
         let mut delta = ComputedScene {
             scene: self.scene.delta_since(&base.scene),

@@ -11,12 +11,31 @@ impl Renderer {
         let instance = create_instance(clear_color);
         let surface = create_surface(&instance, window.clone())?;
         let adapter = request_adapter(&instance, &surface, clear_color).await?;
-        let required_limits = required_device_limits(&adapter);
+        #[cfg(feature = "transform-only-scroll-gpu")]
+        let push_constants_supported = {
+            let payload_size = core::mem::size_of::<PushTranslate>() as u32;
+            adapter.features().contains(wgpu::Features::IMMEDIATES)
+                && adapter.limits().max_immediate_size >= payload_size
+        };
+        let required_limits = required_device_limits(
+            &adapter,
+            #[cfg(feature = "transform-only-scroll-gpu")]
+            push_constants_supported,
+        );
+
+        #[cfg(feature = "transform-only-scroll-gpu")]
+        let required_features = if push_constants_supported {
+            wgpu::Features::IMMEDIATES
+        } else {
+            wgpu::Features::empty()
+        };
+        #[cfg(not(feature = "transform-only-scroll-gpu"))]
+        let required_features = wgpu::Features::empty();
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("tgui-device"),
-                required_features: wgpu::Features::empty(),
+                required_features,
                 required_limits,
                 memory_hints: wgpu::MemoryHints::MemoryUsage,
                 experimental_features: Default::default(),
@@ -48,7 +67,13 @@ impl Renderer {
             desired_maximum_frame_latency: 2,
         };
 
-        let pipelines = create_renderer_pipelines(&device, format, msaa_sample_count);
+        let pipelines = create_renderer_pipelines(
+            &device,
+            format,
+            msaa_sample_count,
+            #[cfg(feature = "transform-only-scroll-gpu")]
+            push_constants_supported,
+        );
 
         let scale_factor = 1.0_f32.max(window.scale_factor() as f32);
 
@@ -91,6 +116,8 @@ impl Renderer {
             text_cache: HashMap::new(),
             texture_cache: HashMap::new(),
             vertex_pool,
+            #[cfg(feature = "transform-only-scroll-gpu")]
+            push_constants_supported,
         })
     }
 }

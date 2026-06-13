@@ -22,7 +22,307 @@ pub(in crate::runtime) mod scroll_fast_path_probe {
     }
 }
 
+#[cfg(feature = "transform-only-scroll-gpu")]
+fn gpu_scroll_clip_supported(clip_rect: Option<Rect>, region: ScrollRegion) -> bool {
+    let Some(clip_rect) = clip_rect else {
+        return false;
+    };
+    clip_rect == region.content_viewport || clip_rect == region.visible_frame
+}
+
+#[cfg(feature = "transform-only-scroll-gpu")]
+fn gpu_scroll_command_supported(
+    command: &crate::ui::widget::RenderCommand,
+    region: ScrollRegion,
+) -> bool {
+    match command {
+        crate::ui::widget::RenderCommand::BackdropBlur(_)
+        | crate::ui::widget::RenderCommand::CanvasComposite(_) => false,
+        crate::ui::widget::RenderCommand::Brush(primitive) => {
+            gpu_scroll_clip_supported(primitive.clip_rect, region)
+        }
+        crate::ui::widget::RenderCommand::Shape(primitive) => {
+            gpu_scroll_clip_supported(primitive.clip_rect, region)
+        }
+        crate::ui::widget::RenderCommand::Texture(primitive) => {
+            gpu_scroll_clip_supported(primitive.clip_rect, region)
+        }
+        #[cfg(feature = "video")]
+        crate::ui::widget::RenderCommand::VideoTexture(primitive) => {
+            gpu_scroll_clip_supported(primitive.clip_rect, region)
+        }
+        crate::ui::widget::RenderCommand::Text(primitive) => {
+            gpu_scroll_clip_supported(primitive.clip_rect, region)
+        }
+        crate::ui::widget::RenderCommand::Mesh(primitive) => {
+            gpu_scroll_clip_supported(primitive.clip_rect, region)
+        }
+    }
+}
+
+#[cfg(feature = "transform-only-scroll-gpu")]
+fn gpu_scroll_scene_supported(
+    scene: &crate::ui::widget::ScenePrimitives,
+    widget_id: WidgetId,
+    region: ScrollRegion,
+) -> bool {
+    scene
+        .commands
+        .iter()
+        .zip(scene.command_gpu_scroll_containers())
+        .all(|(command, owner)| {
+            *owner != Some(widget_id) || gpu_scroll_command_supported(command, region)
+        })
+}
+
+#[cfg(feature = "transform-only-scroll-gpu")]
+fn gpu_scroll_has_descendant_scroll_region<VM: 'static>(
+    layout: &ResolvedSceneLayout<VM>,
+    regions: &[ScrollRegion],
+    widget_id: WidgetId,
+) -> bool {
+    let Some(path) = layout.path_for(widget_id) else {
+        return true;
+    };
+    regions.iter().any(|region| {
+        region.id != widget_id
+            && layout
+                .path_for(region.id)
+                .map(|candidate| candidate.starts_with(path))
+                .unwrap_or(false)
+    })
+}
+
+#[cfg(feature = "transform-only-scroll-gpu")]
+fn translate_gpu_point(point: &mut Point, delta: Point) {
+    point.x += delta.x;
+    point.y += delta.y;
+}
+
+#[cfg(feature = "transform-only-scroll-gpu")]
+fn translate_gpu_rect(rect: &mut Rect, delta: Point) {
+    rect.x += delta.x;
+    rect.y += delta.y;
+}
+
+#[cfg(feature = "transform-only-scroll-gpu")]
+fn translate_gpu_hit_geometry(geometry: &mut crate::ui::widget::HitGeometry, delta: Point) {
+    match geometry {
+        crate::ui::widget::HitGeometry::Rect => {}
+        crate::ui::widget::HitGeometry::Quad(quad) => {
+            for point in quad {
+                translate_gpu_point(point, delta);
+            }
+        }
+        crate::ui::widget::HitGeometry::Triangles(triangles) => {
+            let translated = triangles
+                .iter()
+                .map(|triangle| {
+                    let mut triangle = *triangle;
+                    for point in &mut triangle {
+                        translate_gpu_point(point, delta);
+                    }
+                    triangle
+                })
+                .collect::<Vec<_>>();
+            *triangles = Arc::from(translated);
+        }
+    }
+}
+
+#[cfg(feature = "transform-only-scroll-gpu")]
+fn gpu_scroll_hit_supported<VM>(
+    hit: &crate::ui::widget::HitRegion<VM>,
+    widget_id: WidgetId,
+) -> bool {
+    hit.gpu_scroll_container != Some(widget_id)
+        || !matches!(
+            hit.interaction,
+            crate::ui::widget::HitInteraction::CanvasItem { .. }
+        )
+}
+
+#[cfg(feature = "transform-only-scroll-gpu")]
+fn translate_gpu_hit_interaction<VM>(
+    interaction: &mut crate::ui::widget::HitInteraction<VM>,
+    delta: Point,
+) {
+    match interaction {
+        crate::ui::widget::HitInteraction::SelectableText { frame, .. } => {
+            translate_gpu_rect(frame, delta);
+        }
+        crate::ui::widget::HitInteraction::Slider {
+            track_rect,
+            thumb_rect,
+            ..
+        } => {
+            translate_gpu_rect(track_rect, delta);
+            translate_gpu_rect(thumb_rect, delta);
+        }
+        crate::ui::widget::HitInteraction::TextInput { frame, .. } => {
+            translate_gpu_rect(frame, delta);
+        }
+        crate::ui::widget::HitInteraction::CanvasItem { .. } => {}
+        _ => {}
+    }
+}
+
+#[cfg(feature = "transform-only-scroll-gpu")]
+fn translate_gpu_scroll_hits<VM>(
+    hits: &mut [crate::ui::widget::HitRegion<VM>],
+    widget_id: WidgetId,
+    delta: Point,
+) {
+    for hit in hits {
+        if hit.gpu_scroll_container != Some(widget_id) {
+            continue;
+        }
+        translate_gpu_rect(&mut hit.rect, delta);
+        translate_gpu_hit_geometry(&mut hit.geometry, delta);
+        translate_gpu_hit_interaction(&mut hit.interaction, delta);
+    }
+}
+
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    fn try_pure_scroll_gpu_fast_path(
+        &mut self,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+    ) -> bool {
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
+        };
+        if !self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.push_constants_supported())
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        if !cached.computed_valid
+            || !cached.layout_valid
+            || cached.scroll_epoch == self.scroll_epoch
+            || !self.scene_cache_fields_match_ignoring_scroll(
+                cached,
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+            )
+        {
+            return false;
+        }
+        let Some(layout) = cached.layout.as_ref() else {
+            return false;
+        };
+        if layout.contains_virtual() || self.scroll_dirty_widgets.len() != 1 {
+            return false;
+        }
+        if !cached.computed.overlay_hit_regions.is_empty()
+            || cached.computed.portal_overlay_counts.commands > 0
+            || cached.computed.portal_overlay_counts.hits > 0
+            || !cached.computed.portal_entries.is_empty()
+            || !cached.computed.external_portal_requests.is_empty()
+            || cached.computed.ime_cursor_area.is_some()
+        {
+            return false;
+        }
+
+        let Some(widget_id) = self.scroll_dirty_widgets.iter().next().copied() else {
+            return false;
+        };
+        let Some(region_index) = cached
+            .computed
+            .scroll_regions
+            .iter()
+            .position(|region| region.id == widget_id)
+        else {
+            return false;
+        };
+        let old_region = cached.computed.scroll_regions[region_index];
+        if gpu_scroll_has_descendant_scroll_region(
+            layout,
+            &cached.computed.scroll_regions,
+            widget_id,
+        ) {
+            return false;
+        }
+        if !gpu_scroll_scene_supported(&cached.computed.scene, widget_id, old_region) {
+            return false;
+        }
+        if !cached
+            .computed
+            .hit_regions
+            .iter()
+            .all(|hit| gpu_scroll_hit_supported(hit, widget_id))
+        {
+            return false;
+        }
+        if old_region.horizontal_track.is_some()
+            || old_region.horizontal_thumb.is_some()
+            || old_region.vertical_track.is_some()
+            || old_region.vertical_thumb.is_some()
+        {
+            return false;
+        }
+        let next_offset = self
+            .scroll_states
+            .get(&widget_id)
+            .copied()
+            .unwrap_or(Point::ZERO);
+        if (next_offset.x - old_region.scroll_offset.x).abs() <= 0.01
+            && (next_offset.y - old_region.scroll_offset.y).abs() <= 0.01
+        {
+            return false;
+        }
+        let max = old_region.max_offset();
+        let next_offset = Point::new(
+            if old_region.overflow_x == crate::ui::layout::Overflow::Scroll {
+                next_offset.x.clamp(Dp::ZERO, max.x)
+            } else {
+                Dp::ZERO
+            },
+            if old_region.overflow_y == crate::ui::layout::Overflow::Scroll {
+                next_offset.y.clamp(Dp::ZERO, max.y)
+            } else {
+                Dp::ZERO
+            },
+        );
+
+        let Some(cached) = self.cached_scene.as_mut() else {
+            return false;
+        };
+        let hit_delta = Point::new(
+            old_region.scroll_offset.x - next_offset.x,
+            old_region.scroll_offset.y - next_offset.y,
+        );
+        cached.computed.scroll_regions[region_index].scroll_offset = next_offset;
+        translate_gpu_scroll_hits(&mut cached.computed.hit_regions, widget_id, hit_delta);
+        for chunk in cached.scene_chunks.values_mut() {
+            if let Some(region) = chunk
+                .scroll_regions
+                .iter_mut()
+                .find(|region| region.id == widget_id)
+            {
+                region.scroll_offset = next_offset;
+            }
+            translate_gpu_scroll_hits(&mut chunk.hit_regions, widget_id, hit_delta);
+        }
+        cached.scroll_epoch = self.scroll_epoch;
+        cached.caret_visible = caret_visible;
+        cached.active_scrollbar = active_scrollbar;
+        cached.hovered_scrollbar = self.hovered_scrollbar;
+        cached.gpu_scroll_deferred = true;
+        self.scroll_dirty_widgets.clear();
+        #[cfg(test)]
+        scroll_fast_path_probe::record_hit();
+        true
+    }
+
     fn apply_scroll_view_controller_state(
         &mut self,
         bindings: Vec<(WidgetId, ScrollRegion, ScrollViewController)>,
@@ -180,6 +480,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
         // patch 以 sync_runtime_scene_state=true 同步了 scroll_epoch 等运行时状态。
+        #[cfg(feature = "transform-only-scroll-gpu")]
+        if let Some(cached) = self.cached_scene.as_mut() {
+            cached.gpu_scroll_deferred = false;
+        }
         self.scroll_dirty_widgets.clear();
         #[cfg(test)]
         scroll_fast_path_probe::record_hit();
@@ -247,6 +551,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let text_input_patch_roots = self.cached_scene.as_ref().and_then(|cached| {
             (layout_cache_valid
                 && !cache_valid
+                && {
+                    #[cfg(feature = "transform-only-scroll-gpu")]
+                    {
+                        !cached.gpu_scroll_deferred
+                    }
+                    #[cfg(not(feature = "transform-only-scroll-gpu"))]
+                    {
+                        true
+                    }
+                }
                 && self.can_patch_text_input_scene(
                     cached,
                     viewport,
@@ -284,6 +598,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         // Phase 4 纯滚动快路径：仅 scroll_epoch 变化时,只重收集滚动子树而非整树。
         // 命中即直接返回已更新的 cached.computed；不命中(前置不满足/patch 失败)
         // 落回下方常规 `!cache_valid` 整帧重收集,行为与未开启特性时完全一致。
+        #[cfg(feature = "transform-only-scroll-gpu")]
+        if !cache_valid
+            && layout_cache_valid
+            && self.try_pure_scroll_gpu_fast_path(viewport, units, caret_visible, active_scrollbar)
+        {
+            if let Some(started_at) = started_at {
+                log_text_profile(
+                    "textarea_computed_scene",
+                    started_at.elapsed(),
+                    format!(
+                        "path=pure_scroll_gpu cache_valid={} layout_cache_valid={} cache_mismatch={}",
+                        cache_valid, layout_cache_valid, cache_mismatch
+                    ),
+                );
+            }
+            return &self
+                .cached_scene
+                .as_ref()
+                .expect("pure scroll gpu fast path should preserve cached scene")
+                .computed;
+        }
+
         #[cfg(feature = "transform-only-scroll")]
         if !cache_valid
             && layout_cache_valid
@@ -620,6 +956,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 active_scrollbar,
                 layout_valid: true,
                 computed_valid: true,
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                gpu_scroll_deferred: false,
                 dependencies: {
                     let mut dependencies = DependencyGraph::default();
                     if let Some(layout) = layout.as_ref() {

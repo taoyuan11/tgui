@@ -23,13 +23,22 @@ pub(super) fn create_renderer_pipelines(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
     msaa_sample_count: u32,
+    #[cfg(feature = "transform-only-scroll-gpu")] immediates_enabled: bool,
 ) -> RendererPipelines {
-    let resources = create_renderer_pipeline_resources(device);
+    #[cfg(not(feature = "transform-only-scroll-gpu"))]
+    let immediates_enabled = false;
+    let resources = create_renderer_pipeline_resources(device, immediates_enabled);
+
+    let immediate_size = if immediates_enabled {
+        core::mem::size_of::<PushTranslate>() as u32
+    } else {
+        0
+    };
 
     let rect_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("tgui-rect-pipeline-layout"),
         bind_group_layouts: &[],
-        immediate_size: 0,
+        immediate_size,
     });
 
     let rect_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -69,7 +78,7 @@ pub(super) fn create_renderer_pipelines(
     let brush_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("tgui-brush-pipeline-layout"),
         bind_group_layouts: &[],
-        immediate_size: 0,
+        immediate_size,
     });
 
     let brush_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -109,7 +118,7 @@ pub(super) fn create_renderer_pipelines(
     let mesh_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("tgui-mesh-pipeline-layout"),
         bind_group_layouts: &[Some(&resources.mesh_clip_bind_group_layout)],
-        immediate_size: 0,
+        immediate_size,
     });
 
     let mesh_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -149,7 +158,7 @@ pub(super) fn create_renderer_pipelines(
     let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("tgui-text-pipeline-layout"),
         bind_group_layouts: &[Some(&resources.text_bind_group_layout)],
-        immediate_size: 0,
+        immediate_size,
     });
 
     let scene_text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -192,7 +201,7 @@ pub(super) fn create_renderer_pipelines(
             &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("tgui-present-pipeline-layout"),
                 bind_group_layouts: &[Some(&resources.present_bind_group_layout)],
-                immediate_size: 0,
+                immediate_size,
             }),
         ),
         vertex: wgpu::VertexState {

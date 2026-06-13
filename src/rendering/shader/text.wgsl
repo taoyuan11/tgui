@@ -37,6 +37,14 @@ fn rounded_box_sdf(local_position: vec2<f32>, rect_size: vec2<f32>, radius: f32)
     return outside + inside - radius;
 }
 
+// Phase 4（transform-only-scroll-gpu）：滚动容器子树的每-draw 平移 immediate data。
+struct PushTranslate {
+    offset_ndc: vec2<f32>,
+    offset_physical: vec2<f32>,
+}
+
+const pc: PushTranslate = PushTranslate(vec2<f32>(0.0), vec2<f32>(0.0));
+
 fn clip_mask_alpha(
     local_position: vec2<f32>,
     rect_size: vec2<f32>,
@@ -54,12 +62,12 @@ fn clip_mask_alpha(
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.position = vec4<f32>(input.position, 0.0, 1.0);
+    output.position = vec4<f32>(input.position + pc.offset_ndc, 0.0, 1.0);
+    output.clip_local_position = input.clip_local_position + pc.offset_physical;
     output.uv = input.uv;
     output.local_position = input.local_position;
     output.rect_size = input.rect_size;
     output.corner_radius = input.corner_radius;
-    output.clip_local_position = input.clip_local_position;
     output.clip_rect_size = input.clip_rect_size;
     output.clip_corner_radius = input.clip_corner_radius;
     output.clip_enabled = input.clip_enabled;

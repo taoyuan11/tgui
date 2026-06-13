@@ -234,6 +234,8 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         next_toast_wakeup: context.next_toast_wakeup,
         active_tooltip: context.active_tooltip,
         active_hover_popover: context.active_hover_popover,
+        #[cfg(feature = "transform-only-scroll-gpu")]
+        gpu_scroll_container: None,
     };
     let root_id = resolved.collect_subtree_cache(
         &layout_root,
@@ -610,6 +612,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                     track_rect: geometry.track_rect,
                     thumb_rect: geometry.thumb_rect,
                 },
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                gpu_scroll_container: context.gpu_scroll_container,
             });
         }
         true
@@ -734,6 +738,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                     on_open_change: on_open_change.clone(),
                     is_open: active,
                 },
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                gpu_scroll_container: context.gpu_scroll_container,
             });
         }
         true
@@ -837,6 +843,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                     on_open_change: on_open_change.clone(),
                 }
             },
+            #[cfg(feature = "transform-only-scroll-gpu")]
+            gpu_scroll_container: context.gpu_scroll_container,
         });
         true
     }
@@ -1002,6 +1010,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                 content_viewport,
                 visible_frame,
                 content_bounds,
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                gpu_base_scroll_offset: clamped_scroll,
                 scroll_offset: clamped_scroll,
                 overflow_x,
                 overflow_y,
@@ -1051,6 +1061,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                     padding,
                     text_style: text,
                 },
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                gpu_scroll_container: context.gpu_scroll_container,
             });
         }
         true

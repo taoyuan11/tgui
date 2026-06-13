@@ -51,6 +51,14 @@ fn rounded_box_sdf(local_position: vec2<f32>, rect_size: vec2<f32>, radius: f32)
     return outside + inside - radius;
 }
 
+// Phase 4（transform-only-scroll-gpu）：滚动容器子树的每-draw 平移 immediate data。
+struct PushTranslate {
+    offset_ndc: vec2<f32>,
+    offset_physical: vec2<f32>, // mesh clip 是 uniform,不需平移,但保持 layout 一致
+}
+
+const pc: PushTranslate = PushTranslate(vec2<f32>(0.0), vec2<f32>(0.0));
+
 fn clip_mask_alpha(
     local_position: vec2<f32>,
     rect_size: vec2<f32>,
@@ -128,7 +136,7 @@ fn gradient_color(input: VertexOutput, t_raw: f32) -> vec4<f32> {
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.position = vec4<f32>(input.position, 0.0, 1.0);
+    output.position = vec4<f32>(input.position + pc.offset_ndc, 0.0, 1.0);
     output.local_position = input.local_position;
     output.brush_meta = input.brush_meta;
     output.gradient_data0 = input.gradient_data0;

@@ -10,16 +10,57 @@ use super::{
     MeshVertex, RectVertex, Renderer, TextQuadSpec, TextTransformSpec, TextVertex, VertexViewport,
 };
 
+#[cfg(feature = "transform-only-scroll-gpu")]
+fn compute_scroll_translate(
+    gpu_scroll_container: Option<crate::ui::widget::WidgetId>,
+    scroll_regions: &[crate::ui::widget::ScrollRegion],
+    viewport: VertexViewport,
+) -> Option<super::PushTranslate> {
+    let gpu_scroll_container = gpu_scroll_container?;
+    let region = scroll_regions
+        .iter()
+        .rev()
+        .find(|region| region.id == gpu_scroll_container)?;
+
+    let delta = crate::ui::widget::Point {
+        x: region.scroll_offset.x - region.gpu_base_scroll_offset.x,
+        y: region.scroll_offset.y - region.gpu_base_scroll_offset.y,
+    };
+    if delta.x.abs() < Dp::new(0.01) && delta.y.abs() < Dp::new(0.01) {
+        return None; // 零偏移优化
+    }
+
+    // NDC 偏移：逻辑 dp → 物理像素 → NDC。
+    let physical_offset_x = delta.x.get() * viewport.scale_factor;
+    let physical_offset_y = delta.y.get() * viewport.scale_factor;
+    let ndc_x = -2.0 * physical_offset_x / viewport.physical_size[0];
+    let ndc_y = 2.0 * physical_offset_y / viewport.physical_size[1];
+
+    // 物理像素偏移（用于 clip_local_position）。
+    let physical_x = -physical_offset_x;
+    let physical_y = -physical_offset_y;
+
+    Some(super::PushTranslate {
+        offset_ndc: [ndc_x, ndc_y],
+        offset_physical: [physical_x, physical_y],
+    })
+}
+
 pub(super) struct PreparedRect {
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
+    /// Phase 4（transform-only-scroll-gpu）：该 draw 所属滚动容器的平移量。非滚动内容为 None。
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(super) scroll_translate: Option<super::PushTranslate>,
 }
 
 pub(super) struct PreparedBrush {
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(super) scroll_translate: Option<super::PushTranslate>,
 }
 
 pub(super) struct PreparedMesh {
@@ -27,6 +68,8 @@ pub(super) struct PreparedMesh {
     pub(super) clip_bind_group: wgpu::BindGroup,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(super) scroll_translate: Option<super::PushTranslate>,
 }
 
 pub(super) struct PreparedSprite {
@@ -34,6 +77,8 @@ pub(super) struct PreparedSprite {
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(super) scroll_translate: Option<super::PushTranslate>,
 }
 
 pub(super) struct PreparedBackdropBlur {
@@ -67,10 +112,22 @@ impl Renderer {
         commands: &[RenderCommand],
         font_manager: &FontManager,
         viewport: VertexViewport,
+        #[cfg(feature = "transform-only-scroll-gpu")]
+        scroll_regions: &[crate::ui::widget::ScrollRegion],
+        #[cfg(feature = "transform-only-scroll-gpu")] command_gpu_scroll_containers: &[Option<
+            crate::ui::widget::WidgetId,
+        >],
     ) -> Result<PreparedCommands, TguiError> {
         let mut prepared = Vec::with_capacity(commands.len());
 
-        for command in commands {
+        for (command_index, command) in commands.iter().enumerate() {
+            #[cfg(not(feature = "transform-only-scroll-gpu"))]
+            let _ = command_index;
+            #[cfg(feature = "transform-only-scroll-gpu")]
+            let gpu_scroll_container = command_gpu_scroll_containers
+                .get(command_index)
+                .copied()
+                .flatten();
             match command {
                 RenderCommand::BackdropBlur(primitive) => {
                     if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
@@ -133,6 +190,12 @@ impl Renderer {
                         clip_rect: primitive.clip_rect,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
+                        #[cfg(feature = "transform-only-scroll-gpu")]
+                        scroll_translate: compute_scroll_translate(
+                            gpu_scroll_container,
+                            scroll_regions,
+                            viewport,
+                        ),
                     }));
                 }
                 RenderCommand::CanvasComposite(primitive) => {
@@ -165,6 +228,12 @@ impl Renderer {
                         clip_rect: primitive.clip_rect,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
+                        #[cfg(feature = "transform-only-scroll-gpu")]
+                        scroll_translate: compute_scroll_translate(
+                            gpu_scroll_container,
+                            scroll_regions,
+                            viewport,
+                        ),
                     }));
                 }
                 RenderCommand::Mesh(primitive) => {
@@ -202,6 +271,12 @@ impl Renderer {
                         clip_bind_group,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
+                        #[cfg(feature = "transform-only-scroll-gpu")]
+                        scroll_translate: compute_scroll_translate(
+                            gpu_scroll_container,
+                            scroll_regions,
+                            viewport,
+                        ),
                     }));
                 }
                 RenderCommand::Texture(texture) => {
@@ -240,6 +315,12 @@ impl Renderer {
                             clip_rect: texture.clip_rect,
                             vertex_offset,
                             vertex_count: vertices.len() as u32,
+                            #[cfg(feature = "transform-only-scroll-gpu")]
+                            scroll_translate: compute_scroll_translate(
+                                gpu_scroll_container,
+                                scroll_regions,
+                                viewport,
+                            ),
                         }));
                     }
                 }
@@ -283,6 +364,12 @@ impl Renderer {
                             clip_rect: texture.clip_rect,
                             vertex_offset,
                             vertex_count: vertices.len() as u32,
+                            #[cfg(feature = "transform-only-scroll-gpu")]
+                            scroll_translate: compute_scroll_translate(
+                                gpu_scroll_container,
+                                scroll_regions,
+                                viewport,
+                            ),
                         }));
                     }
                 }
@@ -327,6 +414,12 @@ impl Renderer {
                             clip_rect: text.clip_rect,
                             vertex_offset,
                             vertex_count: vertices.len() as u32,
+                            #[cfg(feature = "transform-only-scroll-gpu")]
+                            scroll_translate: compute_scroll_translate(
+                                gpu_scroll_container,
+                                scroll_regions,
+                                viewport,
+                            ),
                         }));
                     }
                 }
@@ -382,5 +475,158 @@ impl Renderer {
 
     pub(super) fn logical_to_physical(&self, value: f32) -> f32 {
         value * self.scale_factor
+    }
+}
+
+#[cfg(all(test, feature = "transform-only-scroll-gpu"))]
+mod tests {
+    use super::*;
+    use crate::ui::layout::Overflow;
+    use crate::ui::widget::{Point, Rect, ScrollRegion, WidgetId};
+
+    fn make_viewport(logical_width: f32, logical_height: f32, scale: f32) -> VertexViewport {
+        let physical_width = logical_width * scale;
+        let physical_height = logical_height * scale;
+        VertexViewport::new(
+            logical_width,
+            logical_height,
+            physical_width,
+            physical_height,
+            scale,
+        )
+    }
+
+    fn make_scroll_region(
+        id: u64,
+        visible_frame: Rect,
+        gpu_base_scroll_offset: Point,
+        scroll_offset: Point,
+    ) -> ScrollRegion {
+        ScrollRegion {
+            id: WidgetId::from_raw(id),
+            content_viewport: visible_frame,
+            visible_frame,
+            content_bounds: visible_frame,
+            gpu_base_scroll_offset,
+            scroll_offset,
+            overflow_x: Overflow::Scroll,
+            overflow_y: Overflow::Scroll,
+            horizontal_track: None,
+            horizontal_thumb: None,
+            vertical_track: None,
+            vertical_thumb: None,
+        }
+    }
+
+    #[test]
+    fn test_compute_scroll_translate_no_region() {
+        let scroll_regions = [];
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+
+        let result =
+            compute_scroll_translate(Some(WidgetId::from_raw(1)), &scroll_regions, viewport);
+        assert!(result.is_none(), "无 ScrollRegion 时应返回 None");
+    }
+
+    #[test]
+    fn test_compute_scroll_translate_zero_offset() {
+        let scroll_regions = [make_scroll_region(
+            1,
+            Rect::new(0.0, 0.0, 800.0, 600.0),
+            Point::ZERO,
+            Point {
+                x: Dp::ZERO,
+                y: Dp::ZERO,
+            },
+        )];
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+
+        let result =
+            compute_scroll_translate(Some(WidgetId::from_raw(1)), &scroll_regions, viewport);
+        assert!(result.is_none(), "零偏移时应返回 None（优化）");
+    }
+
+    #[test]
+    fn test_compute_scroll_translate_basic() {
+        // Viewport: 800x600 逻辑 dp, scale=2.0 → 1600x1200 物理像素
+        // ScrollRegion: visible_frame (0,0,800,600), offset (50, 30)
+        let scroll_regions = [make_scroll_region(
+            1,
+            Rect::new(0.0, 0.0, 800.0, 600.0),
+            Point::ZERO,
+            Point {
+                x: Dp::new(50.0),
+                y: Dp::new(30.0),
+            },
+        )];
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+
+        let result =
+            compute_scroll_translate(Some(WidgetId::from_raw(1)), &scroll_regions, viewport)
+                .expect("应计算出平移量");
+
+        // 物理偏移：50*2=100, 30*2=60
+        // NDC：-2*100/1600 = -0.125, 2*60/1200 = 0.1
+        assert!((result.offset_ndc[0] - (-0.125)).abs() < 0.001);
+        assert!((result.offset_ndc[1] - 0.1).abs() < 0.001);
+        assert!((result.offset_physical[0] - (-100.0)).abs() < 0.001);
+        assert!((result.offset_physical[1] - (-60.0)).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_compute_scroll_translate_uses_explicit_region_id() {
+        // 元数据明确指向内层 id=2，即使外层先出现也不靠几何猜测。
+        let scroll_regions = [
+            make_scroll_region(
+                1,
+                Rect::new(0.0, 0.0, 800.0, 600.0),
+                Point::ZERO,
+                Point {
+                    x: Dp::new(10.0),
+                    y: Dp::new(10.0),
+                },
+            ),
+            make_scroll_region(
+                2,
+                Rect::new(100.0, 100.0, 200.0, 200.0),
+                Point::ZERO,
+                Point {
+                    x: Dp::new(20.0),
+                    y: Dp::new(5.0),
+                },
+            ),
+        ];
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+
+        let result =
+            compute_scroll_translate(Some(WidgetId::from_raw(2)), &scroll_regions, viewport)
+                .expect("应计算出平移量");
+
+        // 应使用内层的 offset (20, 5)，物理 (40, 10)
+        // NDC：-2*40/1600 = -0.05, 2*10/1200 ≈ 0.0167
+        assert!((result.offset_ndc[0] - (-0.05)).abs() < 0.001);
+        assert!((result.offset_ndc[1] - 0.01667).abs() < 0.001);
+        assert!((result.offset_physical[0] - (-40.0)).abs() < 0.001);
+        assert!((result.offset_physical[1] - (-10.0)).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_compute_scroll_translate_missing_metadata_or_region() {
+        let scroll_regions = [make_scroll_region(
+            1,
+            Rect::new(0.0, 0.0, 200.0, 200.0),
+            Point::ZERO,
+            Point {
+                x: Dp::new(50.0),
+                y: Dp::new(30.0),
+            },
+        )];
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+
+        assert!(compute_scroll_translate(None, &scroll_regions, viewport).is_none());
+        assert!(
+            compute_scroll_translate(Some(WidgetId::from_raw(2)), &scroll_regions, viewport)
+                .is_none()
+        );
     }
 }

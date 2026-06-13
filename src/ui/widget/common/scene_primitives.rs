@@ -177,9 +177,78 @@ pub struct ScenePrimitives {
     pub overlay_texts: SmallVec<[TextPrimitive; 1]>,
     pub(crate) commands: SmallVec<[RenderCommand; 1]>,
     pub(crate) overlay_commands: SmallVec<[RenderCommand; 1]>,
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(crate) command_gpu_scroll_containers: SmallVec<[Option<WidgetId>; 1]>,
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(crate) overlay_command_gpu_scroll_containers: SmallVec<[Option<WidgetId>; 1]>,
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    active_gpu_scroll_container: Option<WidgetId>,
 }
 
 impl ScenePrimitives {
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(crate) fn set_active_gpu_scroll_container(&mut self, id: Option<WidgetId>) {
+        self.active_gpu_scroll_container = id;
+    }
+
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(crate) fn fill_gpu_scroll_container(&mut self, id: WidgetId) {
+        for slot in &mut self.command_gpu_scroll_containers {
+            if slot.is_none() {
+                *slot = Some(id);
+            }
+        }
+        for slot in &mut self.overlay_command_gpu_scroll_containers {
+            if slot.is_none() {
+                *slot = Some(id);
+            }
+        }
+    }
+
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(crate) fn command_gpu_scroll_containers(&self) -> &[Option<WidgetId>] {
+        &self.command_gpu_scroll_containers
+    }
+
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(crate) fn overlay_command_gpu_scroll_containers(&self) -> &[Option<WidgetId>] {
+        &self.overlay_command_gpu_scroll_containers
+    }
+
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    fn should_cull_clipped_out(&self) -> bool {
+        self.active_gpu_scroll_container.is_none()
+    }
+
+    #[cfg(not(feature = "transform-only-scroll-gpu"))]
+    fn should_cull_clipped_out(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    fn push_command(&mut self, command: RenderCommand) {
+        self.commands.push(command);
+        self.command_gpu_scroll_containers
+            .push(self.active_gpu_scroll_container);
+    }
+
+    #[cfg(not(feature = "transform-only-scroll-gpu"))]
+    fn push_command(&mut self, command: RenderCommand) {
+        self.commands.push(command);
+    }
+
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    fn push_overlay_command(&mut self, command: RenderCommand) {
+        self.overlay_commands.push(command);
+        self.overlay_command_gpu_scroll_containers
+            .push(self.active_gpu_scroll_container);
+    }
+
+    #[cfg(not(feature = "transform-only-scroll-gpu"))]
+    fn push_overlay_command(&mut self, command: RenderCommand) {
+        self.overlay_commands.push(command);
+    }
+
     pub(crate) fn delta_since(&self, base: &ScenePrimitives) -> ScenePrimitives {
         let mut delta = ScenePrimitives::default();
         delta.backdrop_blurs.extend(
@@ -249,6 +318,21 @@ impl ScenePrimitives {
                 .skip(base.overlay_commands.len())
                 .cloned(),
         );
+        #[cfg(feature = "transform-only-scroll-gpu")]
+        {
+            delta.command_gpu_scroll_containers.extend(
+                self.command_gpu_scroll_containers
+                    .iter()
+                    .skip(base.command_gpu_scroll_containers.len())
+                    .copied(),
+            );
+            delta.overlay_command_gpu_scroll_containers.extend(
+                self.overlay_command_gpu_scroll_containers
+                    .iter()
+                    .skip(base.overlay_command_gpu_scroll_containers.len())
+                    .copied(),
+            );
+        }
         delta
     }
 
@@ -267,91 +351,88 @@ impl ScenePrimitives {
     }
 
     pub(crate) fn push_backdrop_blur(&mut self, primitive: BackdropBlurPrimitive) {
-        if clipped_out(primitive.rect, primitive.clip_rect) {
+        if self.should_cull_clipped_out() && clipped_out(primitive.rect, primitive.clip_rect) {
             return;
         }
         self.backdrop_blurs.push(primitive);
-        self.commands.push(RenderCommand::BackdropBlur(primitive));
+        self.push_command(RenderCommand::BackdropBlur(primitive));
     }
 
     pub(crate) fn push_brush(&mut self, primitive: BrushPrimitive) {
-        if clipped_out(primitive.rect, primitive.clip_rect) {
+        if self.should_cull_clipped_out() && clipped_out(primitive.rect, primitive.clip_rect) {
             return;
         }
         self.brushes.push(primitive.clone());
-        self.commands.push(RenderCommand::Brush(primitive));
+        self.push_command(RenderCommand::Brush(primitive));
     }
 
     pub(crate) fn push_canvas_composite(&mut self, primitive: CanvasCompositePrimitive) {
-        if clipped_out(primitive.bounds, primitive.clip_rect) {
+        if self.should_cull_clipped_out() && clipped_out(primitive.bounds, primitive.clip_rect) {
             return;
         }
         self.canvas_composites.push(primitive.clone());
-        self.commands
-            .push(RenderCommand::CanvasComposite(Box::new(primitive)));
+        self.push_command(RenderCommand::CanvasComposite(Box::new(primitive)));
     }
 
     pub(crate) fn push_shape(&mut self, primitive: RenderPrimitive) {
-        if clipped_out(primitive.rect, primitive.clip_rect) {
+        if self.should_cull_clipped_out() && clipped_out(primitive.rect, primitive.clip_rect) {
             return;
         }
         self.shapes.push(primitive);
-        self.commands.push(RenderCommand::Shape(primitive));
+        self.push_command(RenderCommand::Shape(primitive));
     }
 
     pub(crate) fn push_mesh(&mut self, primitive: MeshPrimitive) {
         self.meshes.push(primitive.clone());
-        self.commands.push(RenderCommand::Mesh(primitive));
+        self.push_command(RenderCommand::Mesh(primitive));
     }
 
     pub(crate) fn push_texture(&mut self, primitive: TexturePrimitive) {
-        if clipped_out(primitive.frame, primitive.clip_rect) {
+        if self.should_cull_clipped_out() && clipped_out(primitive.frame, primitive.clip_rect) {
             return;
         }
         self.textures.push(primitive.clone());
-        self.commands.push(RenderCommand::Texture(primitive));
+        self.push_command(RenderCommand::Texture(primitive));
     }
 
     #[cfg(feature = "video")]
     pub(crate) fn push_video_texture(&mut self, primitive: VideoTexturePrimitive) {
-        if clipped_out(primitive.frame, primitive.clip_rect) {
+        if self.should_cull_clipped_out() && clipped_out(primitive.frame, primitive.clip_rect) {
             return;
         }
         self.video_textures.push(primitive.clone());
-        self.commands.push(RenderCommand::VideoTexture(primitive));
+        self.push_command(RenderCommand::VideoTexture(primitive));
     }
 
     pub(crate) fn push_text(&mut self, primitive: TextPrimitive) {
-        if clipped_out(primitive.frame, primitive.clip_rect) {
+        if self.should_cull_clipped_out() && clipped_out(primitive.frame, primitive.clip_rect) {
             return;
         }
         self.texts.push(primitive.clone());
-        self.commands.push(RenderCommand::Text(Box::new(primitive)));
+        self.push_command(RenderCommand::Text(Box::new(primitive)));
     }
 
     pub(crate) fn push_overlay_shape(&mut self, primitive: RenderPrimitive) {
         self.overlay_shapes.push(primitive);
-        self.overlay_commands.push(RenderCommand::Shape(primitive));
+        self.push_overlay_command(RenderCommand::Shape(primitive));
     }
 
     #[allow(dead_code)]
     pub(crate) fn push_overlay_texture(&mut self, primitive: TexturePrimitive) {
         self.overlay_textures.push(primitive.clone());
-        self.overlay_commands
-            .push(RenderCommand::Texture(primitive));
+        self.push_overlay_command(RenderCommand::Texture(primitive));
     }
 
     #[allow(dead_code)]
     pub(crate) fn push_overlay_mesh(&mut self, primitive: MeshPrimitive) {
         self.overlay_meshes.push(primitive.clone());
-        self.overlay_commands.push(RenderCommand::Mesh(primitive));
+        self.push_overlay_command(RenderCommand::Mesh(primitive));
     }
 
     #[allow(dead_code)]
     pub(crate) fn push_overlay_text(&mut self, primitive: TextPrimitive) {
         self.overlay_texts.push(primitive.clone());
-        self.overlay_commands
-            .push(RenderCommand::Text(Box::new(primitive)));
+        self.push_overlay_command(RenderCommand::Text(Box::new(primitive)));
     }
 
     pub(crate) fn extend(&mut self, other: &ScenePrimitives) {
@@ -378,6 +459,13 @@ impl ScenePrimitives {
         self.commands.extend(other.commands.iter().cloned());
         self.overlay_commands
             .extend(other.overlay_commands.iter().cloned());
+        #[cfg(feature = "transform-only-scroll-gpu")]
+        {
+            self.command_gpu_scroll_containers
+                .extend(other.command_gpu_scroll_containers.iter().copied());
+            self.overlay_command_gpu_scroll_containers
+                .extend(other.overlay_command_gpu_scroll_containers.iter().copied());
+        }
     }
 
     /// 各渲染流当前的命令数量快照。Phase 1 splice 快路径用它在
@@ -455,6 +543,20 @@ impl ScenePrimitives {
             }
             && overwrite(&mut self.texts, offset.texts, &chunk.texts)
             && overwrite(&mut self.commands, offset.commands, &chunk.commands)
+            && {
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                {
+                    overwrite(
+                        &mut self.command_gpu_scroll_containers,
+                        offset.commands,
+                        &chunk.command_gpu_scroll_containers,
+                    )
+                }
+                #[cfg(not(feature = "transform-only-scroll-gpu"))]
+                {
+                    true
+                }
+            }
     }
 }
 
@@ -677,5 +779,20 @@ mod culling_tests {
         scene.push_shape(shape(Rect::new(10.0, 5000.0, 20.0, 20.0), None));
         assert_eq!(scene.shapes.len(), 1);
         assert_eq!(scene.commands.len(), 1);
+    }
+
+    #[cfg(feature = "transform-only-scroll-gpu")]
+    #[test]
+    fn gpu_scroll_active_keeps_clipped_out_shape_and_tags_command() {
+        let mut scene = ScenePrimitives::default();
+        let scroll_id = WidgetId::from_raw(42);
+        let clip = Rect::new(0.0, 0.0, 100.0, 100.0);
+
+        scene.set_active_gpu_scroll_container(Some(scroll_id));
+        scene.push_shape(shape(Rect::new(10.0, 500.0, 20.0, 20.0), Some(clip)));
+
+        assert_eq!(scene.shapes.len(), 1);
+        assert_eq!(scene.commands.len(), 1);
+        assert_eq!(scene.command_gpu_scroll_containers(), &[Some(scroll_id)]);
     }
 }

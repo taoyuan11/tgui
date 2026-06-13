@@ -12,6 +12,7 @@ tgui = { path = "../..", features = [
     "property-deps",
     "incremental-upload",
     "transform-only-scroll",
+    "transform-only-scroll-gpu",
     "collect-profile",
     "mimalloc"
 ]

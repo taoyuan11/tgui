@@ -115,6 +115,8 @@ fn push_backdrop_hit_region<VM: 'static>(
             focusable: false,
             default_activation: DefaultActivation::None,
         },
+        #[cfg(feature = "transform-only-scroll-gpu")]
+        gpu_scroll_container: context.gpu_scroll_container,
     });
 }
 

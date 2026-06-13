@@ -16,24 +16,44 @@ pub(super) struct RendererPipelineResources {
     pub(super) text_sampler: wgpu::Sampler,
 }
 
+fn immediate_shader_source(source: &'static str, immediates_enabled: bool) -> String {
+    const ZERO_DECLARATION: &str =
+        "const pc: PushTranslate = PushTranslate(vec2<f32>(0.0), vec2<f32>(0.0));";
+    if immediates_enabled {
+        source.replace(ZERO_DECLARATION, "var<immediate> pc: PushTranslate;")
+    } else {
+        source.to_owned()
+    }
+}
+
 pub(super) fn create_renderer_pipeline_resources(
     device: &wgpu::Device,
+    immediates_enabled: bool,
 ) -> RendererPipelineResources {
     let rect_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("tgui-rect-shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/rect.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(
+            immediate_shader_source(include_str!("../shader/rect.wgsl"), immediates_enabled).into(),
+        ),
     });
     let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("tgui-mesh-shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/mesh.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(
+            immediate_shader_source(include_str!("../shader/mesh.wgsl"), immediates_enabled).into(),
+        ),
     });
     let text_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("tgui-text-shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/text.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(
+            immediate_shader_source(include_str!("../shader/text.wgsl"), immediates_enabled).into(),
+        ),
     });
     let brush_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("tgui-brush-shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/brush.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(
+            immediate_shader_source(include_str!("../shader/brush.wgsl"), immediates_enabled)
+                .into(),
+        ),
     });
     let backdrop_blur_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("tgui-backdrop-blur-shader"),
@@ -49,7 +69,9 @@ pub(super) fn create_renderer_pipeline_resources(
     });
     let present_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("tgui-present-shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../shader/text.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(
+            immediate_shader_source(include_str!("../shader/text.wgsl"), immediates_enabled).into(),
+        ),
     });
 
     let text_bind_group_layout =

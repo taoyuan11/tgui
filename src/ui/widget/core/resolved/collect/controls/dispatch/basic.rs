@@ -100,6 +100,8 @@ impl<VM> ResolvedElement<VM> {
                     on_change: on_change.clone(),
                     current: checked.resolve(),
                 },
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                gpu_scroll_container: context.gpu_scroll_container,
             });
         }
         true
@@ -158,6 +160,8 @@ impl<VM> ResolvedElement<VM> {
                     on_change: on_change.clone(),
                     current: checked.resolve(),
                 },
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                gpu_scroll_container: context.gpu_scroll_container,
             });
         }
         true
@@ -232,6 +236,8 @@ impl<VM> ResolvedElement<VM> {
                     on_change: on_change.clone(),
                     current: checked.resolve(),
                 },
+                #[cfg(feature = "transform-only-scroll-gpu")]
+                gpu_scroll_container: context.gpu_scroll_container,
             });
         }
         true

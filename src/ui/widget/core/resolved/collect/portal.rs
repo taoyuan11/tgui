@@ -204,6 +204,8 @@ pub(crate) fn collect_portal_content_scene<VM: 'static>(
                     next_toast_wakeup: context.next_toast_wakeup,
                     active_tooltip: context.active_tooltip,
                     active_hover_popover: context.active_hover_popover,
+                    #[cfg(feature = "transform-only-scroll-gpu")]
+                    gpu_scroll_container: None,
                 };
                 let root_id = resolved.collect_subtree_cache(
                     &layout_root,
