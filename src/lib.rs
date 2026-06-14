@@ -350,7 +350,7 @@ pub mod widgets {
     };
     #[cfg(feature = "bench-support")]
     pub use crate::ui::widget::{
-        default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
+        bench_support_ext, default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
     };
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,

@@ -112,6 +112,8 @@ pub use container::{Flex, Grid, IntoLengthValue, Stack};
 pub use core::bench_support::{
     default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
 };
+#[cfg(feature = "bench-support")]
+pub use core::bench_support_ext;
 pub(crate) use core::LifecycleSnapshot;
 #[cfg(feature = "audio")]
 pub(crate) use core::LifecycleWidgetKind;

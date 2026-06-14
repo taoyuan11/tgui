@@ -63,6 +63,8 @@ use super::text::{IntoTextContent, Text};
 
 #[cfg(feature = "bench-support")]
 pub mod bench_support;
+#[cfg(feature = "bench-support")]
+pub mod bench_support_ext;
 mod collect_profile;
 mod element;
 mod element_path;
