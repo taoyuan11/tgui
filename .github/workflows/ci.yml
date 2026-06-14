@@ -7,7 +7,8 @@
 #   - doc              :  cargo doc --all-features  (Linux)
 #   - clippy           :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
 #   - test             :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
-#   - bench-compile    :  cargo check --benches  (Linux, bench-support 编译可达性)
+#   - bench-compile    :  cargo check --features bench-support --benches
+#                         (Linux, Criterion target + bench-support 编译可达性)
 #   - deny             :  cargo-deny licenses/advisories/bans/sources  (Linux)
 #   - coverage         :  Codecov 上传，需要 vars.ENABLE_COVERAGE=true 与 secrets.CODECOV_TOKEN
 #   - bench-publish    :  Bencher.dev 上报，需要 vars.ENABLE_BENCH=true 与 secrets.BENCHER_API_TOKEN
@@ -208,20 +209,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install FFmpeg dev libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libasound2-dev \
-            libavcodec-dev libavformat-dev libavdevice-dev \
-            libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
-            pkg-config
       - uses: Swatinem/rust-cache@v2
         with:
           key: bench
-      # Cargo.toml 中 audio_pipeline / video_pipeline / state_signal / widget_core_layout / animation_engine
-      # / text_controller 这几个 bench 依赖 bench-support，所以 --all-features 才能编译全部 bench。
-      - run: cargo check --benches --all-features
+      - run: cargo check --features bench-support --benches
 
   deny:
     name: cargo-deny

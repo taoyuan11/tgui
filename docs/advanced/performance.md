@@ -8,20 +8,38 @@
 
 | Bench | 关注点 |
 | --- | --- |
+| `animation` | 动画 helper、插值和时间线相关路径 |
+| `audio_output` | `audio` feature 下的音频输出 callback helper |
+| `canvas_scene` | Canvas scene 构建、查询和 debug export |
+| `event_handling` | 真实 scene hit-region 扫描与 `Command` / `ValueCommand` 执行 |
+| `media_source` | `MediaSource` / `MediaBytes` 构造、clone 和 hash |
+| `real_widget_pipeline` | 真实 widget 树的 full layout+scene 与 scene-only recollect |
+| `scene_rendering` | 真实 widget scene collect、scene-only recollect 和 hit metadata scan |
+| `single_property_patch` | 深层叶子 scene patch 与整树 recollect 对照 |
 | `state_signal` | `State` / `Signal` 写入、派发与求值 |
-| `widget_core_layout` | `taffy` 布局和 scene 收集 |
-| `animation_engine` | 时间线动画与每帧 refresh |
-| `theme_resolution` | `ThemeSet` 解析和状态值求值 |
-| `text_controller` | Rope 缓冲区编辑和 IME 边界 |
-| `canvas_scene` | Canvas tessellation 与命中 |
-| `color_interpolation` | 主题颜色过渡 |
-| `audio_pipeline` | FFmpeg 音频解码到内存采样 |
-| `video_pipeline` | FFmpeg 视频解码到 RGBA 帧 |
+| `text_processing` | `Text` / `Textarea` 真实 layout、scene recollect 和 `TextController` |
+| `video_buffering` | `video` feature 下的视频队列 accounting helper |
+| `widget_core_layout` | 真实 widget 树的 layout、scene recollect 和 cached hit path |
 
 运行示例：
 
 ```sh
 cargo bench --bench widget_core_layout --features bench-support
+```
+
+CI 至少编译所有 `bench-support` Criterion targets：
+
+```sh
+cargo check --features bench-support --benches
+```
+
+性能相关 PR 若触及 `src/runtime/`、`src/ui/widget/core/`、文本输入、Canvas、媒体、音频或视频，需跑对应 target，例如：
+
+```sh
+cargo bench --features bench-support --bench event_handling
+cargo bench --features bench-support --bench widget_core_layout
+cargo bench --features "bench-support audio" --bench audio_output
+cargo bench --features "bench-support video" --bench video_buffering
 ```
 
 ## ResourceBudget

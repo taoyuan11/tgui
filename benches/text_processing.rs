@@ -1,180 +1,275 @@
-// 文本处理基准测试
-// 覆盖文本整形（cosmic-text）、文本渲染、文本输入控制器等热路径
-
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 #[cfg(feature = "bench-support")]
-use tgui::widgets::bench_support_ext::*;
+use std::time::Instant;
+
+#[cfg(feature = "bench-support")]
+use tgui::core::{dp, Rect};
+#[cfg(feature = "bench-support")]
+use tgui::layout::{Axis, Insets};
+#[cfg(feature = "bench-support")]
+use tgui::mvvm::ViewModelContext;
+#[cfg(feature = "bench-support")]
+use tgui::widgets::{Flex, Text, Textarea, WidgetBenchmarkContext, WidgetTree};
+
+#[cfg(feature = "bench-support")]
+fn viewport() -> Rect {
+    Rect::new(0.0, 0.0, 1000.0, 720.0)
+}
+
+#[cfg(feature = "bench-support")]
+fn repeated_text(bytes_hint: usize) -> String {
+    let sentence = "The quick brown fox jumps over the retained text layout path. ";
+    let mut text = String::with_capacity(bytes_hint + sentence.len());
+    while text.len() < bytes_hint {
+        text.push_str(sentence);
+    }
+    text
+}
+
+#[cfg(feature = "bench-support")]
+fn build_text_tree(lines: usize, sample: &str) -> WidgetTree<()> {
+    let mut body = Flex::new(Axis::Vertical)
+        .width(dp(920.0))
+        .gap(dp(4.0))
+        .padding(Insets::all(dp(10.0)));
+
+    for line in 0..lines {
+        body = body.child(Text::new(format!("{line:04}: {sample}")));
+    }
+
+    WidgetTree::new(
+        Flex::new(Axis::Vertical)
+            .width(dp(960.0))
+            .height(dp(720.0))
+            .padding(Insets::all(dp(16.0)))
+            .child(body),
+    )
+}
+
+#[cfg(feature = "bench-support")]
+fn build_textarea_tree(controller: tgui::mvvm::TextController) -> WidgetTree<()> {
+    WidgetTree::new(
+        Flex::new(Axis::Vertical)
+            .width(dp(960.0))
+            .height(dp(720.0))
+            .padding(Insets::all(dp(16.0)))
+            .child(Textarea::new(controller).size(dp(920.0), dp(520.0))),
+    )
+}
 
 #[cfg(feature = "bench-support")]
 fn bench_text_shaping(c: &mut Criterion) {
-    let mut group = c.benchmark_group("text_shaping");
+    let mut group = c.benchmark_group("text_widget_full_layout_and_scene");
 
-    let very_long = "Lorem ipsum dolor sit amet. ".repeat(20);
-    let texts = vec![
-        ("short", "Hello World"),
-        ("medium", "The quick brown fox jumps over the lazy dog"),
-        ("long", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris."),
-        ("very_long", very_long.as_str()),
+    let samples = [
+        ("short", "Hello World".to_string()),
+        (
+            "medium",
+            "The quick brown fox jumps over the lazy dog".to_string(),
+        ),
+        ("long", repeated_text(256)),
+        ("very_long", repeated_text(2048)),
     ];
 
-    for (name, text) in texts {
-        group.bench_with_input(BenchmarkId::new("shape", name), &text, |b, &text| {
+    for (name, sample) in samples {
+        let tree = build_text_tree(20, &sample);
+        group.bench_with_input(BenchmarkId::new("sample", name), &name, |b, _| {
+            let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
             b.iter(|| {
-                let shaped = shape_text(black_box(text), 14.0);
-                black_box(shaped);
+                ctx.invalidate_all();
+                let stats = ctx.run_layout_and_scene(black_box(&tree), Instant::now());
+                black_box(stats);
             });
         });
     }
+
     group.finish();
 }
 
 #[cfg(feature = "bench-support")]
 fn bench_text_layout(c: &mut Criterion) {
-    let mut group = c.benchmark_group("text_layout");
+    let mut group = c.benchmark_group("text_widget_scene_recollect_cached_layout");
+    let sample = repeated_text(192);
 
-    for line_count in [1, 5, 10, 20, 50, 100].iter() {
+    for line_count in [1_usize, 5, 20, 50, 100] {
+        let tree = build_text_tree(line_count, &sample);
         group.bench_with_input(
             BenchmarkId::from_parameter(line_count),
-            line_count,
-            |b, &count| {
-                let text = format!("{}\n", "Lorem ipsum dolor sit amet").repeat(count);
-
+            &line_count,
+            |b, _| {
+                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                let _ = ctx.run_layout_and_scene(&tree, Instant::now());
                 b.iter(|| {
-                    let layout = layout_text(black_box(&text), 400.0, 14.0);
-                    black_box(layout);
+                    let stats = ctx.recollect_scene_only(black_box(&tree), Instant::now());
+                    black_box(stats);
                 });
             },
         );
     }
+
     group.finish();
 }
 
 #[cfg(feature = "bench-support")]
 fn bench_text_measurement(c: &mut Criterion) {
-    let text = "The quick brown fox jumps over the lazy dog";
+    let mut group = c.benchmark_group("text_controller_snapshot");
+    let bench_ctx = ViewModelContext::for_benchmarks();
 
-    c.bench_function("text_measurement", |b| {
-        b.iter(|| {
-            let size = measure_text(black_box(text), 14.0);
-            black_box(size);
+    for size in [32_usize, 256, 1024, 4096] {
+        let controller = bench_ctx.text_controller(repeated_text(size));
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
+            b.iter(|| {
+                let snapshot = controller.snapshot();
+                black_box(snapshot);
+            });
         });
-    });
+    }
+
+    group.finish();
 }
 
 #[cfg(feature = "bench-support")]
 fn bench_text_hit_test(c: &mut Criterion) {
-    let text = "The quick brown fox jumps over the lazy dog";
-    let layout = layout_text(text, 400.0, 14.0);
+    let mut group = c.benchmark_group("textarea_controller_update_scene_recollect");
 
-    c.bench_function("text_hit_test", |b| {
-        b.iter(|| {
-            let index = text_hit_test(&layout, black_box((150.0, 10.0)));
-            black_box(index);
+    for size in [64_usize, 1024, 4096] {
+        let bench_ctx = ViewModelContext::for_benchmarks();
+        let controller = bench_ctx.text_controller(repeated_text(size));
+        let tree = build_textarea_tree(controller.clone());
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+            let _ = ctx.run_layout_and_scene(&tree, Instant::now());
+            let mut revision = 0usize;
+            b.iter(|| {
+                revision = revision.wrapping_add(1);
+                controller.set_text(black_box(format!(
+                    "{}\nrevision={revision}",
+                    repeated_text(size)
+                )));
+                let stats = ctx.recollect_scene_only(black_box(&tree), Instant::now());
+                black_box(stats);
+            });
         });
-    });
+    }
+
+    group.finish();
 }
 
 #[cfg(feature = "bench-support")]
 fn bench_text_controller_insert(c: &mut Criterion) {
-    let mut group = c.benchmark_group("text_controller_insert");
+    let mut group = c.benchmark_group("text_controller_replace_all");
+    let bench_ctx = ViewModelContext::for_benchmarks();
 
-    for text_size in [10, 100, 1000, 10000].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(text_size),
-            text_size,
-            |b, &size| {
-                let initial_text = "a".repeat(size);
-
-                b.iter(|| {
-                    let mut controller = create_text_controller(&initial_text);
-                    controller.insert_at(size / 2, black_box("X"));
-                    black_box(controller);
-                });
-            },
-        );
+    for size in [32_usize, 256, 1024, 4096] {
+        let controller = bench_ctx.text_controller(repeated_text(size));
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            let mut revision = 0usize;
+            b.iter(|| {
+                revision = revision.wrapping_add(1);
+                controller.replace_all(black_box(format!(
+                    "{} revision={revision}",
+                    repeated_text(size)
+                )));
+                black_box(controller.revision());
+            });
+        });
     }
+
     group.finish();
 }
 
 #[cfg(feature = "bench-support")]
 fn bench_text_controller_delete(c: &mut Criterion) {
-    let mut group = c.benchmark_group("text_controller_delete");
+    let mut group = c.benchmark_group("text_controller_with_text");
+    let bench_ctx = ViewModelContext::for_benchmarks();
 
-    for text_size in [10, 100, 1000, 10000].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(text_size),
-            text_size,
-            |b, &size| {
-                let initial_text = "a".repeat(size);
-
-                b.iter(|| {
-                    let mut controller = create_text_controller(&initial_text);
-                    controller.delete_range(size / 2, size / 2 + 1);
-                    black_box(controller);
-                });
-            },
-        );
+    for size in [32_usize, 256, 1024, 4096] {
+        let controller = bench_ctx.text_controller(repeated_text(size));
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
+            b.iter(|| {
+                let len = controller.with_text(|text| text.len());
+                black_box(len);
+            });
+        });
     }
+
     group.finish();
 }
 
 #[cfg(feature = "bench-support")]
 fn bench_text_selection(c: &mut Criterion) {
-    let text = "Lorem ipsum dolor sit amet\n".repeat(50);
-    let layout = layout_text(&text, 400.0, 14.0);
+    let mut group = c.benchmark_group("text_unicode_scene_recollect_cached_layout");
 
-    c.bench_function("text_selection_range", |b| {
-        b.iter(|| {
-            let selection = select_text_range(&layout, black_box(0), black_box(100));
-            black_box(selection);
+    let samples = [
+        ("ascii", "Hello World 123".to_string()),
+        ("latin", "Héllö Wörld".to_string()),
+        ("cjk", "你好世界 こんにちは".to_string()),
+        ("emoji", "Hello 👋 World 🌍".to_string()),
+        ("mixed", "Hello 你好 👋 Wörld こんにちは 🌍".to_string()),
+    ];
+
+    for (name, sample) in samples {
+        let tree = build_text_tree(50, &sample);
+        group.bench_with_input(BenchmarkId::new("sample", name), &name, |b, _| {
+            let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+            let _ = ctx.run_layout_and_scene(&tree, Instant::now());
+            b.iter(|| {
+                let stats = ctx.recollect_scene_only(black_box(&tree), Instant::now());
+                black_box(stats);
+            });
         });
-    });
+    }
+
+    group.finish();
 }
 
 #[cfg(feature = "bench-support")]
 fn bench_unicode_handling(c: &mut Criterion) {
-    let mut group = c.benchmark_group("unicode_handling");
+    let mut group = c.benchmark_group("text_widget_full_layout_by_line_count");
+    let sample = "Hello 你好 👋 Wörld こんにちは 🌍";
 
-    let texts = vec![
-        ("ascii", "Hello World 123"),
-        ("latin", "Héllö Wörld"),
-        ("cjk", "你好世界 こんにちは"),
-        ("emoji", "Hello 👋 World 🌍"),
-        ("mixed", "Hello 你好 👋 Wörld こんにちは 🌍"),
-    ];
-
-    for (name, text) in texts {
-        group.bench_with_input(BenchmarkId::new("shape", name), &text, |b, &text| {
+    for lines in [1_usize, 10, 50, 100] {
+        let tree = build_text_tree(lines, sample);
+        group.bench_with_input(BenchmarkId::from_parameter(lines), &lines, |b, _| {
+            let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
             b.iter(|| {
-                let shaped = shape_text(black_box(text), 14.0);
-                black_box(shaped);
+                ctx.invalidate_all();
+                let stats = ctx.run_layout_and_scene(black_box(&tree), Instant::now());
+                black_box(stats);
             });
         });
     }
+
     group.finish();
 }
 
 #[cfg(feature = "bench-support")]
 fn bench_text_wrapping(c: &mut Criterion) {
-    let mut group = c.benchmark_group("text_wrapping");
+    let mut group = c.benchmark_group("textarea_wrapped_scene_recollect_cached_layout");
 
-    let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(10);
-
-    for width in [100.0, 200.0, 400.0, 800.0].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(*width as i32),
-            width,
-            |b, &width| {
-                b.iter(|| {
-                    let layout = layout_text(black_box(&text), black_box(width), 14.0);
-                    black_box(layout);
-                });
-            },
+    for width in [240.0_f32, 480.0, 720.0, 920.0] {
+        let bench_ctx = ViewModelContext::for_benchmarks();
+        let controller = bench_ctx.text_controller(repeated_text(4096));
+        let tree = WidgetTree::new(
+            Flex::new(Axis::Vertical)
+                .width(dp(960.0))
+                .height(dp(720.0))
+                .padding(Insets::all(dp(16.0)))
+                .child(Textarea::new(controller).size(dp(width), dp(520.0))),
         );
+        group.bench_with_input(BenchmarkId::from_parameter(width as i32), &width, |b, _| {
+            let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+            let _ = ctx.run_layout_and_scene(&tree, Instant::now());
+            b.iter(|| {
+                let stats = ctx.recollect_scene_only(black_box(&tree), Instant::now());
+                black_box(stats);
+            });
+        });
     }
+
     group.finish();
 }
 

@@ -7,7 +7,9 @@ use crate::media::MediaManager;
 use crate::text::font::{FontCatalog, FontManager};
 use crate::ui::theme::Theme;
 use crate::ui::unit::UnitContext;
-use crate::ui::widget::{ComputedScene, Rect, VisualContextSnapshot, WidgetId, WidgetStateMap};
+use crate::ui::widget::{
+    ComputedScene, Point, Rect, VisualContextSnapshot, WidgetId, WidgetStateMap,
+};
 use smallvec::SmallVec;
 
 use super::{CollectedSceneCache, ResolvedSceneLayout, SceneChunkParts, WidgetTree};
@@ -176,6 +178,22 @@ impl WidgetBenchmarkContext {
             hit_region_count: computed.hit_regions.len() + computed.overlay_hit_regions.len(),
             scroll_region_count: computed.scroll_regions.len(),
         }
+    }
+
+    /// 在已缓存的真实 scene 上执行命中路径扫描，供 Criterion 测 runtime hit-region
+    /// 热路径，而不把内部 `HitInteraction` 类型暴露到公共 bench API。
+    #[allow(dead_code)]
+    pub fn cached_hit_path_len(
+        &mut self,
+        tree: &WidgetTree<()>,
+        point: Point,
+        now: Instant,
+    ) -> usize {
+        self.sync_cache(tree, now, true);
+        let Some(computed) = self.cached_scene.as_ref() else {
+            return 0;
+        };
+        WidgetTree::hit_path_from_computed(computed, point).len()
     }
 
     fn sync_cache(&mut self, tree: &WidgetTree<()>, now: Instant, need_scene: bool) {
@@ -484,7 +502,7 @@ mod tests {
     use crate::ui::unit::dp;
     #[cfg(feature = "collect-profile")]
     use crate::ui::widget::Stack;
-    use crate::ui::widget::{Flex, Text};
+    use crate::ui::widget::{Button, Flex, Text};
 
     #[test]
     fn reuses_layout_cache_for_stable_tree() {
@@ -541,6 +559,23 @@ mod tests {
         for _ in 0..4 {
             assert!(bench.patch_single_deep_leaf_scene(&tree, Instant::now()));
         }
+    }
+
+    #[cfg(feature = "bench-support")]
+    #[test]
+    fn cached_hit_path_len_reads_real_scene_hit_regions() {
+        let tree = WidgetTree::new(
+            Flex::new(Axis::Vertical)
+                .width(dp(320.0))
+                .height(dp(120.0))
+                .padding(crate::ui::layout::Insets::all(dp(8.0)))
+                .child(Button::new("Inspect").size(dp(120.0), dp(36.0))),
+        );
+        let mut bench = WidgetBenchmarkContext::default();
+
+        let hit_len = bench.cached_hit_path_len(&tree, Point::new(24.0, 24.0), Instant::now());
+
+        assert!(hit_len > 0);
     }
 
     #[cfg(feature = "collect-profile")]
