@@ -10,7 +10,6 @@ fn should_skip_fully_clipped_child<VM: 'static>(
     clip_rect: Rect,
     context: &CollectContext<'_, '_>,
 ) -> bool {
-    #[cfg(feature = "transform-only-scroll-gpu")]
     if context.gpu_scroll_container.is_some() {
         return false;
     }
@@ -116,7 +115,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                     content_viewport: visual.background_frame,
                     visible_frame,
                     content_bounds,
-                    #[cfg(feature = "transform-only-scroll-gpu")]
                     gpu_base_scroll_offset: scroll_offset,
                     scroll_offset,
                     overflow_x: layout.overflow_x,
@@ -131,10 +129,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                     x: visual.frame.x - scroll_offset.x,
                     y: visual.frame.y - scroll_offset.y,
                 };
-                #[cfg(feature = "transform-only-scroll-gpu")]
                 let previous_gpu_scroll_container = context.gpu_scroll_container;
-                #[cfg(feature = "transform-only-scroll-gpu")]
-                {
+                if context.gpu_scroll_enabled {
                     context.gpu_scroll_container = Some(self.id);
                 }
                 for (child, child_layout) in children.iter().zip(layout_node.children.iter()) {
@@ -175,7 +171,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                     context,
                     computed,
                 );
-                #[cfg(feature = "transform-only-scroll-gpu")]
                 {
                     context.gpu_scroll_container = previous_gpu_scroll_container;
                 }
@@ -301,7 +296,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                     content_viewport: visual.background_frame,
                     visible_frame,
                     content_bounds,
-                    #[cfg(feature = "transform-only-scroll-gpu")]
                     gpu_base_scroll_offset: scroll_offset,
                     scroll_offset,
                     overflow_x: *overflow_x,
@@ -319,10 +313,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                     visual.background_frame.x - scroll_offset.x,
                     visual.background_frame.y - scroll_offset.y,
                 );
-                #[cfg(feature = "transform-only-scroll-gpu")]
                 let previous_gpu_scroll_container = context.gpu_scroll_container;
-                #[cfg(feature = "transform-only-scroll-gpu")]
-                {
+                if context.gpu_scroll_enabled {
                     context.gpu_scroll_container = Some(self.id);
                 }
                 for ((child, child_layout), meta) in children
@@ -391,7 +383,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                         computed.extend(child_chunk);
                     }
                 }
-                #[cfg(feature = "transform-only-scroll-gpu")]
                 {
                     context.gpu_scroll_container = previous_gpu_scroll_container;
                 }
@@ -490,7 +481,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                             text_style: text.clone(),
                             text: text.content.resolve(),
                         },
-                        #[cfg(feature = "transform-only-scroll-gpu")]
                         gpu_scroll_container: context.gpu_scroll_container,
                     });
                 }
@@ -674,7 +664,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                                             .collect::<Vec<_>>()
                                             .into(),
                                     },
-                                    #[cfg(feature = "transform-only-scroll-gpu")]
                                     gpu_scroll_container: context.gpu_scroll_container,
                                 });
                             }
@@ -770,7 +759,6 @@ fn push_splitter_handle_hit_regions<VM: 'static>(
                 interactions: child.interactions.clone(),
                 pair_extent,
             },
-            #[cfg(feature = "transform-only-scroll-gpu")]
             gpu_scroll_container: context.gpu_scroll_container,
         });
     }

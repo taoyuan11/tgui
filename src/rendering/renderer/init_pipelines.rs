@@ -23,10 +23,8 @@ pub(super) fn create_renderer_pipelines(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
     msaa_sample_count: u32,
-    #[cfg(feature = "transform-only-scroll-gpu")] immediates_enabled: bool,
+    immediates_enabled: bool,
 ) -> RendererPipelines {
-    #[cfg(not(feature = "transform-only-scroll-gpu"))]
-    let immediates_enabled = false;
     let resources = create_renderer_pipeline_resources(device, immediates_enabled);
 
     let immediate_size = if immediates_enabled {

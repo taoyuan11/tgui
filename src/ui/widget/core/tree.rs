@@ -533,6 +533,7 @@ impl<VM: 'static> WidgetTree<VM> {
         tooltip_hover_started_at: &HashMap<WidgetId, Instant>,
         active_tooltip: Option<ActiveTooltipState>,
         active_hover_popover: Option<WidgetId>,
+        gpu_scroll_enabled: bool,
         style_sheet: &crate::ui::widget::StyleSheet,
     ) -> CollectedSceneCache<VM> {
         self.collect_scene_cache_from_layout_with_focus_value_and_reduced_motion_at(
@@ -565,6 +566,7 @@ impl<VM: 'static> WidgetTree<VM> {
             virtual_states,
             active_tooltip,
             active_hover_popover,
+            gpu_scroll_enabled,
             style_sheet,
         )
     }
@@ -689,6 +691,7 @@ impl<VM: 'static> WidgetTree<VM> {
             virtual_states,
             active_tooltip,
             active_hover_popover,
+            false,
             style_sheet,
         )
     }
@@ -724,6 +727,7 @@ impl<VM: 'static> WidgetTree<VM> {
         virtual_states: &HashMap<WidgetId, VirtualCacheState>,
         active_tooltip: Option<ActiveTooltipState>,
         active_hover_popover: Option<WidgetId>,
+        gpu_scroll_enabled: bool,
         style_sheet: &crate::ui::widget::StyleSheet,
     ) -> CollectedSceneCache<VM> {
         let next_tooltip_wakeup: std::cell::Cell<Option<Instant>> = std::cell::Cell::new(None);
@@ -767,7 +771,7 @@ impl<VM: 'static> WidgetTree<VM> {
             next_toast_wakeup: &next_toast_wakeup,
             active_tooltip,
             active_hover_popover,
-            #[cfg(feature = "transform-only-scroll-gpu")]
+            gpu_scroll_enabled,
             gpu_scroll_container: None,
         };
         self.collect_scene_cache_with_context(

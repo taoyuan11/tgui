@@ -183,7 +183,6 @@ impl<VM: 'static> ResolvedElement<VM> {
         self.collect_runtime_lifecycle_state(caches.lifecycle_states);
 
         let mut computed = ComputedScene::default();
-        #[cfg(feature = "transform-only-scroll-gpu")]
         computed
             .scene
             .set_active_gpu_scroll_container(context.gpu_scroll_container);
@@ -276,7 +275,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                         after_children: ComputedScene::default(),
                     });
             }
-            #[cfg(feature = "transform-only-scroll-gpu")]
             if let Some(gpu_scroll_container) = context.gpu_scroll_container {
                 computed.fill_gpu_scroll_container(gpu_scroll_container);
                 if let Some(parts) = caches.chunk_parts.get_mut(&self.id) {

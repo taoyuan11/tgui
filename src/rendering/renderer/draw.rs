@@ -8,7 +8,6 @@ use super::surface::surface_clear_color;
 use super::{OffscreenTarget, Renderer};
 
 impl Renderer {
-    #[cfg(feature = "transform-only-scroll-gpu")]
     fn set_scroll_translate(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
@@ -187,7 +186,6 @@ impl Renderer {
                     PreparedCommand::Rect(batch) => {
                         if self.apply_scissor(&mut pass, batch.clip_rect) {
                             pass.set_pipeline(&self.rect_pipeline);
-                            #[cfg(feature = "transform-only-scroll-gpu")]
                             self.set_scroll_translate(&mut pass, batch.scroll_translate);
                             pass.set_vertex_buffer(
                                 0,
@@ -201,7 +199,6 @@ impl Renderer {
                     PreparedCommand::Brush(batch) => {
                         if self.apply_scissor(&mut pass, batch.clip_rect) {
                             pass.set_pipeline(&self.brush_pipeline);
-                            #[cfg(feature = "transform-only-scroll-gpu")]
                             self.set_scroll_translate(&mut pass, batch.scroll_translate);
                             pass.set_vertex_buffer(
                                 0,
@@ -215,7 +212,6 @@ impl Renderer {
                     PreparedCommand::Mesh(batch) => {
                         if self.apply_scissor(&mut pass, batch.clip_rect) {
                             pass.set_pipeline(&self.mesh_pipeline);
-                            #[cfg(feature = "transform-only-scroll-gpu")]
                             self.set_scroll_translate(&mut pass, batch.scroll_translate);
                             pass.set_bind_group(0, &batch.clip_bind_group, &[]);
                             pass.set_vertex_buffer(
@@ -230,7 +226,6 @@ impl Renderer {
                     PreparedCommand::Sprite(batch) => {
                         if self.apply_scissor(&mut pass, batch.clip_rect) {
                             pass.set_pipeline(&self.scene_text_pipeline);
-                            #[cfg(feature = "transform-only-scroll-gpu")]
                             self.set_scroll_translate(&mut pass, batch.scroll_translate);
                             pass.set_vertex_buffer(
                                 0,

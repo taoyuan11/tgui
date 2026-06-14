@@ -2,7 +2,7 @@
 
 > 目标：把 `tgui` 从「细粒度依赖跟踪 + 保留式分块场景图子树增量 patch」推进到「Signal `set()` 直达渲染节点、单属性 O(1) 更新、滚动/动画零重收集」的终极形态（SolidJS / Leptos 级落地粒度）。
 
-## 实施状态（2026-06-13 更新）
+## 实施状态（2026-06-14 更新）
 
 此前版本曾把一次未提交实验会话误写成已落地状态，2026-06-12 已按仓库实际代码重新核对。当前实际进度：
 
@@ -12,9 +12,9 @@
   `collect_profile.rs` 的 `record_node_visible`（recollect/visible 比值探针）。正式基线见附录 A.2。
 - ✅ **Phase 1**（命令区间 splice）：**已实施**（2026-06-12）。落地内容见下方 Phase 1 章节「实施记录」。
 - ✅ **Phase 2**（属性级依赖归因）：**已实施**（2026-06-12）。落地内容见下方 Phase 2 章节「实施记录」。
-- ✅ **Phase 3**（GPU 区间增量上传）：**已实施 + 真机视觉验证通过**（feature `incremental-upload`，**默认仍关闭**）。落地内容见下方 Phase 3 章节「实施记录」。CPU 侧 `dirty_range` 逻辑已穷举单测；真机视觉验证已于 `examples/demo`（与 `audio` / `video` 同时开启该 feature）实跑完成——改色 / 改文本 / 滚动三种场景显示正常，未见上传错位 / 撕裂。保持默认关闭是出于发布稳妥（仍建议在目标硬件实跑后再用于生产），不再因「未验证」阻塞。
-- 🟡 **Phase 4**（滚动 transform-only 快路径）：**CPU 可证等价部分已实施 + GPU 可见变体已有保守实现**（features `transform-only-scroll` / `transform-only-scroll-gpu`，**默认关闭**）。落地内容见下方 Phase 4 章节「实施记录」。CPU 路径已落地「纯滚动帧 → 仅重收集滚动子树」的安全快路径（与整帧重收集逐项等价、已单测），并随 `examples/demo` 真机实跑滚动正常；GPU 变体已接入 wgpu IMMEDIATES + per-draw 平移 + draw metadata + 严格回退，但仍需真实硬件视觉验证后才能扩大支持面或考虑默认值。
-- ✅ **Phase 5**（收尾、文档与发布）：**已实施**（2026-06-12）。落地内容见下方 Phase 5 章节「实施记录」。feature gate 默认值已定稿、文档已同步、全 feature 矩阵 `cargo check` 通过、crate 打包清单已核对。
+- ✅ **Phase 3**（GPU 区间增量上传）：**已实施 + 真机视觉验证通过 + 合入常规路径**。落地内容见下方 Phase 3 章节「实施记录」。CPU 侧 `dirty_range` 逻辑已穷举单测；真机视觉验证已于 `examples/demo`（与 `audio` / `video` 同时开启）实跑完成——改色 / 改文本 / 滚动三种场景显示正常，未见上传错位 / 撕裂。
+- ✅ **Phase 4**（滚动 transform-only 快路径）：**CPU 子树重收集 + GPU per-draw 平移均已合入常规路径**。CPU 路径已落地「纯滚动帧 → 仅重收集滚动子树」的安全快路径（与整帧重收集逐项等价、已单测），GPU 变体已接入 wgpu IMMEDIATES + per-draw 平移 + draw metadata + 严格回退；adapter 不支持或场景前置不满足时自动回退到 CPU 子树重收集，再失败则整帧重收集。
+- ✅ **Phase 5**（收尾、文档与发布）：**已实施**（2026-06-14）。落地内容见下方 Phase 5 章节「实施记录」。性能快路径的 Cargo feature gate 已移除、文档已同步、常规 feature 矩阵 `cargo check` 通过、crate 打包清单已核对。
 - 该实验会话留下的两条**方向性结论**仍然有效，已纳入路线图正文：
   1. 单属性更新成本随树规模**超线性**增长（祖先链 recompose 是主因）——印证 Phase 1 的必要性；
   2. 定高滚动容器下 collect 的节点游走已是视口受限的（recollect/visible ≈ 1.0），Phase 4 的收益重心应在**避免每帧重跑 layout / epoch 全量 pass**，而非减少收集节点数（详见附录 A.2 注记）。
@@ -96,7 +96,7 @@
 
 **验证：** `src/runtime/tests/` + `src/ui/widget/core/tests/` 补：叶子改色后整树渲染命令逐项 diff 应只在该区间不同；多兄弟、嵌套 clip、overlay 下的 z-order 不变；splice 失败能正确回退。`cargo test`。
 
-**回退：** feature-gate `fine-grained-splice`（默认开，可关）；splice 任何前置条件不满足即落回 recompose。
+**回退：** splice 任何前置条件不满足即落回 recompose。
 
 #### 实施记录（2026-06-12）
 
@@ -114,11 +114,11 @@
 - `splice_repeated_updates_stay_consistent`：连续多次改色，offset 不漂移。
 - `splice_sibling_zorder_is_preserved`：改中间兄弟，前后兄弟 z-order/位置不变。
 
-特性关闭时同样 3 个测试经 recompose 回退路径通过（探针断言被 cfg 关掉），证明降级链正确。全套 656 测试通过；feature 矩阵（默认 / `--no-default-features` / `audio` / `video` / `video-static`）均 `cargo check` 通过。
+回退路径同样由 3 个测试覆盖，证明降级链正确。全套 656 测试通过；默认 / `--no-default-features` / `audio` / `video` / `video-static` 均 `cargo check` 通过。
 
 > ⚠️ 本机注记：该 crate 的测试二进制在默认 dev profile（crate opt=1 + 全量 debuginfo）下触发 macOS Mach-O 重定位上限「object file too large」——**这是开工前 committed master 上就存在的环境问题，与本改动无关**。规避：`CARGO_PROFILE_DEV_DEBUG=0 cargo test`（保持 opt=1、去 debuginfo；opt=0 则会栈溢出）。
 
-**回退：** feature-gate `fine-grained-splice`（默认开，可关）；splice 任何前置条件不满足即落回 recompose。
+**回退：** splice 任何前置条件不满足即落回 recompose。
 
 ---
 
@@ -137,13 +137,13 @@
 
 **验证：** `src/foundation/binding/tests.rs` 补：每种属性绑定改动后，dirty 的 owner 属性槽正确；未覆盖的属性安全退化。对照 Phase 0 基线确认无漏更新（关键：跑全套现有 UI 测试，渲染输出 0 回归）。
 
-**回退：** `property` 为 `Option`，全 `None` 时行为与现状完全一致；feature-gate `property-deps`。
+**回退：** 未被属性作用域包裹或未识别的读取仍落在裸 Scene owner 上，失效消费侧按 widget + phase 处理，安全退化为整 widget Scene 失效。
 
 #### 实施记录（2026-06-12）
 
 落地与上文设计一致，并贯彻了「正确性优先、归因失败安全退化」的红线。一处与原计划的**取舍说明**：属性作用域只包裹**场景阶段已确定为视觉属性**的解析点（在 `collect` 路径内），而非在 `element_resolve.rs` / `style.rs` 的每个 `impl Into<Value<T>>` 入口铺设——后者会把作用域散落到布局/结构阶段且难以与 `PropertySlot` 一一对应。当前覆盖的属性槽已足以支撑 Phase 4 的 transform-only / 单属性直写；未覆盖的视觉属性自然落在裸 `Scene` owner 上，安全退化为整 widget 失效。
 
-- `src/foundation/binding/dependency.rs`：`PropertySlot`（`Background` / `BorderColor` / `BorderWidth` / `BorderRadius` / `Opacity` / `Offset` / `Scale` / `TextColor`）；`DependencyOwner` 增 `property: Option<PropertySlot>`（`property-deps` 关闭时恒 `None`）。`track_property_scope(slot, f)`：复制栈顶 owner、把 `property` 设为 `slot` 后压栈，`f` 内的 `Signal` 读取即被归因；`f` 返回自动弹栈恢复外层 owner。栈空（无外层作用域）时不引入任何 owner，与 `record_dependency_read` 的「无作用域即不记录」语义一致。`property-deps` **关闭**时 `track_property_scope` 编译为 `#[inline(always)]` 直接调 `f()`，不触碰作用域栈——逐字节透明。
+- `src/foundation/binding/dependency.rs`：`PropertySlot`（`Background` / `BorderColor` / `BorderWidth` / `BorderRadius` / `Opacity` / `Offset` / `Scale` / `TextColor`）；`DependencyOwner` 增 `property: Option<PropertySlot>`。`track_property_scope(slot, f)`：复制栈顶 owner、把 `property` 设为 `slot` 后压栈，`f` 内的 `Signal` 读取即被归因；`f` 返回自动弹栈恢复外层 owner。栈空（无外层作用域）时不引入任何 owner，与 `record_dependency_read` 的「无作用域即不记录」语义一致。
 - `src/ui/widget/core/resolved/collect/chrome/visual_state.rs`：`offset` / `scale` / `opacity` / `border_width` / `border_radius` / `border_color` / `background` 七处解析各包一层对应 `PropertySlot` 作用域。
 - `src/ui/widget/core/render/text.rs`：`push_text_primitives` 中 `text.color` 的 `resolve_widget` 包 `TextColor` 作用域。
 - `src/foundation/binding/mod.rs` / `src/ui/widget/core/mod.rs`：导出 `track_property_scope` / `PropertySlot`，经既有 `super::*` 链传播到各 collect 子模块。
@@ -151,16 +151,15 @@
 **安全退化的本质（兜底红线）：** 失效消费侧 `scene_patch_invalidation.rs` 当前**只读 `owner.widget_id` + `owner.phase`**，从不读 `property`。因此引入属性槽对失效决策**零行为影响**——属性元信息只是被记录下来供 Phase 4 消费，今天每个属性仍退化为整 widget 的 `Scene` 失效。这从结构上保证「绝不漏更新」：归因正确则未来可精细化，归因缺失/错误也至多回到现状粒度。
 
 **测试（`src/foundation/binding/tests.rs`）：**
-- `property_scope_attributes_signal_read_to_slot`（`property-deps` 门控）：`Background` 作用域内的信号读取被归因到 `Some(Background)`，且不残留裸 `Scene` owner。
-- `property_scope_restores_outer_owner_after_drop`（`property-deps` 门控）：作用域退出后读取归因回外层 `property: None` owner，验证嵌套压/弹栈正确。
-- `property_scope_is_transparent_when_feature_disabled`（`not(property-deps)` 门控）：关闭归因时 owner 恒 `None`，与归因前等价。
-- `property_scope_without_outer_scope_records_nothing`（两配置通用）：栈空时不引入 owner、不退化为 global。
+- `property_scope_attributes_signal_read_to_slot`：`Background` 作用域内的信号读取被归因到 `Some(Background)`，且不残留裸 `Scene` owner。
+- `property_scope_restores_outer_owner_after_drop`：作用域退出后读取归因回外层 `property: None` owner，验证嵌套压/弹栈正确。
+- `property_scope_without_outer_scope_records_nothing`：栈空时不引入 owner、不退化为 global。
 
-全套测试：默认 658 通过、`--features property-deps` 659 通过（门控测试差异），**0 回归**。feature 矩阵（默认 / `--no-default-features` / `property-deps` / `no-default + property-deps` / `audio` / `video` / `video-static` / `video,property-deps`）均 `cargo check` 通过；`cargo fmt --check` 干净。
+全套测试：默认路径通过，**0 回归**。默认 / `--no-default-features` / `audio` / `video` / `video-static` 均 `cargo check` 通过；`cargo fmt --check` 干净。
 
 > ⚠️ 本机注记：测试沿用 Phase 1 的规避方式 `CARGO_PROFILE_DEV_DEBUG=0 cargo test`（macOS Mach-O 重定位上限，committed master 既有环境问题，与本改动无关）。
 
-**回退：** `property` 为 `Option`，全 `None` 时行为与现状完全一致；feature-gate `property-deps`（**默认不开启**，作为可选归因增强）。
+**回退：** 未识别属性安全退化为整 widget Scene 失效。
 
 **目标：** 即便场景命令原地 splice 了（Phase 1），renderer 当前仍每帧 `prepare` 整张命令表成顶点再 draw（`prepare.rs`）。终极形态要求只重新生成 + 上传变化命令对应的那一段顶点。
 
@@ -175,21 +174,21 @@
 
 **验证：** 用 `/verify` 或 `skills/run` 实跑示例（`examples/canvas`、含动画的示例），肉眼 + 截图比对；`src/rendering/renderer/tests.rs` 补区间上传正确性。改色 / 改文本 / 滚动三种场景各验证一遍。
 
-**回退：** feature-gate `incremental-upload`；关闭即回到整表 prepare（现状）。
+**回退：** 扩容或镜像缺失时整段写入；脏区间为空时跳过上传，始终保持 GPU 缓冲与本帧 staging 等价。
 
 #### 实施记录（2026-06-12）
 
 落地了**可证安全、可单测的核心**：逐帧顶点池 flush 时的「脏区间增量上传」。范围比原计划保守——没有引入 `widget_id/command_index → 顶点区间` 映射，也没有跨帧复用 `PreparedCommand`（这两项与 Phase 1 的 `command_spans` 对接、且强依赖 GPU 视觉验证）；而是在**已有的整段上传出口**处做字节级 diff，把「每帧整表 `write_buffer`」压成「只上传变化区间」。这一层独立成立、对上层零侵入，且正确性可在无 GPU 环境穷举单测。
 
-- `src/rendering/renderer/vertex_pool.rs`：`VertexBufferPool` 新增 `last_uploaded: [Vec<u8>; 3]`——各轮转缓冲「上次写入 GPU 的字节镜像」。`flush` 在 `incremental-upload` 开启时：① 缓冲刚扩容重建（GPU 内容未定义）→ 整段写并重置镜像；② 否则用纯函数 `dirty_range(new, old)` 求本帧 staging 相对镜像的变化区间 `[start,end)`，按 `COPY_BUFFER_ALIGNMENT` 对齐后只 `write_buffer` 这一段，完全相同则**跳过上传**；③ 无论整写还是区间写，写后把镜像 `clone` 为本帧 staging——保证镜像与 GPU 缓冲 `[0..write_len]` **逐字节一致**。关闭特性时编译为原来的整段 `write_buffer`，逐字节透明。
+- `src/rendering/renderer/vertex_pool.rs`：`VertexBufferPool` 新增 `last_uploaded: [Vec<u8>; 3]`——各轮转缓冲「上次写入 GPU 的字节镜像」。`flush` 时：① 缓冲刚扩容重建（GPU 内容未定义）→ 整段写并重置镜像；② 否则用纯函数 `dirty_range(new, old)` 求本帧 staging 相对镜像的变化区间 `[start,end)`，按 `COPY_BUFFER_ALIGNMENT` 对齐后只 `write_buffer` 这一段，完全相同则**跳过上传**；③ 无论整写还是区间写，写后把镜像 `clone` 为本帧 staging——保证镜像与 GPU 缓冲 `[0..write_len]` **逐字节一致**。
 - **三缓冲安全性：** 镜像按槽位（`current`）维护，第 N 帧只与「同一槽位上次写入的内容」（即 N−3 帧）做 diff、只覆盖该槽位。该槽位的 GPU 数据此刻已被 GPU 读完（在途帧 ≤ 3），对它部分覆盖无读写竞态——与原整写的安全性论证一致。
 - **渲染等价性：** 写后缓冲 `[0..write_len]` 与本帧 staging 逐字节相同，draw 阶段按本帧 `allocate` 返回的 offset/count 取 slice，绝不读取 `write_len` 之外的陈旧尾字节——故输出与整写**完全一致**。
 
-**测试（`dirty_range_tests`，`incremental-upload` 门控）：** 7 个纯函数单测穷举边界——完全相同→`None`（跳过）、空镜像→整段、单字节中间变化、首末 diff 之间连续覆盖、变长尾部追加（含前缀也变的情形）、变短只在公共区间内变化、变短但公共前缀全同→`None`。全部通过。
+**测试（`dirty_range_tests`）：** 7 个纯函数单测穷举边界——完全相同→`None`（跳过）、空镜像→整段、单字节中间变化、首末 diff 之间连续覆盖、变长尾部追加（含前缀也变的情形）、变短只在公共区间内变化、变短但公共前缀全同→`None`。全部通过。
 
-> ✅ **GPU 视觉验证已通过（原关键遗留已闭环）：** 路线图要求本阶段「实跑示例，改色/改文本/滚动三种场景肉眼比对」。该验证已在真实硬件上通过 `examples/demo`（其 `Cargo.toml` 同时开启 `incremental-upload` / `transform-only-scroll` / `audio` / `video`）实跑完成——程序正常启动，改色 / 改文本 / 滚动显示均正常，未见区间上传错位 / 撕裂 / 残影。`dirty_range` 逻辑此前已被穷举单测覆盖，至此 CPU 等价性 + GPU 视觉两侧均已验证。`incremental-upload` **仍默认关闭**（发布稳妥，生产前建议在目标硬件再实跑确认），但不再因「未验证」阻塞设默认的决策。
+> ✅ **GPU 视觉验证已通过（原关键遗留已闭环）：** 路线图要求本阶段「实跑示例，改色/改文本/滚动三种场景肉眼比对」。该验证已在真实硬件上通过 `examples/demo`（与 `audio` / `video` 同时开启）实跑完成——程序正常启动，改色 / 改文本 / 滚动显示均正常，未见区间上传错位 / 撕裂 / 残影。`dirty_range` 逻辑此前已被穷举单测覆盖，至此 CPU 等价性 + GPU 视觉两侧均已验证。
 
-**回退：** feature-gate `incremental-upload`（**默认关闭**）；关闭即回到整段 `write_buffer`（现状），逐字节透明。
+**回退：** 扩容或镜像缺失时整段 `write_buffer`，输出仍与整段上传逐字节等价。
 
 ---
 
@@ -213,7 +212,7 @@
 
 **验证：** `src/runtime/tests/` 滚动 / canvas / video 命中测试必须全过；实跑滚动示例测 jank（对照 Phase 0 的「重收集节点数 / 可见节点数」比值应趋近 1）；嵌套滚动 + overlay 专项测试。
 
-**回退：** feature-gate `transform-only-scroll` / `transform-only-anim`，各自独立；任一组合不支持即回退整树 recollect。
+**回退：** 任一组合不支持即回退整树 recollect。属性动画 transform-only 仍未实施。
 
 #### 实施记录（2026-06-12）
 
@@ -226,50 +225,46 @@
 
 **正确性依据：** 快路径与整帧重收集调用**同一个收集函数**，仅作用域不同；`patch_resolved_roots` 用最新 `scroll_states` 重解析子树几何（含 `child_origin = frame − scroll_offset` 平移与离屏裁剪），故对滚动子树逐项等价，对树其余部分（未变）保持缓存。这不是近似，是「只重算受影响子树」的精确等价。
 
-**测试（`pure_scroll_patch_matches_full_recollect`，`specialized_patch_tests.rs`）：** 构造内容溢出、可纵向滚动的容器（三个色块），`set_scroll_offset` 后求场景，断言：① 探针确认**确实命中纯滚动快路径**恰一次（避免假阳性「只验证了回退」）；② 快路径结果与随后强制的一次从零全量重收集**逐项等价**。特性关闭时同一测试经整帧重收集路径通过（探针断言被 cfg 关掉），证明降级链正确。
+**测试（`pure_scroll_patch_matches_full_recollect`，`specialized_patch_tests.rs`）：** 构造内容溢出、可纵向滚动的容器（三个色块），`set_scroll_offset` 后求场景，断言：① 探针确认**确实命中纯滚动快路径**恰一次（避免假阳性「只验证了回退」）；② 快路径结果与随后强制的一次从零全量重收集**逐项等价**。
 
 #### GPU 变体实施记录（2026-06-13）
 
-`transform-only-scroll-gpu` 已落地一个**保守覆盖面**的 GPU 可见变体：collect 阶段在滚动内容子树上保留离屏图元（禁用 clipped-out 丢弃与 fully-clipped child 跳过），并给主命令流与 hit regions 记录所属 scroll container。纯滚动帧命中时，runtime 只更新 `ScrollRegion::scroll_offset` 与命中区域坐标，渲染器在 prepare 阶段按命令 metadata 找到对应 scroll region，用 wgpu `IMMEDIATES`（push-constant style immediate data）给 rect / brush / mesh / texture / text draw 下发 NDC 与 physical clip-local 平移量；shader 在顶点阶段移动位置，并让圆角 clip mask 的局部坐标与屏幕位置保持一致。
+GPU 可见变体已落地并合入常规路径：collect 阶段在滚动内容子树上保留离屏图元（禁用 clipped-out 丢弃与 fully-clipped child 跳过），并给主命令流与 hit regions 记录所属 scroll container。纯滚动帧命中时，runtime 只更新 `ScrollRegion::scroll_offset` 与命中区域坐标，渲染器在 prepare 阶段按命令 metadata 找到对应 scroll region，用 wgpu `IMMEDIATES`（push-constant style immediate data）给 rect / brush / mesh / texture / text draw 下发 NDC 与 physical clip-local 平移量；shader 在顶点阶段移动位置，并让圆角 clip mask 的局部坐标与屏幕位置保持一致。
 
-**严格回退条件：** adapter 不支持 `IMMEDIATES`、virtual、嵌套 scroll region、overlay / portal、IME、可见 scrollbar、unsupported draw（BackdropBlur / CanvasComposite）、tagged 命令 clip 不是滚动 viewport、Canvas item hit region 等任一前置不满足，立即回退到 `transform-only-scroll` 的子树重收集；该路径再失败则回退整帧重收集。GPU 命中后会把 cached scene 标记为 `gpu_scroll_deferred`，下一次非纯滚动变化先全量重收集，把命令几何 rebase 到当前滚动位置，避免后续局部 patch 与基准几何混用。
+**严格回退条件：** adapter 不支持 `IMMEDIATES`、virtual、嵌套 scroll region、overlay / portal、IME、可见 scrollbar、unsupported draw（BackdropBlur / CanvasComposite）、tagged 命令 clip 不是滚动 viewport、Canvas item hit region 等任一前置不满足，立即回退到 CPU 子树重收集；该路径再失败则回退整帧重收集。GPU 命中后会把 cached scene 标记为 `gpu_scroll_deferred`，下一次非纯滚动变化先全量重收集，把命令几何 rebase 到当前滚动位置，避免后续局部 patch 与基准几何混用。
 
-**测试：** `compute_scroll_translate_*` 覆盖 explicit metadata → scroll region 的平移计算、零偏移、缺失 region；`gpu_scroll_active_keeps_clipped_out_shape_and_tags_command` 覆盖 GPU 内容收集时离屏命令不被 push 阶段裁掉；`pure_scroll_patch_matches_full_recollect` 在 `transform-only-scroll-gpu` 开启时验证 GPU 前置不满足（测试 handler 无 renderer）会干净回退到既有 CPU 子树重收集等价路径。
+**测试：** `compute_scroll_translate_*` 覆盖 explicit metadata → scroll region 的平移计算、零偏移、缺失 region；`gpu_scroll_active_keeps_clipped_out_shape_and_tags_command` 覆盖 GPU 内容收集时离屏命令不被 push 阶段裁掉；`pure_scroll_patch_matches_full_recollect` 验证 GPU 前置不满足（测试 handler 无 renderer）会干净回退到既有 CPU 子树重收集等价路径。
 
-> ⚠️ **视觉验证与收益边界：** GPU 变体仍默认关闭，且本阶段尚未完成真实硬件截图/肉眼验证；当前覆盖面有意保守，复杂嵌套 clip、嵌套滚动、portal/overlay、CanvasComposite/BackdropBlur 等会回退。属性动画 transform-only（`transform-only-anim`）的 GPU 可见变体仍未实施。
+> **收益边界：** GPU 变体覆盖面有意保守，复杂嵌套 clip、嵌套滚动、portal/overlay、CanvasComposite/BackdropBlur 等会回退。属性动画 transform-only 的 GPU 可见变体仍未实施。
 
-**回退：** feature-gate `transform-only-scroll` / `transform-only-scroll-gpu`（**默认关闭**）；任一前置不满足即回退 GPU → CPU 子树重收集 → 整树 recollect，行为与未开启时逐项等价。
+**回退：** 任一前置不满足即回退 GPU → CPU 子树重收集 → 整树 recollect。
 
 ---
 
 ### Phase 5 · 收尾、文档与发布（1–2 周）
 
-- 统一三个 feature gate 的默认值决策：性能路径默认开、保留关闭逃生口。
+- 合并已验证性能快路径到常规代码，删除对应 Cargo feature gate。
 - 更新 `AGENTS.md`（架构章节）、`CLAUDE.md`（高危区说明）、`README.md`（如有公开 API 变化）、`docs/` 新增「增量渲染管线」说明。
-- 全 feature 矩阵检查：`cargo check` / `--features audio` / `video` / `video-static`。
+- 常规 feature 矩阵检查：`cargo check` / `--no-default-features` / `--features audio` / `video` / `video-static`。
 - 跑 `publish.bat` 流程前确认本文件与新增 doc 已加入 `Cargo.toml` 的 `exclude`（避免进 crate）。
 - 性能回归基线：Phase 0 的 bench 对比，单属性更新应从「子树 + 祖先重合成 + 整表 prepare」降到「单区间 splice + 单区间上传」；滚动应从「整树重收集」降到「transform uniform」。
 
 #### 实施记录（2026-06-12）
 
-收尾阶段四件事均落地，并贯彻「默认值决策 = 只把可证安全、已全量单测的快路径设默认，GPU 可见 / 需真机验证的保持默认关闭」的原则。
+收尾阶段四件事均落地。2026-06-14 起，已验证的性能快路径合入常规代码，不再通过 Cargo feature 开关启用。
 
-**① feature gate 默认值定稿。** `Cargo.toml` `default = ["fine-grained-splice"]`：
-- `fine-grained-splice`：**默认开启**。它是 CPU 可证安全的纯连接合成模型快路径，`cached.computed` 与 recompose 路径逐字节等价，开关两态各有单测，无 GPU 依赖——满足「性能路径默认开、保留逃生口（`--no-default-features`）」。
-- `property-deps` / `incremental-upload` / `transform-only-scroll` / `transform-only-scroll-gpu`：**默认关闭**。`property-deps` 是为后续单属性直写预留的归因增强，开启不改当前失效粒度（消费侧仍按 widget 失效），作为可选项更稳妥；`incremental-upload` 与 `transform-only-scroll` 的 CPU 侧安全路径已验证，`transform-only-scroll-gpu` 仍需真实硬件视觉验证与更复杂场景覆盖，故保持 opt-in。
+**① 性能 feature gate 移除。** `Cargo.toml` 不再暴露 `property-deps` / `transform-only-scroll` / `transform-only-scroll-gpu`；细粒度场景命令拼接、属性级依赖归因、顶点脏区间增量上传、纯滚动 CPU/GPU 快路径均默认内置。GPU 滚动平移仍保留运行时 adapter 能力检测，不支持 IMMEDIATES 时自动回退。
 
 **② 文档同步。**
-- `AGENTS.md`：修正过期的 `default = []` → `default = ["fine-grained-splice"]`，新增「细粒度响应式渲染管线」整节（四条快路径的目标 / 兜底红线 / 代码锚点 / feature 状态），并把 `exclude` 维护注记更新为含 `docs/*` 与本文件。
-- `CLAUDE.md`：新增「细粒度响应式渲染管线（高风险区）」节与 feature 矩阵检查命令；修正 `exclude` 说明与失效的 `docs/canvas.md` 引用（实际为 `docs/features/canvas.md`），补 `docs/advanced/performance.md` 引用。
-- `README.md`：可选 feature 列表新增性能 feature 段。
-- `docs/advanced/performance.md`：新增「增量渲染管线（细粒度响应式）」节（feature 对照表 + 何时开启 + 状态）。
-- `CHANGELOG.md`：`[Unreleased]` 新增 `### Added` 段记录四条快路径，`### Changed` 记录 `exclude` 变更。
+- `AGENTS.md` / `CLAUDE.md`：同步为「性能快路径默认内置」与新的检查矩阵。
+- `README.md` / `docs/advanced/performance.md`：移除性能 feature 开关说明，改为默认内置能力与运行时降级说明。
+- `CHANGELOG.md`：`[Unreleased]` 记录性能快路径默认内置，并提示下游移除已删除 feature 名称。
 
 **③ crate 打包清单核对。** 此前 `cargo package --list` 显示**整套 vitepress 文档站点**（`docs/package.json` / `pnpm-lock.yaml` / `.vitepress/config.mts` / 17 个 `.md`）与本路线图都会进 crate。已在 `Cargo.toml` `exclude` 新增 `docs/*` 与 `FINE_GRAINED_ROADMAP.md`，打包清单从 584 → 562 文件，`docs/` 与 ROADMAP 归零，`README.md` / `CHANGELOG.md` 保留。
 
-**④ 全 feature 矩阵 + 测试验证。** `cargo check` 全绿：默认 / `--no-default-features` / `audio` / `video` / `video-static` / `property-deps` / `incremental-upload` / `transform-only-scroll` / 三 gate 同开 / `--no-default-features` + 三 gate 同开。`cargo fmt --check` 干净。全套测试经 `CARGO_PROFILE_DEV_DEBUG=0 cargo test` 通过、0 回归（沿用前几阶段的 macOS Mach-O 重定位上限规避，committed master 既有环境问题）。
+**④ 常规 feature 矩阵 + 测试验证。** `cargo check` 全绿：默认 / `--no-default-features` / `--all-features` / `audio` / `video` / `video-static`。`cargo fmt --check` 干净。全套测试经 `CARGO_PROFILE_DEV_DEBUG=0 cargo test` 通过、0 回归（沿用前几阶段的 macOS Mach-O 重定位上限规避，committed master 既有环境问题）。
 
-> 性能回归基线对比项（路线图验收标准 1–3）中，已落地部分（splice 跳过祖先重合成、纯滚动只重收集子树、`incremental-upload` 的区间字节上传）的 CPU 侧等价性已由单测覆盖；`incremental-upload` / `transform-only-scroll` 的视觉正确性也已随 `examples/demo` 真机实跑验证（改色 / 改文本 / 滚动正常）。`transform-only-scroll-gpu` 已有保守实现，但仍需真实硬件视觉验证与更复杂场景覆盖后再纳入默认值或收益结论。
+> 性能回归基线对比项（路线图验收标准 1–3）中，已落地部分（splice 跳过祖先重合成、纯滚动只重收集子树、顶点区间字节上传）的 CPU 侧等价性已由单测覆盖；视觉正确性已随 `examples/demo` 真机实跑验证（改色 / 改文本 / 滚动正常）。GPU 纯滚动路径保留严格运行时回退。
 
 ## 3. 里程碑与依赖关系
 
@@ -280,7 +275,7 @@ Phase 0 (度量) ──┬─> Phase 1 (命令区间 splice) ──┬─> Phase
 ```
 
 - Phase 1 与 Phase 2 可并行（分属渲染侧 / 绑定侧），但 Phase 3 需要 Phase 1 的 `command_spans`，Phase 4 需要 Phase 2 的属性槽 + Phase 3 的区间上传。
-- 任何阶段都可独立停下发布——每阶段都带 feature gate 和回退路径。
+- 任何阶段都可独立停下发布——每阶段都带运行时回退路径。
 
 ## 4. 风险登记（高危区清单）
 
@@ -288,7 +283,7 @@ Phase 0 (度量) ──┬─> Phase 1 (命令区间 splice) ──┬─> Phase
 |---|---|---|
 | splice 破坏 z-order / clip 嵌套 | 1 | 严格区分视觉/结构命令；数量不一致即回退 recompose |
 | 属性级依赖漏更新（最危险） | 2 | `property: Option`，未识别属性退化为整 widget 失效；全 UI 测试 0 回归 |
-| 三缓冲部分上传读写冲突 | 3 | vertex pool 视觉验证已通过（`examples/demo` 真机实跑改色/改文本/滚动正常）；feature gate |
+| 三缓冲部分上传读写冲突 | 3 | vertex pool 视觉验证已通过（`examples/demo` 真机实跑改色/改文本/滚动正常）；扩容和镜像缺失时整段写入 |
 | 滚动/嵌套 clip/portal 错位 | 4 | 拆「先滚动后动画」；嵌套场景专项测试；可回退整树 recollect |
 | 媒体/video feature 下编译 | 全 | 每阶段跑 `--features video` check（Windows 需 FFmpeg 链接环境） |
 

@@ -389,7 +389,7 @@ fn collect_toast_card_scene<VM: 'static>(
         next_toast_wakeup: context.next_toast_wakeup,
         active_tooltip: context.active_tooltip,
         active_hover_popover: context.active_hover_popover,
-        #[cfg(feature = "transform-only-scroll-gpu")]
+        gpu_scroll_enabled: false,
         gpu_scroll_container: None,
     };
 
@@ -577,7 +577,7 @@ fn collect_toast_card_shell_scene<VM: 'static>(
         next_toast_wakeup: context.next_toast_wakeup,
         active_tooltip: context.active_tooltip,
         active_hover_popover: context.active_hover_popover,
-        #[cfg(feature = "transform-only-scroll-gpu")]
+        gpu_scroll_enabled: false,
         gpu_scroll_container: None,
     };
     let root_id = resolved.collect_subtree_cache(
@@ -723,7 +723,6 @@ fn push_toast_stack_hover_region<VM: 'static>(
                 focusable: false,
                 default_activation: DefaultActivation::None,
             },
-            #[cfg(feature = "transform-only-scroll-gpu")]
             gpu_scroll_container: None,
         },
     );

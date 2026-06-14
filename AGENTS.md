@@ -43,18 +43,14 @@ crate 信息：
 
 `Cargo.toml` 中的 features：
 
-- `default = ["fine-grained-splice"]`
+- `default = []`
 - `audio`：启用 `ffmpeg-next` 音频解码能力。
 - `video`：在 `audio` 基础上启用视频能力。
 - `video-static`：在 `video` 基础上启用 `ffmpeg-next/static`。
-
-细粒度响应式渲染管线相关 feature（详见下文「细粒度响应式渲染管线」一节）：
-
-- `fine-grained-splice`（**默认开启**）：叶子/子树 scene-only patch 的「场景命令原地拼接」快路径，可关闭作为逃生口。
-- `property-deps`（默认关闭）：属性级依赖归因。
-- `incremental-upload`（默认关闭）：GPU 顶点脏区间增量上传，需真实硬件视觉验证后再决定默认值。
-- `transform-only-scroll`（默认关闭）：纯滚动帧只重收集滚动子树的快路径。
 - `bench-support` / `collect-profile`：基准与相位画像探针，关闭时编译成零成本空操作。
+- `mimalloc`：可选全局分配器替换，由下游二进制 crate 决定是否启用。
+
+细粒度响应式渲染管线已默认内置（详见下文「细粒度响应式渲染管线」一节），不再通过 Cargo feature 开关启用。
 
 平台依赖按 target 区分：
 
@@ -128,17 +124,17 @@ Application::new()
 
 ## 细粒度响应式渲染管线
 
-`tgui` 的失效/渲染管线在「细粒度依赖跟踪 + 保留式分块场景图」之上，逐步加入了一组**分级降级、各带 feature gate**的快路径（路线图见仓库根 `FINE_GRAINED_ROADMAP.md`，不进 crate）。核心设计原则：**保留 pull 模型缩短 pull 半径**；**任一快路径前置不满足必须能干净回退**到子树 patch → 整帧重收集，绝不渲染错误；**正确性优先**，每条快路径都有「与从零全量重收集逐项等价」的单测和对应回退路径的测试。
+`tgui` 的失效/渲染管线在「细粒度依赖跟踪 + 保留式分块场景图」之上，逐步加入了一组**分级降级**的内置快路径（路线图见仓库根 `FINE_GRAINED_ROADMAP.md`，不进 crate）。核心设计原则：**保留 pull 模型缩短 pull 半径**；**任一快路径前置不满足必须能干净回退**到子树 patch → 整帧重收集，绝不渲染错误；**正确性优先**，每条快路径都有「与从零全量重收集逐项等价」的单测和对应回退路径的测试。
 
 五条快路径（高风险区，改前先读路线图对应 Phase 的「实施记录」）：
 
-1. **`fine-grained-splice`（默认开启）· 场景命令区间原地拼接。** 叶子/子树 scene-only 改动（如改色）时，若新旧 chunk 各流命令数量完全一致、且子树不含 overlay/portal/scroll-as-overlay/focus/anchor/carousel/virtual/ime，则把新 chunk 原地 splice 进 `cached.computed` 与各祖先 chunk 的稳定区间，**跳过祖先链 `recompose_scene_chunk` 向上重合成**。必须同时覆盖主渲染流（含按类型分组的并行数组）、`hit_regions`、`scroll_regions`——每个 `Container` 无条件 push 一条 `ScrollRegion`。锚点：`scene_primitives.rs`（`counts/SceneCounts/splice_in_place`）、`hit_scene_state.rs`（`is_simple_for_splice/scene_counts/splice_chunk_in_place`）、`scene_layout.rs`（`scene_splice_ancestor_offsets`）、`scene_patch.rs`（splice 快路径）。
-2. **`property-deps`（默认关闭）· 属性级依赖归因。** 场景阶段解析视觉属性（background / border color/width/radius / opacity / offset / scale / text color）时把 `PropertySlot` 压入依赖作用域，使 Signal 读取归因到「哪个属性」而非仅「哪个 widget 的哪个 phase」。**兜底红线**：失效消费侧（`scene_patch_invalidation`）当前只读 `widget_id + phase`，从不读 `property`，所以引入归因对失效决策零行为影响——未识别属性安全退化为整 widget 失效，结构上「绝不漏更新」。锚点：`dependency.rs`（`PropertySlot` / `track_property_scope`）、`resolved/collect/chrome/visual_state.rs`、`render/text.rs`。
-3. **`incremental-upload`（默认关闭）· GPU 顶点脏区间增量上传。** 逐帧顶点池 flush 时与「该轮转缓冲上次写入内容」做字节级 diff，只 `write_buffer` 变化区间（按 `COPY_BUFFER_ALIGNMENT` 对齐），完全相同则跳过。triple-buffered 保证部分覆盖无读写竞态；覆盖后缓冲 `[0..write_len]` 逐字节一致 → 渲染等价。锚点：`vertex_pool.rs`（`last_uploaded` / `dirty_range` / `flush`）。仍默认关闭，生产前建议在目标硬件实跑改色/改文本/滚动三场景确认。
-4. **`transform-only-scroll`（默认关闭）· 纯滚动帧子树重收集。** 识别「本帧只有 `scroll_epoch` 变化、其余全不变」的纯滚动帧，只对发生偏移的滚动容器（嵌套时取最高根）调 `patch_cached_scene_for_roots` 重收集**滚动子树**（复用同一收集函数，逐项等价），绕开整树重收集。virtual 容器排除。锚点：`runtime/mod.rs` + `input/interaction.rs`（`scroll_dirty_widgets`）、`cache_support.rs`（`scene_cache_fields_match_ignoring_scroll`）、`scene_runtime.rs`（`try_pure_scroll_fast_path`）。
-5. **`transform-only-scroll-gpu`（默认关闭）· 纯滚动帧 GPU 平移变体。** 在 `transform-only-scroll` 基础上，对满足严格前置的单一滚动容器保留离屏命令与命中 metadata，纯滚动帧只更新 scroll offset / hit regions，并通过 wgpu `IMMEDIATES` 给 tagged draw 下发 per-draw 平移。adapter 不支持、virtual、嵌套 scroll、overlay/portal、IME、可见 scrollbar、unsupported clip / composite 等任一前置不满足即回退到 CPU 子树重收集。锚点：`scene_primitives.rs`（GPU scroll command metadata / clipped-out 保留）、`layout_media.rs`（滚动内容收集作用域）、`scene_runtime.rs`（`try_pure_scroll_gpu_fast_path` / `gpu_scroll_deferred`）、`renderer/prepare.rs` + shader。
+1. **场景命令区间原地拼接。** 叶子/子树 scene-only 改动（如改色）时，若新旧 chunk 各流命令数量完全一致、且子树不含 overlay/portal/scroll-as-overlay/focus/anchor/carousel/virtual/ime，则把新 chunk 原地 splice 进 `cached.computed` 与各祖先 chunk 的稳定区间，**跳过祖先链 `recompose_scene_chunk` 向上重合成**。必须同时覆盖主渲染流（含按类型分组的并行数组）、`hit_regions`、`scroll_regions`——每个 `Container` 无条件 push 一条 `ScrollRegion`。锚点：`scene_primitives.rs`（`counts/SceneCounts/splice_in_place`）、`hit_scene_state.rs`（`is_simple_for_splice/scene_counts/splice_chunk_in_place`）、`scene_layout.rs`（`scene_splice_ancestor_offsets`）、`scene_patch.rs`（splice 快路径）。
+2. **属性级依赖归因。** 场景阶段解析视觉属性（background / border color/width/radius / opacity / offset / scale / text color）时把 `PropertySlot` 压入依赖作用域，使 Signal 读取归因到「哪个属性」而非仅「哪个 widget 的哪个 phase」。**兜底红线**：失效消费侧（`scene_patch_invalidation`）当前只读 `widget_id + phase`，从不读 `property`，所以引入归因对失效决策零行为影响——未识别属性安全退化为整 widget 失效，结构上「绝不漏更新」。锚点：`dependency.rs`（`PropertySlot` / `track_property_scope`）、`resolved/collect/chrome/visual_state.rs`、`render/text.rs`。
+3. **GPU 顶点脏区间增量上传。** 逐帧顶点池 flush 时与「该轮转缓冲上次写入内容」做字节级 diff，只 `write_buffer` 变化区间（按 `COPY_BUFFER_ALIGNMENT` 对齐），完全相同则跳过。triple-buffered 保证部分覆盖无读写竞态；覆盖后缓冲 `[0..write_len]` 逐字节一致 → 渲染等价。锚点：`vertex_pool.rs`（`last_uploaded` / `dirty_range` / `flush`）。
+4. **纯滚动帧子树重收集。** 识别「本帧只有 `scroll_epoch` 变化、其余全不变」的纯滚动帧，只对发生偏移的滚动容器（嵌套时取最高根）调 `patch_cached_scene_for_roots` 重收集**滚动子树**（复用同一收集函数，逐项等价），绕开整树重收集。virtual 容器排除。锚点：`runtime/mod.rs` + `input/interaction.rs`（`scroll_dirty_widgets`）、`cache_support.rs`（`scene_cache_fields_match_ignoring_scroll`）、`scene_runtime.rs`（`try_pure_scroll_fast_path`）。
+5. **纯滚动帧 GPU 平移变体。** 在纯滚动子树重收集基础上，对满足严格前置的单一滚动容器保留离屏命令与命中 metadata，纯滚动帧只更新 scroll offset / hit regions，并通过 wgpu `IMMEDIATES` 给 tagged draw 下发 per-draw 平移。adapter 不支持、virtual、嵌套 scroll、overlay/portal、IME、可见 scrollbar、unsupported clip / composite 等任一前置不满足即回退到 CPU 子树重收集。锚点：`scene_primitives.rs`（GPU scroll command metadata / clipped-out 保留）、`layout_media.rs`（滚动内容收集作用域）、`scene_runtime.rs`（`try_pure_scroll_gpu_fast_path` / `gpu_scroll_deferred`）、`renderer/prepare.rs` + shader。
 
-> 改这一管线时务必同时跑：默认 / `--no-default-features` / 各 feature 单开 / `audio` / `video` / `video-static` 的 `cargo check`，并补「快路径结果 == 全量重收集」+「回退路径」两类单测。本机测试受 macOS Mach-O 重定位上限影响，用 `CARGO_PROFILE_DEV_DEBUG=0 cargo test` 规避（committed master 既有环境问题）。
+> 改这一管线时务必同时跑：默认 / `--no-default-features` / `audio` / `video` / `video-static` 的 `cargo check`，并补「快路径结果 == 全量重收集」+「回退路径」两类单测。本机测试受 macOS Mach-O 重定位上限影响，用 `CARGO_PROFILE_DEV_DEBUG=0 cargo test` 规避（committed master 既有环境问题）。
 
 ## 组件和样式约定
 

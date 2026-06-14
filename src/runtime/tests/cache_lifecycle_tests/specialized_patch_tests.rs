@@ -264,7 +264,7 @@ fn select_portal_repositions_and_clears_after_scene_patch() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 1 · 场景命令原地拼接（fine-grained-splice）
+// Phase 1 · 场景命令原地拼接
 //
 // 这些测试的核心断言不是「splice 是否被走到」，而是「无论走 splice 还是 recompose，
 // 最终 `cached.computed` 的渲染命令流（顺序 + 内容）都与一次从零的全量重收集逐项等价」。
@@ -461,7 +461,7 @@ fn action_stats_records_scene_subtree_patch_for_color_change() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4 · 纯滚动快路径（transform-only-scroll）
+// Phase 4 · 纯滚动快路径
 //
 // 核心断言与 Phase 1 一致：无论走纯滚动快路径还是整帧重收集，最终 `cached.computed`
 // 的渲染命令流都逐项等价。快路径只是把「整树重收集」收窄成「只重收集滚动子树」，
@@ -512,7 +512,6 @@ fn pure_scroll_patch_matches_full_recollect() {
         })
         .expect("scrollable container should emit a scroll region");
 
-    #[cfg(feature = "transform-only-scroll")]
     crate::runtime::scene_runtime::scroll_fast_path_probe::reset();
 
     // 滚动该容器，再求场景。
@@ -520,7 +519,6 @@ fn pure_scroll_patch_matches_full_recollect() {
     let after_patch = shape_fingerprints(handler.computed_scene());
 
     // 特性开启时，断言确实走了纯滚动快路径（而非回退整帧重收集）。
-    #[cfg(feature = "transform-only-scroll")]
     assert_eq!(
         crate::runtime::scene_runtime::scroll_fast_path_probe::hits(),
         1,
@@ -537,9 +535,8 @@ fn pure_scroll_patch_matches_full_recollect() {
     );
 }
 
-// 补充测试：transform-only-scroll feature 的边界和回退情况
+// 补充测试：纯滚动快路径的边界和回退情况
 
-#[cfg(feature = "transform-only-scroll")]
 #[test]
 fn nested_scroll_triggers_fallback_to_full_recollect() {
     // 嵌套滚动容器应回退到全量重收集
@@ -594,7 +591,6 @@ fn nested_scroll_triggers_fallback_to_full_recollect() {
     }
 }
 
-#[cfg(feature = "transform-only-scroll")]
 #[test]
 fn multiple_scroll_actions_in_same_frame() {
     // 同一帧内多次滚动，验证正确性
@@ -630,7 +626,6 @@ fn multiple_scroll_actions_in_same_frame() {
     );
 }
 
-#[cfg(feature = "transform-only-scroll")]
 #[test]
 fn scroll_with_content_invalidation_uses_full_path() {
     // 滚动的同时内容失效，验证结果正确性
@@ -666,8 +661,8 @@ fn scroll_with_content_invalidation_uses_full_path() {
 }
 
 #[test]
-fn scroll_without_feature_always_uses_full_recollect() {
-    // 关闭 transform-only-scroll 特性时，滚动总是走全量重收集
+fn scroll_result_matches_full_recollect() {
+    // 无论快路径是否命中，滚动结果都必须与全量重收集一致。
     let invalidation = InvalidationSignal::new();
     let tree = scrollable_color_tree();
     let mut handler = test_handler(Some(tree), invalidation);
@@ -693,7 +688,6 @@ fn scroll_without_feature_always_uses_full_recollect() {
     );
 }
 
-#[cfg(feature = "transform-only-scroll")]
 #[test]
 fn scroll_zero_offset_is_noop() {
     // 滚动偏移为 0 应该是无操作

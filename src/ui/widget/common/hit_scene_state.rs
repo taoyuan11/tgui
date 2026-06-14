@@ -11,7 +11,6 @@ pub(crate) struct ScrollRegion {
     pub content_viewport: Rect,
     pub visible_frame: Rect,
     pub content_bounds: Rect,
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub gpu_base_scroll_offset: Point,
     pub scroll_offset: Point,
     pub overflow_x: Overflow,
@@ -259,7 +258,6 @@ impl<VM> Default for ComputedScene<VM> {
 }
 
 impl<VM> ComputedScene<VM> {
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub(crate) fn fill_gpu_scroll_container(&mut self, id: WidgetId) {
         self.scene.fill_gpu_scroll_container(id);
         for hit in &mut self.hit_regions {

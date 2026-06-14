@@ -227,9 +227,7 @@ impl Renderer {
             &composite.primitive.content_commands,
             font_manager,
             self.vertex_viewport(),
-            #[cfg(feature = "transform-only-scroll-gpu")]
             &[], // canvas composite 内容不受滚动影响
-            #[cfg(feature = "transform-only-scroll-gpu")]
             &[],
         )?;
         self.vertex_pool.flush(&self.device, &self.queue);
@@ -249,9 +247,7 @@ impl Renderer {
                 mask_commands,
                 font_manager,
                 self.vertex_viewport(),
-                #[cfg(feature = "transform-only-scroll-gpu")]
                 &[], // mask 不受滚动影响
-                #[cfg(feature = "transform-only-scroll-gpu")]
                 &[],
             )?;
             self.vertex_pool.flush(&self.device, &self.queue);
@@ -444,7 +440,6 @@ impl Renderer {
             multiview_mask: None,
         });
         pass.set_pipeline(&self.text_pipeline);
-        #[cfg(feature = "transform-only-scroll-gpu")]
         self.set_scroll_translate(&mut pass, None);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.set_bind_group(0, &bind_group, &[]);

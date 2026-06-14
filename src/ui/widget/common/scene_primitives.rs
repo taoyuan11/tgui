@@ -177,21 +177,16 @@ pub struct ScenePrimitives {
     pub overlay_texts: SmallVec<[TextPrimitive; 1]>,
     pub(crate) commands: SmallVec<[RenderCommand; 1]>,
     pub(crate) overlay_commands: SmallVec<[RenderCommand; 1]>,
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub(crate) command_gpu_scroll_containers: SmallVec<[Option<WidgetId>; 1]>,
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub(crate) overlay_command_gpu_scroll_containers: SmallVec<[Option<WidgetId>; 1]>,
-    #[cfg(feature = "transform-only-scroll-gpu")]
     active_gpu_scroll_container: Option<WidgetId>,
 }
 
 impl ScenePrimitives {
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub(crate) fn set_active_gpu_scroll_container(&mut self, id: Option<WidgetId>) {
         self.active_gpu_scroll_container = id;
     }
 
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub(crate) fn fill_gpu_scroll_container(&mut self, id: WidgetId) {
         for slot in &mut self.command_gpu_scroll_containers {
             if slot.is_none() {
@@ -205,48 +200,28 @@ impl ScenePrimitives {
         }
     }
 
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub(crate) fn command_gpu_scroll_containers(&self) -> &[Option<WidgetId>] {
         &self.command_gpu_scroll_containers
     }
 
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub(crate) fn overlay_command_gpu_scroll_containers(&self) -> &[Option<WidgetId>] {
         &self.overlay_command_gpu_scroll_containers
     }
 
-    #[cfg(feature = "transform-only-scroll-gpu")]
     fn should_cull_clipped_out(&self) -> bool {
         self.active_gpu_scroll_container.is_none()
     }
 
-    #[cfg(not(feature = "transform-only-scroll-gpu"))]
-    fn should_cull_clipped_out(&self) -> bool {
-        true
-    }
-
-    #[cfg(feature = "transform-only-scroll-gpu")]
     fn push_command(&mut self, command: RenderCommand) {
         self.commands.push(command);
         self.command_gpu_scroll_containers
             .push(self.active_gpu_scroll_container);
     }
 
-    #[cfg(not(feature = "transform-only-scroll-gpu"))]
-    fn push_command(&mut self, command: RenderCommand) {
-        self.commands.push(command);
-    }
-
-    #[cfg(feature = "transform-only-scroll-gpu")]
     fn push_overlay_command(&mut self, command: RenderCommand) {
         self.overlay_commands.push(command);
         self.overlay_command_gpu_scroll_containers
             .push(self.active_gpu_scroll_container);
-    }
-
-    #[cfg(not(feature = "transform-only-scroll-gpu"))]
-    fn push_overlay_command(&mut self, command: RenderCommand) {
-        self.overlay_commands.push(command);
     }
 
     pub(crate) fn delta_since(&self, base: &ScenePrimitives) -> ScenePrimitives {
@@ -318,7 +293,6 @@ impl ScenePrimitives {
                 .skip(base.overlay_commands.len())
                 .cloned(),
         );
-        #[cfg(feature = "transform-only-scroll-gpu")]
         {
             delta.command_gpu_scroll_containers.extend(
                 self.command_gpu_scroll_containers
@@ -459,7 +433,6 @@ impl ScenePrimitives {
         self.commands.extend(other.commands.iter().cloned());
         self.overlay_commands
             .extend(other.overlay_commands.iter().cloned());
-        #[cfg(feature = "transform-only-scroll-gpu")]
         {
             self.command_gpu_scroll_containers
                 .extend(other.command_gpu_scroll_containers.iter().copied());
@@ -541,20 +514,11 @@ impl ScenePrimitives {
             }
             && overwrite(&mut self.texts, offset.texts, &chunk.texts)
             && overwrite(&mut self.commands, offset.commands, &chunk.commands)
-            && {
-                #[cfg(feature = "transform-only-scroll-gpu")]
-                {
-                    overwrite(
-                        &mut self.command_gpu_scroll_containers,
-                        offset.commands,
-                        &chunk.command_gpu_scroll_containers,
-                    )
-                }
-                #[cfg(not(feature = "transform-only-scroll-gpu"))]
-                {
-                    true
-                }
-            }
+            && overwrite(
+                &mut self.command_gpu_scroll_containers,
+                offset.commands,
+                &chunk.command_gpu_scroll_containers,
+            )
     }
 }
 
@@ -777,7 +741,6 @@ mod culling_tests {
         assert_eq!(scene.commands.len(), 1);
     }
 
-    #[cfg(feature = "transform-only-scroll-gpu")]
     #[test]
     fn gpu_scroll_active_keeps_clipped_out_shape_and_tags_command() {
         let mut scene = ScenePrimitives::default();

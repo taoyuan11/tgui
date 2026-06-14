@@ -394,7 +394,6 @@ fn emit_overlay_registers_focus_scope_and_rebases_hit_scope_path() {
         interaction: HitInteraction::Disabled {
             id: focus_target_id,
         },
-        #[cfg(feature = "transform-only-scroll-gpu")]
         gpu_scroll_container: None,
     }];
 

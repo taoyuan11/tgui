@@ -5,7 +5,7 @@ use crate::ui::unit::Dp;
 
 /// 测试探针：记录纯滚动快路径命中次数，让测试能断言「确实走了滚动快路径而非整帧重收集」。
 /// 仅测试构建编译，热路径零成本。
-#[cfg(all(test, feature = "transform-only-scroll"))]
+#[cfg(test)]
 pub(in crate::runtime) mod scroll_fast_path_probe {
     use std::cell::Cell;
     thread_local! {
@@ -22,7 +22,6 @@ pub(in crate::runtime) mod scroll_fast_path_probe {
     }
 }
 
-#[cfg(feature = "transform-only-scroll-gpu")]
 fn gpu_scroll_clip_supported(clip_rect: Option<Rect>, region: ScrollRegion) -> bool {
     let Some(clip_rect) = clip_rect else {
         return false;
@@ -30,7 +29,6 @@ fn gpu_scroll_clip_supported(clip_rect: Option<Rect>, region: ScrollRegion) -> b
     clip_rect == region.content_viewport || clip_rect == region.visible_frame
 }
 
-#[cfg(feature = "transform-only-scroll-gpu")]
 fn gpu_scroll_command_supported(
     command: &crate::ui::widget::RenderCommand,
     region: ScrollRegion,
@@ -60,7 +58,6 @@ fn gpu_scroll_command_supported(
     }
 }
 
-#[cfg(feature = "transform-only-scroll-gpu")]
 fn gpu_scroll_scene_supported(
     scene: &crate::ui::widget::ScenePrimitives,
     widget_id: WidgetId,
@@ -75,7 +72,6 @@ fn gpu_scroll_scene_supported(
         })
 }
 
-#[cfg(feature = "transform-only-scroll-gpu")]
 fn gpu_scroll_has_descendant_scroll_region<VM: 'static>(
     layout: &ResolvedSceneLayout<VM>,
     regions: &[ScrollRegion],
@@ -93,19 +89,16 @@ fn gpu_scroll_has_descendant_scroll_region<VM: 'static>(
     })
 }
 
-#[cfg(feature = "transform-only-scroll-gpu")]
 fn translate_gpu_point(point: &mut Point, delta: Point) {
     point.x += delta.x;
     point.y += delta.y;
 }
 
-#[cfg(feature = "transform-only-scroll-gpu")]
 fn translate_gpu_rect(rect: &mut Rect, delta: Point) {
     rect.x += delta.x;
     rect.y += delta.y;
 }
 
-#[cfg(feature = "transform-only-scroll-gpu")]
 fn translate_gpu_hit_geometry(geometry: &mut crate::ui::widget::HitGeometry, delta: Point) {
     match geometry {
         crate::ui::widget::HitGeometry::Rect => {}
@@ -130,7 +123,6 @@ fn translate_gpu_hit_geometry(geometry: &mut crate::ui::widget::HitGeometry, del
     }
 }
 
-#[cfg(feature = "transform-only-scroll-gpu")]
 fn gpu_scroll_hit_supported<VM>(
     hit: &crate::ui::widget::HitRegion<VM>,
     widget_id: WidgetId,
@@ -142,7 +134,6 @@ fn gpu_scroll_hit_supported<VM>(
         )
 }
 
-#[cfg(feature = "transform-only-scroll-gpu")]
 fn translate_gpu_hit_interaction<VM>(
     interaction: &mut crate::ui::widget::HitInteraction<VM>,
     delta: Point,
@@ -167,7 +158,6 @@ fn translate_gpu_hit_interaction<VM>(
     }
 }
 
-#[cfg(feature = "transform-only-scroll-gpu")]
 fn translate_gpu_scroll_hits<VM>(
     hits: &mut [crate::ui::widget::HitRegion<VM>],
     widget_id: WidgetId,
@@ -184,7 +174,6 @@ fn translate_gpu_scroll_hits<VM>(
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
-    #[cfg(feature = "transform-only-scroll-gpu")]
     fn try_pure_scroll_gpu_fast_path(
         &mut self,
         viewport: Rect,
@@ -195,12 +184,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(cached) = self.cached_scene.as_ref() else {
             return false;
         };
-        if !self
-            .renderer
-            .as_ref()
-            .map(|renderer| renderer.push_constants_supported())
-            .unwrap_or(false)
-        {
+        if !self.gpu_scroll_supported {
             return false;
         }
         if !cached.computed_valid
@@ -424,7 +408,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ///
     /// 嵌套滚动安全：若一次滚动同时脏了祖孙两个滚动容器，`highest_layout_roots_smallvec`
     /// 只取最高根，重收集其整棵子树（含内层滚动），不会漏更新内层。
-    #[cfg(feature = "transform-only-scroll")]
     fn try_pure_scroll_fast_path(
         &mut self,
         viewport: Rect,
@@ -480,7 +463,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
         // patch 以 sync_runtime_scene_state=true 同步了 scroll_epoch 等运行时状态。
-        #[cfg(feature = "transform-only-scroll-gpu")]
         if let Some(cached) = self.cached_scene.as_mut() {
             cached.gpu_scroll_deferred = false;
         }
@@ -551,16 +533,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let text_input_patch_roots = self.cached_scene.as_ref().and_then(|cached| {
             (layout_cache_valid
                 && !cache_valid
-                && {
-                    #[cfg(feature = "transform-only-scroll-gpu")]
-                    {
-                        !cached.gpu_scroll_deferred
-                    }
-                    #[cfg(not(feature = "transform-only-scroll-gpu"))]
-                    {
-                        true
-                    }
-                }
+                && !cached.gpu_scroll_deferred
                 && self.can_patch_text_input_scene(
                     cached,
                     viewport,
@@ -598,7 +571,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         // Phase 4 纯滚动快路径：仅 scroll_epoch 变化时,只重收集滚动子树而非整树。
         // 命中即直接返回已更新的 cached.computed；不命中(前置不满足/patch 失败)
         // 落回下方常规 `!cache_valid` 整帧重收集,行为与未开启特性时完全一致。
-        #[cfg(feature = "transform-only-scroll-gpu")]
         if !cache_valid
             && layout_cache_valid
             && self.try_pure_scroll_gpu_fast_path(viewport, units, caret_visible, active_scrollbar)
@@ -620,7 +592,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .computed;
         }
 
-        #[cfg(feature = "transform-only-scroll")]
         if !cache_valid
             && layout_cache_valid
             && self.try_pure_scroll_fast_path(viewport, units, caret_visible, active_scrollbar, now)
@@ -673,6 +644,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         let mut collected = {
                             let collect_started_at = Instant::now();
                             let active_slider_value = self.active_slider_value_override();
+                            let gpu_scroll_enabled =
+                                self.gpu_scroll_supported && !layout.contains_virtual();
                             let collected = tree
                                 .collect_scene_cache_from_layout_with_focus_value_virtual_and_menu_state(
                                     &self.font_manager,
@@ -703,6 +676,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     &self.tooltip_hover_started_at,
                                     active_tooltip,
                                     active_hover_popover,
+                                    gpu_scroll_enabled,
                                     &self.config.style_sheet,
                                 );
                             collect_duration += collect_started_at.elapsed();
@@ -729,6 +703,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             collected = {
                                 let collect_started_at = Instant::now();
                                 let active_slider_value = self.active_slider_value_override();
+                                let gpu_scroll_enabled =
+                                    self.gpu_scroll_supported && !layout.contains_virtual();
                                 let collected = tree
                                     .collect_scene_cache_from_layout_with_focus_value_virtual_and_menu_state(
                                         &self.font_manager,
@@ -759,6 +735,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                         &self.tooltip_hover_started_at,
                                         active_tooltip,
                                         active_hover_popover,
+                                        gpu_scroll_enabled,
                                         &self.config.style_sheet,
                                     );
                                 recollect_duration += collect_started_at.elapsed();
@@ -803,6 +780,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         let collected = {
                             let collect_started_at = Instant::now();
                             let active_slider_value = self.active_slider_value_override();
+                            let gpu_scroll_enabled =
+                                self.gpu_scroll_supported && !layout.contains_virtual();
                             let collected = tree
                                 .collect_scene_cache_from_layout_with_focus_value_virtual_and_menu_state(
                                     &self.font_manager,
@@ -833,6 +812,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     &self.tooltip_hover_started_at,
                                     active_tooltip,
                                     active_hover_popover,
+                                    gpu_scroll_enabled,
                                     &self.config.style_sheet,
                                 );
                             collect_duration += collect_started_at.elapsed();
@@ -858,6 +838,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                 Self::stable_text_layout_overrides(&self.text_input_buffers);
                             let collect_started_at = Instant::now();
                             let active_slider_value = self.active_slider_value_override();
+                            let gpu_scroll_enabled =
+                                self.gpu_scroll_supported && !layout.contains_virtual();
                             let collected = tree
                                 .collect_scene_cache_from_layout_with_focus_value_virtual_and_menu_state(
                                     &self.font_manager,
@@ -888,6 +870,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     &self.tooltip_hover_started_at,
                                     active_tooltip,
                                     active_hover_popover,
+                                    gpu_scroll_enabled,
                                     &self.config.style_sheet,
                                 );
                             recollect_duration += collect_started_at.elapsed();
@@ -956,7 +939,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 active_scrollbar,
                 layout_valid: true,
                 computed_valid: true,
-                #[cfg(feature = "transform-only-scroll-gpu")]
                 gpu_scroll_deferred: false,
                 dependencies: {
                     let mut dependencies = DependencyGraph::default();
@@ -975,7 +957,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }));
             // 整帧重收集已用最新 scroll_states 重算全树并把 cached.scroll_epoch 同步到当前,
             // 任何积压的滚动脏标记都已被该重收集覆盖,清空避免下帧误判。
-            #[cfg(feature = "transform-only-scroll")]
             self.scroll_dirty_widgets.clear();
             if let Some(cached) = self.cached_scene.as_ref() {
                 let bindings = if let Some(layout) = cached.layout.as_ref() {

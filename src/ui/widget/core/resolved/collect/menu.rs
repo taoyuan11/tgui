@@ -649,7 +649,6 @@ pub(crate) fn emit_menu_layer<VM>(
                             on_open_change: on_open_change.clone(),
                         }
                     },
-                    #[cfg(feature = "transform-only-scroll-gpu")]
                     gpu_scroll_container: context.gpu_scroll_container,
                 });
                 // 收子菜单候选：父项为 Submenu kind + widget_state.hovered + submenu 非空

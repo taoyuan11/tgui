@@ -33,7 +33,7 @@ use crate::platform::dpi::PhysicalSize;
 use crate::text::font::FontManager;
 use crate::ui::widget::{RenderCommand, ScenePrimitives};
 
-/// Phase 4（transform-only-scroll-gpu）：每-draw 滚动平移 immediate data 的载荷。
+/// Phase 4：每-draw 滚动平移 immediate data 的载荷。
 /// 需两套平移量:position 在 NDC、clip_local_position 在物理像素。16 字节,4 字节对齐。
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -135,15 +135,13 @@ pub struct Renderer {
     text_cache: HashMap<TextCacheKey, TextCacheEntry>,
     texture_cache: HashMap<u64, TextureCacheEntry>,
     vertex_pool: self::vertex_pool::VertexBufferPool,
-    /// Phase 4（transform-only-scroll-gpu）：本次运行的 adapter 是否实际支持 IMMEDIATES。
-    /// feature 编译开启但 adapter 不支持时为 false——此时 GPU 平移变体运行时降级,滚动回退到
-    /// transform-only-scroll 的子树重收集。feature 关闭时该字段不存在。
-    #[cfg(feature = "transform-only-scroll-gpu")]
+    /// Phase 4：本次运行的 adapter 是否实际支持 IMMEDIATES。
+    /// adapter 不支持时为 false——此时 GPU 平移变体运行时降级,滚动回退到
+    /// CPU 子树重收集。
     push_constants_supported: bool,
 }
 
 impl Renderer {
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub(crate) fn push_constants_supported(&self) -> bool {
         self.push_constants_supported
     }
@@ -175,7 +173,6 @@ impl Renderer {
         &mut self,
         scene: &ScenePrimitives,
         font_manager: &FontManager,
-        #[cfg(feature = "transform-only-scroll-gpu")]
         scroll_regions: &[crate::ui::widget::ScrollRegion],
     ) -> Result<RenderStatus, TguiError> {
         if self.config.width == 0 || self.config.height == 0 {
@@ -210,18 +207,14 @@ impl Renderer {
             &scene.commands,
             font_manager,
             viewport,
-            #[cfg(feature = "transform-only-scroll-gpu")]
             scroll_regions,
-            #[cfg(feature = "transform-only-scroll-gpu")]
             scene.command_gpu_scroll_containers(),
         )?;
         let overlay_buffers = self.prepare_commands(
             &scene.overlay_commands,
             font_manager,
             viewport,
-            #[cfg(feature = "transform-only-scroll-gpu")]
             scroll_regions,
-            #[cfg(feature = "transform-only-scroll-gpu")]
             scene.overlay_command_gpu_scroll_containers(),
         )?;
         // 两次 prepare 的顶点数据都已进 staging，这里一次性上传到 GPU。

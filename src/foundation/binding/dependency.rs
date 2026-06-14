@@ -27,11 +27,9 @@ pub(crate) enum DependencyPhase {
 /// `Signal` 读取在 `track_property_scope` 内被归因到对应属性。这为 Phase 4 的
 /// transform-only / 单属性直写快路径提供「脏的是哪个字段」的信息。
 ///
-/// `property-deps` 关闭时,owner 的 `property` 恒为 `None`,行为与现状一致;失效
-/// 消费侧当前仅读 `widget_id` + `phase`,未被作用域包裹或未识别的属性都安全退化为
+/// 失效消费侧当前仅读 `widget_id` + `phase`,未被作用域包裹或未识别的属性都安全退化为
 /// 整 widget 的 Scene 失效——这是「绝不漏更新」的兜底。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(not(feature = "property-deps"), allow(dead_code))]
 pub(crate) enum PropertySlot {
     Background,
     BorderColor,
@@ -47,7 +45,7 @@ pub(crate) enum PropertySlot {
 pub(crate) struct DependencyOwner {
     pub(crate) widget_id: u64,
     pub(crate) phase: DependencyPhase,
-    /// 细分到具体视觉属性。`property-deps` 关闭时恒为 `None`,与归因前行为一致。
+    /// 细分到具体视觉属性。
     pub(crate) property: Option<PropertySlot>,
 }
 
@@ -236,9 +234,6 @@ pub(crate) fn track_dependency_scope<R>(owner: DependencyOwner, f: impl FnOnce()
 /// 返回后自动弹出,恢复外层 owner。栈为空时（无外层作用域）直接执行 `f`,不引入
 /// 任何 owner——保持与 `record_dependency_read` 一致的「无作用域即不记录」语义。
 ///
-/// `property-deps` 关闭时本函数退化为直接调用 `f()`,不触碰作用域栈,owner 的
-/// `property` 恒为 `None`,与归因前行为逐字节一致。
-#[cfg(feature = "property-deps")]
 pub(crate) fn track_property_scope<R>(slot: PropertySlot, f: impl FnOnce() -> R) -> R {
     struct ScopeGuard {
         pushed: bool,
@@ -264,13 +259,6 @@ pub(crate) fn track_property_scope<R>(slot: PropertySlot, f: impl FnOnce() -> R)
         true
     });
     let _guard = ScopeGuard { pushed };
-    f()
-}
-
-/// `property-deps` 关闭时的零成本兜底:不触碰作用域栈,直接执行 `f`。
-#[cfg(not(feature = "property-deps"))]
-#[inline(always)]
-pub(crate) fn track_property_scope<R>(_slot: PropertySlot, f: impl FnOnce() -> R) -> R {
     f()
 }
 

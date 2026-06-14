@@ -146,7 +146,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             next_toast_wakeup: &next_toast_wakeup,
             active_tooltip: None,
             active_hover_popover: None,
-            #[cfg(feature = "transform-only-scroll-gpu")]
+            gpu_scroll_enabled: false,
             gpu_scroll_container: None,
         };
 

@@ -51,7 +51,7 @@ fn rounded_box_sdf(local_position: vec2<f32>, rect_size: vec2<f32>, radius: f32)
     return outside + inside - radius;
 }
 
-// Phase 4（transform-only-scroll-gpu）：滚动容器子树的每-draw 平移 immediate data。
+// Phase 4：滚动容器子树的每-draw 平移 immediate data。
 struct PushTranslate {
     offset_ndc: vec2<f32>,
     offset_physical: vec2<f32>, // mesh clip 是 uniform,不需平移,但保持 layout 一致

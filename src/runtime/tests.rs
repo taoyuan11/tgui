@@ -373,7 +373,6 @@ fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
         active_scrollbar: None,
         layout_valid: true,
         computed_valid: true,
-        #[cfg(feature = "transform-only-scroll-gpu")]
         gpu_scroll_deferred: false,
         layout: None,
         computed: Default::default(),

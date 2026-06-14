@@ -6,11 +6,11 @@
 
 ### Added
 
-- 细粒度响应式增量渲染管线，提供一组可独立开关、分级降级的失效/渲染快路径（详见 `docs/advanced/performance.md`）：
-  - `fine-grained-splice`（**默认开启**）：叶子/子树 scene-only 改动时把新场景 chunk 原地拼接进根扁平场景与各祖先 chunk 的稳定区间，跳过祖先链向上重合成；命令数量或结构变化即干净回退到原 recompose 路径。
-  - `property-deps`（默认关闭）：属性级依赖归因，把 Signal 读取归因到具体视觉属性；未识别属性安全退化为整 widget 失效，不改变当前失效粒度。
-  - `incremental-upload`（默认关闭）：逐帧顶点池按字节 diff 只上传变化区间（triple-buffer 下安全）；CPU 逻辑已单测，GPU 视觉验证待真机完成后再决定默认值。
-  - `transform-only-scroll`（默认关闭）：纯滚动帧只重收集滚动子树而非整树，与全量重收集逐项等价。
+- 细粒度响应式增量渲染管线默认内置一组分级降级的失效/渲染快路径（详见 `docs/advanced/performance.md`）：
+  - 场景命令原地拼接：叶子/子树 scene-only 改动时把新场景 chunk 原地拼接进根扁平场景与各祖先 chunk 的稳定区间，跳过祖先链向上重合成。
+  - 属性级依赖归因：把 Signal 读取归因到具体视觉属性；未识别属性安全退化为整 widget 失效。
+  - 顶点脏区间增量上传：逐帧顶点池按字节 diff 只上传变化区间（triple-buffer 下安全）。
+  - 纯滚动快路径：优先用 GPU per-draw 平移；adapter 或场景前置不满足时回退到 CPU 子树重收集，再失败则整帧重收集。
   - 每条快路径都带「与全量重收集逐项等价」+「回退路径」两类单测；任一前置条件不满足均回退，绝不产生错误渲染。
 
 ### Changed
@@ -20,6 +20,7 @@
 - 在 `Cargo.toml` 中加入 `[package.metadata.docs.rs]`，docs.rs 默认启用全部 feature，便于生成完整 API 文档。
 - `Cargo.toml` 的 `exclude` 新增 `docs/*`（独立 vitepress 文档站点）与 `FINE_GRAINED_ROADMAP.md`，避免文档工程与内部路线图进入发布的 crate。
 - `publish.bat` 默认要求工作区干净，并按 `Cargo.toml` 中的版本进行 git tag 校验，避免误发；显式 opt-in `PUBLISH_ALLOW_DIRTY=1` 时才允许脏工作区。
+- 删除已验证性能快路径的 Cargo feature 开关；下游如配置了 `property-deps`、`transform-only-scroll` 或 `transform-only-scroll-gpu`，需要从 feature 列表中移除。
 
 ## [0.1.8] - 之前发布
 

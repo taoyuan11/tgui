@@ -294,7 +294,6 @@ fn translate_scroll_region(region: ScrollRegion, origin: Point) -> ScrollRegion 
         content_viewport: translate_rect(region.content_viewport, origin),
         visible_frame: translate_rect(region.visible_frame, origin),
         content_bounds: translate_rect(region.content_bounds, origin),
-        #[cfg(feature = "transform-only-scroll-gpu")]
         gpu_base_scroll_offset: region.gpu_base_scroll_offset,
         scroll_offset: region.scroll_offset,
         overflow_x: region.overflow_x,

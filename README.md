@@ -129,12 +129,12 @@ tgui = { version = "0.1.8", features = ["video"] }
 - `video`：启用 FFmpeg 视频播放能力
 - `video-static`：在 `video` 基础上启用静态链接 FFmpeg 的音视频能力
 
-性能相关 feature（默认特性 `fine-grained-splice` 已开启，无需手动配置）：
+性能优化已默认内置，无需配置 feature：
 
-- `fine-grained-splice`（**默认开启**）：细粒度场景命令原地拼接，改深层叶子属性时跳过祖先链重合成；可关闭作为逃生口。
-- `transform-only-scroll`：纯滚动帧只重收集滚动子树，适合长列表高频滚动。
-- `incremental-upload`：GPU 顶点脏区间增量上传（建议在目标硬件上验证后用于生产）。
-- `property-deps`：属性级依赖归因增强。
+- 细粒度场景命令原地拼接：改深层叶子属性时跳过祖先链重合成。
+- 属性级依赖归因：把视觉属性读取归因到具体属性槽，未识别属性安全退化为整 widget 失效。
+- GPU 顶点脏区间增量上传：逐帧只上传变化字节区间，完全相同则跳过上传。
+- 纯滚动快路径：优先用 GPU per-draw 平移；adapter 或场景前置不满足时回退到 CPU 子树重收集，再失败则整帧重收集。
 
 细粒度增量渲染管线的完整说明见 [性能文档](./docs/advanced/performance.md)。
 

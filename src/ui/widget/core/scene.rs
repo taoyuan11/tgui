@@ -64,7 +64,7 @@ pub(crate) struct CollectContext<'a, 'b> {
     pub(crate) next_toast_wakeup: &'a Cell<Option<Instant>>,
     pub(crate) active_tooltip: Option<ActiveTooltipState>,
     pub(crate) active_hover_popover: Option<WidgetId>,
-    #[cfg(feature = "transform-only-scroll-gpu")]
+    pub(crate) gpu_scroll_enabled: bool,
     pub(crate) gpu_scroll_container: Option<WidgetId>,
 }
 

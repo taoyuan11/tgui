@@ -85,18 +85,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .renderer
             .take()
             .expect("renderer should exist before drawing");
+        self.gpu_scroll_supported = renderer.push_constants_supported();
         let font_manager = self.font_manager.clone();
         let computed_started_at = Instant::now();
         let status = {
             let computed = self.computed_scene();
             let computed_duration = computed_started_at.elapsed();
             let render_started_at = Instant::now();
-            let status = renderer.render(
-                &computed.scene,
-                &font_manager,
-                #[cfg(feature = "transform-only-scroll-gpu")]
-                &computed.scroll_regions,
-            );
+            let status = renderer.render(&computed.scene, &font_manager, &computed.scroll_regions);
             let render_duration = render_started_at.elapsed();
             if let Some(frame_started_at) = frame_started_at {
                 let status_name = match &status {
@@ -177,6 +173,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         match Renderer::new(window.clone(), clear_color, self.config.msaa) {
             Ok(renderer) => {
+                self.gpu_scroll_supported = renderer.push_constants_supported();
                 self.renderer = Some(renderer);
                 self.last_synced_clear_color = Some(clear_color);
                 self.initialize_accessibility_adapter();
@@ -197,6 +194,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     pub(in crate::runtime) fn suspend(&mut self) {
         self.renderer = None;
+        self.gpu_scroll_supported = false;
         self.cached_scene = None;
         self.media_event_states.clear();
         self.lifecycle_event_states.clear();

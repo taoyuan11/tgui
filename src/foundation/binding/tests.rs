@@ -311,9 +311,8 @@ fn toast_queue_pause_and_resume_preserve_remaining_time() {
     assert_eq!(resumed.deadline, Some(now + Duration::from_secs(7)));
 }
 
-// Phase 2 · 属性级依赖归因（property-deps）
+// Phase 2 · 属性级依赖归因
 
-#[cfg(feature = "property-deps")]
 #[test]
 fn property_scope_attributes_signal_read_to_slot() {
     let ctx = context();
@@ -347,7 +346,6 @@ fn property_scope_attributes_signal_read_to_slot() {
     );
 }
 
-#[cfg(feature = "property-deps")]
 #[test]
 fn property_scope_restores_outer_owner_after_drop() {
     let ctx = context();
@@ -381,34 +379,6 @@ fn property_scope_restores_outer_owner_after_drop() {
     );
 }
 
-#[cfg(not(feature = "property-deps"))]
-#[test]
-fn property_scope_is_transparent_when_feature_disabled() {
-    let ctx = context();
-    let fill = ctx.state(7);
-    let signal = fill.signal();
-    let owner = DependencyOwner {
-        widget_id: 33,
-        phase: DependencyPhase::Scene,
-        property: None,
-    };
-
-    let (_, graph) = with_dependency_collection(|| {
-        track_dependency_scope(owner, || {
-            track_property_scope(PropertySlot::Background, || signal.get())
-        })
-    });
-
-    // 归因关闭时，track_property_scope 完全透明：owner 恒为 property: None，
-    // 行为与未引入属性槽前逐字节一致——这是「绝不漏更新」的安全退化。
-    let owners = graph.all_owners();
-    assert!(
-        owners.contains(&owner),
-        "with property-deps off, the read must stay attributed to the bare Scene owner: {owners:?}"
-    );
-    assert!(owners.iter().all(|o| o.property.is_none()));
-}
-
 #[test]
 fn property_scope_without_outer_scope_records_nothing() {
     let ctx = context();
@@ -424,9 +394,8 @@ fn property_scope_without_outer_scope_records_nothing() {
     assert!(!graph.has_global_dependency());
 }
 
-// 补充测试：property-deps feature 的边界情况和复杂场景
+// 补充测试：属性级依赖归因的边界情况和复杂场景
 
-#[cfg(feature = "property-deps")]
 #[test]
 fn property_scope_nested_same_property_uses_inner() {
     // 嵌套相同属性作用域时，内层作用域生效
@@ -460,7 +429,6 @@ fn property_scope_nested_same_property_uses_inner() {
     }));
 }
 
-#[cfg(feature = "property-deps")]
 #[test]
 fn property_scope_nested_different_properties() {
     // 嵌套不同属性作用域时，每层读取归因到各自的属性
@@ -501,7 +469,6 @@ fn property_scope_nested_different_properties() {
     );
 }
 
-#[cfg(feature = "property-deps")]
 #[test]
 fn property_scope_multiple_reads_same_slot() {
     // 同一属性作用域内多次读取不同信号，都归因到同一属性槽
@@ -542,7 +509,6 @@ fn property_scope_multiple_reads_same_slot() {
     }));
 }
 
-#[cfg(feature = "property-deps")]
 #[test]
 fn property_scope_different_phases() {
     // 不同阶段的属性作用域独立工作
@@ -589,7 +555,6 @@ fn property_scope_different_phases() {
     }));
 }
 
-#[cfg(feature = "property-deps")]
 #[test]
 fn property_scope_mixed_with_and_without() {
     // 混合使用属性作用域和无作用域的读取
@@ -626,33 +591,4 @@ fn property_scope_mixed_with_and_without() {
         }),
         "read inside property scope uses Scale slot"
     );
-}
-
-#[cfg(not(feature = "property-deps"))]
-#[test]
-fn property_scope_nested_transparent_when_disabled() {
-    // 关闭 property-deps 时，嵌套的属性作用域完全透明
-    let ctx = context();
-    let state = ctx.state(7);
-    let signal = state.signal();
-    let owner = DependencyOwner {
-        widget_id: 600,
-        phase: DependencyPhase::Scene,
-        property: None,
-    };
-
-    let (_, graph) = with_dependency_collection(|| {
-        track_dependency_scope(owner, || {
-            track_property_scope(PropertySlot::Background, || {
-                track_property_scope(PropertySlot::BorderColor, || {
-                    track_property_scope(PropertySlot::Opacity, || signal.get())
-                })
-            })
-        })
-    });
-
-    let owners = graph.all_owners();
-    assert_eq!(owners.len(), 1);
-    assert!(owners.contains(&owner));
-    assert!(owners.iter().all(|o| o.property.is_none()));
 }

@@ -213,6 +213,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         };
 
         self.window_id = Some(window.id());
+        self.gpu_scroll_supported = renderer.push_constants_supported();
         self.renderer = Some(renderer);
         self.last_synced_clear_color = Some(clear_color);
         self.window = Some(window);

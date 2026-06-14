@@ -690,7 +690,6 @@ pub(crate) struct HitRegion<VM> {
     pub scope_path: Vec<WidgetId>,
     pub focus: Option<FocusTargetMeta<VM>>,
     pub interaction: HitInteraction<VM>,
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub gpu_scroll_container: Option<WidgetId>,
 }
 
@@ -703,7 +702,6 @@ impl<VM> Clone for HitRegion<VM> {
             scope_path: self.scope_path.clone(),
             focus: self.focus.clone(),
             interaction: self.interaction.clone(),
-            #[cfg(feature = "transform-only-scroll-gpu")]
             gpu_scroll_container: self.gpu_scroll_container,
         }
     }

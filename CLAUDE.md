@@ -22,13 +22,14 @@ cargo check --features video
 cargo check --features video-static
 ```
 
-细粒度响应式渲染管线的 feature gate（见下方「细粒度响应式渲染管线」与根目录 `FINE_GRAINED_ROADMAP.md`）。改失效/场景拼接/顶点上传/滚动快路径时，把每个 gate 单开、再与 `--no-default-features` 组合跑：
+细粒度响应式渲染管线默认内置（见下方「细粒度响应式渲染管线」与根目录 `FINE_GRAINED_ROADMAP.md`）。改失效/场景拼接/顶点上传/滚动快路径时，至少跑默认、无默认 feature、音视频组合：
 
 ```bash
-cargo check --features property-deps
-cargo check --features incremental-upload
-cargo check --features transform-only-scroll
-cargo check --no-default-features          # 关掉默认的 fine-grained-splice，验证回退路径仍编译
+cargo check
+cargo check --no-default-features
+cargo check --features audio
+cargo check --features video
+cargo check --features video-static
 ```
 
 Benchmarks 在 `benches/`，需要 `bench-support` feature：
@@ -69,14 +70,14 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 
 ## 细粒度响应式渲染管线（高风险区）
 
-失效/渲染管线在「细粒度依赖跟踪 + 保留式分块场景图」之上加了一组**分级降级、各带 feature gate**的快路径（路线图：根目录 `FINE_GRAINED_ROADMAP.md`，不进 crate）。三条红线：**保留 pull 模型缩短半径**、**任一快路径前置不满足必须干净回退**到子树 patch → 整帧重收集（绝不渲染错误）、**正确性优先**（每条快路径都有「与全量重收集逐项等价」+「回退路径」两类单测）。
+失效/渲染管线在「细粒度依赖跟踪 + 保留式分块场景图」之上加了一组**分级降级**的内置快路径（路线图：根目录 `FINE_GRAINED_ROADMAP.md`，不进 crate）。三条红线：**保留 pull 模型缩短半径**、**任一快路径前置不满足必须干净回退**到子树 patch → 整帧重收集（绝不渲染错误）、**正确性优先**（每条快路径都有「与全量重收集逐项等价」+「回退路径」两类单测）。
 
-- `fine-grained-splice`（**默认开启**）：叶子 scene-only 改动时把新 chunk 原地 splice 进各祖先 chunk 稳定区间，跳过祖先链 recompose。必须同时覆盖主渲染流（含并行数组）+ `hit_regions` + `scroll_regions`（每个 Container 无条件 push 一条 ScrollRegion）。z-order 是正确性红线。锚点：`scene_primitives.rs`、`hit_scene_state.rs`、`scene_layout.rs`、`runtime/scene_patch.rs`。
-- `property-deps`（默认关）：属性级依赖归因（`PropertySlot`）。**兜底**：失效消费侧只读 `widget_id + phase`，未识别属性退化为整 widget 失效 → 绝不漏更新。锚点：`foundation/binding/dependency.rs`、`resolved/collect/chrome/visual_state.rs`、`render/text.rs`。
-- `incremental-upload`（默认关，**GPU 视觉验证未完成**）：顶点池 flush 按字节 diff 只上传脏区间。triple-buffer 保证部分覆盖安全。设默认前须真机截图比对。锚点：`rendering/renderer/vertex_pool.rs`。
-- `transform-only-scroll`（默认关）：纯滚动帧只重收集滚动子树（嵌套取最高根、排除 virtual），复用 `patch_cached_scene_for_roots`，逐项等价。锚点：`runtime/mod.rs`、`input/interaction.rs`、`cache_support.rs`、`scene_runtime.rs`。
+- 场景命令原地拼接：叶子 scene-only 改动时把新 chunk 原地 splice 进各祖先 chunk 稳定区间，跳过祖先链 recompose。必须同时覆盖主渲染流（含并行数组）+ `hit_regions` + `scroll_regions`（每个 Container 无条件 push 一条 ScrollRegion）。z-order 是正确性红线。锚点：`scene_primitives.rs`、`hit_scene_state.rs`、`scene_layout.rs`、`runtime/scene_patch.rs`。
+- 属性级依赖归因（`PropertySlot`）：**兜底**：失效消费侧只读 `widget_id + phase`，未识别属性退化为整 widget 失效 → 绝不漏更新。锚点：`foundation/binding/dependency.rs`、`resolved/collect/chrome/visual_state.rs`、`render/text.rs`。
+- 顶点脏区间增量上传：顶点池 flush 按字节 diff 只上传脏区间。triple-buffer 保证部分覆盖安全。锚点：`rendering/renderer/vertex_pool.rs`。
+- 纯滚动快路径：优先用 GPU per-draw 平移；adapter 不支持 IMMEDIATES 或场景前置不满足时回退到 CPU 子树重收集，再失败则整帧重收集。锚点：`runtime/mod.rs`、`input/interaction.rs`、`scene_runtime.rs`、`renderer/prepare.rs`。
 
-> 改这条管线务必跑全 feature 矩阵（默认 / `--no-default-features` / 各 gate 单开 / `audio` / `video` / `video-static`），并补两类单测。本机测试用 `CARGO_PROFILE_DEV_DEBUG=0 cargo test` 规避 macOS Mach-O 重定位上限（committed master 既有问题，与改动无关）。
+> 改这条管线务必跑默认 / `--no-default-features` / `audio` / `video` / `video-static` 检查，并补两类单测。本机测试用 `CARGO_PROFILE_DEV_DEBUG=0 cargo test` 规避 macOS Mach-O 重定位上限（committed master 既有问题，与改动无关）。
 
 ## 启动模型
 

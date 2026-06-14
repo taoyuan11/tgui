@@ -48,22 +48,14 @@ pub(super) fn create_surface(
 }
 
 pub(super) fn required_device_limits(
-    adapter: &wgpu::Adapter,
-    #[cfg(feature = "transform-only-scroll-gpu")] immediates_enabled: bool,
+    _adapter: &wgpu::Adapter,
+    immediates_enabled: bool,
 ) -> wgpu::Limits {
-    let _ = adapter;
-    #[cfg(feature = "transform-only-scroll-gpu")]
-    {
-        let mut limits = wgpu::Limits::default();
-        if immediates_enabled {
-            limits.max_immediate_size = core::mem::size_of::<super::PushTranslate>() as u32;
-        }
-        limits
+    let mut limits = wgpu::Limits::default();
+    if immediates_enabled {
+        limits.max_immediate_size = core::mem::size_of::<super::PushTranslate>() as u32;
     }
-    #[cfg(not(feature = "transform-only-scroll-gpu"))]
-    {
-        wgpu::Limits::default()
-    }
+    limits
 }
 
 pub(super) fn resolve_surface_msaa_sample_count(

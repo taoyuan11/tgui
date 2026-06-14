@@ -189,7 +189,6 @@ impl<VM> ResolvedElement<VM> {
                 scope_path: context.focus_scope_path(),
                 focus: None,
                 interaction: HitInteraction::Disabled { id: self.id },
-                #[cfg(feature = "transform-only-scroll-gpu")]
                 gpu_scroll_container: context.gpu_scroll_container,
             });
         } else if !matches!(&self.kind, ResolvedWidgetKind::Text { text, .. } if text.user_select)
@@ -291,7 +290,6 @@ impl<VM> ResolvedElement<VM> {
                     scope_path: context.focus_scope_path(),
                     focus,
                     interaction,
-                    #[cfg(feature = "transform-only-scroll-gpu")]
                     gpu_scroll_container: context.gpu_scroll_container,
                 });
                 if let Some(tree_node) = self.tree_node.as_ref() {
@@ -312,7 +310,6 @@ impl<VM> ResolvedElement<VM> {
                     scope_path: context.focus_scope_path(),
                     focus: None,
                     interaction: HitInteraction::Occluder { id: self.id },
-                    #[cfg(feature = "transform-only-scroll-gpu")]
                     gpu_scroll_container: context.gpu_scroll_container,
                 });
             }
@@ -356,7 +353,6 @@ fn push_tree_node_control_hit_regions<VM>(
                 state: tree_node.clone(),
                 interactions: interactions.clone(),
             },
-            #[cfg(feature = "transform-only-scroll-gpu")]
             gpu_scroll_container: context.gpu_scroll_container,
         });
     }
@@ -380,7 +376,6 @@ fn push_tree_node_control_hit_regions<VM>(
                     state: tree_node.clone(),
                     interactions: interactions.clone(),
                 },
-                #[cfg(feature = "transform-only-scroll-gpu")]
                 gpu_scroll_container: context.gpu_scroll_container,
             });
         }

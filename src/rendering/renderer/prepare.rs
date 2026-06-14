@@ -10,7 +10,6 @@ use super::{
     MeshVertex, RectVertex, Renderer, TextQuadSpec, TextTransformSpec, TextVertex, VertexViewport,
 };
 
-#[cfg(feature = "transform-only-scroll-gpu")]
 fn compute_scroll_translate(
     gpu_scroll_container: Option<crate::ui::widget::WidgetId>,
     scroll_regions: &[crate::ui::widget::ScrollRegion],
@@ -50,8 +49,7 @@ pub(super) struct PreparedRect {
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
-    /// Phase 4（transform-only-scroll-gpu）：该 draw 所属滚动容器的平移量。非滚动内容为 None。
-    #[cfg(feature = "transform-only-scroll-gpu")]
+    /// Phase 4：该 draw 所属滚动容器的平移量。非滚动内容为 None。
     pub(super) scroll_translate: Option<super::PushTranslate>,
 }
 
@@ -59,7 +57,6 @@ pub(super) struct PreparedBrush {
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub(super) scroll_translate: Option<super::PushTranslate>,
 }
 
@@ -68,7 +65,6 @@ pub(super) struct PreparedMesh {
     pub(super) clip_bind_group: wgpu::BindGroup,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub(super) scroll_translate: Option<super::PushTranslate>,
 }
 
@@ -77,7 +73,6 @@ pub(super) struct PreparedSprite {
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
-    #[cfg(feature = "transform-only-scroll-gpu")]
     pub(super) scroll_translate: Option<super::PushTranslate>,
 }
 
@@ -112,18 +107,12 @@ impl Renderer {
         commands: &[RenderCommand],
         font_manager: &FontManager,
         viewport: VertexViewport,
-        #[cfg(feature = "transform-only-scroll-gpu")]
         scroll_regions: &[crate::ui::widget::ScrollRegion],
-        #[cfg(feature = "transform-only-scroll-gpu")] command_gpu_scroll_containers: &[Option<
-            crate::ui::widget::WidgetId,
-        >],
+        command_gpu_scroll_containers: &[Option<crate::ui::widget::WidgetId>],
     ) -> Result<PreparedCommands, TguiError> {
         let mut prepared = Vec::with_capacity(commands.len());
 
         for (command_index, command) in commands.iter().enumerate() {
-            #[cfg(not(feature = "transform-only-scroll-gpu"))]
-            let _ = command_index;
-            #[cfg(feature = "transform-only-scroll-gpu")]
             let gpu_scroll_container = command_gpu_scroll_containers
                 .get(command_index)
                 .copied()
@@ -190,7 +179,6 @@ impl Renderer {
                         clip_rect: primitive.clip_rect,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
-                        #[cfg(feature = "transform-only-scroll-gpu")]
                         scroll_translate: compute_scroll_translate(
                             gpu_scroll_container,
                             scroll_regions,
@@ -228,7 +216,6 @@ impl Renderer {
                         clip_rect: primitive.clip_rect,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
-                        #[cfg(feature = "transform-only-scroll-gpu")]
                         scroll_translate: compute_scroll_translate(
                             gpu_scroll_container,
                             scroll_regions,
@@ -271,7 +258,6 @@ impl Renderer {
                         clip_bind_group,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
-                        #[cfg(feature = "transform-only-scroll-gpu")]
                         scroll_translate: compute_scroll_translate(
                             gpu_scroll_container,
                             scroll_regions,
@@ -315,7 +301,6 @@ impl Renderer {
                             clip_rect: texture.clip_rect,
                             vertex_offset,
                             vertex_count: vertices.len() as u32,
-                            #[cfg(feature = "transform-only-scroll-gpu")]
                             scroll_translate: compute_scroll_translate(
                                 gpu_scroll_container,
                                 scroll_regions,
@@ -364,7 +349,6 @@ impl Renderer {
                             clip_rect: texture.clip_rect,
                             vertex_offset,
                             vertex_count: vertices.len() as u32,
-                            #[cfg(feature = "transform-only-scroll-gpu")]
                             scroll_translate: compute_scroll_translate(
                                 gpu_scroll_container,
                                 scroll_regions,
@@ -414,7 +398,6 @@ impl Renderer {
                             clip_rect: text.clip_rect,
                             vertex_offset,
                             vertex_count: vertices.len() as u32,
-                            #[cfg(feature = "transform-only-scroll-gpu")]
                             scroll_translate: compute_scroll_translate(
                                 gpu_scroll_container,
                                 scroll_regions,
@@ -478,7 +461,7 @@ impl Renderer {
     }
 }
 
-#[cfg(all(test, feature = "transform-only-scroll-gpu"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::ui::layout::Overflow;
