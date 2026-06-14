@@ -20,6 +20,7 @@ pub struct CanvasSceneQueryOptions {
     font_catalog: FontCatalog,
     scale_factor: f32,
     font_scale: f32,
+    include_text_hits: bool,
     cached_font_manager: OnceCell<FontManager>,
 }
 
@@ -29,9 +30,20 @@ impl Default for CanvasSceneQueryOptions {
             font_catalog: FontCatalog::default(),
             scale_factor: 1.0,
             font_scale: 1.0,
+            include_text_hits: true,
             cached_font_manager: OnceCell::new(),
         }
     }
+}
+
+thread_local! {
+    static DEFAULT_QUERY_OPTIONS: CanvasSceneQueryOptions = CanvasSceneQueryOptions::default();
+}
+
+pub(crate) fn with_default_canvas_scene_query_options<T>(
+    f: impl FnOnce(&CanvasSceneQueryOptions) -> T,
+) -> T {
+    DEFAULT_QUERY_OPTIONS.with(f)
 }
 
 impl CanvasSceneQueryOptions {
@@ -47,6 +59,15 @@ impl CanvasSceneQueryOptions {
     pub fn font_scale(mut self, font_scale: f32) -> Self {
         self.font_scale = font_scale;
         self
+    }
+
+    pub fn include_text_hits(mut self, include_text_hits: bool) -> Self {
+        self.include_text_hits = include_text_hits;
+        self
+    }
+
+    pub fn without_text_hits(self) -> Self {
+        self.include_text_hits(false)
     }
 
     pub fn font_bytes(mut self, name: impl Into<String>, bytes: &'static [u8]) -> Self {
@@ -76,6 +97,10 @@ impl CanvasSceneQueryOptions {
             .get_or_init(|| FontManager::new(&self.font_catalog))
     }
 
+    pub(crate) fn should_include_text_hits(&self) -> bool {
+        self.include_text_hits
+    }
+
     pub(crate) fn units(&self) -> UnitContext {
         UnitContext::new(self.scale_factor, self.font_scale)
     }
@@ -83,11 +108,12 @@ impl CanvasSceneQueryOptions {
 
 pub(crate) fn query_canvas_scene_hits(
     scene: &CanvasScene,
-    font_manager: &FontManager,
+    font_manager: Option<&FontManager>,
     units: UnitContext,
+    include_text_hits: bool,
     scene_position: Point,
 ) -> Vec<CanvasSceneHit> {
-    let query_session = CanvasSceneQuerySession::new(font_manager, units);
+    let query_session = CanvasSceneQuerySession::new(font_manager, units, include_text_hits);
     let mut hits = Vec::new();
     let mut index_path = Vec::new();
     collect_query_hits_recursive(
@@ -154,26 +180,35 @@ fn collect_query_hits_recursive(
 }
 
 struct CanvasSceneQuerySession<'a> {
-    font_manager: &'a FontManager,
+    font_manager: Option<&'a FontManager>,
     units: UnitContext,
+    include_text_hits: bool,
     text_hit_cache: RefCell<HashMap<u64, Arc<[CanvasTextHitEntry]>>>,
 }
 
 impl<'a> CanvasSceneQuerySession<'a> {
-    fn new(font_manager: &'a FontManager, units: UnitContext) -> Self {
+    fn new(
+        font_manager: Option<&'a FontManager>,
+        units: UnitContext,
+        include_text_hits: bool,
+    ) -> Self {
         Self {
             font_manager,
             units,
+            include_text_hits,
             text_hit_cache: RefCell::new(HashMap::new()),
         }
     }
 
     fn text_hits_for_item(&self, item: &CanvasItem) -> Arc<[CanvasTextHitEntry]> {
+        let Some(font_manager) = self.font_manager else {
+            return Arc::from([]);
+        };
         let cache_key = canvas_text_hit_cache_key(item, self.units);
         if let Some(cached) = self.text_hit_cache.borrow().get(&cache_key).cloned() {
             return cached;
         }
-        let computed = item_text_hits(item, self.font_manager, Point::ZERO, self.units);
+        let computed = item_text_hits(item, font_manager, Point::ZERO, self.units);
         self.text_hit_cache
             .borrow_mut()
             .insert(cache_key, Arc::clone(&computed));
@@ -354,6 +389,9 @@ fn item_text_hit_at_point(
     let CanvasItem::Text(_) = item else {
         return None;
     };
+    if !query_session.include_text_hits {
+        return None;
+    }
     let text_hits = query_session.text_hits_for_item(item);
     text_hits
         .iter()

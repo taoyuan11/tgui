@@ -102,11 +102,15 @@ impl CanvasScene {
     }
 
     pub fn query_point(&self, scene_position: Point) -> Option<CanvasSceneHit> {
-        self.query_point_with(&CanvasSceneQueryOptions::default(), scene_position)
+        with_default_canvas_scene_query_options(|options| {
+            self.query_point_with(options, scene_position)
+        })
     }
 
     pub fn query_point_all(&self, scene_position: Point) -> Vec<CanvasSceneHit> {
-        self.query_point_all_with(&CanvasSceneQueryOptions::default(), scene_position)
+        with_default_canvas_scene_query_options(|options| {
+            self.query_point_all_with(options, scene_position)
+        })
     }
 
     pub fn query_point_with(
@@ -124,10 +128,14 @@ impl CanvasScene {
         options: &CanvasSceneQueryOptions,
         scene_position: Point,
     ) -> Vec<CanvasSceneHit> {
+        let font_manager = options
+            .should_include_text_hits()
+            .then(|| options.font_manager());
         query_canvas_scene_hits(
             self,
-            options.font_manager(),
+            font_manager,
             options.units(),
+            options.should_include_text_hits(),
             scene_position,
         )
     }
@@ -151,7 +159,7 @@ impl CanvasScene {
         units: UnitContext,
         scene_position: Point,
     ) -> Vec<CanvasSceneHit> {
-        query_canvas_scene_hits(self, font_manager, units, scene_position)
+        query_canvas_scene_hits(self, Some(font_manager), units, true, scene_position)
     }
 
     pub fn export_json(&self) -> String {

@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use tgui::canvas::{CanvasRecorder, CanvasScene, PathBuilder};
+use tgui::canvas::{CanvasRecorder, CanvasScene, CanvasSceneQueryOptions, PathBuilder};
 use tgui::core::{dp, Color, Point, Rect};
 
 fn build_canvas_scene(items: usize) -> CanvasScene {
@@ -70,6 +70,24 @@ fn bench_canvas_scene_query(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_canvas_scene_query_geometry_only(c: &mut Criterion) {
+    let mut group = c.benchmark_group("canvas_scene_query_point_all_geometry_only");
+
+    for items in [50_usize, 200, 1000] {
+        let scene = build_canvas_scene(items);
+        let options = CanvasSceneQueryOptions::new().without_text_hits();
+        group.bench_with_input(BenchmarkId::from_parameter(items), &items, |b, _| {
+            b.iter(|| {
+                let hits =
+                    scene.query_point_all_with(&options, black_box(Point::new(160.0, 120.0)));
+                black_box(hits);
+            });
+        });
+    }
+
+    group.finish();
+}
+
 fn bench_canvas_debug_export(c: &mut Criterion) {
     let mut group = c.benchmark_group("canvas_debug_export_json");
 
@@ -109,6 +127,7 @@ criterion_group!(
     benches,
     bench_canvas_scene_build,
     bench_canvas_scene_query,
+    bench_canvas_scene_query_geometry_only,
     bench_canvas_debug_export,
     bench_canvas_path_builder,
 );

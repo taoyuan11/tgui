@@ -13,6 +13,13 @@ fn positions(frame_count: usize) -> Vec<u64> {
 }
 
 #[cfg(all(feature = "video", feature = "bench-support"))]
+fn positions_with_interval(frame_count: usize, frame_interval_ms: u64) -> Vec<u64> {
+    (0..frame_count)
+        .map(|index| index as u64 * frame_interval_ms)
+        .collect()
+}
+
+#[cfg(all(feature = "video", feature = "bench-support"))]
 fn bench_video_buffer_decisions(c: &mut Criterion) {
     c.bench_function("video_buffer_decision_helpers", |b| {
         b.iter(|| {
@@ -92,6 +99,49 @@ fn bench_video_queue_accounting(c: &mut Criterion) {
 }
 
 #[cfg(all(feature = "video", feature = "bench-support"))]
+fn bench_video_high_fps_queue_accounting(c: &mut Criterion) {
+    let mut group = c.benchmark_group("video_high_fps_queue_accounting");
+
+    let cases = [
+        ("1080p_60fps_2s", 120_usize, 16_u64, 1920_u64 * 1080 * 4),
+        ("4k_60fps_2s", 120, 16, 3840_u64 * 2160 * 4),
+        ("4k_120fps_2s", 240, 8, 3840_u64 * 2160 * 4),
+    ];
+
+    for (name, frame_count, interval_ms, frame_bytes) in cases {
+        let positions = positions_with_interval(frame_count, interval_ms);
+        group.bench_with_input(
+            BenchmarkId::new(name, frame_count),
+            &positions,
+            |b, positions| {
+                b.iter_batched(
+                    || {
+                        let queue = video_bench::BenchVideoQueue::new();
+                        queue.replace_generation(1);
+                        queue.push_frames(1, positions, frame_bytes);
+                        queue
+                    },
+                    |queue| {
+                        let ready = queue.ready_frame_count(1);
+                        let memory = queue.ready_memory_bytes(1);
+                        let tail = queue.tail_end_position(1);
+                        let constrained = video_bench::bench_buffering_constrained_by_memory_limit(
+                            memory,
+                            512 * 1024 * 1024,
+                            frame_bytes,
+                        );
+                        black_box((ready, memory, tail, constrained));
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+
+    group.finish();
+}
+
+#[cfg(all(feature = "video", feature = "bench-support"))]
 fn bench_video_pts_conversion(c: &mut Criterion) {
     let mut group = c.benchmark_group("video_pts_to_duration");
 
@@ -144,6 +194,9 @@ fn bench_video_buffer_decisions(_c: &mut Criterion) {
 fn bench_video_queue_accounting(_c: &mut Criterion) {}
 
 #[cfg(not(all(feature = "video", feature = "bench-support")))]
+fn bench_video_high_fps_queue_accounting(_c: &mut Criterion) {}
+
+#[cfg(not(all(feature = "video", feature = "bench-support")))]
 fn bench_video_pts_conversion(_c: &mut Criterion) {}
 
 #[cfg(not(all(feature = "video", feature = "bench-support")))]
@@ -153,6 +206,7 @@ criterion_group!(
     benches,
     bench_video_buffer_decisions,
     bench_video_queue_accounting,
+    bench_video_high_fps_queue_accounting,
     bench_video_pts_conversion,
     bench_video_compressed_byte_distribution,
 );

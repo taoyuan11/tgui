@@ -10,7 +10,7 @@
 | --- | --- |
 | `animation` | 动画 helper、插值和时间线相关路径 |
 | `audio_output` | `audio` feature 下的音频输出 callback helper |
-| `canvas_scene` | Canvas scene 构建、查询和 debug export |
+| `canvas_scene` | Canvas scene 构建、默认查询、geometry-only 查询和 debug export |
 | `event_handling` | 真实 scene hit-region 扫描与 `Command` / `ValueCommand` 执行 |
 | `media_source` | `MediaSource` / `MediaBytes` 构造、clone 和 hash |
 | `real_widget_pipeline` | 真实 widget 树的 full layout+scene 与 scene-only recollect |
@@ -18,8 +18,8 @@
 | `single_property_patch` | 深层叶子 scene patch 与整树 recollect 对照 |
 | `state_signal` | `State` / `Signal` 写入、派发与求值 |
 | `text_processing` | `Text` / `Textarea` 真实 layout、scene recollect 和 `TextController` |
-| `video_buffering` | `video` feature 下的视频队列 accounting helper |
-| `widget_core_layout` | 真实 widget 树的 layout、scene recollect 和 cached hit path |
+| `video_buffering` | `video` feature 下的视频队列 accounting helper 与 high-FPS/4K 缓冲压力 |
+| `widget_core_layout` | 真实 widget 树的 layout、局部 layout root patch、scene recollect 和 cached hit path |
 
 运行示例：
 
@@ -38,6 +38,7 @@ cargo check --features bench-support --benches
 ```sh
 cargo bench --features bench-support --bench event_handling
 cargo bench --features bench-support --bench widget_core_layout
+cargo bench --features bench-support --bench canvas_scene
 cargo bench --features "bench-support audio" --bench audio_output
 cargo bench --features "bench-support video" --bench video_buffering
 ```

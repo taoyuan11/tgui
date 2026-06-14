@@ -135,10 +135,46 @@ impl WidgetBenchmarkContext {
     /// 集中在「最深 → 根」的最长祖先链上，复现 roadmap 描述的超线性 patch 场景。
     #[allow(dead_code)]
     fn deepest_leaf_id(layout: &ResolvedSceneLayout<()>) -> Option<WidgetId> {
-        layout
-            .all_widget_ids()
-            .filter(|id| layout.subtree_widget_ids(*id).len() == 1)
+        let ids = layout.all_widget_ids().collect::<Vec<_>>();
+        let mut non_leaf_ids = HashSet::with_capacity(ids.len());
+        for id in &ids {
+            if let Some(parent) = layout.parent_of(*id) {
+                non_leaf_ids.insert(parent);
+            }
+        }
+
+        ids.into_iter()
+            .filter(|id| !non_leaf_ids.contains(id))
             .max_by_key(|id| layout.depth_of(*id))
+    }
+
+    /// Benchmark helper for "one local layout root changed" scenarios. It patches the
+    /// parent of the deepest leaf, then updates the scene cache for that same root.
+    #[allow(dead_code)]
+    pub fn patch_parent_of_deepest_leaf_layout_and_scene(
+        &mut self,
+        tree: &WidgetTree<()>,
+        now: Instant,
+    ) -> bool {
+        if self.cached_scene.is_none() {
+            self.sync_cache(tree, now, true);
+        }
+        let Some(layout) = self.cached_layout.as_ref() else {
+            return false;
+        };
+        let Some(leaf) = Self::deepest_leaf_id(layout) else {
+            return false;
+        };
+        let root = layout.parent_of(leaf).unwrap_or(leaf);
+
+        if !self.patch_layout_roots(&[root], now) {
+            return false;
+        }
+        if !self.patch_scene_roots(&[root], false) {
+            self.clear_scene_cache();
+            return false;
+        }
+        true
     }
 
     #[allow(dead_code)]
@@ -529,6 +565,27 @@ mod tests {
             .expect("second layout should be cached");
 
         assert_eq!(first_layout_ptr, second_layout_ptr);
+    }
+
+    #[cfg(feature = "bench-support")]
+    #[test]
+    fn shallow_deep_leaf_scene_patch_runs_once() {
+        let tree = WidgetTree::new(
+            Flex::new(Axis::Vertical)
+                .width(dp(320.0))
+                .height(dp(120.0))
+                .padding(crate::ui::layout::Insets::all(dp(8.0)))
+                .child(
+                    Flex::new(Axis::Vertical)
+                        .width(dp(240.0))
+                        .padding(crate::ui::layout::Insets::all(dp(4.0)))
+                        .child(Text::new("leaf")),
+                ),
+        );
+        let mut bench = WidgetBenchmarkContext::default();
+        let _ = bench.run_layout_and_scene(&tree, Instant::now());
+
+        assert!(bench.patch_single_deep_leaf_scene(&tree, Instant::now()));
     }
 
     #[cfg(feature = "bench-support")]

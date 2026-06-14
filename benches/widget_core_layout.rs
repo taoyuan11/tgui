@@ -243,6 +243,59 @@ fn bench_scroll_container_scene_recollect(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "bench-support")]
+fn bench_single_row_update_paths(c: &mut Criterion) {
+    let mut group = c.benchmark_group("widget_single_row_update_paths");
+
+    for rows in [500_usize, 1000] {
+        let tree = build_flat_tree(rows);
+
+        group.bench_with_input(
+            BenchmarkId::new("full_layout_and_scene", rows),
+            &rows,
+            |b, _| {
+                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                b.iter(|| {
+                    ctx.invalidate_all();
+                    let stats = ctx.run_layout_and_scene(black_box(&tree), Instant::now());
+                    black_box(stats);
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("layout_root_patch_and_scene", rows),
+            &rows,
+            |b, _| {
+                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                let _ = ctx.run_layout_and_scene(&tree, Instant::now());
+                b.iter(|| {
+                    let patched = ctx.patch_parent_of_deepest_leaf_layout_and_scene(
+                        black_box(&tree),
+                        Instant::now(),
+                    );
+                    black_box(patched);
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("scene_only_recollect", rows),
+            &rows,
+            |b, _| {
+                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                let _ = ctx.run_layout_and_scene(&tree, Instant::now());
+                b.iter(|| {
+                    let stats = ctx.recollect_scene_only(black_box(&tree), Instant::now());
+                    black_box(stats);
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 #[cfg(not(feature = "bench-support"))]
 fn bench_element_tree_build(_c: &mut Criterion) {
     eprintln!("Skipping widget_core_layout benchmarks: bench-support feature not enabled");
@@ -266,6 +319,9 @@ fn bench_hit_test(_c: &mut Criterion) {}
 #[cfg(not(feature = "bench-support"))]
 fn bench_scroll_container_scene_recollect(_c: &mut Criterion) {}
 
+#[cfg(not(feature = "bench-support"))]
+fn bench_single_row_update_paths(_c: &mut Criterion) {}
+
 criterion_group!(
     benches,
     bench_element_tree_build,
@@ -275,5 +331,6 @@ criterion_group!(
     bench_scene_recollect,
     bench_hit_test,
     bench_scroll_container_scene_recollect,
+    bench_single_row_update_paths,
 );
 criterion_main!(benches);

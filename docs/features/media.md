@@ -18,6 +18,24 @@
 - `MediaBytes`
 - `ContentFit`
 
+## 内存 bytes 与零拷贝
+
+如果图片来自资源包、缓存或其他已经共享的数据结构，优先把底层缓冲区保存为
+`Arc<[u8]>`，再通过 `MediaBytes::from_shared(...)` 或 `MediaSource::bytes(...)`
+传入媒体系统。这样 clone、hash 和跨组件复用只复制指针与引用计数，不会重复复制整张图片。
+
+```rust
+use std::sync::Arc;
+use tgui::media::{MediaBytes, MediaSource};
+
+let shared: Arc<[u8]> = load_asset_bytes();
+let source = MediaSource::bytes(MediaBytes::from_shared(shared.clone()));
+```
+
+如果当前只有新建的 `Vec<u8>`，可以直接传给 `MediaSource::bytes(vec)`；之后的
+`MediaBytes` clone 仍会共享同一份缓冲区。需要在多处复用同一资源时，尽量在加载层先
+缓存 `Arc<[u8]>`，再分发给 `Image`、Canvas image 或背景图片。
+
 ## 音频
 
 启用 `audio` feature 后可使用：

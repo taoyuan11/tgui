@@ -219,6 +219,26 @@ fn canvas_scene_query_options_drive_explicit_query_context() {
 }
 
 #[test]
+fn canvas_scene_query_can_skip_text_cluster_hits() {
+    let scene = CanvasScene::from_items(vec![super::super::CanvasText::new(
+        1_u64,
+        Rect::new(0.0, 0.0, 120.0, 32.0),
+        "Hello",
+    )
+    .name_item("label")
+    .into()]);
+    let options = super::super::CanvasSceneQueryOptions::new().without_text_hits();
+
+    let hit = scene
+        .query_point_with(&options, Point::new(6.0, 10.0))
+        .expect("point should still hit the text item bounds");
+
+    assert_eq!(hit.item_id, 1_u64.into());
+    assert_eq!(hit.name.as_deref(), Some("label"));
+    assert!(hit.text_hit.is_none());
+}
+
+#[test]
 fn runtime_query_context_bridge_reuses_runtime_inputs() {
     let scene = CanvasScene::from_items(vec![super::super::CanvasText::new(
         1_u64,
