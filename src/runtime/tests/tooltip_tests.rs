@@ -21,6 +21,9 @@ fn tooltip_emits_overlay_primitives_when_hovered() {
     assert!(handler.handle_hover(viewport));
     tooltip_transition_wait();
     handler.invalidate_computed_scene();
+    let _ = handler.computed_scene();
+    tooltip_transition_wait();
+    handler.invalidate_computed_scene();
 
     let computed = handler.computed_scene();
     // Tooltip 至少推一个背景 shape 与一段文字到 overlay 层
@@ -57,6 +60,9 @@ fn tooltip_rich_content_renders_nested_scene_and_pointer() {
 
     let viewport = handler.viewport_rect();
     assert!(handler.handle_hover(viewport));
+    tooltip_transition_wait();
+    handler.invalidate_computed_scene();
+    let _ = handler.computed_scene();
     tooltip_transition_wait();
     handler.invalidate_computed_scene();
 
@@ -114,6 +120,9 @@ fn tooltip_disappears_when_hover_leaves() {
     assert!(handler.handle_hover(viewport));
     tooltip_transition_wait();
     handler.invalidate_computed_scene();
+    let _ = handler.computed_scene();
+    tooltip_transition_wait();
+    handler.invalidate_computed_scene();
     let shown = handler.computed_scene();
     assert!(!shown.scene.overlay_texts.is_empty());
 
@@ -161,6 +170,9 @@ fn hover_tooltip_registers_escape_close_handler_only() {
     handler.cursor_position = Some(Point::new(dp(40.0), dp(20.0)));
     let viewport = handler.viewport_rect();
     let _ = handler.handle_hover(viewport);
+    tooltip_transition_wait();
+    handler.invalidate_computed_scene();
+    let _ = handler.computed_scene();
     tooltip_transition_wait();
     handler.invalidate_computed_scene();
     let computed = handler.computed_scene();

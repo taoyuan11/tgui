@@ -433,4 +433,175 @@ mod tests {
         assert_eq!(commands.commands, vec!["seek", "play"]);
         assert_eq!(commands.seeks, vec![Duration::ZERO]);
     }
+
+    // 补充测试：更多边界情况和错误处理
+
+    #[test]
+    fn volume_clamps_to_valid_range() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        let backend = Arc::new(MockBackend::new());
+        let commands = backend.commands.clone();
+        let controller = VideoController::from_parts(shared.clone(), backend);
+
+        // 超出范围的值应被 clamp
+        controller.set_volume(1.5);
+        controller.set_volume(-0.5);
+        controller.set_volume(0.5);
+
+        let recorded = commands.lock().expect("commands lock poisoned");
+        assert_eq!(
+            recorded.volumes,
+            vec![1.0, 0.0, 0.5],
+            "volumes should be clamped to [0.0, 1.0]"
+        );
+    }
+
+    #[test]
+    fn multiple_pause_calls_are_idempotent() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        let backend = Arc::new(MockBackend::new());
+        let commands = backend.commands.clone();
+        let controller = VideoController::from_parts(shared, backend);
+
+        controller.pause();
+        controller.pause();
+        controller.pause();
+
+        let recorded = commands.lock().expect("commands lock poisoned");
+        assert_eq!(recorded.pause_count, 3, "all pause calls should be forwarded");
+    }
+
+    #[test]
+    fn seek_then_play_maintains_position() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        let backend = Arc::new(MockBackend::new());
+        let commands = backend.commands.clone();
+        let controller = VideoController::from_parts(shared, backend);
+
+        controller.seek(Duration::from_secs(15));
+        controller.play();
+
+        let recorded = commands.lock().expect("commands lock poisoned");
+        assert_eq!(recorded.commands, vec!["seek", "play"]);
+        assert_eq!(recorded.seeks, vec![Duration::from_secs(15)]);
+    }
+
+    #[test]
+    fn buffer_memory_limit_propagates_to_backend() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        let backend = Arc::new(MockBackend::new());
+        let commands = backend.commands.clone();
+        let controller = VideoController::from_parts(shared, backend);
+
+        let limits = vec![16 * 1024 * 1024, 64 * 1024 * 1024, 128 * 1024 * 1024];
+        for limit in &limits {
+            controller.set_buffer_memory_limit_bytes(*limit);
+        }
+
+        let recorded = commands.lock().expect("commands lock poisoned");
+        assert_eq!(recorded.buffer_memory_limits, limits);
+    }
+
+    #[test]
+    fn mute_unmute_sequence() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        let backend = Arc::new(MockBackend::new());
+        let commands = backend.commands.clone();
+        let controller = VideoController::from_parts(shared.clone(), backend);
+
+        controller.set_muted(true);
+        assert!(shared.muted.get(), "should be muted");
+
+        controller.set_muted(false);
+        assert!(!shared.muted.get(), "should be unmuted");
+
+        controller.set_muted(true);
+        assert!(shared.muted.get(), "should be muted again");
+
+        let recorded = commands.lock().expect("commands lock poisoned");
+        assert_eq!(recorded.muteds, vec![true, false, true]);
+    }
+
+    #[test]
+    fn load_resets_shared_state() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        shared.playback_state.set(VideoPlaybackState::Playing);
+        shared.metrics.set(VideoMetrics {
+            duration: Some(Duration::from_secs(60)),
+            position: Duration::from_secs(30),
+            buffered: Some(Duration::from_secs(45)),
+            video_width: 1920,
+            video_height: 1080,
+        });
+
+        let backend = Arc::new(MockBackend::new());
+        let controller = VideoController::from_parts(shared.clone(), backend);
+
+        controller
+            .load(VideoSource::File("new.mp4".into()))
+            .expect("load should succeed");
+
+        // reset_for_load 设置状态为 Loading（正在加载新源）
+        assert_eq!(shared.playback_state.get(), VideoPlaybackState::Loading);
+        assert_eq!(shared.metrics.get().position, Duration::ZERO);
+    }
+
+    #[test]
+    fn play_when_idle_does_not_seek() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        shared.playback_state.set(VideoPlaybackState::Idle);
+        let backend = Arc::new(MockBackend::new());
+        let commands = backend.commands.clone();
+        let controller = VideoController::from_parts(shared, backend);
+
+        controller.play();
+
+        let recorded = commands.lock().expect("commands lock poisoned");
+        // Idle 状态下 play() 不应触发 seek，只调用 play
+        assert_eq!(recorded.commands, vec!["play"]);
+        assert!(recorded.seeks.is_empty());
+    }
+
+    #[test]
+    fn seek_to_zero_is_valid() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        let backend = Arc::new(MockBackend::new());
+        let commands = backend.commands.clone();
+        let controller = VideoController::from_parts(shared, backend);
+
+        controller.seek(Duration::ZERO);
+
+        let recorded = commands.lock().expect("commands lock poisoned");
+        assert_eq!(recorded.seeks, vec![Duration::ZERO]);
+        assert_eq!(controller.position().get(), Duration::ZERO);
+    }
+
+    #[test]
+    fn volume_and_mute_are_independent() {
+        let ctx = test_context();
+        let shared = test_shared(&ctx);
+        let backend = Arc::new(MockBackend::new());
+        let controller = VideoController::from_parts(shared.clone(), backend);
+
+        controller.set_volume(0.5);
+        controller.set_muted(true);
+
+        assert_eq!(shared.volume.get(), 0.5, "volume setting independent of mute");
+        assert!(shared.muted.get(), "mute flag should be set");
+
+        controller.set_muted(false);
+        assert_eq!(
+            shared.volume.get(),
+            0.5,
+            "unmuting should not change volume"
+        );
+    }
 }

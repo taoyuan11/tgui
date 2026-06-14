@@ -423,3 +423,218 @@ fn property_scope_without_outer_scope_records_nothing() {
     assert!(graph.all_owners().is_empty());
     assert!(!graph.has_global_dependency());
 }
+
+// 补充测试：property-deps feature 的边界情况和复杂场景
+
+#[cfg(feature = "property-deps")]
+#[test]
+fn property_scope_nested_same_property_uses_inner() {
+    // 嵌套相同属性作用域时，内层作用域生效
+    let ctx = context();
+    let state = ctx.state(42);
+    let signal = state.signal();
+    let owner = DependencyOwner {
+        widget_id: 100,
+        phase: DependencyPhase::Scene,
+        property: None,
+    };
+
+    let (_, graph) = with_dependency_collection(|| {
+        track_dependency_scope(owner, || {
+            track_property_scope(PropertySlot::Background, || {
+                track_property_scope(PropertySlot::Background, || signal.get())
+            })
+        })
+    });
+
+    let owners = graph.all_owners();
+    assert_eq!(owners.len(), 1, "nested same property should result in single owner");
+    assert!(owners.contains(&DependencyOwner {
+        widget_id: 100,
+        phase: DependencyPhase::Scene,
+        property: Some(PropertySlot::Background),
+    }));
+}
+
+#[cfg(feature = "property-deps")]
+#[test]
+fn property_scope_nested_different_properties() {
+    // 嵌套不同属性作用域时，每层读取归因到各自的属性
+    let ctx = context();
+    let outer_state = ctx.state(1);
+    let inner_state = ctx.state(2);
+    let outer_signal = outer_state.signal();
+    let inner_signal = inner_state.signal();
+    let owner = DependencyOwner {
+        widget_id: 200,
+        phase: DependencyPhase::Scene,
+        property: None,
+    };
+
+    let (_, graph) = with_dependency_collection(|| {
+        track_dependency_scope(owner, || {
+            let _outer = outer_signal.get();
+            track_property_scope(PropertySlot::BorderColor, || {
+                let _inner = inner_signal.get();
+            });
+        })
+    });
+
+    let owners = graph.all_owners();
+    // 外层读取归因到 bare owner (property: None)
+    // 内层读取归因到 BorderColor
+    assert!(owners.contains(&owner), "outer read should use bare owner: {owners:?}");
+    assert!(
+        owners.contains(&DependencyOwner {
+            widget_id: 200,
+            phase: DependencyPhase::Scene,
+            property: Some(PropertySlot::BorderColor),
+        }),
+        "inner read should use BorderColor: {owners:?}"
+    );
+}
+
+#[cfg(feature = "property-deps")]
+#[test]
+fn property_scope_multiple_reads_same_slot() {
+    // 同一属性作用域内多次读取不同信号，都归因到同一属性槽
+    let ctx = context();
+    let state1 = ctx.state(10);
+    let state2 = ctx.state(20);
+    let state3 = ctx.state(30);
+    let signal1 = state1.signal();
+    let signal2 = state2.signal();
+    let signal3 = state3.signal();
+    let owner = DependencyOwner {
+        widget_id: 300,
+        phase: DependencyPhase::Scene,
+        property: None,
+    };
+
+    let (_, graph) = with_dependency_collection(|| {
+        track_dependency_scope(owner, || {
+            track_property_scope(PropertySlot::Opacity, || {
+                let _a = signal1.get();
+                let _b = signal2.get();
+                let _c = signal3.get();
+            })
+        })
+    });
+
+    let owners = graph.all_owners();
+    // 所有读取都归因到同一 Opacity 槽
+    assert_eq!(owners.len(), 1, "all reads should share the same property owner");
+    assert!(owners.contains(&DependencyOwner {
+        widget_id: 300,
+        phase: DependencyPhase::Scene,
+        property: Some(PropertySlot::Opacity),
+    }));
+}
+
+#[cfg(feature = "property-deps")]
+#[test]
+fn property_scope_different_phases() {
+    // 不同阶段的属性作用域独立工作
+    let ctx = context();
+    let state = ctx.state(99);
+    let signal = state.signal();
+
+    let (_, graph) = with_dependency_collection(|| {
+        // Layout 阶段读取
+        track_dependency_scope(
+            DependencyOwner {
+                widget_id: 400,
+                phase: DependencyPhase::Layout,
+                property: None,
+            },
+            || track_property_scope(PropertySlot::BorderWidth, || signal.get()),
+        );
+        // Scene 阶段读取
+        track_dependency_scope(
+            DependencyOwner {
+                widget_id: 400,
+                phase: DependencyPhase::Scene,
+                property: None,
+            },
+            || track_property_scope(PropertySlot::Background, || signal.get()),
+        );
+    });
+
+    let owners = graph.all_owners();
+    assert_eq!(owners.len(), 2, "different phases should create separate owners");
+    assert!(owners.contains(&DependencyOwner {
+        widget_id: 400,
+        phase: DependencyPhase::Layout,
+        property: Some(PropertySlot::BorderWidth),
+    }));
+    assert!(owners.contains(&DependencyOwner {
+        widget_id: 400,
+        phase: DependencyPhase::Scene,
+        property: Some(PropertySlot::Background),
+    }));
+}
+
+#[cfg(feature = "property-deps")]
+#[test]
+fn property_scope_mixed_with_and_without() {
+    // 混合使用属性作用域和无作用域的读取
+    let ctx = context();
+    let state1 = ctx.state(1);
+    let state2 = ctx.state(2);
+    let signal1 = state1.signal();
+    let signal2 = state2.signal();
+    let owner = DependencyOwner {
+        widget_id: 500,
+        phase: DependencyPhase::Scene,
+        property: None,
+    };
+
+    let (_, graph) = with_dependency_collection(|| {
+        track_dependency_scope(owner, || {
+            let _before = signal1.get();
+            track_property_scope(PropertySlot::Scale, || {
+                let _inside = signal2.get();
+            });
+        })
+    });
+
+    let owners = graph.all_owners();
+    assert!(owners.contains(&owner), "read outside property scope uses bare owner");
+    assert!(
+        owners.contains(&DependencyOwner {
+            widget_id: 500,
+            phase: DependencyPhase::Scene,
+            property: Some(PropertySlot::Scale),
+        }),
+        "read inside property scope uses Scale slot"
+    );
+}
+
+#[cfg(not(feature = "property-deps"))]
+#[test]
+fn property_scope_nested_transparent_when_disabled() {
+    // 关闭 property-deps 时，嵌套的属性作用域完全透明
+    let ctx = context();
+    let state = ctx.state(7);
+    let signal = state.signal();
+    let owner = DependencyOwner {
+        widget_id: 600,
+        phase: DependencyPhase::Scene,
+        property: None,
+    };
+
+    let (_, graph) = with_dependency_collection(|| {
+        track_dependency_scope(owner, || {
+            track_property_scope(PropertySlot::Background, || {
+                track_property_scope(PropertySlot::BorderColor, || {
+                    track_property_scope(PropertySlot::Opacity, || signal.get())
+                })
+            })
+        })
+    });
+
+    let owners = graph.all_owners();
+    assert_eq!(owners.len(), 1);
+    assert!(owners.contains(&owner));
+    assert!(owners.iter().all(|o| o.property.is_none()));
+}

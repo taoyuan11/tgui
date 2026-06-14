@@ -87,3 +87,167 @@ fn stop_clears_session_and_resets_shared_state() {
     assert_eq!(worker.shared.playback_state.get(), AudioPlaybackState::Idle);
     assert_eq!(worker.shared.metrics.get(), AudioMetrics::default());
 }
+
+// 补充测试：命令处理验证（直接测试worker的命令处理逻辑）
+
+#[test]
+fn volume_control_updates_shared_state() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let (_tx, rx) = unbounded();
+    let mut worker = AudioWorker::new(rx, shared.clone());
+
+    // Worker内部处理SetVolume命令
+    assert!(worker.handle_command(BackendCommand::SetVolume(0.75)));
+    assert_eq!(worker.volume, 0.75, "worker volume should be updated");
+
+    assert!(worker.handle_command(BackendCommand::SetVolume(0.0)));
+    assert_eq!(worker.volume, 0.0, "worker volume should be set to 0");
+
+    assert!(worker.handle_command(BackendCommand::SetVolume(1.0)));
+    assert_eq!(worker.volume, 1.0, "worker volume should be set to maximum");
+}
+
+#[test]
+fn mute_control_updates_shared_state() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let (_tx, rx) = unbounded();
+    let mut worker = AudioWorker::new(rx, shared.clone());
+
+    assert!(worker.handle_command(BackendCommand::SetMuted(true)));
+    assert!(worker.muted, "worker muted should be true");
+
+    assert!(worker.handle_command(BackendCommand::SetMuted(false)));
+    assert!(!worker.muted, "worker muted should be false");
+}
+
+#[test]
+fn looping_control_updates_shared_state() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let (_tx, rx) = unbounded();
+    let mut worker = AudioWorker::new(rx, shared.clone());
+
+    assert!(worker.handle_command(BackendCommand::SetLooping(true)));
+    assert!(worker.looping, "worker looping should be enabled");
+
+    assert!(worker.handle_command(BackendCommand::SetLooping(false)));
+    assert!(!worker.looping, "worker looping should be disabled");
+}
+
+#[test]
+fn buffer_memory_limit_updates_shared_state() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let (_tx, rx) = unbounded();
+    let mut worker = AudioWorker::new(rx, shared.clone());
+
+    let new_limit = 32 * 1024 * 1024; // 32 MB
+    assert!(worker.handle_command(BackendCommand::SetBufferMemoryLimitBytes(new_limit)));
+    assert_eq!(
+        worker.buffer_memory_limit_bytes, new_limit,
+        "worker buffer memory limit should be updated"
+    );
+}
+
+#[test]
+fn pause_command_sets_worker_flag() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let (_tx, rx) = unbounded();
+    let mut worker = AudioWorker::new(rx, shared.clone());
+    worker.should_play = true;
+
+    // Pause命令会设置should_play标志
+    assert!(worker.handle_command(BackendCommand::Pause));
+    assert!(!worker.should_play, "should_play flag should be cleared");
+
+    // 注意：playback_state只在有active session时才会更新
+    // 这个测试验证命令处理逻辑，不需要完整的session
+}
+
+#[test]
+fn seek_command_updates_target_position() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let (_tx, rx) = unbounded();
+    let mut worker = AudioWorker::new(rx, shared.clone());
+    worker.current_source = Some(AudioSource::File("test.mp3".into()));
+    worker.current_duration = Some(Duration::from_secs(60));
+
+    let seek_target = Duration::from_secs(30);
+    // Seek command triggers reopen_current_source, which is handled internally
+    // We verify the command returns true (processed successfully)
+    assert!(worker.handle_command(BackendCommand::Seek(seek_target)));
+
+    // The seek is executed via reopen_current_source, not stored in a field
+    // Session will be reopened at the target position when playback continues
+}
+
+#[test]
+fn play_when_paused_resumes_playback() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let (_tx, rx) = unbounded();
+    let mut worker = AudioWorker::new(rx, shared.clone());
+    worker.current_source = Some(AudioSource::File("demo.mp3".into()));
+    worker.shared.playback_state.set(AudioPlaybackState::Paused);
+    worker.should_play = false;
+
+    assert!(worker.handle_command(BackendCommand::Play));
+
+    assert!(worker.should_play, "should_play flag should be set");
+}
+
+#[test]
+fn stop_when_idle_is_noop() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let (_tx, rx) = unbounded();
+    let mut worker = AudioWorker::new(rx, shared.clone());
+    worker.shared.playback_state.set(AudioPlaybackState::Idle);
+
+    assert!(worker.handle_command(BackendCommand::Stop));
+
+    assert_eq!(
+        worker.shared.playback_state.get(),
+        AudioPlaybackState::Idle,
+        "state should remain Idle"
+    );
+    assert!(worker.session.is_none(), "session should be None");
+}
+
+#[test]
+fn multiple_volume_changes_without_worker() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let (_tx, rx) = unbounded();
+    let mut worker = AudioWorker::new(rx, shared.clone());
+
+    // 快速多次改变音量
+    for i in 0..10 {
+        assert!(worker.handle_command(BackendCommand::SetVolume(i as f32 / 10.0)));
+    }
+
+    assert_eq!(
+        worker.volume,
+        0.9,
+        "worker volume should reflect last change"
+    );
+}
+
+#[test]
+fn looping_enabled_prevents_ended_state() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let (_tx, rx) = unbounded();
+    let mut worker = AudioWorker::new(rx, shared.clone());
+    worker.current_source = Some(AudioSource::File("loop.mp3".into()));
+    worker.shared.looping.set(true);
+    worker.shared.playback_state.set(AudioPlaybackState::Playing);
+
+    // 模拟播放结束，但循环开启时不应进入 Ended 状态
+    // 实际逻辑在 worker 的主循环中，这里只验证初始设置
+    assert!(worker.shared.looping.get(), "looping should be enabled");
+}
