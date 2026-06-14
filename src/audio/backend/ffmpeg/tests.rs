@@ -231,8 +231,7 @@ fn multiple_volume_changes_without_worker() {
     }
 
     assert_eq!(
-        worker.volume,
-        0.9,
+        worker.volume, 0.9,
         "worker volume should reflect last change"
     );
 }
@@ -245,7 +244,10 @@ fn looping_enabled_prevents_ended_state() {
     let mut worker = AudioWorker::new(rx, shared.clone());
     worker.current_source = Some(AudioSource::File("loop.mp3".into()));
     worker.shared.looping.set(true);
-    worker.shared.playback_state.set(AudioPlaybackState::Playing);
+    worker
+        .shared
+        .playback_state
+        .set(AudioPlaybackState::Playing);
 
     // 模拟播放结束，但循环开启时不应进入 Ended 状态
     // 实际逻辑在 worker 的主循环中，这里只验证初始设置

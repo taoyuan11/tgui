@@ -1,7 +1,9 @@
 // 文本处理基准测试
 // 覆盖文本整形（cosmic-text）、文本渲染、文本输入控制器等热路径
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 #[cfg(feature = "bench-support")]
 use tgui::widgets::bench_support_ext::*;
@@ -10,24 +12,21 @@ use tgui::widgets::bench_support_ext::*;
 fn bench_text_shaping(c: &mut Criterion) {
     let mut group = c.benchmark_group("text_shaping");
 
+    let very_long = "Lorem ipsum dolor sit amet. ".repeat(20);
     let texts = vec![
         ("short", "Hello World"),
         ("medium", "The quick brown fox jumps over the lazy dog"),
         ("long", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris."),
-        ("very_long", &"Lorem ipsum dolor sit amet. ".repeat(20)),
+        ("very_long", very_long.as_str()),
     ];
 
     for (name, text) in texts {
-        group.bench_with_input(
-            BenchmarkId::new("shape", name),
-            &text,
-            |b, &text| {
-                b.iter(|| {
-                    let shaped = shape_text(black_box(text), 14.0);
-                    black_box(shaped);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("shape", name), &text, |b, &text| {
+            b.iter(|| {
+                let shaped = shape_text(black_box(text), 14.0);
+                black_box(shaped);
+            });
+        });
     }
     group.finish();
 }
@@ -148,16 +147,12 @@ fn bench_unicode_handling(c: &mut Criterion) {
     ];
 
     for (name, text) in texts {
-        group.bench_with_input(
-            BenchmarkId::new("shape", name),
-            &text,
-            |b, &text| {
-                b.iter(|| {
-                    let shaped = shape_text(black_box(text), 14.0);
-                    black_box(shaped);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("shape", name), &text, |b, &text| {
+            b.iter(|| {
+                let shaped = shape_text(black_box(text), 14.0);
+                black_box(shaped);
+            });
+        });
     }
     group.finish();
 }
@@ -170,7 +165,7 @@ fn bench_text_wrapping(c: &mut Criterion) {
 
     for width in [100.0, 200.0, 400.0, 800.0].iter() {
         group.bench_with_input(
-            BenchmarkId::from_parameter(width as i32),
+            BenchmarkId::from_parameter(*width as i32),
             width,
             |b, &width| {
                 b.iter(|| {

@@ -51,6 +51,8 @@ export default defineConfig({
         items: [
           { text: '运行时与渲染', link: '/advanced/runtime' },
           { text: '性能与资源', link: '/advanced/performance' },
+          { text: '基准测试结果', link: '/advanced/benchmark-results' },
+          { text: '性能优化建议', link: '/advanced/performance-optimization-recommendations' },
           { text: '示例索引', link: '/advanced/examples' }
         ]
       },

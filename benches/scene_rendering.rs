@@ -1,7 +1,9 @@
 // 场景渲染管线基准测试
 // 覆盖场景图构建、scene primitive 拼接、失效管理、顶点上传等热路径
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 #[cfg(feature = "bench-support")]
 use tgui::widgets::bench_support_ext::*;

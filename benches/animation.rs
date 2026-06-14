@@ -1,7 +1,9 @@
 // 动画系统基准测试
 // 覆盖动画引擎更新、时间线控制、值插值等热路径
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 #[cfg(feature = "bench-support")]
 use tgui::widgets::bench_support_ext::*;
@@ -11,22 +13,18 @@ fn bench_animation_update(c: &mut Criterion) {
     let mut group = c.benchmark_group("animation_update");
 
     for count in [1, 10, 50, 100, 200].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            count,
-            |b, &count| {
-                let mut engine = create_animation_engine();
-                let animations = create_n_animations(count);
+        group.bench_with_input(BenchmarkId::from_parameter(count), count, |b, &count| {
+            let mut engine = create_animation_engine();
+            let animations = create_n_animations(count);
 
-                for anim in &animations {
-                    add_animation_to_engine(&mut engine, anim.clone());
-                }
+            for anim in animations {
+                add_animation_to_engine(&mut engine, anim);
+            }
 
-                b.iter(|| {
-                    update_animation_engine(&mut engine, black_box(16.0));
-                });
-            },
-        );
+            b.iter(|| {
+                update_animation_engine(&mut engine, black_box(16.0));
+            });
+        });
     }
     group.finish();
 }
@@ -61,10 +59,9 @@ fn bench_animation_interpolation(c: &mut Criterion) {
 #[cfg(feature = "bench-support")]
 fn bench_animation_color_interpolation(c: &mut Criterion) {
     c.bench_function("color_interpolation", |b| {
-        let color1 = create_color(255, 0, 0, 255);
-        let color2 = create_color(0, 0, 255, 255);
-
         b.iter(|| {
+            let color1 = create_color(255, 0, 0, 255);
+            let color2 = create_color(0, 0, 255, 255);
             let color = interpolate_color(color1, color2, black_box(0.5));
             black_box(color);
         });

@@ -448,7 +448,11 @@ fn property_scope_nested_same_property_uses_inner() {
     });
 
     let owners = graph.all_owners();
-    assert_eq!(owners.len(), 1, "nested same property should result in single owner");
+    assert_eq!(
+        owners.len(),
+        1,
+        "nested same property should result in single owner"
+    );
     assert!(owners.contains(&DependencyOwner {
         widget_id: 100,
         phase: DependencyPhase::Scene,
@@ -483,7 +487,10 @@ fn property_scope_nested_different_properties() {
     let owners = graph.all_owners();
     // 外层读取归因到 bare owner (property: None)
     // 内层读取归因到 BorderColor
-    assert!(owners.contains(&owner), "outer read should use bare owner: {owners:?}");
+    assert!(
+        owners.contains(&owner),
+        "outer read should use bare owner: {owners:?}"
+    );
     assert!(
         owners.contains(&DependencyOwner {
             widget_id: 200,
@@ -523,7 +530,11 @@ fn property_scope_multiple_reads_same_slot() {
 
     let owners = graph.all_owners();
     // 所有读取都归因到同一 Opacity 槽
-    assert_eq!(owners.len(), 1, "all reads should share the same property owner");
+    assert_eq!(
+        owners.len(),
+        1,
+        "all reads should share the same property owner"
+    );
     assert!(owners.contains(&DependencyOwner {
         widget_id: 300,
         phase: DependencyPhase::Scene,
@@ -561,7 +572,11 @@ fn property_scope_different_phases() {
     });
 
     let owners = graph.all_owners();
-    assert_eq!(owners.len(), 2, "different phases should create separate owners");
+    assert_eq!(
+        owners.len(),
+        2,
+        "different phases should create separate owners"
+    );
     assert!(owners.contains(&DependencyOwner {
         widget_id: 400,
         phase: DependencyPhase::Layout,
@@ -599,7 +614,10 @@ fn property_scope_mixed_with_and_without() {
     });
 
     let owners = graph.all_owners();
-    assert!(owners.contains(&owner), "read outside property scope uses bare owner");
+    assert!(
+        owners.contains(&owner),
+        "read outside property scope uses bare owner"
+    );
     assert!(
         owners.contains(&DependencyOwner {
             widget_id: 500,

@@ -365,7 +365,7 @@ impl WidgetBenchmarkContext {
                 return false;
             }
 
-            let mut patches = SmallVec::<[ScenePatch; 8]>::new();
+            let mut patches = Vec::with_capacity(roots.len());
             let default_style_sheet = crate::ui::widget::StyleSheet::default();
             for root in roots {
                 let old_ids = layout.subtree_widget_ids(*root);
@@ -511,6 +511,36 @@ mod tests {
             .expect("second layout should be cached");
 
         assert_eq!(first_layout_ptr, second_layout_ptr);
+    }
+
+    #[cfg(feature = "bench-support")]
+    #[test]
+    fn repeated_deep_leaf_scene_patch_does_not_grow_stack() {
+        let mut node = Flex::new(Axis::Vertical)
+            .width(dp(720.0))
+            .padding(crate::ui::layout::Insets::all(dp(1.0)))
+            .height(dp(28.0));
+
+        for _ in 0..4 {
+            node = Flex::new(Axis::Vertical)
+                .width(dp(720.0))
+                .padding(crate::ui::layout::Insets::all(dp(1.0)))
+                .child(node);
+        }
+
+        let tree = WidgetTree::new(
+            Flex::new(Axis::Vertical)
+                .width(dp(760.0))
+                .height(dp(720.0))
+                .padding(crate::ui::layout::Insets::all(dp(8.0)))
+                .child(node),
+        );
+        let mut bench = WidgetBenchmarkContext::default();
+        let _ = bench.run_layout_and_scene(&tree, Instant::now());
+
+        for _ in 0..4 {
+            assert!(bench.patch_single_deep_leaf_scene(&tree, Instant::now()));
+        }
     }
 
     #[cfg(feature = "collect-profile")]

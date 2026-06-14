@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use crate::foundation::binding::{State, Signal, ViewModelContext};
+use crate::foundation::binding::{Signal, State, ViewModelContext};
 use crate::ui::layout::Axis;
 use crate::ui::unit::dp;
 use crate::ui::widget::{Flex, Rect, Text, WidgetTree};
@@ -140,7 +140,7 @@ pub fn create_flat_element_tree(count: usize) -> WidgetTree<()> {
             Flex::new(Axis::Horizontal)
                 .width(dp(780.0))
                 .height(dp(40.0))
-                .child(Text::new(format!("Item {}", i)))
+                .child(Text::new(format!("Item {}", i))),
         );
     }
 
@@ -148,16 +148,14 @@ pub fn create_flat_element_tree(count: usize) -> WidgetTree<()> {
 }
 
 pub fn create_flex_container(children: usize) -> WidgetTree<()> {
-    let mut container = Flex::new(Axis::Horizontal)
-        .width(dp(800.0))
-        .gap(dp(8.0));
+    let mut container = Flex::new(Axis::Horizontal).width(dp(800.0)).gap(dp(8.0));
 
     for i in 0..children {
         container = container.child(
             Flex::new(Axis::Vertical)
                 .width(dp(150.0))
                 .height(dp(200.0))
-                .child(Text::new(format!("Child {}", i)))
+                .child(Text::new(format!("Child {}", i))),
         );
     }
 
@@ -175,7 +173,7 @@ pub fn create_grid_layout(rows: usize, cols: usize) -> WidgetTree<()> {
                 Flex::new(Axis::Vertical)
                     .width(dp(100.0))
                     .height(dp(80.0))
-                    .child(Text::new(format!("{},{}", row, col)))
+                    .child(Text::new(format!("{},{}", row, col))),
             );
         }
 
@@ -196,7 +194,7 @@ pub fn create_mixed_complex_layout() -> WidgetTree<()> {
                     .width(dp(1920.0))
                     .height(dp(60.0))
                     .gap(dp(16.0))
-                    .child(Text::new("Header"))
+                    .child(Text::new("Header")),
             )
             .child(
                 Flex::new(Axis::Horizontal)
@@ -208,27 +206,27 @@ pub fn create_mixed_complex_layout() -> WidgetTree<()> {
                             .gap(dp(8.0))
                             .child(Text::new("Sidebar 1"))
                             .child(Text::new("Sidebar 2"))
-                            .child(Text::new("Sidebar 3"))
+                            .child(Text::new("Sidebar 3")),
                     )
                     .child(
                         Flex::new(Axis::Vertical)
                             .width(dp(1300.0))
                             .gap(dp(8.0))
-                            .child(Text::new("Main Content"))
+                            .child(Text::new("Main Content")),
                     )
                     .child(
                         Flex::new(Axis::Vertical)
                             .width(dp(300.0))
                             .gap(dp(8.0))
-                            .child(Text::new("Right Panel"))
-                    )
-            )
+                            .child(Text::new("Right Panel")),
+                    ),
+            ),
     )
 }
 
 pub fn compute_layout(tree: &WidgetTree<()>, viewport: (f32, f32)) -> WidgetBenchmarkStats {
-    let mut ctx = WidgetBenchmarkContext::new()
-        .with_viewport(Rect::new(0.0, 0.0, viewport.0, viewport.1));
+    let mut ctx =
+        WidgetBenchmarkContext::new().with_viewport(Rect::new(0.0, 0.0, viewport.0, viewport.1));
     ctx.run_layout(tree, Instant::now())
 }
 
@@ -245,7 +243,10 @@ pub fn invalidate_single_widget(_stats: &mut WidgetBenchmarkStats, _widget_idx: 
     // 标记失效
 }
 
-pub fn recompute_layout(_stats: &WidgetBenchmarkStats, _viewport: (f32, f32)) -> WidgetBenchmarkStats {
+pub fn recompute_layout(
+    _stats: &WidgetBenchmarkStats,
+    _viewport: (f32, f32),
+) -> WidgetBenchmarkStats {
     *_stats
 }
 
@@ -357,14 +358,7 @@ pub fn generate_vertices(primitives: &[SceneNode]) -> Vec<f32> {
         let w: f32 = node.rect.width.into();
         let h: f32 = node.rect.height.into();
 
-        vertices.extend_from_slice(&[
-            x, y,
-            x + w, y,
-            x, y + h,
-            x + w, y,
-            x + w, y + h,
-            x, y + h,
-        ]);
+        vertices.extend_from_slice(&[x, y, x + w, y, x, y + h, x + w, y, x + w, y + h, x, y + h]);
     }
     vertices
 }
@@ -387,10 +381,7 @@ pub fn apply_clipping(primitives: &[SceneNode], clip_rect: &Rect) -> Vec<SceneNo
             let w: f32 = node.rect.width.into();
             let h: f32 = node.rect.height.into();
 
-            x < clip_x + clip_w
-                && x + w > clip_x
-                && y < clip_y + clip_h
-                && y + h > clip_y
+            x < clip_x + clip_w && x + w > clip_x && y < clip_y + clip_h && y + h > clip_y
         })
         .cloned()
         .collect()
@@ -653,7 +644,12 @@ pub struct Transform {
 }
 
 pub fn create_transform(x: f32, y: f32, scale: f32, rotation: f32) -> Transform {
-    Transform { x, y, scale, rotation }
+    Transform {
+        x,
+        y,
+        scale,
+        rotation,
+    }
 }
 
 pub fn interpolate_transform(t1: Transform, t2: Transform, t: f32) -> Transform {
@@ -697,7 +693,12 @@ pub struct SpringAnimation {
     damping: f32,
 }
 
-pub fn create_spring_animation(start: f32, target: f32, stiffness: f32, damping: f32) -> SpringAnimation {
+pub fn create_spring_animation(
+    start: f32,
+    target: f32,
+    stiffness: f32,
+    damping: f32,
+) -> SpringAnimation {
     SpringAnimation {
         current: start,
         target,

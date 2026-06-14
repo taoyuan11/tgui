@@ -470,7 +470,10 @@ mod tests {
         controller.pause();
 
         let recorded = commands.lock().expect("commands lock poisoned");
-        assert_eq!(recorded.pause_count, 3, "all pause calls should be forwarded");
+        assert_eq!(
+            recorded.pause_count, 3,
+            "all pause calls should be forwarded"
+        );
     }
 
     #[test]
@@ -594,7 +597,11 @@ mod tests {
         controller.set_volume(0.5);
         controller.set_muted(true);
 
-        assert_eq!(shared.volume.get(), 0.5, "volume setting independent of mute");
+        assert_eq!(
+            shared.volume.get(),
+            0.5,
+            "volume setting independent of mute"
+        );
         assert!(shared.muted.get(), "mute flag should be set");
 
         controller.set_muted(false);

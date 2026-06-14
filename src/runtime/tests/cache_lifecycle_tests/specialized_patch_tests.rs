@@ -546,11 +546,7 @@ fn nested_scroll_triggers_fallback_to_full_recollect() {
     use crate::ui::widget::ScrollView;
 
     fn nested_scroller_tree() -> WidgetTree<TestVm> {
-        let inner_content = Flex::vertical()
-            .child(
-                Flex::vertical()
-                    .size(dp(50.0), dp(100.0))
-            );
+        let inner_content = Flex::vertical().child(Flex::vertical().size(dp(50.0), dp(100.0)));
         let inner_scroll = ScrollView::new()
             .size(dp(50.0), dp(50.0))
             .child(inner_content);
@@ -572,7 +568,11 @@ fn nested_scroll_triggers_fallback_to_full_recollect() {
         .unwrap_or(0);
 
     // 应该有滚动区域（实际数量取决于布局结构）
-    assert!(scroll_regions >= 2, "should have at least two nested scroll regions, got {}", scroll_regions);
+    assert!(
+        scroll_regions >= 2,
+        "should have at least two nested scroll regions, got {}",
+        scroll_regions
+    );
 
     if let Some(outer_id) = handler
         .cached_scene
@@ -624,7 +624,10 @@ fn multiple_scroll_actions_in_same_frame() {
     let full = shape_fingerprints(handler.computed_scene());
 
     assert_eq!(scene2, full, "multiple scrolls should match full recollect");
-    assert_ne!(scene1, scene2, "different scroll offsets should produce different scenes");
+    assert_ne!(
+        scene1, scene2,
+        "different scroll offsets should produce different scenes"
+    );
 }
 
 #[cfg(feature = "transform-only-scroll")]

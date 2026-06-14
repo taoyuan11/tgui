@@ -155,7 +155,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn scrollbar_thumb_hit(&mut self) -> Option<ScrollbarHandle> {
         let cursor_position = self.cursor_position?;
         // CRITICAL: Use cached scroll_regions to avoid stack overflow
-        let scroll_regions = self.cached_scene.as_ref()?.computed.scroll_regions.as_slice();
+        let scroll_regions = self
+            .cached_scene
+            .as_ref()?
+            .computed
+            .scroll_regions
+            .as_slice();
         scroll_regions
             .iter()
             .filter_map(|region| {

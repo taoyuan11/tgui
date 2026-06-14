@@ -1,7 +1,9 @@
 // 事件处理基准测试
 // 覆盖输入事件处理、命中测试、焦点管理、命令派发等热路径
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 #[cfg(feature = "bench-support")]
 use tgui::widgets::bench_support_ext::*;
@@ -34,20 +36,16 @@ fn bench_hit_test_nested(c: &mut Criterion) {
     let mut group = c.benchmark_group("hit_test_nested");
 
     for depth in [2, 4, 8, 12, 16].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(depth),
-            depth,
-            |b, &depth| {
-                let tree = create_nested_element_tree(depth);
-                let layout = compute_layout(&tree, (1920.0, 1080.0));
-                let hit_regions = build_hit_regions(&layout);
+        group.bench_with_input(BenchmarkId::from_parameter(depth), depth, |b, &depth| {
+            let tree = create_nested_element_tree(depth);
+            let layout = compute_layout(&tree, (1920.0, 1080.0));
+            let hit_regions = build_hit_regions(&layout);
 
-                b.iter(|| {
-                    let result = hit_test(&hit_regions, black_box((500.0, 500.0)));
-                    black_box(result);
-                });
-            },
-        );
+            b.iter(|| {
+                let result = hit_test(&hit_regions, black_box((500.0, 500.0)));
+                black_box(result);
+            });
+        });
     }
     group.finish();
 }
@@ -55,8 +53,7 @@ fn bench_hit_test_nested(c: &mut Criterion) {
 #[cfg(feature = "bench-support")]
 fn bench_hover_state_update(c: &mut Criterion) {
     let tree = create_flat_element_tree(100);
-    let layout = compute_layout(&tree, (1920.0, 1080.0));
-    let mut runtime = create_runtime_state(&layout);
+    let mut runtime = create_runtime_state(&tree);
 
     c.bench_function("hover_state_update", |b| {
         b.iter(|| {
@@ -89,8 +86,7 @@ fn bench_mouse_event_dispatch(c: &mut Criterion) {
             widget_count,
             |b, &count| {
                 let tree = create_flat_element_tree(count);
-                let layout = compute_layout(&tree, (1920.0, 1080.0));
-                let mut runtime = create_runtime_state(&layout);
+                let mut runtime = create_runtime_state(&tree);
 
                 b.iter(|| {
                     let event = create_mouse_event(MouseEventType::Click, (500.0, 500.0));
@@ -188,20 +184,16 @@ fn bench_event_bubbling(c: &mut Criterion) {
     let mut group = c.benchmark_group("event_bubbling");
 
     for depth in [2, 4, 8, 12].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(depth),
-            depth,
-            |b, &depth| {
-                let tree = create_nested_element_tree(depth);
-                let mut runtime = create_runtime_state(&tree);
+        group.bench_with_input(BenchmarkId::from_parameter(depth), depth, |b, &depth| {
+            let tree = create_nested_element_tree(depth);
+            let mut runtime = create_runtime_state(&tree);
 
-                b.iter(|| {
-                    let event = create_mouse_event(MouseEventType::Click, (500.0, 500.0));
-                    bubble_event(&mut runtime, black_box(event));
-                    black_box(&runtime);
-                });
-            },
-        );
+            b.iter(|| {
+                let event = create_mouse_event(MouseEventType::Click, (500.0, 500.0));
+                bubble_event(&mut runtime, black_box(event));
+                black_box(&runtime);
+            });
+        });
     }
     group.finish();
 }

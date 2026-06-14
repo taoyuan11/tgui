@@ -1,7 +1,9 @@
 // Widget 核心布局基准测试
 // 覆盖 Element 树构建、taffy 布局计算、scene primitive 收集等热路径
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 #[cfg(feature = "bench-support")]
 use tgui::widgets::bench_support_ext::*;
@@ -11,16 +13,12 @@ fn bench_element_tree_build(c: &mut Criterion) {
     let mut group = c.benchmark_group("element_tree_build");
 
     for depth in [2, 4, 8, 16].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(depth),
-            depth,
-            |b, &depth| {
-                b.iter(|| {
-                    let tree = create_nested_element_tree(black_box(depth));
-                    black_box(tree);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(depth), depth, |b, &depth| {
+            b.iter(|| {
+                let tree = create_nested_element_tree(black_box(depth));
+                black_box(tree);
+            });
+        });
     }
     group.finish();
 }
@@ -30,18 +28,14 @@ fn bench_flat_layout(c: &mut Criterion) {
     let mut group = c.benchmark_group("flat_layout");
 
     for count in [10, 50, 100, 200, 500].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            count,
-            |b, &count| {
-                let tree = create_flat_element_tree(count);
+        group.bench_with_input(BenchmarkId::from_parameter(count), count, |b, &count| {
+            let tree = create_flat_element_tree(count);
 
-                b.iter(|| {
-                    let layout_tree = compute_layout(&tree, (800.0, 600.0));
-                    black_box(layout_tree);
-                });
-            },
-        );
+            b.iter(|| {
+                let layout_tree = compute_layout(&tree, (800.0, 600.0));
+                black_box(layout_tree);
+            });
+        });
     }
     group.finish();
 }
@@ -51,18 +45,14 @@ fn bench_nested_layout(c: &mut Criterion) {
     let mut group = c.benchmark_group("nested_layout");
 
     for depth in [2, 4, 8, 12].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(depth),
-            depth,
-            |b, &depth| {
-                let tree = create_nested_element_tree(*depth);
+        group.bench_with_input(BenchmarkId::from_parameter(depth), depth, |b, &depth| {
+            let tree = create_nested_element_tree(depth);
 
-                b.iter(|| {
-                    let layout_tree = compute_layout(&tree, (800.0, 600.0));
-                    black_box(layout_tree);
-                });
-            },
-        );
+            b.iter(|| {
+                let layout_tree = compute_layout(&tree, (800.0, 600.0));
+                black_box(layout_tree);
+            });
+        });
     }
     group.finish();
 }

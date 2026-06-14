@@ -109,7 +109,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn focused_scroll_region(&mut self) -> Option<ScrollRegion> {
         let focused_id = self.focused_widget_id()?;
         // CRITICAL: Use cached scroll_regions to avoid stack overflow
-        let scroll_regions = self.cached_scene.as_ref()?.computed.scroll_regions.as_slice();
+        let scroll_regions = self
+            .cached_scene
+            .as_ref()?
+            .computed
+            .scroll_regions
+            .as_slice();
         scroll_regions.iter().copied().find(|region| {
             region.id == focused_id && (region.can_scroll_x() || region.can_scroll_y())
         })

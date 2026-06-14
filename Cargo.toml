@@ -143,6 +143,54 @@ winit-x11 = "0.31.0-beta.2"
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
 
+[[bench]]
+name = "animation"
+harness = false
+
+[[bench]]
+name = "audio_output"
+harness = false
+
+[[bench]]
+name = "canvas_scene"
+harness = false
+
+[[bench]]
+name = "event_handling"
+harness = false
+
+[[bench]]
+name = "media_source"
+harness = false
+
+[[bench]]
+name = "real_widget_pipeline"
+harness = false
+
+[[bench]]
+name = "scene_rendering"
+harness = false
+
+[[bench]]
+name = "single_property_patch"
+harness = false
+
+[[bench]]
+name = "state_signal"
+harness = false
+
+[[bench]]
+name = "text_processing"
+harness = false
+
+[[bench]]
+name = "video_buffering"
+harness = false
+
+[[bench]]
+name = "widget_core_layout"
+harness = false
+
 # Dev 模式性能。仅在以 tgui 为根构建时生效(cargo test / cargo run / cargo bench 的
 # 调试构建),作为依赖被引用时会被下游 workspace 的 profile 覆盖,因此对发布无影响。
 # 本地 crate 保持 opt-level=1(编译快、热点代码仍有基本优化),

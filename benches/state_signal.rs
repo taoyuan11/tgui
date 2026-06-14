@@ -1,7 +1,9 @@
 // State 和 Signal 响应式系统基准测试
 // 覆盖依赖跟踪、失效传播、派生信号计算等核心热路径
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use tgui::mvvm::ViewModelContext;
 
 fn bench_state_creation(c: &mut Criterion) {
@@ -188,20 +190,16 @@ fn bench_state_with_large_data(c: &mut Criterion) {
     let ctx = ViewModelContext::for_benchmarks();
 
     for size in [100, 1000, 10000].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            size,
-            |b, &size| {
-                let data: Vec<i32> = (0..size).collect();
-                let state = ctx.state(data.clone());
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
+            let data: Vec<i32> = (0..size).collect();
+            let state = ctx.state(data.clone());
 
-                b.iter(|| {
-                    let mut new_data = state.get();
-                    new_data[0] = black_box(new_data[0] + 1);
-                    state.set(new_data);
-                });
-            },
-        );
+            b.iter(|| {
+                let mut new_data = state.get();
+                new_data[0] = black_box(new_data[0] + 1);
+                state.set(new_data);
+            });
+        });
     }
     group.finish();
 }

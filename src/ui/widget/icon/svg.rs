@@ -9,6 +9,7 @@ use super::super::common::{ClipMask, Point, Rect, ScenePrimitives, TexturePrimit
 use super::BuiltinIcon;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(not(feature = "video"), allow(dead_code))]
 pub(crate) enum SvgIconId {
     ChevronLeft,
     ChevronRight,
