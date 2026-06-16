@@ -33,7 +33,7 @@ use crate::platform::dpi::PhysicalSize;
 use crate::text::font::FontManager;
 use crate::ui::widget::{RenderCommand, ScenePrimitives, TransformRecord, WidgetId};
 
-/// Phase 4：每-draw 滚动平移 immediate data 的载荷。
+/// 每-draw 滚动平移 immediate data 的载荷。
 /// 需两套平移量:position 在 NDC、clip_local_position 在物理像素。16 字节,4 字节对齐。
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -136,7 +136,7 @@ pub struct Renderer {
     text_cache: HashMap<TextCacheKey, TextCacheEntry>,
     texture_cache: HashMap<u64, TextureCacheEntry>,
     vertex_pool: self::vertex_pool::VertexBufferPool,
-    /// Phase 4：本次运行的 adapter 是否实际支持 IMMEDIATES。
+    /// 本次运行的 adapter 是否实际支持 IMMEDIATES。
     /// adapter 不支持时为 false——此时 GPU 平移变体运行时降级,滚动回退到
     /// CPU 子树重收集。
     push_constants_supported: bool,

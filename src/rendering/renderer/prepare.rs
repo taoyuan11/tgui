@@ -94,7 +94,7 @@ pub(super) struct PreparedRect {
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
-    /// Phase 4：该 draw 所属滚动容器的平移量。非滚动内容为 None。
+    /// 该 draw 所属滚动容器的平移量。非滚动内容为 None。
     pub(super) scroll_translate: Option<super::PushTranslate>,
 }
 

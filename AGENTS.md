@@ -126,7 +126,7 @@ Application::new()
 
 `tgui` 的失效/渲染管线在「细粒度依赖跟踪 + 保留式分块场景图」之上，逐步加入了一组**分级降级**的内置快路径（路线图见仓库根 `FINE_GRAINED_ROADMAP.md`，不进 crate）。核心设计原则：**保留 pull 模型缩短 pull 半径**；**任一快路径前置不满足必须能干净回退**到子树 patch → 整帧重收集，绝不渲染错误；**正确性优先**，每条快路径都有「与从零全量重收集逐项等价」的单测和对应回退路径的测试。
 
-五条快路径（高风险区，改前先读路线图对应 Phase 的「实施记录」）：
+五条快路径（高风险区，改前先读路线图对应快路径的「实施记录」）：
 
 1. **场景命令区间原地拼接。** 叶子/子树 scene-only 改动（如改色）时，若新旧 chunk 各流命令数量完全一致、且子树不含 overlay/portal/scroll-as-overlay/focus/anchor/carousel/virtual/ime，则把新 chunk 原地 splice 进 `cached.computed` 与各祖先 chunk 的稳定区间，**跳过祖先链 `recompose_scene_chunk` 向上重合成**。必须同时覆盖主渲染流（含按类型分组的并行数组）、`hit_regions`、`scroll_regions`——每个 `Container` 无条件 push 一条 `ScrollRegion`。锚点：`scene_primitives.rs`（`counts/SceneCounts/splice_in_place`）、`hit_scene_state.rs`（`is_simple_for_splice/scene_counts/splice_chunk_in_place`）、`scene_layout.rs`（`scene_splice_ancestor_offsets`）、`scene_patch.rs`（splice 快路径）。
 2. **属性级依赖归因。** 场景阶段解析视觉属性（background / border color/width/radius / opacity / offset / scale / text color）时把 `PropertySlot` 压入依赖作用域，使 Signal 读取归因到「哪个属性」而非仅「哪个 widget 的哪个 phase」。**兜底红线**：失效消费侧（`scene_patch_invalidation`）当前只读 `widget_id + phase`，从不读 `property`，所以引入归因对失效决策零行为影响——未识别属性安全退化为整 widget 失效，结构上「绝不漏更新」。锚点：`dependency.rs`（`PropertySlot` / `track_property_scope`）、`resolved/collect/chrome/visual_state.rs`、`render/text.rs`。

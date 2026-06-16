@@ -1,4 +1,4 @@
-//! 失效 action 命中计数器（度量护栏，Phase 0）。
+//! 失效 action 命中计数器（度量护栏）。
 //!
 //! `request_redraw_if_dirty` 每次调用 `invalidate_cached_scene_for_dependencies` 后，
 //! 会把它返回的 action 标签（`scene_subtree_patch` / `global_full_rebuild` /

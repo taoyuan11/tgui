@@ -519,7 +519,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             )
     }
 
-    /// Phase 1 splice 支撑：计算 `target` 子树在它**每一个严格祖先** chunk 里的命令区间
+    /// Scene splice 支撑：计算 `target` 子树在它**每一个严格祖先** chunk 里的命令区间
     /// 起点（主渲染流 SceneCounts 偏移 + hit_regions 偏移），从树根到 `target` 父节点。
     ///
     /// 纯连接合成模型下，`target` 在某祖先 `A` 的 chunk 里的偏移 =

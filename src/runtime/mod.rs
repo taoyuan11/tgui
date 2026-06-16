@@ -369,7 +369,7 @@ pub struct BoundRuntimeHandler<VM> {
     external_portal_requests: Vec<ExternalPortalRequest<VM>>,
     external_portal_revision: u64,
     scroll_epoch: u64,
-    /// Phase 4：自上次场景更新以来发生过滚动偏移变化的容器集合。
+    /// 自上次场景更新以来发生过滚动偏移变化的容器集合。
     /// 在唯一的滚动写入口 `set_scroll_offset` 累积,被纯滚动快路径消费后清空。
     scroll_dirty_widgets: HashSet<WidgetId>,
     text_input_epoch: u64,

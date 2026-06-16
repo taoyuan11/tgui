@@ -23,7 +23,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     /// 除 `scroll_epoch`（与 `computed_valid`）外的所有场景缓存匹配字段。
-    /// `scene_cache_matches` 与 Phase 4 的「纯滚动帧」检测共用，避免字段列表漂移。
+    /// `scene_cache_matches` 与「纯滚动帧」检测共用，避免字段列表漂移。
     pub(in crate::runtime) fn scene_cache_fields_match_ignoring_scroll(
         &self,
         cached: &CachedScene<VM>,

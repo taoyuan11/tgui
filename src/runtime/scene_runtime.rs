@@ -399,9 +399,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         layout_invalidated
     }
 
-    /// Phase 4 纯滚动快路径。仅当本帧的缓存失配**只有** `scroll_epoch`（其余字段全部匹配、
+    /// 纯滚动快路径。仅当本帧的缓存失配**只有** `scroll_epoch`（其余字段全部匹配、
     /// 布局缓存仍有效、不含 virtual）时尝试：把发生滚动的容器作为 patch 根，复用既有且已测的
-    /// `patch_cached_scene_for_roots`（子树作用域重收集 + Phase 1 splice）绕开整树重收集。
+    /// `patch_cached_scene_for_roots`（子树作用域重收集 + scene splice）绕开整树重收集。
     ///
     /// 关键正确性：这里调用的 collect 与整帧重收集是**同一个收集函数**，只是作用域收窄到
     /// 滚动子树。`patch_resolved_roots` 会用最新 `scroll_states` 重新解析子树几何（含
@@ -588,7 +588,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        // Phase 4 纯滚动快路径：仅 scroll_epoch 变化时,只重收集滚动子树而非整树。
+        // 纯滚动快路径：仅 scroll_epoch 变化时,只重收集滚动子树而非整树。
         // 命中即直接返回已更新的 cached.computed；不命中(前置不满足/patch 失败)
         // 落回下方常规 `!cache_valid` 整帧重收集,行为与未开启特性时完全一致。
         if !cache_valid

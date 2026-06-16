@@ -429,7 +429,7 @@ fn toast_queue_pause_and_resume_preserve_remaining_time() {
     assert_eq!(resumed.deadline, Some(now + Duration::from_secs(7)));
 }
 
-// Phase 2 · 属性级依赖归因
+// 属性级依赖归因
 
 #[test]
 fn property_scope_attributes_signal_read_to_slot() {

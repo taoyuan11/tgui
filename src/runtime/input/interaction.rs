@@ -501,7 +501,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.scroll_states.insert(widget_id, offset);
         }
         self.scroll_epoch = self.scroll_epoch.wrapping_add(1);
-        // Phase 4：记录本容器发生了滚动变化,供纯滚动快路径定位需要重新收集的子树根。
+        // 记录本容器发生了滚动变化,供纯滚动快路径定位需要重新收集的子树根。
         self.scroll_dirty_widgets.insert(widget_id);
     }
 }

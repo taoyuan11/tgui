@@ -20,11 +20,11 @@ pub(crate) enum DependencyPhase {
     Scene,
 }
 
-/// Phase 2（属性级依赖归因）：场景阶段被读取的依赖归属到的**具体视觉属性**。
+/// 属性级依赖归因：场景阶段被读取的依赖归属到的**具体视觉属性**。
 ///
 /// 当前 `DependencyOwner` 只能定位到「哪个 widget 的哪个阶段」,无法区分改的是
 /// 颜色、不透明度还是 transform。`PropertySlot` 把 Scene 阶段进一步细分,使
-/// `Signal` 读取在 `track_property_scope` 内被归因到对应属性。这为 Phase 4 的
+/// `Signal` 读取在 `track_property_scope` 内被归因到对应属性。这为
 /// transform-only / 单属性直写快路径提供「脏的是哪个字段」的信息。
 ///
 /// 失效消费侧当前仅读 `widget_id` + `phase`,未被作用域包裹或未识别的属性都安全退化为
@@ -241,7 +241,7 @@ pub(crate) fn track_dependency_scope<R>(owner: DependencyOwner, f: impl FnOnce()
     f()
 }
 
-/// Phase 2（属性级依赖归因）：在当前依赖作用域上叠加一个 `PropertySlot`。
+/// 属性级依赖归因：在当前依赖作用域上叠加一个 `PropertySlot`。
 ///
 /// 复制栈顶 owner（通常是某个 widget 的 `Scene` 阶段 owner）并把它的 `property`
 /// 设为 `slot`,在 `f` 执行期间该属性下的 `Signal` 读取都被归因到这个属性。`f`
