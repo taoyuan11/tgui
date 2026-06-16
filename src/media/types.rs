@@ -218,7 +218,7 @@ pub enum ContentFit {
     Fill,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct TextureFrame {
     id: u64,
     revision: u64,
@@ -234,6 +234,17 @@ impl PartialEq for TextureFrame {
 }
 
 impl Eq for TextureFrame {}
+
+impl fmt::Debug for TextureFrame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TextureFrame")
+            .field("id", &self.id)
+            .field("revision", &self.revision)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish_non_exhaustive()
+    }
+}
 
 impl TextureFrame {
     pub(crate) fn allocate_id() -> u64 {
@@ -337,6 +348,27 @@ impl RasterRequest {
     pub(crate) fn height(self) -> u32 {
         self.height
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct MediaTextureKey {
+    pub(crate) source: MediaSource,
+    pub(crate) raster_request: RasterRequest,
+}
+
+impl MediaTextureKey {
+    pub(crate) fn new(source: MediaSource, raster_request: RasterRequest) -> Self {
+        Self {
+            source,
+            raster_request,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum MediaCompletion {
+    SourceLoaded { source: MediaSource },
+    RasterFinished { key: MediaTextureKey },
 }
 
 #[derive(Clone)]

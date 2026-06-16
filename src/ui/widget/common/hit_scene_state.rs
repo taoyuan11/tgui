@@ -38,6 +38,22 @@ impl ScrollRegion {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TransformRecord {
+    pub(crate) id: WidgetId,
+    pub(crate) base_offset: Point,
+    pub(crate) current_offset: Point,
+}
+
+impl TransformRecord {
+    pub(crate) fn delta(self) -> Point {
+        Point {
+            x: self.current_offset.x - self.base_offset.x,
+            y: self.current_offset.y - self.base_offset.y,
+        }
+    }
+}
+
 pub(crate) struct ComputedScene<VM> {
     pub scene: ScenePrimitives,
     pub hit_regions: SmallVec<[HitRegion<VM>; 1]>,
@@ -57,6 +73,7 @@ pub(crate) struct ComputedScene<VM> {
     pub scroll_regions: SmallVec<[ScrollRegion; 1]>,
     pub ime_cursor_area: Option<Rect>,
     pub virtual_state_updates: SmallVec<[VirtualSceneStateUpdate; 1]>,
+    pub(crate) transform_records: HashMap<WidgetId, TransformRecord>,
     pub(crate) dependencies: DependencyGraph,
 }
 
@@ -77,6 +94,7 @@ impl<VM> Clone for ComputedScene<VM> {
             scroll_regions: self.scroll_regions.clone(),
             ime_cursor_area: self.ime_cursor_area,
             virtual_state_updates: self.virtual_state_updates.clone(),
+            transform_records: self.transform_records.clone(),
             dependencies: self.dependencies.clone(),
         }
     }
@@ -90,6 +108,7 @@ pub(crate) struct PortalOverlayCounts {
     pub textures: usize,
     pub meshes: usize,
     pub texts: usize,
+    pub text_decorations: usize,
     pub commands: usize,
     pub hits: usize,
     pub close_handlers: usize,
@@ -104,6 +123,7 @@ pub(crate) struct OverlayLayerBucket<VM> {
     pub textures: SmallVec<[TexturePrimitive; 1]>,
     pub meshes: SmallVec<[MeshPrimitive; 1]>,
     pub texts: SmallVec<[TextPrimitive; 1]>,
+    pub text_decorations: SmallVec<[TextDecorationPrimitive; 1]>,
     pub hits: SmallVec<[HitRegion<VM>; 1]>,
     pub close_handlers: SmallVec<[crate::runtime::overlay::OverlayCloseHandle<VM>; 1]>,
     pub focus_scopes: SmallVec<[FocusScopeState; 1]>,
@@ -118,6 +138,7 @@ impl<VM> Default for OverlayLayerBucket<VM> {
             textures: SmallVec::new(),
             meshes: SmallVec::new(),
             texts: SmallVec::new(),
+            text_decorations: SmallVec::new(),
             hits: SmallVec::new(),
             close_handlers: SmallVec::new(),
             focus_scopes: SmallVec::new(),
@@ -134,6 +155,7 @@ impl<VM> Clone for OverlayLayerBucket<VM> {
             textures: self.textures.clone(),
             meshes: self.meshes.clone(),
             texts: self.texts.clone(),
+            text_decorations: self.text_decorations.clone(),
             hits: self.hits.clone(),
             close_handlers: self.close_handlers.clone(),
             focus_scopes: self.focus_scopes.clone(),
@@ -165,6 +187,12 @@ impl<VM> OverlayLayerBucket<VM> {
         delta
             .texts
             .extend(self.texts.iter().skip(base.texts.len()).cloned());
+        delta.text_decorations.extend(
+            self.text_decorations
+                .iter()
+                .skip(base.text_decorations.len())
+                .cloned(),
+        );
         delta
             .hits
             .extend(self.hits.iter().skip(base.hits.len()).cloned());
@@ -191,6 +219,8 @@ impl<VM> OverlayLayerBucket<VM> {
         self.textures.extend(other.textures.iter().cloned());
         self.meshes.extend(other.meshes.iter().cloned());
         self.texts.extend(other.texts.iter().cloned());
+        self.text_decorations
+            .extend(other.text_decorations.iter().cloned());
         self.hits.extend(other.hits.iter().cloned());
         self.close_handlers
             .extend(other.close_handlers.iter().cloned());
@@ -253,6 +283,7 @@ impl<VM> Default for ComputedScene<VM> {
             ime_cursor_area: None,
             virtual_state_updates: SmallVec::new(),
             dependencies: DependencyGraph::default(),
+            transform_records: HashMap::new(),
         }
     }
 }
@@ -375,6 +406,12 @@ impl<VM> ComputedScene<VM> {
                 .skip(base.virtual_state_updates.len())
                 .cloned(),
         );
+        delta.transform_records.extend(
+            self.transform_records
+                .iter()
+                .filter(|(id, _)| !base.transform_records.contains_key(id))
+                .map(|(id, record)| (*id, *record)),
+        );
         delta.dependencies = self.dependencies.clone();
         delta
     }
@@ -399,6 +436,7 @@ impl<VM> ComputedScene<VM> {
         self.portal_overlay_counts.textures += other.portal_overlay_counts.textures;
         self.portal_overlay_counts.meshes += other.portal_overlay_counts.meshes;
         self.portal_overlay_counts.texts += other.portal_overlay_counts.texts;
+        self.portal_overlay_counts.text_decorations += other.portal_overlay_counts.text_decorations;
         self.portal_overlay_counts.commands += other.portal_overlay_counts.commands;
         self.portal_overlay_counts.hits += other.portal_overlay_counts.hits;
         self.portal_overlay_counts.close_handlers += other.portal_overlay_counts.close_handlers;
@@ -413,6 +451,12 @@ impl<VM> ComputedScene<VM> {
         }
         self.virtual_state_updates
             .extend(other.virtual_state_updates.iter().cloned());
+        self.transform_records.extend(
+            other
+                .transform_records
+                .iter()
+                .map(|(id, record)| (*id, *record)),
+        );
         self.dependencies.merge_from(&other.dependencies);
     }
 
@@ -424,6 +468,9 @@ impl<VM> ComputedScene<VM> {
             self.scene.overlay_textures.extend(bucket.textures);
             self.scene.overlay_meshes.extend(bucket.meshes);
             self.scene.overlay_texts.extend(bucket.texts);
+            self.scene
+                .overlay_text_decorations
+                .extend(bucket.text_decorations);
             self.scene.overlay_commands.extend(bucket.commands);
             self.overlay_hit_regions.extend(bucket.hits);
             self.overlay_close_handlers.extend(bucket.close_handlers);
@@ -452,6 +499,11 @@ impl<VM> ComputedScene<VM> {
             .overlay_texts
             .len()
             .saturating_sub(self.portal_overlay_counts.texts);
+        let base_text_decorations = self
+            .scene
+            .overlay_text_decorations
+            .len()
+            .saturating_sub(self.portal_overlay_counts.text_decorations);
         let base_commands = self
             .scene
             .overlay_commands
@@ -474,6 +526,9 @@ impl<VM> ComputedScene<VM> {
         self.scene.overlay_textures.truncate(base_textures);
         self.scene.overlay_meshes.truncate(base_meshes);
         self.scene.overlay_texts.truncate(base_texts);
+        self.scene
+            .overlay_text_decorations
+            .truncate(base_text_decorations);
         self.scene.overlay_commands.truncate(base_commands);
         self.overlay_hit_regions.truncate(base_hits);
         self.overlay_close_handlers.truncate(base_close_handlers);
@@ -491,6 +546,11 @@ impl<VM> ComputedScene<VM> {
                 .saturating_sub(base_textures),
             meshes: self.scene.overlay_meshes.len().saturating_sub(base_meshes),
             texts: self.scene.overlay_texts.len().saturating_sub(base_texts),
+            text_decorations: self
+                .scene
+                .overlay_text_decorations
+                .len()
+                .saturating_sub(base_text_decorations),
             commands: self
                 .scene
                 .overlay_commands
@@ -514,6 +574,7 @@ impl<VM> ComputedScene<VM> {
         let base_textures = self.scene.overlay_textures.len();
         let base_meshes = self.scene.overlay_meshes.len();
         let base_texts = self.scene.overlay_texts.len();
+        let base_text_decorations = self.scene.overlay_text_decorations.len();
         let base_commands = self.scene.overlay_commands.len();
         let base_hits = self.overlay_hit_regions.len();
         let base_close_handlers = self.overlay_close_handlers.len();
@@ -534,6 +595,11 @@ impl<VM> ComputedScene<VM> {
             self.scene.overlay_meshes.len().saturating_sub(base_meshes);
         self.portal_overlay_counts.texts +=
             self.scene.overlay_texts.len().saturating_sub(base_texts);
+        self.portal_overlay_counts.text_decorations += self
+            .scene
+            .overlay_text_decorations
+            .len()
+            .saturating_sub(base_text_decorations);
         self.portal_overlay_counts.commands += self
             .scene
             .overlay_commands
@@ -586,6 +652,194 @@ impl<VM> ComputedScene<VM> {
     /// 各主渲染流命令数量。Splice：沿 root→target 路径累加，定位子树区间起点。
     pub(crate) fn scene_counts(&self) -> crate::ui::widget::common::SceneCounts {
         self.scene.counts()
+    }
+
+    pub(crate) fn can_write_shape_color_slot(
+        &self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::ShapePrimitiveSlot,
+    ) -> bool {
+        self.scene.can_write_shape_color_slot(offset, slot)
+    }
+
+    pub(crate) fn write_shape_color_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::ShapePrimitiveSlot,
+        color: Color,
+    ) -> bool {
+        self.scene.write_shape_color_slot(offset, slot, color)
+    }
+
+    pub(crate) fn can_write_brush_slot(
+        &self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::BrushPrimitiveSlot,
+    ) -> bool {
+        self.scene.can_write_brush_slot(offset, slot)
+    }
+
+    pub(crate) fn write_brush_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::BrushPrimitiveSlot,
+        primitive: crate::ui::widget::common::BrushPrimitive,
+    ) -> bool {
+        self.scene.write_brush_slot(offset, slot, primitive)
+    }
+
+    pub(crate) fn can_write_backdrop_blur_slot(
+        &self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::BackdropBlurPrimitiveSlot,
+    ) -> bool {
+        self.scene.can_write_backdrop_blur_slot(offset, slot)
+    }
+
+    pub(crate) fn write_backdrop_blur_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::BackdropBlurPrimitiveSlot,
+        primitive: crate::ui::widget::common::BackdropBlurPrimitive,
+    ) -> bool {
+        self.scene.write_backdrop_blur_slot(offset, slot, primitive)
+    }
+
+    pub(crate) fn write_shape_rect_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::ShapePrimitiveSlot,
+        rect: Rect,
+    ) -> bool {
+        self.scene.write_shape_rect_slot(offset, slot, rect)
+    }
+
+    pub(crate) fn write_shape_corner_radius_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::ShapePrimitiveSlot,
+        corner_radius: f32,
+    ) -> bool {
+        self.scene
+            .write_shape_corner_radius_slot(offset, slot, corner_radius)
+    }
+
+    pub(crate) fn write_shape_stroke_width_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::ShapePrimitiveSlot,
+        stroke_width: f32,
+    ) -> bool {
+        self.scene
+            .write_shape_stroke_width_slot(offset, slot, stroke_width)
+    }
+
+    pub(crate) fn can_write_text_color_slot(
+        &self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::TextPrimitiveSlot,
+    ) -> bool {
+        self.scene.can_write_text_color_slot(offset, slot)
+    }
+
+    pub(crate) fn write_text_color_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::TextPrimitiveSlot,
+        color: Color,
+    ) -> bool {
+        self.scene.write_text_color_slot(offset, slot, color)
+    }
+
+    pub(crate) fn write_text_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::TextPrimitiveSlot,
+        primitive: crate::ui::widget::common::TextPrimitive,
+    ) -> bool {
+        self.scene.write_text_slot(offset, slot, primitive)
+    }
+
+    pub(crate) fn write_text_content_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::TextPrimitiveSlot,
+        content: Arc<str>,
+        font_family: Option<Arc<str>>,
+    ) -> bool {
+        self.scene
+            .write_text_content_slot(offset, slot, content, font_family)
+    }
+
+    pub(crate) fn can_write_text_decoration_slot(
+        &self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::TextDecorationPrimitiveSlot,
+    ) -> bool {
+        self.scene.can_write_text_decoration_slot(offset, slot)
+    }
+
+    pub(crate) fn write_text_decoration_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::TextDecorationPrimitiveSlot,
+        primitive: crate::ui::widget::common::TextDecorationPrimitive,
+    ) -> bool {
+        self.scene
+            .write_text_decoration_slot(offset, slot, primitive)
+    }
+
+    pub(crate) fn can_write_overlay_text_decoration_slot(
+        &self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::OverlayTextDecorationPrimitiveSlot,
+    ) -> bool {
+        self.scene
+            .can_write_overlay_text_decoration_slot(offset, slot)
+    }
+
+    pub(crate) fn write_overlay_text_decoration_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::OverlayTextDecorationPrimitiveSlot,
+        primitive: crate::ui::widget::common::TextDecorationPrimitive,
+    ) -> bool {
+        self.scene
+            .write_overlay_text_decoration_slot(offset, slot, primitive)
+    }
+
+    pub(crate) fn can_write_texture_opacity_slot(
+        &self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::TexturePrimitiveSlot,
+    ) -> bool {
+        self.scene.can_write_texture_opacity_slot(offset, slot)
+    }
+
+    pub(crate) fn write_texture_opacity_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::TexturePrimitiveSlot,
+        opacity: f32,
+    ) -> bool {
+        self.scene.write_texture_opacity_slot(offset, slot, opacity)
+    }
+
+    pub(crate) fn write_texture_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::TexturePrimitiveSlot,
+        primitive: crate::ui::widget::common::TexturePrimitive,
+    ) -> bool {
+        self.scene.write_texture_slot(offset, slot, primitive)
+    }
+
+    pub(crate) fn texture_slot(
+        &self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::TexturePrimitiveSlot,
+    ) -> Option<&crate::ui::widget::common::TexturePrimitive> {
+        self.scene.texture_slot(offset, slot)
     }
 
     /// 该 chunk 是否只产生「可原地覆盖的主渲染视觉命令 + 可同步覆盖的位置元数据」，

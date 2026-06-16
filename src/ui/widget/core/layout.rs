@@ -121,12 +121,14 @@ pub(super) fn compute_container_content_bounds<VM>(
             .taffy
             .layout(child_layout.node)
             .expect("child layout node should exist");
-        let offset = child.visual.offset.resolve_widget(
-            context.animations,
-            child.id,
-            WidgetProperty::Offset,
-            context.now,
-        );
+        let offset = track_property_scope(PropertySlot::Offset, || {
+            child.visual.offset.resolve_widget(
+                context.animations,
+                child.id,
+                WidgetProperty::Offset,
+                context.now,
+            )
+        });
         let child_frame = Rect::new(
             frame.x + child_layout.location.x + offset.x,
             frame.y + child_layout.location.y + offset.y,

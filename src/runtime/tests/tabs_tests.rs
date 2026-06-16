@@ -112,7 +112,7 @@ fn active_tab_key(handler: &mut BoundRuntimeHandler<TestVm>) -> Option<String> {
         .scene
         .shapes
         .iter()
-        .filter(|shape| shape.stroke_width > 0.0)
+        .filter(|shape| shape.stroke_width > 0.0 && shape.color.a > 0)
         .find_map(|shape| {
             let mut contained = triggers
                 .iter()
@@ -149,8 +149,23 @@ fn changing_selected_state_moves_active_tab_indicator() {
 
     assert_eq!(active_tab_key(&mut handler).as_deref(), Some("one"));
 
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+
     selected.set("three".to_string());
     handler.request_redraw_if_dirty(Instant::now());
+
+    #[cfg(feature = "bench-support")]
+    {
+        let snapshot = crate::runtime::action_stats::snapshot();
+        assert!(
+            snapshot
+                .iter()
+                .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1),
+            "tabs selected change should be consumed by property slot writes: {snapshot:?}"
+        );
+    }
+
     let event_loop = TestEventLoop;
     handler.drive_animations(
         &event_loop,

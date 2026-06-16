@@ -100,15 +100,15 @@ fn scoped_dynamic_children_resolve_to_root_commands() {
         .on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 10))
         .into();
 
-    let tree = WidgetTree::new(Stack::<ScopeRootVm>::new().child(show.signal().map(
-        move |visible| {
+    let tree = WidgetTree::new_legacy(Stack::<ScopeRootVm>::new().dynamic_child(
+        show.signal().map_unchecked(move |visible| {
             if visible {
                 vec![child_a.clone().scope(scope_child)]
             } else {
                 vec![child_b.clone().scope(scope_other)]
             }
-        },
-    )));
+        }),
+    ));
 
     let resolved = match &tree.root.kind {
         WidgetKind::Container { children, .. } => children[0].resolve(None),
@@ -650,15 +650,17 @@ fn binding_driven_children_can_switch_component_types() {
     let media = test_media();
     let context = test_context();
     let show_button = context.state(false);
-    let tree = WidgetTree::new(Stack::<()>::new().child(show_button.signal().map(|value| {
-        if value {
-            vec![super::Element::from(crate::ui::widget::Button::new(
-                "toggle button",
-            ))]
-        } else {
-            vec![Element::from(Text::new("toggle text"))]
-        }
-    })));
+    let tree = WidgetTree::new_legacy(Stack::<()>::new().dynamic_child(
+        show_button.signal().map_unchecked(|value| {
+            if value {
+                vec![super::Element::from(crate::ui::widget::Button::new(
+                    "toggle button",
+                ))]
+            } else {
+                vec![Element::from(Text::new("toggle text"))]
+            }
+        }),
+    ));
 
     let mut animations = AnimationEngine::default();
     let text_render = tree.render_output(

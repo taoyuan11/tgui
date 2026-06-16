@@ -384,29 +384,19 @@ impl<VM: 'static> From<Calendar<VM>> for Element<VM> {
                 )
             }
             Value::Signal(month) => {
-                let selected = calendar.selected.clone();
-                let today = calendar.today;
-                let disabled = calendar.disabled.clone();
-                let on_change = calendar.on_change.clone();
-                let style_resolver = calendar.style.clone();
-                let framed = calendar.framed;
-                Flex::vertical()
-                    .child(month.map(move |month| {
-                        let style = resolve_input_control_style(
-                            style_resolver.as_ref(),
-                            CalendarStyle::default_for_theme,
-                        );
-                        calendar_element(
-                            month,
-                            selected.resolve(),
-                            today,
-                            disabled.resolve(),
-                            on_change.clone(),
-                            style,
-                            framed,
-                        )
-                    }))
-                    .into()
+                let style = resolve_input_control_style(
+                    calendar.style.as_ref(),
+                    CalendarStyle::default_for_theme,
+                );
+                calendar_element(
+                    month.get_untracked(),
+                    calendar.selected.resolve_untracked(),
+                    calendar.today,
+                    calendar.disabled.resolve_untracked(),
+                    calendar.on_change,
+                    style,
+                    calendar.framed,
+                )
             }
         }
     }
@@ -1234,19 +1224,12 @@ impl<VM: 'static> From<Upload<VM>> for Element<VM> {
             drop_zone = drop_zone.on_file_drop(command);
         }
 
-        let list = match files {
-            Value::Static(files) => build_upload_list(files, on_remove, disabled, style.clone()),
-            Value::Signal(files) => {
-                let on_remove = on_remove.clone();
-                let disabled = disabled.clone();
-                let style = style.clone();
-                Flex::vertical()
-                    .child(files.map(move |files| {
-                        build_upload_list(files, on_remove.clone(), disabled.clone(), style.clone())
-                    }))
-                    .into()
-            }
-        };
+        let list = build_upload_list(
+            files.resolve_untracked(),
+            on_remove,
+            disabled.clone(),
+            style.clone(),
+        );
 
         Flex::vertical()
             .width(style.width)
@@ -1458,18 +1441,9 @@ fn guard_disabled_command<VM: 'static>(disabled: Value<bool>, command: Command<V
 }
 
 fn color_preview_box<VM: 'static>(color: Value<Color>, size: Dp) -> Element<VM> {
-    match color {
-        Value::Static(color) => solid_color_preview(color, size),
-        Value::Signal(color) => Flex::vertical()
-            .child(color.map(move |color| solid_color_preview(color, size)))
-            .into(),
-    }
-}
-
-fn solid_color_preview<VM: 'static>(color: Color, size: Dp) -> Element<VM> {
     Flex::vertical()
         .size(size, size)
-        .style_full(move |context| color_preview_style(context, color))
+        .style_full(move |context| color_preview_value_style(context, color.clone()))
         .into()
 }
 
@@ -2676,9 +2650,13 @@ fn panel_style(context: &StyleContext<'_>) -> ContainerStyle {
 }
 
 fn color_preview_style(context: &StyleContext<'_>, color: Color) -> ContainerStyle {
+    color_preview_value_style(context, Value::Static(color))
+}
+
+fn color_preview_value_style(context: &StyleContext<'_>, color: Value<Color>) -> ContainerStyle {
     let (_, _, _, _, _, _, outline) = mode_colors(context);
     let mut style = ContainerStyle::default_for_theme(context.theme);
-    style.surface.background = Some(Value::Static(color));
+    style.surface.background = Some(color);
     style.surface.border_color = Some(Value::Static(outline));
     style.surface.border_width = Some(Value::Static(dp(1.0)));
     style.surface.border_radius = Some(Value::Static(dp(8.0)));

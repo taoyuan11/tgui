@@ -140,13 +140,11 @@ fn usage_demo(app: &App, demo: UsageDemo, layout: DemoLayout) -> Element<App> {
                 .secondary()
                 .on_click(Command::new(move |app: &mut App| app.toggle_code(id))),
         )
-        .child(app.code_expanded_signal(id).map(move |expanded| {
-            if expanded {
-                code_block(code)
-            } else {
-                empty_code_block()
-            }
-        }))
+        .child(if app.code_expanded_signal(id).get() {
+            code_block(code)
+        } else {
+            empty_code_block()
+        })
         .into()
 }
 

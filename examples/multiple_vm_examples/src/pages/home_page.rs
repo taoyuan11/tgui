@@ -46,9 +46,16 @@ impl HomePage {
     }
 
     pub fn view(&self) -> Element<Self> {
-        let tab = self.tab.signal();
         let counter = self.counter.clone();
         let details = self.details.clone();
+        let content = match self.tab.get() {
+            HomeTab::Counter => counter
+                .view()
+                .scope(|home: &mut HomePage| &mut home.counter),
+            HomeTab::Details => details
+                .view()
+                .scope(|home: &mut HomePage| &mut home.details),
+        };
 
         Flex::new(Axis::Vertical)
             .size(pct(60.0), pct(60.0))
@@ -62,14 +69,7 @@ impl HomePage {
                     Button::new("Details").on_click(Command::new(Self::show_details)),
                 ]),
             ])
-            .child(tab.map(move |tab| match tab {
-                HomeTab::Counter => counter
-                    .view()
-                    .scope(|home: &mut HomePage| &mut home.counter),
-                HomeTab::Details => details
-                    .view()
-                    .scope(|home: &mut HomePage| &mut home.details),
-            }))
+            .child(content)
             .into()
     }
 }

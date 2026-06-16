@@ -6,6 +6,9 @@ use std::sync::{Arc, Mutex};
 use crate::platform::backend::event_loop::EventLoopProxy;
 
 use super::dependency::{DependencyId, DirtyDependencyLog, DirtyDependencySet};
+#[cfg(test)]
+use super::reactive::ReactiveTarget;
+use super::reactive::{ReactiveDrain, ReactiveGraph, SignalId};
 
 #[derive(Default)]
 struct InvalidationWakeState {
@@ -23,7 +26,9 @@ pub(crate) struct InvalidationSignal {
     proxy: Arc<Mutex<Option<EventLoopProxy>>>,
     dirty_dependencies: Arc<Mutex<DirtyDependencyLog>>,
     dependency_revisions: Arc<Mutex<HashMap<DependencyId, u64>>>,
+    media_revisions: Arc<Mutex<Vec<u64>>>,
     redraw_requested: Arc<std::sync::atomic::AtomicBool>,
+    reactive_graph: ReactiveGraph,
 }
 
 impl InvalidationSignal {
@@ -33,7 +38,9 @@ impl InvalidationSignal {
             proxy: Arc::new(Mutex::new(None)),
             dirty_dependencies: Arc::new(Mutex::new(DirtyDependencyLog::default())),
             dependency_revisions: Arc::new(Mutex::new(HashMap::new())),
+            media_revisions: Arc::new(Mutex::new(Vec::new())),
             redraw_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            reactive_graph: ReactiveGraph::default(),
         }
     }
 
@@ -43,6 +50,27 @@ impl InvalidationSignal {
 
     pub(crate) fn mark_dependency_dirty(&self, dependency: DependencyId) {
         self.mark_dirty_dependency(Some(dependency));
+    }
+
+    pub(crate) fn mark_signal_dirty(&self, signal: SignalId) {
+        self.reactive_graph.mark_signal_dirty(signal);
+    }
+
+    pub(crate) fn mark_media_dirty(&self) {
+        let revision = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut revisions = self
+            .media_revisions
+            .lock()
+            .expect("media revision log lock poisoned");
+        revisions.push(revision);
+        if revisions.len() > 1024 {
+            let overflow = revisions.len() - 1024;
+            revisions.drain(0..overflow);
+        }
+        drop(revisions);
+        if self.should_wake_now() {
+            self.wake_proxy();
+        }
     }
 
     #[cfg(feature = "video")]
@@ -130,8 +158,38 @@ impl InvalidationSignal {
             .copied()
     }
 
+    pub(crate) fn media_only_since(&self, revision: u64, current_revision: u64) -> bool {
+        if revision >= current_revision {
+            return false;
+        }
+        let revisions = self
+            .media_revisions
+            .lock()
+            .expect("media revision log lock poisoned");
+        let media_count = revisions
+            .iter()
+            .filter(|&&media_revision| {
+                media_revision > revision && media_revision <= current_revision
+            })
+            .count() as u64;
+        media_count > 0 && media_count == current_revision.saturating_sub(revision)
+    }
+
     pub(crate) fn take_redraw_request(&self) -> bool {
         self.redraw_requested.swap(false, Ordering::SeqCst)
+    }
+
+    pub(crate) fn reactive_graph(&self) -> ReactiveGraph {
+        self.reactive_graph.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn drain_reactive_targets(&self) -> Vec<ReactiveTarget> {
+        self.reactive_graph.drain_dirty_targets()
+    }
+
+    pub(crate) fn drain_reactive_updates(&self) -> ReactiveDrain {
+        self.reactive_graph.drain()
     }
 }
 

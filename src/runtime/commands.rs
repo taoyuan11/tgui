@@ -43,6 +43,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .unwrap_or(false)
             }),
             Log::default(),
+            self.rebuild_requested.clone(),
         )
     }
 
@@ -63,15 +64,25 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             Some(self.invalidation.suppress_wakeups())
         };
         self.with_view_model(|view_model| command.execute_with_context(view_model, &context));
-        if invalidate_scene {
-            self.invalidate_scene_with_reason("execute_command");
+        let rebuild_requested = context.take_rebuild_request();
+        let rebuilt_tree = rebuild_requested && self.rebuild_widget_tree_from_root_view();
+        if invalidate_scene || rebuild_requested {
+            if !rebuilt_tree {
+                self.invalidate_scene_with_reason(if rebuild_requested {
+                    "request_rebuild"
+                } else {
+                    "execute_command"
+                });
+            }
             self.invalidation.mark_dirty();
         }
         if let Some(started_at) = started_at {
             log_text_profile(
                 "execute_command",
                 started_at.elapsed(),
-                format!("invalidated_scene={invalidate_scene}"),
+                format!(
+                    "invalidated_scene={invalidate_scene} rebuild_requested={rebuild_requested}"
+                ),
             );
         }
     }
@@ -92,15 +103,25 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.with_view_model(|view_model| {
             command.execute_with_context(view_model, value, &context)
         });
-        if invalidate_scene {
-            self.invalidate_scene_with_reason("execute_value_command");
+        let rebuild_requested = context.take_rebuild_request();
+        let rebuilt_tree = rebuild_requested && self.rebuild_widget_tree_from_root_view();
+        if invalidate_scene || rebuild_requested {
+            if !rebuilt_tree {
+                self.invalidate_scene_with_reason(if rebuild_requested {
+                    "request_rebuild"
+                } else {
+                    "execute_value_command"
+                });
+            }
             self.invalidation.mark_dirty();
         }
         if let Some(started_at) = started_at {
             log_text_profile(
                 "execute_value_command",
                 started_at.elapsed(),
-                format!("invalidated_scene={invalidate_scene}"),
+                format!(
+                    "invalidated_scene={invalidate_scene} rebuild_requested={rebuild_requested}"
+                ),
             );
         }
     }

@@ -59,7 +59,7 @@ fn textarea_on_change_state_update_does_not_rescan_unrelated_signal() {
     });
     let controller = TextController::from("hi");
     let unrelated_for_command = unrelated.clone();
-    let tree = WidgetTree::new(
+    let tree = WidgetTree::new_legacy(
         Flex::<TextInputVm>::vertical()
             .child(
                 Textarea::new(controller)
@@ -68,13 +68,15 @@ fn textarea_on_change_state_update_does_not_rescan_unrelated_signal() {
                         unrelated_for_command.set(unrelated_for_command.get() + 1);
                     })),
             )
-            .child(probe_signal.map(|visible| -> Element<TextInputVm> {
-                if visible {
-                    Text::new("stable").into()
-                } else {
-                    Text::new("hidden").into()
-                }
-            })),
+            .dynamic_child(
+                probe_signal.map_unchecked(|visible| -> Element<TextInputVm> {
+                    if visible {
+                        Text::new("stable").into()
+                    } else {
+                        Text::new("hidden").into()
+                    }
+                }),
+            ),
     );
     let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
     let viewport = handler.viewport_rect();
@@ -117,9 +119,11 @@ fn textarea_on_change_state_update_keeps_text_input_scene_in_sync() {
         Flex::<TextInputVm>::vertical()
             .width(dp(180.0))
             .height(dp(120.0))
-            .child(Text::new(
-                change_count.signal().map(|count| format!("count={count}")),
-            ))
+            .child(
+                Text::new(change_count.signal().map(|count| format!("count={count}")))
+                    .width(dp(180.0))
+                    .height(dp(20.0)),
+            )
             .child(
                 Textarea::new(controller)
                     .width(dp(180.0))
@@ -169,25 +173,7 @@ fn textarea_on_change_state_update_keeps_text_input_scene_in_sync() {
     let flush_outcome = handler.flush_pending_text_input_changes();
     assert!(flush_outcome.changed);
     assert_eq!(change_count.get(), 1);
-    let (dirty_kind, dirty_dependencies) = handler
-        .invalidation
-        .dirty_dependencies_since(handler.last_invalidation_revision);
-    assert!(
-        matches!(
-            dirty_kind,
-            crate::foundation::binding::DirtyDependencySet::Dependencies { .. }
-        ),
-        "{dirty_kind:?}"
-    );
-    assert!(!dirty_dependencies.is_empty());
-    let action = handler.invalidate_cached_scene_for_dependencies(
-        dirty_kind,
-        &dirty_dependencies,
-        Instant::now(),
-    );
-    assert_ne!(action, "unrelated");
-    handler.last_invalidation_revision = handler.invalidation.revision();
-    handler.sync_bindings(Instant::now());
+    handler.request_redraw_if_dirty(Instant::now());
 
     let computed = handler.computed_scene();
     let texts = computed
@@ -215,7 +201,7 @@ fn textarea_on_change_state_update_does_not_resolve_unrelated_dynamic_sibling() 
     let change_count = context.state(0usize);
     let probe = context.state(true);
     let probe_reads = Arc::new(AtomicUsize::new(0));
-    let probe_signal = probe.signal().map({
+    let probe_signal = probe.signal().map_unchecked({
         let probe_reads = probe_reads.clone();
         move |visible| -> Element<TextInputVm> {
             probe_reads.fetch_add(1, Ordering::SeqCst);
@@ -228,14 +214,16 @@ fn textarea_on_change_state_update_does_not_resolve_unrelated_dynamic_sibling() 
     });
     let controller = TextController::from("hi");
     let change_count_for_command = change_count.clone();
-    let tree = WidgetTree::new(
+    let tree = WidgetTree::new_legacy(
         Flex::<TextInputVm>::vertical()
             .width(dp(180.0))
             .height(dp(140.0))
-            .child(probe_signal)
-            .child(Text::new(
-                change_count.signal().map(|count| format!("count={count}")),
-            ))
+            .dynamic_child(probe_signal)
+            .child(
+                Text::new(change_count.signal().map(|count| format!("count={count}")))
+                    .width(dp(180.0))
+                    .height(dp(20.0)),
+            )
             .child(
                 Textarea::new(controller)
                     .width(dp(180.0))
@@ -283,6 +271,8 @@ fn textarea_on_change_state_update_does_not_resolve_unrelated_dynamic_sibling() 
     let action = handler.invalidate_cached_scene_for_dependencies(
         dirty_kind,
         &dirty_dependencies,
+        &[],
+        0,
         Instant::now(),
     );
     assert_eq!(action, "scene_subtree_patch", "{action}");

@@ -177,14 +177,7 @@ impl<VM: 'static> WidgetTree<VM> {
             .hit_regions
             .iter()
             .chain(computed.overlay_hit_regions.iter())
-            .filter(|hit| {
-                hit.rect.contains(point)
-                    && hit
-                        .clip_rect
-                        .map(|clip_rect| clip_rect.contains(point))
-                        .unwrap_or(true)
-                    && hit.geometry.contains(point)
-            })
+            .filter(|hit| hit.contains_transformed(point, &computed.transform_records))
         {
             let id = hit.interaction.target_id();
 
@@ -194,10 +187,10 @@ impl<VM: 'static> WidgetTree<VM> {
             }
 
             if let Some(index) = ids.iter().position(|existing| *existing == id) {
-                path[index] = hit.interaction.clone();
+                path[index] = hit.transformed_interaction(&computed.transform_records);
             } else {
                 ids.push(id);
-                path.push(hit.interaction.clone());
+                path.push(hit.transformed_interaction(&computed.transform_records));
             }
         }
 

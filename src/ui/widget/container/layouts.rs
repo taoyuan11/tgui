@@ -10,7 +10,7 @@ use super::super::core::Element;
 use super::super::style::ContainerStyle;
 use super::base::{apply_layout_api, Container};
 use super::length::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
-use super::IntoChildren;
+use super::{IntoChildren, IntoDynamicChildren};
 
 mod flex;
 mod grid;

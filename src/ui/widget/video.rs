@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::foundation::binding::Signal;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::ContentFit;
@@ -585,18 +586,24 @@ fn video_controls<VM: 'static>(
         .playback_state()
         .map(playback_button_disabled)
         .into();
-    let play_icon_style = style.clone();
-    let play_icon_visual = visual.clone();
-    let play_icon = controller.playback_state().map(move |state| {
-        vec![video_icon(
-            playback_button_icon(state.clone()),
-            play_icon_style.clone(),
-            play_icon_visual.clone(),
-            playback_button_disabled(state),
-        )]
-    });
+    let play_icons = vec![
+        video_icon_with_opacity(
+            SvgIconId::PlayArrow,
+            style.clone(),
+            visual.clone(),
+            false,
+            playback_icon_opacity(controller.playback_state(), SvgIconId::PlayArrow),
+        ),
+        video_icon_with_opacity(
+            SvgIconId::Pause,
+            style.clone(),
+            visual.clone(),
+            false,
+            playback_icon_opacity(controller.playback_state(), SvgIconId::Pause),
+        ),
+    ];
     let play_button = icon_button(
-        play_icon,
+        play_icons,
         play_disabled,
         style.clone(),
         Command::new(move |_| match play_controller.playback_state().get() {
@@ -647,19 +654,50 @@ fn video_controls<VM: 'static>(
 
     if show_volume {
         let mute_controller = controller.clone();
-        let volume_for_icon = controller.volume();
-        let mute_icon_style = style.clone();
-        let mute_icon_visual = visual.clone();
-        let mute_icon = controller.muted().map(move |muted| {
-            vec![video_icon(
-                volume_button_icon(muted, volume_for_icon.get()),
-                mute_icon_style.clone(),
-                mute_icon_visual.clone(),
+        let mute_icons = vec![
+            video_icon_with_opacity(
+                SvgIconId::VolumeMute,
+                style.clone(),
+                visual.clone(),
                 false,
-            )]
-        });
+                volume_icon_opacity(
+                    controller.muted(),
+                    controller.volume(),
+                    SvgIconId::VolumeMute,
+                ),
+            ),
+            video_icon_with_opacity(
+                SvgIconId::VolumeOff,
+                style.clone(),
+                visual.clone(),
+                false,
+                volume_icon_opacity(
+                    controller.muted(),
+                    controller.volume(),
+                    SvgIconId::VolumeOff,
+                ),
+            ),
+            video_icon_with_opacity(
+                SvgIconId::VolumeDown,
+                style.clone(),
+                visual.clone(),
+                false,
+                volume_icon_opacity(
+                    controller.muted(),
+                    controller.volume(),
+                    SvgIconId::VolumeDown,
+                ),
+            ),
+            video_icon_with_opacity(
+                SvgIconId::VolumeUp,
+                style.clone(),
+                visual.clone(),
+                false,
+                volume_icon_opacity(controller.muted(), controller.volume(), SvgIconId::VolumeUp),
+            ),
+        ];
         let mute = icon_button(
-            mute_icon,
+            mute_icons,
             Value::Static(false),
             style.clone(),
             Command::new(move |_| {
@@ -775,7 +813,7 @@ fn styled_video_text<VM: 'static>(
 }
 
 fn icon_button<VM: 'static>(
-    icon: impl super::container::IntoChildren<VM>,
+    icons: Vec<Element<VM>>,
     disabled: Value<bool>,
     style: Option<StyleResolver<VideoStyle>>,
     command: Command<VM>,
@@ -793,9 +831,21 @@ fn icon_button<VM: 'static>(
             layout_style.control_disabled_opacity,
         ))
         .cursor(disabled_cursor(disabled.clone()))
-        .child(icon)
+        .child(icons)
         .on_click(guard_disabled_command(disabled, command))
         .into()
+}
+
+fn video_icon_with_opacity<VM: 'static>(
+    icon: SvgIconId,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual_identity: VisualStyle,
+    disabled: bool,
+    opacity: Value<f32>,
+) -> Element<VM> {
+    let mut icon = video_icon(icon, style, visual_identity, disabled);
+    icon.visual.opacity = opacity;
+    icon
 }
 
 fn video_icon<VM: 'static>(
@@ -1028,6 +1078,16 @@ fn playback_button_icon(state: VideoPlaybackState) -> SvgIconId {
     }
 }
 
+fn playback_icon_opacity(playback: Signal<VideoPlaybackState>, icon: SvgIconId) -> Value<f32> {
+    Value::Signal(playback.map_memo(move |state| {
+        if playback_button_icon(state) == icon {
+            1.0
+        } else {
+            0.0
+        }
+    }))
+}
+
 fn playback_button_disabled(state: VideoPlaybackState) -> bool {
     matches!(
         state,
@@ -1045,6 +1105,16 @@ fn volume_button_icon(muted: bool, volume: f32) -> SvgIconId {
     } else {
         SvgIconId::VolumeUp
     }
+}
+
+fn volume_icon_opacity(muted: Signal<bool>, volume: Signal<f32>, icon: SvgIconId) -> Value<f32> {
+    Value::Signal(muted.map_memo(move |muted| {
+        if volume_button_icon(muted, volume.get_untracked()) == icon {
+            1.0
+        } else {
+            0.0
+        }
+    }))
 }
 
 fn video_status_text(state: VideoPlaybackState) -> String {

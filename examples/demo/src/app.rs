@@ -397,25 +397,17 @@ impl ViewModel for App {
     }
 
     fn view(&self) -> Element<Self> {
-        let sidebar_app = self.clone();
-        let content_app = self.clone();
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .style_full(styles::root_style)
             .child(
                 Flex::horizontal()
                     .size(pct(100.0), pct(100.0))
-                    .child(
-                        self.current_page
-                            .signal()
-                            .map(move |page| navigation::sidebar(&sidebar_app, page)),
-                    )
+                    .child(navigation::sidebar(self))
                     .child(
                         Flex::vertical().grow(1.0).height(pct(100.0)).child(
                             ScrollView::new().size(pct(100.0), pct(100.0)).child(
-                                self.current_page
-                                    .signal()
-                                    .map(move |page| pages::render(&content_app, page)),
+                                pages::render(self, self.current_page.get()),
                             ),
                         ),
                     ),
@@ -451,8 +443,9 @@ impl ViewModel for App {
 }
 
 impl App {
-    pub(crate) fn show_page(&mut self, page: DemoPage) {
+    pub(crate) fn show_page_with_rebuild(&mut self, page: DemoPage, ctx: &CommandContext<Self>) {
         self.current_page.set(page);
+        ctx.request_rebuild();
     }
 
     pub(crate) fn code_expanded_signal(&self, id: &'static str) -> Signal<bool> {

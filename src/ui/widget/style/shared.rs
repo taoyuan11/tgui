@@ -167,8 +167,6 @@ pub(crate) fn merge_surface_style(
     visual: &mut VisualStyle,
     surface: &WidgetSurfaceStyle,
 ) {
-    let default_visual = VisualStyle::default();
-
     if background.is_none() {
         *background = surface.background.clone();
     }
@@ -178,7 +176,7 @@ pub(crate) fn merge_surface_style(
     if visual.background_image.is_none() {
         visual.background_image = surface.background_image.clone();
     }
-    if visual.background_blur == default_visual.background_blur {
+    if matches!(&visual.background_blur, Value::Static(value) if *value == Dp::ZERO) {
         visual.background_blur = surface.background_blur.clone();
     }
     if visual.shadow.is_none() {
@@ -193,10 +191,10 @@ pub(crate) fn merge_surface_style(
     if visual.border_width.is_none() {
         visual.border_width = surface.border_width.clone();
     }
-    if visual.opacity == default_visual.opacity {
+    if matches!(&visual.opacity, Value::Static(value) if (*value - 1.0).abs() <= f32::EPSILON) {
         visual.opacity = surface.opacity.clone();
     }
-    if visual.offset == default_visual.offset {
+    if matches!(&visual.offset, Value::Static(value) if *value == Point::ZERO) {
         visual.offset = surface.offset.clone();
     }
 }

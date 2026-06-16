@@ -38,17 +38,16 @@ fn tabs_render_strip_and_selected_panel() {
         None,
         false,
     );
-    let texts: Vec<_> = rendered
-        .primitives
-        .texts
-        .iter()
-        .map(|text| text.content.as_ref())
-        .collect();
+    let texts: Vec<_> = rendered.primitives.texts.iter().collect();
 
-    assert!(texts.contains(&"One"));
-    assert!(texts.contains(&"Two"));
-    assert!(texts.contains(&"Panel two"));
-    assert!(!texts.contains(&"Panel one"));
+    assert!(texts.iter().any(|text| text.content.as_ref() == "One"));
+    assert!(texts.iter().any(|text| text.content.as_ref() == "Two"));
+    assert!(texts
+        .iter()
+        .any(|text| text.content.as_ref() == "Panel two" && text.color.a > 0));
+    assert!(texts
+        .iter()
+        .any(|text| text.content.as_ref() == "Panel one" && text.color.a == 0));
 }
 
 #[test]

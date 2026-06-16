@@ -31,7 +31,7 @@ use crate::foundation::error::TguiError;
 use crate::platform::backend::window::Window;
 use crate::platform::dpi::PhysicalSize;
 use crate::text::font::FontManager;
-use crate::ui::widget::{RenderCommand, ScenePrimitives};
+use crate::ui::widget::{RenderCommand, ScenePrimitives, TransformRecord, WidgetId};
 
 /// Phase 4：每-draw 滚动平移 immediate data 的载荷。
 /// 需两套平移量:position 在 NDC、clip_local_position 在物理像素。16 字节,4 字节对齐。
@@ -88,6 +88,7 @@ fn collect_texture_keys_from_commands(commands: &[RenderCommand], keys: &mut Has
             RenderCommand::BackdropBlur(_)
             | RenderCommand::Brush(_)
             | RenderCommand::Shape(_)
+            | RenderCommand::TextDecoration(_)
             | RenderCommand::Text(_)
             | RenderCommand::Mesh(_) => {}
             #[cfg(feature = "video")]
@@ -174,6 +175,7 @@ impl Renderer {
         scene: &ScenePrimitives,
         font_manager: &FontManager,
         scroll_regions: &[crate::ui::widget::ScrollRegion],
+        transform_records: &HashMap<WidgetId, TransformRecord>,
     ) -> Result<RenderStatus, TguiError> {
         if self.config.width == 0 || self.config.height == 0 {
             return Ok(RenderStatus::SkipFrame);
@@ -209,6 +211,8 @@ impl Renderer {
             viewport,
             scroll_regions,
             scene.command_gpu_scroll_containers(),
+            scene.command_transform_chains(),
+            transform_records,
         )?;
         let overlay_buffers = self.prepare_commands(
             &scene.overlay_commands,
@@ -216,6 +220,8 @@ impl Renderer {
             viewport,
             scroll_regions,
             scene.overlay_command_gpu_scroll_containers(),
+            scene.overlay_command_transform_chains(),
+            transform_records,
         )?;
         // 两次 prepare 的顶点数据都已进 staging，这里一次性上传到 GPU。
         self.vertex_pool.flush(&self.device, &self.queue);
@@ -325,6 +331,7 @@ impl Renderer {
                 RenderCommand::BackdropBlur(_)
                 | RenderCommand::Brush(_)
                 | RenderCommand::Shape(_)
+                | RenderCommand::TextDecoration(_)
                 | RenderCommand::Texture(_)
                 | RenderCommand::Mesh(_) => {}
                 #[cfg(feature = "video")]

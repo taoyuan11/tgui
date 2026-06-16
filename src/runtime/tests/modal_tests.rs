@@ -248,7 +248,7 @@ fn dynamic_modal_auto_focus_survives_full_scene_invalidation() {
     let page = context.state(());
     let open = context.state(false);
     let open_for_dynamic_page = open.clone();
-    let dynamic_page = page.signal().map(move |_| {
+    let dynamic_page = page.signal().map_unchecked(move |_| {
         Element::from(
             Stack::<ModalVm>::new()
                 .size(dp(400.0), dp(300.0))
@@ -260,10 +260,10 @@ fn dynamic_modal_auto_focus_survives_full_scene_invalidation() {
                 ),
         )
     });
-    let tree = WidgetTree::new(
+    let tree = WidgetTree::new_legacy(
         Stack::<ModalVm>::new()
             .size(dp(400.0), dp(300.0))
-            .child(dynamic_page),
+            .dynamic_child(dynamic_page),
     );
     let mut handler = test_handler_with_config(
         ModalVm::default(),
@@ -302,7 +302,7 @@ fn dynamic_modal_open_button_click_does_not_recurse() {
     let open = context.state(false);
     let open_for_button = open.clone();
     let open_for_dynamic_page = open.clone();
-    let dynamic_page = page.signal().map(move |_| {
+    let dynamic_page = page.signal().map_unchecked(move |_| {
         Element::from(
             Stack::<ModalVm>::new()
                 .size(dp(400.0), dp(300.0))
@@ -323,10 +323,10 @@ fn dynamic_modal_open_button_click_does_not_recurse() {
                 ),
         )
     });
-    let tree = WidgetTree::new(
+    let tree = WidgetTree::new_legacy(
         Stack::<ModalVm>::new()
             .size(dp(400.0), dp(300.0))
-            .child(dynamic_page),
+            .dynamic_child(dynamic_page),
     );
     let mut handler = test_handler_with_config(
         ModalVm::default(),

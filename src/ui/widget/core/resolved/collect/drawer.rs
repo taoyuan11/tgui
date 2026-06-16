@@ -107,6 +107,7 @@ fn push_backdrop_hit_region<VM: 'static>(
         rect,
         clip_rect: Some(context.viewport),
         geometry: HitGeometry::Rect,
+        transform_chain: Default::default(),
         scope_path: context.focus_scope_path(),
         focus: None,
         interaction: HitInteraction::Widget {

@@ -201,8 +201,8 @@ fn audio_widget_controller_change_stops_previous_and_autoplays_new_controller() 
     second_controller
         .load(AudioSource::File("second.mp3".into()))
         .expect("second audio source should load");
-    let tree = WidgetTree::new(Stack::<AudioEventVm>::new().child(use_second.signal().map(
-        move |use_second| {
+    let tree = WidgetTree::new_legacy(Stack::<AudioEventVm>::new().dynamic_child(
+        use_second.signal().map_unchecked(move |use_second| {
             if use_second {
                 let element: Element<AudioEventVm> =
                     Audio::new(second_controller.clone()).autoplay(true).into();
@@ -212,8 +212,8 @@ fn audio_widget_controller_change_stops_previous_and_autoplays_new_controller() 
                     Audio::new(first_controller.clone()).autoplay(true).into();
                 element
             }
-        },
-    )));
+        }),
+    ));
     let mut handler = test_handler_with_vm(AudioEventVm::default(), Some(tree), invalidation);
 
     handler.invalidation.mark_dirty();
@@ -258,16 +258,16 @@ fn audio_widget_unmount_stops_controller() {
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let visible = context.state(true);
     let (controller, _shared, recorded) = test_audio_controller();
-    let tree = WidgetTree::new(Stack::<AudioEventVm>::new().child(visible.signal().map(
-        move |visible| {
+    let tree = WidgetTree::new_legacy(Stack::<AudioEventVm>::new().dynamic_child(
+        visible.signal().map_unchecked(move |visible| {
             let element: Element<AudioEventVm> = if visible {
                 Audio::new(controller.clone()).key("tracked").into()
             } else {
                 Stack::<AudioEventVm>::new().into()
             };
             element
-        },
-    )));
+        }),
+    ));
     let mut handler = test_handler_with_vm(AudioEventVm::default(), Some(tree), invalidation);
 
     handler.invalidation.mark_dirty();

@@ -115,16 +115,14 @@ pub(crate) fn push_progress_bar_primitives(
         } else {
             let fill_width =
                 Dp::new(track_rect.width.get() * value.clamp(0.0, 1.0)).min(track_rect.width);
-            if fill_width > Dp::ZERO {
-                scene.push_shape(RenderPrimitive {
-                    rect: Rect::new(track_rect.x, track_rect.y, fill_width, track_rect.height),
-                    color: fill_color,
-                    corner_radius: radius,
-                    stroke_width: 0.0,
-                    clip_rect,
-                    clip_mask,
-                });
-            }
+            scene.push_shape(RenderPrimitive {
+                rect: Rect::new(track_rect.x, track_rect.y, fill_width, track_rect.height),
+                color: fill_color,
+                corner_radius: radius,
+                stroke_width: 0.0,
+                clip_rect,
+                clip_mask,
+            });
         }
     }
 

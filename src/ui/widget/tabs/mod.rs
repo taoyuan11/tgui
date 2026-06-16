@@ -2,7 +2,7 @@ use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Axis, Insets, LayoutStyle, Overflow, Value};
 use crate::ui::widget::button::Button;
-use crate::ui::widget::common::{TabPlacement, TabTriggerState, VisualStyle, WidgetId};
+use crate::ui::widget::common::{Point, TabPlacement, TabTriggerState, VisualStyle, WidgetId};
 use crate::ui::widget::container::{set_layout_inset, set_layout_length, set_layout_lengths};
 use crate::ui::widget::container::{Flex, IntoLengthValue};
 use crate::ui::widget::core::Element;
@@ -12,6 +12,7 @@ use crate::ui::widget::style::{ButtonStyle, ContainerStyle, StyleResolver, Style
 use crate::ui::widget::Stack;
 
 const TABS_MORE_VISIBLE_BUDGET: usize = 4;
+const HIDDEN_PANEL_OFFSET_DP: f32 = 100_000.0;
 
 /// Tab strip overflow behavior.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -326,7 +327,6 @@ fn build_tab_strip<VM: 'static>(
         Axis::Vertical
     };
     let layout_style = resolve_tabs_style_for_layout(style.as_ref());
-    // 仅保留构建触发按钮所需的轻量信息，便于在选中信号变化时整体重建。
     let specs: Vec<TabTriggerSpec> = items
         .iter()
         .enumerate()
@@ -341,37 +341,17 @@ fn build_tab_strip<VM: 'static>(
     let list = Flex::new(axis)
         .gap(layout_style.tab_gap)
         .align(Align::Start);
-    // 触发按钮的 active 样式依赖选中值，必须与 panel 一样走信号驱动的动态子节点，
-    // 否则点击切换后 active 样式会停留在首帧的值上。
-    let list = match selected {
-        Value::Static(selected) => list.child(build_triggers(
-            group_id,
-            &specs,
-            &selected,
-            placement,
-            overflow_mode,
-            reorderable.clone(),
-            style.clone(),
-            on_change,
-            on_reorder,
-        )),
-        Value::Signal(signal) => {
-            let strip_style = style.clone();
-            list.child(signal.map(move |selected| {
-                build_triggers(
-                    group_id,
-                    &specs,
-                    &selected,
-                    placement,
-                    overflow_mode,
-                    reorderable.clone(),
-                    strip_style.clone(),
-                    on_change.clone(),
-                    on_reorder.clone(),
-                )
-            }))
-        }
-    };
+    let list = list.child(build_triggers(
+        group_id,
+        &specs,
+        &selected,
+        placement,
+        overflow_mode,
+        reorderable.clone(),
+        style.clone(),
+        on_change,
+        on_reorder,
+    ));
     match overflow_mode {
         TabsOverflowMode::Scroll => ScrollView::new()
             .focusable(false)
@@ -436,7 +416,7 @@ struct TabTriggerSpec {
 fn build_triggers<VM: 'static>(
     group_id: WidgetId,
     specs: &[TabTriggerSpec],
-    selected: &str,
+    selected: &Value<String>,
     placement: TabPlacement,
     overflow_mode: TabsOverflowMode,
     reorderable: Value<bool>,
@@ -445,18 +425,20 @@ fn build_triggers<VM: 'static>(
     on_reorder: Option<ValueCommand<VM, TabsReorderEvent>>,
 ) -> Vec<Element<VM>> {
     let layout_style = resolve_tabs_style_for_layout(style.as_ref());
-    let (visible_specs, overflow_specs) = split_tabs_for_overflow(specs, selected, overflow_mode);
+    let initial_selected = selected.resolve_untracked();
+    let (visible_specs, overflow_specs) =
+        split_tabs_for_overflow(specs, &initial_selected, overflow_mode);
     let mut triggers =
         Vec::with_capacity(visible_specs.len() + usize::from(!overflow_specs.is_empty()));
     for item in visible_specs {
-        let active = item.key == selected;
-        let disabled_now = item.disabled.resolve();
+        let active = tab_active_value(selected, &item.key);
         let mut button = Button::new(item.label.clone())
             .ghost()
             .disable(item.disabled.clone())
             .min_width(layout_style.tab_min_width)
             .style_full_with_style_sheet({
                 let style = style.clone();
+                let active = active.clone();
                 move |context, style_sheet, visual, state| {
                     tab_button_style(
                         resolve_tabs_style_with_sheet(
@@ -467,31 +449,30 @@ fn build_triggers<VM: 'static>(
                             state,
                         ),
                         context,
-                        active,
+                        active.clone(),
                     )
                 }
             });
-        if !disabled_now {
-            if let Some(command) = on_change.clone() {
-                let key = item.key.clone();
-                let label = item.label.clone();
-                button = button.on_click(Command::new_with_context(
-                    move |vm: &mut VM, ctx: &CommandContext<VM>| {
-                        command.execute_with_context(vm, (key.clone(), label.clone()), ctx);
-                    },
-                ));
-            }
+        if let Some(command) = on_change.clone() {
+            let key = item.key.clone();
+            let label = item.label.clone();
+            button = button.on_click(Command::new_with_context(
+                move |vm: &mut VM, ctx: &CommandContext<VM>| {
+                    command.execute_with_context(vm, (key.clone(), label.clone()), ctx);
+                },
+            ));
         }
 
         let mut element: Element<VM> = button.into();
-        element.focus.focusable = Some(!disabled_now);
-        element.focus.tab_index = Some(if active { 0 } else { -1 });
+        element.focus.focusable = Some(true);
+        element.focus.tab_index = Some(0);
         element = element.with_tab_trigger_state(TabTriggerState {
             group_id,
             index: item.index,
             placement,
             key: item.key.clone(),
             label: item.label.clone(),
+            active,
             on_change: on_change.clone(),
             reorderable: reorderable.clone(),
             on_reorder: on_reorder.clone(),
@@ -501,6 +482,7 @@ fn build_triggers<VM: 'static>(
     if !overflow_specs.is_empty() {
         triggers.push(build_more_trigger(
             overflow_specs,
+            selected,
             placement,
             style,
             on_change,
@@ -547,25 +529,30 @@ fn split_tabs_for_overflow<'a>(
 
 fn build_more_trigger<VM: 'static>(
     overflow_specs: Vec<&TabTriggerSpec>,
+    selected: &Value<String>,
     placement: TabPlacement,
     style: Option<StyleResolver<TabsStyle>>,
     on_change: Option<ValueCommand<VM, (String, String)>>,
 ) -> Element<VM> {
     let layout_style = resolve_tabs_style_for_layout(style.as_ref());
+    let active = any_tab_active_value(
+        selected,
+        overflow_specs
+            .iter()
+            .map(|item| item.key.clone())
+            .collect::<Vec<_>>(),
+    );
     let mut more_items = Vec::new();
     for item in overflow_specs {
-        let disabled_now = item.disabled.resolve();
         let mut menu_item = MenuItem::new(item.label.clone()).disable(item.disabled.clone());
-        if !disabled_now {
-            if let Some(command) = on_change.clone() {
-                let key = item.key.clone();
-                let label = item.label.clone();
-                menu_item = menu_item.on_select(Command::new_with_context(
-                    move |vm: &mut VM, ctx: &CommandContext<VM>| {
-                        command.execute_with_context(vm, (key.clone(), label.clone()), ctx);
-                    },
-                ));
-            }
+        if let Some(command) = on_change.clone() {
+            let key = item.key.clone();
+            let label = item.label.clone();
+            menu_item = menu_item.on_select(Command::new_with_context(
+                move |vm: &mut VM, ctx: &CommandContext<VM>| {
+                    command.execute_with_context(vm, (key.clone(), label.clone()), ctx);
+                },
+            ));
         }
         more_items.push(menu_item);
     }
@@ -575,6 +562,7 @@ fn build_more_trigger<VM: 'static>(
         .min_width(layout_style.tab_min_width)
         .style_full_with_style_sheet({
             let style = style.clone();
+            let active = active.clone();
             move |context, style_sheet, visual, state| {
                 tab_button_style(
                     resolve_tabs_style_with_sheet(
@@ -585,7 +573,7 @@ fn build_more_trigger<VM: 'static>(
                         state,
                     ),
                     context,
-                    false,
+                    active.clone(),
                 )
             }
         });
@@ -605,13 +593,12 @@ fn build_panel<VM: 'static>(
     style: Option<StyleResolver<TabsStyle>>,
 ) -> Element<VM> {
     let layout_style = resolve_tabs_style_for_layout(style.as_ref());
-    let panels: Vec<(String, Element<VM>)> = items
-        .into_iter()
-        .map(|item| (item.key, item.panel))
-        .collect();
+    let panel_keys: Vec<String> = items.iter().map(|item| item.key.clone()).collect();
+    let initial_selected = selected.resolve_untracked();
     let mut panel = Flex::vertical()
         .grow(1.0)
         .padding(layout_style.panel_padding)
+        .overflow(Overflow::Hidden)
         .style_full_with_style_sheet({
             let style = style.clone();
             move |context, style_sheet, visual, state| {
@@ -628,24 +615,80 @@ fn build_panel<VM: 'static>(
             }
         });
 
-    match selected {
-        Value::Static(selected) => {
-            panel = panel.child(selected_panel(&panels, &selected));
-        }
-        Value::Signal(signal) => {
-            panel = panel.child(signal.map(move |selected| selected_panel(&panels, &selected)));
-        }
+    for item in items {
+        let active = Value::Static(tab_panel_is_active(
+            &initial_selected,
+            &item.key,
+            panel_keys.first().map(String::as_str),
+            &panel_keys,
+        ));
+        let slot = Stack::new()
+            .position_absolute()
+            .inset(crate::ui::unit::dp(0.0))
+            .width(crate::ui::layout::Length::Percent(1.0))
+            .height(crate::ui::layout::Length::Percent(1.0))
+            .opacity(active_opacity_value(active.clone()))
+            .offset(active_panel_offset_value(active))
+            .child(item.panel);
+        panel = panel.child(slot);
     }
     panel.into()
 }
 
-fn selected_panel<VM>(panels: &[(String, Element<VM>)], selected: &str) -> Element<VM> {
-    panels
-        .iter()
-        .find(|(key, _)| key == selected)
-        .or_else(|| panels.first())
-        .map(|(_, panel)| panel.clone())
-        .unwrap_or_else(|| Stack::new().into())
+fn tab_active_value(selected: &Value<String>, key: &str) -> Value<bool> {
+    match selected {
+        Value::Static(selected) => Value::Static(selected == key),
+        Value::Signal(signal) => {
+            let key = key.to_string();
+            Value::Signal(signal.map_memo(move |selected| selected == key))
+        }
+    }
+}
+
+fn any_tab_active_value(selected: &Value<String>, keys: Vec<String>) -> Value<bool> {
+    match selected {
+        Value::Static(selected) => Value::Static(keys.iter().any(|key| key == selected)),
+        Value::Signal(signal) => {
+            Value::Signal(signal.map_memo(move |selected| keys.iter().any(|key| key == &selected)))
+        }
+    }
+}
+
+fn tab_panel_is_active(
+    selected: &str,
+    key: &str,
+    fallback_key: Option<&str>,
+    known_keys: &[String],
+) -> bool {
+    selected == key
+        || (!known_keys.iter().any(|known| known == selected) && fallback_key == Some(key))
+}
+
+fn active_opacity_value(active: Value<bool>) -> Value<f32> {
+    match active {
+        Value::Static(active) => Value::Static(if active { 1.0 } else { 0.0 }),
+        Value::Signal(signal) => {
+            Value::Signal(signal.map_memo(|active| if active { 1.0 } else { 0.0 }))
+        }
+    }
+}
+
+fn active_panel_offset_value(active: Value<bool>) -> Value<Point> {
+    match active {
+        Value::Static(active) => Value::Static(panel_offset_for_active(active)),
+        Value::Signal(signal) => Value::Signal(signal.map_memo(panel_offset_for_active)),
+    }
+}
+
+fn panel_offset_for_active(active: bool) -> Point {
+    if active {
+        Point::ZERO
+    } else {
+        Point::new(
+            crate::ui::unit::dp(HIDDEN_PANEL_OFFSET_DP),
+            crate::ui::unit::dp(0.0),
+        )
+    }
 }
 
 fn resolve_tabs_style(
@@ -685,57 +728,55 @@ fn resolve_tabs_style_for_layout(style: Option<&StyleResolver<TabsStyle>>) -> Ta
     resolve_tabs_style(style, &context)
 }
 
-fn tab_button_style(style: TabsStyle, context: &StyleContext<'_>, active: bool) -> ButtonStyle {
+fn tab_button_style(
+    style: TabsStyle,
+    context: &StyleContext<'_>,
+    active: Value<bool>,
+) -> ButtonStyle {
     let mut button = ButtonStyle::default_for_theme(
         context.theme,
         crate::ui::widget::common::ButtonVariantKind::Ghost,
     );
-    button.background = if active {
-        crate::ui::theme::StateValue::interactive(
-            style.active_tab_background.clone(),
-            style.active_tab_background.clone(),
-            style.active_tab_background.clone(),
-            style.tab_background.disabled.clone(),
-        )
-    } else {
-        style.tab_background.clone()
-    };
-    button.foreground = if active {
-        crate::ui::theme::StateValue::interactive(
-            style.active_tab_foreground.clone(),
-            style.active_tab_foreground.clone(),
-            style.active_tab_foreground.clone(),
-            style.tab_foreground.disabled.clone(),
-        )
-    } else {
-        style.tab_foreground.clone()
-    };
-    button.border = if active {
-        crate::ui::theme::StateValue::interactive(
+    button.background = style.tab_background.clone();
+    button.foreground = style.tab_foreground.clone();
+    button.border = crate::ui::theme::StateValue::interactive(
+        active_value(
+            &active,
             style.indicator_color.clone(),
-            style.indicator_color.clone(),
-            style.indicator_color.clone(),
-            style.border.clone(),
-        )
-    } else {
-        crate::ui::theme::StateValue::interactive(
             crate::foundation::color::Color::TRANSPARENT.into(),
-            style.border.clone(),
+        ),
+        active_value(&active, style.indicator_color.clone(), style.border.clone()),
+        active_value(&active, style.indicator_color.clone(), style.border.clone()),
+        active_value(
+            &active,
             style.border.clone(),
             crate::foundation::color::Color::TRANSPARENT.into(),
-        )
-    };
-    button.border_width = if active {
-        style.indicator_thickness.into()
-    } else {
-        crate::ui::unit::dp(0.0).into()
-    };
+        ),
+    );
+    button.border_width = style.indicator_thickness.into();
     button.radius = style.radius;
     button.padding_x = style.tab_padding.left;
     button.padding_y = style.tab_padding.top;
     button.min_height = style.tab_min_height;
     button.text_style = style.text_style;
     button
+}
+
+fn active_value<T>(active: &Value<bool>, on: Value<T>, off: Value<T>) -> Value<T>
+where
+    T: Clone + PartialEq + Send + Sync + 'static,
+{
+    match active {
+        Value::Static(true) => on,
+        Value::Static(false) => off,
+        Value::Signal(signal) => Value::Signal(signal.map_memo(move |active| {
+            if active {
+                on.resolve_untracked()
+            } else {
+                off.resolve_untracked()
+            }
+        })),
+    }
 }
 
 fn tab_bar_container_style(style: TabsStyle, context: &StyleContext<'_>) -> ContainerStyle {

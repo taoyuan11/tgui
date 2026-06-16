@@ -1,5 +1,12 @@
 use super::super::*;
 use super::shadow::{rasterize_rounded_rect_shadow, rounded_rect_shadow_cache_key, shadow_padding};
+use crate::media::TextureFrame;
+use std::sync::{Arc, OnceLock};
+
+fn transparent_media_texture() -> Arc<TextureFrame> {
+    static TEXTURE: OnceLock<Arc<TextureFrame>> = OnceLock::new();
+    Arc::clone(TEXTURE.get_or_init(|| Arc::new(TextureFrame::new(1, 1, vec![0, 0, 0, 0]))))
+}
 
 pub(crate) fn push_media_texture_or_placeholder<VM>(
     widget_id: WidgetId,
@@ -18,17 +25,72 @@ pub(crate) fn push_media_texture_or_placeholder<VM>(
 ) {
     let metadata = context.media.image_snapshot(source, None);
     let target_frame = resolve_media_rect(content_frame, metadata.intrinsic_size, fit);
-    let snapshot = if let Some(raster_request) =
-        RasterRequest::from_frame(target_frame, context.units.scale_factor())
-    {
+    let raster_request = RasterRequest::from_frame(target_frame, context.units.scale_factor());
+    let media_key =
+        raster_request.map(|request| crate::media::MediaTextureKey::new(source.clone(), request));
+    let snapshot = if let Some(raster_request) = raster_request {
         context.media.image_snapshot(source, Some(raster_request))
     } else {
         metadata
     };
 
     if let Some(texture) = snapshot.texture.as_ref() {
+        if fit == ContentFit::Fill && media_key.is_some() {
+            push_media_placeholder(
+                frame,
+                content_frame,
+                content_corner_radius,
+                clip_rect,
+                clip_mask,
+                0.0,
+                context,
+                &mut computed.scene,
+                widget_id,
+                kind,
+                true,
+                None,
+                loading_background,
+                true,
+            );
+        }
         computed.scene.push_texture(TexturePrimitive {
             texture: Arc::clone(texture),
+            media_key,
+            frame: target_frame,
+            quad: None,
+            uv_rect: None,
+            corner_radius: content_corner_radius,
+            opacity: opacity.clamp(0.0, 1.0),
+            clip_rect,
+            clip_mask,
+        });
+        return;
+    }
+
+    if fit == ContentFit::Fill
+        && media_key.is_some()
+        && snapshot.loading
+        && snapshot.error.is_none()
+    {
+        push_media_placeholder(
+            frame,
+            content_frame,
+            content_corner_radius,
+            clip_rect,
+            clip_mask,
+            opacity,
+            context,
+            &mut computed.scene,
+            widget_id,
+            kind,
+            snapshot.loading,
+            snapshot.error.as_deref(),
+            loading_background,
+            snapshot.loading,
+        );
+        computed.scene.push_texture(TexturePrimitive {
+            texture: transparent_media_texture(),
+            media_key,
             frame: target_frame,
             quad: None,
             uv_rect: None,
@@ -70,9 +132,8 @@ pub(crate) fn push_background_media_texture<VM>(
 ) {
     let metadata = context.media.image_snapshot(source, None);
     let target_frame = resolve_media_rect(content_frame, metadata.intrinsic_size, fit);
-    let snapshot = if let Some(raster_request) =
-        RasterRequest::from_frame(target_frame, context.units.scale_factor())
-    {
+    let raster_request = RasterRequest::from_frame(target_frame, context.units.scale_factor());
+    let snapshot = if let Some(raster_request) = raster_request {
         context.media.image_snapshot(source, Some(raster_request))
     } else {
         metadata
@@ -81,6 +142,8 @@ pub(crate) fn push_background_media_texture<VM>(
     if let Some(texture) = snapshot.texture.as_ref() {
         computed.scene.push_texture(TexturePrimitive {
             texture: Arc::clone(texture),
+            media_key: raster_request
+                .map(|request| crate::media::MediaTextureKey::new(source.clone(), request)),
             frame: target_frame,
             quad: None,
             uv_rect: None,
@@ -179,6 +242,7 @@ pub(crate) fn rounded_rect_shadow_texture(
 
     Some(TexturePrimitive {
         texture,
+        media_key: None,
         frame: texture_frame,
         quad: None,
         uv_rect: None,

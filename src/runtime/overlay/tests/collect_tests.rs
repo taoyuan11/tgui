@@ -39,6 +39,7 @@ fn shape(rect_local: Rect, color: Color) -> OverlayPrimitive {
 fn texture(frame_local: Rect) -> OverlayPrimitive {
     OverlayPrimitive::Texture(TexturePrimitive {
         texture: std::sync::Arc::new(TextureFrame::new(4, 4, vec![255; 4 * 4 * 4])),
+        media_key: None,
         frame: frame_local,
         quad: None,
         uv_rect: None,
@@ -382,6 +383,7 @@ fn emit_overlay_registers_focus_scope_and_rebases_hit_scope_path() {
         rect: Rect::new(dp(0.0), dp(0.0), dp(40.0), dp(20.0)),
         clip_rect: None,
         geometry: HitGeometry::Rect,
+        transform_chain: Default::default(),
         scope_path: vec![WidgetId::from_raw(999)],
         focus: Some(FocusTargetMeta {
             widget_id: focus_target_id,

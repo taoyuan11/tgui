@@ -92,7 +92,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let computed = self.computed_scene();
             let computed_duration = computed_started_at.elapsed();
             let render_started_at = Instant::now();
-            let status = renderer.render(&computed.scene, &font_manager, &computed.scroll_regions);
+            let status = renderer.render(
+                &computed.scene,
+                &font_manager,
+                &computed.scroll_regions,
+                &computed.transform_records,
+            );
             let render_duration = render_started_at.elapsed();
             if let Some(frame_started_at) = frame_started_at {
                 let status_name = match &status {

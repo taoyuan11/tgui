@@ -493,6 +493,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.prune_text_input_buffers(&updated_computed);
         self.sync_text_input_regions_from_computed(&updated_computed);
         self.sync_visible_text_input_buffers(&updated_computed);
+        self.rebuild_reactive_slot_bindings(now);
+        self.rebuild_media_texture_bindings();
+        self.rebuild_caret_decoration_binding();
+        let cached_caret_visible = self
+            .cached_scene
+            .as_ref()
+            .map(|cached| cached.caret_visible);
+        if let Some(caret_visible) = cached_caret_visible {
+            let _ = self.try_update_caret_visibility_slot(caret_visible);
+        }
+        self.rebuild_text_input_slot_bindings();
         if let Some(started_at) = started_at {
             log_text_profile(
                 "textarea_patch_scene",

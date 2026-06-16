@@ -5,7 +5,7 @@ use crate::ui::layout::{Insets, Overflow, ScrollbarStyle, Value};
 
 use super::common::{ContainerKind, CursorStyle, Point, ScrollViewConfig, VisualStyle, WidgetKind};
 use super::container::{apply_layout_api, set_layout_length, set_layout_lengths, IntoLengthValue};
-use super::container::{Container, IntoChildren};
+use super::container::{Container, IntoChildren, IntoDynamicChildren};
 use super::core::Element;
 use super::style::ContainerStyle;
 
@@ -27,6 +27,13 @@ impl<VM> ScrollView<VM> {
 
     pub fn child(self, child: impl IntoChildren<VM>) -> Self {
         Self(self.0.child(child))
+    }
+
+    /// 追加一个显式动态子节点来源。
+    ///
+    /// 该 API 只用于 legacy 结构更新或显式 rebuild 场景；strict reactive tree 会拒绝它。
+    pub fn dynamic_child(self, child: impl IntoDynamicChildren<VM>) -> Self {
+        Self(self.0.dynamic_child(child))
     }
 
     pub fn size(self, width: impl IntoLengthValue, height: impl IntoLengthValue) -> Self {

@@ -374,6 +374,7 @@ pub(crate) struct TabTriggerState<VM> {
     pub placement: TabPlacement,
     pub key: String,
     pub label: String,
+    pub active: Value<bool>,
     pub on_change: Option<ValueCommand<VM, (String, String)>>,
     pub reorderable: Value<bool>,
     pub on_reorder: Option<ValueCommand<VM, crate::ui::widget::TabsReorderEvent>>,
@@ -387,6 +388,7 @@ impl<VM> Clone for TabTriggerState<VM> {
             placement: self.placement,
             key: self.key.clone(),
             label: self.label.clone(),
+            active: self.active.clone(),
             on_change: self.on_change.clone(),
             reorderable: self.reorderable.clone(),
             on_reorder: self.on_reorder.clone(),
@@ -405,6 +407,7 @@ impl<VM: 'static> TabTriggerState<VM> {
             placement: self.placement,
             key: self.key,
             label: self.label,
+            active: self.active,
             on_change: self
                 .on_change
                 .map(|command| command.scope(selector.clone())),
@@ -734,7 +737,7 @@ impl<VM: 'static> DataGridResizeHandleState<VM> {
 pub(crate) struct SplitterHandleState<VM> {
     pub axis: Axis,
     pub index: usize,
-    pub sizes: Vec<f32>,
+    pub sizes: Value<Vec<f32>>,
     pub constraints: Vec<(f32, f32)>,
     pub step: f32,
     pub on_resize: Option<ValueCommand<VM, crate::ui::widget::SplitterResize>>,
@@ -754,6 +757,14 @@ impl<VM> Clone for SplitterHandleState<VM> {
 }
 
 impl<VM: 'static> SplitterHandleState<VM> {
+    pub(crate) fn current_sizes(&self) -> Vec<f32> {
+        self.sizes.resolve()
+    }
+
+    pub(crate) fn pane_count(&self) -> usize {
+        self.sizes.resolve_ref(Vec::len)
+    }
+
     pub(crate) fn scope<RootVm: 'static>(
         self,
         selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,

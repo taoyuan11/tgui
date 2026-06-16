@@ -1,18 +1,21 @@
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use taffy::prelude::TaffyTree;
 
 use crate::animation::AnimationEngine;
 use crate::foundation::binding::DependencyGraph;
-use crate::media::MediaManager;
+use crate::foundation::color::Color;
+use crate::media::{MediaManager, TextureFrame};
 use crate::text::font::{FontManager, TextLayoutInfo};
 use crate::ui::theme::{StyleContext, Theme};
 use crate::ui::unit::UnitContext;
 use crate::ui::widget::common::{
-    ClipMask, ComputedScene, FocusTargetMeta, LifecycleEventState, MeasureContext, Point, Rect,
-    ScrollbarHandle, TextEditState, WidgetId, WidgetStateMap,
+    BackdropBlurPrimitive, BrushPrimitive, ClipMask, ComputedScene, FocusTargetMeta,
+    LifecycleEventState, MeasureContext, Point, Rect, ScrollbarHandle, TextEditState,
+    TextPrimitive, WidgetId, WidgetStateMap,
 };
 use crate::ui::widget::VirtualCacheState;
 
@@ -66,6 +69,7 @@ pub(crate) struct CollectContext<'a, 'b> {
     pub(crate) active_hover_popover: Option<WidgetId>,
     pub(crate) gpu_scroll_enabled: bool,
     pub(crate) gpu_scroll_container: Option<WidgetId>,
+    pub(crate) transform_stack: smallvec::SmallVec<[WidgetId; 2]>,
 }
 
 impl<'a, 'b> CollectContext<'a, 'b> {
@@ -147,6 +151,113 @@ impl From<VisualContextSnapshot> for VisualContext {
             clip_mask: value.clip_mask,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ReactiveScenePropertyValue {
+    ShapeFillColor {
+        rect: Rect,
+        color: Color,
+    },
+    ShapeStrokeColor {
+        rect: Rect,
+        stroke_width: f32,
+        color: Color,
+    },
+    BackdropBlur(BackdropBlurPrimitive),
+    Brush(BrushPrimitive),
+    BorderRadius {
+        background: Option<(Rect, Color, f32)>,
+        border: Option<(Rect, f32, Color, f32)>,
+    },
+    BorderWidth {
+        frame: Rect,
+        background: Option<(Rect, Color, f32)>,
+        border: Option<(Rect, Color, f32)>,
+    },
+    Opacity {
+        background: Option<(Rect, Color)>,
+        border: Option<(Rect, f32, Color)>,
+        text: Option<Color>,
+    },
+    Offset {
+        background: Option<(Rect, Color)>,
+        border: Option<(Rect, f32, Color)>,
+        backdrop_blur: Option<BackdropBlurPrimitive>,
+        brush: Option<BrushPrimitive>,
+        texture: Option<(
+            Arc<TextureFrame>,
+            Option<crate::media::MediaTextureKey>,
+            Rect,
+            f32,
+            f32,
+            Option<Rect>,
+            Option<ClipMask>,
+        )>,
+    },
+    Scale {
+        background: Option<(Rect, Color, f32)>,
+        border: Option<(Rect, f32, Color, f32)>,
+        backdrop_blur: Option<BackdropBlurPrimitive>,
+        brush: Option<BrushPrimitive>,
+        texture: Option<(
+            Arc<TextureFrame>,
+            Option<crate::media::MediaTextureKey>,
+            Rect,
+            f32,
+            f32,
+            Option<Rect>,
+            Option<ClipMask>,
+        )>,
+    },
+    TextColor {
+        color: Color,
+    },
+    TextContent {
+        content: Arc<str>,
+        font_family: Option<Arc<str>>,
+    },
+    TextInputContent(TextPrimitive),
+    TextureOpacity {
+        frame: Rect,
+        corner_radius: f32,
+        opacity: f32,
+    },
+    Texture {
+        texture: Arc<TextureFrame>,
+        media_key: Option<crate::media::MediaTextureKey>,
+        frame: Rect,
+        corner_radius: f32,
+        opacity: f32,
+        clip_rect: Option<Rect>,
+        clip_mask: Option<ClipMask>,
+    },
+    ProgressFill {
+        track_rect: Rect,
+        fill_rect: Rect,
+        track_color: Color,
+        fill_color: Color,
+        label: Option<ReactiveProgressLabel>,
+    },
+    SliderValue {
+        widget_id: WidgetId,
+        value: f32,
+        track_rect: Rect,
+        active_rect: Rect,
+        thumb_rect: Rect,
+        track_color: Color,
+        active_track_color: Color,
+        thumb_color: Color,
+        thumb_border: Option<(Color, f32)>,
+        label: Option<ReactiveProgressLabel>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ReactiveProgressLabel {
+    pub(crate) frame: Rect,
+    pub(crate) content: Arc<str>,
+    pub(crate) font_family: Option<Arc<str>>,
 }
 
 #[derive(Clone)]

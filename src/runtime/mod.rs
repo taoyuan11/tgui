@@ -4,6 +4,7 @@ mod application_handler;
 mod binding_sync;
 mod bootstrap;
 mod cache_support;
+mod caret_slots;
 mod carousel;
 mod commands;
 mod handler_meta;
@@ -12,10 +13,12 @@ mod helpers;
 mod ime_runtime;
 mod input;
 mod lifecycle;
+mod media_slots;
 mod menu;
 pub(crate) mod overlay;
 mod popover;
 pub(crate) mod portal;
+mod reactive_slots;
 mod render_cycle;
 mod scene_patch;
 mod scene_patch_cleanup;
@@ -24,6 +27,7 @@ mod scene_patch_invalidation;
 mod scene_patch_roots;
 mod scene_runtime;
 mod state;
+mod text_input_slots;
 mod theme;
 mod timing;
 mod tooltip;
@@ -61,11 +65,13 @@ use crate::animation::{
     WindowProperty,
 };
 use crate::application::{
-    ApplicationConfig, ThemeSelection, WindowClosePolicy, WindowRole, WindowSetFactory,
+    build_root_element, ApplicationConfig, RootViewFactory, ThemeSelection, WindowClosePolicy,
+    WindowRole, WindowSetFactory,
 };
 use crate::dialog::{async_dialog_channel, AsyncDialogDispatcher, AsyncDialogReceiver};
 use crate::foundation::binding::{
-    DependencyGraph, DependencyPhase, DirtyDependencySet, InvalidationSignal, Signal,
+    DependencyGraph, DependencyPhase, DirtyDependencySet, InvalidationSignal, PropertySlot,
+    ReactiveTarget, Signal,
 };
 use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
@@ -96,17 +102,21 @@ use crate::runtime::portal::ExternalPortalRequest;
 #[cfg(feature = "audio")]
 use crate::runtime::state::AudioLifecycleState;
 use crate::text::font::FontManager;
+use crate::ui::layout::Overflow;
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet, ThemeStore};
 use crate::ui::unit::{dp, UnitContext};
 #[cfg(feature = "audio")]
 use crate::ui::widget::LifecycleEventState;
 use crate::ui::widget::{
-    CollectedSceneCache, ComputedScene, Point, Rect, ResolvedSceneLayout, ScrollRegion,
-    ScrollbarHandle, TextEditState, VirtualCacheState, WidgetId, WidgetStateMap, WidgetTree,
+    compute_scrollbar_geometry, CollectedSceneCache, ComputedScene, ContainerLayout, Point,
+    ReactiveScenePropertyValue, Rect, ResolvedSceneLayout, SceneCounts, ScrollRegion,
+    ScrollbarHandle, ShapePrimitiveSlot, TextEditState, TextPrimitiveSlot, VirtualCacheState,
+    WidgetId, WidgetStateMap, WidgetTree,
 };
 use crossbeam_channel::{Receiver, Sender};
 use image::GenericImageView;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use winit_core::icon::{Icon, RgbaIcon};
@@ -141,6 +151,7 @@ struct SingleWindowSetup<VM> {
     key: String,
     window_bindings: WindowBindings,
     widget_tree: Option<WidgetTree<VM>>,
+    root_view: Option<RootViewFactory<VM>>,
     commands: Vec<WindowCommand<VM>>,
 }
 
@@ -212,6 +223,7 @@ impl<VM: ViewModel> BoundRuntime<VM> {
             self.view_model,
             single_window.window_bindings,
             single_window.widget_tree,
+            single_window.root_view,
             single_window.commands,
             self.invalidation,
             self.animations,
@@ -262,6 +274,7 @@ pub struct BoundRuntimeHandler<VM> {
     view_model: Arc<Mutex<VM>>,
     window_bindings: WindowBindings,
     widget_tree: Option<WidgetTree<VM>>,
+    root_view: Option<RootViewFactory<VM>>,
     commands: Vec<WindowCommand<VM>>,
     close_policy: WindowClosePolicy,
     invalidation: InvalidationSignal,
@@ -365,6 +378,7 @@ pub struct BoundRuntimeHandler<VM> {
     media_manager: MediaManager,
     startup_started_at: Instant,
     first_frame_logged: bool,
+    rebuild_requested: Arc<AtomicBool>,
     window_requests: WindowRequestQueue,
     window: Option<Arc<dyn Window>>,
     accessibility_adapter: Option<PlatformAccessibilityAdapter>,
@@ -392,6 +406,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         view_model: Arc<Mutex<VM>>,
         window_bindings: WindowBindings,
         widget_tree: Option<WidgetTree<VM>>,
+        root_view: Option<RootViewFactory<VM>>,
         commands: Vec<WindowCommand<VM>>,
         invalidation: InvalidationSignal,
         animations: AnimationCoordinator,
@@ -425,6 +440,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             view_model,
             window_bindings,
             widget_tree,
+            root_view,
             commands,
             close_policy: WindowClosePolicy::Close,
             invalidation: invalidation.clone(),
@@ -506,6 +522,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             media_manager: MediaManager::with_budget(invalidation.clone(), resource_budget),
             startup_started_at: Instant::now(),
             first_frame_logged: false,
+            rebuild_requested: Arc::new(AtomicBool::new(false)),
             window_requests: WindowRequestQueue::default(),
             window: None,
             accessibility_adapter: None,

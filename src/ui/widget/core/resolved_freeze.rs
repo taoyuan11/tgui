@@ -11,7 +11,7 @@ use crate::ui::widget::style::{
 use crate::ui::widget::{Image, Text};
 
 fn freeze_value<T: Clone>(value: &mut Value<T>) {
-    let resolved = value.resolve();
+    let resolved = value.resolve_untracked();
     *value = Value::Static(resolved);
 }
 

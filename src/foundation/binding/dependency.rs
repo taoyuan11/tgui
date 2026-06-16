@@ -32,13 +32,19 @@ pub(crate) enum DependencyPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PropertySlot {
     Background,
+    BackgroundBrush,
+    BackgroundBlur,
     BorderColor,
     BorderWidth,
     BorderRadius,
     Opacity,
     Offset,
     Scale,
+    Texture,
+    TextContent,
     TextColor,
+    ProgressValue,
+    SliderValue,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -62,6 +68,14 @@ impl DependencyGraph {
 
     pub(crate) fn has_global_dependency(&self) -> bool {
         !self.global_owners.is_empty()
+    }
+
+    pub(crate) fn property_owners(&self) -> HashSet<DependencyOwner> {
+        self.dependencies
+            .values()
+            .flat_map(|owners| owners.iter().copied())
+            .filter(|owner| owner.property.is_some())
+            .collect()
     }
 
     #[allow(dead_code)]
@@ -300,4 +314,8 @@ pub(crate) fn record_dependency_read(dependency: Option<DependencyId>) {
             tracker.global_owners.insert(owner);
         }
     });
+}
+
+pub(crate) fn current_dependency_owner() -> Option<DependencyOwner> {
+    DEPENDENCY_TRACKER.with(|tracker| tracker.borrow().scopes.last().copied())
 }

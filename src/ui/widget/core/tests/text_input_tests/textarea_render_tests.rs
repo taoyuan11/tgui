@@ -237,14 +237,15 @@ fn textarea_keeps_wrapped_text_and_caret_clear_of_vertical_scrollbar() {
 
     let caret = focused
         .primitives
-        .overlay_shapes
+        .overlay_text_decorations
         .iter()
-        .find(|primitive| (primitive.rect.width.get() - super::CARET_WIDTH).abs() <= 0.01)
+        .flat_map(|primitive| primitive.segments.iter())
+        .find(|rect| (rect.width.get() - super::CARET_WIDTH).abs() <= 0.01)
         .expect("caret should be rendered");
     assert!(
-        caret.rect.right() <= max_right,
+        caret.right() <= max_right,
         "caret_right={} track_x={} viewport_right={}",
-        caret.rect.right().get(),
+        caret.right().get(),
         vertical_track.x.get(),
         scroll_region.content_viewport.right().get(),
     );

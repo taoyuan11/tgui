@@ -1,6 +1,7 @@
 mod context;
 mod dependency;
 mod invalidation;
+mod reactive;
 mod scroll;
 mod signal_state;
 #[cfg(test)]
@@ -20,3 +21,4 @@ pub(crate) use dependency::{
     DirtyDependencySet, PropertySlot,
 };
 pub(crate) use invalidation::InvalidationSignal;
+pub(crate) use reactive::ReactiveTarget;

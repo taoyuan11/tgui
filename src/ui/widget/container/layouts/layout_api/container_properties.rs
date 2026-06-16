@@ -158,15 +158,22 @@ macro_rules! impl_container_properties {
                 Self(self.0.scale(scale))
             }
 
-            /// 追加一个子节点来源。
+            /// 追加一个静态子节点来源。
             ///
             /// # 参数
-            /// - `child`：单个子节点、子节点集合或动态子节点来源。
+            /// - `child`：单个子节点或静态子节点集合。
             ///
             /// # 返回值
             /// 返回更新后的容器实例。
             pub fn child(self, child: impl IntoChildren<VM>) -> Self {
                 Self(self.0.child(child))
+            }
+
+            /// 追加一个显式动态子节点来源。
+            ///
+            /// 该 API 只用于 legacy 结构更新或显式 rebuild 场景；strict reactive tree 会拒绝它。
+            pub fn dynamic_child(self, child: impl IntoDynamicChildren<VM>) -> Self {
+                Self(self.0.dynamic_child(child))
             }
 
             /// 设置容器内边距。

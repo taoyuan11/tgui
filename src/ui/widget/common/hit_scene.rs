@@ -589,6 +589,51 @@ impl<VM> Clone for HitInteraction<VM> {
 }
 
 impl<VM> HitInteraction<VM> {
+    pub(crate) fn translated(mut self, delta: Point) -> Self {
+        if delta == Point::ZERO {
+            return self;
+        }
+        match &mut self {
+            Self::SelectableText { frame, .. } | Self::TextInput { frame, .. } => {
+                translate_hit_rect(frame, delta);
+            }
+            Self::Slider {
+                track_rect,
+                thumb_rect,
+                ..
+            } => {
+                translate_hit_rect(track_rect, delta);
+                translate_hit_rect(thumb_rect, delta);
+            }
+            Self::CanvasItem {
+                canvas_origin,
+                item_origin,
+                text_hits,
+                ..
+            } => {
+                canvas_origin.x += delta.x;
+                canvas_origin.y += delta.y;
+                item_origin.x += delta.x;
+                item_origin.y += delta.y;
+                *text_hits = Arc::from(
+                    text_hits
+                        .iter()
+                        .cloned()
+                        .map(|hit| CanvasTextHitRegion {
+                            hit: hit.hit,
+                            quad: hit.quad.map(|point| Point {
+                                x: point.x + delta.x,
+                                y: point.y + delta.y,
+                            }),
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
+            _ => {}
+        }
+        self
+    }
+
     pub(crate) fn interactions(&self) -> Option<&InteractionHandlers<VM>> {
         match self {
             Self::Widget { interactions, .. }
@@ -648,6 +693,11 @@ impl<VM> HitInteraction<VM> {
     }
 }
 
+fn translate_hit_rect(rect: &mut Rect, delta: Point) {
+    rect.x += delta.x;
+    rect.y += delta.y;
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum HitTargetId {
     Widget(WidgetId),
@@ -687,6 +737,7 @@ pub(crate) struct HitRegion<VM> {
     pub rect: Rect,
     pub clip_rect: Option<Rect>,
     pub geometry: HitGeometry,
+    pub transform_chain: TransformChain,
     pub scope_path: Vec<WidgetId>,
     pub focus: Option<FocusTargetMeta<VM>>,
     pub interaction: HitInteraction<VM>,
@@ -699,11 +750,68 @@ impl<VM> Clone for HitRegion<VM> {
             rect: self.rect,
             clip_rect: self.clip_rect,
             geometry: self.geometry.clone(),
+            transform_chain: self.transform_chain.clone(),
             scope_path: self.scope_path.clone(),
             focus: self.focus.clone(),
             interaction: self.interaction.clone(),
             gpu_scroll_container: self.gpu_scroll_container,
         }
+    }
+}
+
+impl<VM> HitRegion<VM> {
+    pub(crate) fn transform_delta(
+        &self,
+        transform_records: &std::collections::HashMap<WidgetId, TransformRecord>,
+    ) -> Point {
+        let mut delta = Point::ZERO;
+        for id in &self.transform_chain {
+            if let Some(record) = transform_records.get(id) {
+                let record_delta = (*record).delta();
+                delta.x += record_delta.x;
+                delta.y += record_delta.y;
+            }
+        }
+        delta
+    }
+
+    pub(crate) fn contains_transformed(
+        &self,
+        point: Point,
+        transform_records: &std::collections::HashMap<WidgetId, TransformRecord>,
+    ) -> bool {
+        let delta = self.transform_delta(transform_records);
+        let local_point = Point {
+            x: point.x - delta.x,
+            y: point.y - delta.y,
+        };
+        self.rect.contains(local_point)
+            && self
+                .clip_rect
+                .map(|clip_rect| clip_rect.contains(point))
+                .unwrap_or(true)
+            && self.geometry.contains(local_point)
+    }
+
+    pub(crate) fn transformed_interaction(
+        &self,
+        transform_records: &std::collections::HashMap<WidgetId, TransformRecord>,
+    ) -> HitInteraction<VM> {
+        self.interaction
+            .clone()
+            .translated(self.transform_delta(transform_records))
+    }
+
+    pub(crate) fn supports_retained_transform(&self) -> bool {
+        matches!(self.geometry, HitGeometry::Rect)
+            && self.focus.is_none()
+            && self.gpu_scroll_container.is_none()
+            && matches!(
+                self.interaction,
+                HitInteraction::Widget { .. }
+                    | HitInteraction::Occluder { .. }
+                    | HitInteraction::Disabled { .. }
+            )
     }
 }
 

@@ -1,7 +1,10 @@
 use super::*;
 
+use std::time::Duration;
+
+use crate::animation::Transition;
 use crate::ui::layout::{Length, Value};
-use crate::ui::widget::{Collapse, ResolvedElement, ResolvedSceneLayout};
+use crate::ui::widget::{Accordion, AccordionItem, Collapse, ResolvedElement, ResolvedSceneLayout};
 
 fn resolved_children<VM>(element: &ResolvedElement<VM>) -> &[ResolvedElement<VM>] {
     match &element.kind {
@@ -97,5 +100,106 @@ fn collapse_header_and_panel_are_flush() {
         header.bottom(),
         panel.y,
         "collapse trigger and panel should not leave a hover gap"
+    );
+}
+
+#[test]
+fn collapse_header_click_reads_latest_signal_state() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let context = test_context();
+    let open = context.state(true);
+    let open_for_command = open.clone();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Collapse::new("Runtime notes", Text::new("Panel content"))
+            .expanded(
+                open.signal()
+                    .animated(Transition::ease_in_out(Duration::from_millis(180))),
+            )
+            .on_change(ValueCommand::new(move |_: &mut (), next| {
+                open_for_command.set(next);
+            })),
+    );
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 320.0, 200.0),
+    );
+    let command = resolved_children(&layout.resolved_root)[0]
+        .interactions
+        .on_click
+        .clone()
+        .expect("collapse header should be clickable");
+    let mut vm = ();
+
+    command.execute(&mut vm);
+    assert!(!open.get(), "first click should close the panel");
+
+    command.execute(&mut vm);
+    assert!(open.get(), "second click should reopen the panel");
+}
+
+#[test]
+fn accordion_header_click_reads_latest_signal_state() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let context = test_context();
+    let expanded_key = context.state(Some("usage".to_string()));
+    let expanded_key_for_command = expanded_key.clone();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Accordion::new(
+            vec![
+                AccordionItem::new("usage", "Usage", Text::new("Usage panel")),
+                AccordionItem::new("theme", "Theme", Text::new("Theme panel")),
+            ],
+            expanded_key
+                .signal()
+                .animated(Transition::ease_in_out(Duration::from_millis(180))),
+        )
+        .on_change(ValueCommand::new(move |_: &mut (), next| {
+            expanded_key_for_command.set(next);
+        })),
+    );
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 320.0, 240.0),
+    );
+    let first_item = &resolved_children(&layout.resolved_root)[0];
+    let command = resolved_children(first_item)[0]
+        .interactions
+        .on_click
+        .clone()
+        .expect("accordion header should be clickable");
+    let mut vm = ();
+
+    command.execute(&mut vm);
+    assert_eq!(
+        expanded_key.get(),
+        None,
+        "first click should close the item"
+    );
+
+    command.execute(&mut vm);
+    assert_eq!(
+        expanded_key.get(),
+        Some("usage".to_string()),
+        "second click should reopen the item"
     );
 }

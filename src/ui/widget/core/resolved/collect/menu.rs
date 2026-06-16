@@ -636,6 +636,7 @@ pub(crate) fn emit_menu_layer<VM>(
                     rect: item_rect,
                     clip_rect: None,
                     geometry: HitGeometry::Rect,
+                    transform_chain: Default::default(),
                     scope_path: context.focus_scope_path(),
                     focus: None,
                     interaction: if disabled {
@@ -789,6 +790,7 @@ fn svg_menu_icon_primitive(
     Some(crate::ui::widget::overlay::OverlayPrimitive::Texture(
         TexturePrimitive {
             texture: std::sync::Arc::clone(texture),
+            media_key: None,
             frame: target_frame,
             quad: None,
             uv_rect: None,

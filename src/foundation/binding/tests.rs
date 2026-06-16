@@ -8,8 +8,8 @@ use crate::animation::{AnimationCoordinator, Transition};
 
 use super::{
     track_dependency_scope, track_property_scope, with_dependency_collection, DependencyOwner,
-    DependencyPhase, DirtyDependencySet, InvalidationSignal, PropertySlot, Signal, State, Toast,
-    ToastQueue, ViewModelContext,
+    DependencyPhase, DirtyDependencySet, InvalidationSignal, PropertySlot, ReactiveTarget, Signal,
+    State, TextController, Toast, ToastQueue, ViewModelContext,
 };
 
 fn context() -> ViewModelContext {
@@ -106,6 +106,124 @@ fn signal_recomputes_after_state_changes() {
     assert_eq!(signal.get(), 2);
     state.set(4);
     assert_eq!(signal.get(), 8);
+}
+
+#[test]
+fn state_set_queues_subscribed_reactive_target() {
+    let ctx = context();
+    let state = ctx.state(1);
+    let signal = state.signal();
+    let target = ReactiveTarget::Custom(7);
+    signal.subscribe_target(target);
+
+    state.set(2);
+
+    let targets = ctx.invalidation().drain_reactive_targets();
+    assert_eq!(targets, vec![target]);
+}
+
+#[test]
+fn tracked_signal_read_subscribes_current_owner_as_reactive_target() {
+    let ctx = context();
+    let state = ctx.state(1);
+    let signal = state.signal();
+    let owner = DependencyOwner {
+        widget_id: 42,
+        phase: DependencyPhase::Scene,
+        property: Some(PropertySlot::Background),
+    };
+
+    let _ = with_dependency_collection(|| track_dependency_scope(owner, || signal.get()));
+    state.set(2);
+
+    let targets = ctx.invalidation().drain_reactive_targets();
+    assert!(targets.contains(&ReactiveTarget::Owner(owner)));
+}
+
+#[test]
+fn text_controller_set_queues_subscribed_reactive_target() {
+    let ctx = context();
+    let controller = TextController::new("hello", ctx.invalidation().clone());
+    let owner = DependencyOwner {
+        widget_id: 7,
+        phase: DependencyPhase::Scene,
+        property: Some(PropertySlot::TextContent),
+    };
+
+    let _ = with_dependency_collection(|| track_dependency_scope(owner, || controller.text()));
+    controller.set_text("world");
+
+    let targets = ctx.invalidation().drain_reactive_targets();
+    assert!(targets.contains(&ReactiveTarget::Owner(owner)));
+}
+
+#[test]
+fn memo_signal_stops_propagation_when_value_is_unchanged() {
+    let ctx = context();
+    let state = ctx.state(1);
+    let parity = state.signal().map_memo(|value| value % 2);
+    let target = ReactiveTarget::Custom(11);
+    parity.subscribe_target(target);
+    assert_eq!(parity.get(), 1);
+
+    state.set(3);
+
+    let targets = ctx.invalidation().drain_reactive_targets();
+    assert!(
+        targets.is_empty(),
+        "unchanged memo value must not dirty target"
+    );
+}
+
+#[test]
+fn mapped_signal_stops_propagation_when_value_is_unchanged() {
+    let ctx = context();
+    let state = ctx.state(1);
+    let parity = state.signal().map(|value| value % 2);
+    let target = ReactiveTarget::Custom(13);
+    parity.subscribe_target(target);
+    assert_eq!(parity.get(), 1);
+
+    state.set(3);
+
+    let targets = ctx.invalidation().drain_reactive_targets();
+    assert!(
+        targets.is_empty(),
+        "unchanged map value must not dirty target"
+    );
+}
+
+#[test]
+fn projected_signal_stops_propagation_when_value_is_unchanged() {
+    let ctx = context();
+    let state = ctx.state(String::from("aa"));
+    let len = state.signal().project(|value| value.len());
+    let target = ReactiveTarget::Custom(14);
+    len.subscribe_target(target);
+    assert_eq!(len.get(), 2);
+
+    state.set(String::from("bb"));
+
+    let targets = ctx.invalidation().drain_reactive_targets();
+    assert!(
+        targets.is_empty(),
+        "unchanged project value must not dirty target"
+    );
+}
+
+#[test]
+fn memo_signal_propagates_when_value_changes() {
+    let ctx = context();
+    let state = ctx.state(1);
+    let parity = state.signal().map_memo(|value| value % 2);
+    let target = ReactiveTarget::Custom(12);
+    parity.subscribe_target(target);
+    assert_eq!(parity.get(), 1);
+
+    state.set(2);
+
+    let targets = ctx.invalidation().drain_reactive_targets();
+    assert_eq!(targets, vec![target]);
 }
 
 #[test]

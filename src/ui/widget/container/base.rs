@@ -10,7 +10,7 @@ use super::super::common::{
 use super::super::core::Element;
 use super::super::style::ContainerStyle;
 use super::length::IntoLengthValue;
-use super::IntoChildren;
+use super::{IntoChildren, IntoDynamicChildren};
 
 pub(crate) fn apply_layout_api<VM, T>(
     mut owner: T,
@@ -286,16 +286,26 @@ impl<VM> Container<VM> {
         self
     }
 
-    /// 追加一个子节点来源。
+    /// 追加一个静态子节点来源。
     ///
     /// # 参数
-    /// - `child`：单个子节点、子节点集合或动态子节点来源。
+    /// - `child`：单个子节点或静态子节点集合。
     ///
     /// # 返回值
     /// 返回更新后的容器实例。
     pub fn child(mut self, child: impl IntoChildren<VM>) -> Self {
         if let WidgetKind::Container { children, .. } = &mut self.element.kind {
             children.push(child.into_child_source());
+        }
+        self
+    }
+
+    /// 追加一个显式动态子节点来源。
+    ///
+    /// 该 API 只用于 legacy 结构更新或显式 rebuild 场景；strict reactive tree 会拒绝它。
+    pub fn dynamic_child(mut self, child: impl IntoDynamicChildren<VM>) -> Self {
+        if let WidgetKind::Container { children, .. } = &mut self.element.kind {
+            children.push(child.into_dynamic_child_source());
         }
         self
     }

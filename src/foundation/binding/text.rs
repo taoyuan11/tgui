@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use super::dependency::{record_dependency_read, DependencyId};
+use super::dependency::{current_dependency_owner, record_dependency_read, DependencyId};
 use super::invalidation::InvalidationSignal;
+use super::reactive::{ReactiveTarget, SignalId};
 
 /// 表示某一时刻的文本快照。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,6 +55,7 @@ pub struct TextController {
     state: Arc<parking_lot::Mutex<TextControllerState>>,
     invalidation: InvalidationSignal,
     dependency: DependencyId,
+    signal_id: SignalId,
 }
 
 #[derive(Debug)]
@@ -64,6 +66,7 @@ struct TextControllerState {
 
 impl TextController {
     pub(crate) fn new(initial_text: impl Into<String>, invalidation: InvalidationSignal) -> Self {
+        let signal_id = invalidation.reactive_graph().create_signal();
         Self {
             state: Arc::new(parking_lot::Mutex::new(TextControllerState {
                 text: initial_text.into(),
@@ -71,6 +74,7 @@ impl TextController {
             })),
             invalidation,
             dependency: DependencyId::next(),
+            signal_id,
         }
     }
 
@@ -82,13 +86,13 @@ impl TextController {
     ///
     /// 返回值: 当前文本内容的克隆副本。
     pub fn text(&self) -> String {
-        record_dependency_read(Some(self.dependency));
+        self.track_read();
         self.state.lock().text.clone()
     }
 
     /// 以借用方式读取当前完整文本。
     pub fn with_text<R>(&self, reader: impl FnOnce(&str) -> R) -> R {
-        record_dependency_read(Some(self.dependency));
+        self.track_read();
         let state = self.state.lock();
         reader(&state.text)
     }
@@ -97,7 +101,7 @@ impl TextController {
     ///
     /// 返回值: 包含文本内容和修订号的快照。
     pub fn snapshot(&self) -> TextSnapshot {
-        record_dependency_read(Some(self.dependency));
+        self.track_read();
         let state = self.state.lock();
         TextSnapshot {
             text: state.text.clone(),
@@ -109,7 +113,7 @@ impl TextController {
     ///
     /// 返回值: 当前修订号。
     pub fn revision(&self) -> u64 {
-        record_dependency_read(Some(self.dependency));
+        self.track_read();
         self.state.lock().revision
     }
 
@@ -119,6 +123,7 @@ impl TextController {
     /// - `text`: 新的完整文本内容。
     pub fn set_text(&self, text: impl Into<String>) {
         if self.set_text_silent(text) {
+            self.invalidation.mark_signal_dirty(self.signal_id);
             self.invalidation.mark_dependency_dirty(self.dependency);
         }
     }
@@ -128,6 +133,7 @@ impl TextController {
         let mut state = self.state.lock();
         state.text = text.into();
         state.revision = state.revision.wrapping_add(1).max(1);
+        self.invalidation.mark_signal_dirty(self.signal_id);
         self.invalidation.mark_dependency_dirty(self.dependency);
         state.revision
     }
@@ -158,9 +164,18 @@ impl TextController {
     }
 
     pub(crate) fn set_text_silent(&self, text: impl Into<String>) -> bool {
-        let previous = self.revision();
+        let previous = self.state.lock().revision;
         let next = self.replace_text_silent(text);
         next != previous
+    }
+
+    fn track_read(&self) {
+        record_dependency_read(Some(self.dependency));
+        if let Some(owner) = current_dependency_owner() {
+            self.invalidation
+                .reactive_graph()
+                .subscribe_target(self.signal_id, ReactiveTarget::Owner(owner));
+        }
     }
 }
 

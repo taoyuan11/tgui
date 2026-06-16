@@ -339,8 +339,8 @@ fn apply_widget_semantics<VM: 'static>(
     }
 
     if let Some(splitter) = resolved.splitter_handle.as_ref() {
-        let current = splitter
-            .sizes
+        let sizes = splitter.current_sizes();
+        let current = sizes
             .get(splitter.index)
             .copied()
             .unwrap_or_default()

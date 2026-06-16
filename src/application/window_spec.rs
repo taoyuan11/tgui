@@ -21,7 +21,10 @@ pub(crate) type ReducedMotionBinding<VM> = Arc<dyn Fn(&VM) -> Signal<bool> + Sen
 pub(crate) type RootViewFactory<VM> = Arc<dyn Fn(&VM) -> Element<VM> + Send + Sync>;
 pub(crate) type WindowsFactory<VM> = Box<dyn Fn(&VM) -> Vec<WindowSpec<VM>> + Send + Sync>;
 
-fn build_root_element<VM>(root_view: &RootViewFactory<VM>, view_model: &VM) -> Element<VM> {
+pub(crate) fn build_root_element<VM>(
+    root_view: &RootViewFactory<VM>,
+    view_model: &VM,
+) -> Element<VM> {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
         const ROOT_VIEW_STACK_SIZE: usize = 8 * 1024 * 1024;

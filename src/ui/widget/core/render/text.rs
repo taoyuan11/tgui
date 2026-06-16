@@ -25,7 +25,7 @@ pub(crate) fn push_text_primitives(
     let started_at = crate::log::text_profile_enabled().then_some(std::time::Instant::now());
     let resolve_content_started_at =
         crate::log::text_profile_enabled().then_some(std::time::Instant::now());
-    let content = text.content.resolve();
+    let content = track_property_scope(PropertySlot::TextContent, || text.content.resolve());
     let resolve_content_elapsed_ms = resolve_content_started_at
         .map(|started_at| started_at.elapsed().as_secs_f64() * 1000.0)
         .unwrap_or(0.0);
@@ -84,6 +84,7 @@ pub(crate) fn push_text_primitives(
     let primary_font = resolved.primary_font.clone();
 
     if let Some(current_layout) = current_layout.as_ref() {
+        let mut selection_segments = Vec::new();
         if let Some((selection_start, selection_end)) = selection_state
             .cloned()
             .unwrap_or_else(|| TextEditState::caret_at(&content))
@@ -104,21 +105,24 @@ pub(crate) fn push_text_primitives(
                 let selection_end_x = current_layout.x_for_index(line_end);
                 let selection_width = (selection_end_x - selection_start_x).max(0.0);
                 if selection_width > 0.0 {
-                    scene.push_shape(RenderPrimitive {
-                        rect: Rect::new(
-                            content_frame.x + selection_start_x,
-                            content_frame.y + Dp::new(current_layout.line_top(line_index)),
-                            selection_width,
-                            current_layout.line_height(line_index).max(line_height),
-                        ),
-                        color: theme.colors.selection.with_alpha_factor(opacity),
-                        corner_radius: 4.0,
-                        stroke_width: 0.0,
-                        clip_rect,
-                        clip_mask,
-                    });
+                    selection_segments.push(Rect::new(
+                        content_frame.x + selection_start_x,
+                        content_frame.y + Dp::new(current_layout.line_top(line_index)),
+                        selection_width,
+                        current_layout.line_height(line_index).max(line_height),
+                    ));
                 }
             }
+        }
+        if !selection_segments.is_empty() {
+            scene.push_text_decoration(TextDecorationPrimitive {
+                segments: Arc::from(selection_segments),
+                color: theme.colors.selection.with_alpha_factor(opacity),
+                corner_radius: 4.0,
+                stroke_width: 0.0,
+                clip_rect,
+                clip_mask,
+            });
         }
     }
 
@@ -159,13 +163,13 @@ pub(crate) fn push_text_primitives(
             .map(|(width, _)| width)
             .unwrap_or(current_layout.width);
         let caret_x = (inner.x + inner.width.min(caret_width) + CARET_END_GAP).max(inner.x);
-        scene.push_overlay_shape(RenderPrimitive {
-            rect: Rect::new(
+        scene.push_overlay_text_decoration(TextDecorationPrimitive {
+            segments: Arc::from(vec![Rect::new(
                 caret_x,
                 content_frame.y,
                 CARET_WIDTH,
                 content_frame.height.max(Dp::new(line_height)),
-            ),
+            )]),
             color: theme.colors.on_surface.with_alpha_factor(opacity),
             corner_radius: 0.0,
             stroke_width: 0.0,

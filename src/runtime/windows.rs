@@ -1,7 +1,7 @@
 use super::{
     window_sync_priority, AnimationCoordinator, ApplicationConfig, BoundRuntimeHandler,
-    InvalidationSignal, Log, TguiError, WindowBindings, WindowClosePolicy, WindowCommand,
-    WindowRole, WindowSetFactory,
+    InvalidationSignal, Log, RootViewFactory, TguiError, WindowBindings, WindowClosePolicy,
+    WindowCommand, WindowRole, WindowSetFactory,
 };
 use crate::dialog::{async_dialog_channel, AsyncDialogDispatcher, AsyncDialogReceiver};
 use crate::foundation::task::{async_task_channel, AsyncTaskDispatcher, AsyncTaskReceiver};
@@ -27,6 +27,7 @@ pub(super) struct ResolvedWindowSpec<VM> {
     config: ApplicationConfig,
     window_bindings: WindowBindings,
     widget_tree: Option<WidgetTree<VM>>,
+    root_view: Option<RootViewFactory<VM>>,
     commands: Vec<WindowCommand<VM>>,
     close_policy: WindowClosePolicy,
 }
@@ -160,6 +161,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
             } else {
                 spec.build_widget_tree(&view_model)
             };
+            let root_view = spec.root_view.clone();
 
             resolved.push(ResolvedWindowSpec {
                 key,
@@ -167,6 +169,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
                 config: spec.resolved_config(&self.config),
                 window_bindings: spec.build_window_bindings(&view_model),
                 widget_tree,
+                root_view,
                 commands: spec.commands,
                 close_policy: spec.close_policy,
             });
@@ -254,6 +257,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
                     resolved_window.role,
                     resolved_window.config,
                     resolved_window.window_bindings,
+                    resolved_window.root_view,
                     resolved_window.commands,
                     resolved_window.close_policy,
                 );
@@ -276,6 +280,7 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
                     self.view_model.clone(),
                     resolved_window.window_bindings,
                     resolved_window.widget_tree,
+                    resolved_window.root_view,
                     resolved_window.commands,
                     self.invalidation.clone(),
                     self.animations.clone(),

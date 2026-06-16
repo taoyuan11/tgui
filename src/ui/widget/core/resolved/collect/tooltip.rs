@@ -523,6 +523,7 @@ fn build_tooltip_scene<VM: 'static>(
                     active_hover_popover: context.active_hover_popover,
                     gpu_scroll_enabled: false,
                     gpu_scroll_container: None,
+                    transform_stack: context.transform_stack.clone(),
                 };
                 let root_id = resolved.collect_subtree_cache(
                     &layout_root,

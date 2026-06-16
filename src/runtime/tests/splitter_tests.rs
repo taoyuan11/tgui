@@ -161,3 +161,21 @@ fn splitter_drag_clears_pending_single_click_step() {
     flush_double_click_window(&mut handler);
     assert_sizes_close(&sizes.get(), &dragged_sizes);
 }
+
+#[test]
+fn splitter_drag_updates_handle_layout_from_sizes_signal() {
+    let invalidation = InvalidationSignal::new();
+    let sizes = State::new(vec![0.42, 0.58], invalidation.clone());
+    let mut handler = test_handler(Some(splitter_tree(sizes)), invalidation);
+    let start = splitter_handle_center(&mut handler);
+    let end = Point::new(start.x + dp(30.0), start.y);
+
+    pointer_press(&mut handler, start);
+    pointer_move(&mut handler, end);
+
+    let moved = splitter_handle_center(&mut handler);
+    assert!(
+        moved.x > start.x + dp(10.0),
+        "splitter handle should move after dragging; start={start:?}, moved={moved:?}"
+    );
+}

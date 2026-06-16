@@ -2,7 +2,7 @@ use crate::ui::unit::Dp;
 use crate::ui::widget::{
     BackdropBlurPrimitive, CanvasCompositePrimitive, CanvasTextHitRegion, ClipMask, ComputedScene,
     HitGeometry, HitInteraction, HitRegion, Point, Rect, RenderCommand, ScrollRegion,
-    TextPrimitive, TexturePrimitive,
+    TextDecorationPrimitive, TextPrimitive, TexturePrimitive,
 };
 
 use super::close::OverlayCloseHandle;
@@ -54,6 +54,23 @@ fn translate_backdrop(
 fn translate_texture(mut primitive: TexturePrimitive, origin: Point) -> TexturePrimitive {
     primitive.frame = translate_rect(primitive.frame, origin);
     primitive.quad = primitive.quad.map(|quad| translate_quad(quad, origin));
+    primitive.clip_rect = primitive.clip_rect.map(|rect| translate_rect(rect, origin));
+    primitive.clip_mask = translate_clip_mask(primitive.clip_mask, origin);
+    primitive
+}
+
+fn translate_text_decoration(
+    mut primitive: TextDecorationPrimitive,
+    origin: Point,
+) -> TextDecorationPrimitive {
+    primitive.segments = std::sync::Arc::from(
+        primitive
+            .segments
+            .iter()
+            .copied()
+            .map(|rect| translate_rect(rect, origin))
+            .collect::<Vec<_>>(),
+    );
     primitive.clip_rect = primitive.clip_rect.map(|rect| translate_rect(rect, origin));
     primitive.clip_mask = translate_clip_mask(primitive.clip_mask, origin);
     primitive
@@ -267,6 +284,9 @@ fn translate_render_command(command: RenderCommand, origin: Point) -> RenderComm
         RenderCommand::Text(primitive) => {
             RenderCommand::Text(Box::new(translate_text(*primitive, origin)))
         }
+        RenderCommand::TextDecoration(primitive) => {
+            RenderCommand::TextDecoration(translate_text_decoration(primitive, origin))
+        }
         RenderCommand::Mesh(mut primitive) => {
             let triangles = translate_triangles(&primitive.triangles, origin);
             let vertices: Vec<_> = primitive
@@ -327,6 +347,9 @@ macro_rules! push_overlay_command {
             #[cfg(feature = "video")]
             RenderCommand::VideoTexture(_) => {}
             RenderCommand::Text(primitive) => $bucket.texts.push((**primitive).clone()),
+            RenderCommand::TextDecoration(primitive) => {
+                $bucket.text_decorations.push(primitive.clone())
+            }
             RenderCommand::Mesh(primitive) => $bucket.meshes.push(primitive.clone()),
             RenderCommand::Brush(_) | RenderCommand::CanvasComposite(_) => {}
         }

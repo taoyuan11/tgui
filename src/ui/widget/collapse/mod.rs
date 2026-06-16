@@ -84,6 +84,7 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
     fn from(collapse: Collapse<VM>) -> Self {
         let layout_style = resolve_collapse_style_for_layout(collapse.style.as_ref());
         let expanded = collapse.expanded.resolve();
+        let expanded_for_click = collapse.expanded.clone();
         let progress = collapse_progress_value(collapse.expanded.clone());
         let on_change = collapse.on_change.clone();
         let header_style = collapse.style.clone();
@@ -133,7 +134,11 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
             .focusable(true)
             .on_click(Command::new_with_context(move |vm, context| {
                 if let Some(command) = on_change.as_ref() {
-                    command.execute_with_context(vm, !expanded, context);
+                    command.execute_with_context(
+                        vm,
+                        !expanded_for_click.resolve_untracked(),
+                        context,
+                    );
                 }
             }))
             .child(

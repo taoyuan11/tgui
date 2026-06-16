@@ -229,6 +229,8 @@ impl Renderer {
             self.vertex_viewport(),
             &[], // canvas composite 内容不受滚动影响
             &[],
+            &[],
+            &std::collections::HashMap::new(),
         )?;
         self.vertex_pool.flush(&self.device, &self.queue);
         let mut composite_cleared = true;
@@ -249,6 +251,8 @@ impl Renderer {
                 self.vertex_viewport(),
                 &[], // mask 不受滚动影响
                 &[],
+                &[],
+                &std::collections::HashMap::new(),
             )?;
             self.vertex_pool.flush(&self.device, &self.queue);
             let mut mask_cleared = true;

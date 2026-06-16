@@ -10,3 +10,4 @@ pub use window_spec::{WindowClosePolicy, WindowRole, WindowSpec};
 
 pub(crate) use builder::WindowSetFactory;
 pub(crate) use config::{ApplicationConfig, ThemeSelection};
+pub(crate) use window_spec::{build_root_element, RootViewFactory};

@@ -1,21 +1,55 @@
 use super::*;
+use crate::ui::widget::StrictReactiveViolation;
 
+#[test]
+fn strict_reactive_tree_accepts_static_children() {
+    let tree = WidgetTree::try_new_strict(Stack::<()>::new().child(Text::new("static")));
+
+    assert!(tree.is_ok());
+}
+
+#[test]
+fn strict_reactive_tree_rejects_signal_driven_children() {
+    let context = test_context();
+    let expanded = context.state(false);
+    let tree = WidgetTree::try_new_strict(Stack::<()>::new().dynamic_child(
+        expanded.signal().map_unchecked(|value| {
+            if value {
+                vec![
+                    Element::from(Text::new("first")),
+                    Element::from(Text::new("second")),
+                ]
+            } else {
+                vec![Element::from(Text::new("first"))]
+            }
+        }),
+    ));
+
+    assert!(matches!(
+        tree,
+        Err(StrictReactiveViolation::DynamicChildren)
+    ));
+}
+
+#[test]
 fn binding_driven_children_relayout_when_child_count_changes() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let context = test_context();
     let expanded = context.state(false);
-    let tree = WidgetTree::new(Stack::<()>::new().child(expanded.signal().map(|value| {
-        if value {
-            vec![
-                Element::from(Text::new("first")),
-                Element::from(Text::new("second")),
-            ]
-        } else {
-            vec![Element::from(Text::new("first"))]
-        }
-    })));
+    let tree = WidgetTree::new_legacy(Stack::<()>::new().dynamic_child(
+        expanded.signal().map_unchecked(|value| {
+            if value {
+                vec![
+                    Element::from(Text::new("first")),
+                    Element::from(Text::new("second")),
+                ]
+            } else {
+                vec![Element::from(Text::new("first"))]
+            }
+        }),
+    ));
 
     let mut animations = AnimationEngine::default();
     let compact = tree.render_output(
@@ -78,8 +112,8 @@ fn hit_testing_tracks_currently_resolved_children() {
         })
         .on_click(Command::new(|_: &mut ()| {}))
         .into();
-    let tree = WidgetTree::new(Stack::<()>::new().size(dp(100.0), dp(100.0)).child(
-        visible.signal().map(move |value| {
+    let tree = WidgetTree::new_legacy(Stack::<()>::new().size(dp(100.0), dp(100.0)).dynamic_child(
+        visible.signal().map_unchecked(move |value| {
             if value {
                 vec![clickable.clone()]
             } else {
@@ -120,6 +154,7 @@ fn hit_testing_tracks_currently_resolved_children() {
 }
 
 #[derive(Default)]
+#[allow(dead_code)]
 struct ScopeChildVm {
     count: i32,
     checked: bool,
@@ -130,9 +165,9 @@ struct ScopeChildVm {
 }
 
 #[derive(Default)]
+#[allow(dead_code)]
 struct ScopeRootVm {
     child: ScopeChildVm,
     other: ScopeChildVm,
     root_count: i32,
 }
-

@@ -457,7 +457,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     widget_id: id,
                     axis: state.axis,
                     index: state.index,
-                    pane_count: state.sizes.len(),
+                    pane_count: state.pane_count(),
                 };
                 if self.pending_click_matches_target(target_id, now) {
                     self.pending_click = None;
@@ -472,7 +472,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         splitter: Some(PendingSplitterClick {
                             axis: state.axis,
                             index: state.index,
-                            pane_count: state.sizes.len(),
+                            pane_count: state.pane_count(),
                         }),
                     });
                     let _ = self.begin_splitter_resize(&state, pair_extent, button);

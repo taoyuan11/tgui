@@ -217,12 +217,12 @@ fn dynamic_full_demo_shell_virtual_scroll_test_tree(
     let page_state = State::new(0_u32, invalidation.clone());
     let dynamic_page = page_state
         .signal()
-        .map(|_| full_demo_shell_virtual_page().key("dynamic-data-page"));
+        .map_unchecked(|_| full_demo_shell_virtual_page().key("dynamic-data-page"));
 
     let content_scroll: Element<TestVm> = ScrollView::new()
         .key("demo-content-scroll")
         .size(pct(100.0), pct(100.0))
-        .child(dynamic_page)
+        .dynamic_child(dynamic_page)
         .into();
     let outer_id = content_scroll.id;
     let root = Stack::new().size(dp(900.0), dp(640.0)).child(
@@ -237,7 +237,7 @@ fn dynamic_full_demo_shell_virtual_scroll_test_tree(
             ),
     );
 
-    (outer_id, WidgetTree::new(root))
+    (outer_id, WidgetTree::new_legacy(root))
 }
 
 fn dynamic_virtual_scroll_test_tree(visible: Signal<bool>) -> (WidgetId, WidgetTree<TestVm>) {
@@ -256,8 +256,8 @@ fn dynamic_virtual_scroll_test_tree(visible: Signal<bool>) -> (WidgetId, WidgetT
     .size(dp(180.0), dp(100.0))
     .into();
     let list_id = list.id;
-    let tree = WidgetTree::new(Stack::new().size(dp(220.0), dp(140.0)).child(visible.map(
-        move |visible| {
+    let tree = WidgetTree::new_legacy(Stack::new().size(dp(220.0), dp(140.0)).dynamic_child(
+        visible.map_unchecked(move |visible| {
             if visible {
                 list.clone()
             } else {
@@ -266,8 +266,8 @@ fn dynamic_virtual_scroll_test_tree(visible: Signal<bool>) -> (WidgetId, WidgetT
                     .child(Text::new("Hidden"))
                     .into()
             }
-        },
-    )));
+        }),
+    ));
     (list_id, tree)
 }
 

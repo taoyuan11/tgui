@@ -3,7 +3,11 @@ use wgpu::util::DeviceExt;
 use crate::foundation::error::TguiError;
 use crate::text::font::FontManager;
 use crate::ui::unit::Dp;
-use crate::ui::widget::{BrushPrimitiveData, CanvasCompositePrimitive, Rect, RenderCommand};
+use crate::ui::widget::{
+    BrushPrimitiveData, CanvasCompositePrimitive, Rect, RenderCommand, RenderPrimitive,
+    TransformChain, TransformRecord, WidgetId,
+};
+use std::collections::HashMap;
 
 use super::{
     physical_mesh_clip_mask_data, BrushVertex, BrushVertexSpec, CompositeQuadSpec, CompositeVertex,
@@ -11,7 +15,7 @@ use super::{
 };
 
 fn compute_scroll_translate(
-    gpu_scroll_container: Option<crate::ui::widget::WidgetId>,
+    gpu_scroll_container: Option<WidgetId>,
     scroll_regions: &[crate::ui::widget::ScrollRegion],
     viewport: VertexViewport,
 ) -> Option<super::PushTranslate> {
@@ -21,28 +25,69 @@ fn compute_scroll_translate(
         .rev()
         .find(|region| region.id == gpu_scroll_container)?;
 
-    let delta = crate::ui::widget::Point {
-        x: region.scroll_offset.x - region.gpu_base_scroll_offset.x,
-        y: region.scroll_offset.y - region.gpu_base_scroll_offset.y,
-    };
-    if delta.x.abs() < Dp::new(0.01) && delta.y.abs() < Dp::new(0.01) {
-        return None; // 零偏移优化
+    translate_from_logical_movement(
+        crate::ui::widget::Point {
+            x: region.gpu_base_scroll_offset.x - region.scroll_offset.x,
+            y: region.gpu_base_scroll_offset.y - region.scroll_offset.y,
+        },
+        viewport,
+    )
+}
+
+fn compute_transform_translate(
+    transform_chain: Option<&TransformChain>,
+    transform_records: &HashMap<WidgetId, TransformRecord>,
+    viewport: VertexViewport,
+) -> Option<super::PushTranslate> {
+    let transform_chain = transform_chain?;
+    let mut movement = crate::ui::widget::Point::ZERO;
+    for id in transform_chain {
+        if let Some(record) = transform_records.get(id) {
+            let delta = (*record).delta();
+            movement.x += delta.x;
+            movement.y += delta.y;
+        }
+    }
+    translate_from_logical_movement(movement, viewport)
+}
+
+fn translate_from_logical_movement(
+    movement: crate::ui::widget::Point,
+    viewport: VertexViewport,
+) -> Option<super::PushTranslate> {
+    if movement.x.abs() < Dp::new(0.01) && movement.y.abs() < Dp::new(0.01) {
+        return None;
     }
 
-    // NDC 偏移：逻辑 dp → 物理像素 → NDC。
-    let physical_offset_x = delta.x.get() * viewport.scale_factor;
-    let physical_offset_y = delta.y.get() * viewport.scale_factor;
-    let ndc_x = -2.0 * physical_offset_x / viewport.physical_size[0];
-    let ndc_y = 2.0 * physical_offset_y / viewport.physical_size[1];
-
-    // 物理像素偏移（用于 clip_local_position）。
-    let physical_x = -physical_offset_x;
-    let physical_y = -physical_offset_y;
-
+    let physical_x = movement.x.get() * viewport.scale_factor;
+    let physical_y = movement.y.get() * viewport.scale_factor;
     Some(super::PushTranslate {
-        offset_ndc: [ndc_x, ndc_y],
+        offset_ndc: [
+            2.0 * physical_x / viewport.physical_size[0],
+            -2.0 * physical_y / viewport.physical_size[1],
+        ],
         offset_physical: [physical_x, physical_y],
     })
+}
+
+fn combine_translates(
+    first: Option<super::PushTranslate>,
+    second: Option<super::PushTranslate>,
+) -> Option<super::PushTranslate> {
+    match (first, second) {
+        (None, None) => None,
+        (Some(translate), None) | (None, Some(translate)) => Some(translate),
+        (Some(first), Some(second)) => Some(super::PushTranslate {
+            offset_ndc: [
+                first.offset_ndc[0] + second.offset_ndc[0],
+                first.offset_ndc[1] + second.offset_ndc[1],
+            ],
+            offset_physical: [
+                first.offset_physical[0] + second.offset_physical[0],
+                first.offset_physical[1] + second.offset_physical[1],
+            ],
+        }),
+    }
 }
 
 pub(super) struct PreparedRect {
@@ -108,7 +153,9 @@ impl Renderer {
         font_manager: &FontManager,
         viewport: VertexViewport,
         scroll_regions: &[crate::ui::widget::ScrollRegion],
-        command_gpu_scroll_containers: &[Option<crate::ui::widget::WidgetId>],
+        command_gpu_scroll_containers: &[Option<WidgetId>],
+        command_transform_chains: &[TransformChain],
+        transform_records: &HashMap<WidgetId, TransformRecord>,
     ) -> Result<PreparedCommands, TguiError> {
         let mut prepared = Vec::with_capacity(commands.len());
 
@@ -117,9 +164,20 @@ impl Renderer {
                 .get(command_index)
                 .copied()
                 .flatten();
+            let draw_translate = combine_translates(
+                compute_scroll_translate(gpu_scroll_container, scroll_regions, viewport),
+                compute_transform_translate(
+                    command_transform_chains.get(command_index),
+                    transform_records,
+                    viewport,
+                ),
+            );
             match command {
                 RenderCommand::BackdropBlur(primitive) => {
-                    if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
+                    if primitive.blur_radius <= 0.0
+                        || primitive.rect.width <= Dp::ZERO
+                        || primitive.rect.height <= Dp::ZERO
+                    {
                         continue;
                     }
                     let fullscreen = TextVertex::quad(
@@ -179,11 +237,7 @@ impl Renderer {
                         clip_rect: primitive.clip_rect,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
-                        scroll_translate: compute_scroll_translate(
-                            gpu_scroll_container,
-                            scroll_regions,
-                            viewport,
-                        ),
+                        scroll_translate: draw_translate,
                     }));
                 }
                 RenderCommand::CanvasComposite(primitive) => {
@@ -216,11 +270,37 @@ impl Renderer {
                         clip_rect: primitive.clip_rect,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
-                        scroll_translate: compute_scroll_translate(
-                            gpu_scroll_container,
-                            scroll_regions,
-                            viewport,
-                        ),
+                        scroll_translate: draw_translate,
+                    }));
+                }
+                RenderCommand::TextDecoration(primitive) => {
+                    if primitive.segments.is_empty() || primitive.color.a == 0 {
+                        continue;
+                    }
+                    let mut vertices = Vec::with_capacity(primitive.segments.len() * 6);
+                    for rect in primitive.segments.iter().copied() {
+                        if rect.width <= Dp::ZERO || rect.height <= Dp::ZERO {
+                            continue;
+                        }
+                        let segment = RenderPrimitive {
+                            rect,
+                            color: primitive.color,
+                            corner_radius: primitive.corner_radius,
+                            stroke_width: primitive.stroke_width,
+                            clip_rect: primitive.clip_rect,
+                            clip_mask: primitive.clip_mask,
+                        };
+                        vertices.extend_from_slice(&RectVertex::from_primitive(segment, viewport));
+                    }
+                    if vertices.is_empty() {
+                        continue;
+                    }
+                    let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
+                    prepared.push(PreparedCommand::Rect(PreparedRect {
+                        clip_rect: primitive.clip_rect,
+                        vertex_offset,
+                        vertex_count: vertices.len() as u32,
+                        scroll_translate: draw_translate,
                     }));
                 }
                 RenderCommand::Mesh(primitive) => {
@@ -258,11 +338,7 @@ impl Renderer {
                         clip_bind_group,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
-                        scroll_translate: compute_scroll_translate(
-                            gpu_scroll_container,
-                            scroll_regions,
-                            viewport,
-                        ),
+                        scroll_translate: draw_translate,
                     }));
                 }
                 RenderCommand::Texture(texture) => {
@@ -301,11 +377,7 @@ impl Renderer {
                             clip_rect: texture.clip_rect,
                             vertex_offset,
                             vertex_count: vertices.len() as u32,
-                            scroll_translate: compute_scroll_translate(
-                                gpu_scroll_container,
-                                scroll_regions,
-                                viewport,
-                            ),
+                            scroll_translate: draw_translate,
                         }));
                     }
                 }
@@ -349,11 +421,7 @@ impl Renderer {
                             clip_rect: texture.clip_rect,
                             vertex_offset,
                             vertex_count: vertices.len() as u32,
-                            scroll_translate: compute_scroll_translate(
-                                gpu_scroll_container,
-                                scroll_regions,
-                                viewport,
-                            ),
+                            scroll_translate: draw_translate,
                         }));
                     }
                 }
@@ -398,11 +466,7 @@ impl Renderer {
                             clip_rect: text.clip_rect,
                             vertex_offset,
                             vertex_count: vertices.len() as u32,
-                            scroll_translate: compute_scroll_translate(
-                                gpu_scroll_container,
-                                scroll_regions,
-                                viewport,
-                            ),
+                            scroll_translate: draw_translate,
                         }));
                     }
                 }
@@ -465,7 +529,7 @@ impl Renderer {
 mod tests {
     use super::*;
     use crate::ui::layout::Overflow;
-    use crate::ui::widget::{Point, Rect, ScrollRegion, WidgetId};
+    use crate::ui::widget::{Point, Rect, ScrollRegion, TransformRecord, WidgetId};
 
     fn make_viewport(logical_width: f32, logical_height: f32, scale: f32) -> VertexViewport {
         let physical_width = logical_width * scale;
@@ -611,5 +675,61 @@ mod tests {
             compute_scroll_translate(Some(WidgetId::from_raw(2)), &scroll_regions, viewport)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn test_compute_transform_translate_sums_chain_records() {
+        let first_id = WidgetId::from_raw(10);
+        let second_id = WidgetId::from_raw(11);
+        let mut chain = TransformChain::new();
+        chain.push(first_id);
+        chain.push(second_id);
+        let records = HashMap::from([
+            (
+                first_id,
+                TransformRecord {
+                    id: first_id,
+                    base_offset: Point::ZERO,
+                    current_offset: Point::new(Dp::new(10.0), Dp::new(20.0)),
+                },
+            ),
+            (
+                second_id,
+                TransformRecord {
+                    id: second_id,
+                    base_offset: Point::new(Dp::new(4.0), Dp::new(6.0)),
+                    current_offset: Point::new(Dp::new(9.0), Dp::new(1.0)),
+                },
+            ),
+        ]);
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+
+        let result = compute_transform_translate(Some(&chain), &records, viewport)
+            .expect("non-zero transform chain should produce a translate");
+
+        // Combined logical movement: (10, 20) + (5, -5) = (15, 15).
+        assert!((result.offset_ndc[0] - 0.0375).abs() < 0.001);
+        assert!((result.offset_ndc[1] - (-0.05)).abs() < 0.001);
+        assert!((result.offset_physical[0] - 30.0).abs() < 0.001);
+        assert!((result.offset_physical[1] - 30.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_combine_translates_adds_scroll_and_transform() {
+        let scroll = super::super::PushTranslate {
+            offset_ndc: [-0.1, 0.2],
+            offset_physical: [-20.0, -30.0],
+        };
+        let transform = super::super::PushTranslate {
+            offset_ndc: [0.025, -0.05],
+            offset_physical: [5.0, 10.0],
+        };
+
+        let result = combine_translates(Some(scroll), Some(transform)).expect("combined");
+
+        assert!((result.offset_ndc[0] - (-0.075)).abs() < 0.001);
+        assert!((result.offset_ndc[1] - 0.15).abs() < 0.001);
+        assert!((result.offset_physical[0] - (-15.0)).abs() < 0.001);
+        assert!((result.offset_physical[1] - (-20.0)).abs() < 0.001);
     }
 }

@@ -471,6 +471,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                         rect: visual.frame,
                         clip_rect: visual.primitive_clip,
                         geometry: HitGeometry::Rect,
+                        transform_chain: context.transform_stack.clone(),
                         scope_path: context.focus_scope_path(),
                         focus: None,
                         interaction: HitInteraction::SelectableText {
@@ -490,7 +491,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             #[cfg(feature = "audio")]
             ResolvedWidgetKind::Audio { .. } => true,
             ResolvedWidgetKind::Image { image, .. } => {
-                let source = image.source.resolve();
+                let source = track_property_scope(PropertySlot::Texture, || image.source.resolve());
                 let loading_background = image
                     .background
                     .as_ref()
@@ -640,6 +641,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                                     ),
                                     clip_rect: canvas_clip,
                                     geometry,
+                                    transform_chain: context.transform_stack.clone(),
                                     scope_path: context.focus_scope_path(),
                                     focus: None,
                                     interaction: HitInteraction::CanvasItem {
@@ -751,6 +753,7 @@ fn push_splitter_handle_hit_regions<VM: 'static>(
             rect: handle_frame,
             clip_rect: Some(clip_rect),
             geometry: HitGeometry::Rect,
+            transform_chain: context.transform_stack.clone(),
             scope_path: context.focus_scope_path(),
             focus: None,
             interaction: HitInteraction::SplitterHandle {

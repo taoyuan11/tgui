@@ -45,9 +45,9 @@ use super::common::{
     CursorStyle, FileDropEvent, HitGeometry, HitInteraction, HitRegion, InteractionHandlers,
     LayoutNode, LifecycleEventHandlers, LifecycleEventState, MeasureContext, MediaEventHandlers,
     MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive, ScenePrimitives, ScrollRegion,
-    ScrollbarAxis, ScrollbarHandle, SelectOptionState, SliderValueFormatter, TextEditState,
-    TextInputContentGeometry, TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKey,
-    WidgetKind, WidgetStateMap,
+    ScrollbarAxis, ScrollbarHandle, SelectOptionState, SliderValueFormatter,
+    TextDecorationPrimitive, TextEditState, TextInputContentGeometry, TextPrimitive,
+    TexturePrimitive, VisualStyle, WidgetId, WidgetKey, WidgetKind, WidgetStateMap,
 };
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
@@ -89,20 +89,22 @@ mod types;
 
 pub use self::element::WidgetStyleExt;
 use self::element_path::resolve_subtree_from_source_path;
+pub(crate) use self::layout::compute_scrollbar_geometry;
 use self::layout::*;
 use self::render::*;
 pub(crate) use self::resolved::{
     build_external_portal_overlay, collect_portal_content_scene, resolve_external_portal_anchor,
 };
 pub(crate) use self::scene::{
-    ActiveTooltipState, CollectContext, CollectedSceneCache, FocusCollectState, SceneChunkParts,
-    TextInputLayoutOverride, TooltipTrigger, VisualContext, VisualContextSnapshot,
+    ActiveTooltipState, CollectContext, CollectedSceneCache, FocusCollectState,
+    ReactiveScenePropertyValue, SceneChunkParts, TextInputLayoutOverride, TooltipTrigger,
+    VisualContext, VisualContextSnapshot,
 };
 pub(crate) use self::scene_layout::ResolvedSceneLayout;
 use self::scene_layout::*;
 use self::style::*;
 use self::tree::with_widget_stack;
-pub use self::tree::{rect, WidgetCommand, WidgetEventResult, WidgetTree};
+pub use self::tree::{rect, StrictReactiveViolation, WidgetCommand, WidgetEventResult, WidgetTree};
 pub use self::types::Element;
 use self::types::*;
 pub(crate) use self::types::{

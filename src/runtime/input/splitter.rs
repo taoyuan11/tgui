@@ -31,14 +31,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(start_position) = self.cursor_position else {
             return false;
         };
+        let start_sizes = state.current_sizes();
         self.active_splitter_resize = Some(super::super::ActiveSplitterResize {
             axis: state.axis,
             index: state.index,
             start_position,
             pair_extent: pair_extent.max(Dp::new(1.0)),
-            start_sizes: state.sizes.clone(),
+            start_sizes: start_sizes.clone(),
             constraints: state.constraints.clone(),
-            current_sizes: state.sizes.clone(),
+            current_sizes: start_sizes,
             moved: false,
             on_resize: state.on_resize.clone(),
         });
@@ -137,7 +138,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             command,
             SplitterResize {
                 index: state.index,
-                sizes: splitter_reset_sizes(state.sizes.len()),
+                sizes: splitter_reset_sizes(state.pane_count()),
             },
         );
         true
@@ -158,8 +159,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(command) = state.on_resize.as_ref() else {
             return false;
         };
+        let sizes = state.current_sizes();
         let next_sizes = splitter_adjusted_sizes(
-            &state.sizes,
+            &sizes,
             &state.constraints,
             state.index,
             state.step * direction as f32,

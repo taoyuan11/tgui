@@ -72,8 +72,9 @@ pub(crate) fn push_border_primitives(
     border_radius: f32,
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
+    preserve_transparent: bool,
 ) {
-    if border_color.a == 0 {
+    if border_color.a == 0 && !preserve_transparent {
         return;
     }
 

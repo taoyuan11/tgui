@@ -5,9 +5,10 @@ use crate::foundation::binding::InvalidationSignal;
 use crate::foundation::error::TguiError;
 
 use super::super::loader::spawn_raster_texture_loader;
-use super::super::types::{MediaBytes, RasterRequest, TextureFrame};
+use super::super::types::{MediaBytes, MediaCompletion, MediaSource, RasterRequest, TextureFrame};
 
 pub(in crate::media) struct RasterDocument {
+    source: MediaSource,
     bytes: MediaBytes,
     raster_cache: Vec<RasterTextureEntry>,
     pending_rasters: Vec<PendingRasterEntry>,
@@ -15,8 +16,9 @@ pub(in crate::media) struct RasterDocument {
 }
 
 impl RasterDocument {
-    pub(in crate::media) fn new(bytes: MediaBytes) -> Self {
+    pub(in crate::media) fn new(source: MediaSource, bytes: MediaBytes) -> Self {
         Self {
+            source,
             bytes,
             raster_cache: Vec::new(),
             pending_rasters: Vec::new(),
@@ -29,6 +31,7 @@ impl RasterDocument {
         raster_request: RasterRequest,
         invalidation: &InvalidationSignal,
         budget: &ResourceBudget,
+        completions: &Arc<Mutex<Vec<MediaCompletion>>>,
     ) -> Result<Option<Arc<TextureFrame>>, TguiError> {
         self.collect_finished_rasters(budget)?;
 
@@ -53,9 +56,11 @@ impl RasterDocument {
         let slot = Arc::new(Mutex::new(None));
         spawn_raster_texture_loader(
             self.bytes.clone(),
+            self.source.clone(),
             raster_request,
             slot.clone(),
             invalidation.clone(),
+            completions.clone(),
         );
         self.pending_rasters.push(PendingRasterEntry {
             request: raster_request,

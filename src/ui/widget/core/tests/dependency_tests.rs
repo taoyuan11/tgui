@@ -52,6 +52,68 @@ fn text_signal_records_layout_and_scene_dependencies() {
     assert!(computed.dependencies.contains_owner(DependencyOwner {
         widget_id: widget_id.raw(),
         phase: DependencyPhase::Scene,
+        property: Some(crate::foundation::binding::PropertySlot::TextContent),
+    }));
+}
+
+#[test]
+fn background_blur_signal_records_property_scene_dependency() {
+    let ctx = test_context();
+    let blur = ctx.state(dp(8.0));
+    let blur_signal = blur.signal();
+    let element: Element<()> = Stack::new()
+        .size(dp(48.0), dp(48.0))
+        .style_full(move |ctx| {
+            let mut style = ContainerStyle::default_for_theme(ctx.theme);
+            style.surface.background_blur = blur_signal.clone().into();
+            style
+        })
+        .into();
+    let widget_id = element.id;
+    let tree = WidgetTree::new(element);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    let computed = tree.collect_scene_from_layout(
+        &font_manager,
+        &layout,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(computed.dependencies.contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Scene,
+        property: Some(crate::foundation::binding::PropertySlot::BackgroundBlur),
+    }));
+    assert!(!computed.dependencies.contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Scene,
         property: None,
     }));
 }
@@ -61,7 +123,7 @@ fn dynamic_children_signal_records_structure_dependency() {
     let ctx = test_context();
     let show = ctx.state(true);
     let container: Element<()> = Stack::new()
-        .child(show.signal().map(|show| {
+        .dynamic_child(show.signal().map_unchecked(|show| {
             if show {
                 Text::new("shown")
             } else {
@@ -70,7 +132,7 @@ fn dynamic_children_signal_records_structure_dependency() {
         }))
         .into();
     let widget_id = container.id;
-    let tree = WidgetTree::new(container);
+    let tree = WidgetTree::new_legacy(container);
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();
@@ -98,7 +160,7 @@ fn keyed_dynamic_children_reuse_widget_ids_across_reorder_patch() {
     let ctx = test_context();
     let reversed = ctx.state(false);
     let container: Element<()> = Stack::<()>::new()
-        .child(reversed.signal().map(|reversed| {
+        .dynamic_child(reversed.signal().map_unchecked(|reversed| {
             if reversed {
                 vec![
                     Element::from(Text::new("second").key("second")),
@@ -113,7 +175,7 @@ fn keyed_dynamic_children_reuse_widget_ids_across_reorder_patch() {
         }))
         .into();
     let container_id = container.id;
-    let tree = WidgetTree::new(container);
+    let tree = WidgetTree::new_legacy(container);
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let theme = Theme::default();
@@ -459,16 +521,18 @@ fn textarea_lifecycle_snapshot_ignores_internal_text_revision() {
 fn widget_tree_detects_lifecycle_handlers_in_dynamic_children() {
     let ctx = test_context();
     let visible = ctx.state(false);
-    let tree = WidgetTree::new(Stack::<()>::new().child(visible.signal().map(|visible| {
-        let element: Element<()> = if visible {
-            Text::new("shown")
-                .on_update(Command::new(|_vm: &mut ()| {}))
-                .into()
-        } else {
-            Stack::<()>::new().into()
-        };
-        element
-    })));
+    let tree = WidgetTree::new_legacy(Stack::<()>::new().dynamic_child(
+        visible.signal().map_unchecked(|visible| {
+            let element: Element<()> = if visible {
+                Text::new("shown")
+                    .on_update(Command::new(|_vm: &mut ()| {}))
+                    .into()
+            } else {
+                Stack::<()>::new().into()
+            };
+            element
+        }),
+    ));
 
     assert!(!tree.has_lifecycle_handlers());
 

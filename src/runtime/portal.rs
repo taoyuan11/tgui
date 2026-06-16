@@ -148,6 +148,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             active_hover_popover: None,
             gpu_scroll_enabled: false,
             gpu_scroll_container: None,
+            transform_stack: smallvec::SmallVec::new(),
         };
 
         for request in requests {

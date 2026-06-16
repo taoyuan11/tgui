@@ -3,11 +3,29 @@ use super::*;
 use crate::ui::widget::r#virtual::{VirtualCacheState, VirtualViewportHint};
 use std::time::Instant;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StrictReactiveViolation {
+    DynamicChildren,
+}
+
+impl std::fmt::Display for StrictReactiveViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DynamicChildren => f.write_str(
+                "strict reactive widget trees do not allow signal-driven dynamic children",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for StrictReactiveViolation {}
+
 pub struct WidgetTree<VM> {
     pub(super) root: std::sync::Arc<Element<VM>>,
     /// 树内是否存在 Virtual 节点。无虚拟节点时全量重建可直接共享源树（Arc clone），
     /// 跳过整棵树的深拷贝。
     pub(super) has_virtual: bool,
+    strict_reactive: bool,
 }
 
 /// 在递归走 widget 树的入口（root collect / root layout / overlay 子场景）使用，
@@ -63,18 +81,76 @@ fn element_contains_virtual<VM>(element: &Element<VM>) -> bool {
     }
 }
 
+fn element_contains_dynamic_children<VM>(element: &Element<VM>) -> bool {
+    match &element.kind {
+        WidgetKind::Container { children, .. } => {
+            children.iter().any(|child_source| match child_source {
+                crate::ui::widget::common::ChildSource::Static(children) => {
+                    children.iter().any(element_contains_dynamic_children)
+                }
+                crate::ui::widget::common::ChildSource::Dynamic(_) => true,
+            })
+        }
+        _ => false,
+    }
+}
+
 impl<VM: 'static> WidgetTree<VM> {
-    pub fn new(root: impl Into<Element<VM>>) -> Self {
-        let root = root.into();
+    fn from_root(root: Element<VM>, strict_reactive: bool) -> Self {
         let has_virtual = element_contains_virtual(&root);
         Self {
             root: std::sync::Arc::new(root),
             has_virtual,
+            strict_reactive,
         }
+    }
+
+    /// Construct a strict retained-reactive widget tree.
+    ///
+    /// The default constructor rejects signal-driven child insertion/removal.
+    /// Structural changes must go through an explicit rebuild path instead of
+    /// being driven implicitly by `Signal<Element>` / `Signal<Vec<Element>>`.
+    pub fn new(root: impl Into<Element<VM>>) -> Self {
+        let root = root.into();
+        if let Err(error) = Self::validate_strict_root(&root) {
+            panic!("{error}");
+        }
+        Self::from_root(root, true)
+    }
+
+    /// Construct a legacy tree that allows signal-driven dynamic children.
+    ///
+    /// This is an explicit compatibility path for tests and for code that
+    /// still performs structural updates through dependency invalidation.
+    /// Strict O(1) reactive updates are not guaranteed for this tree.
+    pub fn new_legacy(root: impl Into<Element<VM>>) -> Self {
+        Self::from_root(root.into(), false)
+    }
+
+    fn validate_strict_root(root: &Element<VM>) -> Result<(), StrictReactiveViolation> {
+        if element_contains_dynamic_children(root) {
+            return Err(StrictReactiveViolation::DynamicChildren);
+        }
+        Ok(())
+    }
+
+    /// Construct a tree that follows the strict retained-reactive rules.
+    ///
+    /// In strict mode, signals may update retained values and slots, but they
+    /// may not implicitly add or remove widgets. Use `WidgetTree::new_legacy`
+    /// only for the explicit legacy compatibility path.
+    pub fn try_new_strict(root: impl Into<Element<VM>>) -> Result<Self, StrictReactiveViolation> {
+        let root = root.into();
+        Self::validate_strict_root(&root)?;
+        Ok(Self::from_root(root, true))
     }
 
     pub(crate) fn has_virtual(&self) -> bool {
         self.has_virtual
+    }
+
+    pub(crate) fn is_strict_reactive(&self) -> bool {
+        self.strict_reactive
     }
 
     pub(crate) fn compute_scene_with_units_and_widget_state_at(
@@ -773,6 +849,7 @@ impl<VM: 'static> WidgetTree<VM> {
             active_hover_popover,
             gpu_scroll_enabled,
             gpu_scroll_container: None,
+            transform_stack: smallvec::SmallVec::new(),
         };
         self.collect_scene_cache_with_context(
             layout,

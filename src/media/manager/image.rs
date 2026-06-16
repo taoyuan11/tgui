@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use resvg::usvg;
 
@@ -8,7 +8,8 @@ use crate::foundation::error::TguiError;
 
 use super::super::svg::rasterize_svg_tree;
 use super::super::types::{
-    clamp_raster_request, ImageSnapshot, IntrinsicSize, RasterRequest, TextureFrame,
+    clamp_raster_request, ImageSnapshot, IntrinsicSize, MediaCompletion, RasterRequest,
+    TextureFrame,
 };
 use super::RasterDocument;
 
@@ -48,6 +49,7 @@ impl ImageEntry {
         raster_request: Option<RasterRequest>,
         invalidation: &InvalidationSignal,
         budget: &ResourceBudget,
+        completions: &Arc<Mutex<Vec<MediaCompletion>>>,
     ) -> ImageSnapshot {
         let intrinsic_size = self
             .document
@@ -59,14 +61,14 @@ impl ImageEntry {
         let texture = if self.loading || self.error.is_some() {
             None
         } else if let (Some(document), Some(request)) = (self.document.as_mut(), raster_request) {
-            match document.texture_for(request, invalidation, budget) {
+            match document.texture_for(request, invalidation, budget, completions) {
                 Ok(texture) => {
                     loading |= document.is_loading(request);
                     texture
                 }
                 Err(error) => {
                     self.error = Some(error.to_string());
-                    invalidation.mark_dirty();
+                    invalidation.mark_media_dirty();
                     None
                 }
             }
@@ -103,11 +105,12 @@ impl DocumentEntry {
         raster_request: RasterRequest,
         invalidation: &InvalidationSignal,
         budget: &ResourceBudget,
+        completions: &Arc<Mutex<Vec<MediaCompletion>>>,
     ) -> Result<Option<Arc<TextureFrame>>, TguiError> {
         let raster_request = clamp_raster_request(raster_request.width, raster_request.height);
         match &mut self.content {
             DocumentContent::Raster(raster) => {
-                raster.texture_for(raster_request, invalidation, budget)
+                raster.texture_for(raster_request, invalidation, budget, completions)
             }
             DocumentContent::Svg(svg) => svg.texture_for(raster_request, budget),
         }

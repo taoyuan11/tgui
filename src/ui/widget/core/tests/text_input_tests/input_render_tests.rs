@@ -146,14 +146,18 @@ fn input_uses_custom_selection_and_caret_colors() {
 
     assert!(rendered
         .primitives
-        .shapes
+        .text_decorations
         .iter()
-        .any(|primitive| primitive.color == selection.with_alpha_factor(1.0)));
+        .any(
+            |primitive| primitive.color == selection.with_alpha_factor(1.0)
+                && !primitive.segments.is_empty()
+        ));
     assert!(rendered
         .primitives
-        .overlay_shapes
+        .overlay_text_decorations
         .iter()
-        .any(|primitive| primitive.color == caret.with_alpha_factor(1.0)));
+        .any(|primitive| primitive.color == caret.with_alpha_factor(1.0)
+            && !primitive.segments.is_empty()));
 }
 
 #[test]

@@ -93,19 +93,22 @@ pub use combobox::{AutoComplete, Combobox, ComboboxChange, ComboboxOption};
 pub(crate) use common::{
     slider_effective_step, slider_resolve_value, slider_value_from_normalized,
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
-    BackdropBlurPrimitive, BrushPrimitiveData, CanvasCompositePrimitive,
-    CanvasItemInteractionHandlers, CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask,
-    CompositionState, ComputedScene, DataGridCellState, DataGridHeaderState,
-    DataGridResizeHandleState, DefaultActivation, FocusScopeState, FocusTargetMeta, HitGeometry,
-    HitInteraction, HitRegion, HitTargetId, InteractionHandlers, LifecycleEventHandlers,
-    LifecycleEventState, ListItemState, MeasureContext, MediaEventPhase, MediaEventState,
-    MeshPrimitive, MeshVertex, RenderCommand, ScrollRegion, ScrollbarAxis, ScrollbarHandle,
-    SplitterHandleState, TextEditState, TextInputContentGeometry, TexturePrimitive, TreeNodeState,
-    WidgetStateMap,
+    BackdropBlurPrimitive, BackdropBlurPrimitiveSlot, BrushPrimitive, BrushPrimitiveData,
+    BrushPrimitiveSlot, CanvasCompositePrimitive, CanvasItemInteractionHandlers,
+    CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask, CompositionState, ComputedScene,
+    ContainerLayout, DataGridCellState, DataGridHeaderState, DataGridResizeHandleState,
+    DefaultActivation, FocusScopeState, FocusTargetMeta, HitGeometry, HitInteraction, HitRegion,
+    HitTargetId, InteractionHandlers, LifecycleEventHandlers, LifecycleEventState, ListItemState,
+    MeasureContext, MediaEventPhase, MediaEventState, MeshPrimitive, MeshVertex,
+    OverlayTextDecorationPrimitiveSlot, RenderCommand, SceneCounts, ScrollRegion, ScrollbarAxis,
+    ScrollbarHandle, ShapePrimitiveSlot, SplitterHandleState, TextDecorationPrimitiveSlot,
+    TextEditState, TextInputContentGeometry, TextPrimitiveSlot, TexturePrimitive,
+    TexturePrimitiveSlot, TransformChain, TransformRecord, TreeNodeState, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, DividerOrientation, FileDropEvent, FocusScopeOptions, Point, Rect,
-    RenderPrimitive, ScenePrimitives, TabPlacement, TextPrimitive, WidgetId, WidgetKey,
+    RenderPrimitive, ScenePrimitives, TabPlacement, TextDecorationPrimitive, TextPrimitive,
+    WidgetId, WidgetKey,
 };
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
 #[cfg(feature = "bench-support")]
@@ -118,12 +121,16 @@ pub(crate) use core::LifecycleSnapshot;
 #[cfg(feature = "audio")]
 pub(crate) use core::LifecycleWidgetKind;
 pub(crate) use core::{
-    build_external_portal_overlay, collect_portal_content_scene, resolve_external_portal_anchor,
-    ActiveTooltipState, CollectContext, CollectedSceneCache, FocusCollectState, ResolvedElement,
-    ResolvedSceneLayout, ResolvedWidgetKind, SceneChunkParts, TextInputLayoutOverride,
-    TooltipTrigger, VisualContextSnapshot,
+    build_external_portal_overlay, collect_portal_content_scene, compute_scrollbar_geometry,
+    resolve_external_portal_anchor, ActiveTooltipState, CollectContext, CollectedSceneCache,
+    FocusCollectState, ReactiveScenePropertyValue, ResolvedElement, ResolvedSceneLayout,
+    ResolvedWidgetKind, SceneChunkParts, TextInputLayoutOverride, TooltipTrigger,
+    VisualContextSnapshot,
 };
-pub use core::{rect, Element, WidgetCommand, WidgetEventResult, WidgetStyleExt, WidgetTree};
+pub use core::{
+    rect, Element, StrictReactiveViolation, WidgetCommand, WidgetEventResult, WidgetStyleExt,
+    WidgetTree,
+};
 pub use date_picker::{DatePicker, DatePickerChange, DatePickerStyle};
 pub use divider::Divider;
 pub use drawer::{Drawer, DrawerHost, DrawerMode, DrawerPlacement};

@@ -247,6 +247,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(command) = state.on_resize.as_ref() else {
             return false;
         };
+        let current_sizes = state.current_sizes();
         let delta = match action {
             Action::Increment => state.step,
             Action::Decrement => -state.step,
@@ -259,11 +260,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     },
                     _ => return false,
                 };
-                target - state.sizes.get(state.index).copied().unwrap_or(0.0)
+                target - current_sizes.get(state.index).copied().unwrap_or(0.0)
             }
             _ => return false,
         };
-        let sizes = splitter_adjusted_sizes(&state.sizes, &state.constraints, state.index, delta);
+        let sizes = splitter_adjusted_sizes(&current_sizes, &state.constraints, state.index, delta);
         self.execute_value_command(
             command,
             SplitterResize {

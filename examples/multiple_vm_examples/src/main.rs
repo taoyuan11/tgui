@@ -78,9 +78,12 @@ impl ViewModel for RootVM {
     }
 
     fn view(&self) -> Element<Self> {
-        let page = self.page.signal();
         let home = self.home.clone();
         let settings = self.settings.clone();
+        let content = match self.page.get() {
+            Page::Home => home.view().scope(|root: &mut Self| &mut root.home),
+            Page::Settings => settings.view().scope(|root: &mut Self| &mut root.settings),
+        };
         Flex::new(Axis::Vertical)
             .padding(Insets::all(dp(20.0)))
             .style_full({
@@ -100,12 +103,7 @@ impl ViewModel for RootVM {
                             .on_click(Command::new(Self::toggle_theme_colors)),
                     ]),
             ])
-            .child(page.map(move |page| match page {
-                Page::Home => home.view().scope(|root: &mut Self| &mut root.home),
-                Page::Settings => {
-                    settings.view().scope(|root: &mut Self| &mut root.settings)
-                }
-            }))
+            .child(content)
             .center()
             .into()
     }

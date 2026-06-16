@@ -6,7 +6,7 @@ use crate::foundation::binding::InvalidationSignal;
 use crate::foundation::error::TguiError;
 
 use super::loader::{load_image_entry, spawn_image_loader};
-use super::types::{ImageSnapshot, MediaSource, RasterRequest, TextureFrame};
+use super::types::{ImageSnapshot, MediaCompletion, MediaSource, RasterRequest, TextureFrame};
 
 mod image;
 mod raster;
@@ -20,6 +20,7 @@ pub(crate) struct MediaManager {
     invalidation: InvalidationSignal,
     budget: ResourceBudget,
     images: Mutex<ImageCache>,
+    completions: Arc<Mutex<Vec<MediaCompletion>>>,
     canvas_shadows: Mutex<Vec<CanvasShadowEntry>>,
     widget_shadows: Mutex<Vec<WidgetShadowEntry>>,
 }
@@ -55,6 +56,7 @@ impl MediaManager {
             invalidation,
             budget,
             images: Mutex::new(ImageCache::new()),
+            completions: Arc::new(Mutex::new(Vec::new())),
             canvas_shadows: Mutex::new(Vec::new()),
             widget_shadows: Mutex::new(Vec::new()),
         }
@@ -75,8 +77,17 @@ impl MediaManager {
             raster_request,
             &self.invalidation,
             &self.budget,
+            &self.completions,
         );
         snapshot
+    }
+
+    pub(crate) fn drain_completions(&self) -> Vec<MediaCompletion> {
+        self.completions
+            .lock()
+            .expect("media completion queue lock poisoned")
+            .drain(..)
+            .collect()
     }
 
     fn image_entry(&self, source: &MediaSource) -> Arc<Mutex<ImageEntry>> {
@@ -93,7 +104,12 @@ impl MediaManager {
             MediaSource::Bytes(_) => Arc::new(Mutex::new(load_image_entry(source))),
             _ => {
                 let entry = Arc::new(Mutex::new(ImageEntry::loading()));
-                spawn_image_loader(entry.clone(), source.clone(), self.invalidation.clone());
+                spawn_image_loader(
+                    entry.clone(),
+                    source.clone(),
+                    self.invalidation.clone(),
+                    self.completions.clone(),
+                );
                 entry
             }
         };

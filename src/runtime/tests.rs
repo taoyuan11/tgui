@@ -33,9 +33,9 @@ use crate::ui::widget::{
     Button, Canvas, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent, CanvasRecorder,
     CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Carousel,
     Checkbox, ContainerStyle, CursorStyle, DataGrid, DataGridColumn, DataGridRow, Flex,
-    FocusScopeOptions, HitInteraction, Input, Point, Rect, ScrollView, Select, SelectOption,
-    Slider, Switch, Text, TextEditState, Textarea, Tooltip, VirtualCacheState, WidgetKey,
-    WidgetTree,
+    FocusScopeOptions, HitInteraction, Input, Point, ProgressBar, Rect, ScrollView, Select,
+    SelectOption, Slider, Switch, Text, TextEditState, Textarea, Tooltip, VirtualCacheState,
+    WidgetKey, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle};
@@ -186,6 +186,7 @@ fn test_handler_with_config<VM: crate::foundation::view_model::ViewModel>(
         Arc::new(Mutex::new(view_model)),
         WindowBindings::default(),
         widget_tree,
+        None,
         Vec::new(),
         invalidation,
         AnimationCoordinator::default(),
@@ -380,6 +381,11 @@ fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
         scene_chunks: Default::default(),
         scene_chunk_parts: Default::default(),
         visual_contexts: Default::default(),
+        reactive_slot_bindings: Default::default(),
+        media_texture_bindings: Default::default(),
+        media_texture_binding_index: Default::default(),
+        caret_decoration: None,
+        text_input_slot_bindings: Default::default(),
         dependencies: DependencyGraph::default(),
     }
 }
@@ -434,6 +440,7 @@ fn reduced_motion_defaults_and_window_binding_override() {
         config.clone(),
         Arc::new(Mutex::new(TestVm)),
         bindings,
+        None,
         None,
         Vec::new(),
         invalidation.clone(),

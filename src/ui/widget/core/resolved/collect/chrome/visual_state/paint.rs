@@ -65,7 +65,7 @@ impl<VM> ResolvedElement<VM> {
                         id: self.id.raw(),
                         property: WidgetProperty::BorderColor,
                     },
-                    button_style.border_color,
+                    button_style.border_color_value.resolve(),
                     default_state_transition(context.theme, context.reduced_motion),
                     context.now,
                 )
@@ -183,7 +183,7 @@ impl<VM> ResolvedElement<VM> {
                         id: self.id.raw(),
                         property: WidgetProperty::Background,
                     },
-                    button_style.background,
+                    button_style.background_value.resolve(),
                     default_state_transition(context.theme, context.reduced_motion),
                     context.now,
                 )

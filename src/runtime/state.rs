@@ -1,5 +1,6 @@
-use crate::foundation::binding::{DependencyGraph, TextChange, TextChangeSet};
+use crate::foundation::binding::{DependencyGraph, PropertySlot, TextChange, TextChangeSet};
 use crate::foundation::view_model::{Command, ValueCommand};
+use crate::media::MediaTextureKey;
 use crate::platform::event::FingerId;
 use crate::text::font::{FontWeight, TextLayoutInfo};
 use crate::ui::layout::Axis;
@@ -7,13 +8,17 @@ use crate::ui::theme::Density;
 use crate::ui::unit::{Dp, UnitContext};
 #[cfg(feature = "audio")]
 use crate::ui::widget::LifecycleWidgetKind;
-use crate::ui::widget::{ActiveTooltipState, TooltipTrigger};
+use crate::ui::widget::{
+    ActiveTooltipState, SceneCounts, ShapePrimitiveSlot, TextPrimitiveSlot, TexturePrimitiveSlot,
+    TooltipTrigger,
+};
 use crate::ui::widget::{
     CanvasDragEvent, CanvasItemId, CanvasMouseButton, CanvasMouseEvent, CanvasPointerEvent,
     CanvasWheelEvent, ComputedScene, DoubleTapEvent, EdgeSwipeEvent, GestureEdge, GesturePhase,
     GestureRecognizer, GestureSource, LifecycleEventState, LongPressEvent, MediaEventPhase,
-    MediaEventState, PinchGestureEvent, Point, Rect, ResolvedSceneLayout, SceneChunkParts,
-    ScrollbarHandle, SwipeAxis, SwipeDirection, SwipeGestureEvent, VisualContextSnapshot, WidgetId,
+    MediaEventState, OverlayTextDecorationPrimitiveSlot, PinchGestureEvent, Point, Rect,
+    ResolvedSceneLayout, SceneChunkParts, ScrollbarHandle, SwipeAxis, SwipeDirection,
+    SwipeGestureEvent, TextDecorationPrimitiveSlot, VisualContextSnapshot, WidgetId,
 };
 use cosmic_text::Editor;
 use ropey::Rope;
@@ -22,6 +27,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::input::TextInputSnapshot;
+use super::reactive_slots::ReactiveSlotBinding;
 
 pub(super) const SMOOTH_SCROLL_EPSILON: f32 = 0.1;
 pub(super) const SMOOTH_SCROLL_LERP: f32 = 0.28;
@@ -56,7 +62,77 @@ pub(super) struct CachedScene<VM> {
     pub(super) scene_chunks: HashMap<WidgetId, ComputedScene<VM>>,
     pub(super) scene_chunk_parts: HashMap<WidgetId, SceneChunkParts<VM>>,
     pub(super) visual_contexts: HashMap<WidgetId, VisualContextSnapshot>,
+    pub(super) reactive_slot_bindings: HashMap<(WidgetId, PropertySlot), ReactiveSlotBinding>,
+    pub(super) media_texture_bindings: HashMap<MediaTextureKey, Vec<MediaTextureBinding>>,
+    pub(super) media_texture_binding_index:
+        HashMap<MediaTextureBindingSlot, MediaTextureBindingIndex>,
+    pub(super) caret_decoration: Option<CaretDecorationBinding>,
+    pub(super) text_input_slot_bindings: HashMap<WidgetId, TextInputSlotBinding>,
     pub(super) dependencies: DependencyGraph,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct CaretDecorationBinding {
+    pub(super) overlay_text_decoration_index: usize,
+    pub(super) overlay_command_index: usize,
+    pub(super) visible_color: crate::foundation::color::Color,
+}
+
+#[derive(Clone)]
+pub(super) struct MediaTextureBinding {
+    pub(super) widget_id: WidgetId,
+    pub(super) slot: TexturePrimitiveSlot,
+    pub(super) placeholder_shape_slot: Option<ShapePrimitiveSlot>,
+    pub(super) placeholder_text_slot: Option<TextPrimitiveSlot>,
+    pub(super) root_offset: SceneCounts,
+    pub(super) ancestor_offsets: Vec<(WidgetId, SceneCounts)>,
+    pub(super) has_chunk_part: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct MediaTextureBindingSlot {
+    pub(super) widget_id: WidgetId,
+    pub(super) texture_index: usize,
+    pub(super) command_index: usize,
+}
+
+impl MediaTextureBindingSlot {
+    pub(super) fn new(widget_id: WidgetId, slot: TexturePrimitiveSlot) -> Self {
+        Self {
+            widget_id,
+            texture_index: slot.texture_index,
+            command_index: slot.command_index,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct MediaTextureBindingIndex {
+    pub(super) key: MediaTextureKey,
+    pub(super) index: usize,
+}
+
+#[derive(Clone)]
+pub(super) struct ReactiveMediaTextureBindingUpdate {
+    pub(super) widget_id: WidgetId,
+    pub(super) slot: TexturePrimitiveSlot,
+    pub(super) media_key: Option<MediaTextureKey>,
+    pub(super) frame: Rect,
+    pub(super) root_offset: SceneCounts,
+    pub(super) ancestor_offsets: Vec<(WidgetId, SceneCounts)>,
+    pub(super) has_chunk_part: bool,
+}
+
+#[derive(Clone)]
+pub(super) struct TextInputSlotBinding {
+    pub(super) widget_id: WidgetId,
+    pub(super) text_slots: Vec<TextPrimitiveSlot>,
+    pub(super) selection_slot: TextDecorationPrimitiveSlot,
+    pub(super) caret_slot: OverlayTextDecorationPrimitiveSlot,
+    pub(super) scroll_region_index: Option<usize>,
+    pub(super) root_offset: SceneCounts,
+    pub(super) root_scroll_region_index: Option<usize>,
+    pub(super) ancestor_offsets: Vec<(WidgetId, SceneCounts, Option<usize>)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

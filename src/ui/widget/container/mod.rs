@@ -3,7 +3,7 @@ mod children;
 mod layouts;
 mod length;
 
-pub use children::IntoChildren;
+pub use children::{IntoChildren, IntoDynamicChildren};
 pub use layouts::{Flex, Grid, Stack};
 pub use length::IntoLengthValue;
 

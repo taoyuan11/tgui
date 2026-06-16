@@ -7,16 +7,18 @@ fn binding_driven_children_relayout_when_child_count_changes() {
     let media = test_media();
     let context = test_context();
     let expanded = context.state(false);
-    let tree = WidgetTree::new(Stack::<()>::new().child(expanded.signal().map(|value| {
-        if value {
-            vec![
-                Element::from(Text::new("first")),
-                Element::from(Text::new("second")),
-            ]
-        } else {
-            vec![Element::from(Text::new("first"))]
-        }
-    })));
+    let tree = WidgetTree::new_legacy(Stack::<()>::new().dynamic_child(
+        expanded.signal().map_unchecked(|value| {
+            if value {
+                vec![
+                    Element::from(Text::new("first")),
+                    Element::from(Text::new("second")),
+                ]
+            } else {
+                vec![Element::from(Text::new("first"))]
+            }
+        }),
+    ));
 
     let mut animations = AnimationEngine::default();
     let compact = tree.render_output(
@@ -64,12 +66,12 @@ fn mapped_dynamic_children_recompute_when_nested_state_changes() {
     let page = context.state("p3".to_string());
     let label = context.state("before".to_string());
     let label_for_page = label.clone();
-    let tree = WidgetTree::new(
-        Stack::<()>::new().child(
-            page.signal()
-                .map(move |_page| -> Element<()> { Text::new(label_for_page.get()).into() }),
-        ),
-    );
+    let tree =
+        WidgetTree::new_legacy(
+            Stack::<()>::new().dynamic_child(page.signal().map_unchecked(
+                move |_page| -> Element<()> { Text::new(label_for_page.get()).into() },
+            )),
+        );
 
     let mut animations = AnimationEngine::default();
     let initial = tree.render_output(
@@ -144,8 +146,8 @@ fn hit_testing_tracks_currently_resolved_children() {
         })
         .on_click(Command::new(|_: &mut ()| {}))
         .into();
-    let tree = WidgetTree::new(Stack::<()>::new().size(dp(100.0), dp(100.0)).child(
-        visible.signal().map(move |value| {
+    let tree = WidgetTree::new_legacy(Stack::<()>::new().size(dp(100.0), dp(100.0)).dynamic_child(
+        visible.signal().map_unchecked(move |value| {
             if value {
                 vec![clickable.clone()]
             } else {

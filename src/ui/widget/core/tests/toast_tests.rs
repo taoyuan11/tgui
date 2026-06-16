@@ -117,6 +117,44 @@ fn toast_host_emits_overlay_content_in_stack_order_and_tracks_wakeup() {
 }
 
 #[test]
+fn empty_toast_host_does_not_cover_underlying_hits() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let context = test_context();
+    let queue = ToastQueue::<()>::new(&context);
+    let viewport = Rect::new(0.0, 0.0, 480.0, 320.0);
+
+    let clickable: Element<()> = Stack::new()
+        .size(dp(120.0), dp(48.0))
+        .on_click(Command::new(|_: &mut ()| {}))
+        .into();
+    let clickable_id = clickable.id;
+    let tree = WidgetTree::new(
+        Stack::new()
+            .child(clickable)
+            .child(ToastHost::new(queue.clone()).placement(ToastPlacement::BottomEnd)),
+    );
+
+    let computed = compute_scene_at(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        Instant::now(),
+    );
+    let hit = WidgetTree::hit_path_from_computed(&computed, Point::new(24.0, 24.0)).pop();
+
+    assert!(
+        matches!(hit, Some(HitInteraction::Widget { id, .. }) if id == clickable_id),
+        "empty ToastHost should not block the clickable below"
+    );
+}
+
+#[test]
 fn toast_stack_auto_collapses_after_three_and_expands_from_queue_state() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

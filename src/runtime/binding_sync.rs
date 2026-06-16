@@ -139,15 +139,85 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if revision != self.last_invalidation_revision {
             let started_at = text_profile_enabled().then_some(Instant::now());
             let previous_revision = self.last_invalidation_revision;
+            let media_only = self
+                .invalidation
+                .media_only_since(previous_revision, revision);
+            let media_completions = self.media_manager.drain_completions();
+            if media_only
+                && !media_completions.is_empty()
+                && self.try_patch_media_completions(&media_completions)
+            {
+                self.last_invalidation_revision = revision;
+                super::action_stats::record("media_texture_slot_write");
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                if let Some(started_at) = started_at {
+                    log_text_profile(
+                        "textarea_redraw",
+                        started_at.elapsed(),
+                        format!(
+                            "revision {} -> {} media_completions={} invalidation_action=media_texture_slot_write requested_redraw=true",
+                            previous_revision,
+                            revision,
+                            media_completions.len(),
+                        ),
+                    );
+                }
+                return;
+            }
+            if media_only && !media_completions.is_empty() && self.strict_reactive_tree() {
+                self.last_invalidation_revision = revision;
+                super::action_stats::record("strict_reactive_media_rejected");
+                if let Some(started_at) = started_at {
+                    log_text_profile(
+                        "textarea_redraw",
+                        started_at.elapsed(),
+                        format!(
+                            "revision {} -> {} media_completions={} invalidation_action=strict_reactive_media_rejected requested_redraw=false",
+                            previous_revision,
+                            revision,
+                            media_completions.len(),
+                        ),
+                    );
+                }
+                return;
+            }
             let (dirty_kind, dirty_dependencies) = self
                 .invalidation
                 .dirty_dependencies_since(previous_revision);
             self.last_invalidation_revision = revision;
+            let reactive_updates = self.invalidation.drain_reactive_updates();
+            let reactive_redraw = !reactive_updates.targets.is_empty();
+            if reactive_redraw {
+                super::action_stats::record("reactive_slot_update");
+            }
             let bindings_redraw = self.sync_bindings(now);
-            let invalidation_action =
-                self.invalidate_cached_scene_for_dependencies(dirty_kind, &dirty_dependencies, now);
+            let invalidation_action = self.invalidate_cached_scene_for_dependencies(
+                dirty_kind,
+                &dirty_dependencies,
+                &reactive_updates.targets,
+                reactive_updates.processed_signals,
+                now,
+            );
             super::action_stats::record(invalidation_action);
-            let requested_redraw = bindings_redraw || invalidation_action != "unrelated";
+            let media_action = if media_completions.is_empty() {
+                "none"
+            } else if self.try_patch_media_completions(&media_completions) {
+                super::action_stats::record("media_texture_slot_write");
+                "media_texture_slot_write"
+            } else if self.strict_reactive_tree() {
+                super::action_stats::record("strict_reactive_media_rejected");
+                "strict_reactive_media_rejected"
+            } else {
+                self.invalidate_scene_with_reason("media_completion_patch_failed");
+                super::action_stats::record("media_texture_full_rebuild");
+                "media_texture_full_rebuild"
+            };
+            let requested_redraw = reactive_redraw
+                || bindings_redraw
+                || invalidation_action != "unrelated"
+                || media_action != "none";
 
             if requested_redraw {
                 if let Some(window) = self.window.as_ref() {
@@ -160,12 +230,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     "textarea_redraw",
                     started_at.elapsed(),
                     format!(
-                        "revision {} -> {} dirty_kind={} dirty_dependencies={} invalidation_action={} bindings_redraw={} requested_redraw={}",
+                        "revision {} -> {} dirty_kind={} dirty_dependencies={} reactive_targets={} invalidation_action={} media_action={} bindings_redraw={} requested_redraw={}",
                         previous_revision,
                         revision,
                         dirty_dependency_set_label(dirty_kind),
                         dirty_dependencies.len(),
+                        reactive_updates.targets.len(),
                         invalidation_action,
+                        media_action,
                         bindings_redraw,
                         requested_redraw
                     ),

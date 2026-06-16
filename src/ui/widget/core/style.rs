@@ -18,9 +18,12 @@ use super::super::style::{
 use super::{Text, VisualStyle};
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(super) struct ResolvedButtonStyle {
     pub(super) background: Color,
     pub(super) border_color: Color,
+    pub(super) background_value: Value<Color>,
+    pub(super) border_color_value: Value<Color>,
     pub(super) focus_ring: Option<crate::theme::FocusRingStyle>,
     pub(super) border_width: Dp,
     pub(super) radius: Dp,
@@ -544,9 +547,13 @@ pub(super) fn resolve_button_style(
     theme: &Theme,
 ) -> ResolvedButtonStyle {
     let visual_state = base_interaction_state(state);
+    let background_value = style.background.resolve(visual_state);
+    let border_color_value = style.border.resolve(visual_state);
     ResolvedButtonStyle {
-        background: resolve_stateful_widget_color(&style.background, visual_state),
-        border_color: resolve_stateful_widget_color(&style.border, visual_state),
+        background: background_value.resolve_untracked(),
+        border_color: border_color_value.resolve_untracked(),
+        background_value,
+        border_color_value,
         focus_ring: resolve_focus_ring(theme, style.focus_ring.as_ref(), state),
         border_width: style.border_width.resolve(),
         radius: style.radius.resolve(),

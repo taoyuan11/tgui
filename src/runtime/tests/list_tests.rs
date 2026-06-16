@@ -114,10 +114,10 @@ fn list_grouped_multi_select_click_keeps_scroll_offset_after_dynamic_rebuild() {
     let selected = State::new(Vec::<WidgetKey>::new(), invalidation.clone());
     let page_revision = State::new(0_u32, invalidation.clone());
     let selected_for_page = selected.clone();
-    let dynamic_page = page_revision.signal().map(move |_| {
+    let dynamic_page = page_revision.signal().map_unchecked(move |_| {
         grouped_multi_select_list(selected_for_page.clone()).key("dynamic-list-page")
     });
-    let tree = WidgetTree::new(Stack::new().child(dynamic_page));
+    let tree = WidgetTree::new_legacy(Stack::new().dynamic_child(dynamic_page));
     let mut handler = test_handler_with_config(
         TestVm,
         Some(tree),

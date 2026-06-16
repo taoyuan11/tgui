@@ -151,10 +151,10 @@ fn tabs_component(app: &App) -> Element<App> {
                 "超过可见预算的 tab 会进入 More 菜单，并支持拖拽重排。",
                 Flex::vertical()
                     .gap(dp(8.0))
-                    .child(app.tabs_order.signal().map(move |order| {
+                    .child({
                         let tabs: Element<App> = Tabs::new(
                             demo_tab_items(
-                                order,
+                                app.tabs_order.get(),
                                 slider_value.clone(),
                                 switch_value.clone(),
                                 checkbox_value.clone(),
@@ -183,7 +183,7 @@ fn tabs_component(app: &App) -> Element<App> {
                         ))
                         .into();
                         tabs
-                    }))
+                    })
                     .child(Text::new(app.tabs_reorder_status.signal()).style_full(styles::status_style)),
                 CODE_TABS_BASIC,
             ),

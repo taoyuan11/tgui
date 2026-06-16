@@ -63,6 +63,11 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         Some(self.resolved_at_path(path))
     }
 
+    pub(crate) fn lifecycle_snapshot(&self, widget_id: WidgetId) -> Option<LifecycleSnapshot> {
+        let widget = self.resolved_widget(widget_id)?;
+        Some(super::resolved_freeze::lifecycle_snapshot(widget))
+    }
+
     pub(crate) fn widget_bounds(&self, widget_id: WidgetId) -> Option<Rect> {
         let path = self.path_for(widget_id)?;
         let mut node = &self.layout_root;
@@ -90,7 +95,43 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         };
         match &node.kind {
             ResolvedWidgetKind::Text { text, .. } => {
-                !text.user_select
+                let fixed_width = matches!(
+                    &node.layout.width,
+                    Some(Value::Static(Length::Px(width))) if *width > Dp::ZERO
+                );
+                let fixed_height = matches!(
+                    &node.layout.height,
+                    Some(Value::Static(Length::Px(height))) if *height > Dp::ZERO
+                );
+                fixed_width
+                    && fixed_height
+                    && !text.user_select
+                    && node.background.is_none()
+                    && !node.interactions.has_any()
+                    && !node.media_events.has_any()
+                    && node.visual.border_color.is_none()
+                    && node.visual.border_radius.is_none()
+                    && node.visual.border_width.is_none()
+                    && node.visual.background_brush.is_none()
+                    && node.visual.background_image.is_none()
+                    && node.visual.background_blur.resolve() == Dp::ZERO
+                    && node.visual.shadow.is_none()
+                    && node.visual.opacity.resolve() == 1.0
+                    && node.visual.offset.resolve() == Point::ZERO
+                    && node.visual.scale.resolve() == 1.0
+            }
+            ResolvedWidgetKind::Image { image, .. } => {
+                let fixed_width = matches!(
+                    &image.layout.width,
+                    Some(Value::Static(Length::Px(width))) if *width > Dp::ZERO
+                );
+                let fixed_height = matches!(
+                    &image.layout.height,
+                    Some(Value::Static(Length::Px(height))) if *height > Dp::ZERO
+                );
+                fixed_width
+                    && fixed_height
+                    && image.layout.aspect_ratio.is_none()
                     && node.background.is_none()
                     && !node.interactions.has_any()
                     && !node.lifecycle_events.has_any()
@@ -102,7 +143,21 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     && node.visual.background_image.is_none()
                     && node.visual.background_blur.resolve() == Dp::ZERO
                     && node.visual.shadow.is_none()
-                    && node.visual.opacity.resolve() == 1.0
+                    && node.visual.offset.resolve() == Point::ZERO
+                    && node.visual.scale.resolve() == 1.0
+            }
+            ResolvedWidgetKind::TextEditor { multiline, .. } => {
+                let fixed_width = matches!(
+                    &node.layout.width,
+                    Some(Value::Static(Length::Px(width))) if *width > Dp::ZERO
+                );
+                let fixed_height = matches!(
+                    &node.layout.height,
+                    Some(Value::Static(Length::Px(height))) if *height > Dp::ZERO
+                );
+                !*multiline
+                    && fixed_width
+                    && fixed_height
                     && node.visual.offset.resolve() == Point::ZERO
                     && node.visual.scale.resolve() == 1.0
             }
@@ -265,6 +320,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     active_hover_popover,
                     gpu_scroll_enabled: false,
                     gpu_scroll_container: None,
+                    transform_stack: smallvec::SmallVec::new(),
                 };
                 let root_id = self.resolved_at_path(path).collect_subtree_cache(
                     self.layout_at_path(path),
@@ -301,6 +357,166 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             next_tooltip_wakeup: next_tooltip_wakeup.get(),
             next_toast_wakeup: next_toast_wakeup.get(),
         })
+    }
+
+    pub(crate) fn resolve_reactive_scene_property_value(
+        &self,
+        widget_id: WidgetId,
+        property: PropertySlot,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        reduced_motion: bool,
+        visual_context: VisualContextSnapshot,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        select_open_states: &HashMap<WidgetId, bool>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+        viewport: Rect,
+        now: std::time::Instant,
+        style_sheet: &crate::ui::widget::StyleSheet,
+    ) -> Option<ReactiveScenePropertyValue> {
+        let path = self.path_for(widget_id)?;
+        let tooltip_hover_started_at: HashMap<WidgetId, std::time::Instant> = HashMap::new();
+        let next_tooltip_wakeup: std::cell::Cell<Option<std::time::Instant>> =
+            std::cell::Cell::new(None);
+        let next_toast_wakeup: std::cell::Cell<Option<std::time::Instant>> =
+            std::cell::Cell::new(None);
+        let empty_menu_open_states = HashMap::<WidgetId, bool>::new();
+        let empty_menubar_active_states = HashMap::<u64, Option<usize>>::new();
+        let empty_context_menu_anchor_states = HashMap::<WidgetId, Point>::new();
+        let style_context = crate::ui::theme::StyleContext::from_theme(theme)
+            .with_reduced_motion(reduced_motion)
+            .with_text_scale(self.units.font_scale());
+        let mut context = CollectContext {
+            taffy: &self.taffy,
+            font_manager,
+            theme,
+            style_context,
+            style_sheet,
+            media,
+            focused_input: None,
+            focused_text_state: None,
+            focused_text_value: None,
+            focused_text_layout: None,
+            text_layout_overrides: None,
+            active_slider_value: None,
+            caret_visible: false,
+            selected_text: None,
+            selected_text_state: None,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            select_open_states,
+            menu_open_states: &empty_menu_open_states,
+            menubar_active_states: &empty_menubar_active_states,
+            context_menu_anchor_states: &empty_context_menu_anchor_states,
+            scroll_offsets,
+            virtual_states,
+            viewport,
+            units: self.units,
+            animations,
+            reduced_motion,
+            now,
+            focus: super::scene::FocusCollectState::default(),
+            tooltip_hover_started_at: &tooltip_hover_started_at,
+            next_tooltip_wakeup: &next_tooltip_wakeup,
+            next_toast_wakeup: &next_toast_wakeup,
+            active_tooltip: None,
+            active_hover_popover: None,
+            gpu_scroll_enabled: false,
+            gpu_scroll_container: None,
+            transform_stack: smallvec::SmallVec::new(),
+        };
+        self.resolved_at_path(path)
+            .resolve_reactive_scene_property_value(
+                property,
+                self.layout_at_path(path),
+                visual_context.into(),
+                &mut context,
+            )
+    }
+
+    pub(crate) fn resolve_reactive_transform_offset(
+        &self,
+        widget_id: WidgetId,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        reduced_motion: bool,
+        visual_context: VisualContextSnapshot,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        select_open_states: &HashMap<WidgetId, bool>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+        viewport: Rect,
+        now: std::time::Instant,
+        style_sheet: &crate::ui::widget::StyleSheet,
+    ) -> Option<Point> {
+        let path = self.path_for(widget_id)?;
+        let tooltip_hover_started_at: HashMap<WidgetId, std::time::Instant> = HashMap::new();
+        let next_tooltip_wakeup: std::cell::Cell<Option<std::time::Instant>> =
+            std::cell::Cell::new(None);
+        let next_toast_wakeup: std::cell::Cell<Option<std::time::Instant>> =
+            std::cell::Cell::new(None);
+        let empty_menu_open_states = HashMap::<WidgetId, bool>::new();
+        let empty_menubar_active_states = HashMap::<u64, Option<usize>>::new();
+        let empty_context_menu_anchor_states = HashMap::<WidgetId, Point>::new();
+        let style_context = crate::ui::theme::StyleContext::from_theme(theme)
+            .with_reduced_motion(reduced_motion)
+            .with_text_scale(self.units.font_scale());
+        let mut context = CollectContext {
+            taffy: &self.taffy,
+            font_manager,
+            theme,
+            style_context,
+            style_sheet,
+            media,
+            focused_input: None,
+            focused_text_state: None,
+            focused_text_value: None,
+            focused_text_layout: None,
+            text_layout_overrides: None,
+            active_slider_value: None,
+            caret_visible: false,
+            selected_text: None,
+            selected_text_state: None,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            select_open_states,
+            menu_open_states: &empty_menu_open_states,
+            menubar_active_states: &empty_menubar_active_states,
+            context_menu_anchor_states: &empty_context_menu_anchor_states,
+            scroll_offsets,
+            virtual_states,
+            viewport,
+            units: self.units,
+            animations,
+            reduced_motion,
+            now,
+            focus: super::scene::FocusCollectState::default(),
+            tooltip_hover_started_at: &tooltip_hover_started_at,
+            next_tooltip_wakeup: &next_tooltip_wakeup,
+            next_toast_wakeup: &next_toast_wakeup,
+            active_tooltip: None,
+            active_hover_popover: None,
+            gpu_scroll_enabled: false,
+            gpu_scroll_container: None,
+            transform_stack: smallvec::SmallVec::new(),
+        };
+        self.resolved_at_path(path)
+            .resolve_reactive_transform_offset(
+                self.layout_at_path(path),
+                visual_context.into(),
+                &mut context,
+            )
     }
 
     /// Phase 1 splice 支撑：计算 `target` 子树在它**每一个严格祖先** chunk 里的命令区间

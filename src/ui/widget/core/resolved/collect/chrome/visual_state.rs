@@ -39,10 +39,10 @@ impl<VM> ResolvedElement<VM> {
             layout_frame.height,
         );
         let frame = self.apply_data_grid_sticky_frame(frame, visual_context, context);
-        let scale = if context.reduced_motion {
-            runtime_visual.scale.resolve().clamp(0.01, 16.0)
-        } else {
-            track_property_scope(PropertySlot::Scale, || {
+        let scale = track_property_scope(PropertySlot::Scale, || {
+            if context.reduced_motion {
+                runtime_visual.scale.resolve().clamp(0.01, 16.0)
+            } else {
                 runtime_visual.scale.resolve_widget_clamped(
                     context.animations,
                     self.id,
@@ -51,8 +51,8 @@ impl<VM> ResolvedElement<VM> {
                     0.01,
                     16.0,
                 )
-            })
-        };
+            }
+        });
         let frame = if (scale - 1.0).abs() > f32::EPSILON {
             let width = frame.width * scale;
             let height = frame.height * scale;
@@ -113,12 +113,28 @@ impl<VM> ResolvedElement<VM> {
             .min((frame.height * 0.5).get());
         let background_frame = frame.inset(Insets::all(Dp::new(background_inset)));
         let background_radius = (border_radius - background_inset).max(0.0);
+        let reactive_style_background = styles
+            .button_style
+            .as_ref()
+            .map(|style| matches!(style.background_value, Value::Signal(_)))
+            .unwrap_or(false);
+        let reactive_style_border_color = styles
+            .button_style
+            .as_ref()
+            .map(|style| matches!(style.border_color_value, Value::Signal(_)))
+            .unwrap_or(false);
+        let reactive_border_color = matches!(runtime_visual.border_color, Some(Value::Signal(_)))
+            || reactive_style_border_color;
+        let reactive_offset = matches!(runtime_visual.offset, Value::Signal(_));
+        let reactive_opacity = matches!(runtime_visual.opacity, Value::Signal(_));
 
         CollectVisualState {
             frame,
             background_frame,
             background_radius: Dp::new(background_radius),
             runtime_visual,
+            offset,
+            reactive_offset,
             primitive_clip: Some(visual_context.clip_rect),
             overflow_clip: visual_context.overflow_clip_rect,
             primitive_clip_mask: visual_context.clip_mask,
@@ -129,6 +145,10 @@ impl<VM> ResolvedElement<VM> {
             border_radius: Dp::new(border_radius),
             border_color,
             background,
+            reactive_background: matches!(runtime_background, Some(Value::Signal(_)))
+                || reactive_style_background,
+            reactive_border_color,
+            reactive_opacity,
             styles,
         }
     }

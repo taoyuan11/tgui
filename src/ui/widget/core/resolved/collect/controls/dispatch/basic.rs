@@ -92,6 +92,7 @@ impl<VM> ResolvedElement<VM> {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                transform_chain: context.transform_stack.clone(),
                 scope_path: context.focus_scope_path(),
                 focus,
                 interaction: HitInteraction::Checkbox {
@@ -151,6 +152,7 @@ impl<VM> ResolvedElement<VM> {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                transform_chain: context.transform_stack.clone(),
                 scope_path: context.focus_scope_path(),
                 focus,
                 interaction: HitInteraction::Radio {
@@ -226,6 +228,7 @@ impl<VM> ResolvedElement<VM> {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                transform_chain: context.transform_stack.clone(),
                 scope_path: context.focus_scope_path(),
                 focus,
                 interaction: HitInteraction::Switch {

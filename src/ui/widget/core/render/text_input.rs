@@ -7,6 +7,65 @@ pub(crate) struct TextInputRenderOutput {
     pub(crate) content_height: Dp,
 }
 
+fn multiline_text_slot_count(content_viewport: Rect, line_height: f32) -> usize {
+    let line_height = line_height.max(1.0);
+    ((content_viewport.height.get().max(0.0) / line_height).ceil() as usize)
+        .saturating_add(2)
+        .max(1)
+}
+
+fn multiline_visible_text_slots<'a>(
+    layout: &TextLayoutInfo,
+    display_content: &'a str,
+    content_frame: Rect,
+    content_viewport: Rect,
+    line_height: f32,
+    slot_count: usize,
+) -> Vec<(&'a str, Rect)> {
+    let viewport_top = content_viewport.y.get();
+    let viewport_bottom = content_viewport.bottom().get();
+    let visible_range = layout.line_range_for_vertical_span(
+        viewport_top - content_frame.y.get(),
+        viewport_bottom - content_frame.y.get(),
+    );
+    let start_line = visible_range.start;
+    let mut slots = Vec::with_capacity(slot_count);
+    for slot_index in 0..slot_count {
+        let line_index = start_line + slot_index;
+        if line_index < visible_range.end {
+            let start = layout.line_start(line_index).min(display_content.len());
+            let end = layout.line_end(line_index).min(display_content.len());
+            let line_top = content_frame.y.get() + layout.line_top(line_index);
+            let line_height_value = layout.line_height(line_index).max(line_height);
+            let content = if start < end {
+                &display_content[start..end]
+            } else {
+                ""
+            };
+            let width = if start < end {
+                layout.line_width(line_index).max(1.0)
+            } else {
+                1.0
+            };
+            slots.push((
+                content,
+                Rect::new(content_frame.x, line_top, width, line_height_value),
+            ));
+        } else {
+            slots.push((
+                "",
+                Rect::new(
+                    content_frame.x,
+                    content_viewport.y.get() + slot_index as f32 * line_height.max(1.0),
+                    1.0,
+                    line_height.max(1.0),
+                ),
+            ));
+        }
+    }
+    slots
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn push_text_input_primitives(
     content: &str,
@@ -19,6 +78,7 @@ pub(crate) fn push_text_input_primitives(
     now: std::time::Instant,
     scene: &mut ScenePrimitives,
     show_caret: bool,
+    _caret_visible: bool,
     multiline: bool,
     auto_wrap: bool,
     show_scrollbar: bool,
@@ -191,9 +251,35 @@ pub(crate) fn push_text_input_primitives(
             ));
         }
     }
-    for segment in selection_segments {
-        scene.push_shape(RenderPrimitive {
-            rect: segment,
+    let fixed_selection_slot = show_caret;
+    if fixed_selection_slot {
+        let (segments, color) = if selection_segments.is_empty() {
+            (
+                Arc::from(vec![Rect::new(
+                    content_frame.x,
+                    content_viewport.y,
+                    0.0,
+                    Dp::new(line_height),
+                )]),
+                selection_fill.with_alpha_factor(opacity),
+            )
+        } else {
+            (
+                Arc::from(vec![selection_segments[0]]),
+                selection_fill.with_alpha_factor(opacity),
+            )
+        };
+        scene.push_text_decoration(TextDecorationPrimitive {
+            segments,
+            color,
+            corner_radius: 4.0,
+            stroke_width: 0.0,
+            clip_rect: content_clip_rect,
+            clip_mask,
+        });
+    } else if !selection_segments.is_empty() {
+        scene.push_text_decoration(TextDecorationPrimitive {
+            segments: Arc::from(selection_segments),
             color: selection_fill.with_alpha_factor(opacity),
             corner_radius: 4.0,
             stroke_width: 0.0,
@@ -206,31 +292,19 @@ pub(crate) fn push_text_input_primitives(
     let font_weight = text.font_weight.unwrap_or(default_style.weight);
 
     if multiline {
-        let viewport_top = content_viewport.y.get();
-        let viewport_bottom = content_viewport.bottom().get();
-        let visible_lines = layout.line_range_for_vertical_span(
-            viewport_top - content_frame.y.get(),
-            viewport_bottom - content_frame.y.get(),
-        );
-
-        for line_index in visible_lines {
-            let line_top = content_frame.y.get() + layout.line_top(line_index);
-            let line_height_value = layout.line_height(line_index).max(line_height);
-            let start = layout.line_start(line_index).min(display_content.len());
-            let end = layout.line_end(line_index).min(display_content.len());
-            if start >= end {
-                continue;
-            }
-
+        let slot_count = multiline_text_slot_count(content_viewport, line_height);
+        for (line_content, line_frame) in multiline_visible_text_slots(
+            layout,
+            &display_content,
+            content_frame,
+            content_viewport,
+            line_height,
+            slot_count,
+        ) {
             scene.push_text(TextPrimitive {
-                content: Arc::from(display_content[start..end].to_string()),
+                content: Arc::from(line_content.to_string()),
                 rich_spans: None,
-                frame: Rect::new(
-                    content_frame.x,
-                    line_top,
-                    layout.line_width(line_index).max(1.0),
-                    line_height_value,
-                ),
+                frame: line_frame,
                 quad: None,
                 color: text_color,
                 force_color: false,
@@ -282,8 +356,8 @@ pub(crate) fn push_text_input_primitives(
         let caret_height = Dp::new(layout.line_height_for_index(caret_index).max(line_height));
         let caret_rect = Rect::new(caret_x, caret_y, CARET_WIDTH, caret_height);
         ime_cursor_area = Some(caret_rect);
-        scene.push_overlay_shape(RenderPrimitive {
-            rect: caret_rect,
+        scene.push_overlay_text_decoration(TextDecorationPrimitive {
+            segments: Arc::from(vec![caret_rect]),
             color: caret_fill.with_alpha_factor(opacity),
             corner_radius: 0.0,
             stroke_width: 0.0,

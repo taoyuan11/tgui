@@ -31,15 +31,15 @@ fn unrelated_state_update_does_not_rescan_lifecycle_handlers() {
             visible
         }
     });
-    let tree = WidgetTree::new(Stack::<TestVm>::new().child(probe_signal.map(
-        |visible| -> Element<TestVm> {
+    let tree = WidgetTree::new_legacy(Stack::<TestVm>::new().dynamic_child(
+        probe_signal.map_unchecked(|visible| -> Element<TestVm> {
             if visible {
                 Text::new("stable").into()
             } else {
                 Text::new("hidden").into()
             }
-        },
-    )));
+        }),
+    ));
     let mut handler = test_handler(Some(tree), invalidation);
 
     let _ = handler.computed_scene();
@@ -65,9 +65,9 @@ fn text_input_update_without_lifecycle_handlers_does_not_rescan_tree() {
             visible
         }
     });
-    let tree = WidgetTree::new(
+    let tree = WidgetTree::new_legacy(
         Stack::<TestVm>::new()
-            .child(probe_signal.map(|visible| -> Element<TestVm> {
+            .dynamic_child(probe_signal.map_unchecked(|visible| -> Element<TestVm> {
                 if visible {
                     Text::new("stable").into()
                 } else {
@@ -124,6 +124,7 @@ fn set_definition_for_existing_window_preserves_cached_scene() {
         WindowRole::Main,
         test_config(),
         WindowBindings::default(),
+        None,
         Vec::new(),
         crate::application::WindowClosePolicy::Close,
     );
@@ -192,15 +193,15 @@ fn dynamic_child_dependency_update_preserves_cached_layout_shell() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let visible = context.state(true);
-    let tree = WidgetTree::new(
-        Stack::<TestVm>::new().child(visible.signal().map(|visible| {
+    let tree = WidgetTree::new_legacy(Stack::<TestVm>::new().dynamic_child(
+        visible.signal().map_unchecked(|visible| {
             if visible {
                 Text::new("shown")
             } else {
                 Text::new("hidden")
             }
-        })),
-    );
+        }),
+    ));
     let mut handler = test_handler(Some(tree), invalidation);
 
     let _ = handler.computed_scene();

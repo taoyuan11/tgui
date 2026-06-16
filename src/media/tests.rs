@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -28,6 +28,7 @@ fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
         load_media_document(&MediaSource::bytes(SIMPLE_SVG)).expect("embedded SVG should decode");
     let invalidation = InvalidationSignal::new();
     let budget = ResourceBudget::DEFAULT;
+    let completions = Arc::new(Mutex::new(Vec::new()));
 
     let first = document
         .texture_for(
@@ -37,6 +38,7 @@ fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
             },
             &invalidation,
             &budget,
+            &completions,
         )
         .expect("SVG rasterization should work")
         .expect("SVG should produce a texture");
@@ -48,6 +50,7 @@ fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
             },
             &invalidation,
             &budget,
+            &completions,
         )
         .expect("SVG rasterization should work")
         .expect("SVG should produce a texture");
@@ -59,6 +62,7 @@ fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
             },
             &invalidation,
             &budget,
+            &completions,
         )
         .expect("SVG rasterization should work")
         .expect("SVG should produce a texture");
@@ -76,6 +80,7 @@ fn svg_raster_request_is_clamped_to_max_dimension() {
     ))
     .expect("large SVG should decode");
     let invalidation = InvalidationSignal::new();
+    let completions = Arc::new(Mutex::new(Vec::new()));
 
     let texture = document
         .texture_for(
@@ -85,6 +90,7 @@ fn svg_raster_request_is_clamped_to_max_dimension() {
             },
             &invalidation,
             &ResourceBudget::DEFAULT,
+            &completions,
         )
         .expect("SVG rasterization should work")
         .expect("SVG should produce a texture");

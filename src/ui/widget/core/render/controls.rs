@@ -175,32 +175,30 @@ pub(crate) fn push_slider_primitives(
         clip_mask,
     });
 
-    if active_extent > Dp::ZERO {
-        let rect = if orientation.is_horizontal() {
-            Rect::new(
-                geometry.track_rect.x,
-                geometry.track_rect.y,
-                active_extent.min(geometry.track_rect.width),
-                geometry.track_rect.height,
-            )
-        } else {
-            let height = active_extent.min(geometry.track_rect.height);
-            Rect::new(
-                geometry.track_rect.x,
-                geometry.track_rect.bottom() - height,
-                geometry.track_rect.width,
-                height,
-            )
-        };
-        scene.push_shape(RenderPrimitive {
-            rect,
-            color: active_track_color.with_alpha_factor(opacity),
-            corner_radius: track_radius,
-            stroke_width: 0.0,
-            clip_rect,
-            clip_mask,
-        });
-    }
+    let active_rect = if orientation.is_horizontal() {
+        Rect::new(
+            geometry.track_rect.x,
+            geometry.track_rect.y,
+            active_extent.min(geometry.track_rect.width),
+            geometry.track_rect.height,
+        )
+    } else {
+        let height = active_extent.min(geometry.track_rect.height);
+        Rect::new(
+            geometry.track_rect.x,
+            geometry.track_rect.bottom() - height,
+            geometry.track_rect.width,
+            height,
+        )
+    };
+    scene.push_shape(RenderPrimitive {
+        rect: active_rect,
+        color: active_track_color.with_alpha_factor(opacity),
+        corner_radius: track_radius,
+        stroke_width: 0.0,
+        clip_rect,
+        clip_mask,
+    });
 
     if orientation.is_horizontal() {
         geometry.thumb_rect.x =
@@ -407,6 +405,7 @@ pub(crate) fn push_checkbox_primitives(
         radius,
         clip_rect,
         clip_mask,
+        false,
     );
     push_focus_ring_primitives(
         scene,
@@ -595,6 +594,7 @@ pub(crate) fn push_radio_primitives(
         radius,
         clip_rect,
         clip_mask,
+        false,
     );
     push_focus_ring_primitives(
         scene,

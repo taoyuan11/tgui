@@ -132,6 +132,7 @@ fn text_system_releases_swash_frame_cache() {
 fn texture_primitive(texture: std::sync::Arc<TextureFrame>) -> TexturePrimitive {
     TexturePrimitive {
         texture,
+        media_key: None,
         frame: Rect::new(0.0, 0.0, 8.0, 8.0),
         quad: None,
         uv_rect: None,

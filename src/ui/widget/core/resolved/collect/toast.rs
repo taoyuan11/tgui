@@ -391,6 +391,7 @@ fn collect_toast_card_scene<VM: 'static>(
         active_hover_popover: context.active_hover_popover,
         gpu_scroll_enabled: false,
         gpu_scroll_container: None,
+        transform_stack: context.transform_stack.clone(),
     };
 
     let root_id = resolved.collect_subtree_cache(
@@ -579,6 +580,7 @@ fn collect_toast_card_shell_scene<VM: 'static>(
         active_hover_popover: context.active_hover_popover,
         gpu_scroll_enabled: false,
         gpu_scroll_container: None,
+        transform_stack: context.transform_stack.clone(),
     };
     let root_id = resolved.collect_subtree_cache(
         &layout_root,
@@ -715,6 +717,7 @@ fn push_toast_stack_hover_region<VM: 'static>(
             rect: Rect::new(Dp::ZERO, Dp::ZERO, size.0, size.1),
             clip_rect: None,
             geometry: HitGeometry::Rect,
+            transform_chain: Default::default(),
             scope_path: Vec::new(),
             focus: None,
             interaction: HitInteraction::Widget {

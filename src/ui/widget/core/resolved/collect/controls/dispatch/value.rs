@@ -236,6 +236,7 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         active_hover_popover: context.active_hover_popover,
         gpu_scroll_enabled: false,
         gpu_scroll_container: None,
+        transform_stack: context.transform_stack.clone(),
     };
     let root_id = resolved.collect_subtree_cache(
         &layout_root,
@@ -369,9 +370,12 @@ impl<VM: 'static> ResolvedElement<VM> {
             0.0
         };
 
+        let progress_value = track_property_scope(PropertySlot::ProgressValue, || {
+            value.resolve().clamp(0.0, 1.0)
+        });
         push_progress_bar_primitives(
             visual.frame,
-            value.resolve().clamp(0.0, 1.0),
+            progress_value,
             indeterminate,
             phase,
             *show_label,
@@ -550,7 +554,8 @@ impl<VM: 'static> ResolvedElement<VM> {
             .slider_style
             .as_ref()
             .expect("slider style should be resolved for slider widgets");
-        let resolved_value = common::slider_resolve_value(value.resolve(), *min, *max, *step);
+        let raw_value = track_property_scope(PropertySlot::SliderValue, || value.resolve());
+        let resolved_value = common::slider_resolve_value(raw_value, *min, *max, *step);
         let display_value = context
             .active_slider_value
             .filter(|(widget_id, _)| *widget_id == self.id)
@@ -597,6 +602,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                transform_chain: context.transform_stack.clone(),
                 scope_path: context.focus_scope_path(),
                 focus,
                 interaction: HitInteraction::Slider {
@@ -729,6 +735,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                transform_chain: context.transform_stack.clone(),
                 scope_path: context.focus_scope_path(),
                 focus,
                 interaction: HitInteraction::SelectTrigger {
@@ -828,6 +835,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             rect: visual.frame,
             clip_rect: visual.primitive_clip,
             geometry: HitGeometry::Rect,
+            transform_chain: context.transform_stack.clone(),
             scope_path: context.focus_scope_path(),
             focus: None,
             interaction: if option_disabled {
@@ -884,7 +892,8 @@ impl<VM: 'static> ResolvedElement<VM> {
             context.units,
         );
         let focused = context.focused_input == Some(self.id);
-        let controller_revision = (!focused).then(|| controller.revision());
+        let controller_revision = (!focused)
+            .then(|| track_property_scope(PropertySlot::TextContent, || controller.revision()));
         let cached_layout = (!focused)
             .then(|| {
                 context
@@ -897,11 +906,17 @@ impl<VM: 'static> ResolvedElement<VM> {
             context
                 .focused_text_value
                 .map(Cow::Borrowed)
-                .unwrap_or_else(|| Cow::Owned(controller.text()))
+                .unwrap_or_else(|| {
+                    Cow::Owned(track_property_scope(PropertySlot::TextContent, || {
+                        controller.text()
+                    }))
+                })
         } else if let Some(override_layout) = cached_layout {
             Cow::Borrowed(override_layout.text)
         } else {
-            Cow::Owned(controller.text())
+            Cow::Owned(track_property_scope(PropertySlot::TextContent, || {
+                controller.text()
+            }))
         };
         let display_value = if resolved_value.is_empty() {
             Cow::Owned(placeholder.resolve())
@@ -944,7 +959,8 @@ impl<VM: 'static> ResolvedElement<VM> {
             context.animations,
             context.now,
             &mut computed.scene,
-            context.caret_visible && context.focused_input == Some(self.id),
+            context.focused_input == Some(self.id),
+            context.caret_visible,
             *multiline,
             auto_wrap,
             show_scrollbar,
@@ -1042,6 +1058,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                transform_chain: context.transform_stack.clone(),
                 scope_path: context.focus_scope_path(),
                 focus,
                 interaction: HitInteraction::TextInput {

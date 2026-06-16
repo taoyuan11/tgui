@@ -1,5 +1,85 @@
 use super::*;
 
+#[cfg(feature = "bench-support")]
+type TextInputSceneFingerprint = (
+    Vec<(String, Dp, Dp, Dp, Dp, Color)>,
+    Vec<(Vec<Rect>, Color, f32, Option<Rect>)>,
+    Vec<(Vec<Rect>, Color, f32, Option<Rect>)>,
+    Vec<(
+        WidgetId,
+        Rect,
+        Rect,
+        Point,
+        Point,
+        Option<Rect>,
+        Option<Rect>,
+    )>,
+);
+
+#[cfg(feature = "bench-support")]
+fn text_input_scene_fingerprint<VM>(
+    computed: &crate::ui::widget::ComputedScene<VM>,
+) -> TextInputSceneFingerprint {
+    (
+        computed
+            .scene
+            .texts
+            .iter()
+            .map(|text| {
+                (
+                    text.content.to_string(),
+                    text.frame.x,
+                    text.frame.y,
+                    text.frame.width,
+                    text.frame.height,
+                    text.color,
+                )
+            })
+            .collect(),
+        computed
+            .scene
+            .text_decorations
+            .iter()
+            .map(|decoration| {
+                (
+                    decoration.segments.iter().copied().collect(),
+                    decoration.color,
+                    decoration.stroke_width,
+                    decoration.clip_rect,
+                )
+            })
+            .collect(),
+        computed
+            .scene
+            .overlay_text_decorations
+            .iter()
+            .map(|decoration| {
+                (
+                    decoration.segments.iter().copied().collect(),
+                    decoration.color,
+                    decoration.stroke_width,
+                    decoration.clip_rect,
+                )
+            })
+            .collect(),
+        computed
+            .scroll_regions
+            .iter()
+            .map(|region| {
+                (
+                    region.id,
+                    region.content_viewport,
+                    region.content_bounds,
+                    region.gpu_base_scroll_offset,
+                    region.scroll_offset,
+                    region.vertical_track,
+                    region.vertical_thumb,
+                )
+            })
+            .collect(),
+    )
+}
+
 #[test]
 fn clicking_switch_dispatches_toggled_value() {
     let invalidation = InvalidationSignal::new();
@@ -315,4 +395,191 @@ fn textarea_edit_keeps_cached_scene_shell_for_text_input_patch() {
         .expect("computed scene should remain cached after text patch");
     assert!(cached.computed_valid);
     assert_eq!(cached.text_input_epoch, handler.text_input_epoch);
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn textarea_text_edit_with_stable_visible_lines_updates_retained_text_slots() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Textarea::<TextInputVm>::new("hi"));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    let before_counts = {
+        let _ = handler.computed_scene();
+        let cached = handler.cached_scene.as_ref().expect("cache shell");
+        (
+            cached.computed.scene.texts.len(),
+            cached.computed.scene.text_decorations.len(),
+            cached.computed.scene.overlay_text_decorations.len(),
+            cached.computed.scene.commands.len(),
+            cached.computed.scene.overlay_commands.len(),
+        )
+    };
+
+    crate::runtime::action_stats::reset();
+    assert!(handler.handle_keyboard_input(&text_key_event("a")));
+    let _ = handler.computed_scene();
+    let snapshot = crate::runtime::action_stats::snapshot();
+    let after_slot_fingerprint = {
+        let cached = handler.cached_scene.as_ref().expect("cache shell");
+        assert_eq!(
+            before_counts,
+            (
+                cached.computed.scene.texts.len(),
+                cached.computed.scene.text_decorations.len(),
+                cached.computed.scene.overlay_text_decorations.len(),
+                cached.computed.scene.commands.len(),
+                cached.computed.scene.overlay_commands.len(),
+            ),
+            "same-line textarea edit should keep primitive counts stable"
+        );
+        assert!(
+            cached
+                .computed
+                .scene
+                .texts
+                .iter()
+                .any(|primitive| primitive.content.as_ref() == "hia"),
+            "retained text slot should contain the edited textarea line"
+        );
+        text_input_scene_fingerprint(&cached.computed)
+    };
+    assert!(
+        snapshot
+            .iter()
+            .any(|(action, count)| *action == "text_input_slot_write" && *count == 1),
+        "same-line textarea edit should be written through retained text slots: {snapshot:?}"
+    );
+    assert!(
+        !snapshot
+            .iter()
+            .any(|(action, _)| *action == "text_input_scene_patch"),
+        "same-line textarea edit should not need the subtree scene patch path: {snapshot:?}"
+    );
+
+    handler.invalidate_computed_scene();
+    let after_full_fingerprint = text_input_scene_fingerprint(handler.computed_scene());
+    assert_eq!(
+        after_slot_fingerprint, after_full_fingerprint,
+        "retained textarea text slot write must match a fresh full recollect"
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn textarea_newline_edit_updates_retained_bounded_text_slots() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Textarea::<TextInputVm>::new("hi").height(dp(34.0)));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    multiline: true, ..
+                } => Some(region.rect),
+                _ => None,
+            })
+            .expect("textarea hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    let (before_text_count, before_scroll_height) = {
+        let _ = handler.computed_scene();
+        let cached = handler.cached_scene.as_ref().expect("cache shell");
+        (
+            cached.computed.scene.texts.len(),
+            cached
+                .computed
+                .scroll_regions
+                .iter()
+                .next()
+                .map(|region| region.content_bounds.height)
+                .unwrap_or(Dp::ZERO),
+        )
+    };
+
+    crate::runtime::action_stats::reset();
+    assert!(handler.handle_keyboard_input(&text_key_event("\nthere")));
+    let _ = handler.computed_scene();
+    let snapshot = crate::runtime::action_stats::snapshot();
+    let (after_text_count, after_scroll_height, after_slot_fingerprint) = {
+        let cached = handler.cached_scene.as_ref().expect("cache shell");
+        (
+            cached.computed.scene.texts.len(),
+            cached
+                .computed
+                .scroll_regions
+                .iter()
+                .next()
+                .map(|region| region.content_bounds.height)
+                .unwrap_or(Dp::ZERO),
+            text_input_scene_fingerprint(&cached.computed),
+        )
+    };
+    assert_eq!(
+        before_text_count, after_text_count,
+        "newline edit should keep the textarea's bounded visible text slots"
+    );
+    assert!(
+        snapshot
+            .iter()
+            .any(|(action, count)| *action == "text_input_slot_write" && *count == 1),
+        "newline textarea edit should be written through retained text slots: {snapshot:?}"
+    );
+    assert!(
+        !snapshot
+            .iter()
+            .any(|(action, _)| *action == "text_input_scene_patch"),
+        "newline textarea edit must not use subtree scene patch: {snapshot:?}"
+    );
+    assert!(
+        handler
+            .cached_scene
+            .as_ref()
+            .expect("cache shell")
+            .computed
+            .scene
+            .texts
+            .iter()
+            .any(|primitive| primitive.content.as_ref() == "there"),
+        "retained textarea slots should contain the newly visible line"
+    );
+    assert!(
+        after_scroll_height > before_scroll_height,
+        "newline edit should update retained textarea scroll content bounds"
+    );
+
+    handler.invalidate_computed_scene();
+    let after_full_fingerprint = text_input_scene_fingerprint(handler.computed_scene());
+    assert_eq!(
+        after_slot_fingerprint, after_full_fingerprint,
+        "retained newline textarea slot write must match a fresh full recollect"
+    );
 }

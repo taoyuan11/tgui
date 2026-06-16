@@ -37,6 +37,13 @@ impl<T: Clone> Value<T> {
             Self::Signal(signal) => signal.transition(),
         }
     }
+
+    pub(crate) fn resolve_untracked(&self) -> T {
+        match self {
+            Self::Static(value) => value.clone(),
+            Self::Signal(signal) => signal.get_untracked(),
+        }
+    }
 }
 
 impl<T: Clone + PartialEq> PartialEq for Value<T> {

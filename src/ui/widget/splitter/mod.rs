@@ -124,17 +124,16 @@ impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
             .iter()
             .map(|pane| (pane.min, pane.max))
             .collect::<Vec<_>>();
-        let sizes = normalize_sizes(splitter.sizes.resolve(), splitter.panes.len());
+        let pane_count = splitter.panes.len();
+        let sizes = splitter_sizes_value(splitter.sizes.clone(), pane_count);
         let mut children = Vec::new();
         for (index, pane) in splitter.panes.into_iter().enumerate() {
             let mut content = pane.content;
-            content.layout.grow = Value::Static(sizes[index].max(0.001));
+            content.layout.grow = splitter_pane_grow(&sizes, pane_count, index);
             children.push(content);
-            if index + 1 < sizes.len() {
+            if index + 1 < pane_count {
                 let on_resize = splitter.on_resize.clone();
-                let next_sizes =
-                    splitter_adjusted_sizes(&sizes, &constraints, index, splitter.step);
-                let reset_sizes = splitter_reset_sizes(sizes.len());
+                let reset_sizes = splitter_reset_sizes(pane_count);
                 let style = splitter.style.clone();
                 let axis = splitter.axis;
                 let handle_identity = splitter.visual.clone();
@@ -169,14 +168,22 @@ impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
                         })
                         .on_click(Command::new_with_context({
                             let on_resize = on_resize.clone();
-                            let next_sizes = next_sizes.clone();
+                            let click_sizes = sizes.clone();
+                            let constraints = constraints.clone();
+                            let step = splitter.step;
                             move |vm, context| {
                                 if let Some(command) = on_resize.as_ref() {
+                                    let next_sizes = splitter_adjusted_sizes(
+                                        &click_sizes.resolve(),
+                                        &constraints,
+                                        index,
+                                        step,
+                                    );
                                     command.execute_with_context(
                                         vm,
                                         SplitterResize {
                                             index,
-                                            sizes: next_sizes.clone(),
+                                            sizes: next_sizes,
                                         },
                                         context,
                                     );
@@ -266,6 +273,24 @@ fn normalize_sizes(mut sizes: Vec<f32>, count: usize) -> Vec<f32> {
         vec![1.0 / count as f32; count]
     } else {
         sizes.into_iter().map(|value| value / total).collect()
+    }
+}
+
+fn splitter_sizes_value(sizes: Value<Vec<f32>>, count: usize) -> Value<Vec<f32>> {
+    match sizes {
+        Value::Static(sizes) => Value::Static(normalize_sizes(sizes, count)),
+        Value::Signal(signal) => {
+            Value::Signal(signal.project(move |sizes| normalize_sizes(sizes.clone(), count)))
+        }
+    }
+}
+
+fn splitter_pane_grow(sizes: &Value<Vec<f32>>, count: usize, index: usize) -> Value<f32> {
+    match sizes {
+        Value::Static(sizes) => Value::Static(sizes[index].max(0.001)),
+        Value::Signal(signal) => {
+            Value::Signal(signal.project(move |sizes| sizes[index.min(count - 1)].max(0.001)))
+        }
     }
 }
 

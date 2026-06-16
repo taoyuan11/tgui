@@ -203,6 +203,7 @@ fn default_select_style(
     )
 }
 
+mod binding_children;
 mod binding_scope_tests;
 mod button_switch_slider_tests;
 mod canvas_tests;

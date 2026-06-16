@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::dialog::Dialogs;
@@ -15,6 +16,7 @@ pub struct CommandContext<T> {
     tasks: Tasks<T>,
     window: WindowControl,
     log: Log,
+    rebuild_requested: Arc<AtomicBool>,
 }
 
 impl<T> Clone for CommandContext<T> {
@@ -25,6 +27,7 @@ impl<T> Clone for CommandContext<T> {
             tasks: self.tasks.clone(),
             window: self.window.clone(),
             log: self.log.clone(),
+            rebuild_requested: self.rebuild_requested.clone(),
         }
     }
 }
@@ -70,12 +73,23 @@ impl<T: 'static> CommandContext<T> {
         self.log.clone()
     }
 
+    /// Request an explicit widget tree rebuild after the current command finishes.
+    ///
+    /// Strict retained-reactive trees do not implicitly add or remove widgets when a
+    /// `Signal` changes. Use this when a command intentionally changed view-model
+    /// data that affects structure, intrinsic layout, or primitive counts outside
+    /// retained slots.
+    pub fn request_rebuild(&self) {
+        self.rebuild_requested.store(true, Ordering::SeqCst);
+    }
+
     pub(crate) fn new(
         dialogs: Dialogs<T>,
         notifications: Notifications<T>,
         tasks: Tasks<T>,
         window: WindowControl,
         log: Log,
+        rebuild_requested: Arc<AtomicBool>,
     ) -> Self {
         Self {
             dialogs,
@@ -83,6 +97,7 @@ impl<T: 'static> CommandContext<T> {
             tasks,
             window,
             log,
+            rebuild_requested,
         }
     }
 
@@ -93,7 +108,12 @@ impl<T: 'static> CommandContext<T> {
             Tasks::detached(),
             WindowControl::default(),
             Log::default(),
+            Arc::new(AtomicBool::new(false)),
         )
+    }
+
+    pub(crate) fn take_rebuild_request(&self) -> bool {
+        self.rebuild_requested.swap(false, Ordering::SeqCst)
     }
 
     pub(crate) fn scope<ChildVm: 'static>(
@@ -108,6 +128,7 @@ impl<T: 'static> CommandContext<T> {
             self.tasks.scope(task_selector),
             self.window.clone(),
             self.log.clone(),
+            self.rebuild_requested.clone(),
         )
     }
 }

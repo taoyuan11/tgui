@@ -65,7 +65,7 @@ pub(crate) const NAV_ITEMS: [NavigationItem; 6] = [
     },
 ];
 
-pub(crate) fn sidebar(_app: &App, current: DemoPage) -> Element<App> {
+pub(crate) fn sidebar(app: &App) -> Element<App> {
     let mut items: Vec<Element<App>> = Vec::new();
 
     items.push(
@@ -77,7 +77,7 @@ pub(crate) fn sidebar(_app: &App, current: DemoPage) -> Element<App> {
     );
 
     for item in NAV_ITEMS {
-        items.push(nav_item(item, current));
+        items.push(nav_item(app, item));
     }
 
     Flex::vertical()
@@ -90,17 +90,24 @@ pub(crate) fn sidebar(_app: &App, current: DemoPage) -> Element<App> {
         .into()
 }
 
-fn nav_item(item: NavigationItem, current: DemoPage) -> Element<App> {
+fn nav_item(app: &App, item: NavigationItem) -> Element<App> {
     let page = item.page;
-    let active = current == page;
+    let active = app.current_page.signal().map(move |current| current == page);
     let accent = item.accent;
+    let active_for_item = active.clone();
+    let active_for_badge = active.clone();
+    let active_for_badge_text = active.clone();
+    let active_for_title = active.clone();
+    let active_for_description = active;
 
     Stack::new()
         .width(pct(100.0))
         .padding(Insets::symmetric(dp(12.0), dp(10.0)))
         .cursor(CursorStyle::Pointer)
-        .style_full(move |ctx| styles::nav_item_style(ctx, active, accent))
-        .on_click(Command::new(move |app: &mut App| app.show_page(page)))
+        .style_full(move |ctx| styles::nav_item_style(ctx, active_for_item.get(), accent))
+        .on_click(Command::new_with_context(move |app: &mut App, ctx| {
+            app.show_page_with_rebuild(page, ctx);
+        }))
         .child(
             Flex::horizontal()
                 .gap(dp(10.0))
@@ -109,10 +116,13 @@ fn nav_item(item: NavigationItem, current: DemoPage) -> Element<App> {
                     Stack::new()
                         .size(dp(34.0), dp(34.0))
                         .center()
-                        .style_full(move |ctx| styles::nav_badge_style(ctx, active, accent))
+                        .style_full(move |ctx| {
+                            styles::nav_badge_style(ctx, active_for_badge.get(), accent)
+                        })
                         .child(
-                            Text::new(item.badge)
-                                .style_full(move |ctx| styles::nav_badge_text_style(ctx, active)),
+                            Text::new(item.badge).style_full(move |ctx| {
+                                styles::nav_badge_text_style(ctx, active_for_badge_text.get())
+                            }),
                         ),
                 )
                 .child(
@@ -121,11 +131,17 @@ fn nav_item(item: NavigationItem, current: DemoPage) -> Element<App> {
                         .gap(dp(3.0))
                         .child(
                             Text::new(item.title)
-                                .style_full(move |ctx| styles::nav_title_style(ctx, active)),
+                                .style_full(move |ctx| {
+                                    styles::nav_title_style(ctx, active_for_title.get())
+                                }),
                         )
                         .child(
-                            Text::new(item.description)
-                                .style_full(move |ctx| styles::nav_description_style(ctx, active)),
+                            Text::new(item.description).style_full(move |ctx| {
+                                styles::nav_description_style(
+                                    ctx,
+                                    active_for_description.get(),
+                                )
+                            }),
                         ),
                 ),
         )

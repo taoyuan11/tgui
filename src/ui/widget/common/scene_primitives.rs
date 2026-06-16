@@ -4,6 +4,8 @@ use crate::video::VideoController;
 use smallvec::SmallVec;
 use std::sync::Arc;
 
+pub(crate) type TransformChain = SmallVec<[WidgetId; 2]>;
+
 /// A primitive whose bounding `rect` lies entirely outside its own `clip_rect`
 /// is scissored to zero pixels by the renderer (see `Renderer::scissor_rect`),
 /// so dropping it from the scene produces identical output. Returning `true`
@@ -27,6 +29,48 @@ pub struct RenderPrimitive {
     pub clip_mask: Option<ClipMask>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ShapePrimitiveSlot {
+    pub(crate) shape_index: usize,
+    pub(crate) command_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BackdropBlurPrimitiveSlot {
+    pub(crate) backdrop_blur_index: usize,
+    pub(crate) command_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TextPrimitiveSlot {
+    pub(crate) text_index: usize,
+    pub(crate) command_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TextDecorationPrimitiveSlot {
+    pub(crate) text_decoration_index: usize,
+    pub(crate) command_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct OverlayTextDecorationPrimitiveSlot {
+    pub(crate) text_decoration_index: usize,
+    pub(crate) command_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TexturePrimitiveSlot {
+    pub(crate) texture_index: usize,
+    pub(crate) command_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BrushPrimitiveSlot {
+    pub(crate) brush_index: usize,
+    pub(crate) command_index: usize,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct BrushPrimitive {
     pub rect: Rect,
@@ -45,7 +89,7 @@ pub struct BackdropBlurPrimitive {
     pub clip_mask: Option<ClipMask>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasTextSpanPrimitive {
     pub content: Arc<str>,
     pub font_family: Option<Arc<str>>,
@@ -56,7 +100,7 @@ pub struct CanvasTextSpanPrimitive {
     pub letter_spacing: f32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TextPrimitive {
     pub content: Arc<str>,
     pub rich_spans: Option<Arc<[CanvasTextSpanPrimitive]>>,
@@ -77,9 +121,20 @@ pub struct TextPrimitive {
     pub clip_mask: Option<ClipMask>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextDecorationPrimitive {
+    pub segments: Arc<[Rect]>,
+    pub color: Color,
+    pub corner_radius: f32,
+    pub stroke_width: f32,
+    pub clip_rect: Option<Rect>,
+    pub clip_mask: Option<ClipMask>,
+}
+
 #[derive(Clone)]
 pub struct TexturePrimitive {
     pub texture: Arc<TextureFrame>,
+    pub media_key: Option<crate::media::MediaTextureKey>,
     pub frame: Rect,
     pub quad: Option<[Point; 4]>,
     pub uv_rect: Option<Rect>,
@@ -155,6 +210,7 @@ pub(crate) enum RenderCommand {
     #[cfg(feature = "video")]
     VideoTexture(VideoTexturePrimitive),
     Text(Box<TextPrimitive>),
+    TextDecoration(TextDecorationPrimitive),
     Mesh(MeshPrimitive),
 }
 
@@ -169,17 +225,22 @@ pub struct ScenePrimitives {
     #[cfg(feature = "video")]
     pub video_textures: SmallVec<[VideoTexturePrimitive; 1]>,
     pub texts: SmallVec<[TextPrimitive; 1]>,
+    pub text_decorations: SmallVec<[TextDecorationPrimitive; 1]>,
     pub overlay_shapes: SmallVec<[RenderPrimitive; 1]>,
     pub overlay_textures: SmallVec<[TexturePrimitive; 1]>,
     #[allow(dead_code)]
     pub overlay_meshes: SmallVec<[MeshPrimitive; 1]>,
     #[allow(dead_code)]
     pub overlay_texts: SmallVec<[TextPrimitive; 1]>,
+    pub overlay_text_decorations: SmallVec<[TextDecorationPrimitive; 1]>,
     pub(crate) commands: SmallVec<[RenderCommand; 1]>,
     pub(crate) overlay_commands: SmallVec<[RenderCommand; 1]>,
     pub(crate) command_gpu_scroll_containers: SmallVec<[Option<WidgetId>; 1]>,
     pub(crate) overlay_command_gpu_scroll_containers: SmallVec<[Option<WidgetId>; 1]>,
+    pub(crate) command_transform_chains: SmallVec<[TransformChain; 1]>,
+    pub(crate) overlay_command_transform_chains: SmallVec<[TransformChain; 1]>,
     active_gpu_scroll_container: Option<WidgetId>,
+    active_transform_chain: TransformChain,
 }
 
 impl ScenePrimitives {
@@ -208,6 +269,19 @@ impl ScenePrimitives {
         &self.overlay_command_gpu_scroll_containers
     }
 
+    pub(crate) fn command_transform_chains(&self) -> &[TransformChain] {
+        &self.command_transform_chains
+    }
+
+    pub(crate) fn overlay_command_transform_chains(&self) -> &[TransformChain] {
+        &self.overlay_command_transform_chains
+    }
+
+    pub(crate) fn set_active_transform_chain(&mut self, chain: &[WidgetId]) {
+        self.active_transform_chain.clear();
+        self.active_transform_chain.extend(chain.iter().copied());
+    }
+
     fn should_cull_clipped_out(&self) -> bool {
         self.active_gpu_scroll_container.is_none()
     }
@@ -216,12 +290,16 @@ impl ScenePrimitives {
         self.commands.push(command);
         self.command_gpu_scroll_containers
             .push(self.active_gpu_scroll_container);
+        self.command_transform_chains
+            .push(self.active_transform_chain.clone());
     }
 
     fn push_overlay_command(&mut self, command: RenderCommand) {
         self.overlay_commands.push(command);
         self.overlay_command_gpu_scroll_containers
             .push(self.active_gpu_scroll_container);
+        self.overlay_command_transform_chains
+            .push(self.active_transform_chain.clone());
     }
 
     pub(crate) fn delta_since(&self, base: &ScenePrimitives) -> ScenePrimitives {
@@ -260,6 +338,12 @@ impl ScenePrimitives {
         delta
             .texts
             .extend(self.texts.iter().skip(base.texts.len()).cloned());
+        delta.text_decorations.extend(
+            self.text_decorations
+                .iter()
+                .skip(base.text_decorations.len())
+                .cloned(),
+        );
         delta.overlay_shapes.extend(
             self.overlay_shapes
                 .iter()
@@ -284,6 +368,12 @@ impl ScenePrimitives {
                 .skip(base.overlay_texts.len())
                 .cloned(),
         );
+        delta.overlay_text_decorations.extend(
+            self.overlay_text_decorations
+                .iter()
+                .skip(base.overlay_text_decorations.len())
+                .cloned(),
+        );
         delta
             .commands
             .extend(self.commands.iter().skip(base.commands.len()).cloned());
@@ -306,6 +396,18 @@ impl ScenePrimitives {
                     .skip(base.overlay_command_gpu_scroll_containers.len())
                     .copied(),
             );
+            delta.command_transform_chains.extend(
+                self.command_transform_chains
+                    .iter()
+                    .skip(base.command_transform_chains.len())
+                    .cloned(),
+            );
+            delta.overlay_command_transform_chains.extend(
+                self.overlay_command_transform_chains
+                    .iter()
+                    .skip(base.overlay_command_transform_chains.len())
+                    .cloned(),
+            );
         }
         delta
     }
@@ -320,6 +422,7 @@ impl ScenePrimitives {
             #[cfg(feature = "video")]
             RenderCommand::VideoTexture(primitive) => self.push_video_texture(primitive),
             RenderCommand::Text(primitive) => self.push_text(*primitive),
+            RenderCommand::TextDecoration(primitive) => self.push_text_decoration(primitive),
             RenderCommand::Mesh(primitive) => self.push_mesh(primitive),
         }
     }
@@ -386,6 +489,22 @@ impl ScenePrimitives {
         self.push_command(RenderCommand::Text(Box::new(primitive)));
     }
 
+    pub(crate) fn push_text_decoration(&mut self, primitive: TextDecorationPrimitive) {
+        if primitive.segments.is_empty() {
+            return;
+        }
+        if self.should_cull_clipped_out()
+            && primitive
+                .segments
+                .iter()
+                .all(|rect| clipped_out(*rect, primitive.clip_rect))
+        {
+            return;
+        }
+        self.text_decorations.push(primitive.clone());
+        self.push_command(RenderCommand::TextDecoration(primitive));
+    }
+
     pub(crate) fn push_overlay_shape(&mut self, primitive: RenderPrimitive) {
         self.overlay_shapes.push(primitive);
         self.push_overlay_command(RenderCommand::Shape(primitive));
@@ -409,6 +528,614 @@ impl ScenePrimitives {
         self.push_overlay_command(RenderCommand::Text(Box::new(primitive)));
     }
 
+    pub(crate) fn push_overlay_text_decoration(&mut self, primitive: TextDecorationPrimitive) {
+        if primitive.segments.is_empty() {
+            return;
+        }
+        self.overlay_text_decorations.push(primitive.clone());
+        self.push_overlay_command(RenderCommand::TextDecoration(primitive));
+    }
+
+    pub(crate) fn matching_shape_slots(
+        &self,
+        mut matches: impl FnMut(&RenderPrimitive) -> bool,
+    ) -> SmallVec<[ShapePrimitiveSlot; 4]> {
+        let mut slots = SmallVec::new();
+        let mut shape_index = 0usize;
+        for (command_index, command) in self.commands.iter().enumerate() {
+            if let RenderCommand::Shape(primitive) = command {
+                if matches(primitive) {
+                    slots.push(ShapePrimitiveSlot {
+                        shape_index,
+                        command_index,
+                    });
+                }
+                shape_index += 1;
+            }
+        }
+        debug_assert_eq!(
+            shape_index,
+            self.shapes.len(),
+            "shape stream and command stream should remain in lockstep"
+        );
+        slots
+    }
+
+    pub(crate) fn matching_brush_slots(
+        &self,
+        mut matches: impl FnMut(&BrushPrimitive) -> bool,
+    ) -> SmallVec<[BrushPrimitiveSlot; 2]> {
+        let mut slots = SmallVec::new();
+        let mut brush_index = 0usize;
+        for (command_index, command) in self.commands.iter().enumerate() {
+            if let RenderCommand::Brush(primitive) = command {
+                if matches(primitive) {
+                    slots.push(BrushPrimitiveSlot {
+                        brush_index,
+                        command_index,
+                    });
+                }
+                brush_index += 1;
+            }
+        }
+        debug_assert_eq!(
+            brush_index,
+            self.brushes.len(),
+            "brush stream and command stream should remain in lockstep"
+        );
+        slots
+    }
+
+    pub(crate) fn matching_backdrop_blur_slots(
+        &self,
+        mut matches: impl FnMut(&BackdropBlurPrimitive) -> bool,
+    ) -> SmallVec<[BackdropBlurPrimitiveSlot; 2]> {
+        let mut slots = SmallVec::new();
+        let mut backdrop_blur_index = 0usize;
+        for (command_index, command) in self.commands.iter().enumerate() {
+            if let RenderCommand::BackdropBlur(primitive) = command {
+                if matches(primitive) {
+                    slots.push(BackdropBlurPrimitiveSlot {
+                        backdrop_blur_index,
+                        command_index,
+                    });
+                }
+                backdrop_blur_index += 1;
+            }
+        }
+        debug_assert_eq!(
+            backdrop_blur_index,
+            self.backdrop_blurs.len(),
+            "backdrop blur stream and command stream should remain in lockstep"
+        );
+        slots
+    }
+
+    pub(crate) fn matching_text_slots(
+        &self,
+        mut matches: impl FnMut(&TextPrimitive) -> bool,
+    ) -> SmallVec<[TextPrimitiveSlot; 2]> {
+        let mut slots = SmallVec::new();
+        let mut text_index = 0usize;
+        for (command_index, command) in self.commands.iter().enumerate() {
+            if let RenderCommand::Text(primitive) = command {
+                if matches(primitive) {
+                    slots.push(TextPrimitiveSlot {
+                        text_index,
+                        command_index,
+                    });
+                }
+                text_index += 1;
+            }
+        }
+        debug_assert_eq!(
+            text_index,
+            self.texts.len(),
+            "text stream and command stream should remain in lockstep"
+        );
+        slots
+    }
+
+    pub(crate) fn matching_text_decoration_slots(
+        &self,
+        mut matches: impl FnMut(&TextDecorationPrimitive) -> bool,
+    ) -> SmallVec<[TextDecorationPrimitiveSlot; 2]> {
+        let mut slots = SmallVec::new();
+        let mut text_decoration_index = 0usize;
+        for (command_index, command) in self.commands.iter().enumerate() {
+            if let RenderCommand::TextDecoration(primitive) = command {
+                if matches(primitive) {
+                    slots.push(TextDecorationPrimitiveSlot {
+                        text_decoration_index,
+                        command_index,
+                    });
+                }
+                text_decoration_index += 1;
+            }
+        }
+        debug_assert_eq!(
+            text_decoration_index,
+            self.text_decorations.len(),
+            "text decoration stream and command stream should remain in lockstep"
+        );
+        slots
+    }
+
+    pub(crate) fn matching_overlay_text_decoration_slots(
+        &self,
+        mut matches: impl FnMut(&TextDecorationPrimitive) -> bool,
+    ) -> SmallVec<[OverlayTextDecorationPrimitiveSlot; 2]> {
+        let mut slots = SmallVec::new();
+        let mut text_decoration_index = 0usize;
+        for (command_index, command) in self.overlay_commands.iter().enumerate() {
+            if let RenderCommand::TextDecoration(primitive) = command {
+                if matches(primitive) {
+                    slots.push(OverlayTextDecorationPrimitiveSlot {
+                        text_decoration_index,
+                        command_index,
+                    });
+                }
+                text_decoration_index += 1;
+            }
+        }
+        debug_assert_eq!(
+            text_decoration_index,
+            self.overlay_text_decorations.len(),
+            "overlay text decoration stream and command stream should remain in lockstep"
+        );
+        slots
+    }
+
+    pub(crate) fn matching_texture_slots(
+        &self,
+        mut matches: impl FnMut(&TexturePrimitive) -> bool,
+    ) -> SmallVec<[TexturePrimitiveSlot; 2]> {
+        let mut slots = SmallVec::new();
+        let mut texture_index = 0usize;
+        for (command_index, command) in self.commands.iter().enumerate() {
+            if let RenderCommand::Texture(primitive) = command {
+                if matches(primitive) {
+                    slots.push(TexturePrimitiveSlot {
+                        texture_index,
+                        command_index,
+                    });
+                }
+                texture_index += 1;
+            }
+        }
+        debug_assert_eq!(
+            texture_index,
+            self.textures.len(),
+            "texture stream and command stream should remain in lockstep"
+        );
+        slots
+    }
+
+    pub(crate) fn can_write_backdrop_blur_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: BackdropBlurPrimitiveSlot,
+    ) -> bool {
+        let Some(backdrop_blur_index) = offset.backdrop_blurs.checked_add(slot.backdrop_blur_index)
+        else {
+            return false;
+        };
+        let Some(command_index) = offset.commands.checked_add(slot.command_index) else {
+            return false;
+        };
+        self.backdrop_blurs.get(backdrop_blur_index).is_some()
+            && matches!(
+                self.commands.get(command_index),
+                Some(RenderCommand::BackdropBlur(_))
+            )
+    }
+
+    pub(crate) fn write_backdrop_blur_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: BackdropBlurPrimitiveSlot,
+        primitive: BackdropBlurPrimitive,
+    ) -> bool {
+        if !self.can_write_backdrop_blur_slot(offset, slot) {
+            return false;
+        }
+        let backdrop_blur_index = offset.backdrop_blurs + slot.backdrop_blur_index;
+        let command_index = offset.commands + slot.command_index;
+        self.backdrop_blurs[backdrop_blur_index] = primitive;
+        match &mut self.commands[command_index] {
+            RenderCommand::BackdropBlur(target) => {
+                *target = primitive;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn can_write_shape_color_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: ShapePrimitiveSlot,
+    ) -> bool {
+        let Some(shape_index) = offset.shapes.checked_add(slot.shape_index) else {
+            return false;
+        };
+        let Some(command_index) = offset.commands.checked_add(slot.command_index) else {
+            return false;
+        };
+        self.shapes.get(shape_index).is_some()
+            && matches!(
+                self.commands.get(command_index),
+                Some(RenderCommand::Shape(_))
+            )
+    }
+
+    pub(crate) fn write_shape_color_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: ShapePrimitiveSlot,
+        color: Color,
+    ) -> bool {
+        if !self.can_write_shape_color_slot(offset, slot) {
+            return false;
+        }
+        let shape_index = offset.shapes + slot.shape_index;
+        let command_index = offset.commands + slot.command_index;
+        self.shapes[shape_index].color = color;
+        match &mut self.commands[command_index] {
+            RenderCommand::Shape(primitive) => {
+                primitive.color = color;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn can_write_brush_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: BrushPrimitiveSlot,
+    ) -> bool {
+        let Some(brush_index) = offset.brushes.checked_add(slot.brush_index) else {
+            return false;
+        };
+        let Some(command_index) = offset.commands.checked_add(slot.command_index) else {
+            return false;
+        };
+        self.brushes.get(brush_index).is_some()
+            && matches!(
+                self.commands.get(command_index),
+                Some(RenderCommand::Brush(_))
+            )
+    }
+
+    pub(crate) fn write_brush_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: BrushPrimitiveSlot,
+        primitive: BrushPrimitive,
+    ) -> bool {
+        if !self.can_write_brush_slot(offset, slot) {
+            return false;
+        }
+        let brush_index = offset.brushes + slot.brush_index;
+        let command_index = offset.commands + slot.command_index;
+        self.brushes[brush_index] = primitive.clone();
+        match &mut self.commands[command_index] {
+            RenderCommand::Brush(target) => {
+                *target = primitive;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn write_shape_rect_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: ShapePrimitiveSlot,
+        rect: Rect,
+    ) -> bool {
+        if !self.can_write_shape_color_slot(offset, slot) {
+            return false;
+        }
+        let shape_index = offset.shapes + slot.shape_index;
+        let command_index = offset.commands + slot.command_index;
+        self.shapes[shape_index].rect = rect;
+        match &mut self.commands[command_index] {
+            RenderCommand::Shape(primitive) => {
+                primitive.rect = rect;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn write_shape_corner_radius_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: ShapePrimitiveSlot,
+        corner_radius: f32,
+    ) -> bool {
+        if !self.can_write_shape_color_slot(offset, slot) {
+            return false;
+        }
+        let shape_index = offset.shapes + slot.shape_index;
+        let command_index = offset.commands + slot.command_index;
+        self.shapes[shape_index].corner_radius = corner_radius;
+        match &mut self.commands[command_index] {
+            RenderCommand::Shape(primitive) => {
+                primitive.corner_radius = corner_radius;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn write_shape_stroke_width_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: ShapePrimitiveSlot,
+        stroke_width: f32,
+    ) -> bool {
+        if !self.can_write_shape_color_slot(offset, slot) {
+            return false;
+        }
+        let shape_index = offset.shapes + slot.shape_index;
+        let command_index = offset.commands + slot.command_index;
+        self.shapes[shape_index].stroke_width = stroke_width;
+        match &mut self.commands[command_index] {
+            RenderCommand::Shape(primitive) => {
+                primitive.stroke_width = stroke_width;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn can_write_text_color_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: TextPrimitiveSlot,
+    ) -> bool {
+        let Some(text_index) = offset.texts.checked_add(slot.text_index) else {
+            return false;
+        };
+        let Some(command_index) = offset.commands.checked_add(slot.command_index) else {
+            return false;
+        };
+        self.texts.get(text_index).is_some()
+            && matches!(
+                self.commands.get(command_index),
+                Some(RenderCommand::Text(_))
+            )
+    }
+
+    pub(crate) fn write_text_color_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: TextPrimitiveSlot,
+        color: Color,
+    ) -> bool {
+        if !self.can_write_text_color_slot(offset, slot) {
+            return false;
+        }
+        let text_index = offset.texts + slot.text_index;
+        let command_index = offset.commands + slot.command_index;
+        self.texts[text_index].color = color;
+        match &mut self.commands[command_index] {
+            RenderCommand::Text(primitive) => {
+                primitive.color = color;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn write_text_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: TextPrimitiveSlot,
+        primitive: TextPrimitive,
+    ) -> bool {
+        if !self.can_write_text_color_slot(offset, slot) {
+            return false;
+        }
+        let text_index = offset.texts + slot.text_index;
+        let command_index = offset.commands + slot.command_index;
+        self.texts[text_index] = primitive.clone();
+        match &mut self.commands[command_index] {
+            RenderCommand::Text(target) => {
+                **target = primitive;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn write_text_content_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: TextPrimitiveSlot,
+        content: Arc<str>,
+        font_family: Option<Arc<str>>,
+    ) -> bool {
+        if !self.can_write_text_color_slot(offset, slot) {
+            return false;
+        }
+        let text_index = offset.texts + slot.text_index;
+        let command_index = offset.commands + slot.command_index;
+        self.texts[text_index].content = content.clone();
+        self.texts[text_index].font_family = font_family.clone();
+        match &mut self.commands[command_index] {
+            RenderCommand::Text(primitive) => {
+                primitive.content = content;
+                primitive.font_family = font_family;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn can_write_text_decoration_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: TextDecorationPrimitiveSlot,
+    ) -> bool {
+        let Some(text_decoration_index) = offset
+            .text_decorations
+            .checked_add(slot.text_decoration_index)
+        else {
+            return false;
+        };
+        let Some(command_index) = offset.commands.checked_add(slot.command_index) else {
+            return false;
+        };
+        self.text_decorations.get(text_decoration_index).is_some()
+            && matches!(
+                self.commands.get(command_index),
+                Some(RenderCommand::TextDecoration(_))
+            )
+    }
+
+    pub(crate) fn write_text_decoration_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: TextDecorationPrimitiveSlot,
+        primitive: TextDecorationPrimitive,
+    ) -> bool {
+        if !self.can_write_text_decoration_slot(offset, slot) {
+            return false;
+        }
+        let text_decoration_index = offset.text_decorations + slot.text_decoration_index;
+        let command_index = offset.commands + slot.command_index;
+        self.text_decorations[text_decoration_index] = primitive.clone();
+        match &mut self.commands[command_index] {
+            RenderCommand::TextDecoration(target) => {
+                *target = primitive;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn can_write_overlay_text_decoration_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: OverlayTextDecorationPrimitiveSlot,
+    ) -> bool {
+        let Some(text_decoration_index) = offset
+            .overlay_text_decorations
+            .checked_add(slot.text_decoration_index)
+        else {
+            return false;
+        };
+        let Some(command_index) = offset.overlay_commands.checked_add(slot.command_index) else {
+            return false;
+        };
+        self.overlay_text_decorations
+            .get(text_decoration_index)
+            .is_some()
+            && matches!(
+                self.overlay_commands.get(command_index),
+                Some(RenderCommand::TextDecoration(_))
+            )
+    }
+
+    pub(crate) fn write_overlay_text_decoration_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: OverlayTextDecorationPrimitiveSlot,
+        primitive: TextDecorationPrimitive,
+    ) -> bool {
+        if !self.can_write_overlay_text_decoration_slot(offset, slot) {
+            return false;
+        }
+        let text_decoration_index = offset.overlay_text_decorations + slot.text_decoration_index;
+        let command_index = offset.overlay_commands + slot.command_index;
+        self.overlay_text_decorations[text_decoration_index] = primitive.clone();
+        match &mut self.overlay_commands[command_index] {
+            RenderCommand::TextDecoration(target) => {
+                *target = primitive;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn can_write_texture_opacity_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: TexturePrimitiveSlot,
+    ) -> bool {
+        let Some(texture_index) = offset.textures.checked_add(slot.texture_index) else {
+            return false;
+        };
+        let Some(command_index) = offset.commands.checked_add(slot.command_index) else {
+            return false;
+        };
+        self.textures.get(texture_index).is_some()
+            && matches!(
+                self.commands.get(command_index),
+                Some(RenderCommand::Texture(_))
+            )
+    }
+
+    pub(crate) fn texture_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: TexturePrimitiveSlot,
+    ) -> Option<&TexturePrimitive> {
+        let texture_index = offset.textures.checked_add(slot.texture_index)?;
+        let command_index = offset.commands.checked_add(slot.command_index)?;
+        let texture = self.textures.get(texture_index)?;
+        match self.commands.get(command_index) {
+            Some(RenderCommand::Texture(_)) => Some(texture),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn write_texture_opacity_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: TexturePrimitiveSlot,
+        opacity: f32,
+    ) -> bool {
+        if !self.can_write_texture_opacity_slot(offset, slot) {
+            return false;
+        }
+        let texture_index = offset.textures + slot.texture_index;
+        let command_index = offset.commands + slot.command_index;
+        self.textures[texture_index].opacity = opacity;
+        match &mut self.commands[command_index] {
+            RenderCommand::Texture(primitive) => {
+                primitive.opacity = opacity;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn write_texture_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: TexturePrimitiveSlot,
+        primitive: TexturePrimitive,
+    ) -> bool {
+        if !self.can_write_texture_opacity_slot(offset, slot) {
+            return false;
+        }
+        let texture_index = offset.textures + slot.texture_index;
+        let command_index = offset.commands + slot.command_index;
+        self.textures[texture_index] = primitive.clone();
+        match &mut self.commands[command_index] {
+            RenderCommand::Texture(target) => {
+                *target = primitive;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn extend(&mut self, other: &ScenePrimitives) {
         self.backdrop_blurs
             .extend(other.backdrop_blurs.iter().copied());
@@ -422,6 +1149,8 @@ impl ScenePrimitives {
         self.video_textures
             .extend(other.video_textures.iter().cloned());
         self.texts.extend(other.texts.iter().cloned());
+        self.text_decorations
+            .extend(other.text_decorations.iter().cloned());
         self.overlay_shapes
             .extend(other.overlay_shapes.iter().copied());
         self.overlay_textures
@@ -430,6 +1159,8 @@ impl ScenePrimitives {
             .extend(other.overlay_meshes.iter().cloned());
         self.overlay_texts
             .extend(other.overlay_texts.iter().cloned());
+        self.overlay_text_decorations
+            .extend(other.overlay_text_decorations.iter().cloned());
         self.commands.extend(other.commands.iter().cloned());
         self.overlay_commands
             .extend(other.overlay_commands.iter().cloned());
@@ -438,6 +1169,10 @@ impl ScenePrimitives {
                 .extend(other.command_gpu_scroll_containers.iter().copied());
             self.overlay_command_gpu_scroll_containers
                 .extend(other.overlay_command_gpu_scroll_containers.iter().copied());
+            self.command_transform_chains
+                .extend(other.command_transform_chains.iter().cloned());
+            self.overlay_command_transform_chains
+                .extend(other.overlay_command_transform_chains.iter().cloned());
         }
     }
 
@@ -455,11 +1190,13 @@ impl ScenePrimitives {
             #[cfg(feature = "video")]
             video_textures: self.video_textures.len(),
             texts: self.texts.len(),
+            text_decorations: self.text_decorations.len(),
             commands: self.commands.len(),
             overlay_shapes: self.overlay_shapes.len(),
             overlay_textures: self.overlay_textures.len(),
             overlay_meshes: self.overlay_meshes.len(),
             overlay_texts: self.overlay_texts.len(),
+            overlay_text_decorations: self.overlay_text_decorations.len(),
             overlay_commands: self.overlay_commands.len(),
         }
     }
@@ -513,11 +1250,21 @@ impl ScenePrimitives {
                 }
             }
             && overwrite(&mut self.texts, offset.texts, &chunk.texts)
+            && overwrite(
+                &mut self.text_decorations,
+                offset.text_decorations,
+                &chunk.text_decorations,
+            )
             && overwrite(&mut self.commands, offset.commands, &chunk.commands)
             && overwrite(
                 &mut self.command_gpu_scroll_containers,
                 offset.commands,
                 &chunk.command_gpu_scroll_containers,
+            )
+            && overwrite(
+                &mut self.command_transform_chains,
+                offset.commands,
+                &chunk.command_transform_chains,
             )
     }
 }
@@ -535,11 +1282,13 @@ pub(crate) struct SceneCounts {
     #[cfg(feature = "video")]
     pub video_textures: usize,
     pub texts: usize,
+    pub text_decorations: usize,
     pub commands: usize,
     pub overlay_shapes: usize,
     pub overlay_textures: usize,
     pub overlay_meshes: usize,
     pub overlay_texts: usize,
+    pub overlay_text_decorations: usize,
     pub overlay_commands: usize,
 }
 
@@ -557,11 +1306,13 @@ impl SceneCounts {
             self.video_textures += other.video_textures;
         }
         self.texts += other.texts;
+        self.text_decorations += other.text_decorations;
         self.commands += other.commands;
         self.overlay_shapes += other.overlay_shapes;
         self.overlay_textures += other.overlay_textures;
         self.overlay_meshes += other.overlay_meshes;
         self.overlay_texts += other.overlay_texts;
+        self.overlay_text_decorations += other.overlay_text_decorations;
         self.overlay_commands += other.overlay_commands;
     }
 
@@ -572,6 +1323,7 @@ impl SceneCounts {
             && self.overlay_textures == 0
             && self.overlay_meshes == 0
             && self.overlay_texts == 0
+            && self.overlay_text_decorations == 0
             && self.overlay_commands == 0
     }
 }

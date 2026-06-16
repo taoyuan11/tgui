@@ -14,7 +14,7 @@ fn hover_path_reuses_cached_computed_scene() {
             invalidation.clone(),
         )
     };
-    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child(child));
+    let tree = WidgetTree::new_legacy(Flex::new(Axis::Vertical).dynamic_child(child));
     let mut handler = test_handler(Some(tree), invalidation);
     handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
 

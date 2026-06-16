@@ -52,6 +52,9 @@ fn gpu_scroll_command_supported(
         crate::ui::widget::RenderCommand::Text(primitive) => {
             gpu_scroll_clip_supported(primitive.clip_rect, region)
         }
+        crate::ui::widget::RenderCommand::TextDecoration(primitive) => {
+            gpu_scroll_clip_supported(primitive.clip_rect, region)
+        }
         crate::ui::widget::RenderCommand::Mesh(primitive) => {
             gpu_scroll_clip_supported(primitive.clip_rect, region)
         }
@@ -492,12 +495,27 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             focused_text_state,
             caret_visible,
             cache_mismatch,
-        ) = if let Some(cached) = self.cached_scene.as_ref() {
-            let focused_input = self.focused_text_input_id_cached(&cached.computed);
+        ) = if self.cached_scene.is_some() {
+            let focused_input = self
+                .cached_scene
+                .as_ref()
+                .and_then(|cached| self.focused_text_input_id_cached(&cached.computed));
             let focused_text_state = focused_input
                 .and_then(|id| self.text_edit_state(id))
                 .cloned();
             let caret_visible = self.caret_visible_at(now, focused_input);
+            let _ = self.try_update_focused_text_input_slots(
+                now,
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+            );
+            let _ = self.try_update_caret_visibility_slot(caret_visible);
+            let cached = self
+                .cached_scene
+                .as_ref()
+                .expect("cached scene should remain available after caret slot update");
             let cache_mismatch = self.scene_cache_mismatch_summary(
                 cached,
                 viewport,
@@ -534,6 +552,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             (layout_cache_valid
                 && !cache_valid
                 && !cached.gpu_scroll_deferred
+                && !self.strict_reactive_tree()
                 && self.can_patch_text_input_scene(
                     cached,
                     viewport,
@@ -547,6 +566,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         if let Some(roots) = text_input_patch_roots {
             if self.patch_cached_scene_for_roots(&roots, now, true) {
+                super::action_stats::record("text_input_scene_patch");
                 if let Some(started_at) = started_at {
                     log_text_profile(
                         "textarea_computed_scene",
@@ -954,7 +974,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 scene_chunks: collected.chunks,
                 scene_chunk_parts: collected.chunk_parts,
                 visual_contexts: collected.visual_contexts,
+                reactive_slot_bindings: HashMap::new(),
+                media_texture_bindings: HashMap::new(),
+                media_texture_binding_index: HashMap::new(),
+                caret_decoration: None,
+                text_input_slot_bindings: HashMap::new(),
             }));
+            self.rebuild_reactive_slot_bindings(now);
+            self.rebuild_media_texture_bindings();
+            self.rebuild_caret_decoration_binding();
+            let cached_caret_visible = self
+                .cached_scene
+                .as_ref()
+                .map(|cached| cached.caret_visible);
+            if let Some(caret_visible) = cached_caret_visible {
+                let _ = self.try_update_caret_visibility_slot(caret_visible);
+            }
+            self.rebuild_text_input_slot_bindings();
             // 整帧重收集已用最新 scroll_states 重算全树并把 cached.scroll_epoch 同步到当前,
             // 任何积压的滚动脏标记都已被该重收集覆盖,清空避免下帧误判。
             self.scroll_dirty_widgets.clear();

@@ -15,28 +15,34 @@ impl<VM> ResolvedElement<VM> {
         context: &mut CollectContext<'_, '_>,
         visual: &CollectVisualState,
     ) {
-        let background_blur = visual
-            .runtime_visual
-            .background_blur
-            .resolve_widget_to_logical(
-                context.animations,
-                self.id,
-                WidgetProperty::BackgroundBlur,
-                context.now,
-                context.units,
-            )
-            .max(0.0);
+        let background_blur = track_property_scope(PropertySlot::BackgroundBlur, || {
+            visual
+                .runtime_visual
+                .background_blur
+                .resolve_widget_to_logical(
+                    context.animations,
+                    self.id,
+                    WidgetProperty::BackgroundBlur,
+                    context.now,
+                    context.units,
+                )
+        })
+        .max(0.0);
+        let has_reactive_background_blur =
+            matches!(&visual.runtime_visual.background_blur, Value::Signal(_));
         let shadow = visual.runtime_visual.shadow.as_ref().map(Value::resolve);
         let background_brush = visual
             .runtime_visual
             .background_brush
             .as_ref()
-            .map(|brush| brush.resolve_widget());
+            .map(|brush| {
+                track_property_scope(PropertySlot::BackgroundBrush, || brush.resolve_widget())
+            });
         let background_image = visual
             .runtime_visual
             .background_image
             .as_ref()
-            .map(|image| image.resolve_widget());
+            .map(|image| track_property_scope(PropertySlot::Texture, || image.resolve_widget()));
 
         if let Some(shadow) = shadow.as_ref() {
             if let Some(texture) = rounded_rect_shadow_texture(
@@ -55,7 +61,7 @@ impl<VM> ResolvedElement<VM> {
             }
         }
 
-        if background_blur > 0.0
+        if (background_blur > 0.0 || has_reactive_background_blur)
             && visual.background_frame.width > Dp::ZERO
             && visual.background_frame.height > Dp::ZERO
         {
@@ -71,10 +77,11 @@ impl<VM> ResolvedElement<VM> {
         let preserve_solid_background = matches!(self.kind, ResolvedWidgetKind::Switch { .. });
 
         if visual.background_frame.width > Dp::ZERO && visual.background_frame.height > Dp::ZERO {
-            let should_draw_base_background = visual.background.a > 0
-                && (background_image.is_some()
-                    || background_brush.is_none()
-                    || preserve_solid_background);
+            let should_draw_base_background =
+                (visual.background.a > 0 || visual.reactive_background || visual.reactive_opacity)
+                    && (background_image.is_some()
+                        || background_brush.is_none()
+                        || preserve_solid_background);
             if should_draw_base_background {
                 computed.scene.push_shape(RenderPrimitive {
                     rect: visual.background_frame,
@@ -118,6 +125,7 @@ impl<VM> ResolvedElement<VM> {
             visual.border_radius.get(),
             visual.primitive_clip,
             visual.primitive_clip_mask,
+            visual.reactive_opacity || visual.reactive_border_color,
         );
 
         let focus_ring = match &self.kind {
@@ -186,6 +194,7 @@ impl<VM> ResolvedElement<VM> {
                 rect: visual.frame,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                transform_chain: context.transform_stack.clone(),
                 scope_path: context.focus_scope_path(),
                 focus: None,
                 interaction: HitInteraction::Disabled { id: self.id },
@@ -287,6 +296,7 @@ impl<VM> ResolvedElement<VM> {
                     rect: visual.frame,
                     clip_rect: visual.primitive_clip,
                     geometry: HitGeometry::Rect,
+                    transform_chain: context.transform_stack.clone(),
                     scope_path: context.focus_scope_path(),
                     focus,
                     interaction,
@@ -307,6 +317,7 @@ impl<VM> ResolvedElement<VM> {
                     rect: visual.frame,
                     clip_rect: visual.primitive_clip,
                     geometry: HitGeometry::Rect,
+                    transform_chain: context.transform_stack.clone(),
                     scope_path: context.focus_scope_path(),
                     focus: None,
                     interaction: HitInteraction::Occluder { id: self.id },
@@ -346,6 +357,7 @@ fn push_tree_node_control_hit_regions<VM>(
             rect: disclosure_slot,
             clip_rect: visual.primitive_clip,
             geometry: HitGeometry::Rect,
+            transform_chain: context.transform_stack.clone(),
             scope_path: scope_path.clone(),
             focus: None,
             interaction: HitInteraction::TreeDisclosure {
@@ -369,6 +381,7 @@ fn push_tree_node_control_hit_regions<VM>(
                 rect: checkbox_slot,
                 clip_rect: visual.primitive_clip,
                 geometry: HitGeometry::Rect,
+                transform_chain: context.transform_stack.clone(),
                 scope_path,
                 focus: None,
                 interaction: HitInteraction::TreeCheckbox {

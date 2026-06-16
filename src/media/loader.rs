@@ -14,7 +14,10 @@ use crate::foundation::error::TguiError;
 use super::manager::{DocumentContent, DocumentEntry, ImageEntry, RasterDocument};
 use super::raster::{decode_raster_texture, load_raster_dimensions};
 use super::svg::load_svg_document;
-use super::types::{IntrinsicSize, MediaBytes, MediaSource, RasterRequest, TextureFrame};
+use super::types::{
+    IntrinsicSize, MediaBytes, MediaCompletion, MediaSource, MediaTextureKey, RasterRequest,
+    TextureFrame,
+};
 
 static HTTP_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 static RUSTLS_PROVIDER: OnceLock<()> = OnceLock::new();
@@ -23,6 +26,7 @@ pub(super) fn spawn_image_loader(
     entry: Arc<Mutex<ImageEntry>>,
     source: MediaSource,
     invalidation: InvalidationSignal,
+    completions: Arc<Mutex<Vec<MediaCompletion>>>,
 ) {
     thread::spawn(move || {
         let result = load_media_document(&source);
@@ -35,15 +39,21 @@ pub(super) fn spawn_image_loader(
                 *guard = ImageEntry::failed(error);
             }
         }
-        invalidation.mark_dirty();
+        completions
+            .lock()
+            .expect("media completion queue lock poisoned")
+            .push(MediaCompletion::SourceLoaded { source });
+        invalidation.mark_media_dirty();
     });
 }
 
 pub(super) fn spawn_raster_texture_loader(
     bytes: MediaBytes,
+    source: MediaSource,
     raster_request: RasterRequest,
     slot: Arc<Mutex<Option<Result<Arc<TextureFrame>, String>>>>,
     invalidation: InvalidationSignal,
+    completions: Arc<Mutex<Vec<MediaCompletion>>>,
 ) {
     thread::spawn(move || {
         let result = decode_raster_texture(&bytes, raster_request)
@@ -51,7 +61,13 @@ pub(super) fn spawn_raster_texture_loader(
             .map_err(|error| error.to_string());
         let mut guard = slot.lock().expect("pending raster lock poisoned");
         *guard = Some(result);
-        invalidation.mark_dirty();
+        completions
+            .lock()
+            .expect("media completion queue lock poisoned")
+            .push(MediaCompletion::RasterFinished {
+                key: MediaTextureKey::new(source, raster_request),
+            });
+        invalidation.mark_media_dirty();
     });
 }
 
@@ -106,6 +122,14 @@ impl<'a> LoadedSource<'a> {
             }
         }
     }
+
+    pub(super) fn media_source(&self) -> MediaSource {
+        match self {
+            Self::File { path, .. } => MediaSource::Path(path.clone()),
+            Self::Url { url, .. } => MediaSource::Url(url.to_string()),
+            Self::Embedded { bytes, .. } => MediaSource::Bytes(bytes.clone()),
+        }
+    }
 }
 
 fn load_media_source(source: &MediaSource) -> Result<LoadedSource<'_>, TguiError> {
@@ -147,7 +171,10 @@ fn load_raster_document(source: &LoadedSource<'_>) -> Result<DocumentEntry, Tgui
     let (width, height) = load_raster_dimensions(source.bytes())?;
     Ok(DocumentEntry {
         intrinsic_size: IntrinsicSize::from_pixels(width, height),
-        content: DocumentContent::Raster(RasterDocument::new(source.media_bytes())),
+        content: DocumentContent::Raster(RasterDocument::new(
+            source.media_source(),
+            source.media_bytes(),
+        )),
     })
 }
 

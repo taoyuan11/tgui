@@ -210,7 +210,7 @@ fn external_portal_signal_change_invalidates_target_computed_scene() {
     let mut source = portal_handler("source", source_tree, invalidation.clone(), (240.0, 160.0));
     let mut target = portal_handler(
         "target",
-        WidgetTree::new(Stack::<PortalVm>::new()),
+        WidgetTree::new_legacy(Stack::<PortalVm>::new()),
         invalidation.clone(),
         (320.0, 220.0),
     );

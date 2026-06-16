@@ -52,6 +52,7 @@ fn lifecycle_update_command_without_state_change_does_not_loop() {
     let label = context.state(String::from("first"));
     let tree = WidgetTree::new(
         Text::new(label.signal())
+            .size(dp(160.0), dp(24.0))
             .key("stable")
             .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
             .on_update(Command::new(|vm: &mut LifecycleVm| vm.updates += 1)),
@@ -80,6 +81,7 @@ fn lifecycle_update_dispatches_for_rebuilt_stable_identity() {
     let label = context.state(String::from("first"));
     let tree = WidgetTree::new(
         Text::new(label.signal())
+            .size(dp(160.0), dp(24.0))
             .key("stable")
             .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
             .on_update(Command::new(|vm: &mut LifecycleVm| vm.updates += 1)),
@@ -171,8 +173,8 @@ fn lifecycle_unmount_dispatches_when_component_is_removed() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let visible = context.state(true);
-    let tree = WidgetTree::new(Stack::<LifecycleVm>::new().child(visible.signal().map(
-        |visible| {
+    let tree = WidgetTree::new_legacy(Stack::<LifecycleVm>::new().dynamic_child(
+        visible.signal().map_unchecked(|visible| {
             let element: Element<LifecycleVm> = if visible {
                 Text::new("shown")
                     .key("tracked")
@@ -183,8 +185,8 @@ fn lifecycle_unmount_dispatches_when_component_is_removed() {
                 Stack::<LifecycleVm>::new().into()
             };
             element
-        },
-    )));
+        }),
+    ));
     let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
 
     handler.invalidation.mark_dirty();
