@@ -156,6 +156,40 @@ fn dynamic_children_signal_records_structure_dependency() {
 }
 
 #[test]
+fn layout_width_signal_records_property_layout_dependency() {
+    let ctx = test_context();
+    let width = ctx.state(dp(48.0));
+    let element: Element<()> = Stack::new().width(width.signal()).height(dp(24.0)).into();
+    let widget_id = element.id;
+    let tree = WidgetTree::new(element);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert!(layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Layout,
+        property: Some(crate::foundation::binding::PropertySlot::Width),
+    }));
+    assert!(!layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Layout,
+        property: None,
+    }));
+}
+
+#[test]
 fn keyed_dynamic_children_reuse_widget_ids_across_reorder_patch() {
     let ctx = test_context();
     let reversed = ctx.state(false);
@@ -212,6 +246,68 @@ fn keyed_dynamic_children_reuse_widget_ids_across_reorder_patch() {
             Instant::now(),
         )
         .expect("keyed reorder should patch successfully");
+
+    assert!(removed.is_empty());
+    let reordered_ids = match &layout.resolved_root.kind {
+        ResolvedWidgetKind::Container { children, .. } => {
+            children.iter().map(|child| child.id).collect::<Vec<_>>()
+        }
+        _ => panic!("stack root should remain a container"),
+    };
+    assert_eq!(reordered_ids, vec![initial_ids[1], initial_ids[0]]);
+}
+
+#[test]
+fn strict_keyed_for_children_reuse_widget_ids_across_reorder_patch() {
+    use crate::ui::widget::For;
+
+    let ctx = test_context();
+    let items = ctx.state(vec![1usize, 2]);
+    let container: Element<()> = Stack::<()>::new()
+        .child(For::new(
+            items.signal(),
+            |item| *item,
+            |_index, item| Text::new(format!("item {item}")),
+        ))
+        .into();
+    let container_id = container.id;
+    let tree = WidgetTree::try_new_strict(container).expect("strict keyed For tree");
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let viewport = Rect::new(0.0, 0.0, 200.0, 120.0);
+    let mut animations = AnimationEngine::default();
+
+    let mut layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+
+    let initial_ids = match &layout.resolved_root.kind {
+        ResolvedWidgetKind::Container { children, .. } => {
+            children.iter().map(|child| child.id).collect::<Vec<_>>()
+        }
+        _ => panic!("stack root should resolve to a container"),
+    };
+
+    items.set(vec![2, 1]);
+    let removed = layout
+        .patch_layout_roots(
+            &[container_id],
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            viewport,
+            Instant::now(),
+        )
+        .expect("keyed For reorder should patch successfully");
 
     assert!(removed.is_empty());
     let reordered_ids = match &layout.resolved_root.kind {

@@ -62,6 +62,7 @@ pub(super) fn shadow_texture_for_path(
     Some(TexturePrimitive {
         texture,
         media_key: None,
+        media_layout: None,
         frame,
         quad: None,
         uv_rect: None,

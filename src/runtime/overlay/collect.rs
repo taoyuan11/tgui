@@ -338,7 +338,7 @@ fn translate_overlay_anchor_rect(rect: Rect, origin: Point) -> Rect {
 }
 
 macro_rules! push_overlay_command {
-    ($bucket:expr, $command:expr) => {{
+    ($bucket:expr, $command:expr, $source:expr) => {{
         let command = $command;
         match &command {
             RenderCommand::BackdropBlur(primitive) => $bucket.backdrop_blurs.push(*primitive),
@@ -354,6 +354,7 @@ macro_rules! push_overlay_command {
             RenderCommand::Brush(_) | RenderCommand::CanvasComposite(_) => {}
         }
         $bucket.commands.push(command);
+        $bucket.command_sources.push($source);
     }};
 }
 
@@ -423,13 +424,19 @@ fn finalize_portal_entry<VM>(
         match backdrop {
             OverlayBackdrop::Scrim { mut primitive } => {
                 primitive.clip_rect = content_clip;
-                bucket.shapes.push(primitive);
-                bucket.commands.push(RenderCommand::Shape(primitive));
+                push_overlay_command!(
+                    bucket,
+                    RenderCommand::Shape(primitive),
+                    entry.source_widget_id
+                );
             }
             OverlayBackdrop::Blur { mut primitive } => {
                 primitive.clip_rect = content_clip;
-                bucket.backdrop_blurs.push(primitive);
-                bucket.commands.push(RenderCommand::BackdropBlur(primitive));
+                push_overlay_command!(
+                    bucket,
+                    RenderCommand::BackdropBlur(primitive),
+                    entry.source_widget_id
+                );
             }
         }
     }
@@ -456,8 +463,7 @@ fn finalize_portal_entry<VM>(
                 shape.rect = translate_rect(shape.rect, origin);
                 shape.clip_rect = content_clip;
                 shape.clip_mask = translate_clip_mask(shape.clip_mask, origin);
-                bucket.shapes.push(shape);
-                bucket.commands.push(RenderCommand::Shape(shape));
+                push_overlay_command!(bucket, RenderCommand::Shape(shape), entry.source_widget_id);
             }
             OverlayPrimitive::Text(mut text) => {
                 text.frame = translate_rect(text.frame, origin);
@@ -471,16 +477,20 @@ fn finalize_portal_entry<VM>(
                         Point::new(quad[3].x + origin.x, quad[3].y + origin.y),
                     ]);
                 }
-                bucket
-                    .commands
-                    .push(RenderCommand::Text(Box::new(text.clone())));
-                bucket.texts.push(text);
+                push_overlay_command!(
+                    bucket,
+                    RenderCommand::Text(Box::new(text)),
+                    entry.source_widget_id
+                );
             }
             OverlayPrimitive::Texture(texture) => {
                 let mut texture = translate_texture(texture, origin);
                 texture.clip_rect = content_clip;
-                bucket.textures.push(texture.clone());
-                bucket.commands.push(RenderCommand::Texture(texture));
+                push_overlay_command!(
+                    bucket,
+                    RenderCommand::Texture(texture),
+                    entry.source_widget_id
+                );
             }
             OverlayPrimitive::Mesh(mut mesh) => {
                 let triangles: Vec<_> = mesh
@@ -505,16 +515,22 @@ fn finalize_portal_entry<VM>(
                 mesh.vertices = std::sync::Arc::from(vertices);
                 mesh.clip_rect = content_clip;
                 mesh.clip_mask = translate_clip_mask(mesh.clip_mask, origin);
-                bucket.meshes.push(mesh.clone());
-                bucket.commands.push(RenderCommand::Mesh(mesh));
+                push_overlay_command!(bucket, RenderCommand::Mesh(mesh), entry.source_widget_id);
             }
             OverlayPrimitive::BackdropBlur(primitive) => {
                 let primitive = translate_backdrop(primitive, origin);
-                bucket.backdrop_blurs.push(primitive);
-                bucket.commands.push(RenderCommand::BackdropBlur(primitive));
+                push_overlay_command!(
+                    bucket,
+                    RenderCommand::BackdropBlur(primitive),
+                    entry.source_widget_id
+                );
             }
             OverlayPrimitive::Command(command) => {
-                push_overlay_command!(bucket, translate_render_command(command, origin));
+                push_overlay_command!(
+                    bucket,
+                    translate_render_command(command, origin),
+                    entry.source_widget_id
+                );
             }
         }
     }
@@ -537,11 +553,20 @@ fn finalize_portal_entry<VM>(
             .collect();
 
         for command in scene.scene.commands {
-            push_overlay_command!(bucket, translate_render_command(command, origin));
+            push_overlay_command!(
+                bucket,
+                translate_render_command(command, origin),
+                entry.source_widget_id
+            );
         }
         // 处理嵌套场景的 overlay_commands（例如光标）
+        let mut overlay_command_sources = scene.scene.overlay_command_sources.into_iter();
         for command in scene.scene.overlay_commands {
-            push_overlay_command!(bucket, translate_render_command(command, origin));
+            let source = overlay_command_sources
+                .next()
+                .flatten()
+                .or(entry.source_widget_id);
+            push_overlay_command!(bucket, translate_render_command(command, origin), source);
         }
         for hit in scene.hit_regions {
             bucket.hits.push(translate_hit_region(

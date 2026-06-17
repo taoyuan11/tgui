@@ -69,6 +69,8 @@ fn freeze_layout_style(style: &mut LayoutStyle) {
     freeze_option_value(&mut style.top);
     freeze_option_value(&mut style.right);
     freeze_option_value(&mut style.bottom);
+    freeze_option_value(&mut style.column_start);
+    freeze_option_value(&mut style.row_start);
 }
 
 fn freeze_visual_style(style: &mut VisualStyle) {

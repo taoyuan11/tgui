@@ -4,6 +4,7 @@ use crate::runtime::overlay::{AnchorKey, AnchorSource};
 use crate::runtime::portal::ExternalPortalRequest;
 use crate::ui::widget::VirtualSceneStateUpdate;
 use smallvec::SmallVec;
+use std::ops::Range;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ScrollRegion {
@@ -70,6 +71,7 @@ pub(crate) struct ComputedScene<VM> {
     /// `overlay_hit_regions` / `overlay_close_handlers`，从而强制 z-order
     /// （Tooltip < Popover < Menu < Modal）。
     pub overlay_layers: [OverlayLayerBucket<VM>; OVERLAY_LAYER_COUNT],
+    pub(crate) overlay_layer_graph: OverlayLayerGraph,
     pub scroll_regions: SmallVec<[ScrollRegion; 1]>,
     pub ime_cursor_area: Option<Rect>,
     pub virtual_state_updates: SmallVec<[VirtualSceneStateUpdate; 1]>,
@@ -91,6 +93,7 @@ impl<VM> Clone for ComputedScene<VM> {
             portal_entries: self.portal_entries.clone(),
             external_portal_requests: self.external_portal_requests.clone(),
             overlay_layers: std::array::from_fn(|i| self.overlay_layers[i].clone()),
+            overlay_layer_graph: self.overlay_layer_graph.clone(),
             scroll_regions: self.scroll_regions.clone(),
             ime_cursor_area: self.ime_cursor_area,
             virtual_state_updates: self.virtual_state_updates.clone(),
@@ -101,6 +104,125 @@ impl<VM> Clone for ComputedScene<VM> {
 }
 
 pub(crate) const OVERLAY_LAYER_COUNT: usize = 5;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct OverlayLayerGraph {
+    pub(crate) layers: SmallVec<[OverlayLayerGraphEntry; 4]>,
+    pub(crate) anchor_slots: SmallVec<[OverlayAnchorSlot; 4]>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct OverlayLayerGraphEntry {
+    pub(crate) layer: crate::runtime::overlay::OverlayLayer,
+    pub(crate) command_range: Range<usize>,
+    pub(crate) hit_range: Range<usize>,
+    pub(crate) close_handler_range: Range<usize>,
+    pub(crate) focus_scope_range: Range<usize>,
+    pub(crate) sources: SmallVec<[Option<WidgetId>; 4]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct OverlayAnchorSlot {
+    pub(crate) key: AnchorKey,
+    pub(crate) rect: Rect,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct OverlayLayerGraphOffsets {
+    commands: usize,
+    hits: usize,
+    close_handlers: usize,
+    focus_scopes: usize,
+}
+
+impl OverlayLayerGraph {
+    fn delta_since(&self, base: &Self) -> Self {
+        let mut delta = Self::default();
+        delta
+            .layers
+            .extend(self.layers.iter().skip(base.layers.len()).cloned());
+        delta.anchor_slots.extend(
+            self.anchor_slots
+                .iter()
+                .filter(|slot| {
+                    base.anchor_slots
+                        .iter()
+                        .find(|candidate| candidate.key == slot.key)
+                        .map(|candidate| candidate.rect)
+                        != Some(slot.rect)
+                })
+                .copied(),
+        );
+        delta
+    }
+
+    fn extend_from(&mut self, other: &Self, offsets: OverlayLayerGraphOffsets) {
+        self.layers
+            .extend(other.layers.iter().cloned().map(|mut entry| {
+                entry.command_range = (entry.command_range.start + offsets.commands)
+                    ..(entry.command_range.end + offsets.commands);
+                entry.hit_range =
+                    (entry.hit_range.start + offsets.hits)..(entry.hit_range.end + offsets.hits);
+                entry.close_handler_range = (entry.close_handler_range.start
+                    + offsets.close_handlers)
+                    ..(entry.close_handler_range.end + offsets.close_handlers);
+                entry.focus_scope_range = (entry.focus_scope_range.start + offsets.focus_scopes)
+                    ..(entry.focus_scope_range.end + offsets.focus_scopes);
+                entry
+            }));
+        for slot in other.anchor_slots.iter().copied() {
+            self.upsert_anchor(slot.key, slot.rect);
+        }
+    }
+
+    fn upsert_anchor(&mut self, key: AnchorKey, rect: Rect) {
+        if let Some(slot) = self.anchor_slots.iter_mut().find(|slot| slot.key == key) {
+            slot.rect = rect;
+        } else {
+            self.anchor_slots.push(OverlayAnchorSlot { key, rect });
+        }
+    }
+
+    fn retain_before(
+        &mut self,
+        commands: usize,
+        hits: usize,
+        close_handlers: usize,
+        focus_scopes: usize,
+    ) {
+        self.layers.retain(|entry| {
+            entry.command_range.end <= commands
+                && entry.hit_range.end <= hits
+                && entry.close_handler_range.end <= close_handlers
+                && entry.focus_scope_range.end <= focus_scopes
+        });
+    }
+
+    fn push_layer<VM>(
+        &mut self,
+        layer: crate::runtime::overlay::OverlayLayer,
+        bucket: &OverlayLayerBucket<VM>,
+        offsets: OverlayLayerGraphOffsets,
+    ) {
+        if bucket.commands.is_empty()
+            && bucket.hits.is_empty()
+            && bucket.close_handlers.is_empty()
+            && bucket.focus_scopes.is_empty()
+        {
+            return;
+        }
+        self.layers.push(OverlayLayerGraphEntry {
+            layer,
+            command_range: offsets.commands..(offsets.commands + bucket.commands.len()),
+            hit_range: offsets.hits..(offsets.hits + bucket.hits.len()),
+            close_handler_range: offsets.close_handlers
+                ..(offsets.close_handlers + bucket.close_handlers.len()),
+            focus_scope_range: offsets.focus_scopes
+                ..(offsets.focus_scopes + bucket.focus_scopes.len()),
+            sources: bucket.command_sources.iter().copied().collect(),
+        });
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct PortalOverlayCounts {
@@ -118,6 +240,7 @@ pub(crate) struct PortalOverlayCounts {
 /// 单个 `OverlayLayer` 的暂存桶。
 pub(crate) struct OverlayLayerBucket<VM> {
     pub commands: SmallVec<[RenderCommand; 1]>,
+    pub command_sources: SmallVec<[Option<WidgetId>; 1]>,
     pub backdrop_blurs: SmallVec<[BackdropBlurPrimitive; 1]>,
     pub shapes: SmallVec<[RenderPrimitive; 1]>,
     pub textures: SmallVec<[TexturePrimitive; 1]>,
@@ -133,6 +256,7 @@ impl<VM> Default for OverlayLayerBucket<VM> {
     fn default() -> Self {
         Self {
             commands: SmallVec::new(),
+            command_sources: SmallVec::new(),
             backdrop_blurs: SmallVec::new(),
             shapes: SmallVec::new(),
             textures: SmallVec::new(),
@@ -150,6 +274,7 @@ impl<VM> Clone for OverlayLayerBucket<VM> {
     fn clone(&self) -> Self {
         Self {
             commands: self.commands.clone(),
+            command_sources: self.command_sources.clone(),
             backdrop_blurs: self.backdrop_blurs.clone(),
             shapes: self.shapes.clone(),
             textures: self.textures.clone(),
@@ -169,6 +294,12 @@ impl<VM> OverlayLayerBucket<VM> {
         delta
             .commands
             .extend(self.commands.iter().skip(base.commands.len()).cloned());
+        delta.command_sources.extend(
+            self.command_sources
+                .iter()
+                .skip(base.command_sources.len())
+                .copied(),
+        );
         delta.backdrop_blurs.extend(
             self.backdrop_blurs
                 .iter()
@@ -213,6 +344,8 @@ impl<VM> OverlayLayerBucket<VM> {
 
     fn extend_from(&mut self, other: &Self) {
         self.commands.extend(other.commands.iter().cloned());
+        self.command_sources
+            .extend(other.command_sources.iter().copied());
         self.backdrop_blurs
             .extend(other.backdrop_blurs.iter().copied());
         self.shapes.extend(other.shapes.iter().copied());
@@ -279,6 +412,7 @@ impl<VM> Default for ComputedScene<VM> {
             portal_entries: SmallVec::new(),
             external_portal_requests: SmallVec::new(),
             overlay_layers: std::array::from_fn(|_| OverlayLayerBucket::default()),
+            overlay_layer_graph: OverlayLayerGraph::default(),
             scroll_regions: SmallVec::new(),
             ime_cursor_area: None,
             virtual_state_updates: SmallVec::new(),
@@ -391,6 +525,9 @@ impl<VM> ComputedScene<VM> {
         for i in 0..OVERLAY_LAYER_COUNT {
             delta.overlay_layers[i] = self.overlay_layers[i].delta_since(&base.overlay_layers[i]);
         }
+        delta.overlay_layer_graph = self
+            .overlay_layer_graph
+            .delta_since(&base.overlay_layer_graph);
         delta.scroll_regions.extend(
             self.scroll_regions
                 .iter()
@@ -417,6 +554,12 @@ impl<VM> ComputedScene<VM> {
     }
 
     pub(crate) fn extend(&mut self, other: &ComputedScene<VM>) {
+        let graph_offsets = OverlayLayerGraphOffsets {
+            commands: self.scene.overlay_commands.len(),
+            hits: self.overlay_hit_regions.len(),
+            close_handlers: self.overlay_close_handlers.len(),
+            focus_scopes: self.focus_scopes.len(),
+        };
         self.scene.extend(&other.scene);
         self.hit_regions.extend(other.hit_regions.iter().cloned());
         self.overlay_hit_regions
@@ -444,6 +587,8 @@ impl<VM> ComputedScene<VM> {
         for i in 0..OVERLAY_LAYER_COUNT {
             self.overlay_layers[i].extend_from(&other.overlay_layers[i]);
         }
+        self.overlay_layer_graph
+            .extend_from(&other.overlay_layer_graph, graph_offsets);
         self.scroll_regions
             .extend(other.scroll_regions.iter().copied());
         if self.ime_cursor_area.is_none() {
@@ -463,6 +608,19 @@ impl<VM> ComputedScene<VM> {
     pub(crate) fn finalize_overlay_layers(&mut self) {
         for layer in crate::runtime::overlay::OverlayLayer::ALL {
             let bucket = std::mem::take(&mut self.overlay_layers[layer.index()]);
+            debug_assert_eq!(
+                bucket.commands.len(),
+                bucket.command_sources.len(),
+                "overlay command sources must stay aligned with overlay commands"
+            );
+            let graph_offsets = OverlayLayerGraphOffsets {
+                commands: self.scene.overlay_commands.len(),
+                hits: self.overlay_hit_regions.len(),
+                close_handlers: self.overlay_close_handlers.len(),
+                focus_scopes: self.focus_scopes.len(),
+            };
+            self.overlay_layer_graph
+                .push_layer(layer, &bucket, graph_offsets);
             self.scene.backdrop_blurs.extend(bucket.backdrop_blurs);
             self.scene.overlay_shapes.extend(bucket.shapes);
             self.scene.overlay_textures.extend(bucket.textures);
@@ -472,6 +630,9 @@ impl<VM> ComputedScene<VM> {
                 .overlay_text_decorations
                 .extend(bucket.text_decorations);
             self.scene.overlay_commands.extend(bucket.commands);
+            self.scene
+                .overlay_command_sources
+                .extend(bucket.command_sources);
             self.overlay_hit_regions.extend(bucket.hits);
             self.overlay_close_handlers.extend(bucket.close_handlers);
             self.focus_scopes.extend(bucket.focus_scopes);
@@ -530,10 +691,17 @@ impl<VM> ComputedScene<VM> {
             .overlay_text_decorations
             .truncate(base_text_decorations);
         self.scene.overlay_commands.truncate(base_commands);
+        self.scene.overlay_command_sources.truncate(base_commands);
         self.overlay_hit_regions.truncate(base_hits);
         self.overlay_close_handlers.truncate(base_close_handlers);
         self.focus_scopes.truncate(base_focus_scopes);
         self.portal_overlay_counts = PortalOverlayCounts::default();
+        self.overlay_layer_graph.retain_before(
+            base_commands,
+            base_hits,
+            base_close_handlers,
+            base_focus_scopes,
+        );
         self.overlay_layers = std::array::from_fn(|_| OverlayLayerBucket::default());
         crate::runtime::overlay::collect::finalize_portal_entries(self, viewport);
         self.finalize_overlay_layers();
@@ -616,6 +784,7 @@ impl<VM> ComputedScene<VM> {
 
     pub(crate) fn register_overlay_anchor(&mut self, key: AnchorKey, rect: Rect) {
         self.overlay_anchors.insert(key, rect);
+        self.overlay_layer_graph.upsert_anchor(key, rect);
     }
 
     pub(crate) fn register_widget_overlay_anchor(&mut self, widget_id: WidgetId, rect: Rect) {

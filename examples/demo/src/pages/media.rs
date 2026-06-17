@@ -57,7 +57,7 @@ Button::new("加载").on_click(Command::new(|app: &mut App| {
 }))"#;
 
 const CODE_VIDEO_PLAYER: &str = r#"Video::new(app.video_player.controller.clone())
-    .width(dp(520.0))
+    .width(dp(400.0))
     .fit(ContentFit::Contain)"#;
 
 pub(crate) fn page(app: &App) -> Element<App> {
@@ -230,7 +230,7 @@ fn video_component(app: &App) -> Element<App> {
                 "浏览器式播放器",
                 "Video 在画面底部覆盖 SVG 图标控制栏，组合播放、seek、缓冲、时间、音量和状态文本。",
                 Video::new(app.video_player.controller.clone())
-                    .width(dp(520.0))
+                    .width(dp(400.0))
                     .fit(ContentFit::Contain),
                 CODE_VIDEO_PLAYER,
             ),

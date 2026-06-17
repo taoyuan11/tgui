@@ -288,8 +288,18 @@ pub(crate) fn apply_virtual_runtime_state_to_element<VM>(
     match &mut element.kind {
         WidgetKind::Container { children, .. } => {
             for child_source in children {
-                if let super::common::ChildSource::Static(children) = child_source {
-                    for child in children {
+                match child_source {
+                    super::common::ChildSource::Static(children) => {
+                        for child in children {
+                            apply_virtual_runtime_state_to_element(
+                                child,
+                                scroll_offsets,
+                                virtual_states,
+                                fallback_viewport_hint.clone(),
+                            );
+                        }
+                    }
+                    super::common::ChildSource::Show { child, .. } => {
                         apply_virtual_runtime_state_to_element(
                             child,
                             scroll_offsets,
@@ -297,6 +307,28 @@ pub(crate) fn apply_virtual_runtime_state_to_element<VM>(
                             fallback_viewport_hint.clone(),
                         );
                     }
+                    super::common::ChildSource::Switch {
+                        cases, fallback, ..
+                    } => {
+                        for child in cases {
+                            apply_virtual_runtime_state_to_element(
+                                child,
+                                scroll_offsets,
+                                virtual_states,
+                                fallback_viewport_hint.clone(),
+                            );
+                        }
+                        if let Some(child) = fallback {
+                            apply_virtual_runtime_state_to_element(
+                                child,
+                                scroll_offsets,
+                                virtual_states,
+                                fallback_viewport_hint.clone(),
+                            );
+                        }
+                    }
+                    super::common::ChildSource::KeyedFor(_) => {}
+                    super::common::ChildSource::Dynamic(_) => {}
                 }
             }
         }

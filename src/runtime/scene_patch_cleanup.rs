@@ -6,6 +6,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         }
 
+        let removed_owner_ids = removed_ids
+            .iter()
+            .map(|widget_id| widget_id.raw())
+            .collect::<HashSet<_>>();
+        self.invalidation
+            .remove_reactive_targets_for_widgets(&removed_owner_ids);
+
         if let Some(cached) = self.cached_scene.as_mut() {
             for removed_id in removed_ids {
                 cached.scene_chunks.remove(removed_id);

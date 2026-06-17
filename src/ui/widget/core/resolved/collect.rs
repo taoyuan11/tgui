@@ -410,6 +410,11 @@ impl<VM: 'static> ResolvedElement<VM> {
                                 source,
                                 raster_request,
                             )),
+                            media_layout: Some(crate::media::MediaTextureLayout::new(
+                                visual.background_frame,
+                                image.fit,
+                                context.units.scale_factor(),
+                            )),
                             frame: target_frame,
                             corner_radius: visual.background_radius.get(),
                             opacity: visual.opacity.clamp(0.0, 1.0),
@@ -463,6 +468,11 @@ impl<VM: 'static> ResolvedElement<VM> {
                             media_key: Some(crate::media::MediaTextureKey::new(
                                 background_image.source,
                                 raster_request,
+                            )),
+                            media_layout: Some(crate::media::MediaTextureLayout::new(
+                                visual.background_frame,
+                                background_image.fit,
+                                context.units.scale_factor(),
                             )),
                             frame: target_frame,
                             corner_radius: visual.background_radius.get(),
@@ -560,6 +570,11 @@ impl<VM: 'static> ResolvedElement<VM> {
                                 Some(crate::media::MediaTextureKey::new(
                                     image.source,
                                     raster_request,
+                                )),
+                                Some(crate::media::MediaTextureLayout::new(
+                                    visual.background_frame,
+                                    image.fit,
+                                    context.units.scale_factor(),
                                 )),
                                 target_frame,
                                 visual.background_radius.get(),
@@ -690,6 +705,11 @@ impl<VM: 'static> ResolvedElement<VM> {
                                 Some(crate::media::MediaTextureKey::new(
                                     image.source,
                                     raster_request,
+                                )),
+                                Some(crate::media::MediaTextureLayout::new(
+                                    visual.background_frame,
+                                    image.fit,
+                                    context.units.scale_factor(),
                                 )),
                                 target_frame,
                                 visual.background_radius.get(),
@@ -1172,6 +1192,21 @@ impl<VM: 'static> ResolvedElement<VM> {
                     label,
                 })
             }
+            PropertySlot::Width
+            | PropertySlot::Height
+            | PropertySlot::MinWidth
+            | PropertySlot::MinHeight
+            | PropertySlot::MaxWidth
+            | PropertySlot::MaxHeight
+            | PropertySlot::Margin
+            | PropertySlot::Padding
+            | PropertySlot::Grow
+            | PropertySlot::Shrink
+            | PropertySlot::Basis
+            | PropertySlot::AspectRatio
+            | PropertySlot::GridRow
+            | PropertySlot::GridColumn
+            | PropertySlot::Inset => None,
         }
     }
 

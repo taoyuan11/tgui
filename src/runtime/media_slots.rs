@@ -13,10 +13,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(cached) = self.cached_scene.as_mut() else {
             return;
         };
+        let had_bindings = !cached.media_texture_bindings.is_empty()
+            || !cached.media_texture_binding_index.is_empty();
         let (bindings, index) = build_media_texture_bindings(cached);
+        let has_bindings = !bindings.is_empty() || !index.is_empty();
         cached.media_texture_bindings = bindings;
         cached.media_texture_binding_index = index;
-        super::action_stats::record("media_texture_binding_full_rebuild");
+        if had_bindings || has_bindings {
+            super::action_stats::record("media_texture_binding_full_rebuild");
+        }
     }
 
     pub(super) fn sync_reactive_media_texture_bindings(
@@ -42,38 +47,100 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        let Some(cached) = self.cached_scene.as_ref() else {
-            return false;
-        };
-        let mut keys = Vec::<MediaTextureKey>::new();
-        let mut seen = HashSet::new();
+        let mut patches = Vec::<MediaTexturePatch>::new();
+        let mut seen_raster_keys = HashSet::new();
         let mut handled_pending_source = false;
         for completion in completions {
             match completion {
                 MediaCompletion::RasterFinished { key } => {
-                    if seen.insert(key.clone()) {
-                        keys.push(key.clone());
+                    if !seen_raster_keys.insert(key.clone()) {
+                        continue;
+                    }
+                    let Some(cached) = self.cached_scene.as_ref() else {
+                        return false;
+                    };
+                    let Some(bindings) = cached.media_texture_bindings.get(key).cloned() else {
+                        return false;
+                    };
+                    if bindings.is_empty() {
+                        return false;
+                    }
+                    let snapshot = self
+                        .media_manager
+                        .image_snapshot(&key.source, Some(key.raster_request));
+                    let Some(texture) = snapshot.texture else {
+                        if snapshot.loading && snapshot.error.is_none() {
+                            handled_pending_source = true;
+                            continue;
+                        }
+                        return false;
+                    };
+                    for binding in bindings {
+                        patches.push(MediaTexturePatch {
+                            old_key: key.clone(),
+                            new_key: key.clone(),
+                            binding,
+                            texture: Some(texture.clone()),
+                            frame: None,
+                            hide_placeholder: true,
+                        });
                     }
                 }
                 MediaCompletion::SourceLoaded { source } => {
-                    let source_keys = cached
+                    let Some(cached) = self.cached_scene.as_ref() else {
+                        return false;
+                    };
+                    let source_bindings = cached
                         .media_texture_bindings
-                        .keys()
-                        .filter(|key| &key.source == source)
-                        .cloned()
+                        .iter()
+                        .filter(|(key, _)| &key.source == source)
+                        .flat_map(|(key, bindings)| {
+                            bindings
+                                .iter()
+                                .cloned()
+                                .map(|binding| (key.clone(), binding))
+                        })
                         .collect::<Vec<_>>();
-                    if source_keys.is_empty() {
+                    if source_bindings.is_empty() {
                         return false;
                     }
-                    for key in source_keys {
+                    for (old_key, binding) in source_bindings {
+                        let Some((new_key, frame)) =
+                            source_loaded_media_key(&self.media_manager, &old_key, &binding)
+                        else {
+                            return false;
+                        };
                         let snapshot = self
                             .media_manager
-                            .image_snapshot(&key.source, Some(key.raster_request));
-                        if snapshot.texture.is_some() {
-                            if seen.insert(key.clone()) {
-                                keys.push(key);
-                            }
+                            .image_snapshot(&new_key.source, Some(new_key.raster_request));
+                        if let Some(texture) = snapshot.texture {
+                            patches.push(MediaTexturePatch {
+                                old_key,
+                                new_key,
+                                binding,
+                                texture: Some(texture),
+                                frame,
+                                hide_placeholder: true,
+                            });
                         } else if snapshot.loading && snapshot.error.is_none() {
+                            if old_key != new_key
+                                || frame
+                                    .map(|frame| {
+                                        binding_current_frame(cached, &old_key, &binding)
+                                            .map(|current| current != frame)
+                                            .unwrap_or(true)
+                                    })
+                                    .unwrap_or(false)
+                            {
+                                patches.push(MediaTexturePatch {
+                                    old_key,
+                                    new_key,
+                                    binding,
+                                    texture: None,
+                                    frame,
+                                    hide_placeholder: false,
+                                });
+                            }
                             handled_pending_source = true;
                         } else {
                             return false;
@@ -82,37 +149,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
         }
-
-        let mut textures = Vec::with_capacity(keys.len());
-        for key in keys {
-            let snapshot = self
-                .media_manager
-                .image_snapshot(&key.source, Some(key.raster_request));
-            let Some(texture) = snapshot.texture else {
-                if snapshot.loading && snapshot.error.is_none() {
-                    handled_pending_source = true;
-                    continue;
-                }
-                return false;
-            };
-            textures.push((key, texture));
-        }
-        if textures.is_empty() {
+        if patches.is_empty() {
             return handled_pending_source;
         }
 
         let Some(cached) = self.cached_scene.as_mut() else {
             return false;
         };
-        for (key, texture) in textures {
-            let Some(bindings) = cached.media_texture_bindings.get(&key).cloned() else {
-                return false;
-            };
-            if bindings.is_empty() {
+        for patch in patches {
+            if !write_media_texture_binding(cached, &patch) {
                 return false;
             }
-            for binding in bindings {
-                if !write_media_texture_binding(cached, &key, &binding, texture.clone()) {
+            if patch.old_key != patch.new_key {
+                if !replace_media_texture_binding_key(
+                    cached,
+                    &patch.old_key,
+                    patch.new_key,
+                    patch.binding,
+                ) {
                     return false;
                 }
             }
@@ -160,10 +214,11 @@ fn build_media_texture_bindings<VM: 'static>(
                 continue;
             }
             let (placeholder_shape_slot, placeholder_text_slot) =
-                media_placeholder_slots(local_scene, texture.frame);
+                media_placeholder_slots(local_scene, media_placeholder_frame(texture));
             let candidate_binding = MediaTextureBinding {
                 widget_id,
                 slot,
+                media_layout: texture.media_layout,
                 placeholder_shape_slot,
                 placeholder_text_slot,
                 root_offset: SceneCounts::default(),
@@ -237,6 +292,7 @@ fn build_media_texture_bindings<VM: 'static>(
                 MediaTextureBinding {
                     widget_id,
                     slot,
+                    media_layout: texture.media_layout,
                     placeholder_shape_slot,
                     placeholder_text_slot,
                     root_offset,
@@ -280,11 +336,17 @@ fn sync_reactive_media_texture_binding<VM: 'static>(
         return false;
     }
 
-    let (placeholder_shape_slot, placeholder_text_slot) =
-        media_placeholder_slots(local_scene, update.frame);
+    let (placeholder_shape_slot, placeholder_text_slot) = media_placeholder_slots(
+        local_scene,
+        update
+            .media_layout
+            .map(|layout| layout.content_frame)
+            .unwrap_or(update.frame),
+    );
     let binding = MediaTextureBinding {
         widget_id: update.widget_id,
         slot: update.slot,
+        media_layout: update.media_layout,
         placeholder_shape_slot,
         placeholder_text_slot,
         root_offset: update.root_offset,
@@ -388,6 +450,34 @@ fn remove_media_texture_binding_for_slot<VM: 'static>(
     true
 }
 
+fn replace_media_texture_binding_key<VM: 'static>(
+    cached: &mut CachedScene<VM>,
+    old_key: &MediaTextureKey,
+    new_key: MediaTextureKey,
+    binding: MediaTextureBinding,
+) -> bool {
+    let slot = MediaTextureBindingSlot::new(binding.widget_id, binding.slot);
+    let Some(index) = cached.media_texture_binding_index.get(&slot) else {
+        return false;
+    };
+    if &index.key != old_key {
+        return false;
+    }
+    if !remove_media_texture_binding_for_slot(cached, binding.widget_id, binding.slot) {
+        return false;
+    }
+    if !media_texture_binding_matches(cached, &new_key, &binding) {
+        return false;
+    }
+    insert_media_texture_binding(
+        &mut cached.media_texture_bindings,
+        &mut cached.media_texture_binding_index,
+        new_key,
+        binding,
+    );
+    true
+}
+
 fn media_placeholder_slots<VM>(
     computed: &ComputedScene<VM>,
     texture_frame: Rect,
@@ -408,6 +498,13 @@ fn media_placeholder_slots<VM>(
     } else {
         (None, Some(text_slots[0]))
     }
+}
+
+fn media_placeholder_frame(texture: &TexturePrimitive) -> Rect {
+    texture
+        .media_layout
+        .map(|layout| layout.content_frame)
+        .unwrap_or(texture.frame)
 }
 
 fn texture_slot_matches_key<VM>(
@@ -437,27 +534,72 @@ fn placeholder_slots_match<VM>(
             .unwrap_or(true)
 }
 
+#[derive(Clone)]
+struct MediaTexturePatch {
+    old_key: MediaTextureKey,
+    new_key: MediaTextureKey,
+    binding: MediaTextureBinding,
+    texture: Option<Arc<TextureFrame>>,
+    frame: Option<Rect>,
+    hide_placeholder: bool,
+}
+
+fn source_loaded_media_key(
+    media_manager: &MediaManager,
+    old_key: &MediaTextureKey,
+    binding: &MediaTextureBinding,
+) -> Option<(MediaTextureKey, Option<Rect>)> {
+    let Some(layout) = binding.media_layout else {
+        return Some((old_key.clone(), None));
+    };
+    let metadata = media_manager.image_snapshot(&old_key.source, None);
+    if metadata.error.is_some() {
+        return None;
+    }
+    layout
+        .texture_key(old_key.source.clone(), metadata.intrinsic_size)
+        .map(|(key, frame)| (key, Some(frame)))
+}
+
+fn binding_current_frame<VM>(
+    cached: &CachedScene<VM>,
+    key: &MediaTextureKey,
+    binding: &MediaTextureBinding,
+) -> Option<Rect> {
+    let zero = SceneCounts::default();
+    let texture = cached
+        .scene_chunks
+        .get(&binding.widget_id)?
+        .texture_slot(&zero, binding.slot)?;
+    (texture.media_key.as_ref() == Some(key)).then_some(texture.frame)
+}
+
 fn replacement_texture_primitive<VM>(
     computed: &ComputedScene<VM>,
     offset: &SceneCounts,
     slot: TexturePrimitiveSlot,
-    key: &MediaTextureKey,
-    texture: Arc<TextureFrame>,
+    patch: &MediaTexturePatch,
 ) -> Option<TexturePrimitive> {
     let mut primitive = computed.texture_slot(offset, slot)?.clone();
-    if primitive.media_key.as_ref() != Some(key) {
+    if primitive.media_key.as_ref() != Some(&patch.old_key) {
         return None;
     }
-    primitive.texture = texture;
+    if let Some(texture) = &patch.texture {
+        primitive.texture = texture.clone();
+    }
+    primitive.media_key = Some(patch.new_key.clone());
+    primitive.media_layout = patch.binding.media_layout.or(primitive.media_layout);
+    if let Some(frame) = patch.frame {
+        primitive.frame = frame;
+    }
     Some(primitive)
 }
 
 fn write_media_texture_binding<VM>(
     cached: &mut CachedScene<VM>,
-    key: &MediaTextureKey,
-    binding: &MediaTextureBinding,
-    texture: Arc<TextureFrame>,
+    patch: &MediaTexturePatch,
 ) -> bool {
+    let binding = &patch.binding;
     let zero = SceneCounts::default();
     if !cached
         .scene_chunks
@@ -470,9 +612,7 @@ fn write_media_texture_binding<VM>(
     let Some(primitive) = cached
         .scene_chunks
         .get(&binding.widget_id)
-        .and_then(|chunk| {
-            replacement_texture_primitive(chunk, &zero, binding.slot, key, texture.clone())
-        })
+        .and_then(|chunk| replacement_texture_primitive(chunk, &zero, binding.slot, patch))
     else {
         return false;
     };
@@ -487,7 +627,9 @@ fn write_media_texture_binding<VM>(
         {
             return false;
         }
-        if !write_media_placeholder_slots(&mut parts.before_children, &zero, binding) {
+        if patch.hide_placeholder
+            && !write_media_placeholder_slots(&mut parts.before_children, &zero, binding)
+        {
             return false;
         }
     }
@@ -498,7 +640,7 @@ fn write_media_texture_binding<VM>(
     if !target_chunk.write_texture_slot(&zero, binding.slot, primitive.clone()) {
         return false;
     }
-    if !write_media_placeholder_slots(target_chunk, &zero, binding) {
+    if patch.hide_placeholder && !write_media_placeholder_slots(target_chunk, &zero, binding) {
         return false;
     }
 
@@ -509,15 +651,20 @@ fn write_media_texture_binding<VM>(
         if !ancestor_chunk.write_texture_slot(offset, binding.slot, primitive.clone()) {
             return false;
         }
-        if !write_media_placeholder_slots(ancestor_chunk, offset, binding) {
+        if patch.hide_placeholder && !write_media_placeholder_slots(ancestor_chunk, offset, binding)
+        {
             return false;
         }
     }
 
-    cached
+    if !cached
         .computed
         .write_texture_slot(&binding.root_offset, binding.slot, primitive)
-        && write_media_placeholder_slots(&mut cached.computed, &binding.root_offset, binding)
+    {
+        return false;
+    }
+    !patch.hide_placeholder
+        || write_media_placeholder_slots(&mut cached.computed, &binding.root_offset, binding)
 }
 
 fn write_media_placeholder_slots<VM>(
@@ -526,14 +673,52 @@ fn write_media_placeholder_slots<VM>(
     binding: &MediaTextureBinding,
 ) -> bool {
     if let Some(slot) = binding.placeholder_shape_slot {
-        if !computed.write_shape_color_slot(offset, slot, Color::TRANSPARENT) {
+        if !write_shape_slot_alpha_zero(computed, offset, slot) {
             return false;
         }
     }
     if let Some(slot) = binding.placeholder_text_slot {
-        if !computed.write_text_color_slot(offset, slot, Color::TRANSPARENT) {
+        if !write_text_slot_alpha_zero(computed, offset, slot) {
             return false;
         }
     }
     true
+}
+
+fn write_shape_slot_alpha_zero<VM>(
+    computed: &mut ComputedScene<VM>,
+    offset: &SceneCounts,
+    slot: ShapePrimitiveSlot,
+) -> bool {
+    let Some(shape_index) = offset.shapes.checked_add(slot.shape_index) else {
+        return false;
+    };
+    let Some(color) = computed
+        .scene
+        .shapes
+        .get(shape_index)
+        .map(|shape| shape.color.with_alpha_factor(0.0))
+    else {
+        return false;
+    };
+    computed.write_shape_color_slot(offset, slot, color)
+}
+
+fn write_text_slot_alpha_zero<VM>(
+    computed: &mut ComputedScene<VM>,
+    offset: &SceneCounts,
+    slot: TextPrimitiveSlot,
+) -> bool {
+    let Some(text_index) = offset.texts.checked_add(slot.text_index) else {
+        return false;
+    };
+    let Some(color) = computed
+        .scene
+        .texts
+        .get(text_index)
+        .map(|text| text.color.with_alpha_factor(0.0))
+    else {
+        return false;
+    };
+    computed.write_text_color_slot(offset, slot, color)
 }

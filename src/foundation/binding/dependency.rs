@@ -29,6 +29,7 @@ pub(crate) enum DependencyPhase {
 ///
 /// 失效消费侧当前仅读 `widget_id` + `phase`,未被作用域包裹或未识别的属性都安全退化为
 /// 整 widget 的 Scene 失效——这是「绝不漏更新」的兜底。
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PropertySlot {
     Background,
@@ -45,6 +46,21 @@ pub(crate) enum PropertySlot {
     TextColor,
     ProgressValue,
     SliderValue,
+    Width,
+    Height,
+    MinWidth,
+    MinHeight,
+    MaxWidth,
+    MaxHeight,
+    Margin,
+    Padding,
+    Grow,
+    Shrink,
+    Basis,
+    AspectRatio,
+    GridRow,
+    GridColumn,
+    Inset,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -90,8 +106,6 @@ impl DependencyGraph {
             .any(|owners| owners.contains(&owner))
     }
 
-    /// 测试辅助：收集图中出现过的所有 owner（去重前的并集）。
-    #[cfg(test)]
     pub(crate) fn all_owners(&self) -> HashSet<DependencyOwner> {
         let mut owners = self.global_owners.clone();
         for set in self.dependencies.values() {

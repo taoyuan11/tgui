@@ -152,6 +152,7 @@ pub(crate) fn push_svg_icon_texture(
     scene.push_texture(TexturePrimitive {
         texture: texture.clone(),
         media_key: None,
+        media_layout: None,
         frame: target_frame,
         quad,
         uv_rect: None,

@@ -141,6 +141,72 @@ fn tracked_signal_read_subscribes_current_owner_as_reactive_target() {
 }
 
 #[test]
+fn replacing_owner_subscription_drops_previous_signal_sources() {
+    let ctx = context();
+    let flag = ctx.state(true);
+    let first = ctx.state(1);
+    let second = ctx.state(10);
+    let flag_signal = flag.signal();
+    let first_signal = first.signal();
+    let second_signal = second.signal();
+    let owner = DependencyOwner {
+        widget_id: 91,
+        phase: DependencyPhase::Scene,
+        property: Some(PropertySlot::Background),
+    };
+    let target = ReactiveTarget::Owner(owner);
+
+    ctx.invalidation().replace_reactive_target(target, || {
+        let _ = with_dependency_collection(|| {
+            track_dependency_scope(owner, || {
+                if flag_signal.get() {
+                    first_signal.get()
+                } else {
+                    second_signal.get()
+                }
+            })
+        });
+    });
+    assert_eq!(
+        ctx.invalidation().reactive_target_source_count(target),
+        2,
+        "owner should subscribe to flag + first branch"
+    );
+
+    flag.set(false);
+    let targets = ctx.invalidation().drain_reactive_targets();
+    assert_eq!(targets, vec![target]);
+
+    ctx.invalidation().replace_reactive_target(target, || {
+        let _ = with_dependency_collection(|| {
+            track_dependency_scope(owner, || {
+                if flag_signal.get() {
+                    first_signal.get()
+                } else {
+                    second_signal.get()
+                }
+            })
+        });
+    });
+    assert_eq!(
+        ctx.invalidation().reactive_target_source_count(target),
+        2,
+        "owner should subscribe to flag + second branch after replacement"
+    );
+
+    first.set(2);
+    let targets = ctx.invalidation().drain_reactive_targets();
+    assert!(
+        targets.is_empty(),
+        "old branch signal must not dirty the replaced owner"
+    );
+
+    second.set(11);
+    let targets = ctx.invalidation().drain_reactive_targets();
+    assert_eq!(targets, vec![target]);
+}
+
+#[test]
 fn text_controller_set_queues_subscribed_reactive_target() {
     let ctx = context();
     let controller = TextController::new("hello", ctx.invalidation().clone());

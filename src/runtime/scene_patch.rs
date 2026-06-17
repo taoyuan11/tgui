@@ -29,9 +29,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(cached) = self.cached_scene.as_ref() else {
             return false;
         };
-        let Some(_layout) = cached.layout.as_ref() else {
+        let Some(layout) = cached.layout.as_ref() else {
             return false;
         };
+        let touched_owner_ids = roots
+            .iter()
+            .flat_map(|root| layout.subtree_widget_ids(*root))
+            .map(|widget_id| widget_id.raw())
+            .collect::<HashSet<_>>();
+        self.invalidation
+            .remove_reactive_targets_for_widgets(&touched_owner_ids);
 
         let theme = self.animated_theme(now);
         let viewport = self.viewport_rect();
@@ -60,6 +67,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let _ = layout;
         let _ = cached;
         self.prune_removed_widget_state(&removed_ids);
+        self.rebuild_layout_slot_bindings();
         self.text_input_regions.clear();
         if let Some(started_at) = started_at {
             log_text_profile(
@@ -124,6 +132,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         let active_tooltip = self.resolve_active_tooltip(now);
         let active_hover_popover = self.resolve_active_hover_popover();
+        let scene_owner_ids_to_replace = {
+            let Some(cached) = self.cached_scene.as_ref() else {
+                return false;
+            };
+            let Some(layout) = cached.layout.as_ref() else {
+                return false;
+            };
+            roots
+                .iter()
+                .flat_map(|root| layout.subtree_widget_ids(*root))
+                .map(|widget_id| widget_id.raw())
+                .collect::<HashSet<_>>()
+        };
+        self.invalidation.remove_reactive_targets_for_widget_phase(
+            &scene_owner_ids_to_replace,
+            DependencyPhase::Scene,
+        );
         let Some(cached) = self.cached_scene.as_ref() else {
             return false;
         };
@@ -496,6 +521,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.rebuild_reactive_slot_bindings(now);
         self.rebuild_media_texture_bindings();
         self.rebuild_caret_decoration_binding();
+        self.rebuild_strict_capability_report();
         let cached_caret_visible = self
             .cached_scene
             .as_ref()

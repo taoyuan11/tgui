@@ -72,6 +72,7 @@ pub(crate) fn emit_overlay<VM>(
                         shape.clip_mask = translate_clip_mask(shape.clip_mask, origin);
                         bucket.shapes.push(shape);
                         bucket.commands.push(RenderCommand::Shape(shape));
+                        bucket.command_sources.push(None);
                     }
                     OverlayPrimitive::Text(mut text) => {
                         text.frame = translate_rect(text.frame, origin);
@@ -83,6 +84,7 @@ pub(crate) fn emit_overlay<VM>(
                         }
                         bucket.texts.push(text.clone());
                         bucket.commands.push(RenderCommand::Text(text));
+                        bucket.command_sources.push(None);
                     }
                 }
             }

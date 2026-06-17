@@ -4,7 +4,7 @@ use crate::foundation::error::TguiError;
 use crate::text::font::FontManager;
 use crate::ui::widget::{CanvasBlendMode, Rect};
 
-use super::super::prepare::{PreparedBackdropBlur, PreparedCanvasComposite};
+use super::super::prepare::{DrawStream, PreparedBackdropBlur, PreparedCanvasComposite};
 use super::super::surface::surface_clear_color;
 use super::super::{
     BlurUniform, CompositeUniform, OffscreenTarget, Renderer, TextQuadSpec, TextVertex,
@@ -224,6 +224,9 @@ impl Renderer {
 
         self.clear_offscreen_target(encoder, &composite_target);
         let content_prepared = self.prepare_commands(
+            DrawStream::CompositeContent {
+                depth: composite_depth,
+            },
             &composite.primitive.content_commands,
             font_manager,
             self.vertex_viewport(),
@@ -231,6 +234,7 @@ impl Renderer {
             &[],
             &[],
             &std::collections::HashMap::new(),
+            &[],
         )?;
         self.vertex_pool.flush(&self.device, &self.queue);
         let mut composite_cleared = true;
@@ -246,6 +250,9 @@ impl Renderer {
         if let Some(mask_commands) = composite.primitive.mask_commands.as_ref() {
             self.clear_offscreen_target(encoder, &composite_mask_target);
             let mask_prepared = self.prepare_commands(
+                DrawStream::CompositeMask {
+                    depth: composite_depth,
+                },
                 mask_commands,
                 font_manager,
                 self.vertex_viewport(),
@@ -253,6 +260,7 @@ impl Renderer {
                 &[],
                 &[],
                 &std::collections::HashMap::new(),
+                &[],
             )?;
             self.vertex_pool.flush(&self.device, &self.queue);
             let mut mask_cleared = true;

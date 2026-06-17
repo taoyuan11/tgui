@@ -1408,10 +1408,27 @@ fn apply_default_data_grid_text_style<VM>(
         }
         WidgetKind::Container { children, .. } => {
             for child_source in children {
-                if let ChildSource::Static(children) = child_source {
-                    for child in children {
+                match child_source {
+                    ChildSource::Static(children) => {
+                        for child in children {
+                            apply_default_data_grid_text_style(child, style_resolver.clone(), role);
+                        }
+                    }
+                    ChildSource::Show { child, .. } => {
                         apply_default_data_grid_text_style(child, style_resolver.clone(), role);
                     }
+                    ChildSource::Switch {
+                        cases, fallback, ..
+                    } => {
+                        for child in cases {
+                            apply_default_data_grid_text_style(child, style_resolver.clone(), role);
+                        }
+                        if let Some(child) = fallback {
+                            apply_default_data_grid_text_style(child, style_resolver.clone(), role);
+                        }
+                    }
+                    ChildSource::KeyedFor(_) => {}
+                    ChildSource::Dynamic(_) => {}
                 }
             }
         }

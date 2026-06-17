@@ -275,6 +275,7 @@ fn tessellate_image(
         textures: vec![TexturePrimitive {
             texture,
             media_key: None,
+            media_layout: None,
             frame: target_frame,
             quad: None,
             uv_rect: source_rect.and_then(|rect| source_rect_to_uv_rect(rect, intrinsic_size)),

@@ -19,6 +19,7 @@ mod core;
 mod date_picker;
 mod divider;
 mod drawer;
+mod for_each;
 mod gesture;
 mod icon;
 mod image;
@@ -39,6 +40,7 @@ mod rating;
 mod rich_text;
 mod scroll_view;
 mod select;
+mod show;
 mod skeleton;
 mod slider;
 mod slider_shared;
@@ -57,6 +59,7 @@ mod tree;
 mod upload;
 #[cfg(feature = "video")]
 mod video;
+mod view_switch;
 mod r#virtual;
 
 #[cfg(feature = "audio")]
@@ -97,13 +100,15 @@ pub(crate) use common::{
     BrushPrimitiveSlot, CanvasCompositePrimitive, CanvasItemInteractionHandlers,
     CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask, CompositionState, ComputedScene,
     ContainerLayout, DataGridCellState, DataGridHeaderState, DataGridResizeHandleState,
-    DefaultActivation, FocusScopeState, FocusTargetMeta, HitGeometry, HitInteraction, HitRegion,
-    HitTargetId, InteractionHandlers, LifecycleEventHandlers, LifecycleEventState, ListItemState,
-    MeasureContext, MediaEventPhase, MediaEventState, MeshPrimitive, MeshVertex,
-    OverlayTextDecorationPrimitiveSlot, RenderCommand, SceneCounts, ScrollRegion, ScrollbarAxis,
-    ScrollbarHandle, ShapePrimitiveSlot, SplitterHandleState, TextDecorationPrimitiveSlot,
-    TextEditState, TextInputContentGeometry, TextPrimitiveSlot, TexturePrimitive,
-    TexturePrimitiveSlot, TransformChain, TransformRecord, TreeNodeState, WidgetStateMap,
+    DefaultActivation, DirtyDrawRange, FocusScopeState, FocusTargetMeta, HitGeometry,
+    HitInteraction, HitRegion, HitTargetId, InteractionHandlers, LifecycleEventHandlers,
+    LifecycleEventState, ListItemState, MeasureContext, MediaEventPhase, MediaEventState,
+    MeshPrimitive, MeshVertex, OverlayShapePrimitiveSlot, OverlayTextDecorationPrimitiveSlot,
+    OverlayTextPrimitiveSlot, OverlayTexturePrimitiveSlot, RenderCommand, SceneCounts,
+    SceneDrawStream, ScrollRegion, ScrollbarAxis, ScrollbarHandle, ShapePrimitiveSlot,
+    SplitterHandleState, TextDecorationPrimitiveSlot, TextEditState, TextInputContentGeometry,
+    TextPrimitiveSlot, TexturePrimitive, TexturePrimitiveSlot, TransformChain, TransformRecord,
+    TreeNodeState, WidgetStateMap,
 };
 pub use common::{
     CursorStyle, DividerOrientation, FileDropEvent, FocusScopeOptions, Point, Rect,
@@ -134,6 +139,7 @@ pub use core::{
 pub use date_picker::{DatePicker, DatePickerChange, DatePickerStyle};
 pub use divider::Divider;
 pub use drawer::{Drawer, DrawerHost, DrawerMode, DrawerPlacement};
+pub use for_each::For;
 pub use gesture::{
     DoubleTapEvent, EdgeSwipeEvent, GestureEdge, GestureEdgeSet, GesturePhase, GestureRecognizer,
     GestureSource, LongPressEvent, PinchGestureEvent, SwipeAxis, SwipeDirection, SwipeGestureEvent,
@@ -174,6 +180,7 @@ pub use rating::{Rating, RatingChange};
 pub use rich_text::{RichText, RichTextImage, RichTextLinkClick};
 pub use scroll_view::ScrollView;
 pub use select::{Select, SelectOption};
+pub use show::Show;
 pub use skeleton::{Skeleton, SkeletonShape};
 pub use slider::Slider;
 pub use slider_shared::SliderOrientation;
@@ -216,3 +223,4 @@ pub use upload::{
 };
 #[cfg(feature = "video")]
 pub use video::{Video, VideoSurface};
+pub use view_switch::ViewSwitch;

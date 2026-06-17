@@ -381,12 +381,14 @@ fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
         scene_chunks: Default::default(),
         scene_chunk_parts: Default::default(),
         visual_contexts: Default::default(),
+        layout_slot_bindings: Default::default(),
         reactive_slot_bindings: Default::default(),
         media_texture_bindings: Default::default(),
         media_texture_binding_index: Default::default(),
         caret_decoration: None,
         text_input_slot_bindings: Default::default(),
         dependencies: DependencyGraph::default(),
+        strict_capability_report: None,
     }
 }
 

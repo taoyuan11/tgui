@@ -137,8 +137,8 @@ pub struct LayoutStyle {
     pub bottom: Option<Value<Length>>,
     pub align_self: Option<Align>,
     pub justify_self: Option<Align>,
-    pub column_start: Option<usize>,
-    pub row_start: Option<usize>,
+    pub column_start: Option<Value<usize>>,
+    pub row_start: Option<Value<usize>>,
     pub column_span: usize,
     pub row_span: usize,
 }

@@ -147,6 +147,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 && !media_completions.is_empty()
                 && self.try_patch_media_completions(&media_completions)
             {
+                self.rebuild_reactive_slot_bindings(now);
+                self.rebuild_strict_capability_report();
                 self.last_invalidation_revision = revision;
                 super::action_stats::record("media_texture_slot_write");
                 if let Some(window) = self.window.as_ref() {
@@ -204,6 +206,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let media_action = if media_completions.is_empty() {
                 "none"
             } else if self.try_patch_media_completions(&media_completions) {
+                self.rebuild_reactive_slot_bindings(now);
+                self.rebuild_strict_capability_report();
                 super::action_stats::record("media_texture_slot_write");
                 "media_texture_slot_write"
             } else if self.strict_reactive_tree() {

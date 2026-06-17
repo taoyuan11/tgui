@@ -15,13 +15,15 @@ pub(super) fn apply_container_style(
     now: std::time::Instant,
 ) {
     style.padding = to_taffy_rect(
-        layout
-            .padding
-            .as_ref()
-            .map(|padding| {
-                padding.resolve_widget(animations, widget_id, WidgetProperty::Padding, now)
-            })
-            .unwrap_or(Insets::ZERO),
+        track_property_scope(PropertySlot::Padding, || {
+            layout
+                .padding
+                .as_ref()
+                .map(|padding| {
+                    padding.resolve_widget(animations, widget_id, WidgetProperty::Padding, now)
+                })
+                .unwrap_or(Insets::ZERO)
+        }),
         units,
     );
     let gap = layout

@@ -116,12 +116,12 @@ macro_rules! impl_video_layout_api {
         }
 
         pub fn column(mut self, start: usize) -> Self {
-            self.layout.column_start = Some(start.max(1));
+            self.layout.column_start = Some(Value::Static(start.max(1)));
             self
         }
 
         pub fn row(mut self, start: usize) -> Self {
-            self.layout.row_start = Some(start.max(1));
+            self.layout.row_start = Some(Value::Static(start.max(1)));
             self
         }
 

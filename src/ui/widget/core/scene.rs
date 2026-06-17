@@ -188,6 +188,7 @@ pub(crate) enum ReactiveScenePropertyValue {
         texture: Option<(
             Arc<TextureFrame>,
             Option<crate::media::MediaTextureKey>,
+            Option<crate::media::MediaTextureLayout>,
             Rect,
             f32,
             f32,
@@ -203,6 +204,7 @@ pub(crate) enum ReactiveScenePropertyValue {
         texture: Option<(
             Arc<TextureFrame>,
             Option<crate::media::MediaTextureKey>,
+            Option<crate::media::MediaTextureLayout>,
             Rect,
             f32,
             f32,
@@ -226,6 +228,7 @@ pub(crate) enum ReactiveScenePropertyValue {
     Texture {
         texture: Arc<TextureFrame>,
         media_key: Option<crate::media::MediaTextureKey>,
+        media_layout: Option<crate::media::MediaTextureLayout>,
         frame: Rect,
         corner_radius: f32,
         opacity: f32,

@@ -136,6 +136,7 @@ pub struct Renderer {
     text_cache: HashMap<TextCacheKey, TextCacheEntry>,
     texture_cache: HashMap<u64, TextureCacheEntry>,
     vertex_pool: self::vertex_pool::VertexBufferPool,
+    last_prepare_stats: HashMap<prepare::DrawStream, prepare::PrepareReuseStats>,
     /// 本次运行的 adapter 是否实际支持 IMMEDIATES。
     /// adapter 不支持时为 false——此时 GPU 平移变体运行时降级,滚动回退到
     /// CPU 子树重收集。
@@ -206,6 +207,7 @@ impl Renderer {
         self.vertex_pool.begin_frame();
 
         let command_buffers = self.prepare_commands(
+            prepare::DrawStream::Main,
             &scene.commands,
             font_manager,
             viewport,
@@ -213,8 +215,10 @@ impl Renderer {
             scene.command_gpu_scroll_containers(),
             scene.command_transform_chains(),
             transform_records,
+            scene.dirty_draw_ranges(),
         )?;
         let overlay_buffers = self.prepare_commands(
+            prepare::DrawStream::Overlay,
             &scene.overlay_commands,
             font_manager,
             viewport,
@@ -222,6 +226,7 @@ impl Renderer {
             scene.overlay_command_gpu_scroll_containers(),
             scene.overlay_command_transform_chains(),
             transform_records,
+            scene.dirty_draw_ranges(),
         )?;
         // 两次 prepare 的顶点数据都已进 staging，这里一次性上传到 GPU。
         self.vertex_pool.flush(&self.device, &self.queue);

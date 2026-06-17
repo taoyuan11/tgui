@@ -3,7 +3,8 @@ use super::*;
 use crate::ui::unit::Dp;
 use crate::ui::widget::{
     BackdropBlurPrimitive, BackdropBlurPrimitiveSlot, BrushPrimitive, BrushPrimitiveSlot,
-    HitInteraction, TextPrimitive, TexturePrimitive, TexturePrimitiveSlot,
+    HitInteraction, OverlayShapePrimitiveSlot, OverlayTextPrimitiveSlot,
+    OverlayTexturePrimitiveSlot, TextPrimitive, TexturePrimitive, TexturePrimitiveSlot,
 };
 use std::sync::Arc;
 
@@ -33,8 +34,14 @@ enum ReactiveSlotBindingKind {
     ShapeFillColor {
         slot: ShapePrimitiveSlot,
     },
+    OverlayShapeFillColor {
+        slot: OverlayShapePrimitiveSlot,
+    },
     ShapeStrokeColor {
         slot: ShapePrimitiveSlot,
+    },
+    OverlayShapeStrokeColor {
+        slot: OverlayShapePrimitiveSlot,
     },
     BackdropBlur {
         slot: BackdropBlurPrimitiveSlot,
@@ -72,14 +79,23 @@ enum ReactiveSlotBindingKind {
     TextColor {
         slot: TextPrimitiveSlot,
     },
+    OverlayTextColor {
+        slot: OverlayTextPrimitiveSlot,
+    },
     TextContent {
         slot: TextPrimitiveSlot,
+    },
+    OverlayTextContent {
+        slot: OverlayTextPrimitiveSlot,
     },
     TextInputContent {
         slot: TextPrimitiveSlot,
     },
     TextureOpacity {
         slot: TexturePrimitiveSlot,
+    },
+    OverlayTextureOpacity {
+        slot: OverlayTexturePrimitiveSlot,
     },
     Texture {
         slot: TexturePrimitiveSlot,
@@ -102,6 +118,10 @@ enum ReactiveSlotBindingKind {
 enum ReactiveSlotWrite {
     ShapeColor {
         slot: ShapePrimitiveSlot,
+        color: Color,
+    },
+    OverlayShapeColor {
+        slot: OverlayShapePrimitiveSlot,
         color: Color,
     },
     ShapeRect {
@@ -128,8 +148,17 @@ enum ReactiveSlotWrite {
         slot: TextPrimitiveSlot,
         color: Color,
     },
+    OverlayTextColor {
+        slot: OverlayTextPrimitiveSlot,
+        color: Color,
+    },
     TextContent {
         slot: TextPrimitiveSlot,
+        content: Arc<str>,
+        font_family: Option<Arc<str>>,
+    },
+    OverlayTextContent {
+        slot: OverlayTextPrimitiveSlot,
         content: Arc<str>,
         font_family: Option<Arc<str>>,
     },
@@ -139,6 +168,10 @@ enum ReactiveSlotWrite {
     },
     TextureOpacity {
         slot: TexturePrimitiveSlot,
+        opacity: f32,
+    },
+    OverlayTextureOpacity {
+        slot: OverlayTexturePrimitiveSlot,
         opacity: f32,
     },
     Texture {
@@ -164,6 +197,9 @@ impl ReactiveSlotWrite {
             Self::ShapeColor { slot, color } => {
                 computed.write_shape_color_slot(offset, *slot, *color)
             }
+            Self::OverlayShapeColor { slot, color } => computed
+                .scene
+                .write_overlay_shape_color_slot(offset, *slot, *color),
             Self::ShapeRect { slot, rect } => computed.write_shape_rect_slot(offset, *slot, *rect),
             Self::ShapeCornerRadius {
                 slot,
@@ -181,11 +217,24 @@ impl ReactiveSlotWrite {
             Self::TextColor { slot, color } => {
                 computed.write_text_color_slot(offset, *slot, *color)
             }
+            Self::OverlayTextColor { slot, color } => computed
+                .scene
+                .write_overlay_text_color_slot(offset, *slot, *color),
             Self::TextContent {
                 slot,
                 content,
                 font_family,
             } => computed.write_text_content_slot(
+                offset,
+                *slot,
+                content.clone(),
+                font_family.clone(),
+            ),
+            Self::OverlayTextContent {
+                slot,
+                content,
+                font_family,
+            } => computed.scene.write_overlay_text_content_slot(
                 offset,
                 *slot,
                 content.clone(),
@@ -197,6 +246,9 @@ impl ReactiveSlotWrite {
             Self::TextureOpacity { slot, opacity } => {
                 computed.write_texture_opacity_slot(offset, *slot, *opacity)
             }
+            Self::OverlayTextureOpacity { slot, opacity } => computed
+                .scene
+                .write_overlay_texture_opacity_slot(offset, *slot, *opacity),
             Self::Texture { slot, primitive } => {
                 computed.write_texture_slot(offset, *slot, primitive.clone())
             }
@@ -265,6 +317,10 @@ impl LocalReactiveSlotBinding {
             | ReactiveSlotBindingKind::ShapeStrokeColor { slot } => {
                 computed.can_write_shape_color_slot(offset, *slot)
             }
+            ReactiveSlotBindingKind::OverlayShapeFillColor { slot }
+            | ReactiveSlotBindingKind::OverlayShapeStrokeColor { slot } => {
+                computed.scene.can_write_overlay_shape_slot(offset, *slot)
+            }
             ReactiveSlotBindingKind::BackdropBlur { slot } => {
                 computed.can_write_backdrop_blur_slot(offset, *slot)
             }
@@ -319,10 +375,17 @@ impl LocalReactiveSlotBinding {
             | ReactiveSlotBindingKind::TextInputContent { slot } => {
                 computed.can_write_text_color_slot(offset, *slot)
             }
+            ReactiveSlotBindingKind::OverlayTextColor { slot }
+            | ReactiveSlotBindingKind::OverlayTextContent { slot } => computed
+                .scene
+                .can_write_overlay_text_color_slot(offset, *slot),
             ReactiveSlotBindingKind::TextureOpacity { slot }
             | ReactiveSlotBindingKind::Texture { slot } => {
                 computed.can_write_texture_opacity_slot(offset, *slot)
             }
+            ReactiveSlotBindingKind::OverlayTextureOpacity { slot } => computed
+                .scene
+                .can_write_overlay_texture_opacity_slot(offset, *slot),
             ReactiveSlotBindingKind::ProgressFill { fill, label } => {
                 computed.can_write_shape_color_slot(offset, *fill)
                     && label
@@ -377,6 +440,16 @@ impl LocalReactiveSlotBinding {
                 ReactiveScenePropertyValue::ShapeStrokeColor { color, .. },
             ) => {
                 writes.push(ReactiveSlotWrite::ShapeColor { slot: *slot, color });
+            }
+            (
+                ReactiveSlotBindingKind::OverlayShapeFillColor { slot },
+                ReactiveScenePropertyValue::ShapeFillColor { color, .. },
+            )
+            | (
+                ReactiveSlotBindingKind::OverlayShapeStrokeColor { slot },
+                ReactiveScenePropertyValue::ShapeStrokeColor { color, .. },
+            ) => {
+                writes.push(ReactiveSlotWrite::OverlayShapeColor { slot: *slot, color });
             }
             (
                 ReactiveSlotBindingKind::BackdropBlur { slot },
@@ -510,7 +583,16 @@ impl LocalReactiveSlotBinding {
                 }
                 if let (
                     Some(slot),
-                    Some((texture, media_key, frame, corner_radius, opacity, clip_rect, clip_mask)),
+                    Some((
+                        texture,
+                        media_key,
+                        media_layout,
+                        frame,
+                        corner_radius,
+                        opacity,
+                        clip_rect,
+                        clip_mask,
+                    )),
                 ) = (*texture, value_texture)
                 {
                     writes.push(ReactiveSlotWrite::Texture {
@@ -518,6 +600,7 @@ impl LocalReactiveSlotBinding {
                         primitive: TexturePrimitive {
                             texture,
                             media_key,
+                            media_layout,
                             frame,
                             quad: None,
                             uv_rect: None,
@@ -580,7 +663,16 @@ impl LocalReactiveSlotBinding {
                 }
                 if let (
                     Some(slot),
-                    Some((texture, media_key, frame, corner_radius, opacity, clip_rect, clip_mask)),
+                    Some((
+                        texture,
+                        media_key,
+                        media_layout,
+                        frame,
+                        corner_radius,
+                        opacity,
+                        clip_rect,
+                        clip_mask,
+                    )),
                 ) = (*texture, value_texture)
                 {
                     writes.push(ReactiveSlotWrite::Texture {
@@ -588,6 +680,7 @@ impl LocalReactiveSlotBinding {
                         primitive: TexturePrimitive {
                             texture,
                             media_key,
+                            media_layout,
                             frame,
                             quad: None,
                             uv_rect: None,
@@ -609,6 +702,12 @@ impl LocalReactiveSlotBinding {
                 writes.push(ReactiveSlotWrite::TextColor { slot: *slot, color });
             }
             (
+                ReactiveSlotBindingKind::OverlayTextColor { slot },
+                ReactiveScenePropertyValue::TextColor { color },
+            ) => {
+                writes.push(ReactiveSlotWrite::OverlayTextColor { slot: *slot, color });
+            }
+            (
                 ReactiveSlotBindingKind::TextContent { slot },
                 ReactiveScenePropertyValue::TextContent {
                     content,
@@ -616,6 +715,19 @@ impl LocalReactiveSlotBinding {
                 },
             ) => {
                 writes.push(ReactiveSlotWrite::TextContent {
+                    slot: *slot,
+                    content,
+                    font_family,
+                });
+            }
+            (
+                ReactiveSlotBindingKind::OverlayTextContent { slot },
+                ReactiveScenePropertyValue::TextContent {
+                    content,
+                    font_family,
+                },
+            ) => {
+                writes.push(ReactiveSlotWrite::OverlayTextContent {
                     slot: *slot,
                     content,
                     font_family,
@@ -640,10 +752,20 @@ impl LocalReactiveSlotBinding {
                 });
             }
             (
+                ReactiveSlotBindingKind::OverlayTextureOpacity { slot },
+                ReactiveScenePropertyValue::TextureOpacity { opacity, .. },
+            ) => {
+                writes.push(ReactiveSlotWrite::OverlayTextureOpacity {
+                    slot: *slot,
+                    opacity: opacity.clamp(0.0, 1.0),
+                });
+            }
+            (
                 ReactiveSlotBindingKind::Texture { slot },
                 ReactiveScenePropertyValue::Texture {
                     texture,
                     media_key,
+                    media_layout,
                     frame,
                     corner_radius,
                     opacity,
@@ -656,6 +778,7 @@ impl LocalReactiveSlotBinding {
                     primitive: TexturePrimitive {
                         texture,
                         media_key,
+                        media_layout,
                         frame,
                         quad: None,
                         uv_rect: None,
@@ -1145,6 +1268,7 @@ fn reactive_media_texture_binding_update(
         widget_id: binding.widget_id,
         slot: *slot,
         media_key: primitive.media_key.clone(),
+        media_layout: primitive.media_layout,
         frame: primitive.frame,
         root_offset: binding.root_offset,
         ancestor_offsets: binding
@@ -1176,18 +1300,34 @@ fn slot_binding_kind_from_plan(
 ) -> Option<ReactiveSlotBindingKind> {
     match value {
         ReactiveScenePropertyValue::ShapeFillColor { .. } => {
-            let [ReactiveSlotWrite::ShapeColor { slot, .. }] = plan.writes.as_slice() else {
+            let [write] = plan.writes.as_slice() else {
                 return None;
             };
             no_hit(plan)?;
-            Some(ReactiveSlotBindingKind::ShapeFillColor { slot: *slot })
+            match write {
+                ReactiveSlotWrite::ShapeColor { slot, .. } => {
+                    Some(ReactiveSlotBindingKind::ShapeFillColor { slot: *slot })
+                }
+                ReactiveSlotWrite::OverlayShapeColor { slot, .. } => {
+                    Some(ReactiveSlotBindingKind::OverlayShapeFillColor { slot: *slot })
+                }
+                _ => None,
+            }
         }
         ReactiveScenePropertyValue::ShapeStrokeColor { .. } => {
-            let [ReactiveSlotWrite::ShapeColor { slot, .. }] = plan.writes.as_slice() else {
+            let [write] = plan.writes.as_slice() else {
                 return None;
             };
             no_hit(plan)?;
-            Some(ReactiveSlotBindingKind::ShapeStrokeColor { slot: *slot })
+            match write {
+                ReactiveSlotWrite::ShapeColor { slot, .. } => {
+                    Some(ReactiveSlotBindingKind::ShapeStrokeColor { slot: *slot })
+                }
+                ReactiveSlotWrite::OverlayShapeColor { slot, .. } => {
+                    Some(ReactiveSlotBindingKind::OverlayShapeStrokeColor { slot: *slot })
+                }
+                _ => None,
+            }
         }
         ReactiveScenePropertyValue::BackdropBlur(_) => {
             let [ReactiveSlotWrite::BackdropBlur { slot, .. }] = plan.writes.as_slice() else {
@@ -1360,18 +1500,34 @@ fn slot_binding_kind_from_plan(
             })
         }
         ReactiveScenePropertyValue::TextColor { .. } => {
-            let [ReactiveSlotWrite::TextColor { slot, .. }] = plan.writes.as_slice() else {
+            let [write] = plan.writes.as_slice() else {
                 return None;
             };
             no_hit(plan)?;
-            Some(ReactiveSlotBindingKind::TextColor { slot: *slot })
+            match write {
+                ReactiveSlotWrite::TextColor { slot, .. } => {
+                    Some(ReactiveSlotBindingKind::TextColor { slot: *slot })
+                }
+                ReactiveSlotWrite::OverlayTextColor { slot, .. } => {
+                    Some(ReactiveSlotBindingKind::OverlayTextColor { slot: *slot })
+                }
+                _ => None,
+            }
         }
         ReactiveScenePropertyValue::TextContent { .. } => {
-            let [ReactiveSlotWrite::TextContent { slot, .. }] = plan.writes.as_slice() else {
+            let [write] = plan.writes.as_slice() else {
                 return None;
             };
             no_hit(plan)?;
-            Some(ReactiveSlotBindingKind::TextContent { slot: *slot })
+            match write {
+                ReactiveSlotWrite::TextContent { slot, .. } => {
+                    Some(ReactiveSlotBindingKind::TextContent { slot: *slot })
+                }
+                ReactiveSlotWrite::OverlayTextContent { slot, .. } => {
+                    Some(ReactiveSlotBindingKind::OverlayTextContent { slot: *slot })
+                }
+                _ => None,
+            }
         }
         ReactiveScenePropertyValue::TextInputContent(_) => {
             let [ReactiveSlotWrite::TextPrimitive { slot, .. }] = plan.writes.as_slice() else {
@@ -1381,11 +1537,19 @@ fn slot_binding_kind_from_plan(
             Some(ReactiveSlotBindingKind::TextInputContent { slot: *slot })
         }
         ReactiveScenePropertyValue::TextureOpacity { .. } => {
-            let [ReactiveSlotWrite::TextureOpacity { slot, .. }] = plan.writes.as_slice() else {
+            let [write] = plan.writes.as_slice() else {
                 return None;
             };
             no_hit(plan)?;
-            Some(ReactiveSlotBindingKind::TextureOpacity { slot: *slot })
+            match write {
+                ReactiveSlotWrite::TextureOpacity { slot, .. } => {
+                    Some(ReactiveSlotBindingKind::TextureOpacity { slot: *slot })
+                }
+                ReactiveSlotWrite::OverlayTextureOpacity { slot, .. } => {
+                    Some(ReactiveSlotBindingKind::OverlayTextureOpacity { slot: *slot })
+                }
+                _ => None,
+            }
         }
         ReactiveScenePropertyValue::Texture { .. } => {
             let [ReactiveSlotWrite::Texture { slot, .. }] = plan.writes.as_slice() else {
@@ -1550,7 +1714,16 @@ fn slot_write_for_reactive_value<VM>(
                     hit_write: None,
                 })
             } else {
-                None
+                let slots = computed.scene.matching_overlay_shape_slots(|shape| {
+                    shape.stroke_width == 0.0 && shape.rect == rect
+                });
+                (slots.len() == 1).then(|| LocalReactiveSlotPlan {
+                    writes: vec![ReactiveSlotWrite::OverlayShapeColor {
+                        slot: slots[0],
+                        color,
+                    }],
+                    hit_write: None,
+                })
             }
         }
         ReactiveScenePropertyValue::ShapeStrokeColor {
@@ -1573,7 +1746,16 @@ fn slot_write_for_reactive_value<VM>(
                     hit_write: None,
                 })
             } else {
-                None
+                let slots = computed.scene.matching_overlay_shape_slots(|shape| {
+                    shape.rect == rect && (shape.stroke_width - stroke_width).abs() <= f32::EPSILON
+                });
+                (slots.len() == 1).then(|| LocalReactiveSlotPlan {
+                    writes: vec![ReactiveSlotWrite::OverlayShapeColor {
+                        slot: slots[0],
+                        color,
+                    }],
+                    hit_write: None,
+                })
             }
         }
         ReactiveScenePropertyValue::BackdropBlur(primitive) => {
@@ -1819,8 +2001,16 @@ fn slot_write_for_reactive_value<VM>(
                     rect,
                 });
             }
-            if let Some((texture, media_key, frame, corner_radius, opacity, clip_rect, clip_mask)) =
-                texture
+            if let Some((
+                texture,
+                media_key,
+                media_layout,
+                frame,
+                corner_radius,
+                opacity,
+                clip_rect,
+                clip_mask,
+            )) = texture
             {
                 let slots = computed.scene.matching_texture_slots(|texture| {
                     texture.quad.is_none() && texture.uv_rect.is_none()
@@ -1833,6 +2023,7 @@ fn slot_write_for_reactive_value<VM>(
                     primitive: TexturePrimitive {
                         texture,
                         media_key,
+                        media_layout,
                         frame,
                         quad: None,
                         uv_rect: None,
@@ -1922,8 +2113,16 @@ fn slot_write_for_reactive_value<VM>(
                     corner_radius,
                 });
             }
-            if let Some((texture, media_key, frame, corner_radius, opacity, clip_rect, clip_mask)) =
-                texture
+            if let Some((
+                texture,
+                media_key,
+                media_layout,
+                frame,
+                corner_radius,
+                opacity,
+                clip_rect,
+                clip_mask,
+            )) = texture
             {
                 let slots = computed.scene.matching_texture_slots(|texture| {
                     texture.quad.is_none() && texture.uv_rect.is_none()
@@ -1936,6 +2135,7 @@ fn slot_write_for_reactive_value<VM>(
                     primitive: TexturePrimitive {
                         texture,
                         media_key,
+                        media_layout,
                         frame,
                         quad: None,
                         uv_rect: None,
@@ -1978,7 +2178,16 @@ fn slot_write_for_reactive_value<VM>(
                     hit_write: None,
                 })
             } else {
-                None
+                let slots = computed.scene.matching_overlay_text_slots(|text| {
+                    text.rich_spans.is_none() && !text.force_color
+                });
+                (slots.len() == 1).then(|| LocalReactiveSlotPlan {
+                    writes: vec![ReactiveSlotWrite::OverlayTextColor {
+                        slot: slots[0],
+                        color,
+                    }],
+                    hit_write: None,
+                })
             }
         }
         ReactiveScenePropertyValue::TextContent {
@@ -1998,7 +2207,17 @@ fn slot_write_for_reactive_value<VM>(
                     hit_write: None,
                 })
             } else {
-                None
+                let slots = computed.scene.matching_overlay_text_slots(|text| {
+                    text.rich_spans.is_none() && !text.force_color
+                });
+                (slots.len() == 1).then(|| LocalReactiveSlotPlan {
+                    writes: vec![ReactiveSlotWrite::OverlayTextContent {
+                        slot: slots[0],
+                        content,
+                        font_family,
+                    }],
+                    hit_write: None,
+                })
             }
         }
         ReactiveScenePropertyValue::TextInputContent(primitive) => {
@@ -2036,12 +2255,23 @@ fn slot_write_for_reactive_value<VM>(
                     hit_write: None,
                 })
             } else {
-                None
+                let slots = computed.scene.matching_overlay_texture_slots(|texture| {
+                    texture.frame == frame
+                        && (texture.corner_radius - corner_radius).abs() <= f32::EPSILON
+                });
+                (slots.len() == 1).then(|| LocalReactiveSlotPlan {
+                    writes: vec![ReactiveSlotWrite::OverlayTextureOpacity {
+                        slot: slots[0],
+                        opacity,
+                    }],
+                    hit_write: None,
+                })
             }
         }
         ReactiveScenePropertyValue::Texture {
             texture,
             media_key,
+            media_layout,
             frame,
             corner_radius,
             opacity,
@@ -2058,6 +2288,7 @@ fn slot_write_for_reactive_value<VM>(
                         primitive: TexturePrimitive {
                             texture,
                             media_key,
+                            media_layout,
                             frame,
                             quad: None,
                             uv_rect: None,
@@ -2287,5 +2518,157 @@ fn slider_thumb_rect_matches(rect: Rect, target_thumb_rect: Rect, track_rect: Re
         rect.x == target_thumb_rect.x
             && rect.y >= track_rect.y - (target_thumb_rect.height * 0.5)
             && rect.y <= track_rect.bottom() - (target_thumb_rect.height * 0.5)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::media::TextureFrame;
+    use crate::text::font::FontWeight;
+    use crate::ui::widget::{
+        CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextVerticalAlign, CanvasTextWrap,
+        RenderCommand, RenderPrimitive, SceneCounts,
+    };
+
+    fn shape(rect: Rect, color: Color) -> RenderPrimitive {
+        RenderPrimitive {
+            rect,
+            color,
+            corner_radius: 0.0,
+            stroke_width: 0.0,
+            clip_rect: None,
+            clip_mask: None,
+        }
+    }
+
+    fn text(content: &str, color: Color) -> TextPrimitive {
+        TextPrimitive {
+            content: Arc::from(content),
+            rich_spans: None,
+            frame: Rect::new(0.0, 0.0, 64.0, 20.0),
+            quad: None,
+            color,
+            force_color: false,
+            font_family: None,
+            font_size: 14.0,
+            font_weight: FontWeight::NORMAL,
+            line_height: 18.0,
+            letter_spacing: 0.0,
+            wrap: CanvasTextWrap::Word,
+            overflow: CanvasTextOverflow::Clip,
+            horizontal_align: CanvasTextHorizontalAlign::Start,
+            vertical_align: CanvasTextVerticalAlign::Start,
+            clip_rect: None,
+            clip_mask: None,
+        }
+    }
+
+    fn texture(opacity: f32) -> TexturePrimitive {
+        TexturePrimitive {
+            texture: Arc::new(TextureFrame::new(1, 1, vec![255, 255, 255, 255])),
+            media_key: None,
+            media_layout: None,
+            frame: Rect::new(0.0, 0.0, 12.0, 12.0),
+            quad: None,
+            uv_rect: None,
+            corner_radius: 2.0,
+            opacity,
+            clip_rect: None,
+            clip_mask: None,
+        }
+    }
+
+    fn apply_patch<VM>(
+        computed: &mut ComputedScene<VM>,
+        binding: &LocalReactiveSlotBinding,
+        value: ReactiveScenePropertyValue,
+    ) {
+        let patch = binding
+            .patch_for(value)
+            .expect("overlay reactive slot patch should be available");
+        assert!(patch.hit_write.is_none());
+        for write in patch.writes {
+            assert!(write.write(computed, &SceneCounts::default()));
+        }
+    }
+
+    #[test]
+    fn overlay_shape_color_builds_reactive_slot_plan() {
+        let mut computed = ComputedScene::<()>::default();
+        let rect = Rect::new(1.0, 2.0, 30.0, 20.0);
+        computed.scene.push_overlay_shape(shape(rect, Color::WHITE));
+
+        let value = ReactiveScenePropertyValue::ShapeFillColor {
+            rect,
+            color: Color::RED,
+        };
+        let binding = slot_binding_for_reactive_value(&computed, value.clone())
+            .expect("overlay shape should build a retained slot binding");
+        assert!(matches!(
+            binding.kind,
+            ReactiveSlotBindingKind::OverlayShapeFillColor { .. }
+        ));
+
+        apply_patch(&mut computed, &binding, value);
+        assert_eq!(computed.scene.overlay_shapes[0].color, Color::RED);
+        match &computed.scene.overlay_commands[0] {
+            RenderCommand::Shape(command) => assert_eq!(command.color, Color::RED),
+            _ => panic!("expected overlay shape command"),
+        }
+    }
+
+    #[test]
+    fn overlay_text_content_builds_reactive_slot_plan() {
+        let mut computed = ComputedScene::<()>::default();
+        computed
+            .scene
+            .push_overlay_text(text("before", Color::WHITE));
+
+        let value = ReactiveScenePropertyValue::TextContent {
+            content: Arc::from("after"),
+            font_family: Some(Arc::from("Inter")),
+        };
+        let binding = slot_binding_for_reactive_value(&computed, value.clone())
+            .expect("overlay text should build a retained slot binding");
+        assert!(matches!(
+            binding.kind,
+            ReactiveSlotBindingKind::OverlayTextContent { .. }
+        ));
+
+        apply_patch(&mut computed, &binding, value);
+        assert_eq!(computed.scene.overlay_texts[0].content.as_ref(), "after");
+        match &computed.scene.overlay_commands[0] {
+            RenderCommand::Text(command) => {
+                assert_eq!(command.content.as_ref(), "after");
+                assert_eq!(command.font_family.as_deref(), Some("Inter"));
+            }
+            _ => panic!("expected overlay text command"),
+        }
+    }
+
+    #[test]
+    fn overlay_texture_opacity_builds_reactive_slot_plan() {
+        let mut computed = ComputedScene::<()>::default();
+        computed.scene.push_overlay_texture(texture(0.25));
+
+        let value = ReactiveScenePropertyValue::TextureOpacity {
+            frame: Rect::new(0.0, 0.0, 12.0, 12.0),
+            corner_radius: 2.0,
+            opacity: 0.75,
+        };
+        let binding = slot_binding_for_reactive_value(&computed, value.clone())
+            .expect("overlay texture should build a retained slot binding");
+        assert!(matches!(
+            binding.kind,
+            ReactiveSlotBindingKind::OverlayTextureOpacity { .. }
+        ));
+
+        apply_patch(&mut computed, &binding, value);
+        assert_eq!(computed.scene.overlay_textures[0].opacity, 0.75);
+        match &computed.scene.overlay_commands[0] {
+            RenderCommand::Texture(command) => assert_eq!(command.opacity, 0.75),
+            _ => panic!("expected overlay texture command"),
+        }
     }
 }

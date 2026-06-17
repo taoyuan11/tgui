@@ -12,8 +12,8 @@ use crate::foundation::color::Color;
 use crate::media::TextureFrame;
 use crate::runtime::overlay::collect::emit_overlay;
 use crate::runtime::overlay::{
-    Anchor, FlipPolicy, Overlay, OverlayContent, OverlayId, OverlayLayer, OverlayPrimitive,
-    Placement,
+    Anchor, AnchorKey, FlipPolicy, Overlay, OverlayContent, OverlayId, OverlayLayer,
+    OverlayPrimitive, Placement,
 };
 use crate::ui::unit::{dp, Dp};
 use crate::ui::widget::{
@@ -25,21 +25,26 @@ fn viewport() -> Rect {
     Rect::new(dp(0.0), dp(0.0), dp(800.0), dp(600.0))
 }
 
-fn shape(rect_local: Rect, color: Color) -> OverlayPrimitive {
-    OverlayPrimitive::Shape(RenderPrimitive {
+fn render_shape(rect_local: Rect, color: Color) -> RenderPrimitive {
+    RenderPrimitive {
         rect: rect_local,
         color,
         corner_radius: 0.0,
         stroke_width: 0.0,
         clip_rect: None,
         clip_mask: None,
-    })
+    }
+}
+
+fn shape(rect_local: Rect, color: Color) -> OverlayPrimitive {
+    OverlayPrimitive::Shape(render_shape(rect_local, color))
 }
 
 fn texture(frame_local: Rect) -> OverlayPrimitive {
     OverlayPrimitive::Texture(TexturePrimitive {
         texture: std::sync::Arc::new(TextureFrame::new(4, 4, vec![255; 4 * 4 * 4])),
         media_key: None,
+        media_layout: None,
         frame: frame_local,
         quad: None,
         uv_rect: None,
@@ -173,6 +178,150 @@ fn emit_overlay_texture_writes_to_overlay_texture_bucket() {
     assert!(close(translated.frame.width, 16.0));
     assert!(close(translated.frame.height, 12.0));
     assert_eq!(translated.clip_rect, Some(solved.clip_rect));
+}
+
+#[test]
+fn overlay_command_sources_track_source_widget() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let source = WidgetId::from_raw(321);
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Rect(anchor))
+        .source_widget(source)
+        .placement(Placement::bottom())
+        .offset(dp(8.0));
+
+    let _ = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(80.0), dp(40.0)),
+        OverlayContent::Primitives(vec![
+            shape(
+                Rect::new(dp(0.0), dp(0.0), dp(80.0), dp(40.0)),
+                Color::rgba(255, 0, 0, 255),
+            ),
+            texture(Rect::new(dp(8.0), dp(8.0), dp(16.0), dp(16.0))),
+        ]),
+    );
+    scene.finalize_portals(viewport());
+
+    assert_eq!(
+        scene.scene.overlay_command_sources().len(),
+        scene.scene.overlay_commands.len()
+    );
+    assert_eq!(
+        scene.scene.overlay_command_sources(),
+        &[Some(source), Some(source)]
+    );
+}
+
+#[test]
+fn nested_scene_overlay_command_sources_are_preserved() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let portal_source = WidgetId::from_raw(400);
+    let nested_overlay_source = WidgetId::from_raw(401);
+
+    let mut nested = ComputedScene::<()>::default();
+    nested.scene.push_shape(render_shape(
+        Rect::new(dp(1.0), dp(1.0), dp(10.0), dp(10.0)),
+        Color::rgba(255, 0, 0, 255),
+    ));
+    nested.scene.push_overlay_shape(render_shape(
+        Rect::new(dp(2.0), dp(2.0), dp(10.0), dp(10.0)),
+        Color::rgba(0, 255, 0, 255),
+    ));
+    nested.scene.overlay_command_sources[0] = Some(nested_overlay_source);
+
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Rect(anchor))
+        .source_widget(portal_source)
+        .placement(Placement::bottom())
+        .offset(dp(8.0));
+    let _ = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(20.0), dp(20.0)),
+        OverlayContent::Scene(Box::new(nested)),
+    );
+    scene.finalize_portals(viewport());
+
+    assert_eq!(
+        scene.scene.overlay_command_sources().len(),
+        scene.scene.overlay_commands.len()
+    );
+    assert_eq!(
+        scene.scene.overlay_command_sources(),
+        &[Some(portal_source), Some(nested_overlay_source)]
+    );
+}
+
+#[test]
+fn finalized_overlay_layer_graph_tracks_command_ranges_and_sources() {
+    let mut scene = ComputedScene::<()>::default();
+    let source = WidgetId::from_raw(42);
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Rect(anchor))
+        .source_widget(source)
+        .layer(OverlayLayer::Modal)
+        .close_on_escape(true);
+
+    let _ = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(80.0), dp(40.0)),
+        OverlayContent::Primitives(vec![shape(
+            Rect::new(dp(0.0), dp(0.0), dp(80.0), dp(40.0)),
+            Color::WHITE,
+        )]),
+    );
+    scene.finalize_portals(viewport());
+
+    let graph = &scene.overlay_layer_graph;
+    assert_eq!(graph.layers.len(), 1);
+    let entry = &graph.layers[0];
+    assert_eq!(entry.layer, OverlayLayer::Modal);
+    assert_eq!(entry.command_range, 0..1);
+    assert_eq!(entry.hit_range, 0..0);
+    assert_eq!(entry.close_handler_range, 0..1);
+    assert_eq!(entry.focus_scope_range, 0..0);
+    assert_eq!(entry.sources.as_slice(), &[Some(source)]);
+}
+
+#[test]
+fn portal_anchor_slot_tracks_registered_anchor_and_overlay_position() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor_widget = WidgetId::from_raw(77);
+    let anchor_key = AnchorKey::widget(anchor_widget);
+    let anchor = Rect::new(dp(120.0), dp(140.0), dp(40.0), dp(30.0));
+    scene.register_widget_overlay_anchor(anchor_widget, anchor);
+    scene.register_widget_overlay_anchor(anchor_widget, anchor);
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Key(anchor_key))
+        .placement(Placement::bottom())
+        .offset(dp(0.0))
+        .viewport_padding(dp(0.0));
+
+    let _ = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(20.0), dp(10.0)),
+        OverlayContent::Primitives(vec![shape(
+            Rect::new(dp(0.0), dp(0.0), dp(20.0), dp(10.0)),
+            Color::WHITE,
+        )]),
+    );
+    scene.finalize_portals(viewport());
+
+    assert_eq!(scene.overlay_layer_graph.anchor_slots.len(), 1);
+    assert_eq!(scene.overlay_layer_graph.anchor_slots[0].key, anchor_key);
+    assert_eq!(scene.overlay_layer_graph.anchor_slots[0].rect, anchor);
+    assert_eq!(
+        scene.scene.overlay_shapes[0].rect.y,
+        anchor.y + anchor.height,
+        "portal overlay should be placed from the retained anchor slot"
+    );
 }
 
 #[test]

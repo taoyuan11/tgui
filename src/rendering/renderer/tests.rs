@@ -8,7 +8,10 @@ use crate::ui::widget::{
     CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextVerticalAlign, CanvasTextWrap,
     TextPrimitive,
 };
-use crate::ui::widget::{Rect, ScenePrimitives, TexturePrimitive};
+use crate::ui::widget::{
+    DirtyDrawRange, Rect, RenderPrimitive, SceneCounts, SceneDrawStream, ScenePrimitives,
+    ShapePrimitiveSlot, TexturePrimitive,
+};
 use cosmic_text::{fontdb, CacheKey, CacheKeyFlags, SubpixelBin};
 
 #[cfg(target_os = "windows")]
@@ -38,6 +41,102 @@ fn pipeline_multisample_state_uses_requested_count() {
 #[test]
 fn msaa_mode_default_is_off() {
     assert_eq!(MsaaMode::default(), MsaaMode::Off);
+}
+
+#[test]
+fn draw_id_distinguishes_stream_and_command_index() {
+    use super::prepare::{DrawId, DrawStream};
+
+    let main_zero = DrawId {
+        stream: DrawStream::Main,
+        command_index: 0,
+    };
+    let main_zero_again = DrawId {
+        stream: DrawStream::Main,
+        command_index: 0,
+    };
+    let main_one = DrawId {
+        stream: DrawStream::Main,
+        command_index: 1,
+    };
+    let overlay_zero = DrawId {
+        stream: DrawStream::Overlay,
+        command_index: 0,
+    };
+    let composite_zero = DrawId {
+        stream: DrawStream::CompositeContent { depth: 0 },
+        command_index: 0,
+    };
+
+    assert_eq!(main_zero, main_zero_again);
+    assert_ne!(main_zero, main_one);
+    assert_ne!(main_zero, overlay_zero);
+    assert_ne!(overlay_zero, composite_zero);
+}
+
+#[test]
+fn scene_slot_write_marks_only_the_touched_draw_dirty() {
+    let mut scene = ScenePrimitives::default();
+    scene.push_shape(RenderPrimitive {
+        rect: Rect::new(0.0, 0.0, 10.0, 10.0),
+        color: TguiColorAlias::RED,
+        corner_radius: 0.0,
+        stroke_width: 0.0,
+        clip_rect: None,
+        clip_mask: None,
+    });
+    scene.push_shape(RenderPrimitive {
+        rect: Rect::new(10.0, 0.0, 10.0, 10.0),
+        color: TguiColorAlias::BLUE,
+        corner_radius: 0.0,
+        stroke_width: 0.0,
+        clip_rect: None,
+        clip_mask: None,
+    });
+
+    assert!(scene.dirty_draw_ranges().is_empty());
+    assert!(scene.write_shape_color_slot(
+        &SceneCounts::default(),
+        ShapePrimitiveSlot {
+            shape_index: 1,
+            command_index: 1,
+        },
+        TguiColorAlias::GREEN,
+    ));
+    assert_eq!(
+        scene.dirty_draw_ranges(),
+        &[DirtyDrawRange {
+            stream: SceneDrawStream::Main,
+            range: 1..2,
+        }]
+    );
+}
+
+#[test]
+fn retained_prepare_stats_rebuild_only_dirty_scene_draws() {
+    use super::prepare::{retained_prepare_stats, DrawStream, PrepareReuseStats};
+
+    let dirty = [DirtyDrawRange {
+        stream: SceneDrawStream::Main,
+        range: 1..2,
+    }];
+
+    assert_eq!(
+        retained_prepare_stats(DrawStream::Main, 3, &dirty),
+        PrepareReuseStats {
+            total: 3,
+            rebuild: 1,
+            reuse: 2,
+        }
+    );
+    assert_eq!(
+        retained_prepare_stats(DrawStream::Overlay, 2, &dirty),
+        PrepareReuseStats {
+            total: 2,
+            rebuild: 0,
+            reuse: 2,
+        }
+    );
 }
 
 #[test]
@@ -133,6 +232,7 @@ fn texture_primitive(texture: std::sync::Arc<TextureFrame>) -> TexturePrimitive 
     TexturePrimitive {
         texture,
         media_key: None,
+        media_layout: None,
         frame: Rect::new(0.0, 0.0, 8.0, 8.0),
         quad: None,
         uv_rect: None,

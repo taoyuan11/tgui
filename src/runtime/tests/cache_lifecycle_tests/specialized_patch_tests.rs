@@ -1,4 +1,8 @@
 use super::*;
+#[cfg(feature = "bench-support")]
+use crate::runtime::state::StrictCapabilityKind;
+#[cfg(feature = "bench-support")]
+use crate::ui::widget::{For, Show, ViewSwitch};
 
 #[test]
 fn textarea_show_scrollbar_dependency_update_preserves_cached_layout() {
@@ -261,6 +265,48 @@ fn removing_opaque_dependency_subtree_clears_global_fallback() {
         .as_ref()
         .expect("scene-only invalidation should stay local after opaque removal");
     assert!(cached.computed_valid);
+}
+
+#[test]
+fn removing_dynamic_child_clears_reactive_owner_subscriptions() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let visible = context.state(true);
+    let color = context.state(Color::RED);
+    let color_signal = color.signal();
+    let tree = WidgetTree::new_legacy(
+        Stack::<TestVm>::new().dynamic_child(visible.signal().map_unchecked(
+            move |visible| -> Element<TestVm> {
+                if visible {
+                    let color_signal = color_signal.clone();
+                    Stack::<TestVm>::new()
+                        .size(dp(40.0), dp(40.0))
+                        .style_full(move |ctx| {
+                            let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                            style.surface.background = Some(color_signal.clone().into());
+                            style
+                        })
+                        .into()
+                } else {
+                    Text::new("hidden").key("hidden").into()
+                }
+            },
+        )),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+
+    visible.set(false);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    color.set(Color::BLUE);
+    let updates = handler.invalidation.drain_reactive_updates();
+    assert!(
+        updates.targets.is_empty(),
+        "removed child signal update must not enqueue a detached reactive target: {:?}",
+        updates.targets
+    );
 }
 
 #[test]
@@ -1014,6 +1060,172 @@ fn apply_legacy_scene_dependency_invalidation(
     )
 }
 
+#[cfg(feature = "bench-support")]
+const STRICT_REACTIVE_ALLOWED_ACTIONS: &[&str] = &[
+    "media_texture_slot_write",
+    "reactive_layout_slot_update",
+    "reactive_property_slot_write",
+    "reactive_slot_update",
+    "reactive_structure_slot_update",
+    "reactive_transform_record_update",
+    "strict_reactive_capability_missing_plan",
+    "strict_reactive_detached_rejected",
+    "strict_reactive_global_rejected",
+    "strict_reactive_layout_rejected",
+    "strict_reactive_media_rejected",
+    "strict_reactive_scene_rejected",
+];
+
+#[cfg(feature = "bench-support")]
+const STRICT_REACTIVE_FORBIDDEN_FALLBACK_ACTIONS: &[&str] = &[
+    "global_full_rebuild",
+    "layout_scene_subtree_patch",
+    "reactive_global_full_rebuild",
+    "reactive_layout_scene_patch",
+    "reactive_scene_full_recollect",
+    "scene_full_recollect",
+];
+
+#[cfg(feature = "bench-support")]
+fn assert_action_count(snapshot: &[(&'static str, u64)], expected: &'static str, count: u64) {
+    let actual = snapshot
+        .iter()
+        .find_map(|(action, actual)| (*action == expected).then_some(*actual))
+        .unwrap_or(0);
+    assert_eq!(
+        actual, count,
+        "expected action {expected} to be recorded {count} time(s), got {snapshot:?}"
+    );
+}
+
+#[cfg(feature = "bench-support")]
+fn assert_action_absent(snapshot: &[(&'static str, u64)], unexpected: &'static str) {
+    assert!(
+        !snapshot.iter().any(|(action, _)| *action == unexpected),
+        "unexpected action {unexpected} in {snapshot:?}"
+    );
+}
+
+#[cfg(feature = "bench-support")]
+fn assert_strict_reactive_actions_allowed(snapshot: &[(&'static str, u64)]) {
+    assert!(
+        !snapshot.is_empty(),
+        "strict reactive update should record at least one action"
+    );
+    for (action, count) in snapshot {
+        assert!(
+            *count > 0,
+            "action counts should be positive in {snapshot:?}"
+        );
+        assert!(
+            STRICT_REACTIVE_ALLOWED_ACTIONS.contains(action),
+            "unexpected strict reactive action {action}; allowed={STRICT_REACTIVE_ALLOWED_ACTIONS:?}; snapshot={snapshot:?}"
+        );
+    }
+    for forbidden in STRICT_REACTIVE_FORBIDDEN_FALLBACK_ACTIONS {
+        assert_action_absent(snapshot, forbidden);
+    }
+}
+
+#[cfg(feature = "bench-support")]
+fn capture_strict_reactive_actions(
+    handler: &mut BoundRuntimeHandler<TestVm>,
+    update: impl FnOnce(),
+) -> Vec<(&'static str, u64)> {
+    crate::runtime::action_stats::reset();
+    update();
+    handler.request_redraw_if_dirty(Instant::now());
+    let snapshot = crate::runtime::action_stats::snapshot();
+    assert_strict_reactive_actions_allowed(&snapshot);
+    snapshot
+}
+
+#[cfg(feature = "bench-support")]
+fn assert_strict_missing_property_slot_plan_rejected(
+    handler: &mut BoundRuntimeHandler<TestVm>,
+    property: crate::foundation::binding::PropertySlot,
+    trigger: impl FnOnce(),
+) {
+    let cached = handler
+        .cached_scene
+        .as_mut()
+        .expect("initial scene should be cached");
+    assert!(
+        cached
+            .reactive_slot_bindings
+            .keys()
+            .any(|(_, existing)| *existing == property),
+        "initial strict collect should prebuild a {property:?} slot binding"
+    );
+    cached
+        .reactive_slot_bindings
+        .retain(|(_, existing), _| *existing != property);
+
+    let snapshot = capture_strict_reactive_actions(handler, trigger);
+    assert_action_count(&snapshot, "strict_reactive_scene_rejected", 1);
+    assert_action_absent(&snapshot, "reactive_property_slot_write");
+
+    let cached = handler.cached_scene.as_ref().expect("cache shell");
+    assert!(
+        cached.layout_valid && cached.computed_valid,
+        "strict rejection must preserve retained caches"
+    );
+}
+
+#[cfg(feature = "bench-support")]
+fn filled_stack(color: Color) -> Stack<TestVm> {
+    Stack::<TestVm>::new().style_full(move |ctx| {
+        let mut style = ContainerStyle::default_for_theme(ctx.theme);
+        style.surface.background = Some(color.into());
+        style
+    })
+}
+
+#[cfg(feature = "bench-support")]
+fn assert_reactive_layout_slot_update_matches_full_recollect(
+    label: &'static str,
+    invalidation: InvalidationSignal,
+    tree: WidgetTree<TestVm>,
+    update: impl FnOnce(),
+) {
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let before_shapes = shape_detail_fingerprints(handler.computed_scene());
+
+    let snapshot = capture_strict_reactive_actions(&mut handler, update);
+    let layout_slot_updates = snapshot
+        .iter()
+        .find_map(|(action, count)| (*action == "reactive_layout_slot_update").then_some(*count))
+        .unwrap_or(0);
+    assert_eq!(
+        layout_slot_updates, 1,
+        "{label}: expected one reactive_layout_slot_update, got {snapshot:?}"
+    );
+    assert_action_absent(&snapshot, "strict_reactive_layout_rejected");
+    assert_action_absent(&snapshot, "reactive_layout_scene_patch");
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("retained layout update should keep cache");
+    assert!(
+        cached.layout_valid && cached.computed_valid,
+        "{label}: retained layout update should leave valid caches"
+    );
+    let after_slot_shapes = shape_detail_fingerprints(&cached.computed);
+    assert_ne!(
+        before_shapes, after_slot_shapes,
+        "{label}: test update should move or resize at least one shape"
+    );
+
+    handler.invalidate_scene_with_reason("layout_slot_equivalence_full_recollect");
+    let after_full_shapes = shape_detail_fingerprints(handler.computed_scene());
+    assert_eq!(
+        after_slot_shapes, after_full_shapes,
+        "{label}: retained layout slot update must match full layout + scene recollect"
+    );
+}
+
 #[test]
 fn splice_color_change_matches_full_recollect() {
     let invalidation = InvalidationSignal::new();
@@ -1578,6 +1790,11 @@ fn reactive_property_slot_write_text_opacity_matches_full_recollect() {
 
 #[cfg(feature = "bench-support")]
 fn write_temp_gif(name: &str) -> std::path::PathBuf {
+    write_temp_media(name, ONE_BY_ONE_GIF)
+}
+
+#[cfg(feature = "bench-support")]
+fn write_temp_media(name: &str, bytes: &[u8]) -> std::path::PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system clock should be after epoch")
@@ -1585,8 +1802,49 @@ fn write_temp_gif(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("tgui-runtime-media-slot-{nanos}"));
     std::fs::create_dir_all(&dir).expect("temp media directory should be created");
     let path = dir.join(name);
-    std::fs::write(&path, ONE_BY_ONE_GIF).expect("temp gif should be written");
+    std::fs::write(&path, bytes).expect("temp media should be written");
     path
+}
+
+#[cfg(feature = "bench-support")]
+fn delayed_media_url(
+    bytes: &'static [u8],
+    content_type: &'static str,
+) -> (
+    String,
+    std::sync::mpsc::Sender<()>,
+    std::thread::JoinHandle<()>,
+) {
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("delayed media test server should bind");
+    let url = format!(
+        "http://{}/delayed-media.svg",
+        listener
+            .local_addr()
+            .expect("delayed media test server should have a local addr")
+    );
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        use std::io::{Read, Write};
+
+        let (mut stream, _) = listener
+            .accept()
+            .expect("delayed media test server should accept one request");
+        let mut request = [0_u8; 1024];
+        let _ = stream.read(&mut request);
+        release_rx
+            .recv()
+            .expect("delayed media response should be released");
+        let header = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            bytes.len()
+        );
+        stream
+            .write_all(header.as_bytes())
+            .and_then(|_| stream.write_all(bytes))
+            .expect("delayed media response should be written");
+    });
+    (url, release_tx, handle)
 }
 
 #[cfg(feature = "bench-support")]
@@ -1597,8 +1855,16 @@ fn wait_for_one_texture(
     let start = Instant::now();
     loop {
         handler.request_redraw_if_dirty(Instant::now());
-        let fingerprints = texture_source_fingerprints(handler.computed_scene());
-        if fingerprints.len() == 1 {
+        let scene = handler.computed_scene();
+        let fingerprints = texture_source_fingerprints(scene);
+        if fingerprints.len() == 1
+            && scene
+                .scene
+                .textures
+                .first()
+                .map(|texture| texture.texture.size() != (1, 1))
+                .unwrap_or(false)
+        {
             return fingerprints;
         }
         assert!(
@@ -3352,6 +3618,221 @@ fn action_stats_records_reactive_property_slot_write_for_color_change() {
 
 #[test]
 #[cfg(feature = "bench-support")]
+fn strict_reactive_signal_update_actions_stay_within_explicit_allowlist() {
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let color = context.state(Color::hexa(0xFF0000FF));
+        let tree = nested_color_tree(&color);
+        let mut handler = test_handler(Some(tree), invalidation);
+        let _ = handler.computed_scene();
+
+        let snapshot = capture_strict_reactive_actions(&mut handler, || {
+            color.set(Color::hexa(0x00FF00FF));
+        });
+        assert_action_count(&snapshot, "reactive_property_slot_write", 1);
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let offset = context.state(Point::ZERO);
+        let (tree, _) = retained_transform_offset_tree(&offset);
+        let mut handler = test_handler(Some(tree), invalidation);
+        let _ = handler.computed_scene();
+
+        let snapshot = capture_strict_reactive_actions(&mut handler, || {
+            offset.set(Point::new(dp(8.0), dp(6.0)));
+        });
+        assert_action_count(&snapshot, "reactive_transform_record_update", 1);
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let width = context.state(dp(48.0));
+        let tree = WidgetTree::try_new_strict(
+            Stack::<TestVm>::new()
+                .width(width.signal())
+                .height(dp(24.0))
+                .style_full(|ctx| {
+                    let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                    style.surface.background = Some(Color::hexa(0x111827FF).into());
+                    style
+                }),
+        )
+        .expect("strict layout slot tree");
+        let mut handler = test_handler(Some(tree), invalidation);
+        let _ = handler.computed_scene();
+
+        let snapshot = capture_strict_reactive_actions(&mut handler, || {
+            width.set(dp(96.0));
+        });
+        assert_action_count(&snapshot, "reactive_layout_slot_update", 1);
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let source = context.state(crate::media::MediaSource::bytes(SIMPLE_SVG));
+        let tree = WidgetTree::try_new_strict(crate::ui::widget::Image::new(source.signal()))
+            .expect("strict image tree");
+        let mut handler = test_handler(Some(tree), invalidation);
+        let _ = handler.computed_scene();
+
+        let snapshot = capture_strict_reactive_actions(&mut handler, || {
+            source.set(crate::media::MediaSource::bytes(WIDE_SVG));
+        });
+        assert_action_count(&snapshot, "strict_reactive_layout_rejected", 1);
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let value = context.state(0.25_f32);
+        let tree = WidgetTree::try_new_strict(
+            Slider::<TestVm>::new(value.signal(), 0.0, 1.0)
+                .show_ticks(true)
+                .width(dp(120.0))
+                .style(|style, _| {
+                    style.thumb_shadow = None;
+                }),
+        )
+        .expect("strict slider tree");
+        let mut handler = test_handler(Some(tree), invalidation);
+        let _ = handler.computed_scene();
+
+        let snapshot = capture_strict_reactive_actions(&mut handler, || {
+            value.set(0.75);
+        });
+        assert_action_count(&snapshot, "strict_reactive_scene_rejected", 1);
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let backing = Arc::new(Mutex::new(String::from("first")));
+        let signal = {
+            let backing = backing.clone();
+            context.signal(move || backing.lock().expect("test signal lock poisoned").clone())
+        };
+        let tree = WidgetTree::try_new_strict(Text::new(signal).size(dp(120.0), dp(24.0)))
+            .expect("strict text tree");
+        let mut handler = test_handler(Some(tree), invalidation.clone());
+        let _ = handler.computed_scene();
+
+        let snapshot = capture_strict_reactive_actions(&mut handler, || {
+            *backing.lock().expect("test signal lock poisoned") = String::from("second");
+            invalidation.mark_dirty();
+        });
+        assert_action_count(&snapshot, "strict_reactive_global_rejected", 1);
+        assert_action_absent(&snapshot, "reactive_slot_update");
+    }
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn strict_capability_report_records_retained_plans_and_reject_policy() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let color = context.state(Color::hexa(0x2563EBFF));
+    let width = context.state(dp(40.0));
+    let opaque_backing = Arc::new(Mutex::new(String::from("opaque")));
+    let opaque_text = {
+        let opaque_backing = opaque_backing.clone();
+        context.signal(move || {
+            opaque_backing
+                .lock()
+                .expect("opaque text signal lock poisoned")
+                .clone()
+        })
+    };
+
+    let color_signal = color.signal();
+    let tree = WidgetTree::try_new_strict(
+        Flex::vertical()
+            .child(
+                Stack::<TestVm>::new()
+                    .width(width.signal())
+                    .height(dp(20.0))
+                    .style_full(move |ctx| {
+                        let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                        style.surface.background = Some(color_signal.clone().into());
+                        style
+                    }),
+            )
+            .child(Text::new(opaque_text).size(dp(120.0), dp(24.0))),
+    )
+    .expect("strict capability tree");
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let report = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| cached.strict_capability_report.as_ref())
+        .expect("strict scene cache should build a capability report");
+
+    assert_eq!(
+        report.missing_plan_count(),
+        0,
+        "strict capability report should classify every owner: {report:?}"
+    );
+    assert!(
+        report
+            .entries
+            .iter()
+            .any(|entry| entry.kind == StrictCapabilityKind::DirectSlot),
+        "reactive background color should have a direct slot plan: {report:?}"
+    );
+    assert!(
+        report
+            .entries
+            .iter()
+            .any(|entry| entry.kind == StrictCapabilityKind::LayoutSlot),
+        "reactive width should have a retained layout slot plan: {report:?}"
+    );
+    assert!(
+        report.has_global_reject_policy,
+        "opaque collect-time signal should be represented by a global reject policy: {report:?}"
+    );
+    assert!(
+        report.retained_plan_count() >= 2,
+        "strict capability report should count retained plans: {report:?}"
+    );
+    assert!(
+        report.explicit_reject_count() <= report.entries.len(),
+        "strict capability reject count should stay bounded by report entries: {report:?}"
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn strict_reactive_no_fallback_group_covers_actions_and_capabilities() {
+    strict_reactive_signal_update_actions_stay_within_explicit_allowlist();
+    strict_capability_report_records_retained_plans_and_reject_policy();
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+#[should_panic(expected = "strict capability report contains 1 missing retained plan(s)")]
+fn strict_capability_report_missing_plan_is_hard_gated() {
+    let report = crate::runtime::state::StrictCapabilityReport {
+        entries: vec![crate::runtime::state::StrictCapabilityEntry {
+            owner: crate::foundation::binding::DependencyOwner {
+                widget_id: 1,
+                phase: crate::foundation::binding::DependencyPhase::Scene,
+                property: None,
+            },
+            kind: StrictCapabilityKind::MissingPlan,
+        }],
+        has_global_reject_policy: false,
+    };
+
+    report.enforce_no_missing_plans();
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
 fn strict_reactive_tree_allows_property_slot_write() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
@@ -3407,35 +3888,12 @@ fn strict_reactive_tree_requires_prebuilt_property_slot_binding() {
     let mut handler = test_handler(Some(tree), invalidation);
     let _ = handler.computed_scene();
 
-    let cached = handler
-        .cached_scene
-        .as_mut()
-        .expect("initial scene should be cached");
-    assert!(
-        cached
-            .reactive_slot_bindings
-            .keys()
-            .any(|(_, property)| *property == crate::foundation::binding::PropertySlot::Background),
-        "initial rebuild should prebuild a background slot binding"
-    );
-    cached.reactive_slot_bindings.clear();
-
-    crate::runtime::action_stats::reset();
-    color.set(Color::hexa(0x00FF00FF));
-    handler.request_redraw_if_dirty(Instant::now());
-    let snapshot = crate::runtime::action_stats::snapshot();
-
-    assert!(
-        snapshot
-            .iter()
-            .any(|(action, count)| *action == "strict_reactive_scene_rejected" && *count == 1),
-        "strict updates must reject missing retained slot bindings instead of rebuilding a plan at update time: {snapshot:?}"
-    );
-    assert!(
-        !snapshot
-            .iter()
-            .any(|(action, _)| *action == "reactive_property_slot_write"),
-        "missing retained binding must not be reported as a direct slot write: {snapshot:?}"
+    assert_strict_missing_property_slot_plan_rejected(
+        &mut handler,
+        crate::foundation::binding::PropertySlot::Background,
+        || {
+            color.set(Color::hexa(0x00FF00FF));
+        },
     );
 }
 
@@ -3538,7 +3996,7 @@ fn strict_reactive_tree_rejects_reactive_layout_patch() {
 
 #[test]
 #[cfg(feature = "bench-support")]
-fn strict_reactive_tree_rejects_reactive_auto_flow_layout() {
+fn strict_reactive_tree_updates_reactive_auto_flow_layout_with_retained_layout_slot() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let width = context.state(dp(48.0));
@@ -3571,18 +4029,702 @@ fn strict_reactive_tree_rejects_reactive_auto_flow_layout() {
     handler.request_redraw_if_dirty(Instant::now());
     let snapshot = crate::runtime::action_stats::snapshot();
 
+    assert_action_count(&snapshot, "reactive_layout_slot_update", 1);
     assert!(
-        snapshot
+        !snapshot
             .iter()
-            .any(|(action, count)| *action == "strict_reactive_layout_rejected" && *count == 1),
-        "strict tree should reject reactive auto-flow layout changes: {snapshot:?}"
+            .any(|(action, _)| action.starts_with("strict_reactive")),
+        "strict tree should accept retained layout slot updates: {snapshot:?}"
     );
     assert!(
         !snapshot
             .iter()
-            .any(|(action, _)| *action == "reactive_layout_scene_patch"),
-        "strict tree must not patch reactive auto-flow layout: {snapshot:?}"
+            .any(|(action, _)| *action == "reactive_layout_scene_patch"
+                || *action == "layout_scene_subtree_patch"
+                || *action == "global_full_rebuild"),
+        "retained layout update must not use legacy layout fallback actions: {snapshot:?}"
     );
+
+    let shapes = shape_fingerprints(
+        &handler
+            .cached_scene
+            .as_ref()
+            .expect("retained layout update should keep cache")
+            .computed,
+    );
+    assert!(
+        shapes
+            .iter()
+            .any(|(_, _, width, _, color)| *color == Color::hexa(0x111827FF) && *width == dp(96.0)),
+        "first child width should update in retained layout: {shapes:?}"
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn strict_reactive_show_toggle_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let visible = context.state(true);
+    let tree = WidgetTree::try_new_strict(Stack::<TestVm>::new().size(dp(160.0), dp(80.0)).child(
+        Show::new(
+            visible.signal(),
+            filled_stack(Color::hexa(0x22C55EFF)).size(dp(48.0), dp(24.0)),
+        ),
+    ))
+    .expect("strict retained show tree");
+    let mut handler = test_handler(Some(tree), invalidation);
+    let before_shapes = shape_detail_fingerprints(handler.computed_scene());
+    assert_eq!(before_shapes.len(), 1, "show child should start visible");
+
+    let snapshot = capture_strict_reactive_actions(&mut handler, || visible.set(false));
+    assert_action_count(&snapshot, "reactive_structure_slot_update", 1);
+    assert_action_absent(&snapshot, "strict_reactive_layout_rejected");
+    assert_action_absent(&snapshot, "reactive_layout_scene_patch");
+    let after_slot_shapes = shape_detail_fingerprints(
+        &handler
+            .cached_scene
+            .as_ref()
+            .expect("show patch should keep cache")
+            .computed,
+    );
+    assert!(
+        after_slot_shapes.is_empty(),
+        "hidden Show child should remove its scene primitives"
+    );
+
+    handler.invalidate_scene_with_reason("show_toggle_equivalence_full_recollect");
+    let after_full_shapes = shape_detail_fingerprints(handler.computed_scene());
+    assert_eq!(
+        after_slot_shapes, after_full_shapes,
+        "retained Show toggle must match full layout + scene recollect"
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn strict_reactive_show_hide_clears_child_reactive_subscriptions() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let visible = context.state(true);
+    let color = context.state(Color::RED);
+    let color_signal = color.signal();
+    let tree = WidgetTree::try_new_strict(
+        Stack::<TestVm>::new()
+            .size(dp(160.0), dp(80.0))
+            .child(Show::new(
+                visible.signal(),
+                Stack::<TestVm>::new()
+                    .size(dp(48.0), dp(24.0))
+                    .style_full(move |ctx| {
+                        let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                        style.surface.background = Some(color_signal.clone().into());
+                        style
+                    }),
+            )),
+    )
+    .expect("strict retained show tree");
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    let snapshot = capture_strict_reactive_actions(&mut handler, || visible.set(false));
+    assert_action_count(&snapshot, "reactive_structure_slot_update", 1);
+
+    color.set(Color::BLUE);
+    let updates = handler.invalidation.drain_reactive_updates();
+    assert!(
+        updates.targets.is_empty(),
+        "hidden Show child signal update must not enqueue a removed child target: {:?}",
+        updates.targets
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn strict_reactive_keyed_for_reorder_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let items = context.state(vec![1usize, 2]);
+    let tree =
+        WidgetTree::try_new_strict(Flex::vertical().size(dp(160.0), dp(96.0)).child(For::new(
+            items.signal(),
+            |item| *item,
+            |_index, item| {
+                let color = if *item == 1 {
+                    Color::hexa(0x22C55EFF)
+                } else {
+                    Color::hexa(0x2563EBFF)
+                };
+                Stack::<TestVm>::new()
+                    .size(dp(48.0), dp(24.0))
+                    .style_full(move |ctx| {
+                        let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                        style.surface.background = Some(color.into());
+                        style
+                    })
+            },
+        )))
+        .expect("strict retained keyed For tree");
+    let mut handler = test_handler(Some(tree), invalidation);
+    let before_shapes = shape_detail_fingerprints(handler.computed_scene());
+    assert_eq!(before_shapes.len(), 2, "For should start with two children");
+
+    let snapshot = capture_strict_reactive_actions(&mut handler, || items.set(vec![2, 1]));
+    assert_action_count(&snapshot, "reactive_structure_slot_update", 1);
+    assert_action_absent(&snapshot, "strict_reactive_layout_rejected");
+    assert_action_absent(&snapshot, "reactive_layout_scene_patch");
+    let after_slot_shapes = shape_detail_fingerprints(
+        &handler
+            .cached_scene
+            .as_ref()
+            .expect("keyed For patch should keep cache")
+            .computed,
+    );
+    assert_eq!(after_slot_shapes.len(), 2);
+    assert_ne!(
+        before_shapes, after_slot_shapes,
+        "reordering keyed For children should change ordered scene output"
+    );
+
+    handler.invalidate_scene_with_reason("keyed_for_reorder_equivalence_full_recollect");
+    let after_full_shapes = shape_detail_fingerprints(handler.computed_scene());
+    assert_eq!(
+        after_slot_shapes, after_full_shapes,
+        "retained keyed For reorder must match full layout + scene recollect"
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn strict_reactive_keyed_for_remove_clears_child_reactive_subscriptions() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let items = context.state(vec![1usize, 2]);
+    let first_color = context.state(Color::RED);
+    let second_color = context.state(Color::GREEN);
+    let first_color_signal = first_color.signal();
+    let second_color_signal = second_color.signal();
+    let tree =
+        WidgetTree::try_new_strict(Flex::vertical().size(dp(160.0), dp(96.0)).child(For::new(
+            items.signal(),
+            |item| *item,
+            move |_index, item| {
+                let color = if *item == 1 {
+                    first_color_signal.clone()
+                } else {
+                    second_color_signal.clone()
+                };
+                Stack::<TestVm>::new()
+                    .size(dp(48.0), dp(24.0))
+                    .style_full(move |ctx| {
+                        let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                        style.surface.background = Some(color.clone().into());
+                        style
+                    })
+            },
+        )))
+        .expect("strict retained keyed For tree");
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    let snapshot = capture_strict_reactive_actions(&mut handler, || items.set(vec![1]));
+    assert_action_count(&snapshot, "reactive_structure_slot_update", 1);
+
+    second_color.set(Color::BLUE);
+    let updates = handler.invalidation.drain_reactive_updates();
+    assert!(
+        updates.targets.is_empty(),
+        "removed keyed For child signal update must not enqueue a detached target: {:?}",
+        updates.targets
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn strict_reactive_view_switch_index_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let active = context.state(0usize);
+    let tree = WidgetTree::try_new_strict(
+        Flex::vertical().size(dp(160.0), dp(96.0)).child(
+            ViewSwitch::new(active.signal())
+                .case(filled_stack(Color::hexa(0x22C55EFF)).size(dp(48.0), dp(24.0)))
+                .case(filled_stack(Color::hexa(0x2563EBFF)).size(dp(64.0), dp(32.0)))
+                .fallback(filled_stack(Color::hexa(0xF97316FF)).size(dp(40.0), dp(20.0))),
+        ),
+    )
+    .expect("strict retained ViewSwitch tree");
+    let mut handler = test_handler(Some(tree), invalidation);
+    let before_shapes = shape_detail_fingerprints(handler.computed_scene());
+    assert_eq!(before_shapes.len(), 1, "ViewSwitch should render one case");
+
+    let snapshot = capture_strict_reactive_actions(&mut handler, || active.set(1));
+    assert_action_count(&snapshot, "reactive_structure_slot_update", 1);
+    assert_action_absent(&snapshot, "strict_reactive_layout_rejected");
+    assert_action_absent(&snapshot, "reactive_layout_scene_patch");
+    let after_slot_shapes = shape_detail_fingerprints(
+        &handler
+            .cached_scene
+            .as_ref()
+            .expect("ViewSwitch patch should keep cache")
+            .computed,
+    );
+    assert_eq!(after_slot_shapes.len(), 1);
+    assert_ne!(
+        before_shapes, after_slot_shapes,
+        "switching ViewSwitch cases should change scene output"
+    );
+
+    handler.invalidate_scene_with_reason("view_switch_index_equivalence_full_recollect");
+    let after_full_shapes = shape_detail_fingerprints(handler.computed_scene());
+    assert_eq!(
+        after_slot_shapes, after_full_shapes,
+        "retained ViewSwitch index update must match full layout + scene recollect"
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn strict_reactive_view_switch_remove_clears_child_reactive_subscriptions() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let active = context.state(1usize);
+    let first_color = context.state(Color::RED);
+    let second_color = context.state(Color::GREEN);
+    let first_color_signal = first_color.signal();
+    let second_color_signal = second_color.signal();
+    let tree = WidgetTree::try_new_strict(
+        Flex::vertical().size(dp(160.0), dp(96.0)).child(
+            ViewSwitch::new(active.signal())
+                .case(
+                    Stack::<TestVm>::new()
+                        .size(dp(48.0), dp(24.0))
+                        .style_full(move |ctx| {
+                            let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                            style.surface.background = Some(first_color_signal.clone().into());
+                            style
+                        }),
+                )
+                .case(
+                    Stack::<TestVm>::new()
+                        .size(dp(64.0), dp(32.0))
+                        .style_full(move |ctx| {
+                            let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                            style.surface.background = Some(second_color_signal.clone().into());
+                            style
+                        }),
+                ),
+        ),
+    )
+    .expect("strict retained ViewSwitch tree");
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    let snapshot = capture_strict_reactive_actions(&mut handler, || active.set(0));
+    assert_action_count(&snapshot, "reactive_structure_slot_update", 1);
+
+    second_color.set(Color::BLUE);
+    let updates = handler.invalidation.drain_reactive_updates();
+    assert!(
+        updates.targets.is_empty(),
+        "removed ViewSwitch case signal update must not enqueue a detached target: {:?}",
+        updates.targets
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn reactive_layout_slot_size_constraints_match_full_recollect() {
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let width = context.state(dp(48.0));
+        let tree = WidgetTree::try_new_strict(
+            Flex::<TestVm>::new(Axis::Horizontal)
+                .size(dp(220.0), dp(80.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .width(width.signal())
+                        .height(dp(24.0)),
+                )
+                .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+        )
+        .expect("strict width layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "width",
+            invalidation,
+            tree,
+            || width.set(dp(96.0)),
+        );
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let height = context.state(dp(24.0));
+        let tree = WidgetTree::try_new_strict(
+            Flex::<TestVm>::new(Axis::Horizontal)
+                .size(dp(220.0), dp(80.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .width(dp(48.0))
+                        .height(height.signal()),
+                )
+                .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+        )
+        .expect("strict height layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "height",
+            invalidation,
+            tree,
+            || height.set(dp(48.0)),
+        );
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let min_width = context.state(dp(40.0));
+        let tree = WidgetTree::try_new_strict(
+            Flex::<TestVm>::new(Axis::Horizontal)
+                .size(dp(220.0), dp(80.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .min_width(min_width.signal())
+                        .height(dp(24.0)),
+                )
+                .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+        )
+        .expect("strict min width layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "min_width",
+            invalidation,
+            tree,
+            || min_width.set(dp(80.0)),
+        );
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let min_height = context.state(dp(24.0));
+        let tree = WidgetTree::try_new_strict(
+            Flex::<TestVm>::new(Axis::Horizontal)
+                .size(dp(220.0), dp(100.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .width(dp(48.0))
+                        .min_height(min_height.signal()),
+                )
+                .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+        )
+        .expect("strict min height layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "min_height",
+            invalidation,
+            tree,
+            || min_height.set(dp(56.0)),
+        );
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let max_width = context.state(dp(48.0));
+        let tree = WidgetTree::try_new_strict(
+            Flex::<TestVm>::new(Axis::Horizontal)
+                .size(dp(240.0), dp(80.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .width(dp(140.0))
+                        .max_width(max_width.signal())
+                        .height(dp(24.0)),
+                )
+                .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+        )
+        .expect("strict max width layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "max_width",
+            invalidation,
+            tree,
+            || max_width.set(dp(96.0)),
+        );
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let max_height = context.state(dp(32.0));
+        let tree = WidgetTree::try_new_strict(
+            Flex::<TestVm>::new(Axis::Horizontal)
+                .size(dp(240.0), dp(120.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .width(dp(48.0))
+                        .height(dp(100.0))
+                        .max_height(max_height.signal()),
+                )
+                .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+        )
+        .expect("strict max height layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "max_height",
+            invalidation,
+            tree,
+            || max_height.set(dp(72.0)),
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn reactive_layout_slot_spacing_and_flex_match_full_recollect() {
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let margin = context.state(Insets::ZERO);
+        let tree = WidgetTree::try_new_strict(
+            Flex::<TestVm>::new(Axis::Horizontal)
+                .size(dp(240.0), dp(80.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .size(dp(48.0), dp(24.0))
+                        .margin(margin.signal()),
+                )
+                .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+        )
+        .expect("strict margin layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "margin",
+            invalidation,
+            tree,
+            || margin.set(Insets::symmetric(dp(8.0), dp(4.0))),
+        );
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let padding = context.state(Insets::ZERO);
+        let tree = WidgetTree::try_new_strict(
+            Stack::<TestVm>::new().size(dp(180.0), dp(100.0)).child(
+                filled_stack(Color::hexa(0x111827FF))
+                    .size(dp(120.0), dp(64.0))
+                    .padding(padding.signal())
+                    .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+            ),
+        )
+        .expect("strict padding layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "padding",
+            invalidation,
+            tree,
+            || padding.set(Insets::all(dp(12.0))),
+        );
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let grow = context.state(0.0_f32);
+        let tree = WidgetTree::try_new_strict(
+            Flex::<TestVm>::new(Axis::Horizontal)
+                .size(dp(180.0), dp(64.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .basis(dp(40.0))
+                        .grow(grow.signal())
+                        .height(dp(24.0)),
+                )
+                .child(
+                    filled_stack(Color::hexa(0x38BDF8FF))
+                        .basis(dp(40.0))
+                        .grow(1.0)
+                        .height(dp(24.0)),
+                ),
+        )
+        .expect("strict grow layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "grow",
+            invalidation,
+            tree,
+            || grow.set(1.0),
+        );
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let shrink = context.state(0.0_f32);
+        let tree = WidgetTree::try_new_strict(
+            Flex::<TestVm>::new(Axis::Horizontal)
+                .size(dp(150.0), dp(64.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .basis(dp(100.0))
+                        .shrink(shrink.signal())
+                        .height(dp(24.0)),
+                )
+                .child(
+                    filled_stack(Color::hexa(0x38BDF8FF))
+                        .basis(dp(100.0))
+                        .shrink(1.0)
+                        .height(dp(24.0)),
+                ),
+        )
+        .expect("strict shrink layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "shrink",
+            invalidation,
+            tree,
+            || shrink.set(1.0),
+        );
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let basis = context.state(dp(40.0));
+        let tree = WidgetTree::try_new_strict(
+            Flex::<TestVm>::new(Axis::Horizontal)
+                .size(dp(220.0), dp(64.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .basis(basis.signal())
+                        .height(dp(24.0)),
+                )
+                .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+        )
+        .expect("strict basis layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "basis",
+            invalidation,
+            tree,
+            || basis.set(dp(88.0)),
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn reactive_layout_slot_aspect_ratio_and_inset_match_full_recollect() {
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let aspect_ratio = context.state(1.0_f32);
+        let tree = WidgetTree::try_new_strict(
+            Flex::<TestVm>::new(Axis::Horizontal)
+                .size(dp(220.0), dp(80.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .height(dp(24.0))
+                        .aspect_ratio(aspect_ratio.signal()),
+                )
+                .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+        )
+        .expect("strict aspect ratio layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "aspect_ratio",
+            invalidation,
+            tree,
+            || aspect_ratio.set(2.0),
+        );
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let left = context.state(dp(8.0));
+        let tree = WidgetTree::try_new_strict(
+            Stack::<TestVm>::new()
+                .size(dp(180.0), dp(100.0))
+                .child(
+                    filled_stack(Color::hexa(0x111827FF))
+                        .position_absolute()
+                        .left(left.signal())
+                        .top(dp(10.0))
+                        .size(dp(24.0), dp(24.0)),
+                )
+                .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(16.0), dp(16.0))),
+        )
+        .expect("strict inset layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "inset",
+            invalidation,
+            tree,
+            || left.set(dp(40.0)),
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn reactive_layout_slot_grid_position_matches_full_recollect() {
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let column = context.state(1usize);
+        let tree = WidgetTree::try_new_strict(
+            crate::ui::widget::Grid::<TestVm>::columns([
+                crate::ui::layout::fr(1.0),
+                crate::ui::layout::fr(1.0),
+            ])
+            .set_rows([crate::ui::layout::fr(1.0), crate::ui::layout::fr(1.0)])
+            .size(dp(120.0), dp(80.0))
+            .child(
+                filled_stack(Color::hexa(0x111827FF))
+                    .column(column.signal())
+                    .row(1usize)
+                    .size(dp(24.0), dp(24.0)),
+            )
+            .child(
+                filled_stack(Color::hexa(0x38BDF8FF))
+                    .column(2usize)
+                    .row(2usize)
+                    .size(dp(24.0), dp(24.0)),
+            ),
+        )
+        .expect("strict grid column layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "grid_column",
+            invalidation,
+            tree,
+            || column.set(2),
+        );
+    }
+
+    {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let row = context.state(1usize);
+        let tree = WidgetTree::try_new_strict(
+            crate::ui::widget::Grid::<TestVm>::columns([
+                crate::ui::layout::fr(1.0),
+                crate::ui::layout::fr(1.0),
+            ])
+            .set_rows([crate::ui::layout::fr(1.0), crate::ui::layout::fr(1.0)])
+            .size(dp(120.0), dp(80.0))
+            .child(
+                filled_stack(Color::hexa(0x111827FF))
+                    .column(1usize)
+                    .row(row.signal())
+                    .size(dp(24.0), dp(24.0)),
+            )
+            .child(
+                filled_stack(Color::hexa(0x38BDF8FF))
+                    .column(2usize)
+                    .row(2usize)
+                    .size(dp(24.0), dp(24.0)),
+            ),
+        )
+        .expect("strict grid row layout slot tree");
+        assert_reactive_layout_slot_update_matches_full_recollect(
+            "grid_row",
+            invalidation,
+            tree,
+            || row.set(2),
+        );
+    }
 }
 
 #[test]
@@ -3696,51 +4838,115 @@ fn strict_reactive_tree_rejects_global_dependency_fallback() {
 
 #[test]
 #[cfg(feature = "bench-support")]
-fn strict_reactive_tree_rejects_unretained_media_completion() {
-    let image_path = write_temp_gif("strict-source-load.gif");
-    let source = crate::media::MediaSource::path(image_path.clone());
+fn strict_reactive_contain_image_source_load_updates_retained_texture_slot_matches_full_recollect()
+{
+    let (url, release_response, server) = delayed_media_url(WIDE_SVG, "image/svg+xml");
+    let source = crate::media::MediaSource::url(url);
     let invalidation = InvalidationSignal::new();
     let tree =
         WidgetTree::try_new_strict(crate::ui::widget::Image::new(source).size(dp(48.0), dp(48.0)))
             .expect("strict static image tree");
     let mut handler = test_handler(Some(tree), invalidation);
-    let _ = handler.computed_scene();
+    let initial = texture_source_fingerprints(handler.computed_scene());
+    assert_eq!(
+        initial.len(),
+        1,
+        "strict Contain image should reserve a retained transparent texture slot while loading"
+    );
+    assert_eq!(initial[0].3, dp(48.0));
+    assert_eq!(initial[0].4, dp(48.0));
+    assert!(
+        handler
+            .cached_scene
+            .as_ref()
+            .expect("cache shell")
+            .media_texture_bindings
+            .values()
+            .map(Vec::len)
+            .sum::<usize>()
+            > 0,
+        "reserved non-Fill media texture should register retained texture bindings"
+    );
+    handler.last_invalidation_revision = handler.invalidation.revision();
 
+    crate::runtime::scene_patch::splice_probe::reset();
     crate::runtime::action_stats::reset();
+    let initial_texture_id = initial[0].0;
+    release_response
+        .send(())
+        .expect("delayed media response should be released");
     let start = Instant::now();
     let snapshot = loop {
         handler.request_redraw_if_dirty(Instant::now());
-        let snapshot = crate::runtime::action_stats::snapshot();
-        if snapshot
-            .iter()
-            .any(|(action, count)| *action == "strict_reactive_media_rejected" && *count == 1)
-        {
-            break snapshot;
+        let current = texture_source_fingerprints(
+            &handler
+                .cached_scene
+                .as_ref()
+                .expect("cache shell should remain available")
+                .computed,
+        );
+        if current[0].0 != initial_texture_id {
+            break crate::runtime::action_stats::snapshot();
         }
         assert!(
             start.elapsed() < Duration::from_secs(2),
-            "timed out waiting for strict media rejection; last actions={snapshot:?}"
+            "timed out waiting for strict retained non-Fill media texture load"
         );
         std::thread::sleep(Duration::from_millis(10));
     };
 
+    server
+        .join()
+        .expect("delayed media test server should finish");
+    assert_eq!(
+        crate::runtime::scene_patch::splice_probe::hits(),
+        0,
+        "strict retained non-Fill media load should not enter scene splice"
+    );
+    assert!(
+        snapshot
+            .iter()
+            .any(|(action, count)| *action == "media_texture_slot_write" && *count >= 1),
+        "strict retained non-Fill media load should be consumed by texture slot writes: {snapshot:?}"
+    );
+    assert!(
+        !snapshot
+            .iter()
+            .any(|(action, _)| *action == "strict_reactive_media_rejected"),
+        "strict retained non-Fill media load must not be rejected: {snapshot:?}"
+    );
     assert!(
         !snapshot
             .iter()
             .any(|(action, _)| *action == "media_texture_full_rebuild"),
-        "strict media completion must not fall back to full rebuild: {snapshot:?}"
+        "strict retained non-Fill media load must not fall back to full rebuild: {snapshot:?}"
     );
-    assert!(
-        !snapshot
-            .iter()
-            .any(|(action, _)| *action == "media_texture_slot_write"),
-        "source-load placeholder changes are not retained texture slot writes: {snapshot:?}"
-    );
+    let cached = handler.cached_scene.as_ref().expect("cache shell");
+    let after_slot_textures = texture_source_fingerprints(&cached.computed);
+    let after_slot_shapes = shape_detail_fingerprints(&cached.computed);
+    let after_slot_text = text_fingerprints(&cached.computed);
+    assert_eq!(after_slot_textures.len(), 1);
+    assert_eq!(after_slot_textures[0].1, dp(0.0));
+    assert_eq!(after_slot_textures[0].2, dp(16.0));
+    assert_eq!(after_slot_textures[0].3, dp(48.0));
+    assert_eq!(after_slot_textures[0].4, dp(16.0));
 
-    let _ = std::fs::remove_dir_all(
-        image_path
-            .parent()
-            .expect("temp gif should have a parent directory"),
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene();
+    assert_eq!(
+        after_slot_textures,
+        texture_source_fingerprints(full),
+        "retained non-Fill source load texture must match a fresh full recollect"
+    );
+    assert_eq!(
+        after_slot_shapes,
+        shape_detail_fingerprints(full),
+        "retained non-Fill source load placeholder shape must match a fresh full recollect"
+    );
+    assert_eq!(
+        after_slot_text,
+        text_fingerprints(full),
+        "retained non-Fill source load placeholder text must match a fresh full recollect"
     );
 }
 
@@ -4010,6 +5216,62 @@ fn pure_scroll_patch_matches_full_recollect() {
     assert_eq!(
         after_patch, after_full,
         "pure-scroll patched scene must be item-identical to a fresh full recollect"
+    );
+}
+
+#[test]
+fn virtual_scroll_is_explicitly_excluded_from_pure_scroll_fast_path() {
+    use crate::ui::widget::VirtualList;
+
+    let invalidation = InvalidationSignal::new();
+    let items = (0..80usize).collect::<Vec<_>>();
+    let tree = WidgetTree::new(
+        VirtualList::new(items, |index, _item| {
+            let color = if index % 2 == 0 {
+                Color::hexa(0x111827FF)
+            } else {
+                Color::hexa(0x2563EBFF)
+            };
+            Stack::<TestVm>::new()
+                .size(dp(80.0), dp(40.0))
+                .style_full(move |ctx| {
+                    let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                    style.surface.background = Some(color.into());
+                    style
+                })
+                .into()
+        })
+        .size(dp(80.0), dp(80.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let scroll_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| {
+            cached
+                .computed
+                .scroll_regions
+                .first()
+                .map(|region| region.id)
+        })
+        .expect("virtual list should emit a scroll region");
+
+    crate::runtime::scene_runtime::scroll_fast_path_probe::reset();
+    handler.set_scroll_offset(scroll_id, Point::new(dp(0.0), dp(80.0)));
+    let after_scroll = shape_fingerprints(handler.computed_scene());
+
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::hits(),
+        0,
+        "virtual containers are structural/windowing content and must not use pure-scroll fast paths"
+    );
+
+    handler.invalidate_computed_scene();
+    let after_full = shape_fingerprints(handler.computed_scene());
+    assert_eq!(
+        after_scroll, after_full,
+        "virtual scroll fallback should still match a full recollect"
     );
 }
 

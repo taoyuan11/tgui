@@ -43,7 +43,23 @@ pub(super) fn resolved_child_elements_with_previous<'a, 'b, VM>(
                     (Cow::Borrowed(child), previous_child)
                 }));
             }
-            ChildSource::Dynamic(_) => {
+            ChildSource::Dynamic(_) | ChildSource::KeyedFor(_) => {
+                let source_children = child_source.resolve(Some(owner_id));
+                if let Some(spans) = spans.as_mut() {
+                    spans.push(source_children.len());
+                }
+                resolved.extend(source_children.into_iter().map(|child| {
+                    let previous_child = lookup_previous(
+                        &child,
+                        &previous_by_key,
+                        &previous_by_id,
+                        previous_children.get(resolved_index),
+                    );
+                    resolved_index += 1;
+                    (Cow::Owned(child), previous_child)
+                }));
+            }
+            ChildSource::Show { .. } | ChildSource::Switch { .. } => {
                 let source_children = child_source.resolve(Some(owner_id));
                 if let Some(spans) = spans.as_mut() {
                     spans.push(source_children.len());

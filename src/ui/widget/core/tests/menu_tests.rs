@@ -282,6 +282,9 @@ fn menubar_builder_produces_horizontal_flex_with_entries() {
         .map(|src| match src {
             crate::ui::widget::common::ChildSource::Static(items) => items.len(),
             crate::ui::widget::common::ChildSource::Dynamic(_) => 0,
+            crate::ui::widget::common::ChildSource::KeyedFor(_) => 0,
+            crate::ui::widget::common::ChildSource::Switch { .. } => 0,
+            crate::ui::widget::common::ChildSource::Show { .. } => 0,
         })
         .sum();
     assert_eq!(total_children, 2);

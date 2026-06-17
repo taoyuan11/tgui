@@ -218,6 +218,37 @@ pub enum ContentFit {
     Fill,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct MediaTextureLayout {
+    pub(crate) content_frame: Rect,
+    pub(crate) fit: ContentFit,
+    pub(crate) scale_factor: f32,
+}
+
+impl MediaTextureLayout {
+    pub(crate) fn new(content_frame: Rect, fit: ContentFit, scale_factor: f32) -> Self {
+        Self {
+            content_frame,
+            fit,
+            scale_factor,
+        }
+    }
+
+    pub(crate) fn target_frame(self, intrinsic_size: IntrinsicSize) -> Rect {
+        resolve_media_rect(self.content_frame, intrinsic_size, self.fit)
+    }
+
+    pub(crate) fn texture_key(
+        self,
+        source: MediaSource,
+        intrinsic_size: IntrinsicSize,
+    ) -> Option<(MediaTextureKey, Rect)> {
+        let target_frame = self.target_frame(intrinsic_size);
+        RasterRequest::from_frame(target_frame, self.scale_factor)
+            .map(|request| (MediaTextureKey::new(source, request), target_frame))
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct TextureFrame {
     id: u64,

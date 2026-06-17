@@ -5,10 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::platform::backend::event_loop::EventLoopProxy;
 
-use super::dependency::{DependencyId, DirtyDependencyLog, DirtyDependencySet};
-#[cfg(test)]
-use super::reactive::ReactiveTarget;
-use super::reactive::{ReactiveDrain, ReactiveGraph, SignalId};
+use super::dependency::{DependencyId, DependencyPhase, DirtyDependencyLog, DirtyDependencySet};
+use super::reactive::{ReactiveDrain, ReactiveGraph, ReactiveTarget, SignalId};
 
 #[derive(Default)]
 struct InvalidationWakeState {
@@ -190,6 +188,39 @@ impl InvalidationSignal {
 
     pub(crate) fn drain_reactive_updates(&self) -> ReactiveDrain {
         self.reactive_graph.drain()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn remove_reactive_target(&self, target: ReactiveTarget) {
+        self.reactive_graph.remove_target(target);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn replace_reactive_target<R>(
+        &self,
+        target: ReactiveTarget,
+        collect: impl FnOnce() -> R,
+    ) -> R {
+        self.remove_reactive_target(target);
+        collect()
+    }
+
+    pub(crate) fn remove_reactive_targets_for_widgets(&self, widget_ids: &HashSet<u64>) {
+        self.reactive_graph.remove_widget_targets(widget_ids);
+    }
+
+    pub(crate) fn remove_reactive_targets_for_widget_phase(
+        &self,
+        widget_ids: &HashSet<u64>,
+        phase: DependencyPhase,
+    ) {
+        self.reactive_graph
+            .remove_widget_phase_targets(widget_ids, phase);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reactive_target_source_count(&self, target: ReactiveTarget) -> usize {
+        self.reactive_graph.target_source_count(target)
     }
 }
 

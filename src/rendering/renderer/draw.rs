@@ -137,6 +137,7 @@ impl Renderer {
     ) -> Result<(), TguiError> {
         let mut index = 0;
         while index < commands.len() {
+            let _draw_id = commands[index].draw_id();
             match &commands[index] {
                 PreparedCommand::BackdropBlur(blur) => {
                     self.apply_backdrop_blur_to_target(encoder, blur, target, cleared_draw_target)?;
@@ -181,6 +182,7 @@ impl Renderer {
             });
 
             while index < commands.len() {
+                let _draw_id = commands[index].draw_id();
                 match &commands[index] {
                     PreparedCommand::BackdropBlur(_) | PreparedCommand::CanvasComposite(_) => break,
                     PreparedCommand::Rect(batch) => {

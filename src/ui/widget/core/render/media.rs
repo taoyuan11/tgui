@@ -28,6 +28,11 @@ pub(crate) fn push_media_texture_or_placeholder<VM>(
     let raster_request = RasterRequest::from_frame(target_frame, context.units.scale_factor());
     let media_key =
         raster_request.map(|request| crate::media::MediaTextureKey::new(source.clone(), request));
+    let media_layout = Some(crate::media::MediaTextureLayout::new(
+        content_frame,
+        fit,
+        context.units.scale_factor(),
+    ));
     let snapshot = if let Some(raster_request) = raster_request {
         context.media.image_snapshot(source, Some(raster_request))
     } else {
@@ -35,7 +40,7 @@ pub(crate) fn push_media_texture_or_placeholder<VM>(
     };
 
     if let Some(texture) = snapshot.texture.as_ref() {
-        if fit == ContentFit::Fill && media_key.is_some() {
+        if media_key.is_some() {
             push_media_placeholder(
                 frame,
                 content_frame,
@@ -56,6 +61,7 @@ pub(crate) fn push_media_texture_or_placeholder<VM>(
         computed.scene.push_texture(TexturePrimitive {
             texture: Arc::clone(texture),
             media_key,
+            media_layout,
             frame: target_frame,
             quad: None,
             uv_rect: None,
@@ -67,11 +73,7 @@ pub(crate) fn push_media_texture_or_placeholder<VM>(
         return;
     }
 
-    if fit == ContentFit::Fill
-        && media_key.is_some()
-        && snapshot.loading
-        && snapshot.error.is_none()
-    {
+    if media_key.is_some() && snapshot.loading && snapshot.error.is_none() {
         push_media_placeholder(
             frame,
             content_frame,
@@ -91,6 +93,7 @@ pub(crate) fn push_media_texture_or_placeholder<VM>(
         computed.scene.push_texture(TexturePrimitive {
             texture: transparent_media_texture(),
             media_key,
+            media_layout,
             frame: target_frame,
             quad: None,
             uv_rect: None,
@@ -133,6 +136,11 @@ pub(crate) fn push_background_media_texture<VM>(
     let metadata = context.media.image_snapshot(source, None);
     let target_frame = resolve_media_rect(content_frame, metadata.intrinsic_size, fit);
     let raster_request = RasterRequest::from_frame(target_frame, context.units.scale_factor());
+    let media_layout = Some(crate::media::MediaTextureLayout::new(
+        content_frame,
+        fit,
+        context.units.scale_factor(),
+    ));
     let snapshot = if let Some(raster_request) = raster_request {
         context.media.image_snapshot(source, Some(raster_request))
     } else {
@@ -144,6 +152,7 @@ pub(crate) fn push_background_media_texture<VM>(
             texture: Arc::clone(texture),
             media_key: raster_request
                 .map(|request| crate::media::MediaTextureKey::new(source.clone(), request)),
+            media_layout,
             frame: target_frame,
             quad: None,
             uv_rect: None,
@@ -152,6 +161,24 @@ pub(crate) fn push_background_media_texture<VM>(
             clip_rect,
             clip_mask,
         });
+    } else if let Some(raster_request) = raster_request {
+        if snapshot.loading && snapshot.error.is_none() {
+            computed.scene.push_texture(TexturePrimitive {
+                texture: transparent_media_texture(),
+                media_key: Some(crate::media::MediaTextureKey::new(
+                    source.clone(),
+                    raster_request,
+                )),
+                media_layout,
+                frame: target_frame,
+                quad: None,
+                uv_rect: None,
+                corner_radius: content_corner_radius,
+                opacity: 1.0,
+                clip_rect,
+                clip_mask,
+            });
+        }
     }
 }
 
@@ -243,6 +270,7 @@ pub(crate) fn rounded_rect_shadow_texture(
     Some(TexturePrimitive {
         texture,
         media_key: None,
+        media_layout: None,
         frame: texture_frame,
         quad: None,
         uv_rect: None,

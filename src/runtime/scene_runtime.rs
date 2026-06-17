@@ -640,6 +640,25 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let mut recollect_duration = Duration::ZERO;
             let mut collect_passes = 0usize;
             let previous_cached = self.cached_scene.take();
+            let previous_owner_ids = previous_cached
+                .as_ref()
+                .and_then(|cached| cached.layout.as_ref())
+                .map(|layout| {
+                    layout
+                        .all_widget_ids()
+                        .map(|widget_id| widget_id.raw())
+                        .collect::<HashSet<_>>()
+                })
+                .unwrap_or_default();
+            if layout_cache_valid {
+                self.invalidation.remove_reactive_targets_for_widget_phase(
+                    &previous_owner_ids,
+                    DependencyPhase::Scene,
+                );
+            } else {
+                self.invalidation
+                    .remove_reactive_targets_for_widgets(&previous_owner_ids);
+            }
             let theme = self.animated_theme(Instant::now());
             let (layout, collected) = match self.widget_tree.as_ref() {
                 Some(tree) => {
@@ -974,15 +993,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 scene_chunks: collected.chunks,
                 scene_chunk_parts: collected.chunk_parts,
                 visual_contexts: collected.visual_contexts,
+                layout_slot_bindings: HashMap::new(),
                 reactive_slot_bindings: HashMap::new(),
                 media_texture_bindings: HashMap::new(),
                 media_texture_binding_index: HashMap::new(),
                 caret_decoration: None,
                 text_input_slot_bindings: HashMap::new(),
+                strict_capability_report: None,
             }));
+            self.rebuild_layout_slot_bindings();
             self.rebuild_reactive_slot_bindings(now);
             self.rebuild_media_texture_bindings();
             self.rebuild_caret_decoration_binding();
+            self.rebuild_strict_capability_report();
             let cached_caret_visible = self
                 .cached_scene
                 .as_ref()

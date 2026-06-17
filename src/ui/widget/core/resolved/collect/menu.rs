@@ -791,6 +791,7 @@ fn svg_menu_icon_primitive(
         TexturePrimitive {
             texture: std::sync::Arc::clone(texture),
             media_key: None,
+            media_layout: None,
             frame: target_frame,
             quad: None,
             uv_rect: None,

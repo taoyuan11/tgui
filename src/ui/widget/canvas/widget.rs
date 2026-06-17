@@ -85,12 +85,12 @@ macro_rules! impl_canvas_layout_api {
         }
 
         pub fn column(mut self, start: usize) -> Self {
-            self.element.layout.column_start = Some(start.max(1));
+            self.element.layout.column_start = Some(Value::Static(start.max(1)));
             self
         }
 
         pub fn row(mut self, start: usize) -> Self {
-            self.element.layout.row_start = Some(start.max(1));
+            self.element.layout.row_start = Some(Value::Static(start.max(1)));
             self
         }
 

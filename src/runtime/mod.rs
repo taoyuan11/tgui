@@ -12,6 +12,7 @@ mod handler_support;
 mod helpers;
 mod ime_runtime;
 mod input;
+mod layout_slots;
 mod lifecycle;
 mod media_slots;
 mod menu;
@@ -27,6 +28,7 @@ mod scene_patch_invalidation;
 mod scene_patch_roots;
 mod scene_runtime;
 mod state;
+mod strict_capability;
 mod text_input_slots;
 mod theme;
 mod timing;
@@ -45,6 +47,7 @@ use self::helpers::{
     mouse_scroll_delta, resolved_input_text_metrics, text_cursor_index_at_point,
     text_cursor_index_from_layout_at_point,
 };
+use self::layout_slots::is_layout_property_slot;
 #[cfg(feature = "audio")]
 use self::state::audio_lifecycle_state;
 use self::state::{collect_pending_lifecycle_events, collect_pending_media_event};
@@ -55,7 +58,8 @@ use self::state::{
     ClipboardService, DeferredMouseClick, DispatchedLifecycleState, DispatchedMediaState,
     FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
     PendingClick, PendingLifecycleEvent, PendingMediaEvent, PendingSplitterClick, ScrollbarDrag,
-    SliderDrag, SmoothScrollState, TextInputBufferState, TextInputSessionConfig, TextSelectionDrag,
+    SliderDrag, SmoothScrollState, StrictCapabilityEntry, StrictCapabilityKind,
+    StrictCapabilityReport, TextInputBufferState, TextInputSessionConfig, TextSelectionDrag,
     TooltipState, TouchScrollDrag, TouchScrollInertiaState,
 };
 use self::theme::{resolve_theme, resolve_window_theme};

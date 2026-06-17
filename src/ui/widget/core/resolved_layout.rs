@@ -239,14 +239,16 @@ impl<VM> ResolvedElement<VM> {
             _ => Dimension::AUTO,
         };
         let width = self.layout.width.as_ref().map(|value| {
-            resolve_dimension(
-                value,
-                animations,
-                self.id,
-                WidgetProperty::Width,
-                now,
-                units,
-            )
+            track_property_scope(PropertySlot::Width, || {
+                resolve_dimension(
+                    value,
+                    animations,
+                    self.id,
+                    WidgetProperty::Width,
+                    now,
+                    units,
+                )
+            })
         });
         let width = if is_root {
             width.or(Some(Dimension::from_length(viewport.width)))
@@ -254,14 +256,16 @@ impl<VM> ResolvedElement<VM> {
             width
         };
         let height = self.layout.height.as_ref().map(|value| {
-            resolve_dimension(
-                value,
-                animations,
-                self.id,
-                WidgetProperty::Height,
-                now,
-                units,
-            )
+            track_property_scope(PropertySlot::Height, || {
+                resolve_dimension(
+                    value,
+                    animations,
+                    self.id,
+                    WidgetProperty::Height,
+                    now,
+                    units,
+                )
+            })
         });
         let height = if is_root {
             height.or(Some(Dimension::from_length(viewport.height)))
@@ -288,14 +292,16 @@ impl<VM> ResolvedElement<VM> {
                     .min_width
                     .as_ref()
                     .map(|value| {
-                        resolve_dimension(
-                            value,
-                            animations,
-                            self.id,
-                            WidgetProperty::Width,
-                            now,
-                            units,
-                        )
+                        track_property_scope(PropertySlot::MinWidth, || {
+                            resolve_dimension(
+                                value,
+                                animations,
+                                self.id,
+                                WidgetProperty::Width,
+                                now,
+                                units,
+                            )
+                        })
                     })
                     .unwrap_or(default_min_width),
                 height: self
@@ -303,14 +309,16 @@ impl<VM> ResolvedElement<VM> {
                     .min_height
                     .as_ref()
                     .map(|value| {
-                        resolve_dimension(
-                            value,
-                            animations,
-                            self.id,
-                            WidgetProperty::Height,
-                            now,
-                            units,
-                        )
+                        track_property_scope(PropertySlot::MinHeight, || {
+                            resolve_dimension(
+                                value,
+                                animations,
+                                self.id,
+                                WidgetProperty::Height,
+                                now,
+                                units,
+                            )
+                        })
                     })
                     .unwrap_or(default_min_height),
             },
@@ -320,6 +328,82 @@ impl<VM> ResolvedElement<VM> {
                     .max_width
                     .as_ref()
                     .map(|value| {
+                        track_property_scope(PropertySlot::MaxWidth, || {
+                            resolve_dimension(
+                                value,
+                                animations,
+                                self.id,
+                                WidgetProperty::Width,
+                                now,
+                                units,
+                            )
+                        })
+                    })
+                    .unwrap_or(Dimension::AUTO),
+                height: self
+                    .layout
+                    .max_height
+                    .as_ref()
+                    .map(|value| {
+                        track_property_scope(PropertySlot::MaxHeight, || {
+                            resolve_dimension(
+                                value,
+                                animations,
+                                self.id,
+                                WidgetProperty::Height,
+                                now,
+                                units,
+                            )
+                        })
+                    })
+                    .unwrap_or(Dimension::AUTO),
+            },
+            margin: to_taffy_rect_auto(
+                track_property_scope(PropertySlot::Margin, || {
+                    self.layout.margin.resolve_widget(
+                        animations,
+                        self.id,
+                        WidgetProperty::Margin,
+                        now,
+                    )
+                }),
+                units,
+            ),
+            padding: to_taffy_rect(
+                self.layout
+                    .padding
+                    .as_ref()
+                    .map(|padding| {
+                        track_property_scope(PropertySlot::Padding, || {
+                            padding.resolve_widget(
+                                animations,
+                                self.id,
+                                WidgetProperty::Padding,
+                                now,
+                            )
+                        })
+                    })
+                    .unwrap_or_else(|| default_layout_padding(self, theme)),
+                units,
+            ),
+            flex_grow: track_property_scope(PropertySlot::Grow, || {
+                self.layout
+                    .grow
+                    .resolve_widget(animations, self.id, WidgetProperty::Grow, now)
+            })
+            .max(0.0),
+            flex_shrink: track_property_scope(PropertySlot::Shrink, || {
+                self.layout
+                    .shrink
+                    .resolve_widget(animations, self.id, WidgetProperty::Grow, now)
+            })
+            .max(0.0),
+            flex_basis: self
+                .layout
+                .basis
+                .as_ref()
+                .map(|value| {
+                    track_property_scope(PropertySlot::Basis, || {
                         resolve_dimension(
                             value,
                             animations,
@@ -329,68 +413,13 @@ impl<VM> ResolvedElement<VM> {
                             units,
                         )
                     })
-                    .unwrap_or(Dimension::AUTO),
-                height: self
-                    .layout
-                    .max_height
-                    .as_ref()
-                    .map(|value| {
-                        resolve_dimension(
-                            value,
-                            animations,
-                            self.id,
-                            WidgetProperty::Height,
-                            now,
-                            units,
-                        )
-                    })
-                    .unwrap_or(Dimension::AUTO),
-            },
-            margin: to_taffy_rect_auto(
-                self.layout
-                    .margin
-                    .resolve_widget(animations, self.id, WidgetProperty::Margin, now),
-                units,
-            ),
-            padding: to_taffy_rect(
-                self.layout
-                    .padding
-                    .as_ref()
-                    .map(|padding| {
-                        padding.resolve_widget(animations, self.id, WidgetProperty::Padding, now)
-                    })
-                    .unwrap_or_else(|| default_layout_padding(self, theme)),
-                units,
-            ),
-            flex_grow: self
-                .layout
-                .grow
-                .resolve_widget(animations, self.id, WidgetProperty::Grow, now)
-                .max(0.0),
-            flex_shrink: self
-                .layout
-                .shrink
-                .resolve_widget(animations, self.id, WidgetProperty::Grow, now)
-                .max(0.0),
-            flex_basis: self
-                .layout
-                .basis
-                .as_ref()
-                .map(|value| {
-                    resolve_dimension(
-                        value,
-                        animations,
-                        self.id,
-                        WidgetProperty::Width,
-                        now,
-                        units,
-                    )
                 })
                 .unwrap_or(Dimension::AUTO),
             aspect_ratio: self.layout.aspect_ratio.as_ref().map(|value| {
-                value
-                    .resolve_widget(animations, self.id, WidgetProperty::Grow, now)
-                    .max(0.0)
+                track_property_scope(PropertySlot::AspectRatio, || {
+                    value.resolve_widget(animations, self.id, WidgetProperty::Grow, now)
+                })
+                .max(0.0)
             }),
             position: match self.layout.position_type {
                 PositionType::Relative => TaffyPosition::Relative,
@@ -402,14 +431,16 @@ impl<VM> ResolvedElement<VM> {
                     .left
                     .as_ref()
                     .map(|value| {
-                        resolve_length_percentage_auto(
-                            value,
-                            animations,
-                            self.id,
-                            WidgetProperty::Width,
-                            now,
-                            units,
-                        )
+                        track_property_scope(PropertySlot::Inset, || {
+                            resolve_length_percentage_auto(
+                                value,
+                                animations,
+                                self.id,
+                                WidgetProperty::Width,
+                                now,
+                                units,
+                            )
+                        })
                     })
                     .unwrap_or(LengthPercentageAuto::AUTO),
                 right: self
@@ -417,14 +448,16 @@ impl<VM> ResolvedElement<VM> {
                     .right
                     .as_ref()
                     .map(|value| {
-                        resolve_length_percentage_auto(
-                            value,
-                            animations,
-                            self.id,
-                            WidgetProperty::Width,
-                            now,
-                            units,
-                        )
+                        track_property_scope(PropertySlot::Inset, || {
+                            resolve_length_percentage_auto(
+                                value,
+                                animations,
+                                self.id,
+                                WidgetProperty::Width,
+                                now,
+                                units,
+                            )
+                        })
                     })
                     .unwrap_or(LengthPercentageAuto::AUTO),
                 top: self
@@ -432,14 +465,16 @@ impl<VM> ResolvedElement<VM> {
                     .top
                     .as_ref()
                     .map(|value| {
-                        resolve_length_percentage_auto(
-                            value,
-                            animations,
-                            self.id,
-                            WidgetProperty::Height,
-                            now,
-                            units,
-                        )
+                        track_property_scope(PropertySlot::Inset, || {
+                            resolve_length_percentage_auto(
+                                value,
+                                animations,
+                                self.id,
+                                WidgetProperty::Height,
+                                now,
+                                units,
+                            )
+                        })
                     })
                     .unwrap_or(LengthPercentageAuto::AUTO),
                 bottom: self
@@ -447,14 +482,16 @@ impl<VM> ResolvedElement<VM> {
                     .bottom
                     .as_ref()
                     .map(|value| {
-                        resolve_length_percentage_auto(
-                            value,
-                            animations,
-                            self.id,
-                            WidgetProperty::Height,
-                            now,
-                            units,
-                        )
+                        track_property_scope(PropertySlot::Inset, || {
+                            resolve_length_percentage_auto(
+                                value,
+                                animations,
+                                self.id,
+                                WidgetProperty::Height,
+                                now,
+                                units,
+                            )
+                        })
                     })
                     .unwrap_or(LengthPercentageAuto::AUTO),
             },
@@ -469,13 +506,16 @@ impl<VM> ResolvedElement<VM> {
             style.grid_column.start = line(1);
             style.grid_column.end = span(self.layout.column_span.max(1) as u16);
         } else {
-            if let Some(start) = self.layout.row_start {
+            if let Some(start) = self.layout.row_start.as_ref() {
+                let start = track_property_scope(PropertySlot::GridRow, || start.resolve()).max(1);
                 style.grid_row.start = line(start as i16);
             }
             if self.layout.row_span > 1 {
                 style.grid_row.end = span(self.layout.row_span as u16);
             }
-            if let Some(start) = self.layout.column_start {
+            if let Some(start) = self.layout.column_start.as_ref() {
+                let start =
+                    track_property_scope(PropertySlot::GridColumn, || start.resolve()).max(1);
                 style.grid_column.start = line(start as i16);
             }
             if self.layout.column_span > 1 {

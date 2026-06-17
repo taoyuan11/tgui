@@ -113,13 +113,13 @@ macro_rules! impl_input_layout_api {
 
         /// 设置网格列起始位置。
         pub fn column(mut self, start: usize) -> Self {
-            self.element.layout.column_start = Some(start.max(1));
+            self.element.layout.column_start = Some(Value::Static(start.max(1)));
             self
         }
 
         /// 设置网格行起始位置。
         pub fn row(mut self, start: usize) -> Self {
-            self.element.layout.row_start = Some(start.max(1));
+            self.element.layout.row_start = Some(Value::Static(start.max(1)));
             self
         }
 

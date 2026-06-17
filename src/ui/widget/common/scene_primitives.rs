@@ -2,6 +2,7 @@ use super::*;
 #[cfg(feature = "video")]
 use crate::video::VideoController;
 use smallvec::SmallVec;
+use std::ops::Range;
 use std::sync::Arc;
 
 pub(crate) type TransformChain = SmallVec<[WidgetId; 2]>;
@@ -36,6 +37,12 @@ pub(crate) struct ShapePrimitiveSlot {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct OverlayShapePrimitiveSlot {
+    pub(crate) shape_index: usize,
+    pub(crate) command_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BackdropBlurPrimitiveSlot {
     pub(crate) backdrop_blur_index: usize,
     pub(crate) command_index: usize,
@@ -43,6 +50,12 @@ pub(crate) struct BackdropBlurPrimitiveSlot {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TextPrimitiveSlot {
+    pub(crate) text_index: usize,
+    pub(crate) command_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct OverlayTextPrimitiveSlot {
     pub(crate) text_index: usize,
     pub(crate) command_index: usize,
 }
@@ -66,9 +79,27 @@ pub(crate) struct TexturePrimitiveSlot {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct OverlayTexturePrimitiveSlot {
+    pub(crate) texture_index: usize,
+    pub(crate) command_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BrushPrimitiveSlot {
     pub(crate) brush_index: usize,
     pub(crate) command_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum SceneDrawStream {
+    Main,
+    Overlay,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DirtyDrawRange {
+    pub(crate) stream: SceneDrawStream,
+    pub(crate) range: Range<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -135,6 +166,7 @@ pub struct TextDecorationPrimitive {
 pub struct TexturePrimitive {
     pub texture: Arc<TextureFrame>,
     pub media_key: Option<crate::media::MediaTextureKey>,
+    pub(crate) media_layout: Option<crate::media::MediaTextureLayout>,
     pub frame: Rect,
     pub quad: Option<[Point; 4]>,
     pub uv_rect: Option<Rect>,
@@ -235,10 +267,12 @@ pub struct ScenePrimitives {
     pub overlay_text_decorations: SmallVec<[TextDecorationPrimitive; 1]>,
     pub(crate) commands: SmallVec<[RenderCommand; 1]>,
     pub(crate) overlay_commands: SmallVec<[RenderCommand; 1]>,
+    pub(crate) overlay_command_sources: SmallVec<[Option<WidgetId>; 1]>,
     pub(crate) command_gpu_scroll_containers: SmallVec<[Option<WidgetId>; 1]>,
     pub(crate) overlay_command_gpu_scroll_containers: SmallVec<[Option<WidgetId>; 1]>,
     pub(crate) command_transform_chains: SmallVec<[TransformChain; 1]>,
     pub(crate) overlay_command_transform_chains: SmallVec<[TransformChain; 1]>,
+    pub(crate) dirty_draw_ranges: SmallVec<[DirtyDrawRange; 4]>,
     active_gpu_scroll_container: Option<WidgetId>,
     active_transform_chain: TransformChain,
 }
@@ -269,12 +303,35 @@ impl ScenePrimitives {
         &self.overlay_command_gpu_scroll_containers
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn overlay_command_sources(&self) -> &[Option<WidgetId>] {
+        &self.overlay_command_sources
+    }
+
     pub(crate) fn command_transform_chains(&self) -> &[TransformChain] {
         &self.command_transform_chains
     }
 
     pub(crate) fn overlay_command_transform_chains(&self) -> &[TransformChain] {
         &self.overlay_command_transform_chains
+    }
+
+    pub(crate) fn dirty_draw_ranges(&self) -> &[DirtyDrawRange] {
+        &self.dirty_draw_ranges
+    }
+
+    fn mark_dirty_draw(&mut self, stream: SceneDrawStream, command_index: usize) {
+        if self.dirty_draw_ranges.iter().any(|range| {
+            range.stream == stream
+                && range.range.start <= command_index
+                && command_index < range.range.end
+        }) {
+            return;
+        }
+        self.dirty_draw_ranges.push(DirtyDrawRange {
+            stream,
+            range: command_index..(command_index + 1),
+        });
     }
 
     pub(crate) fn set_active_transform_chain(&mut self, chain: &[WidgetId]) {
@@ -296,6 +353,7 @@ impl ScenePrimitives {
 
     fn push_overlay_command(&mut self, command: RenderCommand) {
         self.overlay_commands.push(command);
+        self.overlay_command_sources.push(None);
         self.overlay_command_gpu_scroll_containers
             .push(self.active_gpu_scroll_container);
         self.overlay_command_transform_chains
@@ -383,6 +441,12 @@ impl ScenePrimitives {
                 .skip(base.overlay_commands.len())
                 .cloned(),
         );
+        delta.overlay_command_sources.extend(
+            self.overlay_command_sources
+                .iter()
+                .skip(base.overlay_command_sources.len())
+                .copied(),
+        );
         {
             delta.command_gpu_scroll_containers.extend(
                 self.command_gpu_scroll_containers
@@ -409,6 +473,9 @@ impl ScenePrimitives {
                     .cloned(),
             );
         }
+        delta
+            .dirty_draw_ranges
+            .extend(self.dirty_draw_ranges.iter().cloned());
         delta
     }
 
@@ -586,6 +653,32 @@ impl ScenePrimitives {
         slots
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn matching_overlay_shape_slots(
+        &self,
+        mut matches: impl FnMut(&RenderPrimitive) -> bool,
+    ) -> SmallVec<[OverlayShapePrimitiveSlot; 4]> {
+        let mut slots = SmallVec::new();
+        let mut shape_index = 0usize;
+        for (command_index, command) in self.overlay_commands.iter().enumerate() {
+            if let RenderCommand::Shape(primitive) = command {
+                if matches(primitive) {
+                    slots.push(OverlayShapePrimitiveSlot {
+                        shape_index,
+                        command_index,
+                    });
+                }
+                shape_index += 1;
+            }
+        }
+        debug_assert_eq!(
+            shape_index,
+            self.overlay_shapes.len(),
+            "overlay shape stream and command stream should remain in lockstep"
+        );
+        slots
+    }
+
     pub(crate) fn matching_backdrop_blur_slots(
         &self,
         mut matches: impl FnMut(&BackdropBlurPrimitive) -> bool,
@@ -607,6 +700,32 @@ impl ScenePrimitives {
             backdrop_blur_index,
             self.backdrop_blurs.len(),
             "backdrop blur stream and command stream should remain in lockstep"
+        );
+        slots
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn matching_overlay_text_slots(
+        &self,
+        mut matches: impl FnMut(&TextPrimitive) -> bool,
+    ) -> SmallVec<[OverlayTextPrimitiveSlot; 2]> {
+        let mut slots = SmallVec::new();
+        let mut text_index = 0usize;
+        for (command_index, command) in self.overlay_commands.iter().enumerate() {
+            if let RenderCommand::Text(primitive) = command {
+                if matches(primitive) {
+                    slots.push(OverlayTextPrimitiveSlot {
+                        text_index,
+                        command_index,
+                    });
+                }
+                text_index += 1;
+            }
+        }
+        debug_assert_eq!(
+            text_index,
+            self.overlay_texts.len(),
+            "overlay text stream and command stream should remain in lockstep"
         );
         slots
     }
@@ -711,6 +830,32 @@ impl ScenePrimitives {
         slots
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn matching_overlay_texture_slots(
+        &self,
+        mut matches: impl FnMut(&TexturePrimitive) -> bool,
+    ) -> SmallVec<[OverlayTexturePrimitiveSlot; 2]> {
+        let mut slots = SmallVec::new();
+        let mut texture_index = 0usize;
+        for (command_index, command) in self.overlay_commands.iter().enumerate() {
+            if let RenderCommand::Texture(primitive) = command {
+                if matches(primitive) {
+                    slots.push(OverlayTexturePrimitiveSlot {
+                        texture_index,
+                        command_index,
+                    });
+                }
+                texture_index += 1;
+            }
+        }
+        debug_assert_eq!(
+            texture_index,
+            self.overlay_textures.len(),
+            "overlay texture stream and command stream should remain in lockstep"
+        );
+        slots
+    }
+
     pub(crate) fn can_write_backdrop_blur_slot(
         &self,
         offset: &SceneCounts,
@@ -745,6 +890,7 @@ impl ScenePrimitives {
         match &mut self.commands[command_index] {
             RenderCommand::BackdropBlur(target) => {
                 *target = primitive;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
                 true
             }
             _ => false,
@@ -784,6 +930,7 @@ impl ScenePrimitives {
         match &mut self.commands[command_index] {
             RenderCommand::Shape(primitive) => {
                 primitive.color = color;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
                 true
             }
             _ => false,
@@ -823,6 +970,7 @@ impl ScenePrimitives {
         match &mut self.commands[command_index] {
             RenderCommand::Brush(target) => {
                 *target = primitive;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
                 true
             }
             _ => false,
@@ -844,6 +992,7 @@ impl ScenePrimitives {
         match &mut self.commands[command_index] {
             RenderCommand::Shape(primitive) => {
                 primitive.rect = rect;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
                 true
             }
             _ => false,
@@ -865,6 +1014,7 @@ impl ScenePrimitives {
         match &mut self.commands[command_index] {
             RenderCommand::Shape(primitive) => {
                 primitive.corner_radius = corner_radius;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
                 true
             }
             _ => false,
@@ -886,6 +1036,118 @@ impl ScenePrimitives {
         match &mut self.commands[command_index] {
             RenderCommand::Shape(primitive) => {
                 primitive.stroke_width = stroke_width;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn can_write_overlay_shape_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: OverlayShapePrimitiveSlot,
+    ) -> bool {
+        let Some(shape_index) = offset.overlay_shapes.checked_add(slot.shape_index) else {
+            return false;
+        };
+        let Some(command_index) = offset.overlay_commands.checked_add(slot.command_index) else {
+            return false;
+        };
+        self.overlay_shapes.get(shape_index).is_some()
+            && matches!(
+                self.overlay_commands.get(command_index),
+                Some(RenderCommand::Shape(_))
+            )
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn write_overlay_shape_color_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: OverlayShapePrimitiveSlot,
+        color: Color,
+    ) -> bool {
+        if !self.can_write_overlay_shape_slot(offset, slot) {
+            return false;
+        }
+        let shape_index = offset.overlay_shapes + slot.shape_index;
+        let command_index = offset.overlay_commands + slot.command_index;
+        self.overlay_shapes[shape_index].color = color;
+        match &mut self.overlay_commands[command_index] {
+            RenderCommand::Shape(primitive) => {
+                primitive.color = color;
+                self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn write_overlay_shape_rect_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: OverlayShapePrimitiveSlot,
+        rect: Rect,
+    ) -> bool {
+        if !self.can_write_overlay_shape_slot(offset, slot) {
+            return false;
+        }
+        let shape_index = offset.overlay_shapes + slot.shape_index;
+        let command_index = offset.overlay_commands + slot.command_index;
+        self.overlay_shapes[shape_index].rect = rect;
+        match &mut self.overlay_commands[command_index] {
+            RenderCommand::Shape(primitive) => {
+                primitive.rect = rect;
+                self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn write_overlay_shape_corner_radius_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: OverlayShapePrimitiveSlot,
+        corner_radius: f32,
+    ) -> bool {
+        if !self.can_write_overlay_shape_slot(offset, slot) {
+            return false;
+        }
+        let shape_index = offset.overlay_shapes + slot.shape_index;
+        let command_index = offset.overlay_commands + slot.command_index;
+        self.overlay_shapes[shape_index].corner_radius = corner_radius;
+        match &mut self.overlay_commands[command_index] {
+            RenderCommand::Shape(primitive) => {
+                primitive.corner_radius = corner_radius;
+                self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn write_overlay_shape_stroke_width_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: OverlayShapePrimitiveSlot,
+        stroke_width: f32,
+    ) -> bool {
+        if !self.can_write_overlay_shape_slot(offset, slot) {
+            return false;
+        }
+        let shape_index = offset.overlay_shapes + slot.shape_index;
+        let command_index = offset.overlay_commands + slot.command_index;
+        self.overlay_shapes[shape_index].stroke_width = stroke_width;
+        match &mut self.overlay_commands[command_index] {
+            RenderCommand::Shape(primitive) => {
+                primitive.stroke_width = stroke_width;
+                self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
                 true
             }
             _ => false,
@@ -925,6 +1187,7 @@ impl ScenePrimitives {
         match &mut self.commands[command_index] {
             RenderCommand::Text(primitive) => {
                 primitive.color = color;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
                 true
             }
             _ => false,
@@ -946,6 +1209,7 @@ impl ScenePrimitives {
         match &mut self.commands[command_index] {
             RenderCommand::Text(target) => {
                 **target = primitive;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
                 true
             }
             _ => false,
@@ -970,6 +1234,98 @@ impl ScenePrimitives {
             RenderCommand::Text(primitive) => {
                 primitive.content = content;
                 primitive.font_family = font_family;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn can_write_overlay_text_color_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: OverlayTextPrimitiveSlot,
+    ) -> bool {
+        let Some(text_index) = offset.overlay_texts.checked_add(slot.text_index) else {
+            return false;
+        };
+        let Some(command_index) = offset.overlay_commands.checked_add(slot.command_index) else {
+            return false;
+        };
+        self.overlay_texts.get(text_index).is_some()
+            && matches!(
+                self.overlay_commands.get(command_index),
+                Some(RenderCommand::Text(_))
+            )
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn write_overlay_text_color_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: OverlayTextPrimitiveSlot,
+        color: Color,
+    ) -> bool {
+        if !self.can_write_overlay_text_color_slot(offset, slot) {
+            return false;
+        }
+        let text_index = offset.overlay_texts + slot.text_index;
+        let command_index = offset.overlay_commands + slot.command_index;
+        self.overlay_texts[text_index].color = color;
+        match &mut self.overlay_commands[command_index] {
+            RenderCommand::Text(primitive) => {
+                primitive.color = color;
+                self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn write_overlay_text_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: OverlayTextPrimitiveSlot,
+        primitive: TextPrimitive,
+    ) -> bool {
+        if !self.can_write_overlay_text_color_slot(offset, slot) {
+            return false;
+        }
+        let text_index = offset.overlay_texts + slot.text_index;
+        let command_index = offset.overlay_commands + slot.command_index;
+        self.overlay_texts[text_index] = primitive.clone();
+        match &mut self.overlay_commands[command_index] {
+            RenderCommand::Text(target) => {
+                **target = primitive;
+                self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn write_overlay_text_content_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: OverlayTextPrimitiveSlot,
+        content: Arc<str>,
+        font_family: Option<Arc<str>>,
+    ) -> bool {
+        if !self.can_write_overlay_text_color_slot(offset, slot) {
+            return false;
+        }
+        let text_index = offset.overlay_texts + slot.text_index;
+        let command_index = offset.overlay_commands + slot.command_index;
+        self.overlay_texts[text_index].content = content.clone();
+        self.overlay_texts[text_index].font_family = font_family.clone();
+        match &mut self.overlay_commands[command_index] {
+            RenderCommand::Text(primitive) => {
+                primitive.content = content;
+                primitive.font_family = font_family;
+                self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
                 true
             }
             _ => false,
@@ -1012,6 +1368,7 @@ impl ScenePrimitives {
         match &mut self.commands[command_index] {
             RenderCommand::TextDecoration(target) => {
                 *target = primitive;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
                 true
             }
             _ => false,
@@ -1056,6 +1413,7 @@ impl ScenePrimitives {
         match &mut self.overlay_commands[command_index] {
             RenderCommand::TextDecoration(target) => {
                 *target = primitive;
+                self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
                 true
             }
             _ => false,
@@ -1109,6 +1467,7 @@ impl ScenePrimitives {
         match &mut self.commands[command_index] {
             RenderCommand::Texture(primitive) => {
                 primitive.opacity = opacity;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
                 true
             }
             _ => false,
@@ -1130,6 +1489,87 @@ impl ScenePrimitives {
         match &mut self.commands[command_index] {
             RenderCommand::Texture(target) => {
                 *target = primitive;
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn can_write_overlay_texture_opacity_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: OverlayTexturePrimitiveSlot,
+    ) -> bool {
+        let Some(texture_index) = offset.overlay_textures.checked_add(slot.texture_index) else {
+            return false;
+        };
+        let Some(command_index) = offset.overlay_commands.checked_add(slot.command_index) else {
+            return false;
+        };
+        self.overlay_textures.get(texture_index).is_some()
+            && matches!(
+                self.overlay_commands.get(command_index),
+                Some(RenderCommand::Texture(_))
+            )
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn overlay_texture_slot(
+        &self,
+        offset: &SceneCounts,
+        slot: OverlayTexturePrimitiveSlot,
+    ) -> Option<&TexturePrimitive> {
+        let texture_index = offset.overlay_textures.checked_add(slot.texture_index)?;
+        let command_index = offset.overlay_commands.checked_add(slot.command_index)?;
+        let texture = self.overlay_textures.get(texture_index)?;
+        match self.overlay_commands.get(command_index) {
+            Some(RenderCommand::Texture(_)) => Some(texture),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn write_overlay_texture_opacity_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: OverlayTexturePrimitiveSlot,
+        opacity: f32,
+    ) -> bool {
+        if !self.can_write_overlay_texture_opacity_slot(offset, slot) {
+            return false;
+        }
+        let texture_index = offset.overlay_textures + slot.texture_index;
+        let command_index = offset.overlay_commands + slot.command_index;
+        self.overlay_textures[texture_index].opacity = opacity;
+        match &mut self.overlay_commands[command_index] {
+            RenderCommand::Texture(primitive) => {
+                primitive.opacity = opacity;
+                self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn write_overlay_texture_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: OverlayTexturePrimitiveSlot,
+        primitive: TexturePrimitive,
+    ) -> bool {
+        if !self.can_write_overlay_texture_opacity_slot(offset, slot) {
+            return false;
+        }
+        let texture_index = offset.overlay_textures + slot.texture_index;
+        let command_index = offset.overlay_commands + slot.command_index;
+        self.overlay_textures[texture_index] = primitive.clone();
+        match &mut self.overlay_commands[command_index] {
+            RenderCommand::Texture(target) => {
+                *target = primitive;
+                self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
                 true
             }
             _ => false,
@@ -1137,6 +1577,8 @@ impl ScenePrimitives {
     }
 
     pub(crate) fn extend(&mut self, other: &ScenePrimitives) {
+        let command_offset = self.commands.len();
+        let overlay_command_offset = self.overlay_commands.len();
         self.backdrop_blurs
             .extend(other.backdrop_blurs.iter().copied());
         self.brushes.extend(other.brushes.iter().cloned());
@@ -1164,6 +1606,8 @@ impl ScenePrimitives {
         self.commands.extend(other.commands.iter().cloned());
         self.overlay_commands
             .extend(other.overlay_commands.iter().cloned());
+        self.overlay_command_sources
+            .extend(other.overlay_command_sources.iter().copied());
         {
             self.command_gpu_scroll_containers
                 .extend(other.command_gpu_scroll_containers.iter().copied());
@@ -1174,6 +1618,15 @@ impl ScenePrimitives {
             self.overlay_command_transform_chains
                 .extend(other.overlay_command_transform_chains.iter().cloned());
         }
+        self.dirty_draw_ranges
+            .extend(other.dirty_draw_ranges.iter().cloned().map(|mut range| {
+                let offset = match range.stream {
+                    SceneDrawStream::Main => command_offset,
+                    SceneDrawStream::Overlay => overlay_command_offset,
+                };
+                range.range = (range.range.start + offset)..(range.range.end + offset);
+                range
+            }));
     }
 
     /// 各渲染流当前的命令数量快照。Splice 快路径用它在
@@ -1464,6 +1917,47 @@ mod culling_tests {
         }
     }
 
+    fn text(content: &str, color: Color) -> TextPrimitive {
+        TextPrimitive {
+            content: Arc::from(content),
+            rich_spans: None,
+            frame: Rect::new(0.0, 0.0, 48.0, 20.0),
+            quad: None,
+            color,
+            force_color: false,
+            font_family: None,
+            font_size: 14.0,
+            font_weight: FontWeight::NORMAL,
+            line_height: 18.0,
+            letter_spacing: 0.0,
+            wrap: CanvasTextWrap::Word,
+            overflow: CanvasTextOverflow::Clip,
+            horizontal_align: CanvasTextHorizontalAlign::Start,
+            vertical_align: CanvasTextVerticalAlign::Start,
+            clip_rect: None,
+            clip_mask: None,
+        }
+    }
+
+    fn texture(opacity: f32) -> TexturePrimitive {
+        TexturePrimitive {
+            texture: Arc::new(crate::media::TextureFrame::new(
+                1,
+                1,
+                vec![255, 255, 255, 255],
+            )),
+            media_key: None,
+            media_layout: None,
+            frame: Rect::new(0.0, 0.0, 12.0, 12.0),
+            quad: None,
+            uv_rect: None,
+            corner_radius: 0.0,
+            opacity,
+            clip_rect: None,
+            clip_mask: None,
+        }
+    }
+
     #[test]
     fn shape_inside_its_clip_is_kept() {
         let mut scene = ScenePrimitives::default();
@@ -1505,5 +1999,97 @@ mod culling_tests {
         assert_eq!(scene.shapes.len(), 1);
         assert_eq!(scene.commands.len(), 1);
         assert_eq!(scene.command_gpu_scroll_containers(), &[Some(scroll_id)]);
+    }
+
+    #[test]
+    fn overlay_shape_slot_writes_parallel_array_and_command_stream() {
+        let mut scene = ScenePrimitives::default();
+        scene.push_overlay_shape(shape(Rect::new(1.0, 2.0, 3.0, 4.0), None));
+        let slot = scene
+            .matching_overlay_shape_slots(|shape| shape.color == Color::WHITE)
+            .pop()
+            .expect("overlay shape slot");
+
+        assert!(scene.write_overlay_shape_color_slot(&SceneCounts::default(), slot, Color::RED));
+        assert!(scene.write_overlay_shape_rect_slot(
+            &SceneCounts::default(),
+            slot,
+            Rect::new(5.0, 6.0, 7.0, 8.0)
+        ));
+        assert!(scene.write_overlay_shape_corner_radius_slot(&SceneCounts::default(), slot, 3.0));
+        assert!(scene.write_overlay_shape_stroke_width_slot(&SceneCounts::default(), slot, 2.0));
+
+        let shape = scene.overlay_shapes[0];
+        assert_eq!(shape.color, Color::RED);
+        assert_eq!(shape.rect, Rect::new(5.0, 6.0, 7.0, 8.0));
+        assert_eq!(shape.corner_radius, 3.0);
+        assert_eq!(shape.stroke_width, 2.0);
+        match &scene.overlay_commands[0] {
+            RenderCommand::Shape(command) => {
+                assert_eq!(command.color, shape.color);
+                assert_eq!(command.rect, shape.rect);
+                assert_eq!(command.corner_radius, shape.corner_radius);
+                assert_eq!(command.stroke_width, shape.stroke_width);
+            }
+            _ => panic!("expected overlay shape command"),
+        }
+    }
+
+    #[test]
+    fn overlay_text_slot_writes_parallel_array_and_command_stream() {
+        let mut scene = ScenePrimitives::default();
+        scene.push_overlay_text(text("before", Color::WHITE));
+        let slot = scene
+            .matching_overlay_text_slots(|text| text.content.as_ref() == "before")
+            .pop()
+            .expect("overlay text slot");
+
+        assert!(scene.write_overlay_text_color_slot(&SceneCounts::default(), slot, Color::BLUE));
+        assert!(scene.write_overlay_text_content_slot(
+            &SceneCounts::default(),
+            slot,
+            Arc::from("after"),
+            Some(Arc::from("Inter")),
+        ));
+
+        let text = scene.overlay_texts[0].clone();
+        assert_eq!(text.color, Color::BLUE);
+        assert_eq!(text.content.as_ref(), "after");
+        assert_eq!(text.font_family.as_deref(), Some("Inter"));
+        match &scene.overlay_commands[0] {
+            RenderCommand::Text(command) => assert_eq!(**command, text),
+            _ => panic!("expected overlay text command"),
+        }
+    }
+
+    #[test]
+    fn overlay_texture_slot_writes_parallel_array_and_command_stream() {
+        let mut scene = ScenePrimitives::default();
+        scene.push_overlay_texture(texture(0.25));
+        let slot = scene
+            .matching_overlay_texture_slots(|texture| (texture.opacity - 0.25).abs() < f32::EPSILON)
+            .pop()
+            .expect("overlay texture slot");
+
+        assert!(scene.write_overlay_texture_opacity_slot(&SceneCounts::default(), slot, 0.75));
+        assert_eq!(scene.overlay_textures[0].opacity, 0.75);
+        assert_eq!(
+            scene
+                .overlay_texture_slot(&SceneCounts::default(), slot)
+                .map(|texture| texture.opacity),
+            Some(0.75)
+        );
+
+        let replacement = texture(1.0);
+        let replacement_id = replacement.texture.id();
+        assert!(scene.write_overlay_texture_slot(&SceneCounts::default(), slot, replacement));
+        assert_eq!(scene.overlay_textures[0].texture.id(), replacement_id);
+        match &scene.overlay_commands[0] {
+            RenderCommand::Texture(command) => {
+                assert_eq!(command.texture.id(), replacement_id);
+                assert_eq!(command.opacity, 1.0);
+            }
+            _ => panic!("expected overlay texture command"),
+        }
     }
 }

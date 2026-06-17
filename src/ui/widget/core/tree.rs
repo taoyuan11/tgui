@@ -75,6 +75,16 @@ fn element_contains_virtual<VM>(element: &Element<VM>) -> bool {
                     children.iter().any(element_contains_virtual)
                 }
                 crate::ui::widget::common::ChildSource::Dynamic(_) => true,
+                crate::ui::widget::common::ChildSource::KeyedFor(_) => true,
+                crate::ui::widget::common::ChildSource::Switch {
+                    cases, fallback, ..
+                } => {
+                    cases.iter().any(element_contains_virtual)
+                        || fallback.as_ref().is_some_and(element_contains_virtual)
+                }
+                crate::ui::widget::common::ChildSource::Show { child, .. } => {
+                    element_contains_virtual(child)
+                }
             })
         }
         _ => false,
@@ -89,6 +99,18 @@ fn element_contains_dynamic_children<VM>(element: &Element<VM>) -> bool {
                     children.iter().any(element_contains_dynamic_children)
                 }
                 crate::ui::widget::common::ChildSource::Dynamic(_) => true,
+                crate::ui::widget::common::ChildSource::KeyedFor(_) => false,
+                crate::ui::widget::common::ChildSource::Switch {
+                    cases, fallback, ..
+                } => {
+                    cases.iter().any(element_contains_dynamic_children)
+                        || fallback
+                            .as_ref()
+                            .is_some_and(element_contains_dynamic_children)
+                }
+                crate::ui::widget::common::ChildSource::Show { child, .. } => {
+                    element_contains_dynamic_children(child)
+                }
             })
         }
         _ => false,

@@ -205,10 +205,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         };
 
         let mut layout_affected_ids = HashSet::new();
+        let mut structure_affected_ids = HashSet::new();
         let mut scene_affected_ids = HashSet::new();
         let mut scene_property_targets = SmallVec::<[(WidgetId, PropertySlot); 16]>::new();
+        let mut layout_property_targets = SmallVec::<[(WidgetId, PropertySlot); 16]>::new();
         let mut saw_scene_owner = false;
         let mut all_scene_owners_are_property_scoped = true;
+        let mut all_layout_owners_are_layout_property_scoped = true;
         for target in reactive_targets {
             let owner = match *target {
                 ReactiveTarget::Owner(owner) => owner,
@@ -224,12 +227,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 return Some("reactive_detached_scene_dependency_recollect");
             }
             match owner.phase {
-                DependencyPhase::Structure | DependencyPhase::Layout => {
+                DependencyPhase::Structure => {
+                    all_layout_owners_are_layout_property_scoped = false;
+                    structure_affected_ids.insert(widget_id);
+                    layout_affected_ids.insert(widget_id);
+                }
+                DependencyPhase::Layout => {
                     if owner.phase == DependencyPhase::Layout
                         && owner.property == Some(PropertySlot::Offset)
                         && layout.can_patch_layout_dependency_as_scene(widget_id)
                     {
                         scene_property_targets.push((widget_id, PropertySlot::Offset));
+                    }
+                    if let Some(property) = owner.property {
+                        if is_layout_property_slot(property) {
+                            layout_property_targets.push((widget_id, property));
+                        } else {
+                            all_layout_owners_are_layout_property_scoped = false;
+                        }
+                    } else {
+                        all_layout_owners_are_layout_property_scoped = false;
                     }
                     layout_affected_ids.insert(widget_id);
                 }
@@ -291,17 +308,43 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             scene_affected_ids.insert(widget_id);
         }
 
-        if !layout_affected_ids.is_empty() {
-            if strict_reactive {
-                return Some("strict_reactive_layout_rejected");
-            }
-            let roots = self.highest_layout_roots_smallvec(layout, &layout_affected_ids);
+        if strict_reactive && !structure_affected_ids.is_empty() {
+            let roots = self.highest_layout_roots_smallvec(layout, &structure_affected_ids);
             if roots.is_empty() {
                 return Some("reactive_unrelated");
             }
+            if self.patch_cached_layout_for_roots(&roots, now)
+                && self.patch_cached_scene_for_roots(&roots, now, false)
+            {
+                return Some("reactive_structure_slot_update");
+            }
+            self.invalidate_scene_with_reason("reactive_structure_patch_failed");
+            return Some("strict_reactive_layout_rejected");
+        }
+
+        if !layout_affected_ids.is_empty() {
+            let roots = self.highest_layout_roots_smallvec(layout, &layout_affected_ids);
             let mut scene_ids = layout_affected_ids.clone();
             scene_ids.extend(scene_affected_ids.iter().copied());
             let scene_roots = self.highest_layout_roots_smallvec(layout, &scene_ids);
+            let layout_property_ids = layout_property_targets
+                .iter()
+                .map(|(widget_id, _)| *widget_id)
+                .collect::<HashSet<_>>();
+            if all_layout_owners_are_layout_property_scoped
+                && layout_affected_ids
+                    .iter()
+                    .all(|widget_id| layout_property_ids.contains(widget_id))
+                && self.try_update_reactive_layout_slots(&layout_property_targets, now)
+            {
+                return Some("reactive_layout_slot_update");
+            }
+            if strict_reactive {
+                return Some("strict_reactive_layout_rejected");
+            }
+            if roots.is_empty() {
+                return Some("reactive_unrelated");
+            }
             if self.patch_cached_layout_for_roots(&roots, now) {
                 if self.patch_cached_scene_for_roots(&scene_roots, now, false) {
                     Some("reactive_layout_scene_patch")

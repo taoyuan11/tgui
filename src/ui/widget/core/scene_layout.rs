@@ -225,6 +225,81 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         layout_at_path(&self.layout_root, path)
     }
 
+    fn parent_kind_for_path(&self, path: &[usize]) -> Option<ContainerKind> {
+        if path.is_empty() {
+            return None;
+        }
+        let parent_path = &path[..path.len() - 1];
+        match &self.resolved_at_path(parent_path).kind {
+            ResolvedWidgetKind::Container { layout, .. } => Some(layout.kind.clone()),
+            ResolvedWidgetKind::Virtual { .. } => None,
+            _ => None,
+        }
+    }
+
+    pub(crate) fn update_layout_style_slots(
+        &mut self,
+        widget_ids: &[WidgetId],
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        viewport: Rect,
+        now: std::time::Instant,
+    ) -> Result<(), taffy::TaffyError> {
+        if widget_ids.is_empty() {
+            return Ok(());
+        }
+        let units = self.units;
+        let touched_owner_ids = widget_ids.iter().map(|id| id.raw()).collect::<HashSet<_>>();
+        let (result, dependencies) = with_dependency_collection(|| {
+            for widget_id in widget_ids {
+                let Some(path) = self.path_for(*widget_id).map(|path| path.to_vec()) else {
+                    continue;
+                };
+                let owner = widget_id.dependency_owner(DependencyPhase::Layout);
+                let style = track_dependency_scope(owner, || {
+                    let parent_kind = self.parent_kind_for_path(&path);
+                    let is_root = *widget_id == self.root_id;
+                    self.resolved_at_path(&path).taffy_style(
+                        parent_kind,
+                        viewport,
+                        is_root,
+                        animations,
+                        theme,
+                        units,
+                        now,
+                    )
+                });
+                let node = self.layout_at_path(&path).node;
+                self.taffy.set_style(node, style)?;
+            }
+
+            self.taffy.compute_layout_with_measure(
+                self.layout_root.node,
+                TaffySize {
+                    width: AvailableSpace::Definite(viewport.width.get()),
+                    height: AvailableSpace::Definite(viewport.height.get()),
+                },
+                |known_dimensions, _, _, node_context, _| {
+                    measure_node(
+                        node_context,
+                        known_dimensions,
+                        font_manager,
+                        theme,
+                        media,
+                        units,
+                    )
+                },
+            )
+        });
+        result?;
+        self.dependencies
+            .remove_widget_phase_owners(&touched_owner_ids, DependencyPhase::Layout);
+        self.dependencies.merge_from(&dependencies);
+        Ok(())
+    }
+
     pub(crate) fn collect_scene_cache_for_widget_with_focus_value(
         &self,
         widget_id: WidgetId,

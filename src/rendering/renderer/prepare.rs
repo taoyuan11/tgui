@@ -4,8 +4,8 @@ use crate::foundation::error::TguiError;
 use crate::text::font::FontManager;
 use crate::ui::unit::Dp;
 use crate::ui::widget::{
-    BrushPrimitiveData, CanvasCompositePrimitive, Rect, RenderCommand, RenderPrimitive,
-    TransformChain, TransformRecord, WidgetId,
+    BrushPrimitiveData, CanvasCompositePrimitive, DirtyDrawRange, Rect, RenderCommand,
+    RenderPrimitive, SceneDrawStream, TransformChain, TransformRecord, WidgetId,
 };
 use std::collections::HashMap;
 
@@ -13,6 +13,85 @@ use super::{
     physical_mesh_clip_mask_data, BrushVertex, BrushVertexSpec, CompositeQuadSpec, CompositeVertex,
     MeshVertex, RectVertex, Renderer, TextQuadSpec, TextTransformSpec, TextVertex, VertexViewport,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) enum DrawStream {
+    Main,
+    Overlay,
+    CompositeContent { depth: usize },
+    CompositeMask { depth: usize },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct DrawId {
+    pub(super) stream: DrawStream,
+    pub(super) command_index: usize,
+}
+
+impl DrawId {
+    fn new(stream: DrawStream, command_index: usize) -> Self {
+        Self {
+            stream,
+            command_index,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct PrepareReuseStats {
+    pub(super) total: usize,
+    pub(super) rebuild: usize,
+    pub(super) reuse: usize,
+}
+
+pub(super) fn retained_prepare_stats(
+    stream: DrawStream,
+    command_count: usize,
+    dirty_ranges: &[DirtyDrawRange],
+) -> PrepareReuseStats {
+    let Some(scene_stream) = stream.scene_stream() else {
+        return PrepareReuseStats {
+            total: command_count,
+            rebuild: command_count,
+            reuse: 0,
+        };
+    };
+    if dirty_ranges.is_empty() {
+        return PrepareReuseStats {
+            total: command_count,
+            rebuild: command_count,
+            reuse: 0,
+        };
+    }
+
+    let mut dirty = vec![false; command_count];
+    for range in dirty_ranges
+        .iter()
+        .filter(|range| range.stream == scene_stream)
+    {
+        let start = range.range.start.min(command_count);
+        let end = range.range.end.min(command_count);
+        for slot in &mut dirty[start..end] {
+            *slot = true;
+        }
+    }
+    let rebuild = dirty.into_iter().filter(|dirty| *dirty).count();
+    PrepareReuseStats {
+        total: command_count,
+        rebuild,
+        reuse: command_count.saturating_sub(rebuild),
+    }
+}
+
+impl DrawStream {
+    fn scene_stream(self) -> Option<SceneDrawStream> {
+        match self {
+            DrawStream::Main => Some(SceneDrawStream::Main),
+            DrawStream::Overlay => Some(SceneDrawStream::Overlay),
+            DrawStream::CompositeContent { .. } | DrawStream::CompositeMask { .. } => None,
+        }
+    }
+}
 
 fn compute_scroll_translate(
     gpu_scroll_container: Option<WidgetId>,
@@ -91,6 +170,7 @@ fn combine_translates(
 }
 
 pub(super) struct PreparedRect {
+    pub(super) draw_id: DrawId,
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
@@ -99,6 +179,7 @@ pub(super) struct PreparedRect {
 }
 
 pub(super) struct PreparedBrush {
+    pub(super) draw_id: DrawId,
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
@@ -106,6 +187,7 @@ pub(super) struct PreparedBrush {
 }
 
 pub(super) struct PreparedMesh {
+    pub(super) draw_id: DrawId,
     pub(super) clip_rect: Option<Rect>,
     pub(super) clip_bind_group: wgpu::BindGroup,
     pub(super) vertex_offset: u64,
@@ -114,6 +196,7 @@ pub(super) struct PreparedMesh {
 }
 
 pub(super) struct PreparedSprite {
+    pub(super) draw_id: DrawId,
     pub(super) bind_group: wgpu::BindGroup,
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
@@ -122,6 +205,7 @@ pub(super) struct PreparedSprite {
 }
 
 pub(super) struct PreparedBackdropBlur {
+    pub(super) draw_id: DrawId,
     pub(super) primitive: crate::ui::widget::BackdropBlurPrimitive,
     pub(super) composite_offset: u64,
     pub(super) composite_vertex_count: u32,
@@ -130,6 +214,7 @@ pub(super) struct PreparedBackdropBlur {
 }
 
 pub(super) struct PreparedCanvasComposite {
+    pub(super) draw_id: DrawId,
     pub(super) primitive: CanvasCompositePrimitive,
     pub(super) composite_offset: u64,
     pub(super) composite_vertex_count: u32,
@@ -144,11 +229,25 @@ pub(super) enum PreparedCommand {
     Sprite(PreparedSprite),
 }
 
+impl PreparedCommand {
+    pub(super) fn draw_id(&self) -> DrawId {
+        match self {
+            Self::BackdropBlur(command) => command.draw_id,
+            Self::Rect(command) => command.draw_id,
+            Self::Brush(command) => command.draw_id,
+            Self::CanvasComposite(command) => command.draw_id,
+            Self::Mesh(command) => command.draw_id,
+            Self::Sprite(command) => command.draw_id,
+        }
+    }
+}
+
 pub(super) struct PreparedCommands(pub(super) Vec<PreparedCommand>);
 
 impl Renderer {
     pub(super) fn prepare_commands(
         &mut self,
+        stream: DrawStream,
         commands: &[RenderCommand],
         font_manager: &FontManager,
         viewport: VertexViewport,
@@ -156,10 +255,16 @@ impl Renderer {
         command_gpu_scroll_containers: &[Option<WidgetId>],
         command_transform_chains: &[TransformChain],
         transform_records: &HashMap<WidgetId, TransformRecord>,
+        dirty_ranges: &[DirtyDrawRange],
     ) -> Result<PreparedCommands, TguiError> {
+        self.last_prepare_stats.insert(
+            stream,
+            retained_prepare_stats(stream, commands.len(), dirty_ranges),
+        );
         let mut prepared = Vec::with_capacity(commands.len());
 
         for (command_index, command) in commands.iter().enumerate() {
+            let draw_id = DrawId::new(stream, command_index);
             let gpu_scroll_container = command_gpu_scroll_containers
                 .get(command_index)
                 .copied()
@@ -208,6 +313,7 @@ impl Renderer {
                     let composite_offset =
                         self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     prepared.push(PreparedCommand::BackdropBlur(PreparedBackdropBlur {
+                        draw_id,
                         primitive: *primitive,
                         composite_offset,
                         composite_vertex_count: vertices.len() as u32,
@@ -234,6 +340,7 @@ impl Renderer {
                     );
                     let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     prepared.push(PreparedCommand::Brush(PreparedBrush {
+                        draw_id,
                         clip_rect: primitive.clip_rect,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
@@ -255,6 +362,7 @@ impl Renderer {
                     let composite_offset =
                         self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     prepared.push(PreparedCommand::CanvasComposite(PreparedCanvasComposite {
+                        draw_id,
                         primitive: (**primitive).clone(),
                         composite_offset,
                         composite_vertex_count: vertices.len() as u32,
@@ -267,6 +375,7 @@ impl Renderer {
                     let vertices = RectVertex::from_primitive(*primitive, viewport);
                     let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     prepared.push(PreparedCommand::Rect(PreparedRect {
+                        draw_id,
                         clip_rect: primitive.clip_rect,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
@@ -297,6 +406,7 @@ impl Renderer {
                     }
                     let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                     prepared.push(PreparedCommand::Rect(PreparedRect {
+                        draw_id,
                         clip_rect: primitive.clip_rect,
                         vertex_offset,
                         vertex_count: vertices.len() as u32,
@@ -334,6 +444,7 @@ impl Renderer {
                             }],
                         });
                     prepared.push(PreparedCommand::Mesh(PreparedMesh {
+                        draw_id,
                         clip_rect: primitive.clip_rect,
                         clip_bind_group,
                         vertex_offset,
@@ -373,6 +484,7 @@ impl Renderer {
                         let vertex_offset =
                             self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                         prepared.push(PreparedCommand::Sprite(PreparedSprite {
+                            draw_id,
                             bind_group,
                             clip_rect: texture.clip_rect,
                             vertex_offset,
@@ -417,6 +529,7 @@ impl Renderer {
                         let vertex_offset =
                             self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                         prepared.push(PreparedCommand::Sprite(PreparedSprite {
+                            draw_id,
                             bind_group,
                             clip_rect: texture.clip_rect,
                             vertex_offset,
@@ -462,6 +575,7 @@ impl Renderer {
                         let vertex_offset =
                             self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
                         prepared.push(PreparedCommand::Sprite(PreparedSprite {
+                            draw_id,
                             bind_group,
                             clip_rect: text.clip_rect,
                             vertex_offset,

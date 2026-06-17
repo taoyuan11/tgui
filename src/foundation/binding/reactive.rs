@@ -36,6 +36,7 @@ enum ReactiveSubscriber {
 #[derive(Default)]
 struct ReactiveGraphInner {
     subscribers: HashMap<SignalId, HashSet<ReactiveSubscriber>>,
+    target_sources: HashMap<ReactiveTarget, HashSet<SignalId>>,
     recomputers: HashMap<SignalId, Arc<dyn Fn() -> bool + Send + Sync>>,
     dirty_signals: VecDeque<SignalId>,
     dirty_signal_set: HashSet<SignalId>,
@@ -81,12 +82,83 @@ impl ReactiveGraph {
     }
 
     fn subscribe(&self, source: SignalId, subscriber: ReactiveSubscriber) {
-        self.inner
-            .lock()
+        let mut inner = self.inner.lock();
+        let inserted = inner
             .subscribers
             .entry(source)
             .or_default()
             .insert(subscriber);
+        if inserted {
+            if let ReactiveSubscriber::Target(target) = subscriber {
+                inner
+                    .target_sources
+                    .entry(target)
+                    .or_default()
+                    .insert(source);
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn remove_target(&self, target: ReactiveTarget) {
+        let mut inner = self.inner.lock();
+        remove_target_locked(&mut inner, target);
+    }
+
+    pub(crate) fn remove_widget_targets(&self, widget_ids: &HashSet<u64>) {
+        if widget_ids.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.lock();
+        let targets = inner
+            .target_sources
+            .keys()
+            .copied()
+            .filter(|target| match target {
+                ReactiveTarget::Owner(owner) => widget_ids.contains(&owner.widget_id),
+                #[cfg(test)]
+                ReactiveTarget::Custom(_) => false,
+            })
+            .collect::<Vec<_>>();
+        for target in targets {
+            remove_target_locked(&mut inner, target);
+        }
+    }
+
+    pub(crate) fn remove_widget_phase_targets(
+        &self,
+        widget_ids: &HashSet<u64>,
+        phase: super::dependency::DependencyPhase,
+    ) {
+        if widget_ids.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.lock();
+        let targets = inner
+            .target_sources
+            .keys()
+            .copied()
+            .filter(|target| match target {
+                ReactiveTarget::Owner(owner) => {
+                    owner.phase == phase && widget_ids.contains(&owner.widget_id)
+                }
+                #[cfg(test)]
+                ReactiveTarget::Custom(_) => false,
+            })
+            .collect::<Vec<_>>();
+        for target in targets {
+            remove_target_locked(&mut inner, target);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn target_source_count(&self, target: ReactiveTarget) -> usize {
+        self.inner
+            .lock()
+            .target_sources
+            .get(&target)
+            .map(HashSet::len)
+            .unwrap_or(0)
     }
 
     pub(crate) fn mark_signal_dirty(&self, signal: SignalId) {
@@ -152,4 +224,23 @@ impl ReactiveGraph {
             inner.dirty_targets.push_back(target);
         }
     }
+}
+
+fn remove_target_locked(inner: &mut ReactiveGraphInner, target: ReactiveTarget) {
+    let Some(sources) = inner.target_sources.remove(&target) else {
+        inner.dirty_target_set.remove(&target);
+        inner.dirty_targets.retain(|dirty| *dirty != target);
+        return;
+    };
+    let subscriber = ReactiveSubscriber::Target(target);
+    for source in sources {
+        if let Some(subscribers) = inner.subscribers.get_mut(&source) {
+            subscribers.remove(&subscriber);
+            if subscribers.is_empty() && !inner.recomputers.contains_key(&source) {
+                inner.subscribers.remove(&source);
+            }
+        }
+    }
+    inner.dirty_target_set.remove(&target);
+    inner.dirty_targets.retain(|dirty| *dirty != target);
 }

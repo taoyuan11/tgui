@@ -247,12 +247,13 @@ macro_rules! impl_layout_properties {
             ///
             /// # 返回值
             /// 返回更新后的容器实例。
-            pub fn column(self, start: usize) -> Self {
+            pub fn column(self, start: impl Into<$crate::ui::layout::Value<usize>>) -> Self {
+                let start = start.into();
                 apply_layout_api(
                     self,
                     |owner| &mut owner.0.element,
                     |layout| {
-                        layout.column_start = Some(start.max(1));
+                        layout.column_start = Some(start);
                     },
                 )
             }
@@ -264,12 +265,13 @@ macro_rules! impl_layout_properties {
             ///
             /// # 返回值
             /// 返回更新后的容器实例。
-            pub fn row(self, start: usize) -> Self {
+            pub fn row(self, start: impl Into<$crate::ui::layout::Value<usize>>) -> Self {
+                let start = start.into();
                 apply_layout_api(
                     self,
                     |owner| &mut owner.0.element,
                     |layout| {
-                        layout.row_start = Some(start.max(1));
+                        layout.row_start = Some(start);
                     },
                 )
             }

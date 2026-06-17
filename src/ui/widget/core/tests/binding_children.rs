@@ -1,9 +1,50 @@
 use super::*;
 use crate::ui::widget::StrictReactiveViolation;
+use crate::ui::widget::{For, Show, ViewSwitch};
 
 #[test]
 fn strict_reactive_tree_accepts_static_children() {
     let tree = WidgetTree::try_new_strict(Stack::<()>::new().child(Text::new("static")));
+
+    assert!(tree.is_ok());
+}
+
+#[test]
+fn strict_reactive_tree_accepts_retained_show_children() {
+    let context = test_context();
+    let visible = context.state(true);
+    let tree = WidgetTree::try_new_strict(
+        Stack::<()>::new().child(Show::new(visible.signal(), Text::new("shown"))),
+    );
+
+    assert!(tree.is_ok());
+}
+
+#[test]
+fn strict_reactive_tree_accepts_retained_keyed_for_children() {
+    let context = test_context();
+    let items = context.state(vec![1usize, 2, 3]);
+    let tree = WidgetTree::try_new_strict(Stack::<()>::new().child(For::new(
+        items.signal(),
+        |item| *item,
+        |_index, item| Text::new(format!("item {item}")),
+    )));
+
+    assert!(tree.is_ok());
+}
+
+#[test]
+fn strict_reactive_tree_accepts_retained_view_switch_children() {
+    let context = test_context();
+    let active = context.state(0usize);
+    let tree = WidgetTree::try_new_strict(
+        Stack::<()>::new().child(
+            ViewSwitch::new(active.signal())
+                .case(Text::new("first"))
+                .case(Text::new("second"))
+                .fallback(Text::new("fallback")),
+        ),
+    );
 
     assert!(tree.is_ok());
 }

@@ -70,6 +70,16 @@ impl ContainerLayout {
 pub(crate) enum ChildSource<VM> {
     Static(Vec<Element<VM>>),
     Dynamic(Arc<dyn Fn() -> Vec<Element<VM>> + Send + Sync>),
+    KeyedFor(Arc<dyn Fn() -> Vec<Element<VM>> + Send + Sync>),
+    Switch {
+        index: Value<usize>,
+        cases: Vec<Element<VM>>,
+        fallback: Option<Element<VM>>,
+    },
+    Show {
+        visible: Value<bool>,
+        child: Element<VM>,
+    },
 }
 
 impl<VM> ChildSource<VM> {
@@ -84,6 +94,51 @@ impl<VM> ChildSource<VM> {
                     )
                 } else {
                     resolve_dynamic_children(resolver)
+                }
+            }
+            Self::KeyedFor(resolver) => {
+                if let Some(owner) = owner {
+                    track_dependency_scope(
+                        owner.dependency_owner(DependencyPhase::Structure),
+                        || resolve_dynamic_children(resolver),
+                    )
+                } else {
+                    resolve_dynamic_children(resolver)
+                }
+            }
+            Self::Switch {
+                index,
+                cases,
+                fallback,
+            } => {
+                let index = if let Some(owner) = owner {
+                    track_dependency_scope(
+                        owner.dependency_owner(DependencyPhase::Structure),
+                        || index.resolve(),
+                    )
+                } else {
+                    index.resolve()
+                };
+                cases
+                    .get(index)
+                    .or(fallback.as_ref())
+                    .cloned()
+                    .into_iter()
+                    .collect()
+            }
+            Self::Show { visible, child } => {
+                let visible = if let Some(owner) = owner {
+                    track_dependency_scope(
+                        owner.dependency_owner(DependencyPhase::Structure),
+                        || visible.resolve(),
+                    )
+                } else {
+                    visible.resolve()
+                };
+                if visible {
+                    vec![child.clone()]
+                } else {
+                    Vec::new()
                 }
             }
         }
@@ -109,6 +164,28 @@ impl<VM> ChildSource<VM> {
                     .map(|child| child.scope_with_selector(selector.clone()))
                     .collect()
             })),
+            Self::KeyedFor(resolver) => ChildSource::KeyedFor(Arc::new(move || {
+                resolver()
+                    .into_iter()
+                    .map(|child| child.scope_with_selector(selector.clone()))
+                    .collect()
+            })),
+            Self::Switch {
+                index,
+                cases,
+                fallback,
+            } => ChildSource::Switch {
+                index,
+                cases: cases
+                    .into_iter()
+                    .map(|child| child.scope_with_selector(selector.clone()))
+                    .collect(),
+                fallback: fallback.map(|child| child.scope_with_selector(selector)),
+            },
+            Self::Show { visible, child } => ChildSource::Show {
+                visible,
+                child: child.scope_with_selector(selector),
+            },
         }
     }
 }
@@ -156,6 +233,20 @@ impl<VM> Clone for ChildSource<VM> {
                 }
             }
             Self::Dynamic(resolver) => Self::Dynamic(resolver.clone()),
+            Self::KeyedFor(resolver) => Self::KeyedFor(resolver.clone()),
+            Self::Switch {
+                index,
+                cases,
+                fallback,
+            } => Self::Switch {
+                index: index.clone(),
+                cases: cases.clone(),
+                fallback: fallback.clone(),
+            },
+            Self::Show { visible, child } => Self::Show {
+                visible: visible.clone(),
+                child: child.clone(),
+            },
         }
     }
 }

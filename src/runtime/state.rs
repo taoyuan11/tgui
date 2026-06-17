@@ -1,4 +1,6 @@
-use crate::foundation::binding::{DependencyGraph, PropertySlot, TextChange, TextChangeSet};
+use crate::foundation::binding::{
+    DependencyGraph, DependencyOwner, PropertySlot, TextChange, TextChangeSet,
+};
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::MediaTextureKey;
 use crate::platform::event::FingerId;
@@ -27,6 +29,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::input::TextInputSnapshot;
+use super::layout_slots::LayoutSlotBinding;
 use super::reactive_slots::ReactiveSlotBinding;
 
 pub(super) const SMOOTH_SCROLL_EPSILON: f32 = 0.1;
@@ -62,6 +65,7 @@ pub(super) struct CachedScene<VM> {
     pub(super) scene_chunks: HashMap<WidgetId, ComputedScene<VM>>,
     pub(super) scene_chunk_parts: HashMap<WidgetId, SceneChunkParts<VM>>,
     pub(super) visual_contexts: HashMap<WidgetId, VisualContextSnapshot>,
+    pub(super) layout_slot_bindings: HashMap<(WidgetId, PropertySlot), LayoutSlotBinding>,
     pub(super) reactive_slot_bindings: HashMap<(WidgetId, PropertySlot), ReactiveSlotBinding>,
     pub(super) media_texture_bindings: HashMap<MediaTextureKey, Vec<MediaTextureBinding>>,
     pub(super) media_texture_binding_index:
@@ -69,6 +73,88 @@ pub(super) struct CachedScene<VM> {
     pub(super) caret_decoration: Option<CaretDecorationBinding>,
     pub(super) text_input_slot_bindings: HashMap<WidgetId, TextInputSlotBinding>,
     pub(super) dependencies: DependencyGraph,
+    pub(super) strict_capability_report: Option<StrictCapabilityReport>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct StrictCapabilityReport {
+    pub(super) entries: Vec<StrictCapabilityEntry>,
+    pub(super) has_global_reject_policy: bool,
+}
+
+impl StrictCapabilityReport {
+    pub(super) fn missing_plan_count(&self) -> usize {
+        self.entries
+            .iter()
+            .filter(|entry| entry.kind == StrictCapabilityKind::MissingPlan)
+            .count()
+    }
+
+    pub(super) fn enforce_no_missing_plans(&self) {
+        let missing = self.missing_plan_count();
+        if missing == 0 {
+            return;
+        }
+        crate::runtime::action_stats::record("strict_reactive_capability_missing_plan");
+        panic!("strict capability report contains {missing} missing retained plan(s)");
+    }
+
+    #[allow(dead_code)]
+    #[cfg(test)]
+    pub(super) fn retained_plan_count(&self) -> usize {
+        self.entries
+            .iter()
+            .filter(|entry| entry.kind.is_retained_plan())
+            .count()
+    }
+
+    #[allow(dead_code)]
+    #[cfg(test)]
+    pub(super) fn explicit_reject_count(&self) -> usize {
+        self.entries
+            .iter()
+            .filter(|entry| entry.kind.is_explicit_reject())
+            .count()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct StrictCapabilityEntry {
+    pub(super) owner: DependencyOwner,
+    pub(super) kind: StrictCapabilityKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StrictCapabilityKind {
+    DirectSlot,
+    LayoutSlot,
+    TransformRecord,
+    StructureSlot,
+    LayoutReject,
+    SceneReject,
+    DetachedReject,
+    #[allow(dead_code)]
+    MissingPlan,
+}
+
+impl StrictCapabilityKind {
+    #[allow(dead_code)]
+    #[cfg(test)]
+    fn is_retained_plan(self) -> bool {
+        matches!(
+            self,
+            Self::DirectSlot | Self::LayoutSlot | Self::TransformRecord | Self::StructureSlot
+        )
+    }
+
+    #[allow(dead_code)]
+    #[cfg(test)]
+    fn is_explicit_reject(self) -> bool {
+        matches!(
+            self,
+            Self::LayoutReject | Self::SceneReject | Self::DetachedReject
+        )
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -82,6 +168,7 @@ pub(super) struct CaretDecorationBinding {
 pub(super) struct MediaTextureBinding {
     pub(super) widget_id: WidgetId,
     pub(super) slot: TexturePrimitiveSlot,
+    pub(super) media_layout: Option<crate::media::MediaTextureLayout>,
     pub(super) placeholder_shape_slot: Option<ShapePrimitiveSlot>,
     pub(super) placeholder_text_slot: Option<TextPrimitiveSlot>,
     pub(super) root_offset: SceneCounts,
@@ -117,6 +204,7 @@ pub(super) struct ReactiveMediaTextureBindingUpdate {
     pub(super) widget_id: WidgetId,
     pub(super) slot: TexturePrimitiveSlot,
     pub(super) media_key: Option<MediaTextureKey>,
+    pub(super) media_layout: Option<crate::media::MediaTextureLayout>,
     pub(super) frame: Rect,
     pub(super) root_offset: SceneCounts,
     pub(super) ancestor_offsets: Vec<(WidgetId, SceneCounts)>,
