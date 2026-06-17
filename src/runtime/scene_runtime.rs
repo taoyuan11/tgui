@@ -475,6 +475,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
+    pub(in crate::runtime) fn computed_scene_mut(&mut self) -> &mut ComputedScene<VM> {
+        let _ = self.computed_scene();
+        &mut self
+            .cached_scene
+            .as_mut()
+            .expect("computed_scene should populate cached scene")
+            .computed
+    }
+
     pub(in crate::runtime) fn computed_scene(&mut self) -> &ComputedScene<VM> {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let viewport = self.viewport_rect();
@@ -943,6 +952,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             // 与这里的部分 move 互不冲突。
             let mut computed = collected.computed;
             self.append_external_portals_to_computed(&mut computed, now);
+            computed.scene.assign_new_prepare_cache_serial();
             let virtual_layout_invalidated = self.sync_virtual_state_updates(&computed);
             if virtual_layout_invalidated {
                 self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);

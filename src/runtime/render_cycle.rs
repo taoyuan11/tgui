@@ -89,11 +89,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let font_manager = self.font_manager.clone();
         let computed_started_at = Instant::now();
         let status = {
-            let computed = self.computed_scene();
+            let computed = self.computed_scene_mut();
             let computed_duration = computed_started_at.elapsed();
             let render_started_at = Instant::now();
             let status = renderer.render(
-                &computed.scene,
+                &mut computed.scene,
                 &font_manager,
                 &computed.scroll_regions,
                 &computed.transform_records,

@@ -235,6 +235,7 @@ impl Renderer {
             &[],
             &std::collections::HashMap::new(),
             &[],
+            None,
         )?;
         self.vertex_pool.flush(&self.device, &self.queue);
         let mut composite_cleared = true;
@@ -261,6 +262,7 @@ impl Renderer {
                 &[],
                 &std::collections::HashMap::new(),
                 &[],
+                None,
             )?;
             self.vertex_pool.flush(&self.device, &self.queue);
             let mut mask_cleared = true;

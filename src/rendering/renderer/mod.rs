@@ -136,6 +136,7 @@ pub struct Renderer {
     text_cache: HashMap<TextCacheKey, TextCacheEntry>,
     texture_cache: HashMap<u64, TextureCacheEntry>,
     vertex_pool: self::vertex_pool::VertexBufferPool,
+    retained_prepare_cache: prepare::RetainedPrepareCache,
     last_prepare_stats: HashMap<prepare::DrawStream, prepare::PrepareReuseStats>,
     /// 本次运行的 adapter 是否实际支持 IMMEDIATES。
     /// adapter 不支持时为 false——此时 GPU 平移变体运行时降级,滚动回退到
@@ -173,7 +174,7 @@ impl Renderer {
 
     pub fn render(
         &mut self,
-        scene: &ScenePrimitives,
+        scene: &mut ScenePrimitives,
         font_manager: &FontManager,
         scroll_regions: &[crate::ui::widget::ScrollRegion],
         transform_records: &HashMap<WidgetId, TransformRecord>,
@@ -216,6 +217,7 @@ impl Renderer {
             scene.command_transform_chains(),
             transform_records,
             scene.dirty_draw_ranges(),
+            Some(scene.prepare_cache_serial()),
         )?;
         let overlay_buffers = self.prepare_commands(
             prepare::DrawStream::Overlay,
@@ -227,6 +229,7 @@ impl Renderer {
             scene.overlay_command_transform_chains(),
             transform_records,
             scene.dirty_draw_ranges(),
+            Some(scene.prepare_cache_serial()),
         )?;
         // 两次 prepare 的顶点数据都已进 staging，这里一次性上传到 GPU。
         self.vertex_pool.flush(&self.device, &self.queue);
@@ -287,6 +290,7 @@ impl Renderer {
         self.text_system.release_frame_raster_cache();
         self.window.pre_present_notify();
         frame.present();
+        scene.clear_dirty_draw_ranges();
 
         Ok(RenderStatus::Rendered)
     }

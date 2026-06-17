@@ -44,6 +44,7 @@ pub(super) struct PrepareReuseStats {
     pub(super) reuse: usize,
 }
 
+#[cfg(test)]
 pub(super) fn retained_prepare_stats(
     stream: DrawStream,
     command_count: usize,
@@ -56,14 +57,21 @@ pub(super) fn retained_prepare_stats(
             reuse: 0,
         };
     };
-    if dirty_ranges.is_empty() {
-        return PrepareReuseStats {
-            total: command_count,
-            rebuild: command_count,
-            reuse: 0,
-        };
-    }
 
+    let dirty = dirty_command_mask(scene_stream, command_count, dirty_ranges);
+    let rebuild = dirty.into_iter().filter(|dirty| *dirty).count();
+    PrepareReuseStats {
+        total: command_count,
+        rebuild,
+        reuse: command_count.saturating_sub(rebuild),
+    }
+}
+
+fn dirty_command_mask(
+    scene_stream: SceneDrawStream,
+    command_count: usize,
+    dirty_ranges: &[DirtyDrawRange],
+) -> Vec<bool> {
     let mut dirty = vec![false; command_count];
     for range in dirty_ranges
         .iter()
@@ -75,12 +83,7 @@ pub(super) fn retained_prepare_stats(
             *slot = true;
         }
     }
-    let rebuild = dirty.into_iter().filter(|dirty| *dirty).count();
-    PrepareReuseStats {
-        total: command_count,
-        rebuild,
-        reuse: command_count.saturating_sub(rebuild),
-    }
+    dirty
 }
 
 impl DrawStream {
@@ -169,6 +172,55 @@ fn combine_translates(
     }
 }
 
+fn texture_quad_vertices(
+    rect: Rect,
+    quad: Option<[crate::ui::widget::Point; 4]>,
+    uv_rect: Option<Rect>,
+    corner_radius: f32,
+    clip_mask: Option<crate::ui::widget::ClipMask>,
+    opacity: f32,
+    viewport: VertexViewport,
+) -> [TextVertex; 6] {
+    match quad {
+        Some(quad) => TextVertex::transformed(
+            TextTransformSpec {
+                rect,
+                quad,
+                uv_rect,
+                corner_radius,
+                clip_mask,
+                opacity,
+            },
+            viewport,
+        ),
+        None => TextVertex::quad(
+            TextQuadSpec {
+                rect,
+                uv_rect,
+                corner_radius,
+                clip_mask,
+                opacity,
+            },
+            viewport,
+        ),
+    }
+}
+
+fn retained_prepare_cacheable(command: &RenderCommand) -> bool {
+    match command {
+        RenderCommand::BackdropBlur(_)
+        | RenderCommand::Brush(_)
+        | RenderCommand::CanvasComposite(_)
+        | RenderCommand::Shape(_)
+        | RenderCommand::TextDecoration(_)
+        | RenderCommand::Mesh(_)
+        | RenderCommand::Texture(_)
+        | RenderCommand::Text(_) => true,
+        #[cfg(feature = "video")]
+        RenderCommand::VideoTexture(_) => false,
+    }
+}
+
 pub(super) struct PreparedRect {
     pub(super) draw_id: DrawId,
     pub(super) clip_rect: Option<Rect>,
@@ -244,6 +296,205 @@ impl PreparedCommand {
 
 pub(super) struct PreparedCommands(pub(super) Vec<PreparedCommand>);
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PrepareStreamSignature {
+    scene_serial: u64,
+    viewport: VertexViewport,
+    command_count: usize,
+}
+
+#[derive(Clone)]
+enum PreparedCommandTemplate {
+    BackdropBlur {
+        primitive: crate::ui::widget::BackdropBlurPrimitive,
+        composite_vertices: Vec<u8>,
+        composite_vertex_count: u32,
+        fullscreen_vertices: Vec<u8>,
+        fullscreen_vertex_count: u32,
+    },
+    Rect {
+        clip_rect: Option<Rect>,
+        vertices: Vec<u8>,
+        vertex_count: u32,
+    },
+    Brush {
+        clip_rect: Option<Rect>,
+        vertices: Vec<u8>,
+        vertex_count: u32,
+    },
+    CanvasComposite {
+        primitive: CanvasCompositePrimitive,
+        vertices: Vec<u8>,
+        vertex_count: u32,
+    },
+    Mesh {
+        clip_rect: Option<Rect>,
+        clip_bind_group: wgpu::BindGroup,
+        vertices: Vec<u8>,
+        vertex_count: u32,
+    },
+    Sprite {
+        bind_group: wgpu::BindGroup,
+        clip_rect: Option<Rect>,
+        vertices: Vec<u8>,
+        vertex_count: u32,
+    },
+}
+
+impl PreparedCommandTemplate {
+    fn prepare(
+        &self,
+        draw_id: DrawId,
+        vertex_pool: &mut super::vertex_pool::VertexBufferPool,
+        scroll_translate: Option<super::PushTranslate>,
+    ) -> PreparedCommand {
+        match self {
+            Self::BackdropBlur {
+                primitive,
+                composite_vertices,
+                composite_vertex_count,
+                fullscreen_vertices,
+                fullscreen_vertex_count,
+            } => PreparedCommand::BackdropBlur(PreparedBackdropBlur {
+                draw_id,
+                primitive: *primitive,
+                composite_offset: vertex_pool.allocate(composite_vertices),
+                composite_vertex_count: *composite_vertex_count,
+                fullscreen_offset: vertex_pool.allocate(fullscreen_vertices),
+                fullscreen_vertex_count: *fullscreen_vertex_count,
+            }),
+            Self::Rect {
+                clip_rect,
+                vertices,
+                vertex_count,
+            } => PreparedCommand::Rect(PreparedRect {
+                draw_id,
+                clip_rect: *clip_rect,
+                vertex_offset: vertex_pool.allocate(vertices),
+                vertex_count: *vertex_count,
+                scroll_translate,
+            }),
+            Self::Brush {
+                clip_rect,
+                vertices,
+                vertex_count,
+            } => PreparedCommand::Brush(PreparedBrush {
+                draw_id,
+                clip_rect: *clip_rect,
+                vertex_offset: vertex_pool.allocate(vertices),
+                vertex_count: *vertex_count,
+                scroll_translate,
+            }),
+            Self::CanvasComposite {
+                primitive,
+                vertices,
+                vertex_count,
+            } => PreparedCommand::CanvasComposite(PreparedCanvasComposite {
+                draw_id,
+                primitive: primitive.clone(),
+                composite_offset: vertex_pool.allocate(vertices),
+                composite_vertex_count: *vertex_count,
+            }),
+            Self::Mesh {
+                clip_rect,
+                clip_bind_group,
+                vertices,
+                vertex_count,
+            } => PreparedCommand::Mesh(PreparedMesh {
+                draw_id,
+                clip_rect: *clip_rect,
+                clip_bind_group: clip_bind_group.clone(),
+                vertex_offset: vertex_pool.allocate(vertices),
+                vertex_count: *vertex_count,
+                scroll_translate,
+            }),
+            Self::Sprite {
+                bind_group,
+                clip_rect,
+                vertices,
+                vertex_count,
+            } => PreparedCommand::Sprite(PreparedSprite {
+                draw_id,
+                bind_group: bind_group.clone(),
+                clip_rect: *clip_rect,
+                vertex_offset: vertex_pool.allocate(vertices),
+                vertex_count: *vertex_count,
+                scroll_translate,
+            }),
+        }
+    }
+}
+
+struct PreparedTemplateBuild {
+    template: PreparedCommandTemplate,
+    cacheable: bool,
+}
+
+struct PrepareStreamCache {
+    signature: PrepareStreamSignature,
+    templates: Vec<Option<PreparedCommandTemplate>>,
+}
+
+impl PrepareStreamCache {
+    fn new(signature: PrepareStreamSignature) -> Self {
+        Self {
+            signature,
+            templates: vec![None; signature.command_count],
+        }
+    }
+}
+
+#[derive(Default)]
+pub(super) struct RetainedPrepareCache {
+    streams: HashMap<DrawStream, PrepareStreamCache>,
+}
+
+impl RetainedPrepareCache {
+    fn stream_reusable(&self, stream: DrawStream, signature: PrepareStreamSignature) -> bool {
+        self.streams
+            .get(&stream)
+            .map(|cache| cache.signature == signature)
+            .unwrap_or(false)
+    }
+
+    fn ensure_stream(&mut self, stream: DrawStream, signature: PrepareStreamSignature) {
+        let reset = self
+            .streams
+            .get(&stream)
+            .map(|cache| cache.signature != signature)
+            .unwrap_or(true);
+        if reset {
+            self.streams
+                .insert(stream, PrepareStreamCache::new(signature));
+        }
+    }
+
+    fn template(
+        &self,
+        stream: DrawStream,
+        command_index: usize,
+    ) -> Option<&PreparedCommandTemplate> {
+        self.streams
+            .get(&stream)
+            .and_then(|cache| cache.templates.get(command_index))
+            .and_then(|template| template.as_ref())
+    }
+
+    fn store_template(
+        &mut self,
+        stream: DrawStream,
+        command_index: usize,
+        template: Option<PreparedCommandTemplate>,
+    ) {
+        let Some(cache) = self.streams.get_mut(&stream) else {
+            return;
+        };
+        if let Some(slot) = cache.templates.get_mut(command_index) {
+            *slot = template;
+        }
+    }
+}
+
 impl Renderer {
     pub(super) fn prepare_commands(
         &mut self,
@@ -256,11 +507,33 @@ impl Renderer {
         command_transform_chains: &[TransformChain],
         transform_records: &HashMap<WidgetId, TransformRecord>,
         dirty_ranges: &[DirtyDrawRange],
+        prepare_cache_serial: Option<u64>,
     ) -> Result<PreparedCommands, TguiError> {
-        self.last_prepare_stats.insert(
-            stream,
-            retained_prepare_stats(stream, commands.len(), dirty_ranges),
-        );
+        let scene_stream = stream.scene_stream();
+        let signature = scene_stream.and_then(|_| {
+            prepare_cache_serial.map(|scene_serial| PrepareStreamSignature {
+                scene_serial,
+                viewport,
+                command_count: commands.len(),
+            })
+        });
+        let stream_reusable = signature
+            .map(|signature| {
+                self.retained_prepare_cache
+                    .stream_reusable(stream, signature)
+            })
+            .unwrap_or(false);
+        if let Some(signature) = signature {
+            self.retained_prepare_cache.ensure_stream(stream, signature);
+        }
+        let dirty_commands = scene_stream
+            .map(|scene_stream| dirty_command_mask(scene_stream, commands.len(), dirty_ranges))
+            .unwrap_or_else(|| vec![true; commands.len()]);
+        let mut stats = PrepareReuseStats {
+            total: commands.len(),
+            rebuild: 0,
+            reuse: 0,
+        };
         let mut prepared = Vec::with_capacity(commands.len());
 
         for (command_index, command) in commands.iter().enumerate() {
@@ -277,317 +550,306 @@ impl Renderer {
                     viewport,
                 ),
             );
-            match command {
-                RenderCommand::BackdropBlur(primitive) => {
-                    if primitive.blur_radius <= 0.0
-                        || primitive.rect.width <= Dp::ZERO
-                        || primitive.rect.height <= Dp::ZERO
-                    {
-                        continue;
-                    }
-                    let fullscreen = TextVertex::quad(
-                        TextQuadSpec {
-                            rect: Rect::new(
-                                0.0,
-                                0.0,
-                                viewport.logical_size[0],
-                                viewport.logical_size[1],
-                            ),
-                            uv_rect: None,
-                            corner_radius: 0.0,
-                            clip_mask: None,
-                            opacity: 1.0,
-                        },
-                        viewport,
-                    );
-                    let fullscreen_offset =
-                        self.vertex_pool.allocate(bytemuck::cast_slice(&fullscreen));
-                    let vertices = CompositeVertex::quad(
-                        CompositeQuadSpec {
-                            rect: primitive.rect,
-                            corner_radius: primitive.corner_radius,
-                            clip_mask: primitive.clip_mask,
-                        },
-                        viewport,
-                    );
-                    let composite_offset =
-                        self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
-                    prepared.push(PreparedCommand::BackdropBlur(PreparedBackdropBlur {
-                        draw_id,
-                        primitive: *primitive,
-                        composite_offset,
-                        composite_vertex_count: vertices.len() as u32,
-                        fullscreen_offset,
-                        fullscreen_vertex_count: fullscreen.len() as u32,
-                    }));
+
+            if stream_reusable
+                && !dirty_commands.get(command_index).copied().unwrap_or(true)
+                && retained_prepare_cacheable(command)
+            {
+                if let Some(template) = self
+                    .retained_prepare_cache
+                    .template(stream, command_index)
+                    .cloned()
+                {
+                    stats.reuse += 1;
+                    prepared.push(template.prepare(draw_id, &mut self.vertex_pool, draw_translate));
+                    continue;
                 }
-                RenderCommand::Brush(primitive) => {
-                    if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
-                        continue;
-                    }
-                    let Some(brush_data) =
-                        BrushPrimitiveData::from_background_brush(&primitive.brush, 1.0)
-                    else {
-                        continue;
-                    };
-                    let vertices = BrushVertex::from_spec(
-                        BrushVertexSpec {
-                            rect: primitive.rect,
-                            corner_radius: primitive.corner_radius,
-                            brush_data,
-                        },
-                        viewport,
-                    );
-                    let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
-                    prepared.push(PreparedCommand::Brush(PreparedBrush {
-                        draw_id,
-                        clip_rect: primitive.clip_rect,
-                        vertex_offset,
-                        vertex_count: vertices.len() as u32,
-                        scroll_translate: draw_translate,
-                    }));
+            }
+
+            stats.rebuild += 1;
+            let Some(build) = self.build_prepared_template(command, font_manager, viewport)? else {
+                if signature.is_some() {
+                    self.retained_prepare_cache
+                        .store_template(stream, command_index, None);
                 }
-                RenderCommand::CanvasComposite(primitive) => {
-                    if primitive.bounds.width <= Dp::ZERO || primitive.bounds.height <= Dp::ZERO {
-                        continue;
-                    }
-                    let vertices = CompositeVertex::quad(
-                        CompositeQuadSpec {
-                            rect: primitive.bounds,
-                            corner_radius: 0.0,
-                            clip_mask: primitive.clip_mask,
-                        },
-                        viewport,
-                    );
-                    let composite_offset =
-                        self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
-                    prepared.push(PreparedCommand::CanvasComposite(PreparedCanvasComposite {
-                        draw_id,
-                        primitive: (**primitive).clone(),
-                        composite_offset,
-                        composite_vertex_count: vertices.len() as u32,
-                    }));
-                }
-                RenderCommand::Shape(primitive) => {
-                    if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
-                        continue;
-                    }
-                    let vertices = RectVertex::from_primitive(*primitive, viewport);
-                    let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
-                    prepared.push(PreparedCommand::Rect(PreparedRect {
-                        draw_id,
-                        clip_rect: primitive.clip_rect,
-                        vertex_offset,
-                        vertex_count: vertices.len() as u32,
-                        scroll_translate: draw_translate,
-                    }));
-                }
-                RenderCommand::TextDecoration(primitive) => {
-                    if primitive.segments.is_empty() || primitive.color.a == 0 {
-                        continue;
-                    }
-                    let mut vertices = Vec::with_capacity(primitive.segments.len() * 6);
-                    for rect in primitive.segments.iter().copied() {
-                        if rect.width <= Dp::ZERO || rect.height <= Dp::ZERO {
-                            continue;
-                        }
-                        let segment = RenderPrimitive {
-                            rect,
-                            color: primitive.color,
-                            corner_radius: primitive.corner_radius,
-                            stroke_width: primitive.stroke_width,
-                            clip_rect: primitive.clip_rect,
-                            clip_mask: primitive.clip_mask,
-                        };
-                        vertices.extend_from_slice(&RectVertex::from_primitive(segment, viewport));
-                    }
-                    if vertices.is_empty() {
-                        continue;
-                    }
-                    let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
-                    prepared.push(PreparedCommand::Rect(PreparedRect {
-                        draw_id,
-                        clip_rect: primitive.clip_rect,
-                        vertex_offset,
-                        vertex_count: vertices.len() as u32,
-                        scroll_translate: draw_translate,
-                    }));
-                }
-                RenderCommand::Mesh(primitive) => {
-                    if primitive.vertices.is_empty() {
-                        continue;
-                    }
-                    let vertices: Vec<_> = primitive
-                        .vertices
-                        .iter()
-                        .copied()
-                        .map(|vertex| MeshVertex::from_scene_vertex(vertex, viewport))
-                        .collect();
-                    let vertex_offset = self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
-                    let clip_buffer =
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("tgui-mesh-clip-uniform"),
-                                contents: bytemuck::bytes_of(&physical_mesh_clip_mask_data(
-                                    primitive.clip_mask,
-                                    viewport.scale_factor,
-                                )),
-                                usage: wgpu::BufferUsages::UNIFORM,
-                            });
-                    let clip_bind_group =
-                        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("tgui-mesh-clip-bind-group"),
-                            layout: &self.mesh_clip_bind_group_layout,
-                            entries: &[wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: clip_buffer.as_entire_binding(),
-                            }],
-                        });
-                    prepared.push(PreparedCommand::Mesh(PreparedMesh {
-                        draw_id,
-                        clip_rect: primitive.clip_rect,
-                        clip_bind_group,
-                        vertex_offset,
-                        vertex_count: vertices.len() as u32,
-                        scroll_translate: draw_translate,
-                    }));
-                }
-                RenderCommand::Texture(texture) => {
-                    if let Some(bind_group) = self.texture_bind_group_for(&texture.texture)? {
-                        let vertices = texture.quad.map_or_else(
-                            || {
-                                TextVertex::quad(
-                                    TextQuadSpec {
-                                        rect: texture.frame,
-                                        uv_rect: texture.uv_rect,
-                                        corner_radius: texture.corner_radius,
-                                        clip_mask: texture.clip_mask,
-                                        opacity: texture.opacity,
-                                    },
-                                    viewport,
-                                )
-                            },
-                            |quad| {
-                                TextVertex::transformed(
-                                    TextTransformSpec {
-                                        rect: texture.frame,
-                                        quad,
-                                        uv_rect: texture.uv_rect,
-                                        corner_radius: texture.corner_radius,
-                                        clip_mask: texture.clip_mask,
-                                        opacity: texture.opacity,
-                                    },
-                                    viewport,
-                                )
-                            },
-                        );
-                        let vertex_offset =
-                            self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
-                        prepared.push(PreparedCommand::Sprite(PreparedSprite {
-                            draw_id,
-                            bind_group,
-                            clip_rect: texture.clip_rect,
-                            vertex_offset,
-                            vertex_count: vertices.len() as u32,
-                            scroll_translate: draw_translate,
-                        }));
-                    }
-                }
-                #[cfg(feature = "video")]
-                RenderCommand::VideoTexture(texture) => {
-                    let Some(frame_texture) = texture.controller.current_frame() else {
-                        continue;
-                    };
-                    if let Some(bind_group) = self.texture_bind_group_for(&frame_texture)? {
-                        let vertices = texture.quad.map_or_else(
-                            || {
-                                TextVertex::quad(
-                                    TextQuadSpec {
-                                        rect: texture.frame,
-                                        uv_rect: texture.uv_rect,
-                                        corner_radius: texture.corner_radius,
-                                        clip_mask: texture.clip_mask,
-                                        opacity: texture.opacity,
-                                    },
-                                    viewport,
-                                )
-                            },
-                            |quad| {
-                                TextVertex::transformed(
-                                    TextTransformSpec {
-                                        rect: texture.frame,
-                                        quad,
-                                        uv_rect: texture.uv_rect,
-                                        corner_radius: texture.corner_radius,
-                                        clip_mask: texture.clip_mask,
-                                        opacity: texture.opacity,
-                                    },
-                                    viewport,
-                                )
-                            },
-                        );
-                        let vertex_offset =
-                            self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
-                        prepared.push(PreparedCommand::Sprite(PreparedSprite {
-                            draw_id,
-                            bind_group,
-                            clip_rect: texture.clip_rect,
-                            vertex_offset,
-                            vertex_count: vertices.len() as u32,
-                            scroll_translate: draw_translate,
-                        }));
-                    }
-                }
-                RenderCommand::Text(text) => {
-                    let opacity = text.color.a as f32 / 255.0;
-                    if opacity <= 0.0 {
-                        continue;
-                    }
-                    if let Some(bind_group) = self.text_bind_group_for(text, font_manager)? {
-                        let snapped_frame = self.snap_text_rect(text.frame);
-                        let vertices = text.quad.map_or_else(
-                            || {
-                                TextVertex::quad(
-                                    TextQuadSpec {
-                                        rect: snapped_frame,
-                                        uv_rect: None,
-                                        corner_radius: 0.0,
-                                        clip_mask: text.clip_mask,
-                                        opacity,
-                                    },
-                                    viewport,
-                                )
-                            },
-                            |quad| {
-                                TextVertex::transformed(
-                                    TextTransformSpec {
-                                        rect: snapped_frame,
-                                        quad,
-                                        uv_rect: None,
-                                        corner_radius: 0.0,
-                                        clip_mask: text.clip_mask,
-                                        opacity,
-                                    },
-                                    viewport,
-                                )
-                            },
-                        );
-                        let vertex_offset =
-                            self.vertex_pool.allocate(bytemuck::cast_slice(&vertices));
-                        prepared.push(PreparedCommand::Sprite(PreparedSprite {
-                            draw_id,
-                            bind_group,
-                            clip_rect: text.clip_rect,
-                            vertex_offset,
-                            vertex_count: vertices.len() as u32,
-                            scroll_translate: draw_translate,
-                        }));
-                    }
-                }
+                continue;
+            };
+            prepared.push(
+                build
+                    .template
+                    .prepare(draw_id, &mut self.vertex_pool, draw_translate),
+            );
+            if signature.is_some() {
+                self.retained_prepare_cache.store_template(
+                    stream,
+                    command_index,
+                    build.cacheable.then_some(build.template),
+                );
             }
         }
 
+        self.last_prepare_stats.insert(stream, stats);
         Ok(PreparedCommands(prepared))
+    }
+
+    fn build_prepared_template(
+        &mut self,
+        command: &RenderCommand,
+        font_manager: &FontManager,
+        viewport: VertexViewport,
+    ) -> Result<Option<PreparedTemplateBuild>, TguiError> {
+        let build = match command {
+            RenderCommand::BackdropBlur(primitive) => {
+                if primitive.blur_radius <= 0.0
+                    || primitive.rect.width <= Dp::ZERO
+                    || primitive.rect.height <= Dp::ZERO
+                {
+                    return Ok(None);
+                }
+                let fullscreen = TextVertex::quad(
+                    TextQuadSpec {
+                        rect: Rect::new(
+                            0.0,
+                            0.0,
+                            viewport.logical_size[0],
+                            viewport.logical_size[1],
+                        ),
+                        uv_rect: None,
+                        corner_radius: 0.0,
+                        clip_mask: None,
+                        opacity: 1.0,
+                    },
+                    viewport,
+                );
+                let vertices = CompositeVertex::quad(
+                    CompositeQuadSpec {
+                        rect: primitive.rect,
+                        corner_radius: primitive.corner_radius,
+                        clip_mask: primitive.clip_mask,
+                    },
+                    viewport,
+                );
+                PreparedTemplateBuild {
+                    template: PreparedCommandTemplate::BackdropBlur {
+                        primitive: *primitive,
+                        composite_vertices: bytemuck::cast_slice(&vertices).to_vec(),
+                        composite_vertex_count: vertices.len() as u32,
+                        fullscreen_vertices: bytemuck::cast_slice(&fullscreen).to_vec(),
+                        fullscreen_vertex_count: fullscreen.len() as u32,
+                    },
+                    cacheable: true,
+                }
+            }
+            RenderCommand::Brush(primitive) => {
+                if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
+                    return Ok(None);
+                }
+                let Some(brush_data) =
+                    BrushPrimitiveData::from_background_brush(&primitive.brush, 1.0)
+                else {
+                    return Ok(None);
+                };
+                let vertices = BrushVertex::from_spec(
+                    BrushVertexSpec {
+                        rect: primitive.rect,
+                        corner_radius: primitive.corner_radius,
+                        brush_data,
+                    },
+                    viewport,
+                );
+                PreparedTemplateBuild {
+                    template: PreparedCommandTemplate::Brush {
+                        clip_rect: primitive.clip_rect,
+                        vertices: bytemuck::cast_slice(&vertices).to_vec(),
+                        vertex_count: vertices.len() as u32,
+                    },
+                    cacheable: true,
+                }
+            }
+            RenderCommand::CanvasComposite(primitive) => {
+                if primitive.bounds.width <= Dp::ZERO || primitive.bounds.height <= Dp::ZERO {
+                    return Ok(None);
+                }
+                let vertices = CompositeVertex::quad(
+                    CompositeQuadSpec {
+                        rect: primitive.bounds,
+                        corner_radius: 0.0,
+                        clip_mask: primitive.clip_mask,
+                    },
+                    viewport,
+                );
+                PreparedTemplateBuild {
+                    template: PreparedCommandTemplate::CanvasComposite {
+                        primitive: (**primitive).clone(),
+                        vertices: bytemuck::cast_slice(&vertices).to_vec(),
+                        vertex_count: vertices.len() as u32,
+                    },
+                    cacheable: true,
+                }
+            }
+            RenderCommand::Shape(primitive) => {
+                if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
+                    return Ok(None);
+                }
+                let vertices = RectVertex::from_primitive(*primitive, viewport);
+                PreparedTemplateBuild {
+                    template: PreparedCommandTemplate::Rect {
+                        clip_rect: primitive.clip_rect,
+                        vertices: bytemuck::cast_slice(&vertices).to_vec(),
+                        vertex_count: vertices.len() as u32,
+                    },
+                    cacheable: true,
+                }
+            }
+            RenderCommand::TextDecoration(primitive) => {
+                if primitive.segments.is_empty() || primitive.color.a == 0 {
+                    return Ok(None);
+                }
+                let mut vertices = Vec::with_capacity(primitive.segments.len() * 6);
+                for rect in primitive.segments.iter().copied() {
+                    if rect.width <= Dp::ZERO || rect.height <= Dp::ZERO {
+                        continue;
+                    }
+                    let segment = RenderPrimitive {
+                        rect,
+                        color: primitive.color,
+                        corner_radius: primitive.corner_radius,
+                        stroke_width: primitive.stroke_width,
+                        clip_rect: primitive.clip_rect,
+                        clip_mask: primitive.clip_mask,
+                    };
+                    vertices.extend_from_slice(&RectVertex::from_primitive(segment, viewport));
+                }
+                if vertices.is_empty() {
+                    return Ok(None);
+                }
+                PreparedTemplateBuild {
+                    template: PreparedCommandTemplate::Rect {
+                        clip_rect: primitive.clip_rect,
+                        vertices: bytemuck::cast_slice(&vertices).to_vec(),
+                        vertex_count: vertices.len() as u32,
+                    },
+                    cacheable: true,
+                }
+            }
+            RenderCommand::Mesh(primitive) => {
+                if primitive.vertices.is_empty() {
+                    return Ok(None);
+                }
+                let vertices: Vec<_> = primitive
+                    .vertices
+                    .iter()
+                    .copied()
+                    .map(|vertex| MeshVertex::from_scene_vertex(vertex, viewport))
+                    .collect();
+                let clip_buffer =
+                    self.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("tgui-mesh-clip-uniform"),
+                            contents: bytemuck::bytes_of(&physical_mesh_clip_mask_data(
+                                primitive.clip_mask,
+                                viewport.scale_factor,
+                            )),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
+                let clip_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("tgui-mesh-clip-bind-group"),
+                    layout: &self.mesh_clip_bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: clip_buffer.as_entire_binding(),
+                    }],
+                });
+                PreparedTemplateBuild {
+                    template: PreparedCommandTemplate::Mesh {
+                        clip_rect: primitive.clip_rect,
+                        clip_bind_group,
+                        vertices: bytemuck::cast_slice(&vertices).to_vec(),
+                        vertex_count: vertices.len() as u32,
+                    },
+                    cacheable: true,
+                }
+            }
+            RenderCommand::Texture(texture) => {
+                let Some(bind_group) = self.texture_bind_group_for(&texture.texture)? else {
+                    return Ok(None);
+                };
+                let vertices = texture_quad_vertices(
+                    texture.frame,
+                    texture.quad,
+                    texture.uv_rect,
+                    texture.corner_radius,
+                    texture.clip_mask,
+                    texture.opacity,
+                    viewport,
+                );
+                PreparedTemplateBuild {
+                    template: PreparedCommandTemplate::Sprite {
+                        bind_group,
+                        clip_rect: texture.clip_rect,
+                        vertices: bytemuck::cast_slice(&vertices).to_vec(),
+                        vertex_count: vertices.len() as u32,
+                    },
+                    cacheable: true,
+                }
+            }
+            #[cfg(feature = "video")]
+            RenderCommand::VideoTexture(texture) => {
+                let Some(frame_texture) = texture.controller.current_frame() else {
+                    return Ok(None);
+                };
+                let Some(bind_group) = self.texture_bind_group_for(&frame_texture)? else {
+                    return Ok(None);
+                };
+                let vertices = texture_quad_vertices(
+                    texture.frame,
+                    texture.quad,
+                    texture.uv_rect,
+                    texture.corner_radius,
+                    texture.clip_mask,
+                    texture.opacity,
+                    viewport,
+                );
+                PreparedTemplateBuild {
+                    template: PreparedCommandTemplate::Sprite {
+                        bind_group,
+                        clip_rect: texture.clip_rect,
+                        vertices: bytemuck::cast_slice(&vertices).to_vec(),
+                        vertex_count: vertices.len() as u32,
+                    },
+                    cacheable: false,
+                }
+            }
+            RenderCommand::Text(text) => {
+                let opacity = text.color.a as f32 / 255.0;
+                if opacity <= 0.0 {
+                    return Ok(None);
+                }
+                let Some(bind_group) = self.text_bind_group_for(text, font_manager)? else {
+                    return Ok(None);
+                };
+                let snapped_frame = self.snap_text_rect(text.frame);
+                let vertices = texture_quad_vertices(
+                    snapped_frame,
+                    text.quad,
+                    None,
+                    0.0,
+                    text.clip_mask,
+                    opacity,
+                    viewport,
+                );
+                PreparedTemplateBuild {
+                    template: PreparedCommandTemplate::Sprite {
+                        bind_group,
+                        clip_rect: text.clip_rect,
+                        vertices: bytemuck::cast_slice(&vertices).to_vec(),
+                        vertex_count: vertices.len() as u32,
+                    },
+                    cacheable: true,
+                }
+            }
+        };
+        Ok(Some(build))
     }
 
     pub(super) fn apply_scissor<'a>(

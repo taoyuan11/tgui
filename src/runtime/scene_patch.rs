@@ -460,6 +460,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 return false;
             };
             root_chunk.finalize_portals(viewport);
+            root_chunk.scene.assign_new_prepare_cache_serial();
             root_hit_region_count = root_chunk.hit_regions.len();
             root_scroll_region_count = root_chunk.scroll_regions.len();
             if let Some(root_clone_started_at) = root_clone_started_at {

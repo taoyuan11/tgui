@@ -401,7 +401,7 @@ impl WidgetStateMap {
 impl<VM> Default for ComputedScene<VM> {
     fn default() -> Self {
         Self {
-            scene: ScenePrimitives::default(),
+            scene: ScenePrimitives::new_prepare_cache_root(),
             hit_regions: SmallVec::new(),
             overlay_hit_regions: SmallVec::new(),
             overlay_close_handlers: SmallVec::new(),

@@ -3,7 +3,14 @@ use super::*;
 use crate::video::VideoController;
 use smallvec::SmallVec;
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+static NEXT_PREPARE_CACHE_SERIAL: AtomicU64 = AtomicU64::new(1);
+
+fn next_prepare_cache_serial() -> u64 {
+    NEXT_PREPARE_CACHE_SERIAL.fetch_add(1, Ordering::Relaxed)
+}
 
 pub(crate) type TransformChain = SmallVec<[WidgetId; 2]>;
 
@@ -273,11 +280,31 @@ pub struct ScenePrimitives {
     pub(crate) command_transform_chains: SmallVec<[TransformChain; 1]>,
     pub(crate) overlay_command_transform_chains: SmallVec<[TransformChain; 1]>,
     pub(crate) dirty_draw_ranges: SmallVec<[DirtyDrawRange; 4]>,
+    pub(crate) prepare_cache_serial: u64,
     active_gpu_scroll_container: Option<WidgetId>,
     active_transform_chain: TransformChain,
 }
 
 impl ScenePrimitives {
+    pub(crate) fn new_prepare_cache_root() -> Self {
+        Self {
+            prepare_cache_serial: next_prepare_cache_serial(),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn prepare_cache_serial(&self) -> u64 {
+        self.prepare_cache_serial
+    }
+
+    pub(crate) fn assign_new_prepare_cache_serial(&mut self) {
+        self.prepare_cache_serial = next_prepare_cache_serial();
+    }
+
+    pub(crate) fn clear_dirty_draw_ranges(&mut self) {
+        self.dirty_draw_ranges.clear();
+    }
+
     pub(crate) fn set_active_gpu_scroll_container(&mut self, id: Option<WidgetId>) {
         self.active_gpu_scroll_container = id;
     }
@@ -362,6 +389,7 @@ impl ScenePrimitives {
 
     pub(crate) fn delta_since(&self, base: &ScenePrimitives) -> ScenePrimitives {
         let mut delta = ScenePrimitives::default();
+        delta.prepare_cache_serial = self.prepare_cache_serial;
         delta.backdrop_blurs.extend(
             self.backdrop_blurs
                 .iter()
@@ -1719,6 +1747,19 @@ impl ScenePrimitives {
                 offset.commands,
                 &chunk.command_transform_chains,
             )
+            && {
+                self.prepare_cache_serial = chunk.prepare_cache_serial;
+                self.dirty_draw_ranges
+                    .extend(chunk.dirty_draw_ranges.iter().cloned().map(|mut range| {
+                        let offset = match range.stream {
+                            SceneDrawStream::Main => offset.commands,
+                            SceneDrawStream::Overlay => offset.overlay_commands,
+                        };
+                        range.range = (range.range.start + offset)..(range.range.end + offset);
+                        range
+                    }));
+                true
+            }
     }
 }
 

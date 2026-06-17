@@ -103,6 +103,7 @@ impl Renderer {
             text_cache: HashMap::new(),
             texture_cache: HashMap::new(),
             vertex_pool,
+            retained_prepare_cache: prepare::RetainedPrepareCache::default(),
             last_prepare_stats: HashMap::new(),
             push_constants_supported,
         }))
