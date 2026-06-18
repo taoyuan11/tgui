@@ -907,6 +907,93 @@ fn measured_virtual_viewport_updates_total_extent_after_collect_feedback() {
 }
 
 #[test]
+fn measured_virtual_viewport_can_shrink_below_estimate_after_collect_feedback() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 200.0, 180.0);
+    let element: Element<()> = VirtualViewport::new(
+        (0..3).collect::<Vec<_>>(),
+        VirtualArrangement::Linear(VirtualDirection::Vertical),
+        crate::ui::widget::ItemLayout::Measured {
+            estimate: dp(120.0),
+            spacing: Dp::ZERO,
+            overscan: 1,
+        },
+        |index, _| Text::new(format!("row-{index}")).height(dp(30.0)).into(),
+    )
+    .size(dp(200.0), dp(180.0))
+    .into();
+    let widget_id = element.id;
+    let tree: WidgetTree<()> = WidgetTree::new(element);
+
+    let first_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let first_extent = match &first_layout.resolved_root.kind {
+        ResolvedWidgetKind::Virtual { window_plan, .. } => window_plan.total_main_extent,
+        _ => panic!("root should resolve to virtual widget"),
+    };
+    assert_eq!(first_extent, dp(360.0));
+
+    let computed = tree.collect_scene_from_layout(
+        &font_manager,
+        &first_layout,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let update = computed
+        .virtual_state_updates
+        .iter()
+        .find(|entry| entry.widget_id == widget_id)
+        .expect("virtual collect should emit state update");
+    assert!(update.invalidate_layout);
+    assert_eq!(update.measured_extents.len(), 3);
+
+    let next_virtual_state = VirtualCacheState {
+        viewport_hint: Some(update.viewport_hint.clone()),
+        measured_extents: update.measured_extents.iter().copied().collect(),
+        widget_ids_by_key: update.widget_ids_by_key.iter().cloned().collect(),
+    };
+    let second_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::from([(widget_id, next_virtual_state)]),
+        viewport,
+    );
+    let second_extent = match &second_layout.resolved_root.kind {
+        ResolvedWidgetKind::Virtual { window_plan, .. } => window_plan.total_main_extent,
+        _ => panic!("root should resolve to virtual widget"),
+    };
+    assert_eq!(second_extent, dp(90.0));
+}
+
+#[test]
 fn measured_virtual_viewport_ignores_subpixel_extent_jitter() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();

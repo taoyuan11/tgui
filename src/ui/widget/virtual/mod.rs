@@ -419,26 +419,14 @@ pub(crate) fn resolve_virtual_window_plan(
     let mut total_main_extent = Dp::ZERO;
     for stripe_index in 0..stripe_count {
         stripe_offsets.push(total_main_extent);
-        let start = stripe_index * lanes;
-        let end = ((stripe_index + 1) * lanes).min(total_items);
-        let mut stripe_extent = item_layout.estimate().max(Dp::ZERO);
-        for item_index in start..end {
-            stripe_extent = stripe_extent.max(item_main_extent(item_index));
-        }
-        total_main_extent += stripe_extent;
+        total_main_extent += stripe_extent_for(stripe_index, lanes, total_items, &item_main_extent);
         if stripe_index + 1 < stripe_count {
             total_main_extent += spacing;
         }
     }
 
     let stripe_extent = |stripe_index: usize| -> Dp {
-        let start = stripe_index * lanes;
-        let end = ((stripe_index + 1) * lanes).min(total_items);
-        let mut extent = item_layout.estimate().max(Dp::ZERO);
-        for item_index in start..end {
-            extent = extent.max(item_main_extent(item_index));
-        }
-        extent
+        stripe_extent_for(stripe_index, lanes, total_items, &item_main_extent)
     };
     let viewport_end = scroll_main + viewport_main;
 
@@ -501,6 +489,24 @@ pub(crate) fn resolve_virtual_window_plan(
         viewport_hint,
         bootstrap,
     }
+}
+
+fn stripe_extent_for<F>(
+    stripe_index: usize,
+    lanes: usize,
+    total_items: usize,
+    item_main_extent: &F,
+) -> Dp
+where
+    F: Fn(usize) -> Dp,
+{
+    let start = stripe_index * lanes;
+    let end = ((stripe_index + 1) * lanes).min(total_items);
+    let mut extent = Dp::ZERO;
+    for item_index in start..end {
+        extent = extent.max(item_main_extent(item_index));
+    }
+    extent
 }
 
 type VirtualBuildFn<VM> = dyn for<'a, 'b> Fn(usize, StyleContext<'a>, &'b StyleSheet) -> Option<Element<VM>>
