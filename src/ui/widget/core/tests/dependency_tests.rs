@@ -26,6 +26,11 @@ fn text_signal_records_layout_and_scene_dependencies() {
     assert!(layout.dependencies().contains_owner(DependencyOwner {
         widget_id: widget_id.raw(),
         phase: DependencyPhase::Layout,
+        property: Some(crate::foundation::binding::PropertySlot::TextContent),
+    }));
+    assert!(!layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: widget_id.raw(),
+        phase: DependencyPhase::Layout,
         property: None,
     }));
 

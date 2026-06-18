@@ -96,6 +96,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if self.drive_carousel_auto_play(now) {
             frame_advanced = true;
         }
+        if self
+            .media_manager
+            .advance_animations_for_keys(self.active_media_texture_keys(), now)
+        {
+            frame_advanced = true;
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
         let controller_changed = self.animations.refresh(now);
         if controller_changed {
             frame_advanced = true;
@@ -131,6 +140,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let animation_deadline = self.animation_engine.next_frame_deadline(now);
         let controller_deadline = self.animations.next_frame_deadline(now);
+        let media_deadline = self.next_media_animation_deadline();
         let click_deadline = self.pending_click_deadline();
         let gesture_deadline = self
             .active_gesture
@@ -165,7 +175,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 "textarea_animation",
                 started_at.elapsed(),
                 format!(
-                    "smooth_scroll_advanced={} touch_scroll_inertia_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} animation_active={} controller_active={} pending_click={} gesture_deadline={} tooltip_release_deadline={} caret_deadline={} key_repeat_deadline={} carousel_deadline={} smooth_scroll_deadline={} touch_scroll_inertia_deadline={} next_deadline={}",
+                    "smooth_scroll_advanced={} touch_scroll_inertia_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} animation_active={} controller_active={} media_active={} pending_click={} gesture_deadline={} tooltip_release_deadline={} caret_deadline={} key_repeat_deadline={} carousel_deadline={} smooth_scroll_deadline={} touch_scroll_inertia_deadline={} next_deadline={}",
                     smooth_scroll_advanced,
                     touch_scroll_inertia_advanced,
                     controller_changed,
@@ -174,6 +184,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     frame_advanced,
                     animation_deadline.is_some(),
                     controller_deadline.is_some(),
+                    media_deadline.is_some(),
                     click_deadline.is_some(),
                     gesture_deadline.is_some(),
                     tooltip_release_deadline.is_some(),

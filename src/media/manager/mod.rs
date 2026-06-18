@@ -1,12 +1,16 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::application::ResourceBudget;
 use crate::foundation::binding::InvalidationSignal;
 use crate::foundation::error::TguiError;
 
 use super::loader::{load_image_entry, spawn_image_loader};
-use super::types::{ImageSnapshot, MediaCompletion, MediaSource, RasterRequest, TextureFrame};
+use super::types::{
+    AnimationClock, ImageSnapshot, MediaCompletion, MediaSource, MediaTextureKey, RasterRequest,
+    TextureFrame,
+};
 
 mod image;
 mod raster;
@@ -73,8 +77,12 @@ impl MediaManager {
         raster_request: Option<RasterRequest>,
     ) -> ImageSnapshot {
         let entry = self.image_entry(source);
+        let clock = AnimationClock {
+            now: Instant::now(),
+        };
         let snapshot = entry.lock().expect("image entry lock poisoned").snapshot(
             raster_request,
+            clock,
             &self.invalidation,
             &self.budget,
             &self.completions,
@@ -88,6 +96,38 @@ impl MediaManager {
             .expect("media completion queue lock poisoned")
             .drain(..)
             .collect()
+    }
+
+    pub(crate) fn next_animation_deadline_for_keys(
+        &self,
+        keys: impl IntoIterator<Item = MediaTextureKey>,
+    ) -> Option<Instant> {
+        let mut next: Option<Instant> = None;
+        for key in keys {
+            let Some(deadline) = self.image_animation_deadline(&key.source, key.raster_request)
+            else {
+                continue;
+            };
+            next = Some(match next {
+                Some(current) => current.min(deadline),
+                None => deadline,
+            });
+        }
+        next
+    }
+
+    pub(crate) fn advance_animations_for_keys(
+        &self,
+        keys: impl IntoIterator<Item = MediaTextureKey>,
+        now: Instant,
+    ) -> bool {
+        let mut advanced = false;
+        for key in keys {
+            if self.advance_image_animation(&key.source, key.raster_request, now) {
+                advanced = true;
+            }
+        }
+        advanced
     }
 
     fn image_entry(&self, source: &MediaSource) -> Arc<Mutex<ImageEntry>> {
@@ -127,6 +167,33 @@ impl MediaManager {
         let image = entry.image.clone();
         self.evict_image_sources_if_needed(&mut images, source);
         image
+    }
+
+    fn image_animation_deadline(
+        &self,
+        source: &MediaSource,
+        raster_request: RasterRequest,
+    ) -> Option<Instant> {
+        let entry = self.image_entry(source);
+        entry
+            .lock()
+            .ok()
+            .and_then(|entry| entry.next_animation_deadline(raster_request))
+    }
+
+    fn advance_image_animation(
+        &self,
+        source: &MediaSource,
+        raster_request: RasterRequest,
+        now: Instant,
+    ) -> bool {
+        let entry = self.image_entry(source);
+        entry
+            .lock()
+            .map(|mut entry| {
+                entry.advance_animation(raster_request, now, &self.completions, &self.invalidation)
+            })
+            .unwrap_or(false)
     }
 
     fn evict_image_sources_if_needed(&self, cache: &mut ImageCache, protected: &MediaSource) {

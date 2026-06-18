@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::ui::widget::Rect;
 
@@ -292,7 +293,6 @@ impl TextureFrame {
         }
     }
 
-    #[cfg(feature = "video")]
     pub(crate) fn with_id_and_revision(
         id: u64,
         revision: u64,
@@ -400,6 +400,11 @@ impl MediaTextureKey {
 pub(crate) enum MediaCompletion {
     SourceLoaded { source: MediaSource },
     RasterFinished { key: MediaTextureKey },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AnimationClock {
+    pub(crate) now: Instant,
 }
 
 #[derive(Clone)]

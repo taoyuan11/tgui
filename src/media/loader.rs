@@ -12,11 +12,10 @@ use crate::foundation::color::Color;
 use crate::foundation::error::TguiError;
 
 use super::manager::{DocumentContent, DocumentEntry, ImageEntry, RasterDocument};
-use super::raster::{decode_raster_texture, load_raster_dimensions};
+use super::raster::{decode_raster_asset, load_raster_dimensions, DecodedRasterAsset};
 use super::svg::load_svg_document;
 use super::types::{
     IntrinsicSize, MediaBytes, MediaCompletion, MediaSource, MediaTextureKey, RasterRequest,
-    TextureFrame,
 };
 
 static HTTP_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
@@ -51,14 +50,12 @@ pub(super) fn spawn_raster_texture_loader(
     bytes: MediaBytes,
     source: MediaSource,
     raster_request: RasterRequest,
-    slot: Arc<Mutex<Option<Result<Arc<TextureFrame>, String>>>>,
+    slot: Arc<Mutex<Option<Result<DecodedRasterAsset, String>>>>,
     invalidation: InvalidationSignal,
     completions: Arc<Mutex<Vec<MediaCompletion>>>,
 ) {
     thread::spawn(move || {
-        let result = decode_raster_texture(&bytes, raster_request)
-            .map(Arc::new)
-            .map_err(|error| error.to_string());
+        let result = decode_raster_asset(&bytes, raster_request).map_err(|error| error.to_string());
         let mut guard = slot.lock().expect("pending raster lock poisoned");
         *guard = Some(result);
         completions

@@ -8,6 +8,10 @@ use crate::ui::widget::{ComputedScene, Stack, ToastHost};
 
 #[test]
 fn toast_host_emits_overlay_content_in_stack_order_and_tracks_wakeup() {
+    run_with_large_stack(toast_host_emits_overlay_content_in_stack_order_and_tracks_wakeup_impl);
+}
+
+fn toast_host_emits_overlay_content_in_stack_order_and_tracks_wakeup_impl() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -118,6 +122,10 @@ fn toast_host_emits_overlay_content_in_stack_order_and_tracks_wakeup() {
 
 #[test]
 fn empty_toast_host_does_not_cover_underlying_hits() {
+    run_with_large_stack(empty_toast_host_does_not_cover_underlying_hits_impl);
+}
+
+fn empty_toast_host_does_not_cover_underlying_hits_impl() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -156,6 +164,10 @@ fn empty_toast_host_does_not_cover_underlying_hits() {
 
 #[test]
 fn toast_stack_auto_collapses_after_three_and_expands_from_queue_state() {
+    run_with_large_stack(toast_stack_auto_collapses_after_three_and_expands_from_queue_state_impl);
+}
+
+fn toast_stack_auto_collapses_after_three_and_expands_from_queue_state_impl() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -268,6 +280,10 @@ fn toast_stack_auto_collapses_after_three_and_expands_from_queue_state() {
 
 #[test]
 fn toast_stack_expand_animation_interpolates_layers() {
+    run_with_large_stack(toast_stack_expand_animation_interpolates_layers_impl);
+}
+
+fn toast_stack_expand_animation_interpolates_layers_impl() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -354,6 +370,10 @@ fn toast_stack_expand_animation_interpolates_layers() {
 
 #[test]
 fn toast_stack_top_placements_animate_new_front_toast_while_collapsed() {
+    run_with_large_stack(toast_stack_top_placements_animate_new_front_toast_while_collapsed_impl);
+}
+
+fn toast_stack_top_placements_animate_new_front_toast_while_collapsed_impl() {
     for placement in [
         ToastPlacement::TopStart,
         ToastPlacement::TopCenter,
@@ -434,6 +454,12 @@ fn toast_stack_top_placements_animate_new_front_toast_while_collapsed() {
 
 #[test]
 fn toast_manual_dismiss_and_clear_use_exit_animation() {
+    run_with_large_stack(|| {
+        toast_manual_dismiss_and_clear_use_exit_animation_impl();
+    });
+}
+
+fn toast_manual_dismiss_and_clear_use_exit_animation_impl() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -528,8 +554,23 @@ fn toast_manual_dismiss_and_clear_use_exit_animation() {
     );
 }
 
+fn run_with_large_stack(f: impl FnOnce() + Send + 'static) {
+    let handle = std::thread::Builder::new()
+        .name("toast-exit-animation-test".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(f)
+        .expect("spawn large-stack toast test");
+    if let Err(payload) = handle.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
 #[test]
 fn toast_stack_hover_region_toggles_auto_collapse_state() {
+    run_with_large_stack(toast_stack_hover_region_toggles_auto_collapse_state_impl);
+}
+
+fn toast_stack_hover_region_toggles_auto_collapse_state_impl() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -619,6 +660,10 @@ fn toast_stack_hover_region_toggles_auto_collapse_state() {
 
 #[test]
 fn toast_close_button_aligns_to_card_trailing_edge() {
+    run_with_large_stack(toast_close_button_aligns_to_card_trailing_edge_impl);
+}
+
+fn toast_close_button_aligns_to_card_trailing_edge_impl() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -704,6 +749,10 @@ fn toast_close_button_aligns_to_card_trailing_edge() {
 
 #[test]
 fn toast_kind_icon_is_centered_inside_circle() {
+    run_with_large_stack(toast_kind_icon_is_centered_inside_circle_impl);
+}
+
+fn toast_kind_icon_is_centered_inside_circle_impl() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();

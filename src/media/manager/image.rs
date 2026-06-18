@@ -8,8 +8,8 @@ use crate::foundation::error::TguiError;
 
 use super::super::svg::rasterize_svg_tree;
 use super::super::types::{
-    clamp_raster_request, ImageSnapshot, IntrinsicSize, MediaCompletion, RasterRequest,
-    TextureFrame,
+    clamp_raster_request, AnimationClock, ImageSnapshot, IntrinsicSize, MediaCompletion,
+    RasterRequest, TextureFrame,
 };
 use super::RasterDocument;
 
@@ -47,6 +47,7 @@ impl ImageEntry {
     pub(in crate::media) fn snapshot(
         &mut self,
         raster_request: Option<RasterRequest>,
+        clock: AnimationClock,
         invalidation: &InvalidationSignal,
         budget: &ResourceBudget,
         completions: &Arc<Mutex<Vec<MediaCompletion>>>,
@@ -61,7 +62,7 @@ impl ImageEntry {
         let texture = if self.loading || self.error.is_some() {
             None
         } else if let (Some(document), Some(request)) = (self.document.as_mut(), raster_request) {
-            match document.texture_for(request, invalidation, budget, completions) {
+            match document.texture_for(request, clock, invalidation, budget, completions) {
                 Ok(texture) => {
                     loading |= document.is_loading(request);
                     texture
@@ -92,6 +93,30 @@ impl ImageEntry {
                 .map(DocumentEntry::has_pending_work)
                 .unwrap_or(false)
     }
+
+    pub(in crate::media) fn next_animation_deadline(
+        &self,
+        raster_request: RasterRequest,
+    ) -> Option<std::time::Instant> {
+        self.document
+            .as_ref()
+            .and_then(|document| document.next_animation_deadline(raster_request))
+    }
+
+    pub(in crate::media) fn advance_animation(
+        &mut self,
+        raster_request: RasterRequest,
+        now: std::time::Instant,
+        completions: &Arc<Mutex<Vec<MediaCompletion>>>,
+        invalidation: &InvalidationSignal,
+    ) -> bool {
+        self.document
+            .as_mut()
+            .map(|document| {
+                document.advance_animation(raster_request, now, completions, invalidation)
+            })
+            .unwrap_or(false)
+    }
 }
 
 pub(in crate::media) struct DocumentEntry {
@@ -103,6 +128,7 @@ impl DocumentEntry {
     pub(in crate::media) fn texture_for(
         &mut self,
         raster_request: RasterRequest,
+        clock: AnimationClock,
         invalidation: &InvalidationSignal,
         budget: &ResourceBudget,
         completions: &Arc<Mutex<Vec<MediaCompletion>>>,
@@ -110,9 +136,34 @@ impl DocumentEntry {
         let raster_request = clamp_raster_request(raster_request.width, raster_request.height);
         match &mut self.content {
             DocumentContent::Raster(raster) => {
-                raster.texture_for(raster_request, invalidation, budget, completions)
+                raster.texture_for(raster_request, clock, invalidation, budget, completions)
             }
             DocumentContent::Svg(svg) => svg.texture_for(raster_request, budget),
+        }
+    }
+
+    pub(in crate::media) fn next_animation_deadline(
+        &self,
+        raster_request: RasterRequest,
+    ) -> Option<std::time::Instant> {
+        match &self.content {
+            DocumentContent::Raster(raster) => raster.next_animation_deadline(raster_request),
+            DocumentContent::Svg(_) => None,
+        }
+    }
+
+    pub(in crate::media) fn advance_animation(
+        &mut self,
+        raster_request: RasterRequest,
+        now: std::time::Instant,
+        completions: &Arc<Mutex<Vec<MediaCompletion>>>,
+        invalidation: &InvalidationSignal,
+    ) -> bool {
+        match &mut self.content {
+            DocumentContent::Raster(raster) => {
+                raster.advance_animation(raster_request, now, completions, invalidation)
+            }
+            DocumentContent::Svg(_) => false,
         }
     }
 

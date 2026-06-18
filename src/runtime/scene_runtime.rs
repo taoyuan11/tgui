@@ -75,21 +75,23 @@ fn gpu_scroll_scene_supported(
         })
 }
 
-fn gpu_scroll_has_descendant_scroll_region<VM: 'static>(
-    layout: &ResolvedSceneLayout<VM>,
-    regions: &[ScrollRegion],
-    widget_id: WidgetId,
-) -> bool {
-    let Some(path) = layout.path_for(widget_id) else {
-        return true;
-    };
-    regions.iter().any(|region| {
-        region.id != widget_id
-            && layout
-                .path_for(region.id)
-                .map(|candidate| candidate.starts_with(path))
-                .unwrap_or(false)
-    })
+fn translate_gpu_scroll_region(region: &mut ScrollRegion, delta: Point) {
+    translate_gpu_point(&mut region.gpu_base_scroll_offset, delta);
+    translate_gpu_rect(&mut region.content_viewport, delta);
+    translate_gpu_rect(&mut region.visible_frame, delta);
+    translate_gpu_rect(&mut region.content_bounds, delta);
+    if let Some(track) = &mut region.horizontal_track {
+        translate_gpu_rect(track, delta);
+    }
+    if let Some(thumb) = &mut region.horizontal_thumb {
+        translate_gpu_rect(thumb, delta);
+    }
+    if let Some(track) = &mut region.vertical_track {
+        translate_gpu_rect(track, delta);
+    }
+    if let Some(thumb) = &mut region.vertical_thumb {
+        translate_gpu_rect(thumb, delta);
+    }
 }
 
 fn translate_gpu_point(point: &mut Point, delta: Point) {
@@ -176,6 +178,18 @@ fn translate_gpu_scroll_hits<VM>(
     }
 }
 
+fn translate_descendant_scroll_regions(
+    descendant_ids: &HashSet<WidgetId>,
+    regions: &mut [ScrollRegion],
+    delta: Point,
+) {
+    for region in regions {
+        if descendant_ids.contains(&region.id) {
+            translate_gpu_scroll_region(region, delta);
+        }
+    }
+}
+
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn try_pure_scroll_gpu_fast_path(
         &mut self,
@@ -231,13 +245,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
         let old_region = cached.computed.scroll_regions[region_index];
-        if gpu_scroll_has_descendant_scroll_region(
-            layout,
-            &cached.computed.scroll_regions,
-            widget_id,
-        ) {
+        let Some(path) = layout.path_for(widget_id) else {
             return false;
-        }
+        };
+        let descendant_scroll_ids = cached
+            .computed
+            .scroll_regions
+            .iter()
+            .filter_map(|region| {
+                (region.id != widget_id
+                    && layout
+                        .path_for(region.id)
+                        .map(|candidate| candidate.starts_with(path))
+                        .unwrap_or(false))
+                .then_some(region.id)
+            })
+            .collect::<HashSet<_>>();
         if !gpu_scroll_scene_supported(&cached.computed.scene, widget_id, old_region) {
             return false;
         }
@@ -288,6 +311,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             old_region.scroll_offset.y - next_offset.y,
         );
         cached.computed.scroll_regions[region_index].scroll_offset = next_offset;
+        translate_descendant_scroll_regions(
+            &descendant_scroll_ids,
+            &mut cached.computed.scroll_regions,
+            hit_delta,
+        );
         translate_gpu_scroll_hits(&mut cached.computed.hit_regions, widget_id, hit_delta);
         for chunk in cached.scene_chunks.values_mut() {
             if let Some(region) = chunk
@@ -297,6 +325,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             {
                 region.scroll_offset = next_offset;
             }
+            translate_descendant_scroll_regions(
+                &descendant_scroll_ids,
+                &mut chunk.scroll_regions,
+                hit_delta,
+            );
             translate_gpu_scroll_hits(&mut chunk.hit_regions, widget_id, hit_delta);
         }
         cached.scroll_epoch = self.scroll_epoch;

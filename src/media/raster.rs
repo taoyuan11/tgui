@@ -1,4 +1,5 @@
 use std::io::Cursor;
+use std::time::Duration;
 
 #[cfg(target_os = "windows")]
 use windows::core::Interface;
@@ -19,6 +20,20 @@ use crate::foundation::error::TguiError;
 
 use super::types::{clamp_raster_request, MediaBytes, RasterRequest, TextureFrame};
 
+pub(super) enum DecodedRasterAsset {
+    Still(TextureFrame),
+    Animated(AnimatedRasterAsset),
+}
+
+pub(super) struct AnimatedRasterAsset {
+    pub(super) frames: Vec<AnimatedRasterFrame>,
+}
+
+pub(super) struct AnimatedRasterFrame {
+    pub(super) texture: TextureFrame,
+    pub(super) delay: Duration,
+}
+
 pub(super) fn load_raster_dimensions(bytes: &[u8]) -> Result<(u32, u32), TguiError> {
     image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
@@ -31,12 +46,20 @@ pub(super) fn load_raster_dimensions(bytes: &[u8]) -> Result<(u32, u32), TguiErr
         })
 }
 
-pub(super) fn decode_raster_texture(
+pub(super) fn decode_raster_asset(
     bytes: &MediaBytes,
     raster_request: RasterRequest,
-) -> Result<TextureFrame, TguiError> {
+) -> Result<DecodedRasterAsset, TguiError> {
     let raster_request = clamp_raster_request(raster_request.width(), raster_request.height());
-    decode_raster_texture_platform(bytes.as_slice(), raster_request)
+    if matches!(
+        image::guess_format(bytes.as_slice()),
+        Ok(image::ImageFormat::Gif)
+    ) {
+        if let Some(animated) = decode_animated_gif(bytes.as_slice(), raster_request)? {
+            return Ok(DecodedRasterAsset::Animated(animated));
+        }
+    }
+    decode_raster_texture_platform(bytes.as_slice(), raster_request).map(DecodedRasterAsset::Still)
 }
 
 fn decode_raster_texture_platform(
@@ -57,7 +80,10 @@ fn decode_raster_texture_with_image_crate(
 ) -> Result<TextureFrame, TguiError> {
     let image = image::load_from_memory(bytes)
         .map_err(|error| TguiError::Media(format!("failed to decode raster image: {error}")))?;
+    Ok(resize_dynamic_image(image, raster_request))
+}
 
+fn resize_dynamic_image(image: image::DynamicImage, raster_request: RasterRequest) -> TextureFrame {
     let resized = if image.width() == raster_request.width()
         && image.height() == raster_request.height()
     {
@@ -73,11 +99,54 @@ fn decode_raster_texture_with_image_crate(
     };
 
     let rgba = resized.to_rgba8();
-    Ok(TextureFrame::new(
-        rgba.width(),
-        rgba.height(),
-        rgba.into_raw(),
-    ))
+    TextureFrame::new(rgba.width(), rgba.height(), rgba.into_raw())
+}
+
+fn decode_animated_gif(
+    bytes: &[u8],
+    raster_request: RasterRequest,
+) -> Result<Option<AnimatedRasterAsset>, TguiError> {
+    use image::AnimationDecoder;
+
+    let decoder = image::codecs::gif::GifDecoder::new(Cursor::new(bytes))
+        .map_err(|error| TguiError::Media(format!("failed to decode animated GIF: {error}")))?;
+    let frames = decoder.into_frames().collect_frames().map_err(|error| {
+        TguiError::Media(format!("failed to collect animated GIF frames: {error}"))
+    })?;
+    if frames.len() <= 1 {
+        return Ok(None);
+    }
+
+    let texture_id = TextureFrame::allocate_id();
+    let frames = frames
+        .into_iter()
+        .enumerate()
+        .map(|(index, frame)| {
+            let delay = normalize_animation_delay(frame.delay());
+            let image = image::DynamicImage::ImageRgba8(frame.into_buffer());
+            let texture = resize_dynamic_image(image, raster_request);
+            let (width, height) = texture.size();
+            AnimatedRasterFrame {
+                texture: TextureFrame::with_id_and_revision(
+                    texture_id,
+                    (index as u64).saturating_add(1),
+                    width,
+                    height,
+                    texture.pixels().to_vec(),
+                ),
+                delay,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Some(AnimatedRasterAsset { frames }))
+}
+
+fn normalize_animation_delay(delay: image::Delay) -> Duration {
+    let (numerator_ms, denominator) = delay.numer_denom_ms();
+    let denominator = denominator.max(1);
+    let millis = (numerator_ms as f64 / denominator as f64).max(16.0);
+    Duration::from_secs_f64(millis / 1000.0)
 }
 
 #[cfg(target_os = "windows")]

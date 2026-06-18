@@ -25,6 +25,7 @@ pub(super) fn is_layout_property_slot(property: PropertySlot) -> bool {
             | PropertySlot::GridRow
             | PropertySlot::GridColumn
             | PropertySlot::Inset
+            | PropertySlot::TextContent
     )
 }
 

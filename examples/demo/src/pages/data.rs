@@ -83,7 +83,7 @@ Pagination::new(app.pagination_page.signal(), 12usize)
     .on_change(...)"#;
 
 pub(crate) fn page(app: &App) -> Element<App> {
-    demo_section::page(
+    demo_section::virtual_page(
         "Data",
         "数据页面展示导航、tabs、列表、虚拟滚动、树和表格型数据控件。",
         vec![
@@ -94,6 +94,7 @@ pub(crate) fn page(app: &App) -> Element<App> {
             tree_component(app),
             data_grid_component(app),
         ],
+        dp(620.0),
     )
 }
 

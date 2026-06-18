@@ -1,6 +1,36 @@
 use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(in crate::runtime) fn scroll_mismatch_requires_layout_rebuild(
+        &self,
+        cached: &CachedScene<VM>,
+    ) -> bool {
+        if cached.scroll_epoch == self.scroll_epoch {
+            return false;
+        }
+
+        let Some(layout) = cached.layout.as_ref() else {
+            return self
+                .widget_tree
+                .as_ref()
+                .map(|tree| tree.has_virtual())
+                .unwrap_or(false);
+        };
+
+        if self.scroll_dirty_widgets.is_empty() {
+            return layout.contains_virtual();
+        }
+
+        self.scroll_dirty_widgets.iter().any(|widget_id| {
+            matches!(
+                layout
+                    .resolved_widget(*widget_id)
+                    .map(|resolved| &resolved.kind),
+                Some(crate::ui::widget::ResolvedWidgetKind::Virtual { .. }) | None
+            )
+        })
+    }
+
     pub(in crate::runtime) fn scene_cache_matches(
         &self,
         cached: &CachedScene<VM>,
@@ -58,13 +88,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         viewport: Rect,
         units: UnitContext,
     ) -> bool {
-        let has_virtual = cached
-            .layout
-            .as_ref()
-            .map(|layout| layout.contains_virtual())
-            .or_else(|| self.widget_tree.as_ref().map(|tree| tree.has_virtual()))
-            .unwrap_or(false);
-        let virtual_scroll_matches = !has_virtual || cached.scroll_epoch == self.scroll_epoch;
+        let virtual_scroll_matches = !self.scroll_mismatch_requires_layout_rebuild(cached);
         cached.layout_valid
             && cached.viewport == viewport
             && cached.units == units
@@ -149,13 +173,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if cached.active_scrollbar != active_scrollbar {
             reasons.push("active_scrollbar");
         }
-        let has_virtual = cached
-            .layout
-            .as_ref()
-            .map(|layout| layout.contains_virtual())
-            .or_else(|| self.widget_tree.as_ref().map(|tree| tree.has_virtual()))
-            .unwrap_or(false);
-        if has_virtual && cached.scroll_epoch != self.scroll_epoch {
+        if self.scroll_mismatch_requires_layout_rebuild(cached) {
             reasons.push("virtual_scroll_epoch");
         }
         if reasons.is_empty() {

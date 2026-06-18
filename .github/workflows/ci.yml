@@ -202,6 +202,11 @@ jobs:
           else
             cargo test --workspace --features "${{ matrix.feature_set.features }}"
           fi
+      - name: Run strict reactive no fallback group
+        if: matrix.feature_set.features == 'bench-support'
+        shell: bash
+        run: |
+          CARGO_PROFILE_TEST_DEBUG=0 cargo test strict_reactive_no_fallback --features bench-support --quiet
 
   bench-compile:
     name: bench compile

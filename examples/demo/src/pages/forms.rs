@@ -140,26 +140,29 @@ const CODE_FORM_SUBMIT: &str = r#"let command = app.profile_form.submit_async_co
 command.execute_with_context(app, ctx);"#;
 
 pub(crate) fn page(app: &App) -> Element<App> {
-    demo_section::page(
+    let sections = vec![
+        input_component(app),
+        textarea_component(app),
+        switch_component(app),
+        checkbox_component(app),
+        radio_component(app),
+        select_component(app),
+        combobox_component(app),
+        slider_component(app),
+        rating_component(app),
+        date_picker_component(app),
+        time_picker_component(app),
+        number_input_component(app),
+        color_picker_component(app),
+        upload_component(app),
+        form_component(app),
+    ];
+
+    demo_section::virtual_page(
         "Forms",
         "表单页面展示输入控件、选择控件、校验状态和受控值绑定。",
-        vec![
-            input_component(app),
-            textarea_component(app),
-            switch_component(app),
-            checkbox_component(app),
-            radio_component(app),
-            select_component(app),
-            combobox_component(app),
-            slider_component(app),
-            rating_component(app),
-            date_picker_component(app),
-            time_picker_component(app),
-            number_input_component(app),
-            color_picker_component(app),
-            upload_component(app),
-            form_component(app),
-        ],
+        sections,
+        dp(560.0),
     )
 }
 

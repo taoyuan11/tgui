@@ -8,8 +8,12 @@ pub(crate) fn measure_text_content(
 ) -> (f32, f32) {
     let default_style = &theme.typography.body;
     let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
+    let content =
+        crate::foundation::binding::track_property_scope(PropertySlot::TextContent, || {
+            text.content.resolve()
+        });
     font_manager.measure_text(
-        &text.content.resolve(),
+        &content,
         TextFontRequest {
             preferred_font: text
                 .font_family

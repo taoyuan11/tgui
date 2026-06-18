@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(feature = "bench-support")]
 use crate::runtime::state::StrictCapabilityKind;
+use crate::ui::widget::ItemLayout;
 #[cfg(feature = "bench-support")]
 use crate::ui::widget::{For, Show, ViewSwitch};
 
@@ -110,6 +111,58 @@ fn canvas_items_dependency_update_preserves_cached_layout_shell() {
         .expect("canvas subtree patch should keep the cache shell");
     assert!(cached.layout.is_some());
     assert!(cached.computed_valid);
+}
+
+#[test]
+fn outer_scroll_with_virtual_descendant_preserves_layout_cache_for_non_virtual_scroll() {
+    let invalidation = InvalidationSignal::new();
+    let items = (0..48usize).collect::<Vec<_>>();
+    let tree = WidgetTree::new(
+        ScrollView::new().size(dp(180.0), dp(120.0)).child(
+            Flex::vertical()
+                .width(dp(180.0))
+                .child(Text::new("header"))
+                .child(
+                    crate::ui::widget::VirtualList::new(items, |index, _item| {
+                        Text::new(format!("row {index}")).height(dp(24.0)).into()
+                    })
+                    .height(dp(96.0))
+                    .item_layout(ItemLayout::Fixed {
+                        item_extent: dp(24.0),
+                        spacing: Dp::ZERO,
+                        overscan: 2,
+                    }),
+                )
+                .child(Flex::vertical().height(dp(260.0))),
+        ),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let viewport = handler.viewport_rect();
+    let units = handler.unit_context();
+
+    let outer_scroll_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| {
+            cached
+                .computed
+                .scroll_regions
+                .first()
+                .map(|region| region.id)
+        })
+        .expect("outer page scroller should exist");
+
+    handler.set_scroll_offset(outer_scroll_id, Point::new(dp(0.0), dp(24.0)));
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("scroll should preserve cached scene shell");
+
+    assert!(
+        handler.scene_layout_cache_matches(cached, viewport, units),
+        "scrolling a non-virtual ancestor should not invalidate layout cache just because a virtual descendant exists"
+    );
 }
 
 #[test]
@@ -499,6 +552,18 @@ fn texture_source_fingerprints<VM>(
                 texture.opacity,
             )
         })
+        .collect()
+}
+
+#[cfg(feature = "bench-support")]
+fn texture_id_revision_fingerprints<VM>(
+    computed: &crate::ui::widget::ComputedScene<VM>,
+) -> Vec<(u64, u64)> {
+    computed
+        .scene
+        .textures
+        .iter()
+        .map(|texture| (texture.texture.id(), texture.texture.revision()))
         .collect()
 }
 
@@ -1804,6 +1869,39 @@ fn write_temp_media(name: &str, bytes: &[u8]) -> std::path::PathBuf {
     let path = dir.join(name);
     std::fs::write(&path, bytes).expect("temp media should be written");
     path
+}
+
+#[cfg(feature = "bench-support")]
+fn animated_gif_bytes() -> Vec<u8> {
+    use image::codecs::gif::{GifEncoder, Repeat};
+    use image::{Delay, Frame, RgbaImage};
+
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = GifEncoder::new(&mut bytes);
+        encoder
+            .set_repeat(Repeat::Infinite)
+            .expect("gif repeat should encode");
+        let red = RgbaImage::from_raw(1, 1, vec![255, 0, 0, 255]).expect("valid red rgba image");
+        let blue = RgbaImage::from_raw(1, 1, vec![0, 0, 255, 255]).expect("valid blue rgba image");
+        encoder
+            .encode_frame(Frame::from_parts(
+                red,
+                0,
+                0,
+                Delay::from_numer_denom_ms(20, 1),
+            ))
+            .expect("first gif frame should encode");
+        encoder
+            .encode_frame(Frame::from_parts(
+                blue,
+                0,
+                0,
+                Delay::from_numer_denom_ms(20, 1),
+            ))
+            .expect("second gif frame should encode");
+    }
+    bytes
 }
 
 #[cfg(feature = "bench-support")]
@@ -4729,30 +4827,66 @@ fn reactive_layout_slot_grid_position_matches_full_recollect() {
 
 #[test]
 #[cfg(feature = "bench-support")]
-fn strict_reactive_tree_rejects_intrinsic_text_content_layout() {
+fn strict_reactive_tree_updates_intrinsic_text_content_with_retained_layout_slot() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let content = context.state(String::from("short"));
-    let tree = WidgetTree::try_new_strict(Text::new(content.signal())).expect("strict tree");
+    let tree = WidgetTree::try_new_strict(
+        Flex::<TestVm>::new(Axis::Horizontal)
+            .size(dp(220.0), dp(48.0))
+            .child(Text::new(content.signal()))
+            .child(
+                Stack::<TestVm>::new()
+                    .size(dp(16.0), dp(16.0))
+                    .style_full(|ctx| {
+                        let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                        style.surface.background = Some(Color::hexa(0x38BDF8FF).into());
+                        style
+                    }),
+            ),
+    )
+    .expect("strict intrinsic text tree");
     let mut handler = test_handler(Some(tree), invalidation);
-    let _ = handler.computed_scene();
+    let before_shapes = shape_detail_fingerprints(handler.computed_scene());
+    let before_texts = text_fingerprints(handler.computed_scene());
 
-    crate::runtime::action_stats::reset();
-    content.set(String::from("a much longer label"));
-    handler.request_redraw_if_dirty(Instant::now());
-    let snapshot = crate::runtime::action_stats::snapshot();
+    let snapshot = capture_strict_reactive_actions(&mut handler, || {
+        content.set(String::from("a much longer label"))
+    });
+    assert_action_count(&snapshot, "reactive_layout_slot_update", 1);
+    assert_action_absent(&snapshot, "strict_reactive_layout_rejected");
+    assert_action_absent(&snapshot, "reactive_layout_scene_patch");
+    assert_action_absent(&snapshot, "reactive_property_slot_write");
 
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("retained intrinsic text layout update should keep cache");
     assert!(
-        snapshot
-            .iter()
-            .any(|(action, count)| *action == "strict_reactive_layout_rejected" && *count == 1),
-        "strict tree should reject intrinsic reactive text layout: {snapshot:?}"
+        cached.layout_valid && cached.computed_valid,
+        "retained intrinsic text update should keep both caches valid"
     );
-    assert!(
-        !snapshot
-            .iter()
-            .any(|(action, _)| *action == "reactive_property_slot_write"),
-        "intrinsic text must not be reported as a fixed-frame slot write: {snapshot:?}"
+    let after_slot_shapes = shape_detail_fingerprints(&cached.computed);
+    let after_slot_texts = text_fingerprints(&cached.computed);
+    assert_ne!(
+        before_shapes, after_slot_shapes,
+        "intrinsic text layout update should move sibling layout output"
+    );
+    assert_ne!(
+        before_texts, after_slot_texts,
+        "intrinsic text layout update should change rendered text output"
+    );
+
+    handler.invalidate_scene_with_reason("intrinsic_text_layout_equivalence_full_recollect");
+    let after_full_shapes = shape_detail_fingerprints(handler.computed_scene());
+    let after_full_texts = text_fingerprints(handler.computed_scene());
+    assert_eq!(
+        after_slot_shapes, after_full_shapes,
+        "retained intrinsic text layout update must match full layout + scene recollect"
+    );
+    assert_eq!(
+        after_slot_texts, after_full_texts,
+        "retained intrinsic text layout text output must match full recollect"
     );
 }
 
@@ -5135,6 +5269,70 @@ fn media_raster_completion_updates_retained_texture_slot() {
     assert!(
         !snapshot.iter().any(|(action, _)| action.contains("patch")),
         "raster completion should not request a subtree scene patch: {snapshot:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(
+        image_path
+            .parent()
+            .expect("temp gif should have a parent directory"),
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn animated_gif_runtime_advances_retained_texture_slot() {
+    let image_path = write_temp_media("animated.gif", &animated_gif_bytes());
+    let source = crate::media::MediaSource::path(image_path.clone());
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::try_new_strict(
+        crate::ui::widget::Image::new(source)
+            .size(dp(48.0), dp(48.0))
+            .style(|style, _| {
+                style.fit = crate::media::ContentFit::Fill;
+            }),
+    )
+    .expect("strict animated gif tree");
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let initial = wait_for_one_texture(&mut handler, Duration::from_secs(2));
+    let initial_texture_id = initial[0].0;
+    let initial_revision = handler
+        .cached_scene
+        .as_ref()
+        .expect("cache shell")
+        .computed
+        .scene
+        .textures
+        .first()
+        .expect("texture should exist")
+        .texture
+        .revision();
+
+    crate::runtime::action_stats::reset();
+    let deadline = handler
+        .next_deadline(Instant::now())
+        .expect("animated gif should schedule a next deadline");
+    assert!(handler.drive_animations(&TestEventLoop, deadline + Duration::from_millis(1),));
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let updated = texture_id_revision_fingerprints(
+        &handler
+            .cached_scene
+            .as_ref()
+            .expect("cache shell remains available")
+            .computed,
+    );
+    let snapshot = crate::runtime::action_stats::snapshot();
+
+    assert_eq!(crate::runtime::scene_patch::splice_probe::hits(), 0);
+    assert_eq!(updated.len(), 1);
+    assert_eq!(updated[0].0, initial_texture_id);
+    assert!(updated[0].1 > initial_revision);
+    assert!(
+        snapshot
+            .iter()
+            .any(|(action, count)| *action == "media_texture_slot_write" && *count >= 1),
+        "animated gif frame advance should be consumed by retained media slot writes: {snapshot:?}"
     );
 
     let _ = std::fs::remove_dir_all(

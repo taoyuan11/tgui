@@ -5,15 +5,15 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::application::ResourceBudget;
 use crate::foundation::binding::InvalidationSignal;
 use crate::ui::widget::Rect;
 
 use super::loader::load_media_document;
-use super::types::ImageSnapshot;
-use super::{MediaManager, MediaSource, RasterRequest, TextureFrame};
+use super::types::{AnimationClock, ImageSnapshot};
+use super::{MediaManager, MediaSource, MediaTextureKey, RasterRequest, TextureFrame};
 
 const ONE_BY_ONE_GIF: &[u8] = &[
     0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -36,6 +36,9 @@ fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
                 width: 20,
                 height: 40,
             },
+            AnimationClock {
+                now: Instant::now(),
+            },
             &invalidation,
             &budget,
             &completions,
@@ -48,6 +51,9 @@ fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
                 width: 20,
                 height: 40,
             },
+            AnimationClock {
+                now: Instant::now(),
+            },
             &invalidation,
             &budget,
             &completions,
@@ -59,6 +65,9 @@ fn svg_rasterizes_per_requested_size_and_reuses_cached_texture() {
             RasterRequest {
                 width: 40,
                 height: 80,
+            },
+            AnimationClock {
+                now: Instant::now(),
             },
             &invalidation,
             &budget,
@@ -87,6 +96,9 @@ fn svg_raster_request_is_clamped_to_max_dimension() {
             RasterRequest {
                 width: 4096,
                 height: 2048,
+            },
+            AnimationClock {
+                now: Instant::now(),
             },
             &invalidation,
             &ResourceBudget::DEFAULT,
@@ -336,6 +348,33 @@ fn raster_document_keeps_previous_texture_while_new_size_is_loading() {
     assert_eq!(fallback_texture.id(), first_texture.id());
 }
 
+#[test]
+fn animated_gif_advances_frames_with_stable_texture_id() {
+    let media = MediaManager::new(InvalidationSignal::new());
+    let source = MediaSource::bytes(two_frame_gif_bytes());
+    let request = RasterRequest {
+        width: 24,
+        height: 24,
+    };
+
+    let first = wait_for_snapshot(&media, &source, Some(request));
+    let first_texture = first.texture.expect("animated gif should decode");
+    let first_id = first_texture.id();
+    let first_revision = first_texture.revision();
+    let first_pixels = first_texture.pixels().to_vec();
+    let key = MediaTextureKey::new(source.clone(), request);
+
+    let deadline = media
+        .next_animation_deadline_for_keys([key.clone()])
+        .expect("animated gif should schedule a next frame");
+    assert!(media.advance_animations_for_keys([key.clone()], deadline + Duration::from_millis(1),));
+    let advanced = wait_for_texture_revision(&media, &source, request, first_revision + 1);
+
+    assert_eq!(advanced.id(), first_id);
+    assert_eq!(advanced.revision(), first_revision + 1);
+    assert_ne!(advanced.pixels(), first_pixels.as_slice());
+}
+
 fn wait_for_snapshot(
     media: &MediaManager,
     source: &MediaSource,
@@ -349,6 +388,56 @@ fn wait_for_snapshot(
         thread::sleep(Duration::from_millis(20));
     }
     panic!("timed out waiting for media snapshot");
+}
+
+fn wait_for_texture_revision(
+    media: &MediaManager,
+    source: &MediaSource,
+    raster_request: RasterRequest,
+    minimum_revision: u64,
+) -> Arc<TextureFrame> {
+    for _ in 0..150 {
+        let snapshot = media.image_snapshot(source, Some(raster_request));
+        if let Some(texture) = snapshot.texture {
+            if texture.revision() >= minimum_revision {
+                return texture;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("timed out waiting for animated media revision >= {minimum_revision}");
+}
+
+fn two_frame_gif_bytes() -> Vec<u8> {
+    use image::codecs::gif::{GifEncoder, Repeat};
+    use image::{Delay, Frame, RgbaImage};
+
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = GifEncoder::new(&mut bytes);
+        encoder
+            .set_repeat(Repeat::Infinite)
+            .expect("gif repeat should encode");
+        let red = RgbaImage::from_raw(1, 1, vec![255, 0, 0, 255]).expect("valid red rgba image");
+        let blue = RgbaImage::from_raw(1, 1, vec![0, 0, 255, 255]).expect("valid blue rgba image");
+        encoder
+            .encode_frame(Frame::from_parts(
+                red,
+                0,
+                0,
+                Delay::from_numer_denom_ms(20, 1),
+            ))
+            .expect("first gif frame should encode");
+        encoder
+            .encode_frame(Frame::from_parts(
+                blue,
+                0,
+                0,
+                Delay::from_numer_denom_ms(20, 1),
+            ))
+            .expect("second gif frame should encode");
+    }
+    bytes
 }
 
 fn unique_temp_dir() -> PathBuf {

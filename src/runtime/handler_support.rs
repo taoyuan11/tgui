@@ -15,6 +15,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn next_deadline(&self, now: Instant) -> Option<Instant> {
         let animation_deadline = self.animation_engine.next_frame_deadline(now);
         let controller_deadline = self.animations.next_frame_deadline(now);
+        let media_deadline = self.next_media_animation_deadline();
         let click_deadline = self.pending_click_deadline();
         let gesture_deadline = self
             .active_gesture
@@ -33,6 +34,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         [
             animation_deadline,
             controller_deadline,
+            media_deadline,
             click_deadline,
             gesture_deadline,
             tooltip_release_deadline,
@@ -69,6 +71,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let deadline = self.next_deadline(now);
         self.set_control_flow_for_deadline(event_loop, deadline);
         deadline
+    }
+
+    pub(super) fn active_media_texture_keys(&self) -> Vec<crate::media::MediaTextureKey> {
+        self.cached_scene
+            .as_ref()
+            .map(|cached| cached.media_texture_bindings.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub(super) fn next_media_animation_deadline(&self) -> Option<Instant> {
+        self.media_manager
+            .next_animation_deadline_for_keys(self.active_media_texture_keys())
     }
 
     pub(super) fn text_edit_state(&self, id: WidgetId) -> Option<&TextEditState> {

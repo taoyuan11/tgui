@@ -397,6 +397,14 @@ impl ViewModel for App {
     }
 
     fn view(&self) -> Element<Self> {
+        let page = self.current_page.get();
+        let content: Element<Self> = match page {
+            DemoPage::Forms | DemoPage::Data => pages::render(self, page),
+            _ => ScrollView::new()
+                .size(pct(100.0), pct(100.0))
+                .child(pages::render(self, page))
+                .into(),
+        };
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .style_full(styles::root_style)
@@ -404,13 +412,7 @@ impl ViewModel for App {
                 Flex::horizontal()
                     .size(pct(100.0), pct(100.0))
                     .child(navigation::sidebar(self))
-                    .child(
-                        Flex::vertical().grow(1.0).height(pct(100.0)).child(
-                            ScrollView::new().size(pct(100.0), pct(100.0)).child(
-                                pages::render(self, self.current_page.get()),
-                            ),
-                        ),
-                    ),
+                    .child(Flex::vertical().grow(1.0).height(pct(100.0)).child(content)),
             )
             .child(ToastHost::new(self.toast_queue.clone()).style_full(styles::modern_toast_style))
             .child(
