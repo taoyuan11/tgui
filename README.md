@@ -106,21 +106,21 @@ pnpm --dir docs preview
 
 ```toml
 [dependencies]
-tgui = "0.1.8"
+tgui = "0.2.0"
 ```
 
 如果需要音频能力：
 
 ```toml
 [dependencies]
-tgui = { version = "0.1.8", features = ["audio"] }
+tgui = { version = "0.2.0", features = ["audio"] }
 ```
 
 如果需要视频能力：
 
 ```toml
 [dependencies]
-tgui = { version = "0.1.8", features = ["video"] }
+tgui = { version = "0.2.0", features = ["video"] }
 ```
 
 可选 feature：
@@ -139,6 +139,12 @@ tgui = { version = "0.1.8", features = ["video"] }
 细粒度增量渲染管线的完整说明见 [性能文档](./docs/advanced/performance.md)。
 
 移动端支持说明：当前版本暂时放弃 Android、HarmonyOS / OpenHarmony 等移动端支持，相关入口、feature、示例和平台依赖已经移除。`tgui` 目前聚焦 Windows、macOS 与 Linux 桌面端。
+
+## 仓库结构
+
+仓库现在是多成员 Cargo workspace。根包仍是公开 crate `tgui`，`src/lib.rs` 只作为兼容门面保留稳定的 `tgui::...` API 路径；主要实现位于 `crates/tgui-runtime/`，内部边界 crate 位于 `crates/tgui-core`、`crates/tgui-platform`、`crates/tgui-log`、`crates/tgui-mvvm`、`crates/tgui-media`、`crates/tgui-ui`、`crates/tgui-rendering`。
+
+`examples/*` 和 `benches/` 也在 workspace 中。根 `cargo check` 默认只检查公开 facade `tgui`；需要全量验证时使用 `cargo check --workspace --all-targets`。
 
 ## 公开 API 结构
 
@@ -878,14 +884,15 @@ fn main() -> Result<(), tgui::core::TguiError> {
 
 ## 适合先看哪些文件
 
-- `src/lib.rs`：crate 导出总览
-- `src/application/mod.rs`：应用与窗口入口
-- `src/foundation/binding/mod.rs`：`State` / `Signal` / `TextController`
-- `src/foundation/view_model/mod.rs`：`Command` / `ValueCommand`
-- `src/notification/mod.rs`：通知、权限与 action 回调
-- `src/foundation/window_control.rs`：`WindowControl` / `WindowResizeDirection`
-- `src/audio/`：音频控制器、隐形 `Audio` 组件和 FFmpeg/CPAL 播放管线
-- `src/ui/widget/`：组件与布局实现
+- `src/lib.rs`：公开 `tgui` facade 导出总览
+- `crates/tgui-runtime/src/lib.rs`：实现 crate 导出总览
+- `crates/tgui-runtime/src/application/mod.rs`：应用与窗口入口
+- `crates/tgui-runtime/src/foundation/binding/mod.rs`：`State` / `Signal` / `TextController`
+- `crates/tgui-runtime/src/foundation/view_model/mod.rs`：`Command` / `ValueCommand`
+- `crates/tgui-runtime/src/notification/mod.rs`：通知、权限与 action 回调
+- `crates/tgui-runtime/src/foundation/window_control.rs`：`WindowControl` / `WindowResizeDirection`
+- `crates/tgui-runtime/src/audio/`：音频控制器、隐形 `Audio` 组件和 FFmpeg/CPAL 播放管线
+- `crates/tgui-runtime/src/ui/widget/`：组件与布局实现
 - `examples/frameless_window/src/main.rs`：无边框窗口和窗口控制参考
 - `examples/*`：最直接的上手参考
 
@@ -897,23 +904,24 @@ fn main() -> Result<(), tgui::core::TguiError> {
 
 ```bash
 cargo fmt
-cargo check
-cargo test
+cargo check -p tgui
+cargo test -p tgui-runtime --lib -- --test-threads=1
 ```
 
 如果改动涉及特定 feature 或平台，请尽量补充对应检查：
 
 ```bash
-cargo check --features video
+cargo check -p tgui --features video
+cargo check --workspace --all-targets
 ```
 
 贡献时请注意：
 
-- 公共 API 变更需要同步更新 README、示例和 `src/lib.rs` 中的 re-export。
+- 公共 API 变更需要同步更新 README、示例、根 `src/lib.rs` facade，以及相关内部边界 crate 的 re-export。
 - 新增 widget 或样式能力时，优先复用现有 `Element`、布局、事件、主题和 `Value<T>` / `Signal<T>` 模式。
-- 文本输入或通知能力变更时，建议同时检查 `src/runtime/`、`src/notification/` 与相关示例。
-- 修改 `src/runtime/`、`src/ui/widget/core/`、渲染 primitive、文本输入、媒体加载或窗口控制时，建议补充针对性的单元测试。
-- 新增示例时保持示例独立、可运行，并同步更新 README 中的示例列表。
+- 文本输入或通知能力变更时，建议同时检查 `crates/tgui-runtime/src/runtime/`、`crates/tgui-runtime/src/notification/` 与相关示例。
+- 修改 `crates/tgui-runtime/src/runtime/`、`crates/tgui-runtime/src/ui/widget/core/`、渲染 primitive、文本输入、媒体加载或窗口控制时，建议补充针对性的单元测试。
+- 新增示例时保持示例作为 workspace member 可运行，并同步更新 README 中的示例列表。
 - 音频相关改动需要考虑 `audio` feature、本机 FFmpeg 解码链路以及桌面端 `cpal` 播放行为。
 - 视频相关改动需要考虑 `video` / `video-static` feature，以及本机 FFmpeg 链接环境差异。
 - 桌面平台相关改动请使用 `cfg` 明确隔离，避免影响其他平台构建。

@@ -1,0 +1,81 @@
+[package]
+name = "tgui-benchmarks"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = ["bench-support"]
+audio = ["tgui/audio"]
+video = ["audio", "tgui/video"]
+video-static = ["video", "tgui/video-static"]
+bench-support = ["tgui/bench-support"]
+collect-profile = ["bench-support", "tgui/collect-profile"]
+
+[dependencies]
+criterion.workspace = true
+tgui = { workspace = true }
+
+[[bench]]
+name = "animation"
+path = "animation.rs"
+harness = false
+
+[[bench]]
+name = "audio_output"
+path = "audio_output.rs"
+harness = false
+
+[[bench]]
+name = "canvas_scene"
+path = "canvas_scene.rs"
+harness = false
+
+[[bench]]
+name = "event_handling"
+path = "event_handling.rs"
+harness = false
+
+[[bench]]
+name = "media_source"
+path = "media_source.rs"
+harness = false
+
+[[bench]]
+name = "real_widget_pipeline"
+path = "real_widget_pipeline.rs"
+harness = false
+
+[[bench]]
+name = "scene_rendering"
+path = "scene_rendering.rs"
+harness = false
+
+[[bench]]
+name = "single_property_patch"
+path = "single_property_patch.rs"
+harness = false
+
+[[bench]]
+name = "state_signal"
+path = "state_signal.rs"
+harness = false
+
+[[bench]]
+name = "text_processing"
+path = "text_processing.rs"
+harness = false
+
+[[bench]]
+name = "video_buffering"
+path = "video_buffering.rs"
+harness = false
+
+[[bench]]
+name = "widget_core_layout"
+path = "widget_core_layout.rs"
+harness = false

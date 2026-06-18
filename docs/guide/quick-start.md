@@ -67,9 +67,10 @@ fn main() -> Result<(), TguiError> {
 
 ## 运行示例
 
-仓库中的示例是独立 Cargo 工程，可以直接指定 manifest 运行：
+仓库中的示例是 workspace member，可以用 package 名运行，也可以直接指定 manifest：
 
 ```sh
+cargo run -p basic_window
 cargo run --manifest-path examples/basic_window/Cargo.toml
 cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 cargo run --manifest-path examples/canvas/Cargo.toml

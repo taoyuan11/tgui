@@ -4,51 +4,56 @@
 
 ## 项目定位
 
-`tgui` 是一个 Rust GUI 框架 crate，目标是提供基于 `wgpu` 的 GPU 加速渲染、MVVM 状态模型、`taffy` 布局、声明式组件树、主题系统、动画、媒体加载、系统通知、对话框、自定义窗口 chrome / 原生窗口控制，以及可选音频/视频播放能力。
+`tgui` 是一个 Rust GUI 框架 workspace，公开 crate `tgui` 继续作为兼容门面，目标是提供基于 `wgpu` 的 GPU 加速渲染、MVVM 状态模型、`taffy` 布局、声明式组件树、主题系统、动画、媒体加载、系统通知、对话框、自定义窗口 chrome / 原生窗口控制，以及可选音频/视频播放能力。
 
-crate 信息：
+workspace / crate 信息：
 
 - 包名：`tgui`
-- 当前版本：`0.1.8`
+- 当前版本：`0.2.0`
 - Rust edition：`2021`
-- License：MIT
+- Rust version：`1.85`
+- License：MIT OR Apache-2.0
 - 主要依赖：`wgpu`、`winit-core` 及平台后端、`taffy`、`cosmic-text`、`image`、`resvg`、`reqwest`、`lyon`
 - 可选音视频依赖：`ffmpeg-next`
 
 ## 重要目录和文件
 
-- `Cargo.toml`：crate 元数据、features、平台依赖和发布排除规则。
-- `src/lib.rs`：公共 API 总出口，按 `application`、`mvvm`、`layout`、`widgets`、`canvas`、`theme`、`core`、`media`、`dialog`、`notification`、`logging`、`platform`、`video` 分组导出。
-- `src/application/mod.rs`：`Application`、`WindowSpec`、多窗口声明、窗口装饰开关、窗口绑定和运行入口。
-- `src/foundation/binding/mod.rs`：`ViewModelContext`、`State`、`Signal`、`TextController`、依赖跟踪与 invalidation。
-- `src/foundation/view_model/mod.rs`：`ViewModel`、`Command`、`ValueCommand`、`CommandContext`。
-- `src/foundation/window_control.rs`：命令上下文中的运行时窗口控制，封装拖拽、拖拽调整大小、最小化、最大化、还原、关闭和最大化状态查询。
-- `src/runtime/`：运行时核心模块；`mod.rs` 管主流程，`input.rs` 处理文本输入状态，`commands.rs` / `theme.rs` 拆分部分行为，`tests.rs` 聚合运行时测试。
-- `src/ui/layout/mod.rs`：布局基础类型，封装 `Length`、`Track`、`Insets`、`Align`、`Justify`、`Axis`、`Overflow`、`Value` 等。
-- `src/ui/widget/`：公开 widget builder 与基础样式；`input/` / `textarea/` 提供文本输入组件。
-- `src/ui/widget/core/`：组件树解析、Taffy 布局、渲染 primitive 收集、命中区域、选择与文本输入基础设施等高风险核心模块。
-- `src/ui/theme/`：主题 token、组件主题、状态解析、light/dark/system 模式。
-- `src/rendering/renderer.rs`：`wgpu` 渲染器，包含矩形、渐变/brush、mesh、文字、纹理、透明窗口 surface、backdrop blur 等 pipeline。
-- `src/rendering/shader/`：WGSL shader。
-- `src/media/mod.rs`：图片、SVG、网络/本地/内存媒体加载，纹理缓存，SVG 栅格化，canvas shadow 缓存。
-- `src/audio/`：启用 `audio` feature 后的 `AudioController`、`Audio` 组件、播放状态与 FFmpeg/CPAL 后端。
-- `src/dialog/mod.rs`：同步和异步原生对话框封装；桌面端通过 `rfd` 提供文件选择和消息框能力。
-- `src/notification/mod.rs`：系统通知抽象，包含通知选项、权限状态、动作回调分发与平台后端实现。
-- `src/platform/mod.rs`：平台抽象和不同 winit 后端的选择。
-- `src/video/`：启用 `video` feature 后的 `VideoController`、`VideoSurface`、FFmpeg 后端。
-- `examples/`：独立 Cargo 示例工程。
+- `Cargo.toml`：公开 facade package、workspace 成员、共享依赖、root feature 转发和发布排除规则；`default-members = ["."]`，所以根 `cargo check` 默认只检查 `tgui`。
+- `src/lib.rs`：公开 API 兼容门面，按 `application`、`mvvm`、`layout`、`widgets`、`canvas`、`theme`、`core`、`media`、`dialog`、`notification`、`logging`、`platform`、`video` 分组 re-export。
+- `crates/tgui-runtime/`：主要实现 crate，承载 application、runtime、UI、rendering、media、platform、audio/video 等实现。
+- `crates/tgui-runtime/src/lib.rs`：实现 crate 总出口和公开分组。
+- `crates/tgui-runtime/src/application/mod.rs`：`Application`、`WindowSpec`、多窗口声明、窗口装饰开关、窗口绑定和运行入口。
+- `crates/tgui-runtime/src/foundation/binding/mod.rs`：`ViewModelContext`、`State`、`Signal`、`TextController`、依赖跟踪与 invalidation。
+- `crates/tgui-runtime/src/foundation/view_model/mod.rs`：`ViewModel`、`Command`、`ValueCommand`、`CommandContext`。
+- `crates/tgui-runtime/src/foundation/window_control.rs`：命令上下文中的运行时窗口控制，封装拖拽、拖拽调整大小、最小化、最大化、还原、关闭和最大化状态查询。
+- `crates/tgui-runtime/src/runtime/`：运行时核心模块；`mod.rs` 管主流程，`input.rs` 处理文本输入状态，`commands.rs` / `theme.rs` 拆分部分行为，`tests.rs` 聚合运行时测试。
+- `crates/tgui-runtime/src/ui/layout/mod.rs`：布局基础类型，封装 `Length`、`Track`、`Insets`、`Align`、`Justify`、`Axis`、`Overflow`、`Value` 等。
+- `crates/tgui-runtime/src/ui/widget/`：公开 widget builder 与基础样式；`input/` / `textarea/` 提供文本输入组件。
+- `crates/tgui-runtime/src/ui/widget/core/`：组件树解析、Taffy 布局、渲染 primitive 收集、命中区域、选择与文本输入基础设施等高风险核心模块。
+- `crates/tgui-runtime/src/ui/theme/`：主题 token、组件主题、状态解析、light/dark/system 模式。
+- `crates/tgui-runtime/src/rendering/renderer.rs`：`wgpu` 渲染器，包含矩形、渐变/brush、mesh、文字、纹理、透明窗口 surface、backdrop blur 等 pipeline。
+- `crates/tgui-runtime/src/rendering/shader/`：WGSL shader。
+- `crates/tgui-runtime/src/media/mod.rs`：图片、SVG、网络/本地/内存媒体加载，纹理缓存，SVG 栅格化，canvas shadow 缓存。
+- `crates/tgui-runtime/src/audio/`：启用 `audio` feature 后的 `AudioController`、`Audio` 组件、播放状态与 FFmpeg/CPAL 后端。
+- `crates/tgui-runtime/src/dialog/mod.rs`：同步和异步原生对话框封装；桌面端通过 `rfd` 提供文件选择和消息框能力。
+- `crates/tgui-runtime/src/notification/mod.rs`：系统通知抽象，包含通知选项、权限状态、动作回调分发与平台后端实现。
+- `crates/tgui-runtime/src/platform/mod.rs`：平台抽象和不同 winit 后端的选择。
+- `crates/tgui-runtime/src/video/`：启用 `video` feature 后的 `VideoController`、`VideoSurface`、FFmpeg 后端。
+- `crates/tgui-core`、`crates/tgui-platform`、`crates/tgui-log`、`crates/tgui-mvvm`、`crates/tgui-media`、`crates/tgui-ui`、`crates/tgui-rendering`：内部边界 crate，当前主要从 `tgui-runtime` re-export 对应 API 面。
+- `benches/`：workspace package `tgui-benchmarks`，显式声明 Criterion bench targets。
+- `examples/`：workspace 示例工程，也可继续用 `--manifest-path` 单独运行。
 - `docs/images/tgui_logo.png`：README 使用的 logo。
 
 ## Features 和平台
 
-`Cargo.toml` 中的 features：
+根 `Cargo.toml` 中的 features 只做 facade 转发：
 
 - `default = []`
-- `audio`：启用 `ffmpeg-next` 音频解码能力。
-- `video`：在 `audio` 基础上启用视频能力。
-- `video-static`：在 `video` 基础上启用 `ffmpeg-next/static`。
-- `bench-support` / `collect-profile`：基准与相位画像探针，关闭时编译成零成本空操作。
-- `mimalloc`：可选全局分配器替换，由下游二进制 crate 决定是否启用。
+- `audio`：转发到 `tgui-runtime/audio`，启用 `ffmpeg-next` 音频解码能力。
+- `video`：转发到 `tgui-runtime/video`，在 `audio` 基础上启用视频能力。
+- `video-static`：转发到 `tgui-runtime/video-static`，在 `video` 基础上启用 `ffmpeg-next/static`。
+- `bench-support` / `collect-profile`：转发到 `tgui-runtime`，用于基准与相位画像探针，关闭时编译成零成本空操作。
+- `mimalloc`：可选全局分配器替换，继续留在公开 `tgui` facade，由下游二进制 crate 决定是否启用。
 
 细粒度响应式渲染管线已默认内置（详见下文「细粒度响应式渲染管线」一节），不再通过 Cargo feature 开关启用。
 
@@ -56,7 +61,7 @@ crate 信息：
 
 - Windows、macOS、Linux：桌面窗口、剪贴板、对话框、音频相关依赖。
 
-Windows 下启用 `video` feature 时，`build.rs` 会额外链接 `strmiids` 和 `mfuuid`。
+平台依赖现在位于 `crates/tgui-runtime/Cargo.toml`。Windows 下启用 `video` feature 时，`crates/tgui-runtime/build.rs` 会额外链接 `strmiids` 和 `mfuuid`。
 
 ## 公共 API 组织
 
@@ -108,7 +113,7 @@ Application::new()
 1. ViewModel 构建 `Element<VM>` 组件树。
 2. `WidgetTree` 解析组件树并用 `taffy` 计算布局。
 3. 组件树生成 `ScenePrimitives`、命中区域、滚动区域、IME/caret 信息等。
-4. `src/runtime/` 处理窗口事件、输入状态、hover/focus/pressed 状态、命令派发与缓存失效。
+4. `crates/tgui-runtime/src/runtime/` 处理窗口事件、输入状态、hover/focus/pressed 状态、命令派发与缓存失效。
 5. `Renderer` 把 scene primitives 提交到 `wgpu` pipeline。
 
 重要渲染能力：
@@ -150,7 +155,7 @@ Application::new()
 
 如果新增 widget，优先复用现有 `Element`、`WidgetKind`、`InteractionHandlers`、`MediaEventHandlers`、`VisualStyle`、`LayoutStyle` 模式，而不是另起一套事件或布局系统。
 
-当前仓库提供公开的 `Input` 和 `Textarea` 组件。处理文本输入相关逻辑时，优先沿着 `TextController`、`TextChangeSet`、`src/ui/widget/common.rs`、`src/ui/widget/core/` 和 `src/runtime/input/` 的共享基础设施追踪，而不是把输入、选择、IME、滚动、渲染当成彼此独立的局部功能。
+当前仓库提供公开的 `Input` 和 `Textarea` 组件。处理文本输入相关逻辑时，优先沿着 `TextController`、`TextChangeSet`、`crates/tgui-runtime/src/ui/widget/common.rs`、`crates/tgui-runtime/src/ui/widget/core/` 和 `crates/tgui-runtime/src/runtime/input/` 的共享基础设施追踪，而不是把输入、选择、IME、滚动、渲染当成彼此独立的局部功能。
 
 ## 动画系统
 
@@ -178,7 +183,7 @@ Application::new()
 
 ## 通知系统
 
-通知能力位于 `src/notification/`，通过 `CommandContext::notifications()` 暴露给命令处理：
+通知能力位于 `crates/tgui-runtime/src/notification/`，通过 `CommandContext::notifications()` 暴露给命令处理：
 
 - `Notifications::send`：发送普通系统通知。
 - `Notifications::send_with_actions`：发送最多两个 action 的交互式通知，并把结果回调到 ViewModel。
@@ -193,44 +198,51 @@ Application::new()
 
 ## 音频系统
 
-音频能力位于 `src/audio/`，需要 `audio` feature：
+音频能力位于 `crates/tgui-runtime/src/audio/`，需要 `audio` feature：
 
 - `AudioController` 管理加载、播放、暂停、seek、音量、静音和播放状态查询。
 - `Audio` 是挂接到 widget tree 的隐形播放组件，本身不渲染 UI。
-- FFmpeg 解码与桌面播放后端位于 `src/audio/backend/`，桌面输出依赖 `cpal`。
+- FFmpeg 解码与桌面播放后端位于 `crates/tgui-runtime/src/audio/backend/`，桌面输出依赖 `cpal`。
 
 涉及音频变更时建议至少运行相关模块测试，并在桌面环境补一次实际播放链路检查。
 
 ## 视频系统
 
-视频能力位于 `src/video/`，需要 `video` feature：
+视频能力位于 `crates/tgui-runtime/src/video/`，需要 `video` feature：
 
 - `VideoController` 管理播放、暂停、seek、音量、静音、buffer memory limit 等。
 - `VideoSurface` 作为 widget 参与布局、渲染和命中测试。
-- FFmpeg 后端位于 `src/video/backend/ffmpeg/`，包含 decode、audio、present 等模块。
+- FFmpeg 后端位于 `crates/tgui-runtime/src/video/backend/ffmpeg/`，包含 decode、audio、present 等模块。
 
 涉及视频变更时建议至少运行带 feature 的检查或测试，但本机需要具备对应 FFmpeg/link 环境。
 
 ## 示例工程
 
-当前 `examples/` 中存在这些独立示例：
+当前 `examples/` 中存在这些 workspace 示例：
 
-- `basic_window`
-- `mvvm_counter`
 - `animation_showcase`
-- `timeline_controller`
-- `multi_window`
-- `dialogs`
-- `canvas`
 - `background_effects`
-- `frameless_window`
+- `basic_window`
+- `canvas`
 - `demo`
-- `text_area`
+- `dialogs`
+- `drawer_demo`
+- `frameless_window`
+- `list_virtual_list`
+- `modal_demo`
+- `multi_window`
 - `multiple_vm_examples`
+- `mvvm_counter`
+- `table_datagrid`
+- `text_area`
+- `timeline_controller`
+- `toast_snackbar`
+- `tree`
 
 运行桌面示例：
 
 ```bash
+cargo run -p basic_window
 cargo run --manifest-path examples/basic_window/Cargo.toml
 cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 cargo run --manifest-path examples/canvas/Cargo.toml
@@ -242,52 +254,63 @@ README 中提到的一些示例名称未必都在当前工作区存在；维护�
 ## 常用开发命令
 
 ```bash
-cargo check
-cargo test
 cargo fmt
+cargo metadata --no-deps --format-version 1
+cargo check -p tgui
+cargo test -p tgui-runtime --lib -- --test-threads=1
 ```
 
 按 feature 检查：
 
 ```bash
-cargo check --features video
-cargo check --features video-static
+cargo check -p tgui --no-default-features
+cargo check -p tgui --features audio
+cargo check -p tgui --features video
+cargo check -p tgui --features video-static
+cargo check --workspace --all-targets
 ```
 
 运行某个测试：
 
 ```bash
-cargo test <test_name>
+cargo test -p tgui-runtime <test_name>
 ```
 
 运行某个示例：
 
 ```bash
+cargo run -p <example_package>
 cargo run --manifest-path examples/<example_name>/Cargo.toml
+```
+
+编译 benchmark：
+
+```bash
+cargo bench -p tgui-benchmarks --no-run --features bench-support
 ```
 
 ## 测试分布
 
 仓库中单元测试主要集中在：
 
-- `src/ui/widget/core/tests.rs`：布局、渲染 primitive、输入、选择、滚动、组件状态。
-- `src/runtime/tests.rs`：事件、焦点、文本输入编辑、滚动条、命令派发、canvas/video 命中等运行时行为。
-- `src/application/mod.rs`、`src/foundation/window_control.rs`：窗口配置、装饰开关、命令上下文窗口控制。
-- `src/notification/tests.rs`：通知选项校验、平台分发、异步 action completion 回调。
-- `src/media/tests.rs`：图片/SVG 加载、栅格化、缓存、外部资源解析。
-- `src/animation/tests.rs`：属性动画和 timeline 行为。
-- `src/audio/controller/tests.rs`、`src/audio/backend/shared/tests.rs`、`src/audio/backend/ffmpeg/tests.rs`：音频控制器、共享播放后端与 FFmpeg 会话逻辑。
-- `src/video/backend/ffmpeg/*`：视频后端内部逻辑，需 feature/环境支持。
-- `src/ui/widget/canvas/tests.rs`、`src/ui/widget/common.rs`、`src/ui/theme/mod.rs`、`src/text/font/tests.rs` 等也有局部测试。
+- `crates/tgui-runtime/src/ui/widget/core/tests.rs`：布局、渲染 primitive、输入、选择、滚动、组件状态。
+- `crates/tgui-runtime/src/runtime/tests.rs`：事件、焦点、文本输入编辑、滚动条、命令派发、canvas/video 命中等运行时行为。
+- `crates/tgui-runtime/src/application/mod.rs`、`crates/tgui-runtime/src/foundation/window_control.rs`：窗口配置、装饰开关、命令上下文窗口控制。
+- `crates/tgui-runtime/src/notification/tests.rs`：通知选项校验、平台分发、异步 action completion 回调。
+- `crates/tgui-runtime/src/media/tests.rs`：图片/SVG 加载、栅格化、缓存、外部资源解析。
+- `crates/tgui-runtime/src/animation/tests.rs`：属性动画和 timeline 行为。
+- `crates/tgui-runtime/src/audio/controller/tests.rs`、`crates/tgui-runtime/src/audio/backend/shared/tests.rs`、`crates/tgui-runtime/src/audio/backend/ffmpeg/tests.rs`：音频控制器、共享播放后端与 FFmpeg 会话逻辑。
+- `crates/tgui-runtime/src/video/backend/ffmpeg/*`：视频后端内部逻辑，需 feature/环境支持。
+- `crates/tgui-runtime/src/ui/widget/canvas/tests.rs`、`crates/tgui-runtime/src/ui/widget/common.rs`、`crates/tgui-runtime/src/ui/theme/mod.rs`、`crates/tgui-runtime/src/text/font/tests.rs` 等也有局部测试。
 
-修改共享行为时，不要只跑示例；至少跑相关模块测试。修改 `src/runtime/`、`src/ui/widget/core/` 或渲染 primitive 时，优先补充小型单元测试。文本选择、光标、IME、输入同步或滚动相关变更要优先覆盖 UTF-8 边界、选区、滚动和失效路径；通知变更优先覆盖 options 校验、平台约束和 completion 回调。
+修改共享行为时，不要只跑示例；至少跑相关模块测试。修改 `crates/tgui-runtime/src/runtime/`、`crates/tgui-runtime/src/ui/widget/core/` 或渲染 primitive 时，优先补充小型单元测试。文本选择、光标、IME、输入同步或滚动相关变更要优先覆盖 UTF-8 边界、选区、滚动和失效路径；通知变更优先覆盖 options 校验、平台约束和 completion 回调。
 
 ## 维护注意事项
 
-- 不要把 `src/runtime/` 或 `src/ui/widget/core/` 当作普通小模块随意大改；它们是行为集中区，牵涉输入、布局、缓存、渲染、命令和平台事件。
-- 公共 API 变更要同步检查 `src/lib.rs` 的 re-export、README、示例和文档。
-- `Cargo.toml` 的 `exclude` 会排除 `examples/*`、`docs/*`（独立 vitepress 站点）、`*.png`、`.github/*`、`AGENTS.md`、`CLAUDE.md`、`FINE_GRAINED_ROADMAP.md`、`skills/*` 等，发布相关变更时要留意资源和文档是否会进入 crate（`cargo package --allow-dirty --list` 核对）。
-- 新增平台能力时优先走 `platform.rs` 的后端抽象，并用 `cfg` 控制依赖和代码路径。
+- 不要把 `crates/tgui-runtime/src/runtime/` 或 `crates/tgui-runtime/src/ui/widget/core/` 当作普通小模块随意大改；它们是行为集中区，牵涉输入、布局、缓存、渲染、命令和平台事件。
+- 公共 API 变更要同步检查根 `src/lib.rs` facade、相关内部边界 crate 的 re-export、README、示例和文档。
+- `Cargo.toml` 的 `exclude` 会排除 `examples/*`、`docs/*`（独立 vitepress 站点）、`crates/*`、`benches/*`、`*.png`、`.github/*`、`AGENTS.md`、`CLAUDE.md`、`FINE_GRAINED_ROADMAP.md`、`skills/*`、`Video.md` 等，发布相关变更时要留意资源和文档是否会进入正确 crate（`cargo package -p <crate> --allow-dirty --list` 核对）。
+- 新增平台能力时优先走 `crates/tgui-runtime/src/platform/` 的后端抽象，并用 `cfg` 控制依赖和代码路径。
 - 新增窗口控制能力时同步检查 `ApplicationConfig` / `WindowSpec`、`CommandContext`、`WindowControl` 请求队列、runtime drain 逻辑、多窗口关闭策略和平台窗口 API。
 - 透明 / 无边框窗口相关改动要同时关注 `Application::decorations`、clear color alpha、surface alpha mode、平台后端选择和示例表现。
 - 新增视觉属性时通常需要同时考虑：widget builder、`VisualStyle` 或相关状态、scene primitive、动画 key、renderer/shader。
@@ -308,12 +331,13 @@ cargo run --manifest-path examples/<example_name>/Cargo.toml
 1. `README.md`
 2. `src/lib.rs`
 3. `examples/mvvm_counter/src/main.rs`
-4. `src/application/mod.rs`
-5. `src/foundation/binding/mod.rs`
-6. `src/foundation/view_model/mod.rs`
-7. 涉及文本选择、光标、IME、`Input` 或 `Textarea` 时读 `src/ui/widget/input/mod.rs`、`src/ui/widget/textarea/mod.rs`、`src/ui/widget/common.rs`、`src/ui/widget/core/` 和 `src/runtime/input/`
-8. 涉及通知时读 `src/notification/mod.rs`、`src/foundation/view_model/mod.rs` 中的 `CommandContext`，以及 `examples/demo/src/main.rs`
-9. 涉及窗口控制时读 `src/foundation/window_control.rs` 和 `examples/frameless_window/src/main.rs`
-10. `src/ui/widget/core/` 中的 `element.rs`、`layout.rs`、`render.rs`、`tree.rs` 等布局和渲染输出相关部分
-11. `src/runtime/mod.rs`、`src/runtime/commands.rs`、`src/runtime/theme.rs` 的事件处理部分
-12. 需要改渲染时再读 `src/rendering/renderer.rs` 与 `src/rendering/shader/*`
+4. `crates/tgui-runtime/src/lib.rs`
+5. `crates/tgui-runtime/src/application/mod.rs`
+6. `crates/tgui-runtime/src/foundation/binding/mod.rs`
+7. `crates/tgui-runtime/src/foundation/view_model/mod.rs`
+8. 涉及文本选择、光标、IME、`Input` 或 `Textarea` 时读 `crates/tgui-runtime/src/ui/widget/input/mod.rs`、`crates/tgui-runtime/src/ui/widget/textarea/mod.rs`、`crates/tgui-runtime/src/ui/widget/common.rs`、`crates/tgui-runtime/src/ui/widget/core/` 和 `crates/tgui-runtime/src/runtime/input/`
+9. 涉及通知时读 `crates/tgui-runtime/src/notification/mod.rs`、`crates/tgui-runtime/src/foundation/view_model/mod.rs` 中的 `CommandContext`，以及 `examples/demo/src/main.rs`
+10. 涉及窗口控制时读 `crates/tgui-runtime/src/foundation/window_control.rs` 和 `examples/frameless_window/src/main.rs`
+11. `crates/tgui-runtime/src/ui/widget/core/` 中的 `element.rs`、`layout.rs`、`render.rs`、`tree.rs` 等布局和渲染输出相关部分
+12. `crates/tgui-runtime/src/runtime/mod.rs`、`crates/tgui-runtime/src/runtime/commands.rs`、`crates/tgui-runtime/src/runtime/theme.rs` 的事件处理部分
+13. 需要改渲染时再读 `crates/tgui-runtime/src/rendering/renderer.rs` 与 `crates/tgui-runtime/src/rendering/shader/*`

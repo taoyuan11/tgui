@@ -24,23 +24,23 @@
 运行示例：
 
 ```sh
-cargo bench --bench widget_core_layout --features bench-support
+cargo bench -p tgui-benchmarks --bench widget_core_layout --features bench-support
 ```
 
 CI 至少编译所有 `bench-support` Criterion targets：
 
 ```sh
-cargo check --features bench-support --benches
+cargo bench -p tgui-benchmarks --no-run --features bench-support
 ```
 
-性能相关 PR 若触及 `src/runtime/`、`src/ui/widget/core/`、文本输入、Canvas、媒体、音频或视频，需跑对应 target，例如：
+性能相关 PR 若触及 `crates/tgui-runtime/src/runtime/`、`crates/tgui-runtime/src/ui/widget/core/`、文本输入、Canvas、媒体、音频或视频，需跑对应 target，例如：
 
 ```sh
-cargo bench --features bench-support --bench event_handling
-cargo bench --features bench-support --bench widget_core_layout
-cargo bench --features bench-support --bench canvas_scene
-cargo bench --features "bench-support audio" --bench audio_output
-cargo bench --features "bench-support video" --bench video_buffering
+cargo bench -p tgui-benchmarks --features bench-support --bench event_handling
+cargo bench -p tgui-benchmarks --features bench-support --bench widget_core_layout
+cargo bench -p tgui-benchmarks --features bench-support --bench canvas_scene
+cargo bench -p tgui-benchmarks --features "bench-support audio" --bench audio_output
+cargo bench -p tgui-benchmarks --features "bench-support video" --bench video_buffering
 ```
 
 ## ResourceBudget
@@ -93,4 +93,4 @@ Application::new()
 - 纯滚动 GPU 平移需要 adapter 支持 wgpu IMMEDIATES；不支持时自动走 CPU 子树重收集。
 - virtual、嵌套滚动、overlay/portal、IME、可见 scrollbar、复杂 clip 或 composite 等前置不满足时会回退，结果仍与全量重收集一致。
 
-> 性能数字与基线方法见仓库根目录的 `FINE_GRAINED_ROADMAP.md`（不随 crate 发布）；相关基准为 `single_property_update`（需 `bench-support`）。
+> 性能数字与基线方法见仓库根目录的 `FINE_GRAINED_ROADMAP.md`（不随 crate 发布）；相关基准为 `single_property_patch`（需 `bench-support`）。

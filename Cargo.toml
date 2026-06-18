@@ -1,18 +1,21 @@
 [package]
 name = "tgui"
 version = "0.2.0"
-authors = ["a2542209451@gmail.com"]
-edition = "2021"
-rust-version = "1.85"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "A modern, GPU-accelerated Rust GUI framework with MVVM, Taffy layout, and wgpu rendering."
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/nandebishitaoyuan/tgui.git"
+license.workspace = true
+repository.workspace = true
 readme = "README.md"
 keywords = ["gui", "graphics", "wgpu", "ui"]
 categories = ["gui", "rendering"]
+autobenches = false
 
 exclude = [
     "target/*",
+    ".DS_Store",
+    "**/.DS_Store",
     "*.png",
     ".github/*",
     "examples/*",
@@ -23,42 +26,50 @@ exclude = [
     "CLAUDE.md",
     "PRODUCTION_READINESS.md",
     "FINE_GRAINED_ROADMAP.md",
+    "TEMP_BENCHMARK_RESULTS.md",
     "Video.md",
     "publish.bat",
-    "skills/*"
+    "skills/*",
+    "crates/*",
+    "benches/*",
 ]
 
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
+[workspace]
+members = ["crates/*", "examples/*", "benches"]
+default-members = ["."]
+resolver = "2"
 
-[features]
-default = []
-audio = ["dep:ffmpeg-next", "dep:cpal"]
-video = ["audio"]
-video-static = ["video", "ffmpeg-next/static"]
-bench-support = []
-# 可选：用 mimalloc 替换全局分配器。场景收集是分配密集型热路径
-# （per-frame SmallVec 溢出、文本整形、HashMap），mimalloc 在 macOS/Windows 上
-# 通常带来 10-25% 的分配吞吐改善。作为库默认不开启——是否替换全局分配器应由
-# 下游二进制 crate 决定，避免与其分配器选择冲突。
-mimalloc = ["dep:mimalloc"]
-# 逐帧场景重收集的相位计时探针(collect_profile)。与 bench-support 解耦:criterion
-# 基准只开 bench-support,probe 编译成 inline 空操作,热路径零成本、不污染基准数字。
-# 需要相位画像时单独开启 collect-profile(它自动带上 bench-support)。
-collect-profile = ["bench-support"]
+[workspace.package]
+version = "0.2.0"
+authors = ["a2542209451@gmail.com"]
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nandebishitaoyuan/tgui.git"
 
-[dependencies]
+[workspace.dependencies]
+tgui = { path = ".", version = "0.2.0", default-features = false }
+tgui-core = { path = "crates/tgui-core", version = "0.2.0", default-features = false }
+tgui-log = { path = "crates/tgui-log", version = "0.2.0", default-features = false }
+tgui-media = { path = "crates/tgui-media", version = "0.2.0", default-features = false }
+tgui-mvvm = { path = "crates/tgui-mvvm", version = "0.2.0", default-features = false }
+tgui-platform = { path = "crates/tgui-platform", version = "0.2.0", default-features = false }
+tgui-rendering = { path = "crates/tgui-rendering", version = "0.2.0", default-features = false }
+tgui-runtime = { path = "crates/tgui-runtime", version = "0.2.0", default-features = false }
+tgui-ui = { path = "crates/tgui-ui", version = "0.2.0", default-features = false }
+
 accesskit = "0.24"
 bytemuck = { version = "1.24", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 cosmic-text = "0.19"
+criterion = { version = "0.8.2", features = ["html_reports"] }
 crossbeam-channel = "0.5"
 dpi = "0.1.2"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-image = { version = "0.25", default-features = true, features = ["jpeg", "png", "gif", "webp", "bmp"] }
+ffmpeg-next = { version = "8.0.0", default-features = false, features = ["codec", "format", "software-resampling", "software-scaling"] }
 geo = "0.33"
+image = { version = "0.25", default-features = true, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 lyon = "1.0"
-mimalloc = { version = "0.1", optional = true }
+mimalloc = "0.1"
 parking_lot = "0.12"
 pollster = "0.4"
 pulldown-cmark = "0.13.4"
@@ -67,99 +78,49 @@ resvg = "0.47"
 ropey = "1.6"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 smallvec = "1.15"
+svgtypes = "0.16.1"
 taffy = "0.10"
+toml_edit = { version = "0.25", default-features = false, features = ["parse"] }
 unicode-segmentation = "1.12"
 usvg-remote-resolvers = { version = "0.2", features = ["reqwest_blocking"] }
-svgtypes = "0.16.1"
-toml_edit = { version = "0.25", default-features = false, features = ["parse"] }
-winit-core = "0.31.0-beta.2"
 wgpu = { version = "29", features = ["wgsl"] }
-ffmpeg-next = { version = "8.0.0", optional = true, default-features = false, features = ["codec", "format", "software-resampling", "software-scaling"] }
+winit-core = "0.31.0-beta.2"
 
-[target.'cfg(target_os = "windows")'.dependencies]
+accesskit_macos = "0.26.1"
+accesskit_unix = "0.21.1"
 accesskit_windows = "0.33"
 arboard = "3.6"
-cpal = { version = "0.17.3", optional = true }
-log = "0.4.30"
-raw-window-handle = "0.6"
-rfd = "0.17"
-stacker = "0.1.24"
-windows = { version = "0.62.2", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"] }
-winit-win32 = "0.31.0-beta.2"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-accesskit_macos = "0.26.1"
-arboard = "3.6"
 block2 = "0.6.2"
-cpal = { version = "0.17.3", optional = true }
+cpal = "0.17.3"
 log = "0.4.30"
+notify-rust = "4"
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-user-notifications = "0.3.2"
 raw-window-handle = "0.6"
 rfd = "0.17"
 stacker = "0.1.24"
+windows = { version = "0.62.2", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"] }
 winit-appkit = "0.31.0-beta.2"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-accesskit_unix = "0.21.1"
-arboard = "3.6"
-cpal = { version = "0.17.3", optional = true }
-log = "0.4.30"
-notify-rust = "4"
-raw-window-handle = "0.6"
-rfd = "0.17"
-stacker = "0.1.24"
 winit-wayland = "0.31.0-beta.2"
+winit-win32 = "0.31.0-beta.2"
 winit-x11 = "0.31.0-beta.2"
 
-[dev-dependencies]
-criterion = { version = "0.8.2", features = ["html_reports"] }
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
-[[bench]]
-name = "animation"
-harness = false
+[features]
+default = []
+audio = ["tgui-runtime/audio"]
+video = ["tgui-runtime/video"]
+video-static = ["tgui-runtime/video-static"]
+bench-support = ["tgui-runtime/bench-support"]
+collect-profile = ["tgui-runtime/collect-profile"]
+# 可选：用 mimalloc 替换全局分配器。作为 facade feature 保留，由下游二进制
+# crate 决定是否启用，避免内部实现 crate 意外选择全局分配器。
+mimalloc = ["dep:mimalloc"]
 
-[[bench]]
-name = "audio_output"
-harness = false
-
-[[bench]]
-name = "canvas_scene"
-harness = false
-
-[[bench]]
-name = "event_handling"
-harness = false
-
-[[bench]]
-name = "media_source"
-harness = false
-
-[[bench]]
-name = "real_widget_pipeline"
-harness = false
-
-[[bench]]
-name = "scene_rendering"
-harness = false
-
-[[bench]]
-name = "single_property_patch"
-harness = false
-
-[[bench]]
-name = "state_signal"
-harness = false
-
-[[bench]]
-name = "text_processing"
-harness = false
-
-[[bench]]
-name = "video_buffering"
-harness = false
-
-[[bench]]
-name = "widget_core_layout"
-harness = false
+[dependencies]
+mimalloc = { workspace = true, optional = true }
+tgui-runtime = { workspace = true }

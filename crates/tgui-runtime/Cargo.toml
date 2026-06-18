@@ -1,0 +1,89 @@
+[package]
+name = "tgui-runtime"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Internal runtime and implementation crate for tgui."
+license.workspace = true
+repository.workspace = true
+publish = true
+
+[lib]
+doctest = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+audio = ["dep:ffmpeg-next", "dep:cpal"]
+video = ["audio"]
+video-static = ["video", "ffmpeg-next/static"]
+bench-support = []
+collect-profile = ["bench-support"]
+
+[dependencies]
+accesskit.workspace = true
+bytemuck.workspace = true
+chrono.workspace = true
+cosmic-text.workspace = true
+crossbeam-channel.workspace = true
+dpi.workspace = true
+ffmpeg-next = { workspace = true, optional = true }
+geo.workspace = true
+image.workspace = true
+lyon.workspace = true
+parking_lot.workspace = true
+pollster.workspace = true
+pulldown-cmark.workspace = true
+reqwest.workspace = true
+resvg.workspace = true
+ropey.workspace = true
+rustls.workspace = true
+smallvec.workspace = true
+svgtypes.workspace = true
+taffy.workspace = true
+toml_edit.workspace = true
+unicode-segmentation.workspace = true
+usvg-remote-resolvers.workspace = true
+wgpu.workspace = true
+winit-core.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+accesskit_windows.workspace = true
+arboard.workspace = true
+cpal = { workspace = true, optional = true }
+log.workspace = true
+raw-window-handle.workspace = true
+rfd.workspace = true
+stacker.workspace = true
+windows.workspace = true
+winit-win32.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+accesskit_macos.workspace = true
+arboard.workspace = true
+block2.workspace = true
+cpal = { workspace = true, optional = true }
+log.workspace = true
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-user-notifications.workspace = true
+raw-window-handle.workspace = true
+rfd.workspace = true
+stacker.workspace = true
+winit-appkit.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+accesskit_unix.workspace = true
+arboard.workspace = true
+cpal = { workspace = true, optional = true }
+log.workspace = true
+notify-rust.workspace = true
+raw-window-handle.workspace = true
+rfd.workspace = true
+stacker.workspace = true
+winit-wayland.workspace = true
+winit-x11.workspace = true

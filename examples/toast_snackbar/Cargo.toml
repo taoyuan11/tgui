@@ -2,6 +2,7 @@
 name = "toast_snackbar"
 version = "0.1.0"
 edition = "2024"
+publish = false
 
 [dependencies]
-tgui = { path = "../.." }
+tgui = { workspace = true }

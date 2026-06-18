@@ -1,0 +1,21 @@
+[package]
+name = "tgui-ui"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Layout, theme, widgets, and canvas boundary for tgui."
+license.workspace = true
+repository.workspace = true
+publish = true
+
+[features]
+default = []
+audio = ["tgui-runtime/audio"]
+video = ["tgui-runtime/video"]
+video-static = ["tgui-runtime/video-static"]
+bench-support = ["tgui-runtime/bench-support"]
+collect-profile = ["tgui-runtime/collect-profile"]
+
+[dependencies]
+tgui-runtime = { workspace = true }

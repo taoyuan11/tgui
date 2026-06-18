@@ -1,10 +1,11 @@
 # 示例索引
 
-仓库示例位于 `examples/`，每个示例都是独立 Cargo 工程。
+仓库示例位于 `examples/`，每个示例都是 workspace member，也可以继续通过独立 manifest 运行。
 
 ## 运行方式
 
 ```sh
+cargo run -p basic_window
 cargo run --manifest-path examples/basic_window/Cargo.toml
 ```
 
