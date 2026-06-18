@@ -79,7 +79,7 @@ ropey = "1.6"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 smallvec = "1.15"
 svgtypes = "0.16.1"
-taffy = "0.10"
+taffy = "0.11"
 toml_edit = { version = "0.25", default-features = false, features = ["parse"] }
 unicode-segmentation = "1.12"
 usvg-remote-resolvers = { version = "0.2", features = ["reqwest_blocking"] }
