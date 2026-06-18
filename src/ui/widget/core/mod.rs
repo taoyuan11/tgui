@@ -42,12 +42,12 @@ use super::common::VideoTexturePrimitive;
 use super::common::{
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
     BackdropBlurPrimitive, BrushPrimitive, ClipMask, ComputedScene, ContainerKind, ContainerLayout,
-    CursorStyle, FileDropEvent, HitGeometry, HitInteraction, HitRegion, InteractionHandlers,
-    LayoutNode, LifecycleEventHandlers, LifecycleEventState, MeasureContext, MediaEventHandlers,
-    MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive, ScenePrimitives, ScrollRegion,
-    ScrollbarAxis, ScrollbarHandle, SelectOptionState, SliderValueFormatter,
-    TextDecorationPrimitive, TextEditState, TextInputContentGeometry, TextPrimitive,
-    TexturePrimitive, VisualStyle, WidgetId, WidgetKey, WidgetKind, WidgetStateMap,
+    CursorStyle, FileDropEvent, HitGeometry, HitInteraction, HitPath, HitRegion, HitTargetId,
+    InteractionHandlers, LayoutNode, LifecycleEventHandlers, LifecycleEventState, MeasureContext,
+    MediaEventHandlers, MediaEventPhase, MediaEventState, Point, Rect, RenderPrimitive,
+    ScenePrimitives, ScrollRegion, ScrollbarAxis, ScrollbarHandle, SelectOptionState,
+    SliderValueFormatter, TextDecorationPrimitive, TextEditState, TextInputContentGeometry,
+    TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKey, WidgetKind, WidgetStateMap,
 };
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;

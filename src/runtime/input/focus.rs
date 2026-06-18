@@ -1,5 +1,6 @@
 use super::*;
 use crate::ui::widget::ScrollRegion;
+use smallvec::SmallVec;
 
 struct FocusCandidate<VM> {
     widget_id: WidgetId,
@@ -25,7 +26,6 @@ impl<VM> Clone for FocusCandidate<VM> {
 
 #[derive(Clone)]
 struct FocusNavigationSnapshot<VM> {
-    active_trap_scope: Option<Vec<WidgetId>>,
     active_auto_focus_scope: Option<Vec<WidgetId>>,
     candidates: Vec<FocusCandidate<VM>>,
 }
@@ -36,12 +36,7 @@ fn scope_path_within(path: &[WidgetId], scope: &[WidgetId]) -> bool {
 
 impl<VM> FocusNavigationSnapshot<VM> {
     fn from_scene(computed: &crate::ui::widget::ComputedScene<VM>) -> Self {
-        let active_trap_scope = computed
-            .focus_scopes
-            .iter()
-            .rev()
-            .find(|scope| scope.active && scope.options.is_trap())
-            .map(|scope| scope.path.clone());
+        let active_trap_scope = active_focus_trap_scope_from_scene(computed);
         let active_auto_focus_scope = computed
             .focus_scopes
             .iter()
@@ -49,7 +44,8 @@ impl<VM> FocusNavigationSnapshot<VM> {
             .find(|scope| scope.active && scope.options.is_auto_focus_first())
             .map(|scope| scope.path.clone());
         let mut candidates = Vec::new();
-        let mut seen = HashSet::new();
+        let mut seen_inline = SmallVec::<[WidgetId; 16]>::new();
+        let mut seen_heap = None;
         for region in computed
             .hit_regions
             .iter()
@@ -66,7 +62,7 @@ impl<VM> FocusNavigationSnapshot<VM> {
                     continue;
                 }
             }
-            if !seen.insert(focus.widget_id) {
+            if !insert_seen_focus(&mut seen_inline, &mut seen_heap, focus.widget_id) {
                 continue;
             }
             candidates.push(FocusCandidate {
@@ -91,7 +87,6 @@ impl<VM> FocusNavigationSnapshot<VM> {
             }
         });
         Self {
-            active_trap_scope,
             active_auto_focus_scope,
             candidates,
         }
@@ -103,6 +98,44 @@ impl<VM> FocusNavigationSnapshot<VM> {
             .find(|candidate| scope_path_within(&candidate.scope_path, scope))
             .cloned()
     }
+}
+
+fn active_focus_trap_scope_from_scene<VM>(
+    computed: &crate::ui::widget::ComputedScene<VM>,
+) -> Option<Vec<WidgetId>> {
+    computed
+        .focus_scopes
+        .iter()
+        .rev()
+        .find(|scope| scope.active && scope.options.is_trap())
+        .map(|scope| scope.path.clone())
+}
+
+fn insert_seen_focus(
+    seen_inline: &mut SmallVec<[WidgetId; 16]>,
+    seen_heap: &mut Option<std::collections::HashSet<WidgetId>>,
+    widget_id: WidgetId,
+) -> bool {
+    if let Some(seen) = seen_heap.as_mut() {
+        return seen.insert(widget_id);
+    }
+
+    if seen_inline.contains(&widget_id) {
+        return false;
+    }
+
+    if seen_inline.len() < 16 {
+        seen_inline.push(widget_id);
+        return true;
+    }
+
+    let mut seen = seen_inline
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    let inserted = seen.insert(widget_id);
+    *seen_heap = Some(seen);
+    inserted
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
@@ -181,7 +214,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn active_focus_trap_scope(&mut self) -> Option<Vec<WidgetId>> {
-        FocusNavigationSnapshot::from_scene(self.computed_scene()).active_trap_scope
+        active_focus_trap_scope_from_scene(self.computed_scene())
     }
 
     fn focus_candidates(&mut self) -> Vec<FocusCandidate<VM>> {

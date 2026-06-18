@@ -1,15 +1,20 @@
 use super::select_state::HoverMoveOrTransition;
 use super::*;
+use crate::ui::widget::HitPath;
+use smallvec::SmallVec;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
-    pub(in crate::runtime) fn hit_path(&mut self, _viewport: Rect) -> Vec<HitInteraction<VM>> {
+    pub(in crate::runtime) fn hit_path(&mut self, _viewport: Rect) -> HitPath<VM> {
         let Some(point) = self.cursor_position else {
-            return Vec::new();
+            return HitPath::new();
         };
         WidgetTree::hit_path_from_computed(self.computed_scene(), point)
     }
 
-    pub(in crate::runtime) fn hover_path(&mut self, viewport: Rect) -> Vec<HoveredWidget<VM>> {
+    pub(in crate::runtime) fn hover_path(
+        &mut self,
+        viewport: Rect,
+    ) -> SmallVec<[HoveredWidget<VM>; 8]> {
         let hit_path = self.hit_path(viewport);
         let topmost_canvas_item = hit_path
             .iter()

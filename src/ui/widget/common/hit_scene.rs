@@ -330,6 +330,8 @@ pub(crate) enum HitInteraction<VM> {
     },
 }
 
+pub(crate) type HitPath<VM> = smallvec::SmallVec<[HitInteraction<VM>; 8]>;
+
 impl<VM> Clone for HitInteraction<VM> {
     fn clone(&self) -> Self {
         match self {
@@ -775,31 +777,27 @@ impl<VM> HitRegion<VM> {
         delta
     }
 
-    pub(crate) fn contains_transformed(
+    pub(crate) fn hit_delta_if_contains(
         &self,
         point: Point,
         transform_records: &std::collections::HashMap<WidgetId, TransformRecord>,
-    ) -> bool {
+    ) -> Option<Point> {
         let delta = self.transform_delta(transform_records);
         let local_point = Point {
             x: point.x - delta.x,
             y: point.y - delta.y,
         };
-        self.rect.contains(local_point)
+        (self.rect.contains(local_point)
             && self
                 .clip_rect
                 .map(|clip_rect| clip_rect.contains(point))
                 .unwrap_or(true)
-            && self.geometry.contains(local_point)
+            && self.geometry.contains(local_point))
+        .then_some(delta)
     }
 
-    pub(crate) fn transformed_interaction(
-        &self,
-        transform_records: &std::collections::HashMap<WidgetId, TransformRecord>,
-    ) -> HitInteraction<VM> {
-        self.interaction
-            .clone()
-            .translated(self.transform_delta(transform_records))
+    pub(crate) fn interaction_translated(&self, delta: Point) -> HitInteraction<VM> {
+        self.interaction.clone().translated(delta)
     }
 
     pub(crate) fn supports_retained_transform(&self) -> bool {

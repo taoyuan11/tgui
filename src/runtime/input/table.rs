@@ -5,6 +5,7 @@ use crate::ui::widget::{
     DataGridSelectionChange, DataGridSelectionMode, DataGridSelectionTrigger, DataGridSort,
     DataGridSortChange, DataGridSortDirection, DataGridSortTrigger, WidgetKey,
 };
+use smallvec::SmallVec;
 
 struct DataGridKeyboardTarget<VM> {
     id: WidgetId,
@@ -320,7 +321,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             })
     }
 
-    fn data_grid_targets(&mut self, grid_id: WidgetId) -> Vec<DataGridKeyboardTarget<VM>> {
+    fn data_grid_targets(
+        &mut self,
+        grid_id: WidgetId,
+    ) -> SmallVec<[DataGridKeyboardTarget<VM>; 32]> {
         let computed = self.computed_scene();
         let mut targets = computed
             .hit_regions
@@ -338,7 +342,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect::<SmallVec<[_; 32]>>();
         targets.sort_by_key(|target| (target.state.virtual_row_index, target.state.column_index));
         targets
     }

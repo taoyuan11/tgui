@@ -1,5 +1,6 @@
 use super::super::state::{SMOOTH_SCROLL_EPSILON, SMOOTH_SCROLL_LERP};
 use super::*;
+use smallvec::SmallVec;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn begin_touch_scroll_drag(&mut self, viewport: Rect) -> bool {
@@ -219,12 +220,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let mut changed = false;
-        let mut finished = Vec::new();
-        let updates: Vec<_> = self
+        let mut finished = SmallVec::<[WidgetId; 8]>::new();
+        let updates = self
             .touch_scroll_inertia_states
             .iter()
             .map(|(widget_id, state)| (*widget_id, *state))
-            .collect();
+            .collect::<SmallVec<[(WidgetId, TouchScrollInertiaState); 8]>>();
 
         for (widget_id, mut state) in updates {
             let elapsed = now
@@ -415,12 +416,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let mut changed = false;
-        let mut finished = Vec::new();
-        let updates: Vec<_> = self
+        let mut finished = SmallVec::<[WidgetId; 8]>::new();
+        let updates = self
             .smooth_scroll_states
             .iter()
             .map(|(widget_id, state)| (*widget_id, *state))
-            .collect();
+            .collect::<SmallVec<[(WidgetId, SmoothScrollState); 8]>>();
 
         for (widget_id, state) in updates {
             let current = self

@@ -65,12 +65,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .collect()
     }
 
-    pub(in crate::runtime) fn sync_text_input_regions_from_computed(
+    pub(in crate::runtime) fn sync_text_inputs_from_computed(
         &mut self,
         computed: &ComputedScene<VM>,
     ) {
-        let mut regions = HashMap::new();
-        let mut flush_data = HashMap::new();
+        let mut widget_ids = smallvec::SmallVec::<[WidgetId; 4]>::new();
+        self.text_input_regions.clear();
+        self.text_input_flush_data.clear();
         for region in computed
             .hit_regions
             .iter()
@@ -93,7 +94,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 continue;
             };
 
-            regions.insert(
+            widget_ids.push(*id);
+            self.text_input_regions.insert(
                 *id,
                 TextInputRegionData {
                     controller: controller.clone(),
@@ -107,7 +109,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     on_change_set: on_change_set.clone(),
                 },
             );
-            flush_data.insert(
+            self.text_input_flush_data.insert(
                 *id,
                 TextInputFlushData {
                     controller: controller.clone(),
@@ -116,44 +118,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 },
             );
         }
-        self.text_input_regions = regions;
-        self.text_input_flush_data = flush_data;
-    }
 
-    pub(in crate::runtime) fn sync_visible_text_input_buffers(
-        &mut self,
-        computed: &ComputedScene<VM>,
-    ) {
-        let widget_ids: Vec<_> = computed
-            .hit_regions
-            .iter()
-            .chain(computed.overlay_hit_regions.iter())
-            .filter_map(|region| match &region.interaction {
-                HitInteraction::TextInput { id, .. } => Some(*id),
-                _ => None,
-            })
-            .collect();
+        if widget_ids.len() <= 8 {
+            self.text_input_buffers
+                .retain(|widget_id, _| widget_ids.contains(widget_id));
+        } else {
+            let active_ids: std::collections::HashSet<_> = widget_ids.iter().copied().collect();
+            self.text_input_buffers
+                .retain(|widget_id, _| active_ids.contains(widget_id));
+        }
+
         for widget_id in widget_ids {
             let _ = self.sync_text_input_buffer(widget_id);
         }
-    }
-
-    pub(in crate::runtime) fn prune_text_input_buffers(&mut self, computed: &ComputedScene<VM>) {
-        let active_ids: HashSet<_> = computed
-            .hit_regions
-            .iter()
-            .chain(computed.overlay_hit_regions.iter())
-            .filter_map(|region| match &region.interaction {
-                HitInteraction::TextInput { id, .. } => Some(*id),
-                _ => None,
-            })
-            .collect();
-        self.text_input_buffers
-            .retain(|widget_id, _| active_ids.contains(widget_id));
-        self.text_input_regions
-            .retain(|widget_id, _| active_ids.contains(widget_id));
-        self.text_input_flush_data
-            .retain(|widget_id, _| active_ids.contains(widget_id));
     }
 
     pub(in crate::runtime) fn caret_visible_at(

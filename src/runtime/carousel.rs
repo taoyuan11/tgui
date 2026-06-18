@@ -1,18 +1,17 @@
-use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use crate::foundation::view_model::ValueCommand;
+use smallvec::SmallVec;
 
 use super::*;
 
 #[derive(Clone)]
-struct CarouselAutoPlaySnapshot<VM: 'static> {
+struct CarouselAutoPlaySnapshot {
     id: WidgetId,
     frame: Rect,
     selected: usize,
     count: usize,
     interval: Duration,
-    on_change: Option<ValueCommand<VM, usize>>,
+    has_on_change: bool,
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
@@ -20,7 +19,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let snapshots = {
             let states = &self.computed_scene().carousel_auto_play;
             if states.is_empty() {
-                Vec::new()
+                SmallVec::new()
             } else {
                 states
                     .iter()
@@ -30,9 +29,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         selected: state.selected,
                         count: state.count,
                         interval: state.interval,
-                        on_change: state.on_change.clone(),
+                        has_on_change: state.on_change.is_some(),
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<SmallVec<[_; 2]>>()
             }
         };
         if snapshots.is_empty() {
@@ -44,16 +43,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let active_ids = snapshots
             .iter()
             .map(|state| state.id)
-            .collect::<HashSet<_>>();
+            .collect::<SmallVec<[_; 2]>>();
         self.carousel_auto_play_last
             .retain(|id, _| active_ids.contains(id));
 
         let mut next_deadline: Option<Instant> = None;
         let cursor_position = self.cursor_position;
-        let mut due_targets = Vec::new();
+        let mut due_targets = SmallVec::<[(WidgetId, usize); 2]>::new();
 
         for state in &snapshots {
-            if state.count < 2 || state.interval == Duration::ZERO || state.on_change.is_none() {
+            if state.count < 2 || state.interval == Duration::ZERO || !state.has_on_change {
                 continue;
             }
 
@@ -80,17 +79,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        let mut changed = false;
-        for (id, target) in due_targets {
-            let command = snapshots
+        let commands = {
+            let states = &self.computed_scene().carousel_auto_play;
+            due_targets
                 .iter()
-                .find(|state| state.id == id)
-                .and_then(|state| state.on_change.as_ref());
+                .filter_map(|(id, target)| {
+                    states
+                        .iter()
+                        .find(|state| state.id == *id)
+                        .and_then(|state| state.on_change.clone())
+                        .map(|command| (command, *target))
+                })
+                .collect::<SmallVec<[_; 2]>>()
+        };
 
-            if let Some(command) = command {
-                self.execute_value_command(command, target);
-                changed = true;
-            }
+        let changed = !commands.is_empty();
+        for (command, target) in commands {
+            self.execute_value_command(&command, target);
         }
 
         if changed {

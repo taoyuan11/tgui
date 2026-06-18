@@ -126,20 +126,14 @@ fn progress_bar_indeterminate_segment_travels_through_track_edges() {
     );
 
     assert_eq!(start_track.rect, end_track.rect);
-    assert_eq!(start_segments.len(), 2);
-    assert_eq!(end_segments.len(), 2);
+    assert_eq!(start_segments.len(), 1);
+    assert_eq!(end_segments.len(), 1);
     assert!(start_segments[0].rect.x < start_track.rect.x);
     assert!((start_segments[0].rect.right().get() - start_track.rect.x.get()).abs() <= 0.01);
     assert!(
         (start_segments[0].rect.x.get() - end_segments[0].rect.x.get()).abs() <= 0.01,
-        "phase wrap should keep the first marquee segment continuous"
+        "phase wrap should keep the marquee segment continuous"
     );
-    assert!(
-        (start_segments[1].rect.x.get() - end_segments[1].rect.x.get()).abs() <= 0.01,
-        "phase wrap should keep the second marquee segment continuous"
-    );
-    assert!(start_segments[1].rect.x > start_track.rect.x);
-    assert!(start_segments[1].rect.x < start_track.rect.right());
 
     let expected_clip_mask = Some(ClipMask {
         rect: start_track.rect,
@@ -283,10 +277,10 @@ fn render_indeterminate_progress_at(
         )
         .rendered();
 
-    assert!(rendered.primitives.shapes.len() >= 3);
+    assert!(rendered.primitives.shapes.len() >= 2);
     (
         rendered.primitives.shapes[0],
-        rendered.primitives.shapes[1..3].to_vec(),
+        rendered.primitives.shapes[1..2].to_vec(),
     )
 }
 

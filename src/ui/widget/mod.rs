@@ -101,7 +101,7 @@ pub(crate) use common::{
     CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask, CompositionState, ComputedScene,
     ContainerLayout, DataGridCellState, DataGridHeaderState, DataGridResizeHandleState,
     DefaultActivation, DirtyDrawRange, FocusScopeState, FocusTargetMeta, HitGeometry,
-    HitInteraction, HitRegion, HitTargetId, InteractionHandlers, LifecycleEventHandlers,
+    HitInteraction, HitPath, HitRegion, HitTargetId, InteractionHandlers, LifecycleEventHandlers,
     LifecycleEventState, ListItemState, MeasureContext, MediaEventPhase, MediaEventState,
     MeshPrimitive, MeshVertex, OverlayShapePrimitiveSlot, OverlayTextDecorationPrimitiveSlot,
     OverlayTextPrimitiveSlot, OverlayTexturePrimitiveSlot, RenderCommand, SceneCounts,

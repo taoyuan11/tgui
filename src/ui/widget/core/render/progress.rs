@@ -108,21 +108,19 @@ pub(crate) fn push_progress_bar_primitives(
                 clip_mask
             };
             if let Some(segment_clip_rect) = segment_clip_rect {
-                for phase_offset in [0.0, 0.5] {
-                    scene.push_shape(RenderPrimitive {
-                        rect: Rect::new(
-                            x_for_phase_offset(phase_offset),
-                            track_rect.y,
-                            segment_width,
-                            track_rect.height,
-                        ),
-                        color: fill_color,
-                        corner_radius: radius,
-                        stroke_width: 0.0,
-                        clip_rect: Some(segment_clip_rect),
-                        clip_mask: segment_clip_mask,
-                    });
-                }
+                scene.push_shape(RenderPrimitive {
+                    rect: Rect::new(
+                        x_for_phase_offset(0.0),
+                        track_rect.y,
+                        segment_width,
+                        track_rect.height,
+                    ),
+                    color: fill_color,
+                    corner_radius: radius,
+                    stroke_width: 0.0,
+                    clip_rect: Some(segment_clip_rect),
+                    clip_mask: segment_clip_mask,
+                });
             }
         } else {
             let fill_width =

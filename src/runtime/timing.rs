@@ -162,7 +162,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             (!self.smooth_scroll_states.is_empty()).then_some(now + Duration::from_millis(16));
         let touch_scroll_inertia_deadline = (!self.touch_scroll_inertia_states.is_empty())
             .then_some(now + super::TOUCH_SCROLL_INERTIA_FRAME);
-        let next_deadline = self.next_deadline(now);
+        let tooltip_deadline = self.next_tooltip_wakeup_deadline;
+        let toast_deadline = self.next_toast_wakeup_deadline;
+        let next_deadline = super::handler_support::earliest_deadline([
+            animation_deadline,
+            controller_deadline,
+            media_deadline,
+            click_deadline,
+            gesture_deadline,
+            tooltip_release_deadline,
+            caret_deadline,
+            key_repeat_deadline,
+            smooth_scroll_deadline,
+            touch_scroll_inertia_deadline,
+            tooltip_deadline,
+            toast_deadline,
+            carousel_deadline,
+        ]);
 
         self.set_control_flow_for_deadline(event_loop, next_deadline, now);
 
@@ -210,6 +226,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn animated_theme(&mut self, now: Instant) -> Theme {
+        if self.theme_colors_settled() {
+            return self.theme.clone();
+        }
         let transition = Some(default_theme_transition());
         let mut theme = self.theme.clone();
         theme.colors.background = self.resolve_theme_color(
@@ -273,5 +292,53 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             now,
         );
         theme
+    }
+
+    pub(in crate::runtime) fn theme_background_color(&mut self, now: Instant) -> Color {
+        if self.window_color_settled_at(
+            WindowProperty::ThemeBackground,
+            self.theme.colors.background,
+        ) {
+            self.theme.colors.background
+        } else {
+            self.resolve_theme_color(
+                WindowProperty::ThemeBackground,
+                self.theme.colors.background,
+                Some(default_theme_transition()),
+                now,
+            )
+        }
+    }
+
+    fn theme_colors_settled(&self) -> bool {
+        [
+            (
+                WindowProperty::ThemeBackground,
+                self.theme.colors.background,
+            ),
+            (WindowProperty::ThemeSurface, self.theme.colors.surface),
+            (
+                WindowProperty::ThemeSurfaceLow,
+                self.theme.colors.surface_low,
+            ),
+            (
+                WindowProperty::ThemeSurfaceHigh,
+                self.theme.colors.surface_high,
+            ),
+            (WindowProperty::ThemePrimary, self.theme.colors.primary),
+            (WindowProperty::ThemeOnSurface, self.theme.colors.on_surface),
+            (
+                WindowProperty::ThemeOnSurfaceMuted,
+                self.theme.colors.on_surface_muted,
+            ),
+            (
+                WindowProperty::ThemePrimaryContainer,
+                self.theme.colors.primary_container,
+            ),
+            (WindowProperty::ThemeFocusRing, self.theme.colors.focus_ring),
+            (WindowProperty::ThemeSelection, self.theme.colors.selection),
+        ]
+        .into_iter()
+        .all(|(property, target)| self.window_color_settled_at(property, target))
     }
 }

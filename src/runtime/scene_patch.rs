@@ -603,9 +603,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        self.prune_text_input_buffers(&updated_computed);
-        self.sync_text_input_regions_from_computed(&updated_computed);
-        self.sync_visible_text_input_buffers(&updated_computed);
+        self.sync_text_inputs_from_computed(&updated_computed);
         self.rebuild_reactive_slot_bindings(now);
         self.rebuild_media_texture_bindings();
         self.rebuild_caret_decoration_binding();

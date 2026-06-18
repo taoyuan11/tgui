@@ -3,6 +3,7 @@ use crate::ui::widget::{
     ListItemAction, ListItemState, ListSelectionChange, ListSelectionMode, ListSelectionTrigger,
     ScrollRegion, WidgetKey,
 };
+use smallvec::SmallVec;
 
 struct ListKeyboardTarget<VM> {
     id: WidgetId,
@@ -200,7 +201,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             })
     }
 
-    fn list_targets(&mut self, list_id: WidgetId) -> Vec<ListKeyboardTarget<VM>> {
+    fn list_targets(&mut self, list_id: WidgetId) -> SmallVec<[ListKeyboardTarget<VM>; 16]> {
         let computed = self.computed_scene();
         let mut targets = computed
             .hit_regions
@@ -218,7 +219,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect::<SmallVec<[_; 16]>>();
         targets.sort_by_key(|target| target.state.row_index);
         targets
     }

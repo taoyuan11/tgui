@@ -12,6 +12,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .resolve_color(AnimationKey::Window(property), target, transition, now)
     }
 
+    pub(super) fn window_color_settled_at(&self, property: WindowProperty, target: Color) -> bool {
+        self.animation_engine
+            .color_settled_at(AnimationKey::Window(property), target)
+    }
+
     pub(super) fn next_deadline(&self, now: Instant) -> Option<Instant> {
         let animation_deadline = self.animation_engine.next_frame_deadline(now);
         let controller_deadline = self.animations.next_frame_deadline(now);
@@ -31,7 +36,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let tooltip_deadline = self.next_tooltip_wakeup_deadline;
         let toast_deadline = self.next_toast_wakeup_deadline;
         let carousel_deadline = self.next_carousel_wakeup_deadline;
-        [
+        earliest_deadline([
             animation_deadline,
             controller_deadline,
             media_deadline,
@@ -45,10 +50,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             tooltip_deadline,
             toast_deadline,
             carousel_deadline,
-        ]
-        .into_iter()
-        .flatten()
-        .min()
+        ])
     }
 
     pub(super) fn set_control_flow_for_deadline(
@@ -102,11 +104,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
-    pub(super) fn active_media_texture_keys(&self) -> Vec<crate::media::MediaTextureKey> {
+    pub(super) fn active_media_texture_keys(
+        &self,
+    ) -> impl Iterator<Item = &crate::media::MediaTextureKey> {
         self.cached_scene
             .as_ref()
-            .map(|cached| cached.media_texture_bindings.keys().cloned().collect())
-            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|cached| cached.media_texture_bindings.keys())
     }
 
     pub(super) fn next_media_animation_deadline(&self) -> Option<Instant> {
@@ -271,4 +275,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             window.set_visible(true);
         }
     }
+}
+
+pub(super) fn earliest_deadline<const N: usize>(
+    deadlines: [Option<Instant>; N],
+) -> Option<Instant> {
+    deadlines.into_iter().flatten().min()
 }

@@ -169,15 +169,18 @@ impl<VM: 'static> WidgetTree<VM> {
     pub(crate) fn hit_path_from_computed(
         computed: &ComputedScene<VM>,
         point: Point,
-    ) -> Vec<HitInteraction<VM>> {
-        let mut path = Vec::new();
-        let mut ids = Vec::new();
+    ) -> HitPath<VM> {
+        let mut path = HitPath::<VM>::new();
+        let mut ids = smallvec::SmallVec::<[HitTargetId; 8]>::new();
 
-        for hit in computed
+        for (hit, delta) in computed
             .hit_regions
             .iter()
             .chain(computed.overlay_hit_regions.iter())
-            .filter(|hit| hit.contains_transformed(point, &computed.transform_records))
+            .filter_map(|hit| {
+                hit.hit_delta_if_contains(point, &computed.transform_records)
+                    .map(|delta| (hit, delta))
+            })
         {
             let id = hit.interaction.target_id();
 
@@ -187,10 +190,10 @@ impl<VM: 'static> WidgetTree<VM> {
             }
 
             if let Some(index) = ids.iter().position(|existing| *existing == id) {
-                path[index] = hit.transformed_interaction(&computed.transform_records);
+                path[index] = hit.interaction_translated(delta);
             } else {
                 ids.push(id);
-                path.push(hit.transformed_interaction(&computed.transform_records));
+                path.push(hit.interaction_translated(delta));
             }
         }
 
@@ -277,9 +280,9 @@ impl<VM: 'static> WidgetTree<VM> {
         viewport: Rect,
         cursor_position: Option<Point>,
         focused_input: Option<WidgetId>,
-    ) -> Vec<HitInteraction<VM>> {
+    ) -> HitPath<VM> {
         let Some(point) = cursor_position else {
-            return Vec::new();
+            return HitPath::new();
         };
         let computed = self.compute_scene_with_widget_state(
             font_manager,
@@ -315,7 +318,7 @@ impl<VM: 'static> WidgetTree<VM> {
         viewport: Rect,
         cursor_position: Option<Point>,
         focused_input: Option<WidgetId>,
-    ) -> Vec<HitInteraction<VM>> {
+    ) -> HitPath<VM> {
         self.hit_path_with_widget_state(
             font_manager,
             theme,

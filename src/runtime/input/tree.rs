@@ -4,6 +4,7 @@ use crate::ui::widget::{
     TreeDropPosition, TreeExpandChange, TreeExpandTrigger, TreeNodeAction, TreeNodeState,
     TreeSelectionChange, TreeSelectionMode, TreeSelectionTrigger, WidgetKey,
 };
+use smallvec::SmallVec;
 
 struct TreeKeyboardTarget<VM> {
     id: WidgetId,
@@ -392,7 +393,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             })
     }
 
-    fn tree_targets(&mut self, tree_id: WidgetId) -> Vec<TreeKeyboardTarget<VM>> {
+    fn tree_targets(&mut self, tree_id: WidgetId) -> SmallVec<[TreeKeyboardTarget<VM>; 16]> {
         let computed = self.computed_scene();
         let mut targets = computed
             .hit_regions
@@ -410,7 +411,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect::<SmallVec<[_; 16]>>();
         targets.sort_by_key(|target| target.state.row_index);
         targets
     }

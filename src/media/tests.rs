@@ -365,9 +365,9 @@ fn animated_gif_advances_frames_with_stable_texture_id() {
     let key = MediaTextureKey::new(source.clone(), request);
 
     let deadline = media
-        .next_animation_deadline_for_keys([key.clone()])
+        .next_animation_deadline_for_keys([&key])
         .expect("animated gif should schedule a next frame");
-    assert!(media.advance_animations_for_keys([key.clone()], deadline + Duration::from_millis(1),));
+    assert!(media.advance_animations_for_keys([&key], deadline + Duration::from_millis(1),));
     let advanced = wait_for_texture_revision(&media, &source, request, first_revision + 1);
 
     assert_eq!(advanced.id(), first_id);

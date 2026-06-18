@@ -1,6 +1,7 @@
 use super::*;
 use crate::runtime::overlay::OverlayLayer;
 use crate::ui::widget::HitInteraction;
+use smallvec::SmallVec;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn focused_open_popover_source(
@@ -47,13 +48,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
         let focused_id = self.focused_widget_id();
-        let mut options = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        let mut options = SmallVec::<[_; 8]>::new();
+        let mut seen_inline = SmallVec::<[WidgetId; 8]>::new();
+        let mut seen_heap = None;
         for region in computed.overlay_hit_regions.iter() {
             let Some(focus) = region.focus.as_ref() else {
                 continue;
             };
-            if focus.widget_id == source_id || !seen.insert(focus.widget_id) {
+            if focus.widget_id == source_id
+                || !insert_seen_option(&mut seen_inline, &mut seen_heap, focus.widget_id)
+            {
                 continue;
             }
             options.push(focus.clone());
@@ -109,4 +113,31 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         false
     }
+}
+
+fn insert_seen_option(
+    seen_inline: &mut SmallVec<[WidgetId; 8]>,
+    seen_heap: &mut Option<std::collections::HashSet<WidgetId>>,
+    widget_id: WidgetId,
+) -> bool {
+    if let Some(seen) = seen_heap.as_mut() {
+        return seen.insert(widget_id);
+    }
+
+    if seen_inline.contains(&widget_id) {
+        return false;
+    }
+
+    if seen_inline.len() < 8 {
+        seen_inline.push(widget_id);
+        return true;
+    }
+
+    let mut seen = seen_inline
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    let inserted = seen.insert(widget_id);
+    *seen_heap = Some(seen);
+    inserted
 }

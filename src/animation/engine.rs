@@ -299,12 +299,14 @@ impl<T: Animatable> SlotState<T> {
 
 struct AnimationStore<T> {
     slots: HashMap<AnimationKey, SlotState<T>>,
+    active_count: usize,
 }
 
 impl<T> Default for AnimationStore<T> {
     fn default() -> Self {
         Self {
             slots: HashMap::new(),
+            active_count: 0,
         }
     }
 }
@@ -323,42 +325,63 @@ impl<T: Animatable> AnimationStore<T> {
     ) -> T {
         let Some(transition) = transition.filter(|transition| !transition.duration().is_zero())
         else {
+            let was_active = self
+                .slots
+                .get(&key)
+                .map(|state| state.animation.is_some())
+                .unwrap_or(false);
             self.slots
                 .insert(key, SlotState::settled(target.clone(), now));
+            if was_active {
+                self.active_count = self.active_count.saturating_sub(1);
+            }
             return target;
         };
 
-        let state = self
-            .slots
-            .entry(key)
-            .or_insert_with(|| SlotState::settled(target.clone(), now));
-        // widget 本帧被解析,刷新触达时间,使其免于槽位回收。
-        state.last_touch = now;
+        let (value, was_active, is_active) = {
+            let state = self
+                .slots
+                .entry(key)
+                .or_insert_with(|| SlotState::settled(target.clone(), now));
+            let was_active = state.animation.is_some();
+            // widget 本帧被解析,刷新触达时间,使其免于槽位回收。
+            state.last_touch = now;
 
-        // 仅在目标变化时,才需要先把动画推进到「当前显示值」作为新动画起点;
-        // 目标未变(占绝大多数 resolve 调用)时跳过这次额外采样 + 克隆,末尾统一采样。
-        if state.target != target {
-            let current = state.sample(now);
-            state.target = target.clone();
-            if current != target {
-                state.displayed = current.clone();
-                state.animation = Some(ActiveAnimation {
-                    from: current,
-                    to: target,
-                    transition,
-                    started_at: now,
-                });
-            } else {
-                state.displayed = target.clone();
-                state.animation = None;
+            // 仅在目标变化时,才需要先把动画推进到「当前显示值」作为新动画起点;
+            // 目标未变(占绝大多数 resolve 调用)时跳过这次额外采样 + 克隆,末尾统一采样。
+            if state.target != target {
+                let current = state.sample(now);
+                state.target = target.clone();
+                if current != target {
+                    state.displayed = current.clone();
+                    state.animation = Some(ActiveAnimation {
+                        from: current,
+                        to: target,
+                        transition,
+                        started_at: now,
+                    });
+                } else {
+                    state.displayed = target.clone();
+                    state.animation = None;
+                }
             }
+
+            let value = state.sample(now);
+            let is_active = state.animation.is_some();
+            (value, was_active, is_active)
+        };
+        match (was_active, is_active) {
+            (false, true) => self.active_count += 1,
+            (true, false) => self.active_count = self.active_count.saturating_sub(1),
+            _ => {}
         }
 
-        state.sample(now)
+        value
     }
 
     fn refresh(&mut self, now: Instant) -> AnimationRefresh {
         let mut refresh = AnimationRefresh::default();
+        let mut completed_count = 0;
         for (key, state) in self.slots.iter_mut() {
             // 「已稳定」(无活动动画)的槽位采样必然返回 `displayed` 不变,不可能产生变化 ——
             // 直接跳过,使每帧 refresh 的成本正比于「活动动画数」而非「槽位总数」,
@@ -380,6 +403,12 @@ impl<T: Animatable> AnimationStore<T> {
                     }
                 }
             }
+            if state.animation.is_none() {
+                completed_count += 1;
+            }
+        }
+        if completed_count > 0 {
+            self.active_count = self.active_count.saturating_sub(completed_count);
         }
         if self.slots.len() > SLOT_GC_SOFT_CAP {
             self.gc_stale_settled_slots(now);
@@ -392,14 +421,24 @@ impl<T: Animatable> AnimationStore<T> {
     /// widget 每次 collect 都会刷新 `last_touch`,因此永不会被误回收;活动动画
     /// 槽位也始终保留。常规应用槽位数远低于上限,完全不触发,无任何行为变化。
     fn gc_stale_settled_slots(&mut self, now: Instant) {
-        self.slots.retain(|_, state| {
-            state.animation.is_some()
+        self.slots.retain(|key, state| {
+            matches!(key, AnimationKey::Window(_))
+                || state.animation.is_some()
                 || now.saturating_duration_since(state.last_touch) < SLOT_GC_TTL
         });
     }
 
     fn has_active(&self) -> bool {
-        self.slots.values().any(|state| state.animation.is_some())
+        self.active_count > 0
+    }
+
+    fn settled_at(&self, key: AnimationKey, target: &T) -> bool {
+        self.slots
+            .get(&key)
+            .map(|state| {
+                state.animation.is_none() && state.target == *target && state.displayed == *target
+            })
+            .unwrap_or(false)
     }
 }
 
@@ -441,6 +480,10 @@ impl AnimationEngine {
             || self.dps.contains(key)
             || self.points.contains(key)
             || self.insets.contains(key)
+    }
+
+    pub(crate) fn color_settled_at(&self, key: AnimationKey, target: Color) -> bool {
+        self.colors.settled_at(key, &target)
     }
 
     pub(crate) fn resolve_color(

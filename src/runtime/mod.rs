@@ -119,6 +119,7 @@ use crate::ui::widget::{
 };
 use crossbeam_channel::{Receiver, Sender};
 use image::GenericImageView;
+use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -291,7 +292,7 @@ pub struct BoundRuntimeHandler<VM> {
     hover_epoch: u64,
     cursor_position: Option<Point>,
     modifiers: ModifiersState,
-    hovered_widgets: Vec<HoveredWidget<VM>>,
+    hovered_widgets: SmallVec<[HoveredWidget<VM>; 8]>,
     /// Widget 进入 hover 的时间戳（按 `WidgetId` 索引）。
     /// `handle_hover` 维护：路径中新出现的 widget 写入 `Instant::now()`；离开 hover 链时删除。
     /// collect 阶段读取它来判断 Tooltip 是否已等够 `delay`。
@@ -457,7 +458,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             hover_epoch: 0,
             cursor_position: None,
             modifiers: ModifiersState::default(),
-            hovered_widgets: Vec::new(),
+            hovered_widgets: SmallVec::new(),
             tooltip_hover_started_at: HashMap::new(),
             next_tooltip_wakeup_deadline: None,
             next_toast_wakeup_deadline: None,

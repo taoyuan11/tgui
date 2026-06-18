@@ -2,6 +2,7 @@ use super::*;
 use crate::foundation::binding::ScrollRequestMode;
 use crate::foundation::binding::{ScrollRequest, ScrollViewController};
 use crate::ui::unit::Dp;
+use smallvec::SmallVec;
 
 const MAX_VIRTUAL_LAYOUT_FEEDBACK_PASSES: usize = 4;
 
@@ -181,7 +182,7 @@ fn translate_gpu_scroll_hits<VM>(
 }
 
 fn translate_descendant_scroll_regions(
-    descendant_ids: &HashSet<WidgetId>,
+    descendant_ids: &[WidgetId],
     regions: &mut [ScrollRegion],
     delta: Point,
 ) {
@@ -250,19 +251,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(path) = layout.path_for(widget_id) else {
             return false;
         };
-        let descendant_scroll_ids = cached
-            .computed
-            .scroll_regions
-            .iter()
-            .filter_map(|region| {
-                (region.id != widget_id
-                    && layout
-                        .path_for(region.id)
-                        .map(|candidate| candidate.starts_with(path))
-                        .unwrap_or(false))
-                .then_some(region.id)
-            })
-            .collect::<HashSet<_>>();
+        let mut descendant_scroll_ids = SmallVec::<[WidgetId; 8]>::new();
+        for region in &cached.computed.scroll_regions {
+            if region.id == widget_id {
+                continue;
+            }
+            if layout
+                .path_for(region.id)
+                .map(|candidate| candidate.starts_with(path))
+                .unwrap_or(false)
+            {
+                descendant_scroll_ids.push(region.id);
+            }
+        }
         if !gpu_scroll_scene_supported(&cached.computed.scene, widget_id, old_region) {
             return false;
         }
@@ -482,20 +483,31 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
         // 收集本帧实际发生滚动、且仍在当前布局树中的脏容器。
-        let mut affected: HashSet<WidgetId> = HashSet::new();
-        for widget_id in self.scroll_dirty_widgets.iter().copied() {
-            if layout.path_for(widget_id).is_some() {
-                affected.insert(widget_id);
+        let roots = if self.scroll_dirty_widgets.len() == 1 {
+            let Some(widget_id) = self.scroll_dirty_widgets.iter().next().copied() else {
+                return false;
+            };
+            if layout.path_for(widget_id).is_none() {
+                return false;
             }
-        }
-        if affected.is_empty() {
-            return false;
-        }
-        let roots = self.highest_layout_roots_smallvec(layout, &affected);
+            let mut roots = SmallVec::<[WidgetId; 16]>::new();
+            roots.push(widget_id);
+            roots
+        } else {
+            let mut affected: HashSet<WidgetId> = HashSet::new();
+            for widget_id in self.scroll_dirty_widgets.iter().copied() {
+                if layout.path_for(widget_id).is_some() {
+                    affected.insert(widget_id);
+                }
+            }
+            if affected.is_empty() {
+                return false;
+            }
+            self.highest_layout_roots_smallvec(layout, &affected)
+        };
         if roots.is_empty() {
             return false;
         }
-        let roots = roots.to_vec();
         if !self.patch_cached_scene_for_roots(&roots, now, true) {
             // patch 失败：保持 cached 未被破坏（patch 在失败前不写 computed），落回整帧重收集。
             return false;
@@ -567,13 +579,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .cached_scene
                 .as_ref()
                 .expect("cached scene should remain available after caret slot update");
-            let cache_mismatch = self.scene_cache_mismatch_summary(
-                cached,
-                viewport,
-                units,
-                caret_visible,
-                active_scrollbar,
-            );
+            let cache_mismatch = started_at.map(|_| {
+                self.scene_cache_mismatch_summary(
+                    cached,
+                    viewport,
+                    units,
+                    caret_visible,
+                    active_scrollbar,
+                )
+            });
             (
                 self.scene_cache_matches(cached, viewport, units, caret_visible, active_scrollbar),
                 self.scene_layout_cache_matches(cached, viewport, units),
@@ -589,7 +603,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 None,
                 None,
                 false,
-                "no_cached_scene".to_string(),
+                started_at.map(|_| "no_cached_scene".to_string()),
             )
         };
         let selected_text_state = self
@@ -627,7 +641,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             roots.len(),
                             cache_valid,
                             layout_cache_valid,
-                            cache_mismatch
+                            cache_mismatch.as_deref().unwrap_or("not_profiled")
                         ),
                     );
                 }
@@ -652,7 +666,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     started_at.elapsed(),
                     format!(
                         "path=pure_scroll_gpu cache_valid={} layout_cache_valid={} cache_mismatch={}",
-                        cache_valid, layout_cache_valid, cache_mismatch
+                        cache_valid,
+                        layout_cache_valid,
+                        cache_mismatch.as_deref().unwrap_or("not_profiled")
                     ),
                 );
             }
@@ -673,7 +689,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     started_at.elapsed(),
                     format!(
                         "path=pure_scroll_patch cache_valid={} layout_cache_valid={} cache_mismatch={}",
-                        cache_valid, layout_cache_valid, cache_mismatch
+                        cache_valid,
+                        layout_cache_valid,
+                        cache_mismatch.as_deref().unwrap_or("not_profiled")
                     ),
                 );
             }
@@ -1004,9 +1022,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             let focused_input = self.focused_text_input_id_cached(&computed);
             let caret_visible = self.caret_visible_at(now, focused_input);
-            self.prune_text_input_buffers(&computed);
-            self.sync_text_input_regions_from_computed(&computed);
-            self.sync_visible_text_input_buffers(&computed);
+            self.sync_text_inputs_from_computed(&computed);
             self.cached_scene = Some(Box::new(CachedScene {
                 viewport,
                 units,
@@ -1118,7 +1134,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     format!(
                         "path=rebuild cache_valid=false layout_cache_valid={} cache_mismatch={} layout_ms={:.3} collect_ms={:.3} recollect_ms={:.3} collect_passes={} focused_input={:?} hit_regions={} scroll_regions={}",
                         layout_cache_valid,
-                        cache_mismatch,
+                        cache_mismatch.as_deref().unwrap_or("not_profiled"),
                         layout_duration.as_secs_f64() * 1000.0,
                         collect_duration.as_secs_f64() * 1000.0,
                         recollect_duration.as_secs_f64() * 1000.0,

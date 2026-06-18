@@ -103,38 +103,47 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         // CRITICAL: Use cached scroll_regions to avoid triggering computed_scene()
-        // during mouse wheel handling, which causes stack overflow on Windows
-        let scroll_regions = if let Some(cached) = self.cached_scene.as_ref() {
-            cached.computed.scroll_regions.clone()
-        } else {
-            return false; // No cached scene, cannot scroll
+        // during mouse wheel handling, which causes stack overflow on Windows.
+        // Copy only the target region instead of cloning the whole region table on
+        // every wheel event.
+        let target = self.cached_scene.as_ref().and_then(|cached| {
+            cached
+                .computed
+                .scroll_regions
+                .iter()
+                .rev()
+                .copied()
+                .find_map(|region| {
+                    if region.visible_frame.is_empty()
+                        || !region.visible_frame.contains(cursor_position)
+                    {
+                        return None;
+                    }
+
+                    let max_offset = region.max_offset();
+                    let current_offset =
+                        self.effective_scroll_offset(region.id, region.scroll_offset);
+                    let mut next_offset = current_offset;
+                    if region.can_scroll_x() {
+                        next_offset.x = (next_offset.x - scroll_delta.x).clamp(0.0, max_offset.x);
+                    }
+                    if region.can_scroll_y() {
+                        next_offset.y = (next_offset.y - scroll_delta.y).clamp(0.0, max_offset.y);
+                    }
+
+                    ((next_offset.x - current_offset.x).abs() > 0.01
+                        || (next_offset.y - current_offset.y).abs() > 0.01)
+                        .then_some((region.id, next_offset))
+                })
+        });
+
+        let Some((widget_id, next_offset)) = target else {
+            return false;
         };
 
-        for region in scroll_regions.iter().rev().copied() {
-            if region.visible_frame.is_empty() || !region.visible_frame.contains(cursor_position) {
-                continue;
-            }
-
-            let max_offset = region.max_offset();
-            let current_offset = self.effective_scroll_offset(region.id, region.scroll_offset);
-            let mut next_offset = current_offset;
-            if region.can_scroll_x() {
-                next_offset.x = (next_offset.x - scroll_delta.x).clamp(0.0, max_offset.x);
-            }
-            if region.can_scroll_y() {
-                next_offset.y = (next_offset.y - scroll_delta.y).clamp(0.0, max_offset.y);
-            }
-
-            if (next_offset.x - current_offset.x).abs() > 0.01
-                || (next_offset.y - current_offset.y).abs() > 0.01
-            {
-                self.touch_scroll_inertia_states.remove(&region.id);
-                self.set_smooth_scroll_target(region.id, next_offset);
-                return true;
-            }
-        }
-
-        false
+        self.touch_scroll_inertia_states.remove(&widget_id);
+        self.set_smooth_scroll_target(widget_id, next_offset);
+        true
     }
 
     pub(in crate::runtime) fn sync_scrollbar_hover(&mut self) -> bool {
@@ -317,32 +326,35 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn rebind_active_scrollbar_drag_if_needed(&mut self, drag: ScrollbarDrag, next_offset: Point) {
         // CRITICAL: Do NOT call computed_scene() here - it causes stack overflow on Windows
         // during scroll drag events. Use cached scene if available, otherwise skip rebind.
-        let scroll_regions = if let Some(cached) = self.cached_scene.as_ref() {
-            cached.computed.scroll_regions.clone()
-        } else {
-            return; // No cached scene available, skip rebind
-        };
-        if scroll_regions
-            .iter()
-            .any(|region| region.id == drag.handle.id)
-        {
-            return;
-        }
+        let Some(region) = ({
+            let scroll_regions = if let Some(cached) = self.cached_scene.as_ref() {
+                &cached.computed.scroll_regions
+            } else {
+                return; // No cached scene available, skip rebind
+            };
+            if scroll_regions
+                .iter()
+                .any(|region| region.id == drag.handle.id)
+            {
+                return;
+            }
 
-        let Some(region) = scroll_regions
-            .iter()
-            .filter(|region| {
-                !region.visible_frame.is_empty()
-                    && region.visible_frame.contains(drag.start_cursor)
-                    && scrollbar_region_axis_hit(region, drag.handle.axis, drag.start_cursor)
-            })
-            .min_by(|a, b| {
-                scrollbar_axis_thumb_area(a, drag.handle.axis)
-                    .unwrap_or(f32::MAX)
-                    .total_cmp(&scrollbar_axis_thumb_area(b, drag.handle.axis).unwrap_or(f32::MAX))
-            })
-            .copied()
-        else {
+            scroll_regions
+                .iter()
+                .filter(|region| {
+                    !region.visible_frame.is_empty()
+                        && region.visible_frame.contains(drag.start_cursor)
+                        && scrollbar_region_axis_hit(region, drag.handle.axis, drag.start_cursor)
+                })
+                .min_by(|a, b| {
+                    scrollbar_axis_thumb_area(a, drag.handle.axis)
+                        .unwrap_or(f32::MAX)
+                        .total_cmp(
+                            &scrollbar_axis_thumb_area(b, drag.handle.axis).unwrap_or(f32::MAX),
+                        )
+                })
+                .copied()
+        }) else {
             return;
         };
 

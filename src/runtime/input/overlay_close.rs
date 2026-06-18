@@ -3,6 +3,7 @@ use crate::ui::widget::Point;
 use super::BoundRuntimeHandler;
 use crate::runtime::state::{FocusedWidget, TooltipDismissReason};
 use crate::ui::widget::{HitInteraction, ResolvedWidgetKind, WidgetId};
+use smallvec::SmallVec;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn close_menu_layer_source(&mut self, source_widget_id: WidgetId) -> bool {
@@ -131,7 +132,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if self.dismiss_active_tooltip(TooltipDismissReason::OutsideClick) {
             return None;
         }
-        let handlers: Vec<_> = self
+        let handlers: SmallVec<[_; 4]> = self
             .computed_scene()
             .overlay_close_handlers
             .iter()

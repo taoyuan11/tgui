@@ -98,9 +98,9 @@ impl MediaManager {
             .collect()
     }
 
-    pub(crate) fn next_animation_deadline_for_keys(
+    pub(crate) fn next_animation_deadline_for_keys<'a>(
         &self,
-        keys: impl IntoIterator<Item = MediaTextureKey>,
+        keys: impl IntoIterator<Item = &'a MediaTextureKey>,
     ) -> Option<Instant> {
         let mut next: Option<Instant> = None;
         for key in keys {
@@ -116,9 +116,9 @@ impl MediaManager {
         next
     }
 
-    pub(crate) fn advance_animations_for_keys(
+    pub(crate) fn advance_animations_for_keys<'a>(
         &self,
-        keys: impl IntoIterator<Item = MediaTextureKey>,
+        keys: impl IntoIterator<Item = &'a MediaTextureKey>,
         now: Instant,
     ) -> bool {
         let mut advanced = false;

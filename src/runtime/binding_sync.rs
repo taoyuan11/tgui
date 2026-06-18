@@ -106,22 +106,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        let theme = self.animated_theme(now);
         let mut clear_color_changed = false;
-        if let Some(renderer) = self.renderer.as_mut() {
-            let next_clear_color = if let Some(signal) = self.window_bindings.clear_color.as_ref() {
-                self.animation_engine.resolve_color(
+        let next_clear_color = if self.renderer.is_some() {
+            if let Some(signal) = self.window_bindings.clear_color.as_ref() {
+                Some(self.animation_engine.resolve_color(
                     AnimationKey::Window(WindowProperty::ClearColor),
                     signal.get(),
                     signal.transition(),
                     now,
-                )
+                ))
             } else if !self.config.clear_color_overridden {
-                theme.colors.background
+                Some(self.theme_background_color(now))
             } else {
-                self.last_synced_clear_color
-                    .unwrap_or(self.config.clear_color)
-            };
+                Some(
+                    self.last_synced_clear_color
+                        .unwrap_or(self.config.clear_color),
+                )
+            }
+        } else {
+            None
+        };
+        if let (Some(renderer), Some(next_clear_color)) = (self.renderer.as_mut(), next_clear_color)
+        {
             clear_color_changed = self.last_synced_clear_color != Some(next_clear_color);
             if clear_color_changed {
                 renderer.set_clear_color(next_clear_color);

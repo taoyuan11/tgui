@@ -14,14 +14,13 @@
 //! - 字母 type-ahead 在当前层跳到首字母匹配项；
 //! - 全局 KeyChord 派发：扫整棵 resolved 树（含 submenu 递归）找 shortcut 命中。
 
-use std::collections::HashMap;
-
 use crate::foundation::view_model::ValueCommand;
 use crate::platform::keyboard::{Key, KeyCode, ModifiersState};
 use crate::runtime::overlay::OverlayLayer;
 use crate::ui::widget::{
     HitInteraction, KeyChord, MenuItemKind, MenuItemState, Rect, WidgetId, WidgetStateMap,
 };
+use smallvec::SmallVec;
 
 use super::BoundRuntimeHandler;
 
@@ -253,24 +252,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     /// 返回某菜单某层级（`parent_path` 指定）下所有可"游走"的索引：跳过 Separator
     /// 与 disabled 项。parent_path 空表示根菜单。
-    fn selectable_indices(&self, menu_id: WidgetId, parent_path: &[usize]) -> Vec<usize> {
+    fn selectable_indices(&self, menu_id: WidgetId, parent_path: &[usize]) -> SmallVec<[usize; 8]> {
         let Some(cached) = self.cached_scene.as_ref() else {
-            return Vec::new();
+            return SmallVec::new();
         };
         let Some(layout) = cached.layout.as_ref() else {
-            return Vec::new();
+            return SmallVec::new();
         };
         let Some(resolved) = layout.resolved_widget(menu_id) else {
-            return Vec::new();
+            return SmallVec::new();
         };
         let Some(menu) = resolved.menu.as_ref() else {
-            return Vec::new();
+            return SmallVec::new();
         };
         // 走到目标父级 items 列表。
         let mut items: &[MenuItemState<VM>] = &menu.items;
         for idx in parent_path {
             let Some(parent) = items.get(*idx) else {
-                return Vec::new();
+                return SmallVec::new();
             };
             items = &parent.submenu;
         }
@@ -413,15 +412,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
         // 扫所有同 group 的 menu，按 menubar_index 排序，取相邻 entry。
-        let ids: Vec<WidgetId> = layout.all_widget_ids().collect();
-        let mut peers: Vec<usize> = ids
-            .into_iter()
+        let mut peers = layout
+            .all_widget_ids()
             .filter_map(|id| {
                 let resolved = layout.resolved_widget(id)?;
                 let menu = resolved.menu.as_ref()?;
                 (menu.menubar_group == Some(group)).then(|| menu.menubar_index)?
             })
-            .collect();
+            .collect::<SmallVec<[_; 8]>>();
         peers.sort();
         peers.dedup();
         if peers.len() < 2 {
@@ -484,7 +482,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             items = &parent.submenu;
         }
         let target = letter.to_ascii_lowercase();
-        let candidates: Vec<usize> = items
+        let candidates = items
             .iter()
             .enumerate()
             .filter_map(|(idx, item)| {
@@ -503,7 +501,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     }
                 }
             })
-            .collect();
+            .collect::<SmallVec<[_; 8]>>();
         if candidates.is_empty() {
             return false;
         }
@@ -573,19 +571,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     /// 这样 collect 阶段会用 item_background 的 hover 颜色渲染。
     /// 路径每一层都标 hovered=true，保证嵌套 submenu 自动展开。
     pub(super) fn apply_menu_keyboard_cursor_to_states(&self, states: &mut WidgetStateMap) {
-        let open_menus: HashMap<WidgetId, ()> = if let Some(cached) = self.cached_scene.as_ref() {
+        let open_menus = if let Some(cached) = self.cached_scene.as_ref() {
             cached
                 .computed
                 .overlay_close_handlers
                 .iter()
                 .filter(|h| h.layer == OverlayLayer::Menu)
-                .map(|h| (WidgetId::from_raw(h.overlay_id.0), ()))
-                .collect()
+                .map(|h| WidgetId::from_raw(h.overlay_id.0))
+                .collect::<SmallVec<[_; 4]>>()
         } else {
-            HashMap::new()
+            SmallVec::new()
         };
         for (menu_id, path) in &self.menu_keyboard_cursor {
-            if !open_menus.contains_key(menu_id) {
+            if !open_menus.contains(menu_id) {
                 continue;
             }
             // 路径每一层都标 hovered=true，让 submenu 自动展开。最末层是真正的 cursor。
@@ -612,9 +610,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(layout) = cached.layout.as_ref() else {
             return false;
         };
-        let ids: Vec<WidgetId> = layout.all_widget_ids().collect();
-        let mut matched_commands: Vec<crate::foundation::view_model::Command<VM>> = Vec::new();
-        for id in ids {
+        let mut matched_commands =
+            SmallVec::<[crate::foundation::view_model::Command<VM>; 2]>::new();
+        for id in layout.all_widget_ids() {
             let Some(resolved) = layout.resolved_widget(id) else {
                 continue;
             };
@@ -651,7 +649,7 @@ fn collect_shortcut_matches<VM>(
     mods: ModifiersState,
     key: &Key,
     code: KeyCode,
-    out: &mut Vec<crate::foundation::view_model::Command<VM>>,
+    out: &mut SmallVec<[crate::foundation::view_model::Command<VM>; 2]>,
 ) where
     VM: 'static,
 {
