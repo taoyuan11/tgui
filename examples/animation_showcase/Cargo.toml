@@ -6,3 +6,9 @@ publish = false
 
 [dependencies]
 tgui = { path = "../.." }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

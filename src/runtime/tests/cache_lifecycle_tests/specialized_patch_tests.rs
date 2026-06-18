@@ -665,6 +665,41 @@ fn nested_color_tree_with_mode(color_state: &State<Color>, legacy: bool) -> Widg
     }
 }
 
+fn multi_root_color_tree(
+    first_state: &State<Color>,
+    second_state: &State<Color>,
+) -> (WidgetTree<TestVm>, WidgetId, WidgetId) {
+    let first_bg = first_state.signal();
+    let first: Element<TestVm> = Stack::new()
+        .size(dp(20.0), dp(20.0))
+        .style_full(move |ctx| {
+            let mut style = ContainerStyle::default_for_theme(ctx.theme);
+            style.surface.background = Some(first_bg.clone().into());
+            style
+        })
+        .into();
+    let first_id = first.id;
+
+    let second_bg = second_state.signal();
+    let second: Element<TestVm> = Stack::new()
+        .size(dp(20.0), dp(20.0))
+        .style_full(move |ctx| {
+            let mut style = ContainerStyle::default_for_theme(ctx.theme);
+            style.surface.background = Some(second_bg.clone().into());
+            style
+        })
+        .into();
+    let second_id = second.id;
+
+    let first_wrapper: Element<TestVm> = Stack::new().child(first).into();
+    let second_wrapper: Element<TestVm> = Stack::new().child(second).into();
+    (
+        WidgetTree::new(Stack::new().child([first_wrapper, second_wrapper])),
+        first_id,
+        second_id,
+    )
+}
+
 fn text_color_tree(color_state: &State<Color>) -> WidgetTree<TestVm> {
     let text_color = color_state.signal();
     WidgetTree::new(
@@ -1354,6 +1389,80 @@ fn splice_color_change_matches_full_recollect() {
     assert_eq!(before[changed].1, after_patch[changed].1);
     assert_eq!(before[changed].4, Color::hexa(0xFF0000FF));
     assert_eq!(after_patch[changed].4, Color::hexa(0x00FF00FF));
+}
+
+#[test]
+fn multi_root_splice_preserves_animation_epoch_and_prepare_cache() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let first = context.state(Color::hexa(0xAA0000FF));
+    let second = context.state(Color::hexa(0x0000AAFF));
+    let (tree, first_id, second_id) = multi_root_color_tree(&first, &second);
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let _ = handler.computed_scene();
+    let viewport = handler.viewport_rect();
+    let units = handler.unit_context();
+    let before = shape_fingerprints(handler.computed_scene());
+    let before_serial = handler
+        .cached_scene
+        .as_ref()
+        .expect("warm cache")
+        .computed
+        .scene
+        .prepare_cache_serial();
+
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    handler.layout_animation_epoch = handler.layout_animation_epoch.wrapping_add(1);
+    first.set(Color::hexa(0x00AA00FF));
+    second.set(Color::hexa(0xAA00AAFF));
+
+    crate::runtime::scene_patch::splice_probe::reset();
+    assert!(handler.patch_cached_scene_for_roots(&[first_id, second_id], Instant::now(), false));
+    assert_eq!(
+        crate::runtime::scene_patch::splice_probe::hits(),
+        1,
+        "multi-root scene patch should hit the splice fast path once"
+    );
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("scene patch keeps cache shell");
+    assert!(cached.computed_valid);
+    assert_eq!(cached.animation_epoch, handler.animation_epoch);
+    assert_eq!(
+        cached.layout_animation_epoch,
+        handler.layout_animation_epoch
+    );
+    assert_eq!(
+        cached.computed.scene.prepare_cache_serial(),
+        before_serial,
+        "spliced animation frames should preserve the prepare cache serial"
+    );
+    assert!(
+        !cached.computed.scene.dirty_draw_ranges().is_empty(),
+        "spliced animation frames must mark the replaced draw ranges dirty"
+    );
+    assert!(
+        handler.scene_cache_matches(cached, viewport, units, cached.caret_visible, None),
+        "animation scene patch should remain reusable for the next computed_scene call"
+    );
+
+    let after_patch = shape_fingerprints(&cached.computed);
+    handler.invalidate_computed_scene();
+    let after_full = shape_fingerprints(handler.computed_scene());
+    assert_eq!(
+        after_patch, after_full,
+        "multi-root spliced scene must match a fresh full recollect"
+    );
+    assert_eq!(before.len(), after_patch.len());
+    let diffs = before
+        .iter()
+        .zip(after_patch.iter())
+        .filter(|(a, b)| a != b)
+        .count();
+    assert_eq!(diffs, 2, "both animated roots should update in place");
 }
 
 #[test]

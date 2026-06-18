@@ -103,6 +103,12 @@ impl<VM> Clone for ComputedScene<VM> {
     }
 }
 
+impl<VM> ComputedScene<VM> {
+    pub(crate) fn assign_new_prepare_cache_serial(&mut self) {
+        self.scene.assign_new_prepare_cache_serial();
+    }
+}
+
 pub(crate) const OVERLAY_LAYER_COUNT: usize = 5;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1016,7 +1022,7 @@ impl<VM> ComputedScene<VM> {
     ///
     /// 允许非空且 splice 会同步覆盖的：`hit_regions`、`scroll_regions`（二者都按子树
     /// 连续排布，splice 用对应 offset + 数量一致性原地覆盖）。其余结构性内容
-    /// （overlay/portal/focus/anchor/carousel/virtual/ime/外部 portal 请求）任一非空
+    /// （overlay/portal/focus/anchor/carousel/virtual/ime/transform/外部 portal 请求）任一非空
     /// 都判定为不可 splice，干净回退到 recompose。
     pub(crate) fn is_simple_for_splice(&self) -> bool {
         self.scene.counts().has_no_overlay()
@@ -1029,6 +1035,7 @@ impl<VM> ComputedScene<VM> {
             && self.external_portal_requests.is_empty()
             && self.ime_cursor_area.is_none()
             && self.virtual_state_updates.is_empty()
+            && self.transform_records.is_empty()
             && self.portal_overlay_counts.commands == 0
             && self.portal_overlay_counts.shapes == 0
             && self.portal_overlay_counts.textures == 0

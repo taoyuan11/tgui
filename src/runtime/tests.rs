@@ -34,8 +34,8 @@ use crate::ui::widget::{
     CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Carousel,
     Checkbox, ContainerStyle, CursorStyle, DataGrid, DataGridColumn, DataGridRow, Flex,
     FocusScopeOptions, HitInteraction, Input, Point, ProgressBar, Rect, ScrollView, Select,
-    SelectOption, Slider, Switch, Text, TextEditState, Textarea, Tooltip, VirtualCacheState,
-    WidgetKey, WidgetTree,
+    SelectOption, Slider, Spinner, Switch, Text, TextEditState, Textarea, Tooltip,
+    VirtualCacheState, WidgetKey, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle};

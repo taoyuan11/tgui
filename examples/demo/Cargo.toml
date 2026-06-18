@@ -8,9 +8,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 tgui = { path = "../..", features = [
     "audio",
     "video",
-    "collect-profile",
-]
-}
+] }
+
+[features]
+collect-profile = ["tgui/collect-profile"]
 
 [profile.release]
 lto = true

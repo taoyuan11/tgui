@@ -55,8 +55,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         &self,
         event_loop: &dyn ActiveEventLoop,
         deadline: Option<Instant>,
+        now: Instant,
     ) {
         if let Some(deadline) = deadline {
+            // During the animation tick, stale deadlines have already fired and must be
+            // replaced. A future deadline that is earlier than this one belongs to the
+            // current frame clock and should keep its original cadence.
+            if let ControlFlow::WaitUntil(existing) = event_loop.control_flow() {
+                if existing > now && existing <= deadline {
+                    return;
+                }
+            }
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         } else {
             event_loop.set_control_flow(ControlFlow::Wait);
@@ -69,8 +78,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         now: Instant,
     ) -> Option<Instant> {
         let deadline = self.next_deadline(now);
-        self.set_control_flow_for_deadline(event_loop, deadline);
+        self.set_control_flow_for_deadline_after_redraw(event_loop, deadline);
         deadline
+    }
+
+    fn set_control_flow_for_deadline_after_redraw(
+        &self,
+        event_loop: &dyn ActiveEventLoop,
+        deadline: Option<Instant>,
+    ) {
+        if let Some(deadline) = deadline {
+            // Redraw happens after the tick has already scheduled the next wakeup.
+            // Replacing it here with `Instant::now() + frame_interval` shifts every
+            // animation frame by the render cost, which is visible in debug builds.
+            if let ControlFlow::WaitUntil(existing) = event_loop.control_flow() {
+                if existing <= deadline {
+                    return;
+                }
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
     }
 
     pub(super) fn active_media_texture_keys(&self) -> Vec<crate::media::MediaTextureKey> {

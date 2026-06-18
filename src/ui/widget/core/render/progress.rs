@@ -89,7 +89,12 @@ pub(crate) fn push_progress_bar_primitives(
                 .max(dp(8.0))
                 .min(track_rect.width);
             let travel = track_rect.width + segment_width;
-            let x = track_rect.x - segment_width + Dp::new(travel.get() * phase.clamp(0.0, 1.0));
+            let cycle = travel.get().max(1.0);
+            let left_edge = (track_rect.x - segment_width).get();
+            let x_for_phase_offset = |offset: f32| {
+                let raw = left_edge + cycle * (phase.clamp(0.0, 1.0) + offset);
+                Dp::new(left_edge + (raw - left_edge).rem_euclid(cycle))
+            };
             let segment_clip_rect = match clip_rect {
                 Some(clip) => clip.intersect(track_rect),
                 None => Some(track_rect),
@@ -103,14 +108,21 @@ pub(crate) fn push_progress_bar_primitives(
                 clip_mask
             };
             if let Some(segment_clip_rect) = segment_clip_rect {
-                scene.push_shape(RenderPrimitive {
-                    rect: Rect::new(x, track_rect.y, segment_width, track_rect.height),
-                    color: fill_color,
-                    corner_radius: radius,
-                    stroke_width: 0.0,
-                    clip_rect: Some(segment_clip_rect),
-                    clip_mask: segment_clip_mask,
-                });
+                for phase_offset in [0.0, 0.5] {
+                    scene.push_shape(RenderPrimitive {
+                        rect: Rect::new(
+                            x_for_phase_offset(phase_offset),
+                            track_rect.y,
+                            segment_width,
+                            track_rect.height,
+                        ),
+                        color: fill_color,
+                        corner_radius: radius,
+                        stroke_width: 0.0,
+                        clip_rect: Some(segment_clip_rect),
+                        clip_mask: segment_clip_mask,
+                    });
+                }
             }
         } else {
             let fill_width =

@@ -106,7 +106,7 @@ fn progress_bar_indeterminate_segment_travels_through_track_edges() {
     let mut animations = AnimationEngine::default();
     let start = Instant::now();
 
-    let (start_track, start_segment) = render_indeterminate_progress_at(
+    let (start_track, start_segments) = render_indeterminate_progress_at(
         &tree,
         &font_manager,
         &theme,
@@ -115,7 +115,7 @@ fn progress_bar_indeterminate_segment_travels_through_track_edges() {
         viewport,
         start,
     );
-    let (end_track, end_segment) = render_indeterminate_progress_at(
+    let (end_track, end_segments) = render_indeterminate_progress_at(
         &tree,
         &font_manager,
         &theme,
@@ -126,19 +126,29 @@ fn progress_bar_indeterminate_segment_travels_through_track_edges() {
     );
 
     assert_eq!(start_track.rect, end_track.rect);
-    assert!(start_segment.rect.x < start_track.rect.x);
-    assert!((start_segment.rect.right().get() - start_track.rect.x.get()).abs() <= 0.01);
-    assert!((end_segment.rect.x.get() - end_track.rect.right().get()).abs() <= 0.01);
-    assert!(end_segment.rect.right() > end_track.rect.right());
+    assert_eq!(start_segments.len(), 2);
+    assert_eq!(end_segments.len(), 2);
+    assert!(start_segments[0].rect.x < start_track.rect.x);
+    assert!((start_segments[0].rect.right().get() - start_track.rect.x.get()).abs() <= 0.01);
+    assert!(
+        (start_segments[0].rect.x.get() - end_segments[0].rect.x.get()).abs() <= 0.01,
+        "phase wrap should keep the first marquee segment continuous"
+    );
+    assert!(
+        (start_segments[1].rect.x.get() - end_segments[1].rect.x.get()).abs() <= 0.01,
+        "phase wrap should keep the second marquee segment continuous"
+    );
+    assert!(start_segments[1].rect.x > start_track.rect.x);
+    assert!(start_segments[1].rect.x < start_track.rect.right());
 
     let expected_clip_mask = Some(ClipMask {
         rect: start_track.rect,
         corner_radius: start_track.corner_radius,
     });
-    assert_eq!(start_segment.clip_rect, Some(start_track.rect));
-    assert_eq!(end_segment.clip_rect, Some(end_track.rect));
-    assert_eq!(start_segment.clip_mask, expected_clip_mask);
-    assert_eq!(end_segment.clip_mask, expected_clip_mask);
+    for segment in start_segments.iter().chain(end_segments.iter()) {
+        assert_eq!(segment.clip_rect, Some(start_track.rect));
+        assert_eq!(segment.clip_mask, expected_clip_mask);
+    }
 }
 
 #[test]
@@ -248,7 +258,7 @@ fn render_indeterminate_progress_at(
     now: Instant,
 ) -> (
     crate::ui::widget::common::RenderPrimitive,
-    crate::ui::widget::common::RenderPrimitive,
+    Vec<crate::ui::widget::common::RenderPrimitive>,
 ) {
     let rendered = tree
         .compute_scene_with_units_and_widget_state_at(
@@ -273,8 +283,11 @@ fn render_indeterminate_progress_at(
         )
         .rendered();
 
-    assert!(rendered.primitives.shapes.len() >= 2);
-    (rendered.primitives.shapes[0], rendered.primitives.shapes[1])
+    assert!(rendered.primitives.shapes.len() >= 3);
+    (
+        rendered.primitives.shapes[0],
+        rendered.primitives.shapes[1..3].to_vec(),
+    )
 }
 
 fn render_divider(

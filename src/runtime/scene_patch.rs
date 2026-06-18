@@ -209,8 +209,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let focused_widget = self.focused_widget_id();
 
         struct ScenePatch<VM> {
+            root: WidgetId,
             old_ids: Vec<WidgetId>,
             cache: CollectedSceneCache<VM>,
+        }
+
+        struct SceneSplicePlan<VM> {
+            new_chunk: ComputedScene<VM>,
+            ancestor_offsets: Vec<(WidgetId, crate::ui::widget::SceneCounts, usize, usize)>,
+            computed_offset: crate::ui::widget::SceneCounts,
+            computed_hit_offset: usize,
+            computed_scroll_offset: usize,
         }
 
         let mut patches = Vec::new();
@@ -268,7 +277,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     ),
                 );
             }
-            patches.push(ScenePatch { old_ids, cache });
+            patches.push(ScenePatch {
+                root: *root,
+                old_ids,
+                cache,
+            });
         }
         if let Some(collect_started_at) = collect_started_at {
             let patched_widget_ids = patches
@@ -330,29 +343,72 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .remove_widget_phase_owners(&scene_owner_ids, DependencyPhase::Scene);
 
             // Splice 资格判定：必须在「存入新 chunk」之前读取旧 root chunk。
-            // 仅当单 root patch、且该 subtree 的合并 chunk 新旧各流命令数量完全一致、
-            // 且新旧都不含 overlay/portal/scroll/focus 等结构性内容时，才记下 splice 计划。
-            // 任一条件不满足 → splice_plan 为 None，走原 recompose。
-            let splice_plan: Option<(WidgetId, ComputedScene<VM>)> =
-                if roots.len() == 1 && patches.len() == 1 {
-                    let target = roots[0];
-                    match (
-                        patches[0].cache.chunks.get(&target),
-                        cached.scene_chunks.get(&target),
-                    ) {
-                        (Some(new_chunk), Some(old_chunk))
-                            if new_chunk.is_simple_for_splice()
-                                && old_chunk.is_simple_for_splice()
-                                && new_chunk.scene_counts() == old_chunk.scene_counts()
-                                && new_chunk.hit_regions.len() == old_chunk.hit_regions.len() =>
-                        {
-                            Some((target, new_chunk.clone()))
+            // 多个 root 只有在全部互不嵌套、且每个 subtree 的新旧命令/命中/滚动数量
+            // 完全一致时才整体命中。任一 root 不满足就整体回退到 recompose，避免半快半慢
+            // 带来偏移漂移。
+            let splice_plans: Option<Vec<SceneSplicePlan<VM>>> = {
+                let mut unique_roots = HashSet::new();
+                let unique = roots.iter().copied().all(|root| unique_roots.insert(root));
+                let disjoint = roots.iter().copied().all(|root| {
+                    let mut parent = layout.parent_of(root);
+                    while let Some(current) = parent {
+                        if unique_roots.contains(&current) {
+                            return false;
                         }
-                        _ => None,
+                        parent = layout.parent_of(current);
                     }
+                    true
+                });
+                if unique && disjoint && roots.len() == patches.len() {
+                    let mut plans = Vec::with_capacity(patches.len());
+                    let mut ok = true;
+                    for patch in &patches {
+                        let target = patch.root;
+                        let Some(new_chunk) = patch.cache.chunks.get(&target) else {
+                            ok = false;
+                            break;
+                        };
+                        let Some(old_chunk) = cached.scene_chunks.get(&target) else {
+                            ok = false;
+                            break;
+                        };
+                        if !(new_chunk.is_simple_for_splice()
+                            && old_chunk.is_simple_for_splice()
+                            && new_chunk.scene_counts() == old_chunk.scene_counts()
+                            && new_chunk.hit_regions.len() == old_chunk.hit_regions.len()
+                            && new_chunk.scroll_regions.len() == old_chunk.scroll_regions.len())
+                        {
+                            ok = false;
+                            break;
+                        }
+                        let Some(ancestor_offsets) = layout.scene_splice_ancestor_offsets(
+                            target,
+                            &cached.scene_chunk_parts,
+                            &cached.scene_chunks,
+                        ) else {
+                            ok = false;
+                            break;
+                        };
+                        let (computed_offset, computed_hit_offset, computed_scroll_offset) =
+                            ancestor_offsets
+                                .first()
+                                .map(|(_, offset, hit_offset, scroll_offset)| {
+                                    (*offset, *hit_offset, *scroll_offset)
+                                })
+                                .unwrap_or_default();
+                        plans.push(SceneSplicePlan {
+                            new_chunk: new_chunk.clone(),
+                            ancestor_offsets,
+                            computed_offset,
+                            computed_hit_offset,
+                            computed_scroll_offset,
+                        });
+                    }
+                    ok.then_some(plans)
                 } else {
                     None
-                };
+                }
+            };
 
             for patch in patches {
                 let new_ids: HashSet<_> = patch.cache.chunks.keys().copied().collect();
@@ -375,44 +431,39 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             ancestors.sort_by_key(|widget_id| std::cmp::Reverse(layout.depth_of(*widget_id)));
             ancestor_count = ancestors.len();
 
-            // Splice 快路径：把目标子树的新 chunk 原地覆盖进每个严格祖先 chunk
+            // Splice 快路径：把每个目标子树的新 chunk 原地覆盖进每个严格祖先 chunk
             // 的稳定区间，跳过「逐级 recompose 向上重合成」。纯连接模型下，这与 recompose
             // 的结果逐字节等价（只有目标子树的字节变化，且新旧数量一致 → 后续偏移不动）。
             // 任一前置不满足（缺 chunk_parts / 子 chunk / 偏移越界）即 return false，
             // 由调用方 invalidate_computed_scene() 安全回退整帧重收集。
-            let did_splice = if let Some((target, new_chunk)) = splice_plan.as_ref() {
-                match layout.scene_splice_ancestor_offsets(
-                    *target,
-                    &cached.scene_chunk_parts,
-                    &cached.scene_chunks,
-                ) {
-                    Some(offsets) => {
-                        let mut ok = true;
-                        for (ancestor_id, offset, hit_offset, scroll_offset) in &offsets {
-                            let Some(ancestor_chunk) = cached.scene_chunks.get_mut(ancestor_id)
-                            else {
-                                ok = false;
-                                break;
-                            };
-                            if !ancestor_chunk.splice_chunk_in_place(
-                                offset,
-                                *hit_offset,
-                                *scroll_offset,
-                                new_chunk,
-                            ) {
-                                ok = false;
-                                break;
-                            }
+            let did_splice = if let Some(plans) = splice_plans.as_ref() {
+                let mut ok = true;
+                for plan in plans {
+                    for (ancestor_id, offset, hit_offset, scroll_offset) in &plan.ancestor_offsets {
+                        let Some(ancestor_chunk) = cached.scene_chunks.get_mut(ancestor_id) else {
+                            ok = false;
+                            break;
+                        };
+                        if !ancestor_chunk.splice_chunk_in_place(
+                            offset,
+                            *hit_offset,
+                            *scroll_offset,
+                            &plan.new_chunk,
+                        ) {
+                            ok = false;
+                            break;
                         }
-                        if !ok {
-                            return false;
-                        }
-                        #[cfg(test)]
-                        splice_probe::record_hit();
-                        true
                     }
-                    None => false,
+                    if !ok {
+                        break;
+                    }
                 }
+                if !ok {
+                    return false;
+                }
+                #[cfg(test)]
+                splice_probe::record_hit();
+                true
             } else {
                 false
             };
@@ -455,31 +506,54 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 );
             }
 
-            let root_clone_started_at = text_profile_enabled().then_some(Instant::now());
-            let Some(mut root_chunk) = cached.scene_chunks.get(&layout.root_id()).cloned() else {
-                return false;
-            };
-            root_chunk.finalize_portals(viewport);
-            root_chunk.scene.assign_new_prepare_cache_serial();
-            root_hit_region_count = root_chunk.hit_regions.len();
-            root_scroll_region_count = root_chunk.scroll_regions.len();
-            if let Some(root_clone_started_at) = root_clone_started_at {
-                root_clone_elapsed_ms = root_clone_started_at.elapsed().as_secs_f64() * 1000.0;
-                log_text_profile(
-                    "textarea_patch_scene_root_clone",
-                    std::time::Duration::from_secs_f64(root_clone_elapsed_ms / 1000.0),
-                    format!(
-                        "roots={:?} commands={} texts={} hit_regions={} scroll_regions={}",
-                        roots,
-                        root_chunk.scene.commands.len(),
-                        root_chunk.scene.texts.len(),
-                        root_chunk.hit_regions.len(),
-                        root_chunk.scroll_regions.len()
-                    ),
-                );
+            let can_splice_computed_directly =
+                did_splice && self.external_portal_requests.is_empty();
+            if can_splice_computed_directly {
+                let Some(plans) = splice_plans.as_ref() else {
+                    return false;
+                };
+                for plan in plans {
+                    if !cached.computed.splice_chunk_in_place(
+                        &plan.computed_offset,
+                        plan.computed_hit_offset,
+                        plan.computed_scroll_offset,
+                        &plan.new_chunk,
+                    ) {
+                        return false;
+                    }
+                }
+                root_hit_region_count = cached.computed.hit_regions.len();
+                root_scroll_region_count = cached.computed.scroll_regions.len();
+            } else {
+                let root_clone_started_at = text_profile_enabled().then_some(Instant::now());
+                let Some(mut root_chunk) = cached.scene_chunks.get(&layout.root_id()).cloned()
+                else {
+                    return false;
+                };
+                root_chunk.finalize_portals(viewport);
+                root_chunk.assign_new_prepare_cache_serial();
+                root_hit_region_count = root_chunk.hit_regions.len();
+                root_scroll_region_count = root_chunk.scroll_regions.len();
+                if let Some(root_clone_started_at) = root_clone_started_at {
+                    root_clone_elapsed_ms = root_clone_started_at.elapsed().as_secs_f64() * 1000.0;
+                    log_text_profile(
+                        "textarea_patch_scene_root_clone",
+                        std::time::Duration::from_secs_f64(root_clone_elapsed_ms / 1000.0),
+                        format!(
+                            "roots={:?} commands={} texts={} hit_regions={} scroll_regions={}",
+                            roots,
+                            root_chunk.scene.commands.len(),
+                            root_chunk.scene.texts.len(),
+                            root_chunk.hit_regions.len(),
+                            root_chunk.scroll_regions.len()
+                        ),
+                    );
+                }
+                cached.computed = root_chunk;
             }
-            cached.computed = root_chunk;
             cached.computed_valid = true;
+            cached.animation_epoch = self.animation_epoch;
+            cached.layout_animation_epoch = self.layout_animation_epoch;
             if sync_runtime_scene_state {
                 cached.focused_widget = focused_widget;
                 cached.focus_visible = self.focus_visible;
@@ -491,8 +565,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 cached.density = self.theme.density;
                 cached.reduced_motion = self.reduced_motion;
                 cached.text_scale_bits = cached.units.font_scale().to_bits();
-                cached.animation_epoch = self.animation_epoch;
-                cached.layout_animation_epoch = self.layout_animation_epoch;
                 cached.scroll_epoch = self.scroll_epoch;
                 cached.hover_epoch = self.hover_epoch;
                 cached.text_input_epoch = self.text_input_epoch;

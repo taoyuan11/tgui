@@ -1703,7 +1703,7 @@ impl ScenePrimitives {
             dst[start..end].clone_from_slice(src);
             true
         }
-        overwrite(
+        let ok = overwrite(
             &mut self.backdrop_blurs,
             offset.backdrop_blurs,
             &chunk.backdrop_blurs,
@@ -1746,20 +1746,25 @@ impl ScenePrimitives {
                 &mut self.command_transform_chains,
                 offset.commands,
                 &chunk.command_transform_chains,
-            )
-            && {
-                self.prepare_cache_serial = chunk.prepare_cache_serial;
-                self.dirty_draw_ranges
-                    .extend(chunk.dirty_draw_ranges.iter().cloned().map(|mut range| {
-                        let offset = match range.stream {
-                            SceneDrawStream::Main => offset.commands,
-                            SceneDrawStream::Overlay => offset.overlay_commands,
-                        };
-                        range.range = (range.range.start + offset)..(range.range.end + offset);
-                        range
-                    }));
-                true
+            );
+        if ok {
+            if !chunk.commands.is_empty() {
+                self.dirty_draw_ranges.push(DirtyDrawRange {
+                    stream: SceneDrawStream::Main,
+                    range: offset.commands..(offset.commands + chunk.commands.len()),
+                });
             }
+            self.dirty_draw_ranges
+                .extend(chunk.dirty_draw_ranges.iter().cloned().map(|mut range| {
+                    let offset = match range.stream {
+                        SceneDrawStream::Main => offset.commands,
+                        SceneDrawStream::Overlay => offset.overlay_commands,
+                    };
+                    range.range = (range.range.start + offset)..(range.range.end + offset);
+                    range
+                }));
+        }
+        ok
     }
 }
 

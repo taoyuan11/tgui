@@ -105,7 +105,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 window.request_redraw();
             }
         }
-        let controller_changed = self.animations.refresh(now);
+        let frame_clock_due = match event_loop.control_flow() {
+            ControlFlow::WaitUntil(deadline) => deadline <= now,
+            ControlFlow::Poll | ControlFlow::Wait => true,
+        };
+        let controller_changed = frame_clock_due && self.animations.refresh(now);
         if controller_changed {
             frame_advanced = true;
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
@@ -116,7 +120,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        let animation_refresh = self.animation_engine.refresh(now);
+        let animation_refresh = if frame_clock_due {
+            self.animation_engine.refresh(now)
+        } else {
+            Default::default()
+        };
         if animation_refresh.changed {
             frame_advanced = true;
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
@@ -156,7 +164,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .then_some(now + super::TOUCH_SCROLL_INERTIA_FRAME);
         let next_deadline = self.next_deadline(now);
 
-        self.set_control_flow_for_deadline(event_loop, next_deadline);
+        self.set_control_flow_for_deadline(event_loop, next_deadline, now);
 
         if let Some(started_at) = started_at {
             if animation_refresh.changed || animation_deadline.is_some() {

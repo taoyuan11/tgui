@@ -113,6 +113,53 @@ fn scene_slot_write_marks_only_the_touched_draw_dirty() {
 }
 
 #[test]
+fn scene_splice_marks_replaced_draw_range_dirty_without_bumping_serial() {
+    let mut scene = ScenePrimitives::new_prepare_cache_root();
+    scene.push_shape(RenderPrimitive {
+        rect: Rect::new(0.0, 0.0, 10.0, 10.0),
+        color: TguiColorAlias::RED,
+        corner_radius: 0.0,
+        stroke_width: 0.0,
+        clip_rect: None,
+        clip_mask: None,
+    });
+    scene.push_shape(RenderPrimitive {
+        rect: Rect::new(10.0, 0.0, 10.0, 10.0),
+        color: TguiColorAlias::BLUE,
+        corner_radius: 0.0,
+        stroke_width: 0.0,
+        clip_rect: None,
+        clip_mask: None,
+    });
+    let serial = scene.prepare_cache_serial();
+
+    let mut replacement = ScenePrimitives::default();
+    replacement.push_shape(RenderPrimitive {
+        rect: Rect::new(10.0, 0.0, 10.0, 10.0),
+        color: TguiColorAlias::GREEN,
+        corner_radius: 0.0,
+        stroke_width: 0.0,
+        clip_rect: None,
+        clip_mask: None,
+    });
+    assert!(replacement.dirty_draw_ranges().is_empty());
+
+    let mut offset = SceneCounts::default();
+    offset.shapes = 1;
+    offset.commands = 1;
+    assert!(scene.splice_in_place(&offset, &replacement));
+
+    assert_eq!(scene.prepare_cache_serial(), serial);
+    assert_eq!(
+        scene.dirty_draw_ranges(),
+        &[DirtyDrawRange {
+            stream: SceneDrawStream::Main,
+            range: 1..2,
+        }]
+    );
+}
+
+#[test]
 fn retained_prepare_stats_rebuild_only_dirty_scene_draws() {
     use super::prepare::{retained_prepare_stats, DrawStream, PrepareReuseStats};
 

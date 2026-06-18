@@ -994,7 +994,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             // 与这里的部分 move 互不冲突。
             let mut computed = collected.computed;
             self.append_external_portals_to_computed(&mut computed, now);
-            computed.scene.assign_new_prepare_cache_serial();
+            computed.assign_new_prepare_cache_serial();
             let virtual_layout_invalidated = self.sync_virtual_state_updates(&computed);
             if virtual_layout_invalidated {
                 self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
