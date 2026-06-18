@@ -29,15 +29,12 @@ pub struct WidgetTree<VM> {
 }
 
 /// 在递归走 widget 树的入口（root collect / root layout / overlay 子场景）使用，
-/// 一次性预留 8MB 备用栈，避免 debug 构建中每层 ~数十 KB 的局部把默认 1MB 栈打爆。
+/// 一次性预留 16MB 备用栈，避免 debug 构建中每层 ~数十 KB 的局部把默认 1MB 栈打爆。
 pub(crate) fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
-        const WIDGET_STACK_SIZE: usize = 8 * 1024 * 1024;
-        // CRITICAL: Red zone must be smaller than Windows default stack (1MB)
-        // to trigger stack extension before overflow
-        const WIDGET_STACK_RED_ZONE: usize = 512 * 1024; // 512KB red zone
-        return stacker::maybe_grow(WIDGET_STACK_RED_ZONE, WIDGET_STACK_SIZE, f);
+        const WIDGET_STACK_SIZE: usize = 16 * 1024 * 1024;
+        return stacker::grow(WIDGET_STACK_SIZE, f);
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
@@ -119,12 +116,14 @@ fn element_contains_dynamic_children<VM>(element: &Element<VM>) -> bool {
 
 impl<VM: 'static> WidgetTree<VM> {
     fn from_root(root: Element<VM>, strict_reactive: bool) -> Self {
-        let has_virtual = element_contains_virtual(&root);
-        Self {
-            root: std::sync::Arc::new(root),
-            has_virtual,
-            strict_reactive,
-        }
+        with_widget_stack(|| {
+            let has_virtual = element_contains_virtual(&root);
+            Self {
+                root: std::sync::Arc::new(root),
+                has_virtual,
+                strict_reactive,
+            }
+        })
     }
 
     /// Construct a strict retained-reactive widget tree.
@@ -133,11 +132,13 @@ impl<VM: 'static> WidgetTree<VM> {
     /// Structural changes must go through an explicit rebuild path instead of
     /// being driven implicitly by `Signal<Element>` / `Signal<Vec<Element>>`.
     pub fn new(root: impl Into<Element<VM>>) -> Self {
-        let root = root.into();
-        if let Err(error) = Self::validate_strict_root(&root) {
-            panic!("{error}");
-        }
-        Self::from_root(root, true)
+        with_widget_stack(|| {
+            let root = root.into();
+            if let Err(error) = Self::validate_strict_root(&root) {
+                panic!("{error}");
+            }
+            Self::from_root(root, true)
+        })
     }
 
     /// Construct a legacy tree that allows signal-driven dynamic children.
@@ -146,7 +147,7 @@ impl<VM: 'static> WidgetTree<VM> {
     /// still performs structural updates through dependency invalidation.
     /// Strict O(1) reactive updates are not guaranteed for this tree.
     pub fn new_legacy(root: impl Into<Element<VM>>) -> Self {
-        Self::from_root(root.into(), false)
+        with_widget_stack(|| Self::from_root(root.into(), false))
     }
 
     fn validate_strict_root(root: &Element<VM>) -> Result<(), StrictReactiveViolation> {
@@ -162,9 +163,11 @@ impl<VM: 'static> WidgetTree<VM> {
     /// may not implicitly add or remove widgets. Use `WidgetTree::new_legacy`
     /// only for the explicit legacy compatibility path.
     pub fn try_new_strict(root: impl Into<Element<VM>>) -> Result<Self, StrictReactiveViolation> {
-        let root = root.into();
-        Self::validate_strict_root(&root)?;
-        Ok(Self::from_root(root, true))
+        with_widget_stack(|| {
+            let root = root.into();
+            Self::validate_strict_root(&root)?;
+            Ok(Self::from_root(root, true))
+        })
     }
 
     pub(crate) fn has_virtual(&self) -> bool {
@@ -176,6 +179,51 @@ impl<VM: 'static> WidgetTree<VM> {
     }
 
     pub(crate) fn compute_scene_with_units_and_widget_state_at(
+        &self,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        units: UnitContext,
+        animations: &mut AnimationEngine,
+        reduced_motion: bool,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        select_open_states: &HashMap<WidgetId, bool>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        viewport: Rect,
+        focused_input: Option<WidgetId>,
+        focused_text_state: Option<&TextEditState>,
+        selected_text: Option<WidgetId>,
+        selected_text_state: Option<&TextEditState>,
+        caret_visible: bool,
+        now: Instant,
+    ) -> ComputedScene<VM> {
+        with_widget_stack(|| {
+            self.compute_scene_with_units_and_widget_state_at_inner(
+                font_manager,
+                theme,
+                media,
+                units,
+                animations,
+                reduced_motion,
+                hovered_scrollbar,
+                active_scrollbar,
+                widget_states,
+                select_open_states,
+                scroll_offsets,
+                viewport,
+                focused_input,
+                focused_text_state,
+                selected_text,
+                selected_text_state,
+                caret_visible,
+                now,
+            )
+        })
+    }
+
+    fn compute_scene_with_units_and_widget_state_at_inner(
         &self,
         font_manager: &FontManager,
         theme: &Theme,
@@ -407,25 +455,16 @@ impl<VM: 'static> WidgetTree<VM> {
                         &mut taffy, animations, theme, units, None, viewport, true, now,
                     )
                     .expect("widget tree layout should build");
-                taffy
-                    .compute_layout_with_measure(
-                        root_layout.node,
-                        TaffySize {
-                            width: AvailableSpace::Definite(viewport.width.get()),
-                            height: AvailableSpace::Definite(viewport.height.get()),
-                        },
-                        |known_dimensions, _, _, node_context, _| {
-                            measure_node(
-                                node_context,
-                                known_dimensions,
-                                font_manager,
-                                theme,
-                                media,
-                                units,
-                            )
-                        },
-                    )
-                    .expect("widget tree layout should compute");
+                compute_taffy_layout_with_measure(
+                    &mut taffy,
+                    root_layout.node,
+                    viewport,
+                    font_manager,
+                    theme,
+                    media,
+                    units,
+                )
+                .expect("widget tree layout should compute");
 
                 ResolvedSceneLayout {
                     source_root: root,

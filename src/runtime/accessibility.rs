@@ -41,11 +41,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn drain_accessibility_actions(&mut self) -> bool {
-        let mut handled = false;
-        while let Ok(request) = self.accessibility_action_receiver.try_recv() {
-            handled |= self.handle_accessibility_action(request);
-        }
-        handled
+        with_accessibility_action_stack(|| {
+            let mut handled = false;
+            while let Ok(request) = self.accessibility_action_receiver.try_recv() {
+                handled |= self.handle_accessibility_action(request);
+            }
+            handled
+        })
     }
 
     fn handle_accessibility_action(&mut self, request: ActionRequest) -> bool {
@@ -66,24 +68,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn focus_accessibility_widget(&mut self, widget_id: WidgetId) -> bool {
-        let computed = self.computed_scene().clone();
-        let target = computed
-            .hit_regions
-            .iter()
-            .chain(computed.overlay_hit_regions.iter())
-            .find_map(|region| {
-                let focus = region.focus.as_ref()?;
-                (focus.widget_id == widget_id).then(|| {
-                    (
-                        FocusedWidget {
-                            widget_id: focus.widget_id,
-                            scope_path: focus.scope_path.clone(),
-                            on_blur: focus.on_blur.clone(),
-                        },
-                        focus.on_focus.clone(),
-                    )
+        let target = {
+            let computed = self.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .chain(computed.overlay_hit_regions.iter())
+                .find_map(|region| {
+                    let focus = region.focus.as_ref()?;
+                    (focus.widget_id == widget_id).then(|| {
+                        (
+                            FocusedWidget {
+                                widget_id: focus.widget_id,
+                                scope_path: focus.scope_path.clone(),
+                                on_blur: focus.on_blur.clone(),
+                            },
+                            focus.on_focus.clone(),
+                        )
+                    })
                 })
-            });
+        };
         let Some((target, on_focus)) = target else {
             return false;
         };
@@ -96,16 +100,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if self.activate_focused_widget(true, true) {
             return true;
         }
-        let computed = self.computed_scene().clone();
-        let interaction = computed
-            .hit_regions
-            .iter()
-            .chain(computed.overlay_hit_regions.iter())
-            .find_map(|region| {
-                hit_interaction_widget_id(&region.interaction)
-                    .filter(|id| *id == widget_id)
-                    .map(|_| region.interaction.clone())
-            });
+        let interaction = {
+            let computed = self.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .chain(computed.overlay_hit_regions.iter())
+                .find_map(|region| {
+                    hit_interaction_widget_id(&region.interaction)
+                        .filter(|id| *id == widget_id)
+                        .map(|_| region.interaction.clone())
+                })
+        };
         match interaction {
             Some(HitInteraction::Widget { interactions, .. }) => {
                 if let Some(command) = interactions.on_click {
@@ -230,17 +236,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         action: Action,
         data: Option<ActionData>,
     ) -> bool {
-        let computed = self.computed_scene().clone();
-        let splitter = computed
-            .hit_regions
-            .iter()
-            .chain(computed.overlay_hit_regions.iter())
-            .find_map(|region| match &region.interaction {
-                HitInteraction::SplitterHandle { id, state, .. } if *id == widget_id => {
-                    Some(state.clone())
-                }
-                _ => None,
-            });
+        let splitter = {
+            let computed = self.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .chain(computed.overlay_hit_regions.iter())
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::SplitterHandle { id, state, .. } if *id == widget_id => {
+                        Some(state.clone())
+                    }
+                    _ => None,
+                })
+        };
         let Some(state) = splitter else {
             return false;
         };
@@ -281,23 +289,25 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         action: Action,
         data: Option<ActionData>,
     ) -> bool {
-        let computed = self.computed_scene().clone();
-        let slider = computed
-            .hit_regions
-            .iter()
-            .chain(computed.overlay_hit_regions.iter())
-            .find_map(|region| match &region.interaction {
-                HitInteraction::Slider {
-                    id,
-                    on_change,
-                    value,
-                    min,
-                    max,
-                    step,
-                    ..
-                } if *id == widget_id => Some((on_change.clone(), *value, *min, *max, *step)),
-                _ => None,
-            });
+        let slider = {
+            let computed = self.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .chain(computed.overlay_hit_regions.iter())
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::Slider {
+                        id,
+                        on_change,
+                        value,
+                        min,
+                        max,
+                        step,
+                        ..
+                    } if *id == widget_id => Some((on_change.clone(), *value, *min, *max, *step)),
+                    _ => None,
+                })
+        };
         let Some((on_change, value, min, max, step)) = slider else {
             return false;
         };
@@ -326,23 +336,25 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             Some(ActionData::Value(value)) => value.to_string(),
             _ => return false,
         };
-        let computed = self.computed_scene().clone();
-        let input = computed
-            .hit_regions
-            .iter()
-            .chain(computed.overlay_hit_regions.iter())
-            .find_map(|region| match &region.interaction {
-                HitInteraction::TextInput {
-                    id,
-                    controller,
-                    on_change,
-                    on_change_set,
-                    ..
-                } if *id == widget_id => {
-                    Some((controller.clone(), on_change.clone(), on_change_set.clone()))
-                }
-                _ => None,
-            });
+        let input = {
+            let computed = self.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .chain(computed.overlay_hit_regions.iter())
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::TextInput {
+                        id,
+                        controller,
+                        on_change,
+                        on_change_set,
+                        ..
+                    } if *id == widget_id => {
+                        Some((controller.clone(), on_change.clone(), on_change_set.clone()))
+                    }
+                    _ => None,
+                })
+        };
         let Some((controller, on_change, on_change_set)) = input else {
             return false;
         };
@@ -368,6 +380,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.invalidate_text_input_scene();
         true
+    }
+}
+
+fn with_accessibility_action_stack<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    {
+        const ACTION_STACK_SIZE: usize = 16 * 1024 * 1024;
+        return stacker::grow(ACTION_STACK_SIZE, f);
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        f()
     }
 }
 

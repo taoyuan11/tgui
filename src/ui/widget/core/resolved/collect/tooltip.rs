@@ -6,8 +6,7 @@
 //! - 对 focus / long-press tooltip 接入外部点击与 Esc 关闭。
 
 use std::sync::Arc;
-use taffy::prelude::{AvailableSpace, TaffyTree};
-use taffy::Size as TaffySize;
+use taffy::prelude::TaffyTree;
 
 use crate::animation::{AnimationKey, Transition, WidgetProperty};
 use crate::foundation::binding::{with_dependency_collection, DependencyGraph};
@@ -19,7 +18,7 @@ use crate::ui::widget::common::{
     ComputedScene, MeshPrimitive, MeshVertex, Rect, RenderPrimitive, TextPrimitive,
 };
 use crate::ui::widget::container::Stack;
-use crate::ui::widget::core::measure_node;
+use crate::ui::widget::core::compute_taffy_layout_with_measure;
 use crate::ui::widget::overlay::{
     collect::emit_overlay, solve_placement, Anchor, AnchorKey, Overlay, OverlayContent, OverlayId,
     OverlayLayer, OverlayPrimitive,
@@ -458,25 +457,16 @@ fn build_tooltip_scene<VM: 'static>(
                         context.now,
                     )
                     .ok()?;
-                taffy
-                    .compute_layout_with_measure(
-                        layout_root.node,
-                        TaffySize {
-                            width: AvailableSpace::Definite(context.viewport.width.get()),
-                            height: AvailableSpace::Definite(context.viewport.height.get()),
-                        },
-                        |known_dimensions, _, _, node_context, _| {
-                            measure_node(
-                                node_context,
-                                known_dimensions,
-                                context.font_manager,
-                                context.theme,
-                                context.media,
-                                context.units,
-                            )
-                        },
-                    )
-                    .ok()?;
+                compute_taffy_layout_with_measure(
+                    &mut taffy,
+                    layout_root.node,
+                    context.viewport,
+                    context.font_manager,
+                    context.theme,
+                    context.media,
+                    context.units,
+                )
+                .ok()?;
                 let layout = taffy.layout(layout_root.node).ok()?;
                 let size = (Dp::new(layout.size.width), Dp::new(layout.size.height));
                 let local_bounds = Rect::new(Dp::ZERO, Dp::ZERO, size.0, size.1);

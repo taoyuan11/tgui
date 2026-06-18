@@ -134,6 +134,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn request_redraw_if_dirty(&mut self, now: Instant) {
+        with_runtime_redraw_stack(|| self.request_redraw_if_dirty_inner(now));
+    }
+
+    fn request_redraw_if_dirty_inner(&mut self, now: Instant) {
         let revision = self.invalidation.revision();
         let caret_blink_changed = self.caret_blink_needs_redraw(now);
         if revision != self.last_invalidation_revision {
@@ -254,5 +258,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 window.request_redraw();
             }
         }
+    }
+}
+
+fn with_runtime_redraw_stack<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    {
+        const RUNTIME_REDRAW_STACK_SIZE: usize = 16 * 1024 * 1024;
+        return stacker::grow(RUNTIME_REDRAW_STACK_SIZE, f);
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        f()
     }
 }

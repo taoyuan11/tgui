@@ -25,6 +25,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         roots: &[WidgetId],
         now: Instant,
     ) -> bool {
+        with_runtime_scene_patch_stack(|| self.patch_cached_layout_for_roots_inner(roots, now))
+    }
+
+    fn patch_cached_layout_for_roots_inner(&mut self, roots: &[WidgetId], now: Instant) -> bool {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let Some(cached) = self.cached_scene.as_ref() else {
             return false;
@@ -84,6 +88,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn patch_cached_scene_for_roots(
+        &mut self,
+        roots: &[WidgetId],
+        now: Instant,
+        sync_runtime_scene_state: bool,
+    ) -> bool {
+        with_runtime_scene_patch_stack(|| {
+            self.patch_cached_scene_for_roots_inner(roots, now, sync_runtime_scene_state)
+        })
+    }
+
+    fn patch_cached_scene_for_roots_inner(
         &mut self,
         roots: &[WidgetId],
         now: Instant,
@@ -634,5 +649,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             );
         }
         true
+    }
+}
+
+fn with_runtime_scene_patch_stack<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    {
+        const RUNTIME_SCENE_PATCH_STACK_SIZE: usize = 16 * 1024 * 1024;
+        return stacker::grow(RUNTIME_SCENE_PATCH_STACK_SIZE, f);
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        f()
     }
 }

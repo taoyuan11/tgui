@@ -97,13 +97,12 @@ $env:PATH = 'C:\Program Files\LLVM\bin;' + "$env:USERPROFILE\vcpkg\installed\x64
 
 ```powershell
 cargo build --manifest-path examples\demo\Cargo.toml
-cargo build --manifest-path examples\demo\Cargo.toml --release
 ```
 
-release 产物位于：
+debug 产物位于：
 
 ```text
-examples\demo\target\release\demo.exe
+examples\demo\target\debug\demo.exe
 ```
 
 ## macOS
@@ -145,13 +144,12 @@ EOF
 
 ```sh
 cargo build --manifest-path examples/demo/Cargo.toml
-cargo build --manifest-path examples/demo/Cargo.toml --release
 ```
 
-release 产物位于：
+debug 产物位于：
 
 ```text
-examples/demo/target/release/demo
+examples/demo/target/debug/demo
 ```
 
 macOS 打包为 `.app` 时，需要同时考虑 FFmpeg 动态库的查找路径。开发阶段可通过 `DYLD_LIBRARY_PATH` 临时验证：
@@ -214,13 +212,12 @@ find /usr -name 'libclang.so*' 2>/dev/null
 
 ```sh
 cargo build --manifest-path examples/demo/Cargo.toml
-cargo build --manifest-path examples/demo/Cargo.toml --release
 ```
 
-release 产物位于：
+debug 产物位于：
 
 ```text
-examples/demo/target/release/demo
+examples/demo/target/debug/demo
 ```
 
 如果运行时报找不到 FFmpeg 动态库，请确认系统动态链接器能找到 `libavcodec.so`、`libavformat.so`、`libavutil.so`、`libswresample.so` 和 `libswscale.so`。系统包安装路径通常无需额外设置；自定义安装时可临时使用：
@@ -293,6 +290,5 @@ export LD_LIBRARY_PATH=/path/to/ffmpeg/lib:$LD_LIBRARY_PATH
 Windows 安装 LLVM 后，也可以查看 `demo.exe` 依赖：
 
 ```powershell
-llvm-objdump -p examples\demo\target\release\demo.exe | Select-String 'DLL Name'
+llvm-objdump -p examples\demo\target\debug\demo.exe | Select-String 'DLL Name'
 ```
-

@@ -5,6 +5,3 @@ edition = "2024"
 
 [dependencies]
 tgui = { path = "../.." }
-
-[profile.dev]
-opt-level = 1

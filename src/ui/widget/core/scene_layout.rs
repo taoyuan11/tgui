@@ -275,22 +275,14 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                 self.taffy.set_style(node, style)?;
             }
 
-            self.taffy.compute_layout_with_measure(
+            compute_taffy_layout_with_measure(
+                &mut self.taffy,
                 self.layout_root.node,
-                TaffySize {
-                    width: AvailableSpace::Definite(viewport.width.get()),
-                    height: AvailableSpace::Definite(viewport.height.get()),
-                },
-                |known_dimensions, _, _, node_context, _| {
-                    measure_node(
-                        node_context,
-                        known_dimensions,
-                        font_manager,
-                        theme,
-                        media,
-                        units,
-                    )
-                },
+                viewport,
+                font_manager,
+                theme,
+                media,
+                units,
             )
         });
         result?;
@@ -742,22 +734,14 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                         self.rebuild_indexes();
                     }
 
-                    self.taffy.compute_layout_with_measure(
+                    compute_taffy_layout_with_measure(
+                        &mut self.taffy,
                         self.layout_root.node,
-                        TaffySize {
-                            width: AvailableSpace::Definite(viewport.width.get()),
-                            height: AvailableSpace::Definite(viewport.height.get()),
-                        },
-                        |known_dimensions, _, _, node_context, _| {
-                            measure_node(
-                                node_context,
-                                known_dimensions,
-                                font_manager,
-                                theme,
-                                media,
-                                units,
-                            )
-                        },
+                        viewport,
+                        font_manager,
+                        theme,
+                        media,
+                        units,
                     )?;
 
                     Ok((removed_ids, touched_owner_ids))

@@ -174,25 +174,16 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
             context.now,
         )
         .ok()?;
-    taffy
-        .compute_layout_with_measure(
-            layout_root.node,
-            TaffySize {
-                width: AvailableSpace::Definite(menu_width.get()),
-                height: AvailableSpace::Definite(full_height.get()),
-            },
-            |known_dimensions, _, _, node_context, _| {
-                measure_node(
-                    node_context,
-                    known_dimensions,
-                    context.font_manager,
-                    context.theme,
-                    context.media,
-                    context.units,
-                )
-            },
-        )
-        .ok()?;
+    compute_taffy_layout_with_measure(
+        &mut taffy,
+        layout_root.node,
+        Rect::new(Dp::ZERO, Dp::ZERO, menu_width, full_height),
+        context.font_manager,
+        context.theme,
+        context.media,
+        context.units,
+    )
+    .ok()?;
 
     let mut lifecycle_states = std::collections::HashMap::new();
     let mut chunks = std::collections::HashMap::new();

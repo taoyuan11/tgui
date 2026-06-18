@@ -520,7 +520,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn computed_scene(&mut self) -> &ComputedScene<VM> {
-        self.computed_scene_with_virtual_feedback(0)
+        with_runtime_scene_stack(|| self.computed_scene_with_virtual_feedback(0))
     }
 
     fn computed_scene_with_virtual_feedback(
@@ -1197,5 +1197,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.apply_menu_keyboard_cursor_to_states(&mut states);
         states
+    }
+}
+
+fn with_runtime_scene_stack<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    {
+        const RUNTIME_SCENE_STACK_SIZE: usize = 16 * 1024 * 1024;
+        return stacker::grow(RUNTIME_SCENE_STACK_SIZE, f);
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        f()
     }
 }

@@ -77,7 +77,7 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 - 顶点脏区间增量上传：顶点池 flush 按字节 diff 只上传脏区间。triple-buffer 保证部分覆盖安全。锚点：`rendering/renderer/vertex_pool.rs`。
 - 纯滚动快路径：优先用 GPU per-draw 平移；adapter 不支持 IMMEDIATES 或场景前置不满足时回退到 CPU 子树重收集，再失败则整帧重收集。锚点：`runtime/mod.rs`、`input/interaction.rs`、`scene_runtime.rs`、`renderer/prepare.rs`。
 
-> 改这条管线务必跑默认 / `--no-default-features` / `audio` / `video` / `video-static` 检查，并补两类单测。本机测试用 `CARGO_PROFILE_DEV_DEBUG=0 cargo test` 规避 macOS Mach-O 重定位上限（committed master 既有问题，与改动无关）。
+> 改这条管线务必跑默认 / `--no-default-features` / `audio` / `video` / `video-static` 检查，并补两类单测。
 
 ## 启动模型
 

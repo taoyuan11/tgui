@@ -334,6 +334,34 @@ pub(super) fn measure_node(
     )
 }
 
+pub(super) fn compute_taffy_layout_with_measure(
+    taffy: &mut TaffyTree<MeasureContext>,
+    root: taffy::prelude::NodeId,
+    viewport: Rect,
+    font_manager: &FontManager,
+    theme: &Theme,
+    media: &MediaManager,
+    units: UnitContext,
+) -> Result<(), taffy::TaffyError> {
+    taffy.compute_layout_with_measure(
+        root,
+        TaffySize {
+            width: AvailableSpace::Definite(viewport.width.get()),
+            height: AvailableSpace::Definite(viewport.height.get()),
+        },
+        |known_dimensions, _, _, node_context, _| {
+            measure_node(
+                node_context,
+                known_dimensions,
+                font_manager,
+                theme,
+                media,
+                units,
+            )
+        },
+    )
+}
+
 fn measure_node_tracked(
     node_context: Option<&mut MeasureContext>,
     known_dimensions: TaffySize<Option<f32>>,

@@ -331,12 +331,16 @@ fn insert_node(
 }
 
 fn file_row(ctx: TreeNodeContext<FileInfo>) -> Element<AppVm> {
+    let selected = ctx.selected;
+    let disabled = ctx.disabled;
     let label = if ctx.disabled {
         format!("{} ({}, disabled)", ctx.item.name, ctx.item.kind)
     } else {
         format!("{} ({})", ctx.item.name, ctx.item.kind)
     };
-    Text::new(label).style_full(move |ctx| row_text_style(ctx, ctx.selected, ctx.disabled)).into()
+    Text::new(label)
+        .style_full(move |ctx| row_text_style(ctx, selected, disabled))
+        .into()
 }
 
 fn state_view(text: &'static str) -> Element<AppVm> {

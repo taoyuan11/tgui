@@ -12,20 +12,3 @@ tgui = { path = "../..", features = [
 
 [features]
 collect-profile = ["tgui/collect-profile"]
-
-[profile.release]
-lto = true
-codegen-units = 1
-panic = 'abort'
-debug = false
-opt-level = 3
-
-# Dev 模式性能：本地 crate 用 opt-level=1 保持增量编译快,
-# 把全部依赖(cosmic-text 文本整形 / lyon 镶嵌 / resvg / taffy / image 解码)
-# 编到 opt-level=3。这些 per-frame 热点几乎都在依赖里,
-# 依赖只编译一次后增量构建仍然很快。
-[profile.dev]
-opt-level = 1
-
-[profile.dev.package."*"]
-opt-level = 3

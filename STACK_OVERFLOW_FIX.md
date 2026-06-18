@@ -112,7 +112,7 @@ $ cargo run  # 用户项目，无 build.rs，无 config
 
 ### ✅ 完整测试套件
 ```bash
-$ CARGO_PROFILE_DEV_DEBUG=0 cargo test --lib
+$ cargo test --lib
 test result: ok. 655 passed; 4 failed; 0 ignored
 ```
 

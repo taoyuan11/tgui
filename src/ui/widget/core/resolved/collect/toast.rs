@@ -1,5 +1,4 @@
-use taffy::prelude::{AvailableSpace, TaffyTree};
-use taffy::Size as TaffySize;
+use taffy::prelude::TaffyTree;
 
 use crate::animation::{AnimationKey, Transition, WidgetProperty};
 use crate::foundation::binding::{ToastEntry, ToastKind, ToastPlacement, ToastQueue};
@@ -7,7 +6,7 @@ use crate::ui::layout::{pct, Axis, Justify, Length, Value};
 use crate::ui::unit::{dp, sp, Dp};
 use crate::ui::widget::button::Button;
 use crate::ui::widget::container::{Flex, Stack};
-use crate::ui::widget::core::measure_node;
+use crate::ui::widget::core::compute_taffy_layout_with_measure;
 use crate::ui::widget::icon::{Icon, SvgIconId};
 use crate::ui::widget::overlay::{
     collect::emit_overlay, Anchor, Overlay, OverlayContent, OverlayId, OverlayLayer, Placement,
@@ -327,25 +326,16 @@ fn collect_toast_card_scene<VM: 'static>(
             context.now,
         )
         .ok()?;
-    taffy
-        .compute_layout_with_measure(
-            layout_root.node,
-            TaffySize {
-                width: AvailableSpace::Definite(context.viewport.width.get()),
-                height: AvailableSpace::Definite(context.viewport.height.get()),
-            },
-            |known_dimensions, _, _, node_context, _| {
-                measure_node(
-                    node_context,
-                    known_dimensions,
-                    context.font_manager,
-                    context.theme,
-                    context.media,
-                    context.units,
-                )
-            },
-        )
-        .ok()?;
+    compute_taffy_layout_with_measure(
+        &mut taffy,
+        layout_root.node,
+        context.viewport,
+        context.font_manager,
+        context.theme,
+        context.media,
+        context.units,
+    )
+    .ok()?;
     let layout = taffy.layout(layout_root.node).ok()?;
     let card_size = (Dp::new(layout.size.width), Dp::new(layout.size.height));
 
@@ -458,25 +448,16 @@ fn measure_toast_card_size<VM: 'static>(
             context.now,
         )
         .ok()?;
-    taffy
-        .compute_layout_with_measure(
-            layout_root.node,
-            TaffySize {
-                width: AvailableSpace::Definite(context.viewport.width.get()),
-                height: AvailableSpace::Definite(context.viewport.height.get()),
-            },
-            |known_dimensions, _, _, node_context, _| {
-                measure_node(
-                    node_context,
-                    known_dimensions,
-                    context.font_manager,
-                    context.theme,
-                    context.media,
-                    context.units,
-                )
-            },
-        )
-        .ok()?;
+    compute_taffy_layout_with_measure(
+        &mut taffy,
+        layout_root.node,
+        context.viewport,
+        context.font_manager,
+        context.theme,
+        context.media,
+        context.units,
+    )
+    .ok()?;
     let layout = taffy.layout(layout_root.node).ok()?;
     Some((Dp::new(layout.size.width), Dp::new(layout.size.height)))
 }
@@ -518,25 +499,16 @@ fn collect_toast_card_shell_scene<VM: 'static>(
             context.now,
         )
         .ok()?;
-    taffy
-        .compute_layout_with_measure(
-            layout_root.node,
-            TaffySize {
-                width: AvailableSpace::Definite(context.viewport.width.get()),
-                height: AvailableSpace::Definite(context.viewport.height.get()),
-            },
-            |known_dimensions, _, _, node_context, _| {
-                measure_node(
-                    node_context,
-                    known_dimensions,
-                    context.font_manager,
-                    context.theme,
-                    context.media,
-                    context.units,
-                )
-            },
-        )
-        .ok()?;
+    compute_taffy_layout_with_measure(
+        &mut taffy,
+        layout_root.node,
+        context.viewport,
+        context.font_manager,
+        context.theme,
+        context.media,
+        context.units,
+    )
+    .ok()?;
 
     let mut lifecycle_states = std::collections::HashMap::new();
     let mut chunks = std::collections::HashMap::new();

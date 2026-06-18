@@ -10,7 +10,7 @@ const RETAINED_CARD_HEIGHT: f32 = 612.0;
 const EVENT_CARD_HEIGHT: f32 = 448.0;
 
 fn logo_source() -> MediaSource {
-    MediaSource::bytes(include_bytes!("../../../docs/images/tgui_logo.png"))
+    MediaSource::bytes(include_bytes!("../../../docs/public/images/tgui_logo.png"))
 }
 
 fn text_style(ctx: &StyleContext<'_>, size: Sp) -> TextWidgetStyle {

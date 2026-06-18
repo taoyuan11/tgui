@@ -1,5 +1,4 @@
-use taffy::prelude::{AvailableSpace, TaffyTree};
-use taffy::Size as TaffySize;
+use taffy::prelude::TaffyTree;
 
 use crate::foundation::binding::{with_dependency_collection, DependencyGraph};
 use crate::log::Log;
@@ -8,7 +7,7 @@ use crate::runtime::overlay::{
 };
 use crate::runtime::portal::ExternalPortalRequest;
 use crate::ui::unit::Dp;
-use crate::ui::widget::core::measure_node;
+use crate::ui::widget::core::compute_taffy_layout_with_measure;
 use crate::ui::widget::{
     ComputedScene, Element, FocusScopeState, PortalAnchor, PortalTarget, Rect,
 };
@@ -141,25 +140,16 @@ pub(crate) fn collect_portal_content_scene<VM: 'static>(
                         context.now,
                     )
                     .ok()?;
-                taffy
-                    .compute_layout_with_measure(
-                        layout_root.node,
-                        TaffySize {
-                            width: AvailableSpace::Definite(context.viewport.width.get()),
-                            height: AvailableSpace::Definite(context.viewport.height.get()),
-                        },
-                        |known_dimensions, _, _, node_context, _| {
-                            measure_node(
-                                node_context,
-                                known_dimensions,
-                                context.font_manager,
-                                context.theme,
-                                context.media,
-                                context.units,
-                            )
-                        },
-                    )
-                    .ok()?;
+                compute_taffy_layout_with_measure(
+                    &mut taffy,
+                    layout_root.node,
+                    context.viewport,
+                    context.font_manager,
+                    context.theme,
+                    context.media,
+                    context.units,
+                )
+                .ok()?;
                 let layout = taffy.layout(layout_root.node).ok()?;
                 let size = (Dp::new(layout.size.width), Dp::new(layout.size.height));
                 let local_bounds = Rect::new(Dp::ZERO, Dp::ZERO, size.0, size.1);

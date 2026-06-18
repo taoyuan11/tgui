@@ -344,9 +344,9 @@ cargo run --manifest-path examples/demo/Cargo.toml
 
 ```bash
 cargo check --features video
-CARGO_PROFILE_TEST_DEBUG=0 cargo test --features video video
-CARGO_PROFILE_TEST_DEBUG=0 cargo test --features video command_video_tests
-CARGO_PROFILE_TEST_DEBUG=0 cargo test --features video audio_video_tests
+cargo test --features video video
+cargo test --features video command_video_tests
+cargo test --features video audio_video_tests
 ```
 
 涉及 FFmpeg 链接或真实播放链路时，还应在桌面环境运行 `examples/demo` 并实际加载一个本地视频或 URL。
@@ -379,4 +379,3 @@ tgui = { version = "0.2.0", features = ["video-static"] }
 * 它会把 `ffmpeg-next/static` 传递给上游依赖。
 * 构建环境仍然需要提供 FFmpeg 静态库和头文件。
 * 实际支持的容器和 codec 仍取决于链接到的 FFmpeg 构建。
-

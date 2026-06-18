@@ -134,7 +134,7 @@ Application::new()
 4. **纯滚动帧子树重收集。** 识别「本帧只有 `scroll_epoch` 变化、其余全不变」的纯滚动帧，只对发生偏移的滚动容器（嵌套时取最高根）调 `patch_cached_scene_for_roots` 重收集**滚动子树**（复用同一收集函数，逐项等价），绕开整树重收集。virtual 容器排除。锚点：`runtime/mod.rs` + `input/interaction.rs`（`scroll_dirty_widgets`）、`cache_support.rs`（`scene_cache_fields_match_ignoring_scroll`）、`scene_runtime.rs`（`try_pure_scroll_fast_path`）。
 5. **纯滚动帧 GPU 平移变体。** 在纯滚动子树重收集基础上，对满足严格前置的单一滚动容器保留离屏命令与命中 metadata，纯滚动帧只更新 scroll offset / hit regions，并通过 wgpu `IMMEDIATES` 给 tagged draw 下发 per-draw 平移。adapter 不支持、virtual、嵌套 scroll、overlay/portal、IME、可见 scrollbar、unsupported clip / composite 等任一前置不满足即回退到 CPU 子树重收集。锚点：`scene_primitives.rs`（GPU scroll command metadata / clipped-out 保留）、`layout_media.rs`（滚动内容收集作用域）、`scene_runtime.rs`（`try_pure_scroll_gpu_fast_path` / `gpu_scroll_deferred`）、`renderer/prepare.rs` + shader。
 
-> 改这一管线时务必同时跑：默认 / `--no-default-features` / `audio` / `video` / `video-static` 的 `cargo check`，并补「快路径结果 == 全量重收集」+「回退路径」两类单测。本机测试受 macOS Mach-O 重定位上限影响，用 `CARGO_PROFILE_DEV_DEBUG=0 cargo test` 规避（committed master 既有环境问题）。
+> 改这一管线时务必同时跑：默认 / `--no-default-features` / `audio` / `video` / `video-static` 的 `cargo check`，并补「快路径结果 == 全量重收集」+「回退路径」两类单测。
 
 ## 组件和样式约定
 
@@ -243,11 +243,9 @@ README 中提到的一些示例名称未必都在当前工作区存在；维护�
 
 ```bash
 cargo check
-CARGO_PROFILE_TEST_DEBUG=0 cargo test
+cargo test
 cargo fmt
 ```
-
-跑测试时需要加上 `CARGO_PROFILE_TEST_DEBUG=0`，避免 macOS 下 test binary 因调试信息过大链接失败。
 
 按 feature 检查：
 
@@ -259,7 +257,7 @@ cargo check --features video-static
 运行某个测试：
 
 ```bash
-CARGO_PROFILE_TEST_DEBUG=0 cargo test <test_name>
+cargo test <test_name>
 ```
 
 运行某个示例：
