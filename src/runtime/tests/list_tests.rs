@@ -3,7 +3,7 @@ use super::*;
 use crate::ui::layout::pct;
 use crate::ui::widget::{
     ItemLayout, List, ListItem, ListItemAction, ListSection, ListSelectionChange,
-    ListSelectionMode, MenuItem, ScrollRegion, WidgetKey,
+    ListSelectionMode, MenuItem, ScrollRegion, VirtualList, WidgetKey,
 };
 
 fn list_row_center(
@@ -106,6 +106,49 @@ fn grouped_multi_select_list(selected: State<Vec<WidgetKey>>) -> Element<TestVm>
             },
         ))
         .into()
+}
+
+#[test]
+fn measured_virtual_list_rebuilds_after_initial_measure_feedback_without_scroll() {
+    let invalidation = InvalidationSignal::new();
+    let rows = (0..3).collect::<Vec<_>>();
+    let list: Element<TestVm> = VirtualList::new(rows, |index, _item| {
+        Stack::new()
+            .height(dp(30.0))
+            .child(Text::new(format!("Measured row {index}")))
+            .into()
+    })
+    .item_layout(ItemLayout::Measured {
+        estimate: dp(120.0),
+        spacing: Dp::ZERO,
+        overscan: 1,
+    })
+    .size(dp(200.0), dp(180.0))
+    .into();
+    let list_id = list.id;
+    let tree = WidgetTree::new(list);
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(200.0, 180.0),
+    );
+
+    let first = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == list_id)
+        .copied()
+        .expect("measured virtual list should create a scroll region");
+    assert_eq!(first.content_bounds.height, dp(180.0));
+    assert!(
+        handler
+            .cached_scene
+            .as_ref()
+            .is_some_and(|cached| cached.layout_valid && cached.computed_valid),
+        "initial measured feedback should rebuild before returning the scene"
+    );
 }
 
 #[test]

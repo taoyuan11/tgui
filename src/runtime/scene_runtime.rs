@@ -3,6 +3,8 @@ use crate::foundation::binding::ScrollRequestMode;
 use crate::foundation::binding::{ScrollRequest, ScrollViewController};
 use crate::ui::unit::Dp;
 
+const MAX_VIRTUAL_LAYOUT_FEEDBACK_PASSES: usize = 4;
+
 /// 测试探针：记录纯滚动快路径命中次数，让测试能断言「确实走了滚动快路径而非整帧重收集」。
 /// 仅测试构建编译，热路径零成本。
 #[cfg(test)]
@@ -518,6 +520,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn computed_scene(&mut self) -> &ComputedScene<VM> {
+        self.computed_scene_with_virtual_feedback(0)
+    }
+
+    fn computed_scene_with_virtual_feedback(
+        &mut self,
+        virtual_feedback_pass: usize,
+    ) -> &ComputedScene<VM> {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let viewport = self.viewport_rect();
         let units = self.unit_context();
@@ -1044,6 +1053,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 text_input_slot_bindings: HashMap::new(),
                 strict_capability_report: None,
             }));
+            if virtual_layout_invalidated {
+                if let Some(cached) = self.cached_scene.as_mut() {
+                    cached.layout_valid = false;
+                    cached.computed_valid = false;
+                }
+                if virtual_feedback_pass < MAX_VIRTUAL_LAYOUT_FEEDBACK_PASSES {
+                    return self.computed_scene_with_virtual_feedback(virtual_feedback_pass + 1);
+                }
+            }
             self.rebuild_layout_slot_bindings();
             self.rebuild_reactive_slot_bindings(now);
             self.rebuild_media_texture_bindings();

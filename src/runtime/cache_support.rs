@@ -75,6 +75,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && cached.reduced_motion == self.reduced_motion
             && cached.text_scale_bits == units.font_scale().to_bits()
             && cached.animation_epoch == self.animation_epoch
+            && cached.layout_animation_epoch == self.layout_animation_epoch
             && cached.hover_epoch == self.hover_epoch
             && cached.text_input_epoch == self.text_input_epoch
             && cached.external_portal_revision == self.external_portal_revision
@@ -154,6 +155,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         if cached.animation_epoch != self.animation_epoch {
             reasons.push("animation_epoch");
+        }
+        if cached.layout_animation_epoch != self.layout_animation_epoch {
+            reasons.push("layout_animation_epoch");
         }
         if cached.scroll_epoch != self.scroll_epoch {
             reasons.push("scroll_epoch");

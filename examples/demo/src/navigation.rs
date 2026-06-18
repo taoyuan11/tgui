@@ -12,6 +12,19 @@ pub(crate) enum DemoPage {
     MediaCanvas,
 }
 
+impl DemoPage {
+    pub(crate) fn content_key(self) -> &'static str {
+        match self {
+            Self::Basics => "page-content-basics",
+            Self::Forms => "page-content-forms",
+            Self::Feedback => "page-content-feedback",
+            Self::Overlays => "page-content-overlays",
+            Self::Data => "page-content-data",
+            Self::MediaCanvas => "page-content-media-canvas",
+        }
+    }
+}
+
 pub(crate) struct NavigationItem {
     pub page: DemoPage,
     pub title: &'static str,
