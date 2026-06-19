@@ -184,11 +184,7 @@ fn usage_demo(app: &App, demo: UsageDemo, layout: DemoLayout) -> Element<App> {
                 .secondary()
                 .on_click(Command::new(move |app: &mut App| app.toggle_code(id))),
         )
-        .child(if app.code_expanded_signal(id).get() {
-            code_block(code)
-        } else {
-            empty_code_block()
-        })
+        .child(Show::new(app.code_expanded_signal(id), code_block(code)))
         .into()
 }
 
@@ -206,8 +202,4 @@ fn code_block(code: &'static str) -> Element<App> {
                 .user_select(true),
         )
         .into()
-}
-
-fn empty_code_block() -> Element<App> {
-    Flex::vertical().height(dp(0.0)).into()
 }
