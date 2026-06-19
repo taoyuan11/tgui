@@ -32,6 +32,7 @@ pub struct PathBuilder {
 }
 
 impl PathBuilder {
+    #[inline]
     pub fn new() -> Self {
         Self {
             commands: Vec::new(),
@@ -40,6 +41,7 @@ impl PathBuilder {
         }
     }
 
+    #[inline]
     pub fn fill_rule(mut self, fill_rule: CanvasFillRule) -> Self {
         self.fill_rule = fill_rule;
         self
@@ -53,18 +55,21 @@ impl PathBuilder {
         self.fill_rule(CanvasFillRule::NonZero)
     }
 
+    #[inline]
     pub fn move_to(mut self, x: impl Into<Dp>, y: impl Into<Dp>) -> Self {
         self.shape_hint = None;
         self.commands.push(PathCommand::MoveTo(Point::new(x, y)));
         self
     }
 
+    #[inline]
     pub fn line_to(mut self, x: impl Into<Dp>, y: impl Into<Dp>) -> Self {
         self.shape_hint = None;
         self.commands.push(PathCommand::LineTo(Point::new(x, y)));
         self
     }
 
+    #[inline]
     pub fn quad_to(
         mut self,
         ctrl_x: impl Into<Dp>,
@@ -80,6 +85,7 @@ impl PathBuilder {
         self
     }
 
+    #[inline]
     pub fn cubic_to(
         mut self,
         ctrl1_x: impl Into<Dp>,
@@ -98,10 +104,62 @@ impl PathBuilder {
         self
     }
 
+    #[inline]
     pub fn close(mut self) -> Self {
         self.shape_hint = None;
         self.commands.push(PathCommand::Close);
         self
+    }
+
+    #[inline]
+    pub(crate) fn push_move_to(&mut self, x: impl Into<Dp>, y: impl Into<Dp>) {
+        self.shape_hint = None;
+        self.commands.push(PathCommand::MoveTo(Point::new(x, y)));
+    }
+
+    #[inline]
+    pub(crate) fn push_line_to(&mut self, x: impl Into<Dp>, y: impl Into<Dp>) {
+        self.shape_hint = None;
+        self.commands.push(PathCommand::LineTo(Point::new(x, y)));
+    }
+
+    #[inline]
+    pub(crate) fn push_quad_to(
+        &mut self,
+        ctrl_x: impl Into<Dp>,
+        ctrl_y: impl Into<Dp>,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+    ) {
+        self.shape_hint = None;
+        self.commands.push(PathCommand::QuadTo {
+            ctrl: Point::new(ctrl_x, ctrl_y),
+            to: Point::new(x, y),
+        });
+    }
+
+    #[inline]
+    pub(crate) fn push_cubic_to(
+        &mut self,
+        ctrl1_x: impl Into<Dp>,
+        ctrl1_y: impl Into<Dp>,
+        ctrl2_x: impl Into<Dp>,
+        ctrl2_y: impl Into<Dp>,
+        x: impl Into<Dp>,
+        y: impl Into<Dp>,
+    ) {
+        self.shape_hint = None;
+        self.commands.push(PathCommand::CubicTo {
+            ctrl1: Point::new(ctrl1_x, ctrl1_y),
+            ctrl2: Point::new(ctrl2_x, ctrl2_y),
+            to: Point::new(x, y),
+        });
+    }
+
+    #[inline]
+    pub(crate) fn push_close(&mut self) {
+        self.shape_hint = None;
+        self.commands.push(PathCommand::Close);
     }
 
     pub fn rect(
@@ -116,6 +174,7 @@ impl PathBuilder {
         let y = y.into();
         let width = width.into().max(Dp::ZERO);
         let height = height.into().max(Dp::ZERO);
+        self.commands.reserve(5);
         self = self
             .move_to(x, y)
             .line_to(x + width, y)
@@ -156,7 +215,9 @@ impl PathBuilder {
         let right = x + width;
         let bottom = y + height;
         let r = radius.get();
-        let mut builder = self.move_to(x + radius, y);
+        let mut builder = self;
+        builder.commands.reserve(22);
+        builder = builder.move_to(x + radius, y);
         builder = append_arc_segments(
             builder,
             Point::new(right - radius, y + radius),
@@ -224,12 +285,15 @@ impl PathBuilder {
         }
 
         let segments = 32usize;
-        let mut builder = self.move_to(center.x.get() + radius_x, center.y.get());
+        let mut builder = self;
+        builder.commands.reserve(segments + 1);
+        builder = builder.move_to(center.x.get() + radius_x, center.y.get());
         for index in 1..segments {
             let angle = (index as f32 / segments as f32) * std::f32::consts::TAU;
+            let (sin, cos) = angle.sin_cos();
             builder = builder.line_to(
-                center.x.get() + angle.cos() * radius_x,
-                center.y.get() + angle.sin() * radius_y,
+                center.x.get() + cos * radius_x,
+                center.y.get() + sin * radius_y,
             );
         }
         builder.close()

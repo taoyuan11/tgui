@@ -14,6 +14,7 @@ impl Point {
         y: Dp::ZERO,
     };
 
+    #[inline]
     pub fn new(x: impl Into<Dp>, y: impl Into<Dp>) -> Self {
         Self {
             x: x.into(),
@@ -32,6 +33,7 @@ pub struct Rect {
 }
 
 impl Rect {
+    #[inline]
     pub fn new(
         x: impl Into<Dp>,
         y: impl Into<Dp>,

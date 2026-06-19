@@ -105,7 +105,10 @@ pub(crate) fn sidebar(app: &App) -> Element<App> {
 
 fn nav_item(app: &App, item: NavigationItem) -> Element<App> {
     let page = item.page;
-    let active = app.current_page.signal().map(move |current| current == page);
+    let active = app
+        .current_page
+        .signal()
+        .map(move |current| current == page);
     let accent = item.accent;
     let active_for_item = active.clone();
     let active_for_badge = active.clone();
@@ -132,30 +135,20 @@ fn nav_item(app: &App, item: NavigationItem) -> Element<App> {
                         .style_full(move |ctx| {
                             styles::nav_badge_style(ctx, active_for_badge.get(), accent)
                         })
-                        .child(
-                            Text::new(item.badge).style_full(move |ctx| {
-                                styles::nav_badge_text_style(ctx, active_for_badge_text.get())
-                            }),
-                        ),
+                        .child(Text::new(item.badge).style_full(move |ctx| {
+                            styles::nav_badge_text_style(ctx, active_for_badge_text.get())
+                        })),
                 )
                 .child(
                     Flex::vertical()
                         .grow(1.0)
                         .gap(dp(3.0))
-                        .child(
-                            Text::new(item.title)
-                                .style_full(move |ctx| {
-                                    styles::nav_title_style(ctx, active_for_title.get())
-                                }),
-                        )
-                        .child(
-                            Text::new(item.description).style_full(move |ctx| {
-                                styles::nav_description_style(
-                                    ctx,
-                                    active_for_description.get(),
-                                )
-                            }),
-                        ),
+                        .child(Text::new(item.title).style_full(move |ctx| {
+                            styles::nav_title_style(ctx, active_for_title.get())
+                        }))
+                        .child(Text::new(item.description).style_full(move |ctx| {
+                            styles::nav_description_style(ctx, active_for_description.get())
+                        })),
                 ),
         )
         .into()

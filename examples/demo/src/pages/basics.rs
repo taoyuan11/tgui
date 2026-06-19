@@ -328,9 +328,11 @@ fn disclosure_layout_component(app: &App) -> Element<App> {
                     app.splitter_sizes.signal(),
                 )
                 .height(dp(150.0))
-                .on_resize(ValueCommand::new(|app: &mut App, resize: SplitterResize| {
-                    app.splitter_sizes.set(resize.sizes);
-                })),
+                .on_resize(ValueCommand::new(
+                    |app: &mut App, resize: SplitterResize| {
+                        app.splitter_sizes.set(resize.sizes);
+                    },
+                )),
                 CODE_SPLITTER,
             ),
         ],

@@ -62,8 +62,11 @@ impl HomePage {
             .padding(Insets::all(dp(20.0)))
             .style_full(|ctx| panel_style(ctx, Color::hex(0x0066FF)))
             .child(el![
-                Text::new("Home 内部也有页面切换")
-                    .style_full(|ctx| text_style(ctx, sp(22.0), Color::WHITE)),
+                Text::new("Home 内部也有页面切换").style_full(|ctx| text_style(
+                    ctx,
+                    sp(22.0),
+                    Color::WHITE
+                )),
                 Flex::new(Axis::Horizontal).gap(dp(10.0)).child(el![
                     Button::new("Counter").on_click(Command::new(Self::show_counter)),
                     Button::new("Details").on_click(Command::new(Self::show_details)),
@@ -95,8 +98,12 @@ impl HomeCounterPage {
             .padding(Insets::all(dp(14.0)))
             .style_full(|ctx| panel_style(ctx, Color::hex(0x0D47A1)))
             .child(el![
-                Text::new(self.count.signal().map(|i| format!("Home Counter 数量：{i}")))
-                    .style_full(|ctx| text_style(ctx, sp(16.0), Color::WHITE)),
+                Text::new(
+                    self.count
+                        .signal()
+                        .map(|i| format!("Home Counter 数量：{i}"))
+                )
+                .style_full(|ctx| text_style(ctx, sp(16.0), Color::WHITE)),
                 Button::new("Counter +1").on_click(Command::new(Self::increment)),
             ])
             .into()
@@ -124,10 +131,17 @@ impl HomeDetailsPage {
             .padding(Insets::all(dp(14.0)))
             .style_full(|ctx| panel_style(ctx, Color::hex(0x1565C0)))
             .child(el![
-                Text::new("Home Details 子页面")
-                    .style_full(|ctx| text_style(ctx, sp(16.0), Color::WHITE)),
-                Text::new(self.visits.signal().map(|visits| format!("访问次数：{visits}")))
-                    .style_full(|ctx| text_style(ctx, sp(16.0), Color::WHITE)),
+                Text::new("Home Details 子页面").style_full(|ctx| text_style(
+                    ctx,
+                    sp(16.0),
+                    Color::WHITE
+                )),
+                Text::new(
+                    self.visits
+                        .signal()
+                        .map(|visits| format!("访问次数：{visits}"))
+                )
+                .style_full(|ctx| text_style(ctx, sp(16.0), Color::WHITE)),
                 Button::new("记录访问").on_click(Command::new(Self::add_visit)),
             ])
             .into()

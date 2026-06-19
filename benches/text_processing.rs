@@ -1,6 +1,6 @@
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 
 #[cfg(feature = "bench-support")]
 use std::time::Instant;
@@ -11,6 +11,8 @@ use tgui::core::{dp, Rect};
 use tgui::layout::{Axis, Insets};
 #[cfg(feature = "bench-support")]
 use tgui::mvvm::ViewModelContext;
+#[cfg(feature = "bench-support")]
+use tgui::widgets::bench_support_ext::{BenchRopeBuffer, BenchTextLayout};
 #[cfg(feature = "bench-support")]
 use tgui::widgets::{Flex, Text, Textarea, WidgetBenchmarkContext, WidgetTree};
 
@@ -27,6 +29,52 @@ fn repeated_text(bytes_hint: usize) -> String {
         text.push_str(sentence);
     }
     text
+}
+
+#[cfg(feature = "bench-support")]
+fn repeated_unicode_text(bytes_hint: usize) -> String {
+    let sentence = "Hello 你好 cafe こんにちは text edit boundary path. ";
+    let mut text = String::with_capacity(bytes_hint + sentence.len());
+    while text.len() < bytes_hint {
+        text.push_str(sentence);
+    }
+    text
+}
+
+#[cfg(feature = "bench-support")]
+fn indexed_lines(line_count: usize) -> (String, Vec<usize>, Vec<f32>) {
+    let mut text = String::new();
+    let mut byte_indices = Vec::with_capacity(line_count);
+    let mut ys = Vec::with_capacity(line_count);
+
+    for line in 0..line_count {
+        let line_start = text.len();
+        let line_text = format!("{line:04}: retained text layout query benchmark line");
+        byte_indices.push(line_start + line_text.len() / 2);
+        ys.push(line as f32 * 24.0 + 12.0);
+        text.push_str(&line_text);
+        if line + 1 < line_count {
+            text.push('\n');
+        }
+    }
+
+    (text, byte_indices, ys)
+}
+
+#[cfg(feature = "bench-support")]
+fn indexed_single_line(bytes_hint: usize) -> (String, Vec<usize>) {
+    let text = repeated_text(bytes_hint);
+    let byte_indices = (0..=text.len()).collect();
+    (text, byte_indices)
+}
+
+#[cfg(feature = "bench-support")]
+fn clamp_to_char_boundary(text: &str, index: usize) -> usize {
+    let mut index = index.min(text.len());
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
 }
 
 #[cfg(feature = "bench-support")]
@@ -273,6 +321,138 @@ fn bench_text_wrapping(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "bench-support")]
+fn bench_rope_buffer_replace(c: &mut Criterion) {
+    let mut group = c.benchmark_group("text_rope_buffer_replace_at_cursor");
+
+    for (name, sample) in [
+        ("ascii_1024", repeated_text(1024)),
+        ("mixed_1024", repeated_unicode_text(1024)),
+        ("ascii_4096", repeated_text(4096)),
+        ("mixed_4096", repeated_unicode_text(4096)),
+    ] {
+        let cursor = clamp_to_char_boundary(&sample, sample.len() / 2);
+        group.bench_with_input(BenchmarkId::from_parameter(name), &sample, |b, sample| {
+            b.iter_batched(
+                || BenchRopeBuffer::from_text(sample),
+                |mut buffer| {
+                    buffer.replace_byte_range(black_box(cursor), black_box(cursor), "x");
+                    black_box(buffer.len_bytes());
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_rope_buffer_boundary_walk(c: &mut Criterion) {
+    let mut group = c.benchmark_group("text_rope_buffer_boundary_walk");
+
+    for (name, sample) in [
+        ("ascii_4096", repeated_text(4096)),
+        ("mixed_4096", repeated_unicode_text(4096)),
+    ] {
+        let buffer = BenchRopeBuffer::from_text(&sample);
+        let cursor = clamp_to_char_boundary(&sample, sample.len() / 2);
+        group.bench_with_input(BenchmarkId::from_parameter(name), &sample, |b, _| {
+            b.iter(|| {
+                let previous = buffer.prev_char_boundary_byte(black_box(cursor));
+                let next = buffer.next_char_boundary_byte(black_box(cursor));
+                black_box((previous, next));
+            });
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_text_layout_line_queries(c: &mut Criterion) {
+    let mut group = c.benchmark_group("text_layout_line_queries");
+
+    for line_count in [32_usize, 256, 2048] {
+        let (text, byte_indices, ys) = indexed_lines(line_count);
+        let layout = BenchTextLayout::from_text(&text);
+
+        group.bench_with_input(
+            BenchmarkId::new("index", line_count),
+            &line_count,
+            |b, _| {
+                b.iter(|| {
+                    let mut sum = 0usize;
+                    for index in &byte_indices {
+                        sum = sum.wrapping_add(layout.line_index_for_index(black_box(*index)));
+                    }
+                    black_box(sum);
+                });
+            },
+        );
+
+        group.bench_with_input(BenchmarkId::new("y", line_count), &line_count, |b, _| {
+            b.iter(|| {
+                let mut sum = 0usize;
+                for y in &ys {
+                    sum = sum.wrapping_add(layout.line_index_for_y(black_box(*y)));
+                }
+                black_box(sum);
+            });
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_text_layout_boundary_queries(c: &mut Criterion) {
+    let mut group = c.benchmark_group("text_layout_boundary_queries");
+
+    for size in [64_usize, 512, 4096] {
+        let (text, byte_indices) = indexed_single_line(size);
+        let layout = BenchTextLayout::from_text(&text);
+
+        group.bench_with_input(BenchmarkId::new("x_for_index", size), &size, |b, _| {
+            b.iter(|| {
+                let mut sum = 0.0f32;
+                for index in &byte_indices {
+                    sum += layout.x_for_index(black_box(*index));
+                }
+                black_box(sum);
+            });
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_text_layout_hit_queries(c: &mut Criterion) {
+    let mut group = c.benchmark_group("text_layout_hit_queries");
+
+    for size in [64_usize, 512, 4096] {
+        let (text, byte_indices) = indexed_single_line(size);
+        let layout = BenchTextLayout::from_text(&text);
+        let xs: Vec<_> = byte_indices
+            .iter()
+            .map(|index| layout.x_for_index(*index) + 0.25)
+            .collect();
+
+        group.bench_with_input(BenchmarkId::new("index_for_x", size), &size, |b, _| {
+            b.iter(|| {
+                let mut sum = 0usize;
+                for x in &xs {
+                    sum = sum.wrapping_add(layout.index_for_x(black_box(*x)));
+                }
+                black_box(sum);
+            });
+        });
+    }
+
+    group.finish();
+}
+
 #[cfg(not(feature = "bench-support"))]
 fn bench_text_shaping(_c: &mut Criterion) {
     eprintln!("Skipping text_processing benchmarks: bench-support feature not enabled");
@@ -302,6 +482,21 @@ fn bench_unicode_handling(_c: &mut Criterion) {}
 #[cfg(not(feature = "bench-support"))]
 fn bench_text_wrapping(_c: &mut Criterion) {}
 
+#[cfg(not(feature = "bench-support"))]
+fn bench_rope_buffer_replace(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_rope_buffer_boundary_walk(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_text_layout_line_queries(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_text_layout_boundary_queries(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_text_layout_hit_queries(_c: &mut Criterion) {}
+
 criterion_group!(
     benches,
     bench_text_shaping,
@@ -313,5 +508,10 @@ criterion_group!(
     bench_text_selection,
     bench_unicode_handling,
     bench_text_wrapping,
+    bench_rope_buffer_replace,
+    bench_rope_buffer_boundary_walk,
+    bench_text_layout_line_queries,
+    bench_text_layout_boundary_queries,
+    bench_text_layout_hit_queries,
 );
 criterion_main!(benches);

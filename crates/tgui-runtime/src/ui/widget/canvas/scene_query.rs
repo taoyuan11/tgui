@@ -126,6 +126,23 @@ pub(crate) fn query_canvas_scene_hits(
     hits
 }
 
+pub(crate) fn query_canvas_scene_hit(
+    scene: &CanvasScene,
+    font_manager: Option<&FontManager>,
+    units: UnitContext,
+    include_text_hits: bool,
+    scene_position: Point,
+) -> Option<CanvasSceneHit> {
+    let query_session = CanvasSceneQuerySession::new(font_manager, units, include_text_hits);
+    let mut index_path = Vec::new();
+    query_first_hit_recursive(
+        scene.items(),
+        scene_position,
+        &mut index_path,
+        &query_session,
+    )
+}
+
 fn collect_query_hits_recursive(
     items: &[CanvasItem],
     scene_position: Point,
@@ -141,9 +158,9 @@ fn collect_query_hits_recursive(
             continue;
         }
 
-        let contains = item_contains_scene_point(item, scene_position);
+        let contains_bounds = item_hit_bounds_if_contains(item, scene_position);
         if let CanvasItem::Group(group) = item {
-            if contains {
+            if contains_bounds.is_some() {
                 collect_query_hits_recursive(
                     &group.items,
                     scene_position,
@@ -154,28 +171,76 @@ fn collect_query_hits_recursive(
             }
         }
 
-        if contains {
-            let local_position = item_event_local_position(item, scene_position);
-            let depth = index_path.len().saturating_sub(1);
-            let stored_path = index_path.clone();
-            let kind = item.kind();
-            let name = item.name().map(ToOwned::to_owned);
-            let bounds = item.hit_bounds_rect();
-            let text_hit = item_text_hit_at_point(item, scene_position, query_session);
-            hits.push(CanvasSceneHit {
-                item_id: item.id(),
-                name,
-                kind,
-                depth,
-                index_path: stored_path,
+        if let Some(bounds) = contains_bounds {
+            hits.push(canvas_scene_hit_for_item(
+                item,
                 scene_position,
-                local_position,
+                index_path,
                 bounds,
-                text_hit,
-            });
+                query_session,
+            ));
         }
 
         index_path.pop();
+    }
+}
+
+fn query_first_hit_recursive(
+    items: &[CanvasItem],
+    scene_position: Point,
+    index_path: &mut Vec<usize>,
+    query_session: &CanvasSceneQuerySession<'_>,
+) -> Option<CanvasSceneHit> {
+    for index in (0..items.len()).rev() {
+        let item = &items[index];
+        index_path.push(index);
+        if !item.style().visible || !item.style().hit_test {
+            index_path.pop();
+            continue;
+        }
+
+        if let Some(bounds) = item_hit_bounds_if_contains(item, scene_position) {
+            if let CanvasItem::Group(group) = item {
+                if let Some(hit) = query_first_hit_recursive(
+                    &group.items,
+                    scene_position,
+                    index_path,
+                    query_session,
+                ) {
+                    index_path.pop();
+                    return Some(hit);
+                }
+            }
+
+            let hit =
+                canvas_scene_hit_for_item(item, scene_position, index_path, bounds, query_session);
+            index_path.pop();
+            return Some(hit);
+        }
+
+        index_path.pop();
+    }
+
+    None
+}
+
+fn canvas_scene_hit_for_item(
+    item: &CanvasItem,
+    scene_position: Point,
+    index_path: &[usize],
+    bounds: Rect,
+    query_session: &CanvasSceneQuerySession<'_>,
+) -> CanvasSceneHit {
+    CanvasSceneHit {
+        item_id: item.id(),
+        name: item.name().map(ToOwned::to_owned),
+        kind: item.kind(),
+        depth: index_path.len().saturating_sub(1),
+        index_path: index_path.to_vec(),
+        scene_position,
+        local_position: item_event_local_position(item, scene_position),
+        bounds: Some(bounds),
+        text_hit: item_text_hit_at_point(item, scene_position, query_session),
     }
 }
 
@@ -216,17 +281,17 @@ impl<'a> CanvasSceneQuerySession<'a> {
     }
 }
 
-fn item_contains_scene_point(item: &CanvasItem, scene_position: Point) -> bool {
+fn item_hit_bounds_if_contains(item: &CanvasItem, scene_position: Point) -> Option<Rect> {
     let Some(bounds) = item.hit_bounds_rect() else {
-        return false;
+        return None;
     };
     if !bounds.contains(scene_position) {
-        return false;
+        return None;
     }
 
     match scene_hit_geometry_for_item(item) {
-        Some(geometry) => hit_geometry_contains(&geometry, scene_position),
-        None => true,
+        Some(geometry) if !hit_geometry_contains(&geometry, scene_position) => None,
+        _ => Some(bounds),
     }
 }
 

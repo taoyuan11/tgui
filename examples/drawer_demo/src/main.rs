@@ -74,8 +74,7 @@ impl DrawerDemoVm {
                             .on_click(Command::new(Self::toggle_bottom_drawer)),
                     )
                     .child(
-                        Button::new("Push 模式")
-                            .on_click(Command::new(Self::toggle_push_drawer)),
+                        Button::new("Push 模式").on_click(Command::new(Self::toggle_push_drawer)),
                     ),
             )
             .child(Text::new("提示："))

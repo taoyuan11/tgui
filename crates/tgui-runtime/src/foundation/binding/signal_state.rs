@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::animation::Transition;
 
-use super::dependency::{current_dependency_owner, record_dependency_read, DependencyId};
+use super::dependency::{record_dependency_read, DependencyId};
 use super::invalidation::InvalidationSignal;
 use super::reactive::{ReactiveGraph, ReactiveTarget, SignalId};
 
@@ -88,8 +88,7 @@ impl<T> State<T> {
     }
 
     fn track_read(&self) {
-        record_dependency_read(Some(self.dependency));
-        if let Some(owner) = current_dependency_owner() {
+        if let Some(owner) = record_dependency_read(Some(self.dependency)) {
             self.invalidation
                 .reactive_graph()
                 .subscribe_target(self.signal_id, ReactiveTarget::Owner(owner));
@@ -329,8 +328,7 @@ impl<T: Clone> Signal<T> {
     }
 
     fn track_read(&self) {
-        record_dependency_read(self.dependency);
-        if let Some(owner) = current_dependency_owner() {
+        if let Some(owner) = record_dependency_read(self.dependency) {
             self.graph
                 .subscribe_target(self.signal_id, ReactiveTarget::Owner(owner));
         }
@@ -338,18 +336,28 @@ impl<T: Clone> Signal<T> {
 
     fn read_cached_value(&self) -> T {
         let revision = self.invalidation.revision();
+        {
+            let cache = self.cache.lock();
+            if cache.revision == revision {
+                if let Some(value) = cache.value.as_ref() {
+                    return value.clone();
+                }
+            }
+        }
+
         let dependency_revision = self
             .dependency
             .and_then(|dependency| self.invalidation.dependency_revision(dependency));
         {
-            let cache = self.cache.lock();
+            let mut cache = self.cache.lock();
             let cache_hit = match self.dependency {
                 Some(_) => cache.dependency_revision == dependency_revision,
                 None => cache.revision == revision,
             };
             if cache_hit {
-                if let Some(value) = cache.value.as_ref() {
-                    return value.clone();
+                if let Some(value) = cache.value.as_ref().cloned() {
+                    cache.revision = revision;
+                    return value;
                 }
             }
         }

@@ -8,7 +8,7 @@ use crate::ui::widget::Point;
 use smallvec::SmallVec;
 
 use super::controller::{sample_timeline, FRAME_INTERVAL};
-use super::spec::{Keyframes, Transition};
+use super::spec::{AnimationCurve, Keyframe, Keyframes, Transition};
 
 const THEME_DURATION_MS: u64 = 240;
 
@@ -201,33 +201,76 @@ impl Animatable for Insets {
 impl<T: Animatable> Keyframes<T> {
     /// 在指定时间点采样关键帧值。
     pub fn sample_at(&self, time: Duration) -> Option<T> {
+        let curve = self.curve_mode();
+        if self.frames_are_sorted_by_offset() {
+            return sample_sorted_keyframes(self.frames(), curve, time);
+        }
+
         let frames = self.sorted_frames();
-        let first = frames.first()?;
-        let last = frames.last()?;
-        if frames.len() == 1 || time <= first.offset() {
-            return Some(first.value().clone());
-        }
-        if time >= last.offset() {
-            return Some(last.value().clone());
-        }
-
-        for window in frames.windows(2) {
-            let from = window[0];
-            let to = window[1];
-            if time >= from.offset() && time <= to.offset() {
-                let span = to.offset().saturating_sub(from.offset());
-                if span.is_zero() {
-                    return Some(to.value().clone());
-                }
-                let elapsed = time.saturating_sub(from.offset());
-                let progress = (elapsed.as_secs_f32() / span.as_secs_f32()).clamp(0.0, 1.0);
-                let eased = self.curve_mode().sample(progress);
-                return Some(T::interpolate(from.value(), to.value(), eased));
-            }
-        }
-
-        Some(last.value().clone())
+        sample_sorted_keyframe_refs(&frames, curve, time)
     }
+}
+
+fn sample_sorted_keyframes<T: Animatable>(
+    frames: &[Keyframe<T>],
+    curve: AnimationCurve,
+    time: Duration,
+) -> Option<T> {
+    let first = frames.first()?;
+    let last = frames.last()?;
+    if frames.len() == 1 || time <= first.offset() {
+        return Some(first.value().clone());
+    }
+    if time >= last.offset() {
+        return Some(last.value().clone());
+    }
+
+    let to_index = frames.partition_point(|frame| frame.offset() < time);
+    Some(interpolate_keyframes(
+        &frames[to_index - 1],
+        &frames[to_index],
+        curve,
+        time,
+    ))
+}
+
+fn sample_sorted_keyframe_refs<T: Animatable>(
+    frames: &[&Keyframe<T>],
+    curve: AnimationCurve,
+    time: Duration,
+) -> Option<T> {
+    let first = *frames.first()?;
+    let last = *frames.last()?;
+    if frames.len() == 1 || time <= first.offset() {
+        return Some(first.value().clone());
+    }
+    if time >= last.offset() {
+        return Some(last.value().clone());
+    }
+
+    let to_index = frames.partition_point(|frame| frame.offset() < time);
+    Some(interpolate_keyframes(
+        frames[to_index - 1],
+        frames[to_index],
+        curve,
+        time,
+    ))
+}
+
+fn interpolate_keyframes<T: Animatable>(
+    from: &Keyframe<T>,
+    to: &Keyframe<T>,
+    curve: AnimationCurve,
+    time: Duration,
+) -> T {
+    let span = to.offset().saturating_sub(from.offset());
+    if span.is_zero() {
+        return to.value().clone();
+    }
+    let elapsed = time.saturating_sub(from.offset());
+    let progress = (elapsed.as_secs_f32() / span.as_secs_f32()).clamp(0.0, 1.0);
+    let eased = curve.sample(progress);
+    T::interpolate(from.value(), to.value(), eased)
 }
 
 #[derive(Clone)]
@@ -325,15 +368,19 @@ impl<T: Animatable> AnimationStore<T> {
     ) -> T {
         let Some(transition) = transition.filter(|transition| !transition.duration().is_zero())
         else {
-            let was_active = self
-                .slots
-                .get(&key)
-                .map(|state| state.animation.is_some())
-                .unwrap_or(false);
-            self.slots
-                .insert(key, SlotState::settled(target.clone(), now));
-            if was_active {
-                self.active_count = self.active_count.saturating_sub(1);
+            if let Some(state) = self.slots.get_mut(&key) {
+                let was_active = state.animation.take().is_some();
+                state.last_touch = now;
+                if was_active || state.target != target || state.displayed != target {
+                    state.displayed = target.clone();
+                    state.target = target.clone();
+                }
+                if was_active {
+                    self.active_count = self.active_count.saturating_sub(1);
+                }
+            } else {
+                self.slots
+                    .insert(key, SlotState::settled(target.clone(), now));
             }
             return target;
         };
@@ -380,6 +427,11 @@ impl<T: Animatable> AnimationStore<T> {
     }
 
     fn refresh(&mut self, now: Instant) -> AnimationRefresh {
+        if self.active_count == 0 {
+            self.gc_stale_settled_slots_if_needed(now);
+            return AnimationRefresh::default();
+        }
+
         let mut refresh = AnimationRefresh::default();
         let mut completed_count = 0;
         for (key, state) in self.slots.iter_mut() {
@@ -426,6 +478,12 @@ impl<T: Animatable> AnimationStore<T> {
                 || state.animation.is_some()
                 || now.saturating_duration_since(state.last_touch) < SLOT_GC_TTL
         });
+    }
+
+    fn gc_stale_settled_slots_if_needed(&mut self, now: Instant) {
+        if self.slots.len() > SLOT_GC_SOFT_CAP {
+            self.gc_stale_settled_slots(now);
+        }
     }
 
     fn has_active(&self) -> bool {
@@ -537,6 +595,15 @@ impl AnimationEngine {
     }
 
     pub(crate) fn refresh(&mut self, now: Instant) -> AnimationRefresh {
+        if !self.has_active_animations() {
+            self.colors.gc_stale_settled_slots_if_needed(now);
+            self.floats.gc_stale_settled_slots_if_needed(now);
+            self.dps.gc_stale_settled_slots_if_needed(now);
+            self.points.gc_stale_settled_slots_if_needed(now);
+            self.insets.gc_stale_settled_slots_if_needed(now);
+            return AnimationRefresh::default();
+        }
+
         let stores = [
             self.colors.refresh(now),
             self.floats.refresh(now),

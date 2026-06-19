@@ -293,7 +293,8 @@ fn modal_component(app: &App) -> Element<App> {
                 modal_preview(
                     Flex::vertical().gap(dp(8.0)).child(el![
                         Button::new("打开 Confirm").on_click(Command::new(App::open_confirm_modal)),
-                        Text::new(app.modal_confirm_result.signal()).style_full(styles::status_style),
+                        Text::new(app.modal_confirm_result.signal())
+                            .style_full(styles::status_style),
                     ]),
                     Modal::new(app.modal_confirm_open.signal())
                         .on_open_change(ValueCommand::new(App::dismiss_confirm_modal))

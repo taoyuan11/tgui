@@ -3,9 +3,15 @@
 
 #![allow(dead_code, unused_variables)]
 
+use std::sync::Arc;
+#[cfg(feature = "bench-support")]
+use std::time::Duration;
 use std::time::Instant;
 
+#[cfg(feature = "bench-support")]
+use crate::animation::Playback;
 use crate::foundation::binding::{Signal, State, ViewModelContext};
+use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::Axis;
 use crate::ui::unit::dp;
 use crate::ui::widget::{Flex, Rect, Text, WidgetTree};
@@ -30,6 +36,20 @@ pub fn create_bench_state<T>(ctx: &ViewModelContext, value: T) -> State<T> {
 /// 为基准测试创建 Signal
 pub fn create_bench_signal<T: Clone + Send + Sync + 'static>(state: &State<T>) -> Signal<T> {
     state.signal()
+}
+
+pub fn scope_bench_command<RootVm: 'static, ChildVm: 'static>(
+    command: Command<ChildVm>,
+    selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut ChildVm + Send + Sync>,
+) -> Command<RootVm> {
+    command.scope(selector)
+}
+
+pub fn scope_bench_value_command<RootVm: 'static, ChildVm: 'static, V: 'static>(
+    command: ValueCommand<ChildVm, V>,
+    selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut ChildVm + Send + Sync>,
+) -> ValueCommand<RootVm, V> {
+    command.scope(selector)
 }
 
 // ============================================================
@@ -109,6 +129,76 @@ pub fn select_text_range(layout: &[String], start: usize, end: usize) -> Vec<Rec
     }
 
     rects
+}
+
+#[cfg(feature = "bench-support")]
+pub struct BenchTextLayout {
+    inner: crate::text::font::TextLayoutInfo,
+}
+
+#[cfg(feature = "bench-support")]
+impl BenchTextLayout {
+    pub fn from_text(text: &str) -> Self {
+        let manager =
+            crate::text::font::FontManager::new(&crate::text::font::FontCatalog::default());
+        let inner = manager.measure_text_layout(
+            text,
+            crate::text::font::TextFontRequest {
+                preferred_font: None,
+                weight: crate::text::font::FontWeight::NORMAL,
+            },
+            16.0,
+            24.0,
+            0.0,
+        );
+        Self { inner }
+    }
+
+    pub fn line_index_for_index(&self, index: usize) -> usize {
+        self.inner.line_index_for_index(index)
+    }
+
+    pub fn line_index_for_y(&self, y: f32) -> usize {
+        self.inner.line_index_for_y(y)
+    }
+
+    pub fn x_for_index(&self, index: usize) -> f32 {
+        self.inner.x_for_index(index)
+    }
+
+    pub fn index_for_x(&self, x: f32) -> usize {
+        self.inner.index_for_x(x)
+    }
+}
+
+#[cfg(feature = "bench-support")]
+pub struct BenchRopeBuffer {
+    inner: crate::text::rope_buffer::RopeBuffer,
+}
+
+#[cfg(feature = "bench-support")]
+impl BenchRopeBuffer {
+    pub fn from_text(text: &str) -> Self {
+        Self {
+            inner: crate::text::rope_buffer::RopeBuffer::from_str(text),
+        }
+    }
+
+    pub fn len_bytes(&self) -> usize {
+        self.inner.len_bytes()
+    }
+
+    pub fn replace_byte_range(&mut self, start: usize, end: usize, replacement: &str) {
+        self.inner.replace_byte_range(start, end, replacement);
+    }
+
+    pub fn prev_char_boundary_byte(&self, byte_index: usize) -> usize {
+        self.inner.prev_char_boundary_byte(byte_index)
+    }
+
+    pub fn next_char_boundary_byte(&self, byte_index: usize) -> usize {
+        self.inner.next_char_boundary_byte(byte_index)
+    }
 }
 
 // ============================================================
@@ -586,6 +676,53 @@ pub fn update_animation_engine(engine: &mut AnimationEngine, dt: f32) {
     }
 }
 
+pub struct RealAnimationEngineBench {
+    engine: crate::animation::AnimationEngine,
+    now: Instant,
+    count: usize,
+}
+
+pub fn create_real_animation_engine_with_settled_slots(count: usize) -> RealAnimationEngineBench {
+    let mut engine = crate::animation::AnimationEngine::default();
+    let now = Instant::now();
+    for index in 0..count {
+        engine.resolve_f32(
+            crate::animation::AnimationKey::Widget {
+                id: index as u64,
+                property: crate::animation::WidgetProperty::Opacity,
+            },
+            1.0,
+            None,
+            now,
+        );
+    }
+    RealAnimationEngineBench { engine, now, count }
+}
+
+pub fn refresh_real_animation_engine(engine: &mut RealAnimationEngineBench) -> bool {
+    let refresh = engine.engine.refresh(engine.now);
+    refresh.changed
+        || refresh.layout_changed
+        || !refresh.layout_widget_ids.is_empty()
+        || !refresh.scene_widget_ids.is_empty()
+}
+
+pub fn resolve_real_animation_engine_settled_slots(engine: &mut RealAnimationEngineBench) -> f32 {
+    let mut total = 0.0;
+    for index in 0..engine.count {
+        total += engine.engine.resolve_f32(
+            crate::animation::AnimationKey::Widget {
+                id: index as u64,
+                property: crate::animation::WidgetProperty::Opacity,
+            },
+            1.0,
+            None,
+            engine.now,
+        );
+    }
+    total
+}
+
 #[derive(Copy, Clone)]
 pub enum InterpolationType {
     Linear,
@@ -714,6 +851,23 @@ pub fn update_spring(spring: &mut SpringAnimation, dt: f32) -> f32 {
     spring.velocity += (force - damping_force) * dt / 1000.0;
     spring.current += spring.velocity * dt / 1000.0;
     spring.current
+}
+
+#[cfg(feature = "bench-support")]
+pub fn sample_real_timeline(
+    total_duration: Duration,
+    playback: Playback,
+    elapsed: Duration,
+) -> Option<(bool, bool, u32, Duration, bool)> {
+    crate::animation::sample_timeline(total_duration, playback, elapsed).map(|sample| {
+        (
+            sample.active,
+            sample.completed,
+            sample.cycle_index,
+            sample.local_time,
+            sample.reversed,
+        )
+    })
 }
 
 pub struct Keyframe {

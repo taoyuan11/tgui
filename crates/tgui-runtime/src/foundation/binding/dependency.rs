@@ -1,5 +1,5 @@
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_DEPENDENCY_ID: AtomicU64 = AtomicU64::new(1);
@@ -172,21 +172,20 @@ struct DirtyDependencyEntry {
 
 #[derive(Debug, Default)]
 pub(super) struct DirtyDependencyLog {
-    entries: Vec<DirtyDependencyEntry>,
+    entries: VecDeque<DirtyDependencyEntry>,
 }
 
 const MAX_DIRTY_DEPENDENCY_ENTRIES: usize = 1024;
 
 impl DirtyDependencyLog {
     pub(super) fn push(&mut self, revision: u64, dependency: Option<DependencyId>) {
-        self.entries.push(DirtyDependencyEntry {
+        if self.entries.len() == MAX_DIRTY_DEPENDENCY_ENTRIES {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(DirtyDependencyEntry {
             revision,
             dependency,
         });
-        if self.entries.len() > MAX_DIRTY_DEPENDENCY_ENTRIES {
-            let overflow = self.entries.len() - MAX_DIRTY_DEPENDENCY_ENTRIES;
-            self.entries.drain(0..overflow);
-        }
     }
 
     pub(super) fn dirty_since(
@@ -197,7 +196,7 @@ impl DirtyDependencyLog {
         if revision == current_revision {
             return (DirtyDependencySet::Clean, HashSet::new());
         }
-        let Some(first) = self.entries.first() else {
+        let Some(first) = self.entries.front() else {
             return (DirtyDependencySet::Global, HashSet::new());
         };
         if revision != 0 && first.revision > revision.saturating_add(1) {
@@ -235,6 +234,7 @@ struct DependencyTracker {
 
 thread_local! {
     static DEPENDENCY_TRACKER: RefCell<DependencyTracker> = RefCell::new(DependencyTracker::default());
+    static CURRENT_DEPENDENCY_OWNER: Cell<Option<DependencyOwner>> = const { Cell::new(None) };
 }
 
 pub(crate) fn track_dependency_scope<R>(owner: DependencyOwner, f: impl FnOnce() -> R) -> R {
@@ -242,15 +242,11 @@ pub(crate) fn track_dependency_scope<R>(owner: DependencyOwner, f: impl FnOnce()
 
     impl Drop for ScopeGuard {
         fn drop(&mut self) {
-            DEPENDENCY_TRACKER.with(|tracker| {
-                tracker.borrow_mut().scopes.pop();
-            });
+            pop_dependency_owner();
         }
     }
 
-    DEPENDENCY_TRACKER.with(|tracker| {
-        tracker.borrow_mut().scopes.push(owner);
-    });
+    push_dependency_owner(owner);
     let _guard = ScopeGuard;
     f()
 }
@@ -270,22 +266,18 @@ pub(crate) fn track_property_scope<R>(slot: PropertySlot, f: impl FnOnce() -> R)
     impl Drop for ScopeGuard {
         fn drop(&mut self) {
             if self.pushed {
-                DEPENDENCY_TRACKER.with(|tracker| {
-                    tracker.borrow_mut().scopes.pop();
-                });
+                pop_dependency_owner();
             }
         }
     }
 
-    let pushed = DEPENDENCY_TRACKER.with(|tracker| {
-        let mut tracker = tracker.borrow_mut();
-        let Some(mut owner) = tracker.scopes.last().copied() else {
-            return false;
-        };
+    let pushed = if let Some(mut owner) = CURRENT_DEPENDENCY_OWNER.with(|current| current.get()) {
         owner.property = Some(slot);
-        tracker.scopes.push(owner);
+        push_dependency_owner(owner);
         true
-    });
+    } else {
+        false
+    };
     let _guard = ScopeGuard { pushed };
     f()
 }
@@ -316,20 +308,31 @@ pub(crate) fn with_dependency_collection<R>(f: impl FnOnce() -> R) -> (R, Depend
     (result, graph)
 }
 
-pub(crate) fn record_dependency_read(dependency: Option<DependencyId>) {
+pub(crate) fn record_dependency_read(dependency: Option<DependencyId>) -> Option<DependencyOwner> {
+    let owner = CURRENT_DEPENDENCY_OWNER.with(|current| current.get())?;
     DEPENDENCY_TRACKER.with(|tracker| {
         let mut tracker = tracker.borrow_mut();
-        let Some(owner) = tracker.scopes.last().copied() else {
-            return;
-        };
         if let Some(dependency) = dependency {
             tracker.records.push((dependency, owner));
         } else {
             tracker.global_owners.insert(owner);
         }
-    });
+        Some(owner)
+    })
 }
 
-pub(crate) fn current_dependency_owner() -> Option<DependencyOwner> {
-    DEPENDENCY_TRACKER.with(|tracker| tracker.borrow().scopes.last().copied())
+fn push_dependency_owner(owner: DependencyOwner) {
+    DEPENDENCY_TRACKER.with(|tracker| {
+        tracker.borrow_mut().scopes.push(owner);
+    });
+    CURRENT_DEPENDENCY_OWNER.with(|current| current.set(Some(owner)));
+}
+
+fn pop_dependency_owner() {
+    let next = DEPENDENCY_TRACKER.with(|tracker| {
+        let mut tracker = tracker.borrow_mut();
+        tracker.scopes.pop();
+        tracker.scopes.last().copied()
+    });
+    CURRENT_DEPENDENCY_OWNER.with(|current| current.set(next));
 }

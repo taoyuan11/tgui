@@ -173,6 +173,31 @@ impl<VM: 'static> WidgetTree<VM> {
         let mut path = HitPath::<VM>::new();
         let mut ids = smallvec::SmallVec::<[HitTargetId; 8]>::new();
 
+        if computed.transform_records.is_empty() {
+            for hit in computed
+                .hit_regions
+                .iter()
+                .chain(computed.overlay_hit_regions.iter())
+                .filter(|hit| hit.contains_without_transform(point))
+            {
+                let id = hit.interaction.target_id();
+
+                if matches!(hit.interaction, HitInteraction::Occluder { .. }) {
+                    ids.clear();
+                    path.clear();
+                }
+
+                if let Some(index) = ids.iter().position(|existing| *existing == id) {
+                    path[index] = hit.interaction.clone();
+                } else {
+                    ids.push(id);
+                    path.push(hit.interaction.clone());
+                }
+            }
+
+            return path;
+        }
+
         for (hit, delta) in computed
             .hit_regions
             .iter()

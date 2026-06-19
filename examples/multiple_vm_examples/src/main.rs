@@ -68,9 +68,15 @@ impl ViewModel for RootVM {
         Self {
             page: context.state(Page::Home),
             home: HomePage::new(context),
-            settings: SettingsPage::new(context, Some(Arc::new(|enabled| {
-                tgui_log(LogLevel::Debug, format_args!("Settings enabled: {}", enabled));
-            }))),
+            settings: SettingsPage::new(
+                context,
+                Some(Arc::new(|enabled| {
+                    tgui_log(
+                        LogLevel::Debug,
+                        format_args!("Settings enabled: {}", enabled),
+                    );
+                })),
+            ),
             themes,
             current_theme,
             background_color,
@@ -97,8 +103,7 @@ impl ViewModel for RootVM {
                     .padding(Insets::all(dp(10.0)))
                     .child(el![
                         Button::new("Home").on_click(Command::new(Self::show_home)),
-                        Button::new("Settings")
-                            .on_click(Command::new(Self::show_settings)),
+                        Button::new("Settings").on_click(Command::new(Self::show_settings)),
                         Button::new("Change theme colors")
                             .on_click(Command::new(Self::toggle_theme_colors)),
                     ]),

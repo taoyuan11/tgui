@@ -4,6 +4,7 @@ use ropey::Rope;
 pub(crate) struct RopeBuffer {
     rope: Rope,
     snapshot: String,
+    is_ascii: bool,
 }
 
 impl RopeBuffer {
@@ -11,11 +12,17 @@ impl RopeBuffer {
         Self {
             rope: Rope::from_str(text),
             snapshot: text.to_string(),
+            is_ascii: text.is_ascii(),
         }
     }
 
     pub(crate) fn from_parts(rope: Rope, snapshot: String) -> Self {
-        Self { rope, snapshot }
+        let is_ascii = snapshot.is_ascii();
+        Self {
+            rope,
+            snapshot,
+            is_ascii,
+        }
     }
 
     pub(crate) fn len_bytes(&self) -> usize {
@@ -23,41 +30,61 @@ impl RopeBuffer {
     }
 
     pub(crate) fn clamp_byte_boundary(&self, byte_index: usize) -> usize {
-        let byte_index = byte_index.min(self.len_bytes());
-        self.char_to_byte(self.byte_to_char(byte_index))
+        if self.is_ascii {
+            return byte_index.min(self.snapshot.len());
+        }
+        let mut byte_index = byte_index.min(self.snapshot.len());
+        while byte_index > 0 && !self.snapshot.is_char_boundary(byte_index) {
+            byte_index -= 1;
+        }
+        byte_index
     }
 
     pub(crate) fn byte_to_char(&self, byte_index: usize) -> usize {
+        if self.is_ascii {
+            return byte_index.min(self.snapshot.len());
+        }
         self.rope.byte_to_char(byte_index.min(self.len_bytes()))
     }
 
+    #[cfg(test)]
     pub(crate) fn char_to_byte(&self, char_index: usize) -> usize {
         self.rope
             .char_to_byte(char_index.min(self.rope.len_chars()))
     }
 
     pub(crate) fn prev_char_boundary_byte(&self, byte_index: usize) -> usize {
-        let byte_index = self.clamp_byte_boundary(byte_index);
+        if self.is_ascii {
+            return byte_index.min(self.snapshot.len()).saturating_sub(1);
+        }
+        let mut byte_index = self.clamp_byte_boundary(byte_index);
         if byte_index == 0 {
             return 0;
         }
 
-        let char_index = self.byte_to_char(byte_index);
-        if char_index == 0 {
-            0
-        } else {
-            self.char_to_byte(char_index - 1)
+        byte_index -= 1;
+        while byte_index > 0 && !self.snapshot.is_char_boundary(byte_index) {
+            byte_index -= 1;
         }
+        byte_index
     }
 
     pub(crate) fn next_char_boundary_byte(&self, byte_index: usize) -> usize {
-        let byte_index = self.clamp_byte_boundary(byte_index);
-        if byte_index >= self.len_bytes() {
-            return self.len_bytes();
+        if self.is_ascii {
+            let byte_index = byte_index.min(self.snapshot.len());
+            return (byte_index + 1).min(self.snapshot.len());
+        }
+        let mut byte_index = self.clamp_byte_boundary(byte_index);
+        let len = self.snapshot.len();
+        if byte_index >= len {
+            return len;
         }
 
-        let char_index = self.byte_to_char(byte_index);
-        self.char_to_byte((char_index + 1).min(self.rope.len_chars()))
+        byte_index += 1;
+        while byte_index < len && !self.snapshot.is_char_boundary(byte_index) {
+            byte_index += 1;
+        }
+        byte_index
     }
 
     pub(crate) fn replace_byte_range(
@@ -69,11 +96,19 @@ impl RopeBuffer {
         let start_byte = self.clamp_byte_boundary(start_byte);
         let end_byte = self.clamp_byte_boundary(end_byte);
         let start_char = self.byte_to_char(start_byte);
-        let end_char = self.byte_to_char(end_byte.max(start_byte));
+        let end_byte_for_char = end_byte.max(start_byte);
+        let end_char = if end_byte_for_char == start_byte {
+            start_char
+        } else {
+            self.byte_to_char(end_byte_for_char)
+        };
 
         self.rope.remove(start_char..end_char);
         if !replacement.is_empty() {
             self.rope.insert(start_char, replacement);
+        }
+        if self.is_ascii && !replacement.is_ascii() {
+            self.is_ascii = false;
         }
         self.snapshot
             .replace_range(start_byte..end_byte, replacement);
@@ -137,6 +172,23 @@ mod tests {
         buffer.replace_byte_range(start, end, "中");
 
         assert_eq!(buffer.materialize_string(), "hello中world");
+        assert_eq!(
+            buffer.prev_char_boundary_byte("hello中".len()),
+            "hello".len()
+        );
+        assert_eq!(
+            buffer.next_char_boundary_byte("hello".len()),
+            "hello中".len()
+        );
+    }
+
+    #[test]
+    fn ascii_buffer_exits_fast_path_after_non_ascii_insert() {
+        let mut buffer = RopeBuffer::from_str("hello world");
+        let insert_at = "hello".len();
+        buffer.replace_byte_range(insert_at, insert_at, "中");
+
+        assert_eq!(buffer.materialize_string(), "hello中 world");
         assert_eq!(
             buffer.prev_char_boundary_byte("hello中".len()),
             "hello".len()

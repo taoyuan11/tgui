@@ -45,13 +45,43 @@ impl ViewModel for AppVm {
     fn new(ctx: &ViewModelContext) -> Self {
         Self {
             rows: ctx.state(vec![
-                Employee::new("e-001", "Ada Torres", "Product Lead", "Platform", "Planning"),
+                Employee::new(
+                    "e-001",
+                    "Ada Torres",
+                    "Product Lead",
+                    "Platform",
+                    "Planning",
+                ),
                 Employee::new("e-002", "Mika Chen", "Designer", "Experience", "Reviewing"),
-                Employee::new("e-003", "Nora Patel", "Researcher", "Experience", "Interviewing"),
-                Employee::new("e-004", "Owen Blake", "Runtime Engineer", "Core", "Implementing"),
+                Employee::new(
+                    "e-003",
+                    "Nora Patel",
+                    "Researcher",
+                    "Experience",
+                    "Interviewing",
+                ),
+                Employee::new(
+                    "e-004",
+                    "Owen Blake",
+                    "Runtime Engineer",
+                    "Core",
+                    "Implementing",
+                ),
                 Employee::new("e-005", "Li Wei", "Rendering Engineer", "Core", "Profiling"),
-                Employee::new("e-006", "Sam Rivera", "Platform Engineer", "Desktop", "Testing"),
-                Employee::new("e-007", "Iris Morgan", "QA Engineer", "Desktop", "Validating"),
+                Employee::new(
+                    "e-006",
+                    "Sam Rivera",
+                    "Platform Engineer",
+                    "Desktop",
+                    "Testing",
+                ),
+                Employee::new(
+                    "e-007",
+                    "Iris Morgan",
+                    "QA Engineer",
+                    "Desktop",
+                    "Validating",
+                ),
                 Employee::new("e-008", "Jun Park", "Data Engineer", "Tools", "Shipping"),
             ]),
             selected: ctx.state(vec![WidgetKey::from("e-001")]),
@@ -67,7 +97,10 @@ impl ViewModel for AppVm {
             role_width: ctx.state(dp(190.0)),
             team_width: ctx.state(dp(160.0)),
             status_width: ctx.state(dp(180.0)),
-            status: ctx.state("Click headers, drag column edges, reorder columns, or right-click cells.".to_string()),
+            status: ctx.state(
+                "Click headers, drag column edges, reorder columns, or right-click cells."
+                    .to_string(),
+            ),
         }
     }
 
@@ -91,7 +124,8 @@ impl ViewModel for AppVm {
                     .overscan(4)
                     .context_menu(vec![
                         MenuItem::new("Mark reviewed").on_select(Command::new(Self::mark_reviewed)),
-                        MenuItem::new("Clear selection").on_select(Command::new(Self::clear_selection)),
+                        MenuItem::new("Clear selection")
+                            .on_select(Command::new(Self::clear_selection)),
                     ])
                     .on_selection_change(ValueCommand::new(Self::select_rows))
                     .on_sort_change(ValueCommand::new(Self::sort_rows))
@@ -141,9 +175,11 @@ impl AppVm {
     fn column_for(&self, key: &str) -> Option<DataGridColumn<Employee, Self>> {
         match key {
             "id" => Some(
-                DataGridColumn::new("id", "ID".to_string(), |ctx: DataGridCellContext<Employee>| {
-                    Text::new(ctx.row.id).into()
-                })
+                DataGridColumn::new(
+                    "id",
+                    "ID".to_string(),
+                    |ctx: DataGridCellContext<Employee>| Text::new(ctx.row.id).into(),
+                )
                 .width(dp(86.0))
                 .min_width(dp(72.0))
                 .resizable(false)
@@ -151,9 +187,11 @@ impl AppVm {
                 .pin(DataGridColumnPin::Start),
             ),
             "name" => Some(
-                DataGridColumn::new("name", "Name".to_string(), |ctx: DataGridCellContext<Employee>| {
-                    Text::new(ctx.row.name).into()
-                })
+                DataGridColumn::new(
+                    "name",
+                    "Name".to_string(),
+                    |ctx: DataGridCellContext<Employee>| Text::new(ctx.row.name).into(),
+                )
                 .width(self.name_width.signal())
                 .min_width(dp(140.0))
                 .max_width(dp(260.0))
@@ -162,9 +200,11 @@ impl AppVm {
                 .editable(true),
             ),
             "role" => Some(
-                DataGridColumn::new("role", "Role".to_string(), |ctx: DataGridCellContext<Employee>| {
-                    Text::new(ctx.row.role).into()
-                })
+                DataGridColumn::new(
+                    "role",
+                    "Role".to_string(),
+                    |ctx: DataGridCellContext<Employee>| Text::new(ctx.row.role).into(),
+                )
                 .width(self.role_width.signal())
                 .min_width(dp(140.0))
                 .max_width(dp(280.0))
@@ -173,18 +213,22 @@ impl AppVm {
                 .editable(true),
             ),
             "team" => Some(
-                DataGridColumn::new("team", "Team".to_string(), |ctx: DataGridCellContext<Employee>| {
-                    Text::new(ctx.row.team).into()
-                })
+                DataGridColumn::new(
+                    "team",
+                    "Team".to_string(),
+                    |ctx: DataGridCellContext<Employee>| Text::new(ctx.row.team).into(),
+                )
                 .width(self.team_width.signal())
                 .min_width(dp(120.0))
                 .max_width(dp(220.0))
                 .sortable(true),
             ),
             "status" => Some(
-                DataGridColumn::new("status", "Status".to_string(), |ctx: DataGridCellContext<Employee>| {
-                    Text::new(ctx.row.status).into()
-                })
+                DataGridColumn::new(
+                    "status",
+                    "Status".to_string(),
+                    |ctx: DataGridCellContext<Employee>| Text::new(ctx.row.status).into(),
+                )
                 .width(self.status_width.signal())
                 .min_width(dp(140.0))
                 .max_width(dp(240.0))
@@ -225,8 +269,10 @@ impl AppVm {
         } else if change.column_key == WidgetKey::from("status") {
             self.status_width.set(change.width);
         }
-        self.status
-            .set(format!("Column {:?} resized to {}", change.column_key, change.width));
+        self.status.set(format!(
+            "Column {:?} resized to {}",
+            change.column_key, change.width
+        ));
     }
 
     fn reorder_column(&mut self, event: DataGridColumnReorderEvent) {
@@ -252,7 +298,9 @@ impl AppVm {
 
     fn commit_cell_edit(&mut self, commit: DataGridCellEditCommit) {
         self.rows.update(|rows| {
-            if let Some(row) = rows.iter_mut().find(|row| WidgetKey::from(row.id) == commit.row_key)
+            if let Some(row) = rows
+                .iter_mut()
+                .find(|row| WidgetKey::from(row.id) == commit.row_key)
             {
                 let value = format!("{}*", commit.value.trim_end_matches('*'));
                 if commit.column_key == WidgetKey::from("name") {
@@ -279,7 +327,8 @@ impl AppVm {
                 }
             }
         });
-        self.status.set("Marked selected rows as reviewed".to_string());
+        self.status
+            .set("Marked selected rows as reviewed".to_string());
     }
 
     fn clear_selection(&mut self) {

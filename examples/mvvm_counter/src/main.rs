@@ -94,8 +94,6 @@ impl CounterVm {
     fn reset(&mut self) {
         self.count.set(0);
     }
-
-    
 }
 
 impl ViewModel for CounterVm {
@@ -134,19 +132,25 @@ impl ViewModel for CounterVm {
                             .child(
                                 Button::new("-1")
                                     .grow(1.0)
-                                    .style_full(|ctx| solid_button_style(ctx, Color::hexa(0x243247FF)))
+                                    .style_full(|ctx| {
+                                        solid_button_style(ctx, Color::hexa(0x243247FF))
+                                    })
                                     .on_click(Command::new(Self::decrement)),
                             )
                             .child(
                                 Button::new("+1")
                                     .grow(1.0)
-                                    .style_full(|ctx| solid_button_style(ctx, Color::hexa(0x0F766EFF)))
+                                    .style_full(|ctx| {
+                                        solid_button_style(ctx, Color::hexa(0x0F766EFF))
+                                    })
                                     .on_click(Command::new(Self::increment)),
                             )
                             .child(
                                 Button::new("Reset")
                                     .grow(1.0)
-                                    .style_full(|ctx| solid_button_style(ctx, Color::hexa(0x7C2D12FF)))
+                                    .style_full(|ctx| {
+                                        solid_button_style(ctx, Color::hexa(0x7C2D12FF))
+                                    })
                                     .on_click(Command::new(Self::reset)),
                             ),
                     ),

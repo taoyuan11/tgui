@@ -86,6 +86,13 @@ impl CanvasTextContent {
             Self::Rich(spans) => spans.iter().map(|span| span.content.as_str()).collect(),
         }
     }
+
+    pub(crate) fn plain_text_char_count(&self) -> usize {
+        match self {
+            Self::Plain(content) => content.chars().count(),
+            Self::Rich(spans) => spans.iter().map(|span| span.content.chars().count()).sum(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -141,6 +148,10 @@ impl CanvasText {
 
     pub fn plain_text(&self) -> String {
         self.content.plain_text()
+    }
+
+    pub(crate) fn plain_text_char_count(&self) -> usize {
+        self.content.plain_text_char_count()
     }
 
     pub fn name_item(mut self, name: impl Into<String>) -> Self {

@@ -169,20 +169,18 @@ fn skeleton_component(app: &App) -> Element<App> {
                 "skeleton/lines",
                 "文本骨架",
                 "多行骨架适合列表、摘要和详情加载态。",
-                Flex::vertical().gap(dp(6.0)).child(el![
-                    Skeleton::line().width(dp(180.0)),
-                    Skeleton::lines(2),
-                ]),
+                Flex::vertical()
+                    .gap(dp(6.0))
+                    .child(el![Skeleton::line().width(dp(180.0)), Skeleton::lines(2),]),
                 CODE_SKELETON_LINES,
             ),
             UsageDemo::new(
                 "skeleton/card",
                 "内容块骨架",
                 "组合不同宽度的 line 可以模拟卡片或面板内容。",
-                Flex::vertical().gap(dp(10.0)).child(el![
-                    Skeleton::line().width(dp(220.0)),
-                    Skeleton::lines(3),
-                ]),
+                Flex::vertical()
+                    .gap(dp(10.0))
+                    .child(el![Skeleton::line().width(dp(220.0)), Skeleton::lines(3),]),
                 CODE_SKELETON_CARD,
             ),
         ],

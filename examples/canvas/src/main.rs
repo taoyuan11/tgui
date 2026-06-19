@@ -66,9 +66,13 @@ fn action_row_style(ctx: &StyleContext<'_>) -> ContainerStyle {
 }
 
 fn card_scene_background(canvas: &mut CanvasRecorder, color: Color) {
-    canvas
-        .set_fill(color)
-        .fill_round_rect(0.0, 0.0, CARD_CANVAS_WIDTH, CARD_CANVAS_HEIGHT, dp(20.0));
+    canvas.set_fill(color).fill_round_rect(
+        0.0,
+        0.0,
+        CARD_CANVAS_WIDTH,
+        CARD_CANVAS_HEIGHT,
+        dp(20.0),
+    );
 }
 
 fn showcase_title(canvas: &mut CanvasRecorder, x: f32, y: f32, label: &str) {
@@ -143,7 +147,9 @@ fn paths_scene() -> CanvasScene {
         .line_to(176.0, 220.0)
         .line_to(108.0, 220.0)
         .close();
-    let diff = right.difference(&left).expect("boolean path should succeed");
+    let diff = right
+        .difference(&left)
+        .expect("boolean path should succeed");
 
     CanvasRecorder::build(|canvas| {
         card_scene_background(canvas, Color::hexa(0x111827FF));
@@ -244,26 +250,23 @@ fn text_scene() -> CanvasScene {
             .draw_rich_text(
                 Rect::new(282.0, 48.0, 196.0, 58.0),
                 vec![
-                    CanvasTextSpan::new("Recorder ")
-                        .style(CanvasTextStyle {
-                            color: Color::hexa(0x0F172AFF),
-                            font_size: sp(16.0),
-                            font_weight: FontWeight::Bold,
-                            ..Default::default()
-                        }),
-                    CanvasTextSpan::new("supports ")
-                        .style(CanvasTextStyle {
-                            color: Color::hexa(0x1D4ED8FF),
-                            font_size: sp(16.0),
-                            ..Default::default()
-                        }),
-                    CanvasTextSpan::new("styled spans")
-                        .style(CanvasTextStyle {
-                            color: Color::hexa(0xF97316FF),
-                            font_size: sp(16.0),
-                            font_weight: FontWeight::Bold,
-                            ..Default::default()
-                        }),
+                    CanvasTextSpan::new("Recorder ").style(CanvasTextStyle {
+                        color: Color::hexa(0x0F172AFF),
+                        font_size: sp(16.0),
+                        font_weight: FontWeight::Bold,
+                        ..Default::default()
+                    }),
+                    CanvasTextSpan::new("supports ").style(CanvasTextStyle {
+                        color: Color::hexa(0x1D4ED8FF),
+                        font_size: sp(16.0),
+                        ..Default::default()
+                    }),
+                    CanvasTextSpan::new("styled spans").style(CanvasTextStyle {
+                        color: Color::hexa(0xF97316FF),
+                        font_size: sp(16.0),
+                        font_weight: FontWeight::Bold,
+                        ..Default::default()
+                    }),
                 ],
             );
 
@@ -310,7 +313,9 @@ fn transforms_scene() -> CanvasScene {
 
         canvas
             .save()
-            .transform(CanvasTransform2D::from_matrix([1.0, 0.12, -0.18, 1.0, 278.0, 48.0]))
+            .transform(CanvasTransform2D::from_matrix([
+                1.0, 0.12, -0.18, 1.0, 278.0, 48.0,
+            ]))
             .set_fill(Color::hexa(0x0EA5E9FF))
             .fill_round_rect(0.0, 0.0, 166.0, 92.0, dp(18.0))
             .set_text_style(CanvasTextStyle {
@@ -326,7 +331,10 @@ fn transforms_scene() -> CanvasScene {
                 line_height: Some(sp(18.0)),
                 ..Default::default()
             })
-            .draw_text(Rect::new(18.0, 54.0, 124.0, 32.0), "Local state stays isolated by save / restore.")
+            .draw_text(
+                Rect::new(18.0, 54.0, 124.0, 32.0),
+                "Local state stays isolated by save / restore.",
+            )
             .restore();
     })
 }
@@ -359,10 +367,7 @@ fn clip_mask_scene() -> CanvasScene {
             .save()
             .circle(384.0, 130.0, 86.0)
             .mask()
-            .draw_image(
-                Rect::new(294.0, 40.0, 180.0, 180.0),
-                logo_source(),
-            )
+            .draw_image(Rect::new(294.0, 40.0, 180.0, 180.0), logo_source())
             .set_fill(CanvasLinearGradient::new(
                 Point::new(276.0, 42.0),
                 Point::new(472.0, 218.0),
@@ -402,10 +407,7 @@ fn composite_scene() -> CanvasScene {
             .set_isolation(true)
             .set_effects(vec![
                 CanvasEffect::Blur(dp(6.0)),
-                CanvasEffect::ColorFilter(CanvasColorFilter::tint(
-                    Color::hexa(0x38BDF8FF),
-                    0.28,
-                )),
+                CanvasEffect::ColorFilter(CanvasColorFilter::tint(Color::hexa(0x38BDF8FF), 0.28)),
             ])
             .set_fill(Color::hexa(0x0F172AFF))
             .fill_round_rect(0.0, 0.0, 196.0, 86.0, dp(22.0))
@@ -424,7 +426,10 @@ fn composite_scene() -> CanvasScene {
                 font_weight: FontWeight::Bold,
                 ..Default::default()
             })
-            .draw_text(Rect::new(18.0, 138.0, 158.0, 24.0), "Blur, tint, inner shadow")
+            .draw_text(
+                Rect::new(18.0, 138.0, 158.0, 24.0),
+                "Blur, tint, inner shadow",
+            )
             .restore();
     })
 }
@@ -597,43 +602,46 @@ fn build_retained_scene() -> CanvasScene {
     let clipped_cluster = CanvasGroup::new(
         520_u64,
         CanvasGroupMode::Clip,
-        CanvasGroupShape::path(PathBuilder::new().rounded_rect(278.0, 58.0, 176.0, 148.0, dp(30.0))),
+        CanvasGroupShape::path(PathBuilder::new().rounded_rect(
+            278.0,
+            58.0,
+            176.0,
+            148.0,
+            dp(30.0),
+        )),
         vec![
-            CanvasPath::new(
-                521_u64,
-                PathBuilder::new().circle(360.0, 122.0, 88.0),
-            )
-            .name_item("cluster-fill")
-            .fill(CanvasRadialGradient::new(
-                Point::new(340.0, 102.0),
-                dp(108.0),
-                vec![
-                    CanvasGradientStop::new(0.0, Color::hexa(0x67E8F9FF)),
-                    CanvasGradientStop::new(1.0, Color::hexa(0x2563EBFF)),
-                ],
-            ))
-            .effects(vec![CanvasEffect::Blur(dp(2.0))])
-            .into(),
-            CanvasText::new(
-                522_u64,
-                Rect::new(302.0, 82.0, 128.0, 52.0),
-                "Named group",
-            )
-            .name_item("cluster-title")
-            .text_style(CanvasTextStyle {
-                color: Color::WHITE,
-                font_size: sp(22.0),
-                font_weight: FontWeight::Bold,
-                ..Default::default()
-            })
-            .paragraph_style(CanvasParagraphStyle {
-                horizontal_align: CanvasTextHorizontalAlign::Center,
-                ..Default::default()
-            })
-            .into(),
+            CanvasPath::new(521_u64, PathBuilder::new().circle(360.0, 122.0, 88.0))
+                .name_item("cluster-fill")
+                .fill(CanvasRadialGradient::new(
+                    Point::new(340.0, 102.0),
+                    dp(108.0),
+                    vec![
+                        CanvasGradientStop::new(0.0, Color::hexa(0x67E8F9FF)),
+                        CanvasGradientStop::new(1.0, Color::hexa(0x2563EBFF)),
+                    ],
+                ))
+                .effects(vec![CanvasEffect::Blur(dp(2.0))])
+                .into(),
+            CanvasText::new(522_u64, Rect::new(302.0, 82.0, 128.0, 52.0), "Named group")
+                .name_item("cluster-title")
+                .text_style(CanvasTextStyle {
+                    color: Color::WHITE,
+                    font_size: sp(22.0),
+                    font_weight: FontWeight::Bold,
+                    ..Default::default()
+                })
+                .paragraph_style(CanvasParagraphStyle {
+                    horizontal_align: CanvasTextHorizontalAlign::Center,
+                    ..Default::default()
+                })
+                .into(),
             CanvasImage::new(523_u64, Rect::new(320.0, 132.0, 92.0, 56.0), logo_source())
                 .name_item("cluster-image")
-                .options(CanvasImageOptions::new().fit(ContentFit::Cover).corner_radius(dp(16.0)))
+                .options(
+                    CanvasImageOptions::new()
+                        .fit(ContentFit::Cover)
+                        .corner_radius(dp(16.0)),
+                )
                 .opacity(0.92)
                 .into(),
         ],
@@ -649,14 +657,11 @@ fn build_retained_scene() -> CanvasScene {
                 .name_item("logo-mask-image")
                 .options(CanvasImageOptions::new().fit(ContentFit::Cover))
                 .into(),
-            CanvasPath::new(
-                542_u64,
-                PathBuilder::new().rect(60.0, 62.0, 144.0, 144.0),
-            )
-            .name_item("logo-mask-tint")
-            .fill(CanvasBrush::Solid(Color::hexa(0x0EA5E988)))
-            .blend_mode(CanvasBlendMode::Screen)
-            .into(),
+            CanvasPath::new(542_u64, PathBuilder::new().rect(60.0, 62.0, 144.0, 144.0))
+                .name_item("logo-mask-tint")
+                .fill(CanvasBrush::Solid(Color::hexa(0x0EA5E988)))
+                .blend_mode(CanvasBlendMode::Screen)
+                .into(),
         ],
     )
     .name_item("logo-mask");
@@ -795,19 +800,16 @@ fn retained_scene_report(scene: &CanvasScene) -> String {
         .find_named("cluster-title")
         .map(|item| format!("{:?}#{}", item.kind(), item.id().get()))
         .unwrap_or_else(|| "missing".to_string());
-    let options = CanvasSceneQueryOptions::new().scale_factor(1.0).font_scale(1.0);
+    let options = CanvasSceneQueryOptions::new()
+        .scale_factor(1.0)
+        .font_scale(1.0);
     let top_hit = scene.query_point_with(&options, Point::new(332.0, 116.0));
     let all_hits = scene.query_point_all(Point::new(332.0, 116.0));
     let mut visit_lines = Vec::new();
     scene.visit(|entry| {
         let name = entry.item.name().unwrap_or("unnamed");
         if visit_lines.len() < 5 {
-            visit_lines.push(format!(
-                "{}:{}@{:?}",
-                entry.depth,
-                name,
-                entry.index_path
-            ));
+            visit_lines.push(format!("{}:{}@{:?}", entry.depth, name, entry.index_path));
         }
     });
 
@@ -829,10 +831,7 @@ fn retained_scene_report(scene: &CanvasScene) -> String {
     let _ = writeln!(
         report,
         "contains_id(590)={} contains_name(cluster)={} find(512)={} find_named(cluster-title)={}",
-        contains_overlay,
-        contains_cluster,
-        title,
-        named
+        contains_overlay, contains_cluster, title, named
     );
     let _ = writeln!(
         report,
@@ -848,11 +847,7 @@ fn retained_scene_report(scene: &CanvasScene) -> String {
         debug_text.lines().count(),
         debug_json.len()
     );
-    let _ = writeln!(
-        report,
-        "stable preview={}",
-        truncate(stable.as_str(), 108)
-    );
+    let _ = writeln!(report, "stable preview={}", truncate(stable.as_str(), 108));
     report
 }
 
@@ -924,7 +919,11 @@ impl CanvasVm {
             .into()
     }
 
-    fn static_scene_card(title: &'static str, description: &'static str, scene: CanvasScene) -> Element<Self> {
+    fn static_scene_card(
+        title: &'static str,
+        description: &'static str,
+        scene: CanvasScene,
+    ) -> Element<Self> {
         Self::showcase_card(
             title,
             description,
@@ -1192,13 +1191,16 @@ impl CanvasVm {
     }
 
     fn reset_probe(&mut self) {
-        self.retained_probe
-            .set("Move over the retained canvas to run query_point/query_point_all live.".to_string());
+        self.retained_probe.set(
+            "Move over the retained canvas to run query_point/query_point_all live.".to_string(),
+        );
     }
 
     fn probe_retained_scene(&mut self, point: Point) {
         let message = self.retained_scene.read(|scene| {
-            let options = CanvasSceneQueryOptions::new().scale_factor(1.0).font_scale(1.0);
+            let options = CanvasSceneQueryOptions::new()
+                .scale_factor(1.0)
+                .font_scale(1.0);
             let top = scene.query_point_with(&options, point);
             let all = scene.query_point_all(point);
             format!(
@@ -1218,7 +1220,8 @@ impl ViewModel for CanvasVm {
         Self {
             selected_demo: ctx.state(0_usize),
             hovered: ctx.state("Move across any canvas to inspect item payloads.".to_string()),
-            activity: ctx.state("Use the interaction lab to exercise every item-level event.".to_string()),
+            activity: ctx
+                .state("Use the interaction lab to exercise every item-level event.".to_string()),
             retained_probe: ctx.state(
                 "Move over the retained canvas to run query_point/query_point_all live."
                     .to_string(),

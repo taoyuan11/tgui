@@ -530,8 +530,9 @@ impl App {
 
     pub(crate) fn send_action_notification(&mut self, ctx: &CommandContext<Self>) {
         if cfg!(target_os = "macos") {
-            self.notification_status
-                .set("macOS 当前不支持系统通知 action；请使用 Snackbar action 或普通通知。".to_string());
+            self.notification_status.set(
+                "macOS 当前不支持系统通知 action；请使用 Snackbar action 或普通通知。".to_string(),
+            );
             return;
         }
 
@@ -720,7 +721,8 @@ impl App {
 
     pub(crate) fn toggle_tree_loading(&mut self) {
         self.tree_loading.update(|loading| *loading = !*loading);
-        self.tree_status.set("Tree loading slot toggled".to_string());
+        self.tree_status
+            .set("Tree loading slot toggled".to_string());
     }
 
     pub(crate) fn toggle_tree_empty(&mut self) {
@@ -885,10 +887,7 @@ impl App {
             }
             for rejection in selection.rejected {
                 files.push(UploadFile {
-                    id: UploadFileId::new(format!(
-                        "rejected:{}",
-                        rejection.path.to_string_lossy()
-                    )),
+                    id: UploadFileId::new(format!("rejected:{}", rejection.path.to_string_lossy())),
                     path: rejection.path,
                     name: "Rejected file".to_string(),
                     size_bytes: None,
@@ -953,7 +952,6 @@ pub(crate) fn audio_status_text(state: AudioPlaybackState) -> String {
         AudioPlaybackState::Error(error) => format!("播放状态: 出错: {error}"),
     }
 }
-
 
 fn seed_upload_files() -> Vec<UploadFile> {
     vec![

@@ -18,7 +18,6 @@ struct AnimationVm {
 }
 
 impl AnimationVm {
-
     fn title(&self) -> Signal<String> {
         self.expanded.signal().map(|expanded| {
             if expanded {
@@ -115,11 +114,9 @@ impl AnimationVm {
     fn toggle(&mut self) {
         self.expanded.update(|expanded| *expanded = !*expanded);
     }
-
 }
 
 impl ViewModel for AnimationVm {
-
     fn new(ctx: &ViewModelContext) -> Self {
         Self {
             expanded: ctx.state(false),
@@ -188,7 +185,6 @@ impl ViewModel for AnimationVm {
             )
             .into()
     }
-
 }
 
 fn main() -> Result<(), TguiError> {

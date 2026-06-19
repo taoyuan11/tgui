@@ -2,6 +2,7 @@ use super::*;
 
 mod json;
 
+use self::json::write_canvas_scene_debug_json;
 pub(crate) use self::json::{
     canvas_text_horizontal_align_name, canvas_text_overflow_name, canvas_text_vertical_align_name,
     canvas_text_wrap_name, export_canvas_scene_json,
@@ -82,7 +83,9 @@ impl CanvasSceneDebugInfo {
     }
 
     pub fn to_pretty_json(&self) -> String {
-        let mut out = String::new();
+        let mut out = String::with_capacity(
+            128usize.saturating_add(self.stats.total_items.saturating_mul(512)),
+        );
         out.push_str("{\n");
         out.push_str("  \"stats\": ");
         write_debug_stats_json(&mut out, &self.stats, 1);
@@ -117,29 +120,39 @@ pub(crate) fn build_canvas_scene_debug_info(scene: &CanvasScene) -> CanvasSceneD
     CanvasSceneDebugInfo { stats, nodes }
 }
 
+pub(crate) fn export_canvas_scene_debug_json(scene: &CanvasScene) -> String {
+    let stats = collect_canvas_scene_debug_stats(scene);
+    write_canvas_scene_debug_json(scene, &stats)
+}
+
+fn collect_canvas_scene_debug_stats(scene: &CanvasScene) -> CanvasSceneDebugStats {
+    let mut stats = CanvasSceneDebugStats {
+        root_items: scene.items().len(),
+        bounds: scene.bounds(),
+        ..Default::default()
+    };
+    for item in scene.items() {
+        collect_debug_item_stats(item, 0, &mut stats);
+    }
+    stats
+}
+
+fn collect_debug_item_stats(item: &CanvasItem, depth: usize, stats: &mut CanvasSceneDebugStats) {
+    record_debug_item_stats(item, depth, stats);
+    if let CanvasItem::Group(group) = item {
+        for child in &group.items {
+            collect_debug_item_stats(child, depth + 1, stats);
+        }
+    }
+}
+
 fn build_debug_node(
     item: &CanvasItem,
     depth: usize,
     index_path: &mut Vec<usize>,
     stats: &mut CanvasSceneDebugStats,
 ) -> CanvasSceneDebugNode {
-    stats.total_items += 1;
-    stats.max_depth = stats.max_depth.max(depth);
-    if item.name().is_some() {
-        stats.named_items += 1;
-    }
-    if item.style().visible {
-        stats.visible_items += 1;
-    }
-    if item.style().hit_test {
-        stats.hit_testable_items += 1;
-    }
-    match item.kind() {
-        CanvasItemKind::Path => stats.path_items += 1,
-        CanvasItemKind::Text => stats.text_items += 1,
-        CanvasItemKind::Image => stats.image_items += 1,
-        CanvasItemKind::Group => stats.group_items += 1,
-    }
+    record_debug_item_stats(item, depth, stats);
 
     let summary = match item {
         CanvasItem::Path(path) => format!(
@@ -148,7 +161,7 @@ fn build_debug_node(
             path.stroke.is_some(),
             path.shadow.is_some()
         ),
-        CanvasItem::Text(text) => format!("text(chars={})", text.plain_text().chars().count()),
+        CanvasItem::Text(text) => format!("text(chars={})", text.plain_text_char_count()),
         CanvasItem::Image(image) => format!("image(fit={:?})", image.fit),
         CanvasItem::Group(group) => {
             format!("group(mode={:?}, items={})", group.mode, group.items.len())
@@ -184,6 +197,26 @@ fn build_debug_node(
         child_count: item.children().len(),
         summary,
         children,
+    }
+}
+
+fn record_debug_item_stats(item: &CanvasItem, depth: usize, stats: &mut CanvasSceneDebugStats) {
+    stats.total_items += 1;
+    stats.max_depth = stats.max_depth.max(depth);
+    if item.name().is_some() {
+        stats.named_items += 1;
+    }
+    if item.style().visible {
+        stats.visible_items += 1;
+    }
+    if item.style().hit_test {
+        stats.hit_testable_items += 1;
+    }
+    match item.kind() {
+        CanvasItemKind::Path => stats.path_items += 1,
+        CanvasItemKind::Text => stats.text_items += 1,
+        CanvasItemKind::Image => stats.image_items += 1,
+        CanvasItemKind::Group => stats.group_items += 1,
     }
 }
 

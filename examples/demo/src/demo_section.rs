@@ -63,33 +63,26 @@ pub(crate) fn virtual_page(
             .gap(dp(18.0))
             .padding(Insets::all(dp(24.0)))
             .child(Text::new(title).style_full(styles::title_style))
-            .child(
-                Text::new(description)
-                    .style_full(|ctx| styles::muted_text_style(ctx, sp(15.0))),
-            )
+            .child(Text::new(description).style_full(|ctx| styles::muted_text_style(ctx, sp(15.0))))
             .into(),
     );
-    items.extend(
-        sections
-            .into_iter()
-            .map(|section| {
-                Flex::vertical()
-                    .width(pct(100.0))
-                    .padding(Insets::symmetric(dp(24.0), Dp::ZERO))
-                    .child(section)
-                    .into()
-            }),
-    );
+    items.extend(sections.into_iter().map(|section| {
+        Flex::vertical()
+            .width(pct(100.0))
+            .padding(Insets::symmetric(dp(24.0), Dp::ZERO))
+            .child(section)
+            .into()
+    }));
     items.push(Flex::vertical().height(dp(24.0)).into());
 
     VirtualList::new(items, |_index, item: &Element<App>| item.clone())
-    .width(pct(100.0))
-    .height(pct(100.0))
-    .item_layout(ItemLayout::Measured {
-        estimate,
-        spacing: dp(18.0),
-        overscan: 1,
-    })
+        .width(pct(100.0))
+        .height(pct(100.0))
+        .item_layout(ItemLayout::Measured {
+            estimate,
+            spacing: dp(18.0),
+            overscan: 1,
+        })
         .into()
 }
 
@@ -125,7 +118,11 @@ fn component_doc_with_layout(
     layout: DemoLayout,
 ) -> Element<App> {
     let mut children: Vec<Element<App>> = Vec::new();
-    children.push(Text::new(title).style_full(styles::section_title_style).into());
+    children.push(
+        Text::new(title)
+            .style_full(styles::section_title_style)
+            .into(),
+    );
     children.push(Text::new(intro).style_full(styles::status_style).into());
     let mut demo_cards: Vec<Element<App>> = Vec::new();
     for demo in demos {
@@ -167,7 +164,11 @@ fn usage_demo(app: &App, demo: UsageDemo, layout: DemoLayout) -> Element<App> {
         .child(
             Flex::vertical()
                 .gap(dp(4.0))
-                .child(Text::new(demo.title).style_full(styles::usage_title_style).user_select(true))
+                .child(
+                    Text::new(demo.title)
+                        .style_full(styles::usage_title_style)
+                        .user_select(true),
+                )
                 .child(Text::new(demo.description).style_full(styles::status_style)),
         )
         .child(

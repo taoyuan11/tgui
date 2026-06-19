@@ -77,7 +77,9 @@ impl ViewModel for AppVm {
                 Flex::horizontal()
                     .gap(dp(8.0))
                     .child(Button::new("Reset").on_click(Command::new(Self::reset)))
-                    .child(Button::new("Toggle loading").on_click(Command::new(Self::toggle_loading)))
+                    .child(
+                        Button::new("Toggle loading").on_click(Command::new(Self::toggle_loading)),
+                    )
                     .child(Button::new("Show empty").on_click(Command::new(Self::toggle_empty)))
                     .child(Button::new("Clear checks").on_click(Command::new(Self::clear_checks))),
             )
@@ -95,8 +97,10 @@ impl ViewModel for AppVm {
                     .empty(state_view("No nodes"))
                     .draggable(true)
                     .context_menu(vec![
-                        MenuItem::new("Select checked").on_select(Command::new(Self::select_checked)),
-                        MenuItem::new("Clear selection").on_select(Command::new(Self::clear_selection)),
+                        MenuItem::new("Select checked")
+                            .on_select(Command::new(Self::select_checked)),
+                        MenuItem::new("Clear selection")
+                            .on_select(Command::new(Self::clear_selection)),
                     ])
                     .style_full(tree_style)
                     .on_expand_change(ValueCommand::new(Self::set_expanded))
@@ -159,8 +163,10 @@ impl AppVm {
     }
 
     fn open_node(&mut self, action: TreeNodeAction) {
-        self.status
-            .set(format!("Primary action for {:?} at index {}", action.key, action.index));
+        self.status.set(format!(
+            "Primary action for {:?} at index {}",
+            action.key, action.index
+        ));
     }
 
     fn drop_node(&mut self, event: TreeDropEvent) {
@@ -184,8 +190,10 @@ impl AppVm {
                 event.dragged_key, event.position, event.target_key
             ));
         } else {
-            self.status
-                .set(format!("Drop skipped; missing target {:?}", event.target_key));
+            self.status.set(format!(
+                "Drop skipped; missing target {:?}",
+                event.target_key
+            ));
         }
     }
 
@@ -407,11 +415,7 @@ fn status_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
     style
 }
 
-fn row_text_style(
-    ctx: &StyleContext<'_>,
-    selected: bool,
-    disabled: bool,
-) -> TextWidgetStyle {
+fn row_text_style(ctx: &StyleContext<'_>, selected: bool, disabled: bool) -> TextWidgetStyle {
     let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
     style.typography.size = sp(14.0);
     style.typography.weight = if selected {

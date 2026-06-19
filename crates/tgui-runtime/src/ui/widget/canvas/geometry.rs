@@ -73,6 +73,10 @@ impl RectBounds {
 }
 
 pub(crate) fn transform_bounds(bounds: RectBounds, transform: CanvasTransform2D) -> RectBounds {
+    if transform == CanvasTransform2D::IDENTITY {
+        return bounds;
+    }
+
     let corners = [
         Point::new(bounds.min_x, bounds.min_y),
         Point::new(bounds.max_x, bounds.min_y),
@@ -172,6 +176,44 @@ pub(crate) fn transform_path_builder(
         };
     }
     builder
+}
+
+pub(crate) fn transform_path_builder_owned(
+    path: PathBuilder,
+    transform: CanvasTransform2D,
+) -> PathBuilder {
+    if transform == CanvasTransform2D::IDENTITY {
+        return path;
+    }
+
+    let PathBuilder {
+        commands,
+        fill_rule,
+        shape_hint: _,
+    } = path;
+    let mut transformed = Vec::with_capacity(commands.len());
+    for command in commands {
+        transformed.push(match command {
+            PathCommand::MoveTo(point_value) => PathCommand::MoveTo(transform.apply(point_value)),
+            PathCommand::LineTo(point_value) => PathCommand::LineTo(transform.apply(point_value)),
+            PathCommand::QuadTo { ctrl, to } => PathCommand::QuadTo {
+                ctrl: transform.apply(ctrl),
+                to: transform.apply(to),
+            },
+            PathCommand::CubicTo { ctrl1, ctrl2, to } => PathCommand::CubicTo {
+                ctrl1: transform.apply(ctrl1),
+                ctrl2: transform.apply(ctrl2),
+                to: transform.apply(to),
+            },
+            PathCommand::Close => PathCommand::Close,
+        });
+    }
+
+    PathBuilder {
+        commands: transformed,
+        fill_rule,
+        shape_hint: None,
+    }
 }
 
 pub(crate) fn transform_rect_quad(

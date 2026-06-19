@@ -51,6 +51,11 @@ fn mixed_text_layout_round_trips_cursor_boundaries() {
             assert_eq!(layout.index_for_x(start_x + delta * 0.75), end);
         }
     }
+
+    assert_eq!(
+        layout.x_for_index(usize::MAX),
+        layout.x_for_index(text.len())
+    );
 }
 
 #[test]
@@ -182,6 +187,34 @@ fn line_range_for_vertical_span_tracks_visible_lines() {
     assert_eq!(layout.line_range_for_vertical_span(24.0, 48.0), 1..2);
     assert_eq!(layout.line_range_for_vertical_span(48.0, 72.0), 2..3);
     assert_eq!(layout.line_range_for_vertical_span(72.0, 96.0), 3..3);
+}
+
+#[test]
+fn line_queries_track_newline_and_vertical_boundaries() {
+    let manager = FontManager::new(&FontCatalog::default());
+    let layout = manager.measure_text_layout(
+        "aa\nbb\ncc",
+        TextFontRequest {
+            preferred_font: None,
+            weight: FontWeight::NORMAL,
+        },
+        16.0,
+        24.0,
+        0.0,
+    );
+
+    assert_eq!(layout.line_index_for_index(0), 0);
+    assert_eq!(layout.line_index_for_index(2), 0);
+    assert_eq!(layout.line_index_for_index(3), 1);
+    assert_eq!(layout.line_index_for_index(6), 2);
+    assert_eq!(layout.line_index_for_index(usize::MAX), 2);
+
+    assert_eq!(layout.line_index_for_y(-10.0), 0);
+    assert_eq!(layout.line_index_for_y(0.0), 0);
+    assert_eq!(layout.line_index_for_y(23.99), 0);
+    assert_eq!(layout.line_index_for_y(24.0), 1);
+    assert_eq!(layout.line_index_for_y(48.0), 2);
+    assert_eq!(layout.line_index_for_y(10_000.0), 2);
 }
 
 #[test]

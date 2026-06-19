@@ -117,14 +117,16 @@ fn navigation_component(app: &App) -> Element<App> {
                 ]),
                 Pagination::new(app.pagination_page.signal(), 12usize)
                     .page_size(app.pagination_page_size.signal())
-                    .on_change(ValueCommand::new(|app: &mut App, change: PaginationChange| {
-                        app.pagination_page.set(change.page);
-                        app.pagination_page_size.set(change.page_size);
-                        app.component_status.set(format!(
-                            "分页: page={}, page_size={}",
-                            change.page, change.page_size
-                        ));
-                    })),
+                    .on_change(ValueCommand::new(
+                        |app: &mut App, change: PaginationChange| {
+                            app.pagination_page.set(change.page);
+                            app.pagination_page_size.set(change.page_size);
+                            app.component_status.set(format!(
+                                "分页: page={}, page_size={}",
+                                change.page, change.page_size
+                            ));
+                        }
+                    )),
                 Text::new(app.component_status.signal()).style_full(styles::status_style),
             ]),
             CODE_DATA_NAVIGATION,
@@ -185,7 +187,10 @@ fn tabs_component(app: &App) -> Element<App> {
                         .into();
                         tabs
                     })
-                    .child(Text::new(app.tabs_reorder_status.signal()).style_full(styles::status_style)),
+                    .child(
+                        Text::new(app.tabs_reorder_status.signal())
+                            .style_full(styles::status_style),
+                    ),
                 CODE_TABS_BASIC,
             ),
             UsageDemo::new(
@@ -237,7 +242,8 @@ fn demo_tab_items(
                 "overview",
                 "概览",
                 Flex::vertical().gap(dp(8.0)).child(el![
-                    Text::new("Tabs 会根据选中 key 只渲染当前 panel。").style_full(styles::status_style),
+                    Text::new("Tabs 会根据选中 key 只渲染当前 panel。")
+                        .style_full(styles::status_style),
                     ProgressBar::new(slider_value.clone().map(|value| value / 100.0))
                         .width(dp(240.0))
                         .show_label(true)
@@ -598,21 +604,23 @@ fn tree_summary(app: &App) -> String {
 }
 
 fn demo_tree_nodes() -> Vec<TreeNode<&'static str>> {
-    vec![TreeNode::keyed("workspace", "workspace").children([
-        TreeNode::keyed("src", "src").children([
-            TreeNode::keyed("widgets", "ui/widget").children([
-                TreeNode::keyed("tree", "tree/mod.rs"),
-                TreeNode::keyed("list", "list/mod.rs"),
-                TreeNode::keyed("table", "table/mod.rs"),
+    vec![
+        TreeNode::keyed("workspace", "workspace").children([
+            TreeNode::keyed("src", "src").children([
+                TreeNode::keyed("widgets", "ui/widget").children([
+                    TreeNode::keyed("tree", "tree/mod.rs"),
+                    TreeNode::keyed("list", "list/mod.rs"),
+                    TreeNode::keyed("table", "table/mod.rs"),
+                ]),
+                TreeNode::keyed("runtime", "runtime/input")
+                    .children([TreeNode::keyed("tree-runtime", "tree.rs")]),
             ]),
-            TreeNode::keyed("runtime", "runtime/input")
-                .children([TreeNode::keyed("tree-runtime", "tree.rs")]),
+            TreeNode::keyed("docs", "docs").children([
+                TreeNode::keyed("readme", "README.md"),
+                TreeNode::keyed("roadmap", "COMPONENTS_ROADMAP.md").disable(true),
+            ]),
         ]),
-        TreeNode::keyed("docs", "docs").children([
-            TreeNode::keyed("readme", "README.md"),
-            TreeNode::keyed("roadmap", "COMPONENTS_ROADMAP.md").disable(true),
-        ]),
-    ])]
+    ]
 }
 
 fn tree_row(ctx: TreeNodeContext<&'static str>) -> Element<App> {

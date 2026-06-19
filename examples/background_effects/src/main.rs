@@ -32,7 +32,6 @@ fn surface_style(
 }
 
 impl ViewModel for BackgroundEffectsVm {
-
     fn new(_: &ViewModelContext) -> Self {
         Self
     }
@@ -49,8 +48,10 @@ impl ViewModel for BackgroundEffectsVm {
                     Dp::ZERO,
                     None,
                     Some(
-                        BackgroundImage::from_bytes(include_bytes!("../assets/juequling_shushu.jpg"))
-                            .fit(ContentFit::Cover),
+                        BackgroundImage::from_bytes(include_bytes!(
+                            "../assets/juequling_shushu.jpg"
+                        ))
+                        .fit(ContentFit::Cover),
                     ),
                 )
             })
@@ -65,7 +66,6 @@ impl ViewModel for BackgroundEffectsVm {
             )
             .into()
     }
-    
 }
 
 fn background_pattern() -> Element<BackgroundEffectsVm> {
@@ -190,7 +190,11 @@ fn gallery_column(
                     )
                     .into(),
                 ),
-                if show_background_blur { dp(12.0) } else { Dp::ZERO },
+                if show_background_blur {
+                    dp(12.0)
+                } else {
+                    Dp::ZERO
+                },
                 Some((dp(1.0), Color::hexa(0xFFFFFF2E))),
                 None,
             )
@@ -267,10 +271,7 @@ fn blur_gallery() -> Element<BackgroundEffectsVm> {
         .into()
 }
 
-fn gradient_tile(
-    gradient: BackgroundLinearGradient,
-    label: &str,
-) -> Element<BackgroundEffectsVm> {
+fn gradient_tile(gradient: BackgroundLinearGradient, label: &str) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .height(dp(110.0))
         .style_full(move |context| {
@@ -292,10 +293,7 @@ fn gradient_tile(
         .into()
 }
 
-fn radial_tile(
-    gradient: BackgroundRadialGradient,
-    label: &str,
-) -> Element<BackgroundEffectsVm> {
+fn radial_tile(gradient: BackgroundRadialGradient, label: &str) -> Element<BackgroundEffectsVm> {
     Stack::new()
         .height(dp(110.0))
         .style_full(move |context| {

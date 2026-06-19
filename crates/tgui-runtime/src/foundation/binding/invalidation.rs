@@ -1,7 +1,9 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use crate::platform::backend::event_loop::EventLoopProxy;
 
@@ -56,10 +58,7 @@ impl InvalidationSignal {
 
     pub(crate) fn mark_media_dirty(&self) {
         let revision = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
-        let mut revisions = self
-            .media_revisions
-            .lock()
-            .expect("media revision log lock poisoned");
+        let mut revisions = self.media_revisions.lock();
         revisions.push(revision);
         if revisions.len() > 1024 {
             let overflow = revisions.len() - 1024;
@@ -84,26 +83,16 @@ impl InvalidationSignal {
         if let Some(dependency) = dependency {
             self.dependency_revisions
                 .lock()
-                .expect("dependency revision map lock poisoned")
                 .insert(dependency, revision);
         }
-        self.dirty_dependencies
-            .lock()
-            .expect("dirty dependency log lock poisoned")
-            .push(revision, dependency);
+        self.dirty_dependencies.lock().push(revision, dependency);
         if self.should_wake_now() {
             self.wake_proxy();
         }
     }
 
     fn wake_proxy(&self) {
-        if let Some(proxy) = self
-            .proxy
-            .lock()
-            .expect("invalidation proxy lock poisoned")
-            .as_ref()
-            .cloned()
-        {
+        if let Some(proxy) = self.proxy.lock().as_ref().cloned() {
             proxy.wake_up();
         }
     }
@@ -125,7 +114,7 @@ impl InvalidationSignal {
     }
 
     pub(crate) fn set_proxy(&self, proxy: EventLoopProxy) {
-        *self.proxy.lock().expect("invalidation proxy lock poisoned") = Some(proxy);
+        *self.proxy.lock() = Some(proxy);
     }
 
     pub(crate) fn suppress_wakeups(&self) -> InvalidationWakeGuard {
@@ -144,26 +133,18 @@ impl InvalidationSignal {
         let current_revision = self.revision();
         self.dirty_dependencies
             .lock()
-            .expect("dirty dependency log lock poisoned")
             .dirty_since(revision, current_revision)
     }
 
     pub(crate) fn dependency_revision(&self, dependency: DependencyId) -> Option<u64> {
-        self.dependency_revisions
-            .lock()
-            .expect("dependency revision map lock poisoned")
-            .get(&dependency)
-            .copied()
+        self.dependency_revisions.lock().get(&dependency).copied()
     }
 
     pub(crate) fn media_only_since(&self, revision: u64, current_revision: u64) -> bool {
         if revision >= current_revision {
             return false;
         }
-        let revisions = self
-            .media_revisions
-            .lock()
-            .expect("media revision log lock poisoned");
+        let revisions = self.media_revisions.lock();
         let media_count = revisions
             .iter()
             .filter(|&&media_revision| {

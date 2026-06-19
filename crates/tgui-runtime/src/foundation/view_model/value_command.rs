@@ -62,9 +62,15 @@ impl<T: 'static, V> ValueCommand<T, V> {
     /// 参数：
     /// - `view_model`：要被修改的视图模型实例。
     /// - `value`：命令负载。
+    #[inline]
     pub fn execute(&self, view_model: &mut T, value: V) {
-        let context = CommandContext::detached();
-        self.execute_with_context(view_model, value, &context);
+        match &self.handler {
+            ValueCommandKind::Plain(handler) => handler(view_model, value),
+            ValueCommandKind::WithContext(handler) => {
+                let context = CommandContext::detached();
+                handler(view_model, value, &context);
+            }
+        }
     }
 
     /// 在给定视图模型实例和运行时上下文上执行命令。
@@ -73,6 +79,7 @@ impl<T: 'static, V> ValueCommand<T, V> {
     /// - `view_model`：要被修改的视图模型实例。
     /// - `value`：命令负载。
     /// - `context`：运行时上下文。
+    #[inline]
     pub fn execute_with_context(&self, view_model: &mut T, value: V, context: &CommandContext<T>) {
         match &self.handler {
             ValueCommandKind::Plain(handler) => handler(view_model, value),
@@ -87,9 +94,16 @@ impl<T: 'static, V> ValueCommand<T, V> {
     where
         V: 'static,
     {
-        ValueCommand::new_with_context(move |view_model, value, context| {
-            let scoped_context = context.scope(selector.clone());
-            self.execute_with_context(selector(view_model), value, &scoped_context);
-        })
+        match self.handler {
+            ValueCommandKind::Plain(handler) => {
+                ValueCommand::new(move |view_model, value| handler(selector(view_model), value))
+            }
+            ValueCommandKind::WithContext(handler) => {
+                ValueCommand::new_with_context(move |view_model, value, context| {
+                    let scoped_context = context.scope(selector.clone());
+                    handler(selector(view_model), value, &scoped_context);
+                })
+            }
+        }
     }
 }

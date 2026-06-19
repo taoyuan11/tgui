@@ -13,6 +13,8 @@ pub use spec::{
 };
 pub use value::AnimatedValue;
 
+#[cfg(feature = "bench-support")]
+pub(crate) use controller::sample_timeline;
 pub(crate) use controller::AnimationCoordinator;
 pub(crate) use engine::{
     default_theme_transition, AnimationEngine, AnimationKey, WidgetProperty, WindowProperty,

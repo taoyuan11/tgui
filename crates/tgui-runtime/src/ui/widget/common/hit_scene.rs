@@ -796,6 +796,15 @@ impl<VM> HitRegion<VM> {
         .then_some(delta)
     }
 
+    pub(crate) fn contains_without_transform(&self, point: Point) -> bool {
+        self.rect.contains(point)
+            && self
+                .clip_rect
+                .map(|clip_rect| clip_rect.contains(point))
+                .unwrap_or(true)
+            && self.geometry.contains(point)
+    }
+
     pub(crate) fn interaction_translated(&self, delta: Point) -> HitInteraction<VM> {
         self.interaction.clone().translated(delta)
     }

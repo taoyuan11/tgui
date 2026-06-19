@@ -418,10 +418,13 @@ fn combobox_component(app: &App) -> Element<App> {
                     .on_open_change(ValueCommand::new(|app: &mut App, open| {
                         app.combobox_open.set(open);
                     }))
-                    .on_change(ValueCommand::new(|app: &mut App, change: ComboboxChange| {
-                        app.combobox_selected.set(change.selected_key.clone());
-                        app.component_status.set(format!("Combobox: {}", change.text));
-                    })),
+                    .on_change(ValueCommand::new(
+                        |app: &mut App, change: ComboboxChange| {
+                            app.combobox_selected.set(change.selected_key.clone());
+                            app.component_status
+                                .set(format!("Combobox: {}", change.text));
+                        }
+                    )),
                 Text::new(app.component_status.signal()).style_full(styles::status_style),
             ]),
             CODE_COMBOBOX_BASIC,
@@ -473,24 +476,27 @@ fn slider_component(app: &App) -> Element<App> {
                 "slider/vertical",
                 "竖向滑块",
                 "底部为最小值，顶部为最大值，适合音量、亮度等纵向控制。",
-                Flex::horizontal().gap(dp(16.0)).align(Align::Center).child(el![
-                    Slider::new(app.slider_value.signal(), 0.0, 100.0)
-                        .vertical()
-                        .height(dp(180.0))
-                        .step(5.0)
-                        .show_ticks(true)
-                        .show_value_label(true)
-                        .format_value(|value| format!("{value:.0}%"))
-                        .on_change(ValueCommand::new(|app: &mut App, value| {
-                            app.slider_value.set(value);
-                        })),
-                    Text::new(
-                        app.slider_value
-                            .signal()
-                            .map(|value| format!("当前值: {value:.0}%"))
-                    )
-                    .style_full(styles::status_style),
-                ]),
+                Flex::horizontal()
+                    .gap(dp(16.0))
+                    .align(Align::Center)
+                    .child(el![
+                        Slider::new(app.slider_value.signal(), 0.0, 100.0)
+                            .vertical()
+                            .height(dp(180.0))
+                            .step(5.0)
+                            .show_ticks(true)
+                            .show_value_label(true)
+                            .format_value(|value| format!("{value:.0}%"))
+                            .on_change(ValueCommand::new(|app: &mut App, value| {
+                                app.slider_value.set(value);
+                            })),
+                        Text::new(
+                            app.slider_value
+                                .signal()
+                                .map(|value| format!("当前值: {value:.0}%"))
+                        )
+                        .style_full(styles::status_style),
+                    ]),
                 CODE_SLIDER_VERTICAL,
             ),
         ],
@@ -507,12 +513,13 @@ fn rating_component(app: &App) -> Element<App> {
             "半星评分",
             "点击或键盘调整评分，变更会写回 ViewModel。",
             Flex::vertical().gap(dp(8.0)).child(el![
-                Rating::new(app.rating_value.signal()).half().on_change(ValueCommand::new(
-                    |app: &mut App, change: RatingChange| {
+                Rating::new(app.rating_value.signal())
+                    .half()
+                    .on_change(ValueCommand::new(|app: &mut App, change: RatingChange| {
                         app.rating_value.set(change.value);
-                        app.component_status.set(format!("评分: {:.1}", change.value));
-                    },
-                )),
+                        app.component_status
+                            .set(format!("评分: {:.1}", change.value));
+                    },)),
                 Text::new(app.component_status.signal()).style_full(styles::status_style),
             ]),
             CODE_RATING_BASIC,

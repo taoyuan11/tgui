@@ -9,7 +9,6 @@ struct App {
 }
 
 impl App {
-
     fn open_file_sync(&mut self, ctx: &CommandContext<Self>) {
         let result = ctx.dialogs().open_file(
             FileDialogOptions::new()
@@ -85,7 +84,6 @@ impl App {
 }
 
 impl ViewModel for App {
-
     fn new(context: &ViewModelContext) -> Self {
         Self {
             clicks: context.state(0),
@@ -99,17 +97,20 @@ impl ViewModel for App {
             |app: &mut App, ctx| app.open_file_sync(ctx),
         ));
 
-        let open_async = Button::new("异步文件选择").on_click(
-            Command::new_with_context(|_: &mut App, ctx| Self::open_file_async(ctx)),
-        );
+        let open_async =
+            Button::new("异步文件选择").on_click(Command::new_with_context(|_: &mut App, ctx| {
+                Self::open_file_async(ctx)
+            }));
 
-        let message_sync = Button::new("同步确认框").on_click(
-            Command::new_with_context(|app: &mut App, ctx| app.show_message_sync(ctx)),
-        );
+        let message_sync =
+            Button::new("同步确认框").on_click(Command::new_with_context(|app: &mut App, ctx| {
+                app.show_message_sync(ctx)
+            }));
 
-        let message_async = Button::new("异步消息框").on_click(
-            Command::new_with_context(|_: &mut App, ctx| Self::show_message_async(ctx)),
-        );
+        let message_async =
+            Button::new("异步消息框").on_click(Command::new_with_context(|_: &mut App, ctx| {
+                Self::show_message_async(ctx)
+            }));
 
         let counter = Button::new(
             self.clicks
@@ -134,7 +135,6 @@ impl ViewModel for App {
             ])
             .into()
     }
-
 }
 
 fn main() -> Result<(), TguiError> {

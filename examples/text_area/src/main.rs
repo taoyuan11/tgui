@@ -39,14 +39,15 @@ impl App {
 
 impl ViewModel for App {
     fn new(context: &ViewModelContext) -> Self {
-        let source_path = String::from("/Users/sky/Desktop/Project/Rust/libs/tgui/src/runtime/mod.rs");
+        let source_path =
+            String::from("/Users/sky/Desktop/Project/Rust/libs/tgui/src/runtime/mod.rs");
 
         let source = Self::get_source(source_path.as_str());
 
         Self {
             theme: context.state(ThemeMode::System),
             content: context.text_controller(source),
-            path_label: context.state(source_path.clone())
+            path_label: context.state(source_path.clone()),
         }
     }
 
@@ -60,7 +61,9 @@ impl ViewModel for App {
             }))
             .child(el![
                 Text::new("Textarea 示例").style_full(title_style),
-                Text::new("下面的内容读取自当前示例的 `main.rs`，你可以编辑它，但修改不会保存到磁盘。")
+                Text::new(
+                    "下面的内容读取自当前示例的 `main.rs`，你可以编辑它，但修改不会保存到磁盘。"
+                )
                 .user_select(true),
                 Text::new(self.path_label.signal()).user_select(true),
                 Flex::vertical()

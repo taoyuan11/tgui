@@ -122,7 +122,8 @@ impl ViewModel for AppVm {
             selected_keys: ctx.state(vec![WidgetKey::from("ana")]),
             loading: ctx.state(false),
             show_empty: ctx.state(false),
-            status: ctx.state("Click rows, Shift-click ranges, press Enter, or right-click.".into()),
+            status: ctx
+                .state("Click rows, Shift-click ranges, press Enter, or right-click.".into()),
             virtual_rows,
         }
     }
@@ -155,7 +156,9 @@ impl AppVm {
             .child(
                 Flex::horizontal()
                     .gap(dp(8.0))
-                    .child(Button::new("Toggle loading").on_click(Command::new(Self::toggle_loading)))
+                    .child(
+                        Button::new("Toggle loading").on_click(Command::new(Self::toggle_loading)),
+                    )
                     .child(Button::new("Show empty").on_click(Command::new(Self::toggle_empty)))
                     .child(Button::new("Clear").on_click(Command::new(Self::clear_selection))),
             )
@@ -168,26 +171,25 @@ impl AppVm {
                     },
                     contact_row,
                 )
-                    .width(pct(100.0))
-                    .height(dp(360.0))
-                    .item_layout(ItemLayout::Measured {
-                        estimate: dp(64.0),
-                        spacing: dp(4.0),
-                        overscan: 3,
-                    })
-                    .style_full(contact_list_style)
-                    .selection_mode(ListSelectionMode::Multiple)
-                    .selected_keys(self.selected_keys.signal())
-                    .loading(self.loading.signal())
-                    .loading_view(state_view("Loading contact rows..."))
-                    .empty(state_view("No contacts"))
-                    .context_menu(vec![
-                        MenuItem::new("Mark as reviewed")
-                            .on_select(Command::new(Self::context_action)),
-                        MenuItem::new("Open profile").on_select(Command::new(Self::context_action)),
-                    ])
-                    .on_selection_change(ValueCommand::new(Self::set_selection))
-                    .on_item_action(ValueCommand::new(Self::open_contact)),
+                .width(pct(100.0))
+                .height(dp(360.0))
+                .item_layout(ItemLayout::Measured {
+                    estimate: dp(64.0),
+                    spacing: dp(4.0),
+                    overscan: 3,
+                })
+                .style_full(contact_list_style)
+                .selection_mode(ListSelectionMode::Multiple)
+                .selected_keys(self.selected_keys.signal())
+                .loading(self.loading.signal())
+                .loading_view(state_view("Loading contact rows..."))
+                .empty(state_view("No contacts"))
+                .context_menu(vec![
+                    MenuItem::new("Mark as reviewed").on_select(Command::new(Self::context_action)),
+                    MenuItem::new("Open profile").on_select(Command::new(Self::context_action)),
+                ])
+                .on_selection_change(ValueCommand::new(Self::set_selection))
+                .on_item_action(ValueCommand::new(Self::open_contact)),
             )
             .child(Text::new(self.status()).style_full(status_text_style))
             .into()
@@ -201,7 +203,10 @@ impl AppVm {
             .padding(Insets::all(dp(16.0)))
             .style_full(panel_style)
             .child(Text::new("VirtualList").style_full(title_style))
-            .child(Text::new("10,000 rows, fixed 32dp item layout, overscan 4").style_full(muted_text_style))
+            .child(
+                Text::new("10,000 rows, fixed 32dp item layout, overscan 4")
+                    .style_full(muted_text_style),
+            )
             .child(
                 VirtualList::new_with_context(self.virtual_rows.clone(), virtual_row)
                     .item_layout(ItemLayout::Fixed {
@@ -236,7 +241,10 @@ fn contact_row(ctx: ListItemContext<Contact>) -> Element<AppVm> {
     Flex::vertical()
         .gap(dp(2.0))
         .child(Text::new(ctx.item.name).style_full(move |ctx| row_title_style(ctx, accent)))
-        .child(Text::new(format!("{} - {}", ctx.item.role, ctx.item.status)).style_full(muted_text_style))
+        .child(
+            Text::new(format!("{} - {}", ctx.item.role, ctx.item.status))
+                .style_full(muted_text_style),
+        )
         .into()
 }
 

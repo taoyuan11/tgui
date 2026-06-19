@@ -97,11 +97,7 @@ pub(crate) fn sidebar_style(ctx: &StyleContext<'_>) -> ContainerStyle {
     style
 }
 
-pub(crate) fn nav_item_style(
-    ctx: &StyleContext<'_>,
-    active: bool,
-    accent: u32,
-) -> ContainerStyle {
+pub(crate) fn nav_item_style(ctx: &StyleContext<'_>, active: bool, accent: u32) -> ContainerStyle {
     let mode = ctx.mode;
     let accent = Color::hexa(accent);
     let mut style = ContainerStyle::default_for_theme(ctx.theme);
@@ -146,11 +142,7 @@ pub(crate) fn nav_item_style(
     style
 }
 
-pub(crate) fn nav_badge_style(
-    ctx: &StyleContext<'_>,
-    active: bool,
-    accent: u32,
-) -> ContainerStyle {
+pub(crate) fn nav_badge_style(ctx: &StyleContext<'_>, active: bool, accent: u32) -> ContainerStyle {
     let mode = ctx.mode;
     let accent = Color::hexa(accent);
     let mut style = ContainerStyle::default_for_theme(ctx.theme);

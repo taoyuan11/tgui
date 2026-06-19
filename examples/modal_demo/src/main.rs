@@ -83,23 +83,18 @@ impl ViewModel for DemoVm {
         let main_ui = Flex::new(Axis::Vertical)
             .padding(Insets::all(dp(32.0)))
             .gap(dp(16.0))
-            .child(
-                Text::new("tgui Modal / Dialog Demo")
-                    .style_full(|ctx| {
-                        let mut s = TextWidgetStyle::default_for_theme(ctx.theme);
-                        s.typography.size = sp(24.0);
-                        s
-                    }),
-            )
-            .child(
-                Text::new("点击下方按钮试用三种用法。Esc 关闭、Tab 在 modal 内循环、Enter 触发主按钮。"),
-            )
+            .child(Text::new("tgui Modal / Dialog Demo").style_full(|ctx| {
+                let mut s = TextWidgetStyle::default_for_theme(ctx.theme);
+                s.typography.size = sp(24.0);
+                s
+            }))
+            .child(Text::new(
+                "点击下方按钮试用三种用法。Esc 关闭、Tab 在 modal 内循环、Enter 触发主按钮。",
+            ))
             .child(
                 Flex::new(Axis::Horizontal)
                     .gap(dp(12.0))
-                    .child(
-                        Button::new("Alert（提示）").on_click(Command::new(Self::open_alert)),
-                    )
+                    .child(Button::new("Alert（提示）").on_click(Command::new(Self::open_alert)))
                     .child(
                         Button::new("Confirm（二选一）").on_click(Command::new(Self::open_confirm)),
                     )
@@ -126,7 +121,9 @@ impl ViewModel for DemoVm {
         let alert_modal = Modal::new(self.alert_open.signal())
             .on_open_change(ValueCommand::new(Self::dismiss_alert))
             .title("提示")
-            .content(Text::new("这是一个简单的 alert modal。按 Esc 或点击 backdrop 也能关闭。"))
+            .content(Text::new(
+                "这是一个简单的 alert modal。按 Esc 或点击 backdrop 也能关闭。",
+            ))
             .action(
                 ModalAction::primary("OK")
                     .on_click(Command::new(|vm: &mut Self| vm.alert_open.set(false))),
@@ -150,9 +147,10 @@ impl ViewModel for DemoVm {
                     .child(Text::new("请填写名称（可为空）："))
                     .child(Input::new(self.form_name.clone()).placeholder("Anonymous")),
             )
-            .action(ModalAction::new("取消").on_click(Command::new(|vm: &mut Self| {
-                vm.form_open.set(false)
-            })))
+            .action(
+                ModalAction::new("取消")
+                    .on_click(Command::new(|vm: &mut Self| vm.form_open.set(false))),
+            )
             .action(ModalAction::primary("保存").on_click(Command::new(Self::submit_form)));
 
         // 根 Stack：主界面 + 三个 modal 叠加在上面。

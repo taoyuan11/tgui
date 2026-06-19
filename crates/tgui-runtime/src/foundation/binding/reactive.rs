@@ -33,6 +33,14 @@ enum ReactiveSubscriber {
     Target(ReactiveTarget),
 }
 
+enum ReactiveDrainAction {
+    Signal {
+        signal: SignalId,
+        recompute: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    },
+    Target(ReactiveTarget),
+}
+
 #[derive(Default)]
 struct ReactiveGraphInner {
     subscribers: HashMap<SignalId, HashSet<ReactiveSubscriber>>,
@@ -58,9 +66,7 @@ pub(crate) struct ReactiveGraph {
 
 impl ReactiveGraph {
     pub(crate) fn create_signal(&self) -> SignalId {
-        let id = SignalId::next();
-        self.inner.lock().subscribers.entry(id).or_default();
-        id
+        SignalId::next()
     }
 
     pub(crate) fn register_memo(
@@ -69,7 +75,6 @@ impl ReactiveGraph {
         recompute: Arc<dyn Fn() -> bool + Send + Sync>,
     ) {
         let mut inner = self.inner.lock();
-        inner.subscribers.entry(id).or_default();
         inner.recomputers.insert(id, recompute);
     }
 
@@ -163,6 +168,9 @@ impl ReactiveGraph {
 
     pub(crate) fn mark_signal_dirty(&self, signal: SignalId) {
         let mut inner = self.inner.lock();
+        if inner.subscribers.get(&signal).is_none_or(HashSet::is_empty) {
+            return;
+        }
         if inner.dirty_signal_set.insert(signal) {
             inner.dirty_signals.push_back(signal);
         }
@@ -176,29 +184,27 @@ impl ReactiveGraph {
     pub(crate) fn drain(&self) -> ReactiveDrain {
         let mut processed_signals = 0;
         loop {
-            let Some(signal) = self.pop_dirty_signal() else {
+            let Some(actions) = self.pop_dirty_signal_actions() else {
                 break;
             };
             processed_signals += 1;
-            let subscribers = self
-                .inner
-                .lock()
-                .subscribers
-                .get(&signal)
-                .cloned()
-                .unwrap_or_default();
 
-            for subscriber in subscribers {
-                match subscriber {
-                    ReactiveSubscriber::Signal(signal) => {
-                        let recompute = self.inner.lock().recomputers.get(&signal).cloned();
+            let mut changed_signals = Vec::new();
+            let mut changed_targets = Vec::new();
+            for action in actions {
+                match action {
+                    ReactiveDrainAction::Signal { signal, recompute } => {
                         let changed = recompute.map(|recompute| recompute()).unwrap_or(true);
                         if changed {
-                            self.mark_signal_dirty(signal);
+                            changed_signals.push(signal);
                         }
                     }
-                    ReactiveSubscriber::Target(target) => self.mark_target_dirty(target),
+                    ReactiveDrainAction::Target(target) => changed_targets.push(target),
                 }
+            }
+
+            if !changed_signals.is_empty() || !changed_targets.is_empty() {
+                self.mark_dirty_batch(&changed_signals, &changed_targets);
             }
         }
 
@@ -211,17 +217,38 @@ impl ReactiveGraph {
         }
     }
 
-    fn pop_dirty_signal(&self) -> Option<SignalId> {
+    fn pop_dirty_signal_actions(&self) -> Option<Vec<ReactiveDrainAction>> {
         let mut inner = self.inner.lock();
         let signal = inner.dirty_signals.pop_front()?;
         inner.dirty_signal_set.remove(&signal);
-        Some(signal)
+        Some(
+            inner
+                .subscribers
+                .get(&signal)
+                .into_iter()
+                .flat_map(|subscribers| subscribers.iter().copied())
+                .map(|subscriber| match subscriber {
+                    ReactiveSubscriber::Signal(signal) => ReactiveDrainAction::Signal {
+                        signal,
+                        recompute: inner.recomputers.get(&signal).cloned(),
+                    },
+                    ReactiveSubscriber::Target(target) => ReactiveDrainAction::Target(target),
+                })
+                .collect(),
+        )
     }
 
-    fn mark_target_dirty(&self, target: ReactiveTarget) {
+    fn mark_dirty_batch(&self, signals: &[SignalId], targets: &[ReactiveTarget]) {
         let mut inner = self.inner.lock();
-        if inner.dirty_target_set.insert(target) {
-            inner.dirty_targets.push_back(target);
+        for signal in signals {
+            if inner.dirty_signal_set.insert(*signal) {
+                inner.dirty_signals.push_back(*signal);
+            }
+        }
+        for target in targets {
+            if inner.dirty_target_set.insert(*target) {
+                inner.dirty_targets.push_back(*target);
+            }
         }
     }
 }

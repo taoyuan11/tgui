@@ -28,18 +28,22 @@ pub(in crate::text::font) struct TextLineLayoutInfo {
 }
 
 impl TextLayoutInfo {
+    #[inline]
     pub(crate) fn x_for_index(&self, index: usize) -> f32 {
         self.line_for_index(index).x_for_index(index)
     }
 
+    #[inline]
     pub(crate) fn top_for_index(&self, index: usize) -> f32 {
         self.line_for_index(index).top
     }
 
+    #[inline]
     pub(crate) fn line_height_for_index(&self, index: usize) -> f32 {
         self.line_for_index(index).height
     }
 
+    #[inline]
     pub(crate) fn index_for_x(&self, x: f32) -> usize {
         self.lines
             .first()
@@ -47,12 +51,23 @@ impl TextLayoutInfo {
             .unwrap_or(0)
     }
 
+    #[inline]
     pub(crate) fn index_for_point(&self, x: f32, y: f32) -> usize {
         self.line_for_y(y).index_for_x(x)
     }
 
     pub(crate) fn line_index_for_index(&self, index: usize) -> usize {
         self.find_line_index_for_index(index)
+    }
+
+    pub(crate) fn line_index_for_y(&self, y: f32) -> usize {
+        if self.lines.len() <= 1 {
+            return 0;
+        }
+
+        let local_y = y.max(0.0);
+        self.first_line_with_bottom_after(local_y)
+            .min(self.lines.len() - 1)
     }
 
     pub(crate) fn line_count(&self) -> usize {
@@ -132,21 +147,18 @@ impl TextLayoutInfo {
             return 0;
         }
 
-        for line_index in 0..self.lines.len() {
-            let next_start = self
-                .lines
-                .get(line_index + 1)
-                .map(|next| next.start_index)
-                .unwrap_or(usize::MAX);
-            if index < next_start {
-                return line_index;
-            }
-        }
-
-        self.lines.len() - 1
+        self.lines
+            .partition_point(|line| line.start_index <= index)
+            .saturating_sub(1)
+            .min(self.lines.len() - 1)
     }
 
+    #[inline]
     fn line_for_index(&self, index: usize) -> &TextLineLayoutInfo {
+        if self.lines.len() == 1 {
+            return &self.lines[0];
+        }
+
         let line_index = self.find_line_index_for_index(index);
         self.lines
             .get(line_index)
@@ -154,16 +166,14 @@ impl TextLayoutInfo {
             .expect("text layout should always contain at least one line")
     }
 
+    #[inline]
     fn line_for_y(&self, y: f32) -> &TextLineLayoutInfo {
         if self.lines.is_empty() {
             panic!("text layout should always contain at least one line");
         }
 
-        let local_y = y.max(0.0);
         self.lines
-            .iter()
-            .find(|line| local_y < line.top + line.height)
-            .or_else(|| self.lines.last())
+            .get(self.line_index_for_y(y))
             .expect("text layout should always contain at least one line")
     }
 
@@ -183,40 +193,57 @@ impl TextLayoutInfo {
 }
 
 impl TextLineLayoutInfo {
+    #[inline]
     fn x_for_index(&self, index: usize) -> f32 {
         if self.boundaries.is_empty() {
             return 0.0;
         }
 
         let local_index = index.saturating_sub(self.start_index);
-        let mut x = 0.0;
-        for boundary in &self.boundaries {
-            if boundary.index > local_index {
-                break;
+        if let Some(boundary) = self.boundaries.get(local_index) {
+            if boundary.index == local_index {
+                return boundary.x;
             }
-            x = boundary.x;
         }
-        x
+
+        let boundary_index = self
+            .boundaries
+            .partition_point(|boundary| boundary.index <= local_index);
+        if boundary_index == 0 {
+            0.0
+        } else {
+            self.boundaries[boundary_index - 1].x
+        }
     }
 
+    #[inline]
     fn index_for_x(&self, x: f32) -> usize {
         if self.boundaries.len() <= 1 {
             return self.start_index;
         }
 
         let local_x = x.max(0.0);
-        for pair in self.boundaries.windows(2) {
-            let start = pair[0];
-            let end = pair[1];
-            if local_x <= (start.x + end.x) * 0.5 {
-                return self.start_index + start.index;
-            }
+        let right = self
+            .boundaries
+            .partition_point(|boundary| boundary.x < local_x);
+        if right == 0 {
+            return self.start_index + self.boundaries[0].index;
+        }
+        if right >= self.boundaries.len() {
+            return self
+                .boundaries
+                .last()
+                .map(|boundary| self.start_index + boundary.index)
+                .unwrap_or(self.end_index);
         }
 
-        self.boundaries
-            .last()
-            .map(|boundary| self.start_index + boundary.index)
-            .unwrap_or(self.end_index)
+        let left = right - 1;
+        let midpoint = (self.boundaries[left].x + self.boundaries[right].x) * 0.5;
+        if local_x <= midpoint {
+            self.start_index + self.boundaries[left].index
+        } else {
+            self.start_index + self.boundaries[right].index
+        }
     }
 }
 
@@ -289,17 +316,33 @@ pub(crate) fn build_layout_info_from_buffer(
             );
 
             let cluster = &run.text[glyph.start..glyph.end];
-            let grapheme_count = cluster.graphemes(true).count().max(1);
-            let grapheme_width = glyph.w / grapheme_count as f32;
             let mut grapheme_x = glyph.x;
 
-            for (offset, grapheme) in cluster.grapheme_indices(true) {
-                grapheme_x += grapheme_width;
-                push_boundary(
-                    &mut boundaries,
-                    glyph.start + offset + grapheme.len() - start_relative,
-                    grapheme_x.max(0.0),
-                );
+            if cluster.is_ascii() {
+                let byte_count = cluster.len();
+                if byte_count > 0 {
+                    let grapheme_width = glyph.w / byte_count as f32;
+                    for offset in 1..=byte_count {
+                        grapheme_x += grapheme_width;
+                        push_boundary(
+                            &mut boundaries,
+                            glyph.start + offset - start_relative,
+                            grapheme_x.max(0.0),
+                        );
+                    }
+                }
+            } else {
+                let grapheme_count = cluster.graphemes(true).count().max(1);
+                let grapheme_width = glyph.w / grapheme_count as f32;
+
+                for (offset, grapheme) in cluster.grapheme_indices(true) {
+                    grapheme_x += grapheme_width;
+                    push_boundary(
+                        &mut boundaries,
+                        glyph.start + offset + grapheme.len() - start_relative,
+                        grapheme_x.max(0.0),
+                    );
+                }
             }
         }
 

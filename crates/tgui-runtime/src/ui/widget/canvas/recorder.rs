@@ -125,7 +125,7 @@ impl CanvasRecorder {
 
     pub fn set_fill_rule(&mut self, fill_rule: CanvasFillRule) -> &mut Self {
         self.current_state_mut().fill_rule = fill_rule;
-        self.current_path = self.current_path.clone().fill_rule(fill_rule);
+        self.current_path.fill_rule = fill_rule;
         self
     }
 
@@ -212,6 +212,11 @@ impl CanvasRecorder {
     pub fn set_paragraph_style(&mut self, paragraph_style: CanvasParagraphStyle) -> &mut Self {
         self.current_state_mut().paragraph_style = paragraph_style;
         self
+    }
+
+    fn update_current_path(&mut self, update: impl FnOnce(PathBuilder) -> PathBuilder) {
+        let path = std::mem::take(&mut self.current_path);
+        self.current_path = update(path);
     }
 
     fn begin_group(&mut self, mode: CanvasGroupMode) -> &mut Self {

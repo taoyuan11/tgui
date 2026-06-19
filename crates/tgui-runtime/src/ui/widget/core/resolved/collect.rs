@@ -1325,6 +1325,15 @@ impl<VM: 'static> ResolvedElement<VM> {
             && scene.overlay_command_transform_chains.is_empty()
     }
 
+    fn may_emit_runtime_overlay(&self) -> bool {
+        self.tooltip.is_some()
+            || self.popover.is_some()
+            || self.menu.is_some()
+            || self.context_menu.is_some()
+            || self.modal.is_some()
+            || self.drawer.is_some()
+    }
+
     fn clip_cull_safe_self(&self) -> bool {
         let has_runtime_overlay = self.tooltip.is_some()
             || self.popover.is_some()
@@ -1484,7 +1493,8 @@ impl<VM: 'static> ResolvedElement<VM> {
             self.kind,
             ResolvedWidgetKind::Container { .. } | ResolvedWidgetKind::Virtual { .. }
         );
-        let before_overlays = is_container_like.then(|| computed.clone());
+        let before_overlays =
+            (is_container_like && self.may_emit_runtime_overlay()).then(|| computed.clone());
 
         self.emit_tooltip_if_visible(context, &mut computed, &visual);
         self.emit_popover_overlay_if_visible(context, &mut computed, &visual);

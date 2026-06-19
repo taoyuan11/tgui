@@ -159,6 +159,39 @@ fn timed_and_percent_keyframes_land_on_same_value() {
 }
 
 #[test]
+fn unsorted_keyframes_are_sampled_by_offset_order() {
+    let unsorted = Keyframes::timed(Duration::from_millis(200))
+        .at(Duration::from_millis(100), 10.0)
+        .at(Duration::ZERO, 0.0)
+        .at(Duration::from_millis(200), 20.0);
+    let sorted = Keyframes::timed(Duration::from_millis(200))
+        .at(Duration::ZERO, 0.0)
+        .at(Duration::from_millis(100), 10.0)
+        .at(Duration::from_millis(200), 20.0);
+
+    assert_eq!(
+        unsorted.sample_at(Duration::from_millis(50)),
+        sorted.sample_at(Duration::from_millis(50))
+    );
+    assert_eq!(
+        unsorted.sample_at(Duration::from_millis(150)),
+        sorted.sample_at(Duration::from_millis(150))
+    );
+}
+
+#[test]
+fn duplicate_keyframe_offsets_keep_first_boundary_value() {
+    let keyframes = Keyframes::timed(Duration::from_millis(200))
+        .at(Duration::ZERO, 0.0)
+        .at(Duration::from_millis(100), 10.0)
+        .at(Duration::from_millis(100), 99.0)
+        .at(Duration::from_millis(200), 20.0);
+
+    assert_eq!(keyframes.sample_at(Duration::from_millis(100)), Some(10.0));
+    assert_eq!(keyframes.sample_at(Duration::from_millis(150)), Some(59.5));
+}
+
+#[test]
 fn timeline_sampling_respects_alternate_direction() {
     let sample = sample_timeline(
         Duration::from_millis(100),
@@ -171,6 +204,20 @@ fn timeline_sampling_respects_alternate_direction() {
 
     assert_eq!(sample.cycle_index, 1);
     assert!(sample.reversed);
+}
+
+#[test]
+fn timeline_sampling_exact_cycle_boundary_stays_on_previous_cycle() {
+    let sample = sample_timeline(
+        Duration::from_millis(100),
+        Playback::default().repeat(3),
+        Duration::from_millis(100),
+    )
+    .expect("boundary sample should exist");
+
+    assert_eq!(sample.cycle_index, 0);
+    assert_eq!(sample.local_time, Duration::from_millis(100));
+    assert!(!sample.completed);
 }
 
 #[test]
@@ -286,4 +333,39 @@ fn over_cap_reclaims_stale_settled_slots_but_keeps_recent() {
     // 此刻 refresh 触发回收:陈旧的已稳定槽位被回收,仅保留刚触达的存活槽位。
     let _ = engine.refresh(later);
     assert_eq!(engine.debug_total_slots(), 1);
+}
+
+#[test]
+fn over_cap_same_target_touch_refreshes_settled_slot_liveness() {
+    use super::engine::{SLOT_GC_SOFT_CAP, SLOT_GC_TTL};
+    let mut engine = AnimationEngine::default();
+    let start = Instant::now();
+    let live_key = AnimationKey::Widget {
+        id: 7,
+        property: WidgetProperty::Opacity,
+    };
+
+    for id in 0..(SLOT_GC_SOFT_CAP as u64 + 4) {
+        engine.resolve_f32(
+            AnimationKey::Widget {
+                id,
+                property: WidgetProperty::Opacity,
+            },
+            1.0,
+            None,
+            start,
+        );
+    }
+    assert!(engine.debug_total_slots() > SLOT_GC_SOFT_CAP);
+
+    let later = start + SLOT_GC_TTL + Duration::from_secs(1);
+    engine.resolve_f32(live_key, 1.0, None, later);
+    let _ = engine.refresh(later);
+
+    assert_eq!(engine.debug_total_slots(), 1);
+    assert_eq!(
+        engine.resolve_f32(live_key, 1.0, None, later),
+        1.0,
+        "same-target settled resolve should keep the live slot reachable"
+    );
 }

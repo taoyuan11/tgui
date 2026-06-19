@@ -19,6 +19,7 @@ pub(super) fn append_arc_segments(
     }
 
     let steps = ((sweep_angle.abs() / std::f32::consts::FRAC_PI_8).ceil() as usize).max(1);
+    builder.commands.reserve(steps + 1);
     for index in 0..=steps {
         let t = index as f32 / steps as f32;
         let angle = start_angle + sweep_angle * t;

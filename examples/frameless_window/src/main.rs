@@ -128,16 +128,12 @@ impl AppVm {
                 .top(corner)
                 .bottom(corner)
                 .into(),
-            WindowResizeDirection::NorthWest => grip
-                .size(corner, corner)
-                .left(dp(0.0))
-                .top(dp(0.0))
-                .into(),
-            WindowResizeDirection::NorthEast => grip
-                .size(corner, corner)
-                .right(dp(0.0))
-                .top(dp(0.0))
-                .into(),
+            WindowResizeDirection::NorthWest => {
+                grip.size(corner, corner).left(dp(0.0)).top(dp(0.0)).into()
+            }
+            WindowResizeDirection::NorthEast => {
+                grip.size(corner, corner).right(dp(0.0)).top(dp(0.0)).into()
+            }
             WindowResizeDirection::SouthWest => grip
                 .size(corner, corner)
                 .left(dp(0.0))
@@ -151,7 +147,11 @@ impl AppVm {
         }
     }
 
-    fn window_button(label: &'static str, background: Color, command: Command<Self>) -> Button<Self> {
+    fn window_button(
+        label: &'static str,
+        background: Color,
+        command: Command<Self>,
+    ) -> Button<Self> {
         Button::new(label)
             .size(dp(38.0), dp(30.0))
             .padding(Insets::all(dp(0.0)))
@@ -421,14 +421,12 @@ impl AppVm {
             return Vec::new();
         }
 
-        let mut windows = vec![
-            WindowSpec::main("main")
-                .title("tgui frameless window")
-                .window_size(dp(900.0), dp(620.0))
-                .min_window_size(dp(760.0), dp(520.0))
-                .bind_title(Self::main_title)
-                .root_view(Self::main_view),
-        ];
+        let mut windows = vec![WindowSpec::main("main")
+            .title("tgui frameless window")
+            .window_size(dp(900.0), dp(620.0))
+            .min_window_size(dp(760.0), dp(520.0))
+            .bind_title(Self::main_title)
+            .root_view(Self::main_view)];
 
         if self.confirm_exit_open.get() {
             windows.push(

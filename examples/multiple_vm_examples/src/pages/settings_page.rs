@@ -19,14 +19,17 @@ fn panel_style(ctx: &StyleContext<'_>) -> ContainerStyle {
 #[derive(Clone)]
 pub struct SettingsPage {
     enabled: State<bool>,
-    on_change: Option<Arc<dyn Fn(bool) + Send + Sync>>
+    on_change: Option<Arc<dyn Fn(bool) + Send + Sync>>,
 }
 
 impl SettingsPage {
-    pub fn new(context: &ViewModelContext, on_change: Option<Arc<dyn Fn(bool) + Send + Sync>>) -> Self {
+    pub fn new(
+        context: &ViewModelContext,
+        on_change: Option<Arc<dyn Fn(bool) + Send + Sync>>,
+    ) -> Self {
         Self {
             enabled: context.state(false),
-            on_change
+            on_change,
         }
     }
 
@@ -47,11 +50,10 @@ impl SettingsPage {
             .style_full(panel_style)
             .child(el![
                 Text::new("设置页").style_full(|ctx| text_style(ctx, sp(24.0), Color::WHITE)),
-                Text::new(
-                    self.enabled
-                        .signal()
-                        .map(|enabled| format!("当前状态：{}", if enabled { "已启用" } else { "已关闭" }))
-                )
+                Text::new(self.enabled.signal().map(|enabled| format!(
+                    "当前状态：{}",
+                    if enabled { "已启用" } else { "已关闭" }
+                )))
                 .style_full(|ctx| text_style(ctx, sp(16.0), Color::WHITE)),
                 Button::new("切换状态").on_click(Command::new(Self::toggle)),
             ])

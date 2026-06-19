@@ -59,9 +59,15 @@ impl<T: 'static> Command<T> {
     ///
     /// 参数：
     /// - `view_model`：要被修改的视图模型实例。
+    #[inline]
     pub fn execute(&self, view_model: &mut T) {
-        let context = CommandContext::detached();
-        self.execute_with_context(view_model, &context);
+        match &self.handler {
+            CommandKind::Plain(handler) => handler(view_model),
+            CommandKind::WithContext(handler) => {
+                let context = CommandContext::detached();
+                handler(view_model, &context);
+            }
+        }
     }
 
     /// 在给定视图模型实例和运行时上下文上执行命令。
@@ -69,6 +75,7 @@ impl<T: 'static> Command<T> {
     /// 参数：
     /// - `view_model`：要被修改的视图模型实例。
     /// - `context`：运行时上下文。
+    #[inline]
     pub fn execute_with_context(&self, view_model: &mut T, context: &CommandContext<T>) {
         match &self.handler {
             CommandKind::Plain(handler) => handler(view_model),
@@ -80,9 +87,16 @@ impl<T: 'static> Command<T> {
         self,
         selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut T + Send + Sync>,
     ) -> Command<RootVm> {
-        Command::new_with_context(move |view_model, context| {
-            let scoped_context = context.scope(selector.clone());
-            self.execute_with_context(selector(view_model), &scoped_context);
-        })
+        match self.handler {
+            CommandKind::Plain(handler) => {
+                Command::new(move |view_model| handler(selector(view_model)))
+            }
+            CommandKind::WithContext(handler) => {
+                Command::new_with_context(move |view_model, context| {
+                    let scoped_context = context.scope(selector.clone());
+                    handler(selector(view_model), &scoped_context);
+                })
+            }
+        }
     }
 }

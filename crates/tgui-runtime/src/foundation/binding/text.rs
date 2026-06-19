@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::dependency::{current_dependency_owner, record_dependency_read, DependencyId};
+use super::dependency::{record_dependency_read, DependencyId};
 use super::invalidation::InvalidationSignal;
 use super::reactive::{ReactiveTarget, SignalId};
 
@@ -153,25 +153,19 @@ impl TextController {
         self.set_text(text);
     }
 
-    pub(crate) fn replace_text_silent(&self, text: impl Into<String>) -> u64 {
+    pub(crate) fn set_text_silent(&self, text: impl Into<String>) -> bool {
         let text = text.into();
         let mut state = self.state.lock();
-        if state.text != text {
-            state.text = text;
-            state.revision = state.revision.wrapping_add(1).max(1);
+        if state.text == text {
+            return false;
         }
-        state.revision
-    }
-
-    pub(crate) fn set_text_silent(&self, text: impl Into<String>) -> bool {
-        let previous = self.state.lock().revision;
-        let next = self.replace_text_silent(text);
-        next != previous
+        state.text = text;
+        state.revision = state.revision.wrapping_add(1).max(1);
+        true
     }
 
     fn track_read(&self) {
-        record_dependency_read(Some(self.dependency));
-        if let Some(owner) = current_dependency_owner() {
+        if let Some(owner) = record_dependency_read(Some(self.dependency)) {
             self.invalidation
                 .reactive_graph()
                 .subscribe_target(self.signal_id, ReactiveTarget::Owner(owner));

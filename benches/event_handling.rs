@@ -3,6 +3,8 @@ use std::hint::black_box;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 #[cfg(feature = "bench-support")]
+use std::sync::Arc;
+#[cfg(feature = "bench-support")]
 use std::time::Instant;
 
 #[cfg(feature = "bench-support")]
@@ -12,6 +14,8 @@ use tgui::layout::{Axis, Insets, Overflow};
 #[cfg(feature = "bench-support")]
 use tgui::mvvm::{Command, ValueCommand};
 #[cfg(feature = "bench-support")]
+use tgui::widgets::bench_support_ext::{scope_bench_command, scope_bench_value_command};
+#[cfg(feature = "bench-support")]
 use tgui::widgets::{Button, Flex, Text, WidgetBenchmarkContext, WidgetTree};
 
 #[cfg(feature = "bench-support")]
@@ -19,6 +23,12 @@ use tgui::widgets::{Button, Flex, Text, WidgetBenchmarkContext, WidgetTree};
 struct BenchVm {
     clicks: usize,
     last_x: f32,
+}
+
+#[cfg(feature = "bench-support")]
+#[derive(Default)]
+struct RootBenchVm {
+    child: BenchVm,
 }
 
 #[cfg(feature = "bench-support")]
@@ -278,6 +288,43 @@ fn bench_command_dispatch(c: &mut Criterion) {
 }
 
 #[cfg(feature = "bench-support")]
+fn bench_scoped_command_dispatch(c: &mut Criterion) {
+    let command = scope_bench_command(
+        Command::new(|vm: &mut BenchVm| {
+            vm.clicks = vm.clicks.wrapping_add(1);
+        }),
+        Arc::new(|vm: &mut RootBenchVm| &mut vm.child),
+    );
+    let mut vm = RootBenchVm::default();
+
+    c.bench_function("event_scoped_command_execute_plain", |b| {
+        b.iter(|| {
+            command.execute(black_box(&mut vm));
+            black_box(&vm);
+        });
+    });
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_scoped_value_command_dispatch(c: &mut Criterion) {
+    let command = scope_bench_value_command(
+        ValueCommand::new(|vm: &mut BenchVm, point: Point| {
+            vm.last_x = point.x.get();
+            vm.clicks = vm.clicks.wrapping_add(1);
+        }),
+        Arc::new(|vm: &mut RootBenchVm| &mut vm.child),
+    );
+    let mut vm = RootBenchVm::default();
+
+    c.bench_function("event_scoped_value_command_execute_point", |b| {
+        b.iter(|| {
+            command.execute(black_box(&mut vm), black_box(Point::new(42.0, 12.0)));
+            black_box(&vm);
+        });
+    });
+}
+
+#[cfg(feature = "bench-support")]
 fn bench_scroll_event_handling(c: &mut Criterion) {
     let tree = build_scrollable_interactive_tree(500);
     let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
@@ -376,6 +423,12 @@ fn bench_keyboard_event_dispatch(_c: &mut Criterion) {}
 fn bench_command_dispatch(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
+fn bench_scoped_command_dispatch(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_scoped_value_command_dispatch(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
 fn bench_scroll_event_handling(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
@@ -396,6 +449,8 @@ criterion_group!(
     bench_mouse_event_dispatch,
     bench_keyboard_event_dispatch,
     bench_command_dispatch,
+    bench_scoped_command_dispatch,
+    bench_scoped_value_command_dispatch,
     bench_scroll_event_handling,
     bench_drag_tracking,
     bench_gesture_recognition,

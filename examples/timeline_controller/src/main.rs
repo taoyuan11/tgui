@@ -24,7 +24,6 @@ struct TimelineVm {
 }
 
 impl TimelineVm {
-
     fn play(&mut self) {
         self.timeline.play();
     }
@@ -53,11 +52,9 @@ impl TimelineVm {
         self.timeline.seek_percent(0.5);
         self.status.set("Jumped to 50%".to_string());
     }
-
 }
 
 impl ViewModel for TimelineVm {
-
     fn new(ctx: &ViewModelContext) -> Self {
         let status = ctx.state("Idle".to_string());
         let card_color = ctx.animated_value(Color::hexa(0x2563EBFF));
@@ -115,8 +112,14 @@ impl ViewModel for TimelineVm {
                     Keyframes::timed(Duration::from_millis(1200))
                         .curve(AnimationCurve::EaseInOutCubic)
                         .at(Duration::ZERO, Insets::symmetric(dp(18.0), dp(14.0)))
-                        .at(Duration::from_millis(520), Insets::symmetric(dp(30.0), dp(22.0)))
-                        .at(Duration::from_millis(1200), Insets::symmetric(dp(22.0), dp(16.0))),
+                        .at(
+                            Duration::from_millis(520),
+                            Insets::symmetric(dp(30.0), dp(22.0)),
+                        )
+                        .at(
+                            Duration::from_millis(1200),
+                            Insets::symmetric(dp(22.0), dp(16.0)),
+                        ),
                 ),
             )
             .track(
@@ -161,7 +164,7 @@ impl ViewModel for TimelineVm {
                         .signal()
                         .map(|status| format!("Status: {status}")),
                 )
-                    .style_full(|ctx| text_style(ctx, sp(16.0), Color::hexa(0xCBD5E1FF))),
+                .style_full(|ctx| text_style(ctx, sp(16.0), Color::hexa(0xCBD5E1FF))),
             )
             .child(
                 Flex::new(Axis::Horizontal)
@@ -171,10 +174,7 @@ impl ViewModel for TimelineVm {
                     .child(Button::new("Resume").on_click(Command::new(Self::resume)))
                     .child(Button::new("Restart").on_click(Command::new(Self::restart)))
                     .child(Button::new("Reverse").on_click(Command::new(Self::reverse)))
-                    .child(
-                        Button::new("Seek 50%")
-                            .on_click(Command::new(Self::seek_middle)),
-                    ),
+                    .child(Button::new("Seek 50%").on_click(Command::new(Self::seek_middle))),
             )
             .child(
                 Button::new("Timeline-driven card")
@@ -199,14 +199,12 @@ impl ViewModel for TimelineVm {
                             padding_x: dp(18.0),
                             padding_y: dp(14.0),
                             min_height: dp(44.0),
-                            text_style: TextWidgetStyle::default_for_theme(ctx.theme)
-                                .typography,
+                            text_style: TextWidgetStyle::default_for_theme(ctx.theme).typography,
                         }
                     }),
             )
             .into()
     }
-
 }
 
 fn main() -> Result<(), TguiError> {

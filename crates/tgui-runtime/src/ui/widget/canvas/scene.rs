@@ -118,9 +118,16 @@ impl CanvasScene {
         options: &CanvasSceneQueryOptions,
         scene_position: Point,
     ) -> Option<CanvasSceneHit> {
-        self.query_point_all_with(options, scene_position)
-            .into_iter()
-            .next()
+        let font_manager = options
+            .should_include_text_hits()
+            .then(|| options.font_manager());
+        query_canvas_scene_hit(
+            self,
+            font_manager,
+            options.units(),
+            options.should_include_text_hits(),
+            scene_position,
+        )
     }
 
     pub fn query_point_all_with(
@@ -147,9 +154,7 @@ impl CanvasScene {
         units: UnitContext,
         scene_position: Point,
     ) -> Option<CanvasSceneHit> {
-        self.query_point_all_with_runtime_context(font_manager, units, scene_position)
-            .into_iter()
-            .next()
+        query_canvas_scene_hit(self, Some(font_manager), units, true, scene_position)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -171,7 +176,7 @@ impl CanvasScene {
     }
 
     pub fn export_debug_json(&self) -> String {
-        self.debug_info().to_pretty_json()
+        export_canvas_scene_debug_json(self)
     }
 }
 

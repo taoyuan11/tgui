@@ -64,7 +64,11 @@ pub(crate) fn sample_timeline(
     playback: Playback,
     elapsed: Duration,
 ) -> Option<TimelineSample> {
-    let start_reversed = playback.direction_mode().starts_reversed();
+    let direction = playback.direction_mode();
+    let fill = playback.fill();
+    let repeat = playback.repeat_mode();
+    let delay = playback.delay_duration();
+    let start_reversed = direction.starts_reversed();
 
     if total_duration.is_zero() {
         return Some(TimelineSample {
@@ -76,11 +80,17 @@ pub(crate) fn sample_timeline(
         });
     }
 
-    let scaled_elapsed =
-        Duration::from_secs_f64(elapsed.as_secs_f64() * playback.speed_factor().max(0.0) as f64);
+    let speed = playback.speed_factor().max(0.0);
+    let scaled_elapsed = if speed == 1.0 {
+        elapsed
+    } else if speed == 0.0 {
+        Duration::ZERO
+    } else {
+        Duration::from_secs_f64(elapsed.as_secs_f64() * speed as f64)
+    };
 
-    if scaled_elapsed < playback.delay_duration() {
-        return match playback.fill() {
+    if scaled_elapsed < delay {
+        return match fill {
             FillMode::Backwards | FillMode::Both => Some(TimelineSample {
                 active: false,
                 completed: false,
@@ -96,18 +106,23 @@ pub(crate) fn sample_timeline(
         };
     }
 
-    let active_elapsed = scaled_elapsed.saturating_sub(playback.delay_duration());
-    let cycle_secs = total_duration.as_secs_f64();
-    let elapsed_secs = active_elapsed.as_secs_f64();
-    let cycles = playback.repeat_mode().finite_cycles();
+    let active_elapsed = scaled_elapsed.saturating_sub(delay);
+    let cycles = repeat.finite_cycles();
 
     if let Some(cycle_count) = cycles {
-        let total_secs = cycle_secs * cycle_count as f64;
-        if elapsed_secs >= total_secs {
-            return match playback.fill() {
+        if cycle_count == 1 && active_elapsed < total_duration {
+            return Some(TimelineSample {
+                active: true,
+                completed: false,
+                cycle_index: 0,
+                local_time: active_elapsed,
+                reversed: is_cycle_reversed(direction, 0),
+            });
+        } else if elapsed_reaches_cycle_count(active_elapsed, total_duration, cycle_count) {
+            return match fill {
                 FillMode::Forwards | FillMode::Both => {
                     let cycle_index = cycle_count.saturating_sub(1);
-                    let reversed = is_cycle_reversed(playback.direction_mode(), cycle_index);
+                    let reversed = is_cycle_reversed(direction, cycle_index);
                     Some(TimelineSample {
                         active: false,
                         completed: true,
@@ -125,20 +140,52 @@ pub(crate) fn sample_timeline(
         }
     }
 
-    let mut cycle_index = (elapsed_secs / cycle_secs).floor() as u32;
-    let mut cycle_time = Duration::from_secs_f64(elapsed_secs % cycle_secs);
-    if !active_elapsed.is_zero() && cycle_time.is_zero() {
-        cycle_index = cycle_index.saturating_sub(1);
-        cycle_time = total_duration;
-    }
+    let (cycle_index, cycle_time) = cycle_position(active_elapsed, total_duration);
 
     Some(TimelineSample {
         active: true,
         completed: false,
         cycle_index,
         local_time: cycle_time,
-        reversed: is_cycle_reversed(playback.direction_mode(), cycle_index),
+        reversed: is_cycle_reversed(direction, cycle_index),
     })
+}
+
+fn elapsed_reaches_cycle_count(
+    elapsed: Duration,
+    total_duration: Duration,
+    cycle_count: u32,
+) -> bool {
+    elapsed.as_nanos()
+        >= total_duration
+            .as_nanos()
+            .saturating_mul(cycle_count as u128)
+}
+
+fn cycle_position(elapsed: Duration, total_duration: Duration) -> (u32, Duration) {
+    let total_nanos = total_duration.as_nanos();
+    let elapsed_nanos = elapsed.as_nanos();
+    let raw_cycle_index = elapsed_nanos / total_nanos;
+    let remainder = elapsed_nanos % total_nanos;
+
+    if !elapsed.is_zero() && remainder == 0 {
+        return (
+            raw_cycle_index.saturating_sub(1).min(u32::MAX as u128) as u32,
+            total_duration,
+        );
+    }
+
+    (
+        raw_cycle_index.min(u32::MAX as u128) as u32,
+        duration_from_nanos(remainder),
+    )
+}
+
+fn duration_from_nanos(nanos: u128) -> Duration {
+    Duration::new(
+        (nanos / 1_000_000_000).min(u64::MAX as u128) as u64,
+        (nanos % 1_000_000_000) as u32,
+    )
 }
 
 fn is_cycle_reversed(direction: PlaybackDirection, cycle_index: u32) -> bool {

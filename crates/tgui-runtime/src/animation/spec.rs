@@ -19,17 +19,23 @@ impl AnimationCurve {
     ///
     /// 返回值：
     /// - 返回应用当前曲线后的进度值。
+    #[inline]
     pub fn sample(self, progress: f32) -> f32 {
+        #[inline]
+        fn cube(value: f32) -> f32 {
+            value * value * value
+        }
+
         let progress = progress.clamp(0.0, 1.0);
         match self {
             Self::Linear => progress,
-            Self::EaseInCubic => progress * progress * progress,
-            Self::EaseOutCubic => 1.0 - (1.0 - progress).powi(3),
+            Self::EaseInCubic => cube(progress),
+            Self::EaseOutCubic => 1.0 - cube(1.0 - progress),
             Self::EaseInOutCubic => {
                 if progress < 0.5 {
-                    4.0 * progress * progress * progress
+                    4.0 * cube(progress)
                 } else {
-                    1.0 - ((-2.0 * progress + 2.0).powi(3) / 2.0)
+                    1.0 - (cube(-2.0 * progress + 2.0) / 2.0)
                 }
             }
         }
@@ -314,6 +320,7 @@ pub struct Keyframes<T> {
     total_duration: Duration,
     frames: Vec<Keyframe<T>>,
     curve: AnimationCurve,
+    frames_sorted_by_offset: bool,
 }
 
 impl<T> Keyframes<T> {
@@ -323,6 +330,7 @@ impl<T> Keyframes<T> {
             total_duration,
             frames: Vec::new(),
             curve: AnimationCurve::Linear,
+            frames_sorted_by_offset: true,
         }
     }
 
@@ -333,8 +341,7 @@ impl<T> Keyframes<T> {
 
     /// 添加一个绝对时间偏移关键帧，超过总时长时会截断到末尾。
     pub fn at(mut self, offset: Duration, value: T) -> Self {
-        self.frames
-            .push(Keyframe::at(offset.min(self.total_duration), value));
+        self.push_frame(offset.min(self.total_duration), value);
         self
     }
 
@@ -342,7 +349,7 @@ impl<T> Keyframes<T> {
     pub fn at_percent(mut self, percent: f32, value: T) -> Self {
         let progress = percent.clamp(0.0, 1.0) as f64;
         let offset = Duration::from_secs_f64(self.total_duration.as_secs_f64() * progress);
-        self.frames.push(Keyframe::at(offset, value));
+        self.push_frame(offset, value);
         self
     }
 
@@ -369,10 +376,21 @@ impl<T> Keyframes<T> {
         self.curve
     }
 
+    pub(super) fn frames_are_sorted_by_offset(&self) -> bool {
+        self.frames_sorted_by_offset
+    }
+
     pub(super) fn sorted_frames(&self) -> Vec<&Keyframe<T>> {
         let mut frames = self.frames.iter().collect::<Vec<_>>();
         frames.sort_by_key(|frame| frame.offset);
         frames
+    }
+
+    fn push_frame(&mut self, offset: Duration, value: T) {
+        if let Some(last) = self.frames.last() {
+            self.frames_sorted_by_offset &= last.offset <= offset;
+        }
+        self.frames.push(Keyframe::at(offset, value));
     }
 }
 

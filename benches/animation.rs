@@ -2,9 +2,13 @@
 // 覆盖动画引擎更新、时间线控制、值插值等热路径
 
 use std::hint::black_box;
+#[cfg(feature = "bench-support")]
+use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
+#[cfg(feature = "bench-support")]
+use tgui::animation::{AnimationCurve, FillMode, Keyframes, Playback, PlaybackDirection};
 #[cfg(feature = "bench-support")]
 use tgui::widgets::bench_support_ext::*;
 
@@ -26,6 +30,40 @@ fn bench_animation_update(c: &mut Criterion) {
             });
         });
     }
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_real_animation_idle_refresh(c: &mut Criterion) {
+    let mut group = c.benchmark_group("real_animation_idle_refresh_settled_slots");
+
+    for count in [100_usize, 1000, 5000] {
+        let mut engine = create_real_animation_engine_with_settled_slots(count);
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, _| {
+            b.iter(|| {
+                let changed = refresh_real_animation_engine(black_box(&mut engine));
+                black_box(changed);
+            });
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_real_animation_resolve_settled(c: &mut Criterion) {
+    let mut group = c.benchmark_group("real_animation_resolve_settled_slots");
+
+    for count in [100_usize, 1000, 5000] {
+        let mut engine = create_real_animation_engine_with_settled_slots(count);
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, _| {
+            b.iter(|| {
+                let total = resolve_real_animation_engine_settled_slots(black_box(&mut engine));
+                black_box(total);
+            });
+        });
+    }
+
     group.finish();
 }
 
@@ -53,6 +91,27 @@ fn bench_animation_interpolation(c: &mut Criterion) {
             },
         );
     }
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_real_animation_curve_sample(c: &mut Criterion) {
+    let mut group = c.benchmark_group("real_animation_curve_sample");
+
+    for (name, curve) in [
+        ("linear", AnimationCurve::Linear),
+        ("ease_in_cubic", AnimationCurve::EaseInCubic),
+        ("ease_out_cubic", AnimationCurve::EaseOutCubic),
+        ("ease_in_out_cubic", AnimationCurve::EaseInOutCubic),
+    ] {
+        group.bench_with_input(BenchmarkId::from_parameter(name), &curve, |b, &curve| {
+            b.iter(|| {
+                let value = curve.sample(black_box(0.625));
+                black_box(value);
+            });
+        });
+    }
+
     group.finish();
 }
 
@@ -91,6 +150,44 @@ fn bench_timeline_playback(c: &mut Criterion) {
             black_box(state);
         });
     });
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_real_timeline_sample(c: &mut Criterion) {
+    let mut group = c.benchmark_group("real_timeline_sample");
+    let total_duration = Duration::from_millis(1_000);
+
+    for (name, playback, elapsed) in [
+        ("normal", Playback::default(), Duration::from_millis(625)),
+        (
+            "delayed",
+            Playback::default()
+                .delay(Duration::from_millis(120))
+                .fill_mode(FillMode::Both),
+            Duration::from_millis(625),
+        ),
+        (
+            "alternate",
+            Playback::default()
+                .repeat(8)
+                .direction(PlaybackDirection::Alternate),
+            Duration::from_millis(1_625),
+        ),
+        (
+            "fast_forever",
+            Playback::default().speed(1.75).repeat_forever(),
+            Duration::from_millis(1_625),
+        ),
+    ] {
+        group.bench_with_input(BenchmarkId::from_parameter(name), &name, |b, _| {
+            b.iter(|| {
+                let sample = sample_real_timeline(total_duration, playback, black_box(elapsed));
+                black_box(sample);
+            });
+        });
+    }
+
+    group.finish();
 }
 
 #[cfg(feature = "bench-support")]
@@ -149,13 +246,54 @@ fn bench_keyframe_evaluation(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "bench-support")]
+fn bench_real_keyframe_sample(c: &mut Criterion) {
+    let mut group = c.benchmark_group("real_keyframe_sample");
+    let total = Duration::from_millis(1_000);
+
+    for keyframe_count in [3_usize, 10, 20, 50] {
+        let keyframes = (0..keyframe_count).fold(
+            Keyframes::timed(total).curve(AnimationCurve::Linear),
+            |frames, i| {
+                let progress = i as f64 / (keyframe_count - 1) as f64;
+                frames.at(
+                    Duration::from_secs_f64(total.as_secs_f64() * progress),
+                    i as f32,
+                )
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(keyframe_count),
+            &keyframe_count,
+            |b, _| {
+                b.iter(|| {
+                    let value = keyframes.sample_at(black_box(Duration::from_millis(625)));
+                    black_box(value);
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 #[cfg(not(feature = "bench-support"))]
 fn bench_animation_update(_c: &mut Criterion) {
     eprintln!("Skipping animation benchmarks: bench-support feature not enabled");
 }
 
 #[cfg(not(feature = "bench-support"))]
+fn bench_real_animation_idle_refresh(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_real_animation_resolve_settled(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
 fn bench_animation_interpolation(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_real_animation_curve_sample(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
 fn bench_animation_color_interpolation(_c: &mut Criterion) {}
@@ -167,6 +305,9 @@ fn bench_animation_transform_interpolation(_c: &mut Criterion) {}
 fn bench_timeline_playback(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
+fn bench_real_timeline_sample(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
 fn bench_animation_state_transition(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
@@ -175,15 +316,23 @@ fn bench_spring_physics(_c: &mut Criterion) {}
 #[cfg(not(feature = "bench-support"))]
 fn bench_keyframe_evaluation(_c: &mut Criterion) {}
 
+#[cfg(not(feature = "bench-support"))]
+fn bench_real_keyframe_sample(_c: &mut Criterion) {}
+
 criterion_group!(
     benches,
     bench_animation_update,
+    bench_real_animation_idle_refresh,
+    bench_real_animation_resolve_settled,
     bench_animation_interpolation,
+    bench_real_animation_curve_sample,
     bench_animation_color_interpolation,
     bench_animation_transform_interpolation,
     bench_timeline_playback,
+    bench_real_timeline_sample,
     bench_animation_state_transition,
     bench_spring_physics,
     bench_keyframe_evaluation,
+    bench_real_keyframe_sample,
 );
 criterion_main!(benches);
