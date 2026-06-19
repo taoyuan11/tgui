@@ -13,15 +13,31 @@ pub(in crate::runtime) mod scroll_fast_path_probe {
     use std::cell::Cell;
     thread_local! {
         static HITS: Cell<u64> = const { Cell::new(0) };
+        static VIRTUAL_HITS: Cell<u64> = const { Cell::new(0) };
+        static VIRTUAL_SCENE_HITS: Cell<u64> = const { Cell::new(0) };
     }
     pub(in crate::runtime) fn record_hit() {
         HITS.with(|h| h.set(h.get() + 1));
     }
+    pub(in crate::runtime) fn record_virtual_hit() {
+        VIRTUAL_HITS.with(|h| h.set(h.get() + 1));
+    }
+    pub(in crate::runtime) fn record_virtual_scene_hit() {
+        VIRTUAL_SCENE_HITS.with(|h| h.set(h.get() + 1));
+    }
     pub(in crate::runtime) fn reset() {
         HITS.with(|h| h.set(0));
+        VIRTUAL_HITS.with(|h| h.set(0));
+        VIRTUAL_SCENE_HITS.with(|h| h.set(0));
     }
     pub(in crate::runtime) fn hits() -> u64 {
         HITS.with(Cell::get)
+    }
+    pub(in crate::runtime) fn virtual_hits() -> u64 {
+        VIRTUAL_HITS.with(Cell::get)
+    }
+    pub(in crate::runtime) fn virtual_scene_hits() -> u64 {
+        VIRTUAL_SCENE_HITS.with(Cell::get)
     }
 }
 
@@ -410,10 +426,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.apply_scroll_view_controller_state(bindings)
     }
 
-    fn sync_virtual_state_updates(&mut self, computed: &ComputedScene<VM>) -> bool {
+    fn sync_virtual_state_update_list(
+        &mut self,
+        updates: &[crate::ui::widget::VirtualSceneStateUpdate],
+    ) -> bool {
         let mut layout_invalidated = false;
-        for update in &computed.virtual_state_updates {
+        for update in updates {
             let state = self.virtual_states.entry(update.widget_id).or_default();
+            let viewport_changed = state
+                .viewport_hint
+                .as_ref()
+                .map(|previous| {
+                    (previous.width - update.viewport_hint.width).abs()
+                        > crate::ui::widget::MEASURED_EXTENT_INVALIDATION_EPSILON
+                        || (previous.height - update.viewport_hint.height).abs()
+                            > crate::ui::widget::MEASURED_EXTENT_INVALIDATION_EPSILON
+                })
+                .unwrap_or(true);
+            layout_invalidated = layout_invalidated || viewport_changed;
             state.viewport_hint = Some(update.viewport_hint.clone());
             for (index, extent) in &update.measured_extents {
                 let measured_changed = state
@@ -435,9 +465,147 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         layout_invalidated
     }
 
+    fn sync_virtual_state_updates(&mut self, computed: &ComputedScene<VM>) -> bool {
+        self.sync_virtual_state_update_list(&computed.virtual_state_updates)
+    }
+
+    fn try_virtual_scroll_fast_path(
+        &mut self,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+        now: Instant,
+    ) -> bool {
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
+        };
+        if !cached.computed_valid
+            || !cached.layout_valid
+            || cached.scroll_epoch == self.scroll_epoch
+            || !self.scene_cache_fields_match_ignoring_scroll(
+                cached,
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+            )
+        {
+            return false;
+        }
+        let Some(layout) = cached.layout.as_ref() else {
+            return false;
+        };
+
+        let mut affected = HashSet::new();
+        for widget_id in self.scroll_dirty_widgets.iter().copied() {
+            if !layout.is_virtual_widget(widget_id) {
+                return false;
+            }
+            affected.insert(widget_id);
+        }
+        if affected.is_empty() {
+            return false;
+        }
+        let roots = self.highest_layout_roots_smallvec(layout, &affected);
+        if roots.is_empty() || roots.iter().any(|root| !layout.is_virtual_widget(*root)) {
+            return false;
+        }
+        let roots = roots.into_iter().collect::<Vec<_>>();
+
+        if self.try_virtual_scroll_scene_fast_path(&roots, now) {
+            return true;
+        }
+
+        for _ in 0..=MAX_VIRTUAL_LAYOUT_FEEDBACK_PASSES {
+            if !self.patch_cached_layout_for_roots_with_runtime_state(&roots, now) {
+                return false;
+            }
+            if !self.patch_cached_scene_for_roots(&roots, now, true) {
+                return false;
+            }
+
+            let updates = self
+                .cached_scene
+                .as_ref()
+                .map(|cached| cached.computed.virtual_state_updates.clone())
+                .unwrap_or_default();
+            if !self.sync_virtual_state_update_list(&updates) {
+                if let Some(cached) = self.cached_scene.as_mut() {
+                    cached.gpu_scroll_deferred = false;
+                }
+                self.scroll_dirty_widgets.clear();
+                #[cfg(test)]
+                scroll_fast_path_probe::record_virtual_hit();
+                return true;
+            }
+
+            self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
+
+        if let Some(cached) = self.cached_scene.as_mut() {
+            cached.layout_valid = false;
+            cached.computed_valid = false;
+        }
+        false
+    }
+
+    fn try_virtual_scroll_scene_fast_path(&mut self, roots: &[WidgetId], now: Instant) -> bool {
+        let scroll_states = self.scroll_states.clone();
+        let virtual_states = self.virtual_states.clone();
+        {
+            let Some(cached) = self.cached_scene.as_mut() else {
+                return false;
+            };
+            let Some(layout) = cached.layout.as_mut() else {
+                return false;
+            };
+            if !layout.patch_virtual_scroll_offsets_if_window_stable(
+                roots,
+                &scroll_states,
+                &virtual_states,
+            ) {
+                return false;
+            }
+        }
+
+        if !self.patch_cached_scene_for_roots(roots, now, true) {
+            return false;
+        }
+
+        let updates = self
+            .cached_scene
+            .as_ref()
+            .map(|cached| cached.computed.virtual_state_updates.clone())
+            .unwrap_or_default();
+        if self.sync_virtual_state_update_list(&updates) {
+            if let Some(cached) = self.cached_scene.as_mut() {
+                cached.layout_valid = false;
+                cached.computed_valid = false;
+            }
+            self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return false;
+        }
+
+        if let Some(cached) = self.cached_scene.as_mut() {
+            cached.gpu_scroll_deferred = false;
+        }
+        self.scroll_dirty_widgets.clear();
+        #[cfg(test)]
+        scroll_fast_path_probe::record_virtual_scene_hit();
+        true
+    }
+
     /// 纯滚动快路径。仅当本帧的缓存失配**只有** `scroll_epoch`（其余字段全部匹配、
-    /// 布局缓存仍有效、不含 virtual）时尝试：把发生滚动的容器作为 patch 根，复用既有且已测的
-    /// `patch_cached_scene_for_roots`（子树作用域重收集 + scene splice）绕开整树重收集。
+    /// 布局缓存仍有效、滚动 root 子树不含 virtual）时尝试：把发生滚动的容器作为 patch 根，
+    /// 复用既有且已测的 `patch_cached_scene_for_roots`（子树作用域重收集 + scene splice）
+    /// 绕开整树重收集。
     ///
     /// 关键正确性：这里调用的 collect 与整帧重收集是**同一个收集函数**，只是作用域收窄到
     /// 滚动子树。`patch_resolved_roots` 会用最新 `scroll_states` 重新解析子树几何（含
@@ -478,10 +646,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(layout) = cached.layout.as_ref() else {
             return false;
         };
-        // virtual 容器滚动会改变窗口化 plan（结构性），不在纯滚动快路径覆盖范围。
-        if layout.contains_virtual() {
-            return false;
-        }
         // 收集本帧实际发生滚动、且仍在当前布局树中的脏容器。
         let roots = if self.scroll_dirty_widgets.len() == 1 {
             let Some(widget_id) = self.scroll_dirty_widgets.iter().next().copied() else {
@@ -506,6 +670,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.highest_layout_roots_smallvec(layout, &affected)
         };
         if roots.is_empty() {
+            return false;
+        }
+        // virtual 容器滚动会改变窗口化 plan（结构性）；含 virtual 的滚动子树交给
+        // virtual-scroll layout+scene patch 处理，普通纯滚动只覆盖稳定子树。
+        if roots
+            .iter()
+            .any(|root| layout.subtree_contains_virtual(*root))
+        {
             return false;
         }
         if !self.patch_cached_scene_for_roots(&roots, now, true) {
@@ -699,6 +871,34 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .cached_scene
                 .as_ref()
                 .expect("pure scroll patch should preserve cached scene")
+                .computed;
+        }
+
+        if !cache_valid
+            && self.try_virtual_scroll_fast_path(
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+                now,
+            )
+        {
+            if let Some(started_at) = started_at {
+                log_text_profile(
+                    "textarea_computed_scene",
+                    started_at.elapsed(),
+                    format!(
+                        "path=virtual_scroll_patch cache_valid={} layout_cache_valid={} cache_mismatch={}",
+                        cache_valid,
+                        layout_cache_valid,
+                        cache_mismatch.as_deref().unwrap_or("not_profiled")
+                    ),
+                );
+            }
+            return &self
+                .cached_scene
+                .as_ref()
+                .expect("virtual scroll patch should preserve cached scene")
                 .computed;
         }
 

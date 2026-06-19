@@ -3,10 +3,11 @@ mod patch;
 pub(super) use self::patch::media_event_phase;
 use self::patch::{
     collect_indexes, collect_resolved_widget_ids, layout_at_path, patch_layout_at_path,
-    patch_resolved_at_path, resolved_at_path,
+    patch_resolved_at_path, resolved_at_path, resolved_at_path_mut,
 };
 use super::scene::ActiveTooltipState;
 use super::*;
+use crate::ui::widget::r#virtual::{resolve_virtual_window_plan, VirtualViewportHint};
 use crate::ui::widget::VirtualCacheState;
 
 #[derive(Clone)]
@@ -34,6 +35,96 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
 
     pub(crate) fn contains_virtual(&self) -> bool {
         self.resolved_root.contains_virtual()
+    }
+
+    pub(crate) fn subtree_contains_virtual(&self, widget_id: WidgetId) -> bool {
+        self.resolved_widget(widget_id)
+            .is_some_and(ResolvedElement::contains_virtual)
+    }
+
+    pub(crate) fn is_virtual_widget(&self, widget_id: WidgetId) -> bool {
+        self.resolved_widget(widget_id)
+            .is_some_and(|resolved| matches!(resolved.kind, ResolvedWidgetKind::Virtual { .. }))
+    }
+
+    pub(crate) fn patch_virtual_scroll_offsets_if_window_stable(
+        &mut self,
+        roots: &[WidgetId],
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+    ) -> bool {
+        let mut next_offsets = Vec::with_capacity(roots.len());
+        for root_id in roots {
+            let Some(resolved) = self.resolved_widget(*root_id) else {
+                return false;
+            };
+            let ResolvedWidgetKind::Virtual {
+                arrangement,
+                item_layout,
+                content_cross_extent,
+                runtime_state,
+                window_plan,
+                child_meta,
+                ..
+            } = &resolved.kind
+            else {
+                return false;
+            };
+            let mut next_state = runtime_state.clone();
+            if let Some(cache) = virtual_states.get(root_id) {
+                next_state.viewport_hint = cache.viewport_hint.clone();
+                next_state.measured_extents = cache.measured_extents.clone();
+                next_state.widget_ids_by_key = cache.widget_ids_by_key.clone();
+                next_state.bootstrap = next_state.viewport_hint.is_none();
+            }
+            next_state.scroll_offset = scroll_offsets.get(root_id).copied().unwrap_or(Point::ZERO);
+            if matches!(
+                arrangement.direction(),
+                crate::ui::widget::VirtualDirection::Vertical
+            ) && content_cross_extent.is_none()
+            {
+                next_state.scroll_offset.x = Dp::ZERO;
+            } else if matches!(
+                arrangement.direction(),
+                crate::ui::widget::VirtualDirection::Horizontal
+            ) && content_cross_extent.is_none()
+            {
+                next_state.scroll_offset.y = Dp::ZERO;
+            }
+            let next_plan = resolve_virtual_window_plan(
+                *arrangement,
+                *item_layout,
+                &next_state,
+                window_plan.total_items,
+                next_state.fallback_viewport_hint.clone(),
+                content_cross_extent.as_ref().map(|value| value.resolve()),
+            );
+            if next_plan.total_main_extent != window_plan.total_main_extent
+                || next_plan.visible_range != window_plan.visible_range
+                || next_plan.placements.len() != window_plan.placements.len()
+                || next_plan
+                    .placements
+                    .iter()
+                    .zip(child_meta.iter())
+                    .any(|(placement, meta)| placement.item_index != meta.item_index)
+            {
+                return false;
+            }
+            next_offsets.push((*root_id, next_state.scroll_offset));
+        }
+
+        for (root_id, scroll_offset) in next_offsets {
+            let Some(path) = self.path_for(root_id).map(|path| path.to_vec()) else {
+                return false;
+            };
+            let resolved = self.resolved_at_path_mut(&path);
+            let ResolvedWidgetKind::Virtual { runtime_state, .. } = &mut resolved.kind else {
+                return false;
+            };
+            runtime_state.scroll_offset = scroll_offset;
+        }
+
+        true
     }
 
     pub(crate) fn path_for(&self, widget_id: WidgetId) -> Option<&[usize]> {
@@ -219,6 +310,10 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
 
     fn resolved_at_path(&self, path: &[usize]) -> &ResolvedElement<VM> {
         resolved_at_path(&self.resolved_root, path)
+    }
+
+    fn resolved_at_path_mut(&mut self, path: &[usize]) -> &mut ResolvedElement<VM> {
+        resolved_at_path_mut(&mut self.resolved_root, path)
     }
 
     fn layout_at_path(&self, path: &[usize]) -> &LayoutNode {
@@ -702,6 +797,105 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                             Some(&self.resolved_root),
                             theme,
                             &path,
+                        ) else {
+                            continue;
+                        };
+                        let next_ids = {
+                            let mut ids = Vec::new();
+                            collect_resolved_widget_ids(&next, &mut ids);
+                            ids
+                        };
+                        let next_id_set: HashSet<_> = next_ids.into_iter().collect();
+                        removed_ids.extend(
+                            previous_ids
+                                .into_iter()
+                                .filter(|id| !next_id_set.contains(id)),
+                        );
+
+                        patch_layout_at_path(
+                            &mut self.resolved_root,
+                            &mut self.layout_root,
+                            &path,
+                            next,
+                            &mut self.taffy,
+                            animations,
+                            theme,
+                            units,
+                            viewport,
+                            now,
+                            None,
+                            true,
+                        )?;
+                        self.rebuild_indexes();
+                    }
+
+                    compute_taffy_layout_with_measure(
+                        &mut self.taffy,
+                        self.layout_root.node,
+                        viewport,
+                        font_manager,
+                        theme,
+                        media,
+                        units,
+                    )?;
+
+                    Ok((removed_ids, touched_owner_ids))
+                })
+            },
+        );
+        let (removed_ids, touched_owner_ids) = result?;
+        self.dependencies.remove_widget_owners(&touched_owner_ids);
+        self.dependencies.merge_from(&dependencies);
+        self.rebuild_indexes();
+        Ok(removed_ids)
+    }
+
+    pub(crate) fn patch_layout_roots_with_runtime_state(
+        &mut self,
+        roots: &[WidgetId],
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+        viewport: Rect,
+        now: std::time::Instant,
+        reduced_motion: bool,
+        style_sheet: &crate::ui::widget::StyleSheet,
+    ) -> Result<HashSet<WidgetId>, taffy::TaffyError> {
+        let units = self.units;
+        let (result, dependencies) = with_dependency_collection(
+            || -> Result<(HashSet<WidgetId>, HashSet<u64>), taffy::TaffyError> {
+                super::tree::with_widget_stack(|| {
+                    let mut removed_ids = HashSet::new();
+                    let mut touched_owner_ids = HashSet::new();
+                    let style_context = crate::ui::theme::StyleContext::from_theme(theme)
+                        .with_reduced_motion(reduced_motion)
+                        .with_text_scale(units.font_scale());
+                    let fallback_viewport_hint = VirtualViewportHint {
+                        width: viewport.width,
+                        height: viewport.height,
+                    };
+
+                    for root_id in roots {
+                        let Some(path) = self.path_for(*root_id).map(|path| path.to_vec()) else {
+                            continue;
+                        };
+
+                        let previous_ids = self.subtree_widget_ids(*root_id);
+                        touched_owner_ids.extend(previous_ids.iter().map(|id| id.raw()));
+
+                        let Some(next) = resolve_subtree_from_source_path_with_runtime_state(
+                            &self.source_root,
+                            Some(&self.resolved_root),
+                            theme,
+                            &path,
+                            scroll_offsets,
+                            virtual_states,
+                            fallback_viewport_hint.clone(),
+                            &style_context,
+                            style_sheet,
                         ) else {
                             continue;
                         };

@@ -5527,7 +5527,73 @@ fn pure_scroll_patch_matches_full_recollect() {
 }
 
 #[test]
-fn virtual_scroll_is_explicitly_excluded_from_pure_scroll_fast_path() {
+fn pure_scroll_patch_ignores_virtual_sibling() {
+    use crate::ui::widget::VirtualList;
+
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Flex::vertical()
+            .child(
+                ScrollView::new()
+                    .size(dp(80.0), dp(80.0))
+                    .child(Flex::vertical().child(Flex::vertical().size(dp(80.0), dp(160.0)))),
+            )
+            .child(
+                VirtualList::new((0..40usize).collect::<Vec<_>>(), |index, _item| {
+                    Text::new(format!("row {index}")).height(dp(20.0)).into()
+                })
+                .size(dp(80.0), dp(80.0))
+                .item_layout(ItemLayout::Fixed {
+                    item_extent: dp(20.0),
+                    spacing: Dp::ZERO,
+                    overscan: 2,
+                }),
+            ),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let normal_scroll_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| {
+            cached
+                .computed
+                .scroll_regions
+                .iter()
+                .find(|region| {
+                    region.can_scroll_y()
+                        && handler
+                            .cached_scene
+                            .as_ref()
+                            .and_then(|cached| cached.layout.as_ref())
+                            .is_some_and(|layout| !layout.is_virtual_widget(region.id))
+                })
+                .map(|region| region.id)
+        })
+        .expect("normal scroll sibling should emit a scroll region");
+
+    crate::runtime::scene_runtime::scroll_fast_path_probe::reset();
+    handler.set_scroll_offset(normal_scroll_id, Point::new(dp(0.0), dp(20.0)));
+    let after_patch = shape_fingerprints(handler.computed_scene());
+
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::hits(),
+        1,
+        "normal scroll should still hit pure-scroll when a virtual widget is only a sibling"
+    );
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::virtual_hits(),
+        0,
+        "normal scroll should not use virtual-scroll patch"
+    );
+
+    handler.invalidate_computed_scene();
+    let after_full = shape_fingerprints(handler.computed_scene());
+    assert_eq!(after_patch, after_full);
+}
+
+#[test]
+fn virtual_scroll_layout_patch_matches_full_recollect() {
     use crate::ui::widget::VirtualList;
 
     let invalidation = InvalidationSignal::new();
@@ -5552,6 +5618,7 @@ fn virtual_scroll_is_explicitly_excluded_from_pure_scroll_fast_path() {
     );
     let mut handler = test_handler(Some(tree), invalidation);
     let _ = handler.computed_scene();
+    let _ = handler.computed_scene();
     let scroll_id = handler
         .cached_scene
         .as_ref()
@@ -5573,12 +5640,233 @@ fn virtual_scroll_is_explicitly_excluded_from_pure_scroll_fast_path() {
         0,
         "virtual containers are structural/windowing content and must not use pure-scroll fast paths"
     );
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::virtual_hits(),
+        1,
+        "virtual scroll should patch only the virtual root layout and scene"
+    );
 
     handler.invalidate_computed_scene();
     let after_full = shape_fingerprints(handler.computed_scene());
     assert_eq!(
         after_scroll, after_full,
         "virtual scroll fallback should still match a full recollect"
+    );
+}
+
+#[test]
+fn virtual_scroll_scene_patch_handles_stable_visible_window() {
+    use crate::ui::widget::VirtualList;
+
+    let invalidation = InvalidationSignal::new();
+    let items = (0..80usize).collect::<Vec<_>>();
+    let tree = WidgetTree::new(
+        VirtualList::new(items, |index, _item| {
+            let color = if index % 2 == 0 {
+                Color::hexa(0x111827FF)
+            } else {
+                Color::hexa(0x2563EBFF)
+            };
+            Stack::<TestVm>::new()
+                .size(dp(80.0), dp(40.0))
+                .style_full(move |ctx| {
+                    let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                    style.surface.background = Some(color.into());
+                    style
+                })
+                .child(Text::new(format!("row {index}")))
+                .into()
+        })
+        .size(dp(80.0), dp(75.0))
+        .item_layout(ItemLayout::Fixed {
+            item_extent: dp(40.0),
+            spacing: Dp::ZERO,
+            overscan: 2,
+        }),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let _ = handler.computed_scene();
+    let scroll_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| {
+            cached
+                .computed
+                .scroll_regions
+                .first()
+                .map(|region| region.id)
+        })
+        .expect("virtual list should emit a scroll region");
+
+    crate::runtime::scene_runtime::scroll_fast_path_probe::reset();
+    handler.set_scroll_offset(scroll_id, Point::new(dp(0.0), dp(4.0)));
+    let after_scroll = shape_fingerprints(handler.computed_scene());
+
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::virtual_scene_hits(),
+        1,
+        "small virtual scrolls that keep the same visible window should skip layout patch"
+    );
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::virtual_hits(),
+        0,
+        "stable-window virtual scroll should not fall through to layout patch"
+    );
+
+    handler.invalidate_computed_scene();
+    let after_full = shape_fingerprints(handler.computed_scene());
+    assert_eq!(
+        after_scroll, after_full,
+        "scene-only virtual scroll patch should match a full recollect"
+    );
+}
+
+#[test]
+fn virtual_scroll_layout_patch_handles_changed_visible_window() {
+    use crate::ui::widget::VirtualList;
+
+    let invalidation = InvalidationSignal::new();
+    let items = (0..80usize).collect::<Vec<_>>();
+    let tree = WidgetTree::new(
+        VirtualList::new(items, |index, _item| {
+            let color = if index % 2 == 0 {
+                Color::hexa(0x111827FF)
+            } else {
+                Color::hexa(0x2563EBFF)
+            };
+            Stack::<TestVm>::new()
+                .size(dp(80.0), dp(40.0))
+                .style_full(move |ctx| {
+                    let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                    style.surface.background = Some(color.into());
+                    style
+                })
+                .child(Text::new(format!("row {index}")))
+                .into()
+        })
+        .size(dp(80.0), dp(80.0))
+        .item_layout(ItemLayout::Fixed {
+            item_extent: dp(40.0),
+            spacing: Dp::ZERO,
+            overscan: 2,
+        }),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let scroll_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| {
+            cached
+                .computed
+                .scroll_regions
+                .first()
+                .map(|region| region.id)
+        })
+        .expect("virtual list should emit a scroll region");
+
+    crate::runtime::scene_runtime::scroll_fast_path_probe::reset();
+    handler.set_scroll_offset(scroll_id, Point::new(dp(0.0), dp(120.0)));
+    let after_scroll = shape_fingerprints(handler.computed_scene());
+
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::virtual_scene_hits(),
+        0,
+        "window-changing virtual scrolls need a layout patch to rebuild visible children"
+    );
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::virtual_hits(),
+        1,
+        "window-changing virtual scroll should use the virtual layout patch"
+    );
+
+    handler.invalidate_computed_scene();
+    let after_full = shape_fingerprints(handler.computed_scene());
+    assert_eq!(
+        after_scroll, after_full,
+        "layout virtual scroll patch should match a full recollect"
+    );
+}
+
+#[test]
+fn measured_page_virtual_scroll_uses_scene_patch_when_window_is_stable() {
+    use crate::ui::widget::VirtualList;
+
+    let invalidation = InvalidationSignal::new();
+
+    fn section(index: usize, height: Dp) -> Element<TestVm> {
+        let color = if index % 2 == 0 {
+            Color::hexa(0x0F172AFF)
+        } else {
+            Color::hexa(0x334155FF)
+        };
+        Flex::<TestVm>::vertical()
+            .width(dp(320.0))
+            .height(height)
+            .padding(Insets::all(dp(12.0)))
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(color.into());
+                style
+            })
+            .child(Text::new(format!("section {index}")))
+            .child(Text::new("demo data page section"))
+            .into()
+    }
+
+    let sections = vec![
+        section(0, dp(140.0)),
+        section(1, dp(360.0)),
+        section(2, dp(420.0)),
+        section(3, dp(280.0)),
+        section(4, dp(360.0)),
+    ];
+    let tree = WidgetTree::new(
+        VirtualList::new(sections, |_index, item: &Element<TestVm>| item.clone())
+            .size(dp(360.0), dp(300.0))
+            .item_layout(ItemLayout::Measured {
+                estimate: dp(220.0),
+                spacing: dp(18.0),
+                overscan: 1,
+            }),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    for _ in 0..4 {
+        let _ = handler.computed_scene();
+    }
+    let scroll_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| {
+            cached
+                .computed
+                .scroll_regions
+                .first()
+                .map(|region| region.id)
+        })
+        .expect("page virtual list should emit a scroll region");
+
+    crate::runtime::scene_runtime::scroll_fast_path_probe::reset();
+    handler.set_scroll_offset(scroll_id, Point::new(dp(0.0), dp(6.0)));
+    let after_scroll = shape_fingerprints(handler.computed_scene());
+
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::virtual_scene_hits(),
+        1,
+        "small measured page scrolls should update scene without re-laying out sections"
+    );
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::virtual_hits(),
+        0,
+        "stable measured page scroll should not fall through to virtual layout patch"
+    );
+
+    handler.invalidate_computed_scene();
+    let after_full = shape_fingerprints(handler.computed_scene());
+    assert_eq!(
+        after_scroll, after_full,
+        "measured page virtual scene patch should match a full recollect"
     );
 }
 

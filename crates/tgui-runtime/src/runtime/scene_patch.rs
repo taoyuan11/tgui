@@ -87,6 +87,87 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
+    pub(super) fn patch_cached_layout_for_roots_with_runtime_state(
+        &mut self,
+        roots: &[WidgetId],
+        now: Instant,
+    ) -> bool {
+        with_runtime_scene_patch_stack(|| {
+            self.patch_cached_layout_for_roots_with_runtime_state_inner(roots, now)
+        })
+    }
+
+    fn patch_cached_layout_for_roots_with_runtime_state_inner(
+        &mut self,
+        roots: &[WidgetId],
+        now: Instant,
+    ) -> bool {
+        let started_at = text_profile_enabled().then_some(Instant::now());
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
+        };
+        let Some(layout) = cached.layout.as_ref() else {
+            return false;
+        };
+        let touched_owner_ids = roots
+            .iter()
+            .flat_map(|root| layout.subtree_widget_ids(*root))
+            .map(|widget_id| widget_id.raw())
+            .collect::<HashSet<_>>();
+        self.invalidation
+            .remove_reactive_targets_for_widgets(&touched_owner_ids);
+
+        let theme = self.animated_theme(now);
+        let viewport = self.viewport_rect();
+        let scroll_states = self.scroll_states.clone();
+        let virtual_states = self.virtual_states.clone();
+        let reduced_motion = self.reduced_motion;
+        let style_sheet = self.config.style_sheet.clone();
+
+        let Some(cached) = self.cached_scene.as_mut() else {
+            return false;
+        };
+        let Some(layout) = cached.layout.as_mut() else {
+            return false;
+        };
+        let removed_ids = match layout.patch_layout_roots_with_runtime_state(
+            roots,
+            &self.font_manager,
+            &theme,
+            &self.media_manager,
+            &mut self.animation_engine,
+            &scroll_states,
+            &virtual_states,
+            viewport,
+            now,
+            reduced_motion,
+            &style_sheet,
+        ) {
+            Ok(removed_ids) => removed_ids,
+            Err(_) => return false,
+        };
+
+        cached.dependencies = layout.dependencies().clone();
+        cached.computed_valid = false;
+        let _ = layout;
+        let _ = cached;
+        self.prune_removed_widget_state(&removed_ids);
+        self.rebuild_layout_slot_bindings();
+        self.text_input_regions.clear();
+        if let Some(started_at) = started_at {
+            log_text_profile(
+                "textarea_patch_layout",
+                started_at.elapsed(),
+                format!(
+                    "roots={:?} removed_ids={} computed_valid=false runtime_state=true",
+                    roots,
+                    removed_ids.len()
+                ),
+            );
+        }
+        true
+    }
+
     pub(super) fn patch_cached_scene_for_roots(
         &mut self,
         roots: &[WidgetId],

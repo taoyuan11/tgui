@@ -88,7 +88,9 @@ mod tree_scene;
 mod types;
 
 pub use self::element::WidgetStyleExt;
-use self::element_path::resolve_subtree_from_source_path;
+use self::element_path::{
+    resolve_subtree_from_source_path, resolve_subtree_from_source_path_with_runtime_state,
+};
 pub(crate) use self::layout::compute_scrollbar_geometry;
 use self::layout::*;
 use self::render::*;

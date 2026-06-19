@@ -258,6 +258,21 @@ pub(super) fn resolved_at_path<'a, VM>(
     resolved_at_path(&children[path[0]], &path[1..])
 }
 
+pub(super) fn resolved_at_path_mut<'a, VM>(
+    node: &'a mut ResolvedElement<VM>,
+    path: &[usize],
+) -> &'a mut ResolvedElement<VM> {
+    if path.is_empty() {
+        return node;
+    }
+    let children = match &mut node.kind {
+        ResolvedWidgetKind::Container { children, .. }
+        | ResolvedWidgetKind::Virtual { children, .. } => children,
+        _ => panic!("resolved path descends into a non-container widget"),
+    };
+    resolved_at_path_mut(&mut children[path[0]], &path[1..])
+}
+
 pub(super) fn patch_resolved_at_path<VM>(
     node: &mut ResolvedElement<VM>,
     path: &[usize],
