@@ -17,19 +17,19 @@
 
 `tgui` 目前已经能够基本使用：应用启动、窗口管理、MVVM 状态绑定、常用布局、基础控件、主题、动画、图片、Canvas、自定义窗口 chrome、系统通知、对话框以及可选音视频播放等核心链路已经打通，并配有多个可运行示例。
 
-当前版本仍处于 `0.x` 阶段，公共 API 还可能根据真实应用反馈继续调整。它已经适合用于原型、内部工具、小型桌面应用、可视化面板和自定义绘制界面的探索；如果用于长期维护的生产项目，建议固定 crate 版本，并在升级前阅读 README、示例和变更记录。
+当前版本仍处于 `0.x` 阶段，公共 API 还可能根据真实应用反馈继续调整。它已经适合用于原型、内部工具、小型桌面应用、可视化面板和自定义绘制界面的探索；如果用于长期维护的生产项目，建议固定 crate 版本，并在升级前阅读 README、示例和迁移文档。
 
 ### 版本承诺与升级节奏
 
-- **0.x**：处于公开 API 调整窗口期，破坏性变更可能出现在任意 minor（`0.x.0`）版本；patch（`0.x.y`）只做兼容性修复。每次破坏性变更会在 [`CHANGELOG.md`](./CHANGELOG.md) 列出。
+- **0.x**：处于公开 API 调整窗口期，破坏性变更可能出现在任意 minor（`0.x.0`）版本；patch（`0.x.y`）只做兼容性修复。
 - **1.0 之前**：会做一次系统的公开 API review（重点是 `src/lib.rs` 的 re-export、`Application` 链式 API、widget builder），冻结后用 `cargo public-api` 守门。
 - **1.0 之后**：严格遵循 SemVer，破坏性变更只在 major 版本出现。
-- **wgpu 升级策略**：当前依赖 `wgpu 29`，跟随主版本时只在 minor 升级，不在 patch 升级；每次升级在 CHANGELOG 中列出迁移点。
-- **winit 升级策略**：当前 `winit-* 0.31.0-beta.2`，会在 winit 0.31 stable 化时作为一次显式 minor 升级；详见 [`CHANGELOG.md`](./CHANGELOG.md)。
+- **wgpu 升级策略**：当前依赖 `wgpu 29`，跟随主版本时只在 minor 升级，不在 patch 升级。
+- **winit 升级策略**：当前 `winit-* 0.31.0-beta.2`，会在 winit 0.31 stable 化时作为一次显式 minor 升级。
 
 ### MSRV
 
-最低支持 Rust 版本（MSRV）为 **`1.85`**。MSRV 提升被视为 minor-level 变更并在 CHANGELOG 中显式标注。
+最低支持 Rust 版本（MSRV）为 **`1.85`**。MSRV 提升被视为 minor-level 变更。
 
 ## 文档站开发
 

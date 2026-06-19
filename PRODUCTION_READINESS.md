@@ -5,15 +5,15 @@
 ## 一、依赖与发布稳定性（阻塞 1.0）
 
 - **winit 升级到稳定版**：当前锁在 `winit-core/-win32/-wayland/-x11/-appkit 0.31.0-beta.2`，beta 依赖会让下游 lockfile 不稳；需要等 winit 0.31 stable 或回退到稳定线。
-- **`wgpu 29` 升级策略**：明确支持的 wgpu 版本范围与升级节奏（每个 minor 写入 CHANGELOG）。
+- **`wgpu 29` 升级策略**：明确支持的 wgpu 版本范围与升级节奏。
 - **MSRV 声明**：`Cargo.toml` 增加 `rust-version = "..."`，并在 CI 矩阵中固定。
-- **语义化版本承诺**：在 README/CHANGELOG 中明确 0.x → 1.0 的 breaking 节奏；公共 API（`src/lib.rs` re-export 列表）冻结前需要一次系统 review。
+- **语义化版本承诺**：在 README 中明确 0.x → 1.0 的 breaking 节奏；公共 API（`src/lib.rs` re-export 列表）冻结前需要一次系统 review。
 - **`publish.bat` 用 `--allow-dirty`**：发布脚本默认允许脏工作区，正式版本前应改成强制干净 + tag 校验，避免误发。
 - **License 完整性**：当前只有 `LICENSE`（MIT）。考虑 dual-license `MIT OR Apache-2.0`（Rust 生态默认），并补 `LICENSE-APACHE`、`NOTICE`。
 
 ## 二、CI / 质量基础设施（阻塞 1.0）
 
-> 状态：骨架已落地（`.github/workflows/ci.yml`、`.github/workflows/release.yml`、`.github/dependabot.yml`、`deny.toml`）。后续仅需仓库 owner 配 secret 启用条件门控的 job、按 CI 输出收敛 clippy / deny exception。
+> 状态：骨架已落地（`.github/workflows/ci.yml`、`.github/dependabot.yml`、`deny.toml`）。后续仅需仓库 owner 配 secret 启用条件门控的 job、按 CI 输出收敛 clippy / deny exception。
 
 - **GitHub Actions 矩阵**（已实现）：
   - OS：`ubuntu-latest`、`windows-latest`、`macos-latest`
@@ -21,7 +21,7 @@
 - **必跑步骤**（已实现）：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`、`cargo doc --no-deps --all-features`（`RUSTDOCFLAGS=-D warnings`）、`cargo-deny` licenses/advisories/bans/sources
 - **基准回归**（骨架）：`bench-compile` job 用 `cargo check --benches --all-features` 守编译；`bench-publish` job 接 Bencher.dev，需仓库 owner 设 `vars.ENABLE_BENCH=true` + `secrets.BENCHER_API_TOKEN` 后启用
 - **覆盖率**（骨架）：`coverage` job 用 `cargo-llvm-cov` + Codecov，需仓库 owner 设 `vars.ENABLE_COVERAGE=true` + `secrets.CODECOV_TOKEN` 后启用；目标仍为 `src/runtime/`、`src/ui/widget/core/` ≥ 80%
-- **Release 流程**（已实现）：`release.yml` 在 `v*.*.*` tag push 时跑 `cargo publish --dry-run` → `cargo publish` → 抽 CHANGELOG 段 → `gh release create`，需仓库 owner 设 `secrets.CARGO_REGISTRY_TOKEN`
+- **Release 流程**：自动发布工作流已移除；当前保留本地 `publish.bat` 作为手动发布辅助脚本。
 - **Dependabot**（已实现）：`cargo` + `github-actions` 周更新，patch 版本合并 PR 减少噪音
 
 ## 三、稳定性与正确性
@@ -77,7 +77,7 @@ AccessKit baseline 已默认接入，当前已具备系统 a11y 树与 runtime �
 - **API doc**：所有公开 type 都要有 `///` 文档；CI 加 `RUSTDOCFLAGS="-D warnings"`。
 - **`docs.rs` 配置**：在 `Cargo.toml` 加 `[package.metadata.docs.rs] all-features = true`，并处理 FFmpeg 不可用时的降级。
 - **官方站点**：mdBook 或类似的 GitHub Pages，统一示例 + API 索引。
-- **CHANGELOG.md / CONTRIBUTING.md / CODE_OF_CONDUCT.md / SECURITY.md**：四个标准文件目前都缺。
+- **CONTRIBUTING.md / CODE_OF_CONDUCT.md / SECURITY.md**：三个标准文件目前都缺。
 
 ## 八、性能与资源
 
@@ -127,7 +127,7 @@ AccessKit baseline 已默认接入，当前已具备系统 a11y 树与 runtime �
 
 ## 优先级建议（个人判断）
 
-1. **现在就该做**：CI 矩阵 + clippy/fmt/audit、CHANGELOG/CONTRIBUTING/SECURITY、`unsafe` SAFETY 注释、`todo!()` 清理、API 文档覆盖率、AccessKit baseline 的屏幕阅读器 smoke test。
+1. **现在就该做**：CI 矩阵 + clippy/fmt/audit、CONTRIBUTING/SECURITY、`unsafe` SAFETY 注释、`todo!()` 清理、API 文档覆盖率、AccessKit baseline 的屏幕阅读器 smoke test。
 2. **0.2 之前**：winit 稳定版升级、macOS 通知后端、Linux 通知兼容性、错误类型对外固化、`cargo public-api` 守门。
 3. **0.3 ~ 0.5**：a11y 屏幕阅读器实测、复杂脚本/IME 回归、Tabs/Tooltip/Menu/Table 等 widget、视觉回归测试、桌面打包样例。
 4. **1.0 之前**：API 冻结、性能基线、安全审计、官方站点、多平台 release 工作流。
