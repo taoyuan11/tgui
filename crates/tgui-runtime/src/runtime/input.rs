@@ -182,33 +182,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 let _ = self.clear_focused_input_composition();
                 self.insert_text_at_focused_input(text)
             }
-            Ime::DeleteSurrounding {
-                before_bytes,
-                after_bytes,
-            } => self.edit_focused_text_input(|buffer: &mut RopeBuffer, state: &TextEditState| {
-                let start = buffer.clamp_byte_boundary(state.cursor.saturating_sub(*before_bytes));
-                let end = buffer.clamp_byte_boundary(
-                    state
-                        .cursor
-                        .saturating_add(*after_bytes)
-                        .min(buffer.len_bytes()),
-                );
-                if start >= end {
-                    return None;
-                }
-                buffer.replace_byte_range(start, end, "");
-                Some((
-                    TextEditState {
-                        cursor: start,
-                        anchor: start,
-                        composition: None,
-                        scroll_x: state.scroll_x,
-                        scroll_y: state.scroll_y,
-                        preferred_column_x: None,
-                    },
-                    TextChange::new((start, end), ""),
-                ))
-            }),
             Ime::Disabled => self.clear_focused_input_composition(),
         };
         let _ = started_at;

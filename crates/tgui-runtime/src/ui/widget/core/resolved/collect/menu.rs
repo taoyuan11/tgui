@@ -807,7 +807,7 @@ fn svg_menu_icon_primitive(
 /// 当 `MenuItem::shortcut_hint()` 未显式设置但 `MenuItem::shortcut()` 有值时
 /// 用作后备显示。
 fn format_chord(chord: &crate::ui::widget::menu::KeyChord) -> String {
-    use crate::platform::keyboard::ModifiersState;
+    use crate::platform::keyboard::{has_meta_modifier, ModifiersState};
     let mut parts: Vec<&'static str> = Vec::new();
     if chord.mods.contains(ModifiersState::CONTROL) {
         parts.push("Ctrl");
@@ -818,7 +818,7 @@ fn format_chord(chord: &crate::ui::widget::menu::KeyChord) -> String {
     if chord.mods.contains(ModifiersState::SHIFT) {
         parts.push("Shift");
     }
-    if chord.mods.contains(ModifiersState::META) {
+    if has_meta_modifier(chord.mods) {
         parts.push("Meta");
     }
     let key_label = match &chord.key {

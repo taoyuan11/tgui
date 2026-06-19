@@ -12,10 +12,8 @@ use crate::foundation::binding::{InvalidationSignal, Signal, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::task::async_task_channel;
 use crate::foundation::view_model::{Command, ValueCommand, ViewModel};
-use crate::platform::backend::event_loop::{
-    ActiveEventLoop, ControlFlow, DeviceEvents, EventLoopProxy, OwnedDisplayHandle,
-};
-use crate::platform::cursor::{CustomCursor, CustomCursorSource};
+use crate::platform::backend::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
+use crate::platform::backend::window::Window;
 use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use crate::platform::error::RequestError;
 use crate::platform::event::{
@@ -23,8 +21,8 @@ use crate::platform::event::{
     PointerSource, TouchPhase, WindowEvent,
 };
 use crate::platform::keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey};
+use crate::platform::window::WindowAttributes;
 use crate::platform::window::{ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose};
-use crate::platform::window::{Theme as WindowTheme, Window, WindowAttributes};
 use crate::text::font::FontCatalog;
 use crate::ui::layout::{Axis, Insets, Overflow};
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
@@ -38,14 +36,13 @@ use crate::ui::widget::{
     VirtualCacheState, WidgetKey, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
-use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle};
 #[cfg(feature = "audio")]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
-use winit_core::monitor::MonitorHandle;
+use winit::monitor::MonitorHandle;
 
 #[cfg(feature = "audio")]
 use crate::audio::backend::{
@@ -214,15 +211,6 @@ fn pressed_key_event(physical_key: PhysicalKey) -> KeyEvent {
         location: KeyLocation::Standard,
         state: ElementState::Pressed,
         repeat: false,
-        text_with_all_modifiers: None,
-        key_without_modifiers: match physical_key {
-            PhysicalKey::Code(KeyCode::Tab) => Key::Named(NamedKey::Tab),
-            PhysicalKey::Code(KeyCode::PageUp) => Key::Named(NamedKey::PageUp),
-            PhysicalKey::Code(KeyCode::PageDown) => Key::Named(NamedKey::PageDown),
-            PhysicalKey::Code(KeyCode::Home) => Key::Named(NamedKey::Home),
-            PhysicalKey::Code(KeyCode::End) => Key::Named(NamedKey::End),
-            _ => Key::Character(" ".into()),
-        },
     }
 }
 
@@ -246,8 +234,6 @@ fn text_key_event(text: &str) -> KeyEvent {
         location: KeyLocation::Standard,
         state: ElementState::Pressed,
         repeat: false,
-        text_with_all_modifiers: None,
-        key_without_modifiers: Key::Character(text.into()),
     }
 }
 
@@ -282,15 +268,6 @@ fn custom_theme_set() -> (ThemeSet, Theme, Theme) {
 #[derive(Debug)]
 struct TestEventLoop;
 
-#[derive(Debug)]
-struct TestDisplayHandle;
-
-impl HasDisplayHandle for TestDisplayHandle {
-    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
-        Ok(DisplayHandle::windows())
-    }
-}
-
 impl ActiveEventLoop for TestEventLoop {
     fn create_proxy(&self) -> EventLoopProxy {
         panic!("not needed in runtime tests")
@@ -303,24 +280,11 @@ impl ActiveEventLoop for TestEventLoop {
         panic!("not needed in runtime tests")
     }
 
-    fn create_custom_cursor(
-        &self,
-        _custom_cursor: CustomCursorSource,
-    ) -> Result<CustomCursor, RequestError> {
-        panic!("not needed in runtime tests")
-    }
-
     fn available_monitors(&self) -> Box<dyn Iterator<Item = MonitorHandle>> {
         Box::new(std::iter::empty())
     }
 
     fn primary_monitor(&self) -> Option<MonitorHandle> {
-        None
-    }
-
-    fn listen_device_events(&self, _allowed: DeviceEvents) {}
-
-    fn system_theme(&self) -> Option<WindowTheme> {
         None
     }
 
@@ -331,19 +295,6 @@ impl ActiveEventLoop for TestEventLoop {
     }
 
     fn exit(&self) {}
-
-    fn exiting(&self) -> bool {
-        false
-    }
-
-    fn owned_display_handle(&self) -> OwnedDisplayHandle {
-        OwnedDisplayHandle::new(Arc::new(TestDisplayHandle))
-    }
-
-    fn rwh_06_handle(&self) -> &dyn HasDisplayHandle {
-        static DISPLAY: TestDisplayHandle = TestDisplayHandle;
-        &DISPLAY
-    }
 }
 
 fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(

@@ -97,9 +97,10 @@ use crate::platform::cursor::CursorIcon;
 use crate::platform::dpi::PhysicalPosition;
 use crate::platform::event::{ElementState, WindowEvent};
 use crate::platform::keyboard::ModifiersState;
+use crate::platform::window::Icon;
 use crate::platform::window::{
-    ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeSurroundingText,
-    Theme as WindowTheme, WindowAttributes, WindowId,
+    ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, Theme as WindowTheme,
+    WindowAttributes, WindowId,
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
 use crate::runtime::portal::ExternalPortalRequest;
@@ -124,7 +125,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use winit_core::icon::{Icon, RgbaIcon};
 
 pub(super) const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);

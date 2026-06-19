@@ -275,7 +275,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         continue;
                     }
                     match owner.phase {
-                        DependencyPhase::Structure => {}
+                        DependencyPhase::Structure => {
+                            all_layout_owners_are_layout_property_scoped = false;
+                            structure_affected_ids.insert(widget_id);
+                            layout_affected_ids.insert(widget_id);
+                        }
                         DependencyPhase::Layout => {
                             if owner.property == Some(PropertySlot::Offset)
                                 && layout.can_patch_layout_dependency_as_scene(widget_id)

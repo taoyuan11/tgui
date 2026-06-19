@@ -19,7 +19,7 @@ use crate::ui::widget::WidgetTree;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 #[cfg(target_os = "windows")]
-use winit_win32::WindowExtWindows;
+use winit::platform::windows::WindowExtWindows;
 
 pub(super) struct ResolvedWindowSpec<VM> {
     key: String,
@@ -363,12 +363,12 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
 }
 
 impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
-    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
+    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         self.set_dialog_proxy(event_loop);
         self.sync_windows(event_loop, true);
     }
 
-    fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {
+    fn user_event(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, _event: ()) {
         self.drain_dialog_completions();
         self.drain_notification_completions();
         self.drain_task_completions();
@@ -383,13 +383,19 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
 
     fn window_event(
         &mut self,
-        event_loop: &dyn ActiveEventLoop,
+        event_loop: &winit::event_loop::ActiveEventLoop,
         window_id: WindowId,
-        event: WindowEvent,
+        event: winit::event::WindowEvent,
     ) {
         let Some(key) = self.window_keys_by_id.get(&window_id).cloned() else {
             return;
         };
+
+        let events = self
+            .windows_by_key
+            .get(&key)
+            .map(|window| WindowEvent::from_winit(event, window.physical_cursor_position()))
+            .unwrap_or_default();
 
         let is_main_window = self
             .windows_by_key
@@ -397,18 +403,21 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
             .map(BoundRuntimeHandler::is_main_window)
             .unwrap_or(false);
 
-        if is_main_window
-            && self.main_window_is_blocked()
-            && Self::should_gate_main_window_event(&event)
-        {
-            return;
-        }
+        let mut close_requested = false;
+        for event in events {
+            if is_main_window
+                && self.main_window_is_blocked()
+                && Self::should_gate_main_window_event(&event)
+            {
+                continue;
+            }
 
-        let close_requested = self
-            .windows_by_key
-            .get_mut(&key)
-            .map(|window| window.handle_bound_window_event(event_loop, event))
-            .unwrap_or(false);
+            close_requested |= self
+                .windows_by_key
+                .get_mut(&key)
+                .map(|window| window.handle_bound_window_event(event_loop, event))
+                .unwrap_or(false);
+        }
 
         if let Some(window) = self.windows_by_key.get_mut(&key) {
             if let Some(error) = window.error.take() {
@@ -435,7 +444,7 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         if self.shutting_down {
             event_loop.exit();
             return;
@@ -490,7 +499,7 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
         }
     }
 
-    fn suspended(&mut self, _event_loop: &dyn ActiveEventLoop) {
+    fn suspended(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
         for window in self.windows_by_key.values_mut() {
             window.suspend();
         }

@@ -35,7 +35,7 @@ impl PlatformAccessibilityAdapter {
 #[cfg(target_os = "windows")]
 mod platform {
     use super::*;
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use raw_window_handle::RawWindowHandle;
     use windows::Win32::Foundation::HWND;
 
     pub(super) struct PlatformAccessibilityAdapterInner {
@@ -79,7 +79,7 @@ mod platform {
 #[cfg(target_os = "macos")]
 mod platform {
     use super::*;
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use raw_window_handle::RawWindowHandle;
 
     pub(super) struct PlatformAccessibilityAdapterInner {
         adapter: accesskit_macos::Adapter,

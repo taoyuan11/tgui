@@ -389,7 +389,7 @@ fn table_cell_context_menu_opens_on_right_click() {
 fn primary_shortcut_modifier() -> ModifiersState {
     #[cfg(target_os = "macos")]
     {
-        ModifiersState::META
+        crate::platform::keyboard::meta_modifier()
     }
 
     #[cfg(not(target_os = "macos"))]

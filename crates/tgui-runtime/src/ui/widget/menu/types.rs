@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::foundation::view_model::Command;
-use crate::platform::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
+use crate::platform::keyboard::{meta_modifier, Key, KeyCode, ModifiersState, NamedKey};
 use crate::ui::layout::Value;
 
 /// 菜单项类型。
@@ -121,7 +121,7 @@ impl KeyChord {
 
     /// 在 chord 上叠加 Meta (Super / Command)。
     pub fn meta(mut self) -> Self {
-        self.mods |= ModifiersState::META;
+        self.mods |= meta_modifier();
         self
     }
 

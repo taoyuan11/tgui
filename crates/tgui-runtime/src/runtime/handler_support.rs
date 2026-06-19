@@ -181,22 +181,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .with_transparent(true)
             .with_decorations(self.config.decorations)
             .with_title(self.config.title.clone())
-            .with_surface_size(self.config.size)
+            .with_inner_size(self.config.size)
             .with_visible(false);
 
         #[cfg(target_os = "windows")]
         if self.config.clear_color.a < 255 {
-            let platform_attrs =
-                winit_win32::WindowAttributesWindows::default().with_no_redirection_bitmap(true);
-            attributes = attributes.with_platform_attributes(Box::new(platform_attrs));
+            use winit::platform::windows::WindowAttributesExtWindows;
+
+            attributes = attributes.with_no_redirection_bitmap(true);
         }
 
         if let Some(min_size) = self.config.min_size {
-            attributes = attributes.with_min_surface_size(min_size);
+            attributes = attributes.with_min_inner_size(min_size);
         }
 
         if let Some(max_size) = self.config.max_size {
-            attributes = attributes.with_max_surface_size(max_size);
+            attributes = attributes.with_max_inner_size(max_size);
         }
 
         if let Some(position) = default_window_position(event_loop, self.config.size) {
@@ -209,10 +209,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     let (w, h) = image.dimensions();
                     let rgba = image.into_rgba8().into_raw();
 
-                    match RgbaIcon::new(rgba, w, h) {
+                    match Icon::from_rgba(rgba, w, h) {
                         Ok(ok) => {
-                            let icon = Icon::from(ok);
-                            attributes = attributes.with_window_icon(Some(icon));
+                            attributes = attributes.with_window_icon(Some(ok));
                         }
                         Err(err) => {
                             self.fail(event_loop, TguiError::Icon(err.to_string()));

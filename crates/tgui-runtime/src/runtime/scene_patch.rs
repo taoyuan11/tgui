@@ -442,6 +442,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             // 多个 root 只有在全部互不嵌套、且每个 subtree 的新旧命令/命中/滚动数量
             // 完全一致时才整体命中。任一 root 不满足就整体回退到 recompose，避免半快半慢
             // 带来偏移漂移。
+            let can_attempt_splice = computed_allows_direct_scene_splice(&cached.computed);
             let splice_plans: Option<Vec<SceneSplicePlan<VM>>> = {
                 let mut unique_roots = HashSet::new();
                 let unique = roots.iter().copied().all(|root| unique_roots.insert(root));
@@ -455,7 +456,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     }
                     true
                 });
-                if unique && disjoint && roots.len() == patches.len() {
+                if can_attempt_splice && unique && disjoint && roots.len() == patches.len() {
                     let mut plans = Vec::with_capacity(patches.len());
                     let mut ok = true;
                     for patch in &patches {
@@ -602,8 +603,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 );
             }
 
-            let can_splice_computed_directly =
-                did_splice && self.external_portal_requests.is_empty();
+            let can_splice_computed_directly = did_splice
+                && self.external_portal_requests.is_empty()
+                && computed_allows_direct_scene_splice(&cached.computed);
             if can_splice_computed_directly {
                 let Some(plans) = splice_plans.as_ref() else {
                     return false;
@@ -729,6 +731,39 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         true
     }
+}
+
+fn computed_allows_direct_scene_splice<VM>(computed: &ComputedScene<VM>) -> bool {
+    let portal_counts = computed.portal_overlay_counts;
+    computed.scene.counts().has_no_overlay()
+        && computed.overlay_hit_regions.is_empty()
+        && computed.overlay_close_handlers.is_empty()
+        && computed.portal_entries.is_empty()
+        && computed.external_portal_requests.is_empty()
+        && portal_counts.shapes == 0
+        && portal_counts.textures == 0
+        && portal_counts.meshes == 0
+        && portal_counts.texts == 0
+        && portal_counts.text_decorations == 0
+        && portal_counts.commands == 0
+        && portal_counts.hits == 0
+        && portal_counts.close_handlers == 0
+        && portal_counts.focus_scopes == 0
+        && computed.overlay_layer_graph.layers.is_empty()
+        && computed.overlay_layer_graph.anchor_slots.is_empty()
+        && computed.overlay_layers.iter().all(|bucket| {
+            bucket.commands.is_empty()
+                && bucket.command_sources.is_empty()
+                && bucket.backdrop_blurs.is_empty()
+                && bucket.shapes.is_empty()
+                && bucket.textures.is_empty()
+                && bucket.meshes.is_empty()
+                && bucket.texts.is_empty()
+                && bucket.text_decorations.is_empty()
+                && bucket.hits.is_empty()
+                && bucket.close_handlers.is_empty()
+                && bucket.focus_scopes.is_empty()
+        })
 }
 
 fn with_runtime_scene_patch_stack<R>(f: impl FnOnce() -> R) -> R {

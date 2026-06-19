@@ -49,7 +49,7 @@ toml_edit.workspace = true
 unicode-segmentation.workspace = true
 usvg-remote-resolvers.workspace = true
 wgpu.workspace = true
-winit-core.workspace = true
+winit.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 accesskit_windows.workspace = true
@@ -60,7 +60,6 @@ raw-window-handle.workspace = true
 rfd.workspace = true
 stacker.workspace = true
 windows.workspace = true
-winit-win32.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 accesskit_macos.workspace = true
@@ -74,7 +73,6 @@ objc2-user-notifications.workspace = true
 raw-window-handle.workspace = true
 rfd.workspace = true
 stacker.workspace = true
-winit-appkit.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 accesskit_unix.workspace = true
@@ -85,5 +83,3 @@ notify-rust.workspace = true
 raw-window-handle.workspace = true
 rfd.workspace = true
 stacker.workspace = true
-winit-wayland.workspace = true
-winit-x11.workspace = true

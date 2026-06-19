@@ -1,7 +1,7 @@
 use crate::foundation::window_control::WindowResizeDirection;
 use crate::platform::cursor::CursorIcon;
 use crate::platform::event::{MouseButton, MouseScrollDelta};
-use crate::platform::keyboard::ModifiersState;
+use crate::platform::keyboard::{has_meta_modifier, ModifiersState};
 use crate::platform::window::ResizeDirection;
 use crate::text::font::{FontManager, TextFontRequest, TextLayoutInfo};
 use crate::ui::theme::Theme;
@@ -16,7 +16,7 @@ use super::input::{self, ScrollContext, TextInputContext};
 pub(super) fn is_primary_shortcut_modifier(modifiers: ModifiersState) -> bool {
     #[cfg(target_os = "macos")]
     {
-        modifiers.meta_key()
+        has_meta_modifier(modifiers)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -41,7 +41,7 @@ pub(super) fn canvas_mouse_button(button: Option<MouseButton>) -> Option<CanvasM
         MouseButton::Middle => Some(CanvasMouseButton::Middle),
         MouseButton::Back => Some(CanvasMouseButton::Back),
         MouseButton::Forward => Some(CanvasMouseButton::Forward),
-        other => Some(CanvasMouseButton::Other(other as u16)),
+        MouseButton::Other(other) => Some(CanvasMouseButton::Other(other)),
     }
 }
 

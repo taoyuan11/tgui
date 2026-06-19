@@ -266,8 +266,6 @@ fn global_shortcut_dispatches_on_select_even_when_menu_closed() {
 #[test]
 fn type_ahead_jumps_cursor_to_matching_item() {
     use crate::platform::keyboard::{Key, KeyLocation};
-    use winit_core::event::ElementState;
-    use winit_core::event::KeyEvent;
 
     let invalidation = InvalidationSignal::new();
     let counter = Arc::new(Mutex::new(0_u32));
@@ -299,7 +297,6 @@ fn type_ahead_jumps_cursor_to_matching_item() {
     };
     let _ = p_event.location;
     let _ = KeyLocation::Standard;
-    let _ = ElementState::Pressed;
     assert!(handler.handle_keyboard_input(&p_event));
     handler.invalidate_computed_scene();
     let _ = handler.computed_scene();

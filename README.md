@@ -25,7 +25,7 @@
 - **1.0 之前**：会做一次系统的公开 API review（重点是 `src/lib.rs` 的 re-export、`Application` 链式 API、widget builder），冻结后用 `cargo public-api` 守门。
 - **1.0 之后**：严格遵循 SemVer，破坏性变更只在 major 版本出现。
 - **wgpu 升级策略**：当前依赖 `wgpu 29`，跟随主版本时只在 minor 升级，不在 patch 升级。
-- **winit 升级策略**：当前 `winit-* 0.31.0-beta.2`，会在 winit 0.31 stable 化时作为一次显式 minor 升级。
+- **winit 升级策略**：当前使用稳定版 `winit 0.30.13`；升级到未来 `0.31` 稳定线时作为一次显式 minor 升级处理。
 
 ### MSRV
 

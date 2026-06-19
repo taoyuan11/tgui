@@ -20,42 +20,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         &mut self,
     ) -> Option<crate::platform::window::ImeRequestData> {
         let id = self.focused_text_input_id()?;
-        let region = {
+        let ime_cursor_area = {
             let computed = self.computed_scene();
-            let ime_cursor_area = computed.ime_cursor_area;
             computed
                 .hit_regions
                 .iter()
                 .chain(computed.overlay_hit_regions.iter())
                 .find_map(|region| match &region.interaction {
-                    crate::ui::widget::HitInteraction::TextInput {
-                        id: hit_id,
-                        controller,
-                        ..
-                    } if *hit_id == id => Some((ime_cursor_area, controller.clone())),
+                    crate::ui::widget::HitInteraction::TextInput { id: hit_id, .. }
+                        if *hit_id == id =>
+                    {
+                        Some(computed.ime_cursor_area)
+                    }
                     _ => None,
                 })?
         };
-        let text = self
-            .text_input_buffers
-            .get(&id)
-            .map(|session| session.current_text.clone())
-            .unwrap_or_else(|| region.1.text());
-        let state = self
-            .text_edit_state(id)
-            .cloned()
-            .unwrap_or_else(|| self.default_text_edit_state(id, &text));
-        let surrounding = ImeSurroundingText::new(text, state.cursor, state.anchor).ok();
         let mut data = crate::platform::window::ImeRequestData::default()
             .with_hint_and_purpose(ImeHint::NONE, ImePurpose::Normal);
-        if let Some(rect) = region.0 {
+        if let Some(rect) = ime_cursor_area {
             let cursor = Self::ime_cursor_request_data(rect, self.unit_context());
             if let Some((position, size)) = cursor.cursor_area {
                 data = data.with_cursor_area(position, size);
             }
-        }
-        if let Some(surrounding) = surrounding {
-            data = data.with_surrounding_text(surrounding);
         }
         Some(data)
     }
@@ -65,11 +51,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let capabilities = ImeCapabilities::new()
                 .with_hint_and_purpose()
                 .with_cursor_area();
-            let capabilities = if request_data.surrounding_text.is_some() {
-                capabilities.with_surrounding_text()
-            } else {
-                capabilities
-            };
             if let Some(enable) = ImeEnableRequest::new(capabilities, request_data.clone()) {
                 if let Some(window) = self.window.as_ref() {
                     let _ = window.request_ime_update(ImeRequest::Enable(enable));

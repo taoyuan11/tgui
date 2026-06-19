@@ -1,133 +1,224 @@
 # tgui 生产可用化清单
 
-> 基于当前仓库（`v0.1.8`，`winit` beta 系列）的现状梳理。条目按"对生产用户的影响"从高到低排序，可作为 roadmap 抓手。
+> 基于当前仓库代码整理：公开 crate `tgui 0.2.0`，MSRV `1.85`，`wgpu 29`，稳定版 `winit 0.30.13`。本文不再把已经落地的能力列为待办，而是记录当前生产基线、剩余风险和 1.0 前需要收敛的事项。
 
-## 一、依赖与发布稳定性（阻塞 1.0）
+## 状态总览
 
-- **winit 升级到稳定版**：当前锁在 `winit-core/-win32/-wayland/-x11/-appkit 0.31.0-beta.2`，beta 依赖会让下游 lockfile 不稳；需要等 winit 0.31 stable 或回退到稳定线。
-- **`wgpu 29` 升级策略**：明确支持的 wgpu 版本范围与升级节奏。
-- **MSRV 声明**：`Cargo.toml` 增加 `rust-version = "..."`，并在 CI 矩阵中固定。
-- **语义化版本承诺**：在 README 中明确 0.x → 1.0 的 breaking 节奏；公共 API（`src/lib.rs` re-export 列表）冻结前需要一次系统 review。
-- **`publish.bat` 用 `--allow-dirty`**：发布脚本默认允许脏工作区，正式版本前应改成强制干净 + tag 校验，避免误发。
-- **License 完整性**：当前只有 `LICENSE`（MIT）。考虑 dual-license `MIT OR Apache-2.0`（Rust 生态默认），并补 `LICENSE-APACHE`、`NOTICE`。
+当前 `tgui` 已经适合原型、内部工具、小型桌面应用、可视化面板和需要强自定义绘制的桌面 GUI。核心链路包括 MVVM 启动、声明式 widget tree、`taffy` 布局、`wgpu` 渲染、主题/动画、文本输入、媒体加载、系统通知、原生对话框、AccessKit a11y、无边框窗口控制、多窗口、Canvas，以及可选音频/视频。
 
-## 二、CI / 质量基础设施（阻塞 1.0）
+生产化的主要剩余风险集中在：跨平台实机矩阵、API 冻结与 public-api 守门、安全默认值、发布自动化、文档完整度、可访问性/IME 的真实设备验证，以及音视频/通知这类强平台能力的打包场景验证。
 
-> 状态：骨架已落地（`.github/workflows/ci.yml`、`.github/dependabot.yml`、`deny.toml`）。后续仅需仓库 owner 配 secret 启用条件门控的 job、按 CI 输出收敛 clippy / deny exception。
+## 一、依赖与发布稳定性
 
-- **GitHub Actions 矩阵**（已实现）：
-  - OS：`ubuntu-latest`、`windows-latest`、`macos-latest`
-  - Feature 组合：`default`、`audio + video + bench-support`（FFmpeg：Linux 用 apt、macOS 用 brew、Windows 走 BtbN 钉版本 + cache）
-- **必跑步骤**（已实现）：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`、`cargo doc --no-deps --all-features`（`RUSTDOCFLAGS=-D warnings`）、`cargo-deny` licenses/advisories/bans/sources
-- **基准回归**（骨架）：`bench-compile` job 用 `cargo check --benches --all-features` 守编译；`bench-publish` job 接 Bencher.dev，需仓库 owner 设 `vars.ENABLE_BENCH=true` + `secrets.BENCHER_API_TOKEN` 后启用
-- **覆盖率**（骨架）：`coverage` job 用 `cargo-llvm-cov` + Codecov，需仓库 owner 设 `vars.ENABLE_COVERAGE=true` + `secrets.CODECOV_TOKEN` 后启用；目标仍为 `src/runtime/`、`src/ui/widget/core/` ≥ 80%
-- **Release 流程**：自动发布工作流已移除；当前保留本地 `publish.bat` 作为手动发布辅助脚本。
-- **Dependabot**（已实现）：`cargo` + `github-actions` 周更新，patch 版本合并 PR 减少噪音
+已落地：
+
+- `Cargo.toml` 已声明 `version = "0.2.0"`、workspace `rust-version = "1.85"`、`license = "MIT OR Apache-2.0"`。
+- 双许可证文件已存在：`LICENSE-MIT`、`LICENSE-APACHE`，并补了 `NOTICE`。
+- `[package.metadata.docs.rs] all-features = true` 已在根 crate 与 `tgui-runtime` 配置。
+- 根 crate 继续作为公开 facade，主要实现位于 `crates/tgui-runtime/`，workspace 默认成员为根 crate，示例和 bench 也纳入 workspace。
+- 已从 `winit-core/-win32/-wayland/-x11/-appkit 0.31.0-beta.2` 切回稳定版单体 `winit 0.30.13`，并在 runtime/platform 层保留兼容封装，降低下游 lockfile 和平台 API 波动。
+- `publish.bat` 已改为默认要求干净工作区，并校验 `v<crate-version>` tag 指向当前 `HEAD`；只有显式设置 `PUBLISH_ALLOW_DIRTY=1` / `PUBLISH_ALLOW_UNTAGGED=1` 才跳过。
+
+1.0 前阻塞：
+
+- **公开 API 冻结**：`src/lib.rs` / `crates/tgui-runtime/src/lib.rs` 的 re-export 面已经很大，1.0 前需要系统 review `Application`、`WindowSpec`、widget builder、theme/style、media、dialog、notification、audio/video 的命名和泛型边界。
+- **public API 防回退**：接入 `cargo public-api` 或同等工具，breaking change 需要显式批准。
+- **SemVer 文档化**：README 已说明 0.x / 1.0 节奏，发布检查应把 changelog / migration note 作为必要步骤。
+- **winit 后续升级策略**：未来升级到 `winit 0.31` stable 时需要作为一次显式 minor 迁移，重点复测 IME、窗口透明/无边框、a11y adapter、事件转换和平台扩展方法。
+
+## 二、CI 与质量基础设施
+
+已落地：
+
+- `.github/workflows/ci.yml` 包含 `fmt`、`doc`、`clippy`、`test`、`bench-compile`、`cargo-deny`，OS 覆盖 Linux / Windows / macOS。
+- feature 矩阵覆盖默认配置和 `audio video bench-support` 组合，CI 中包含 FFmpeg 安装/缓存逻辑。
+- `deny.toml` 已启用 licenses / advisories / bans / sources 检查，依赖源默认限制到 crates.io index。
+- `.github/dependabot.yml` 已覆盖 cargo 和 GitHub Actions 周更新。
+- coverage / Bencher.dev job 已有条件门控骨架，需要仓库 owner 配置变量和 secret。
+- `benches/` 当前包含动画、音频、Canvas、事件、媒体、真实 widget pipeline、scene rendering、单属性 patch、state/signal、文本、视频缓冲、widget core layout 等 Criterion targets。
+
+待补齐：
+
+- clippy 目前只显式 deny 部分 lint 组；若要作为强 1.0 门禁，需要评估是否切到更完整的 `-D warnings` 或固定允许列表。
+- coverage job 需要启用并设定实际门槛。高风险目录建议优先跟踪 `crates/tgui-runtime/src/runtime/`、`crates/tgui-runtime/src/ui/widget/core/`、文本输入、通知、媒体和渲染 primitive。
+- 示例虽然是 workspace member，仍建议在 CI 里显式跑 `cargo check --workspace --all-targets` 或列出关键示例 smoke check，避免只测根 facade。
+- 需要补 Issue / PR 模板，降低平台 bug、渲染 bug、IME/a11y bug 的信息缺口。
 
 ## 三、稳定性与正确性
 
-> 状态：本节列出的核心项已全部落地。后续仅需在新写代码时遵循同样的约定。
+已落地：
 
-- **`unsafe` 审计**：当前 `unsafe` 集中在 `src/media/raster.rs`（WIC/COM 调用）、`src/notification/platform/windows.rs`、`src/dialog/platform/mod.rs`、`src/video/backend/ffmpeg/helpers.rs`、`src/audio/backend/ffmpeg/session/decode.rs`、`src/log/platform.rs`、`src/runtime/bootstrap.rs`、`src/runtime/theme.rs`、`src/runtime/input/platform_keys.rs`、`src/rendering/renderer/surface.rs`。**已为每处补 `// SAFETY:` 注释**，说明指针/句柄来源、生命周期、线程约束。后续 miri/loom 仍可在非 FFI 部分进一步覆盖。
-- **去除 `todo!()` / `unimplemented!()`**：`src/runtime/tests.rs` 与 `src/notification/tests.rs` 中的 `TestVm` 占位已替换成最小可用实现（返回空 `Stack`），并把 `ViewModelContext::for_benchmarks` 同时对 `bench-support` 与 `cfg(test)` 开放，恢复 `cargo test` 全绿。
-- **panic 清理**：媒体加载路径里 `http_client()` 的 `expect("http client should build")` 已改为返回 `Result`，并把 `media/loader.rs`、`media/svg.rs` 调用方改成可恢复错误；`media/raster.rs` 中 WIC `cast()` 的 `expect` 也改为映射成 `TguiError::Media`。`runtime/` 中剩余的 `expect` 都是布局/缓存层的不变量保护，按"仅在 setup / 真不变量处 panic"的原则保留。
-- **错误类型公开化**：`tgui::core::Error`（`TguiError` 的别名）和 `tgui::core::Result<T, E = TguiError>` 已稳定对外暴露，`prelude` 中可一起导入。`DialogError` / `NotificationError` 在原有位置保持不变。
-- **线程安全审查**：`README.md` 新增"线程模型与 Send / Sync"章节，列出 `ViewModel` / `Command` / `ValueCommand` / `root_view` / `Signal` 求值器 / 异步通知 & 对话框回调等关键位置的约束表；`DialogParentHandles` 的 `unsafe impl Send/Sync` 已补 SAFETY 注释，说明只在拥有窗口的线程解引用句柄。
+- `unsafe` 主要集中在平台/FFI/渲染边界，已能看到 `// SAFETY:` 注释覆盖 WIC、Windows Toast、窗口 parent handle、AccessKit macOS adapter、FFmpeg 音频解码等关键路径。
+- 公开错误别名已存在：`tgui::core::Error` 和 `tgui::core::Result<T, E = TguiError>`。
+- README 已补“线程模型与 Send / Sync”章节，说明 `ViewModel`、`Command`、`ValueCommand`、`root_view`、`Signal`、通知/对话框回调等边界。
+- 媒体加载、异步 raster、通知 action、对话框等异步路径会通过 runtime invalidation / dispatcher 回到主线程。
+- `State` / `Signal` / `TextController`、scene cache、runtime input、widget core、通知、媒体、动画、音频、视频 helper 均已有较多单元测试覆盖。
 
-## 四、平台覆盖（生产用户最常踩的坑）
+待补齐：
 
-- **macOS 通知后端**：`AGENTS.md` 提到"接口已公开但仍依赖 UserNotifications bridge，调用时可能返回 backend error"。需要走通 `objc2-user-notifications`，含权限请求、分类注册、action 回调。
-- **Linux 通知**：当前用 `notify-rust`，需要验证 GNOME / KDE / 老桌面环境（无 dbus 时降级）。
-- **Wayland**：HiDPI、fractional scaling、IME（fcitx5/ibus）、剪贴板、CSD 在 GNOME/KDE/wlroots 三类 compositor 上的实地验证。
-- **Windows**：DPI awareness manifest、HiDPI、暗色标题栏（DWM）、jump list、taskbar progress 至少给一组示例。
-- **WebAssembly**：当前不支持，但很多 GUI crate 把 wasm 作为试金石。明确 roadmap（暂不支持也要写在 README）。
+- 对仍保留的 `expect` / `panic` 做定期审计，区分测试代码、锁 poisoning、真实不变量和可恢复错误。
+- 对 `crates/tgui-runtime/src/runtime/`、`crates/tgui-runtime/src/ui/widget/core/`、`rendering` 的关键 invariant 建议补 `docs/advanced/runtime.md` 细化或代码旁 `// invariant:` 注释。
+- FFI 边界仍建议补平台 smoke checklist，尤其 Windows COM、macOS bundle-only API、Linux DBus/Wayland 组合。
 
-## 五、可访问性（a11y）
+## 四、平台覆盖
 
-AccessKit baseline 已默认接入，当前已具备系统 a11y 树与 runtime 焦点同源的基础能力：
+已落地：
 
-- `accesskit` 已接入；平台 adapter 分别走 Windows HWND、macOS NSView、Unix backend，不依赖 `accesskit_winit`。
-- 从 resolved layout + computed scene 暴露 root/window、containers、text、button、checkbox/radio/switch/select/slider/input/textarea/image/canvas/scrollview/modal/drawer 等基础 role、名称、值、状态与 bounds。
-- 键盘焦点链已与 a11y focus 同源：tab 顺序、focus trap、`auto_focus_first`、`return_focus_to`、`Esc` 关闭 overlay/dialog、`Enter`/`Space` 默认激活均走 runtime 同一路径。
-- AccessKit `Focus` / `Click` / Slider `SetValue` / TextInput `SetValue` action 已回到 runtime 线程并复用既有命令与文本同步路径。
-- 后续重点是屏幕阅读器实测：NVDA（Windows）、VoiceOver（macOS）、Orca（Linux）至少 smoke test，并补充真实设备兼容性记录。
-- 高级组件语义增强：DataGrid / Tree / Menu / Tabs 等组件落地时继续补行列、层级、选区、快捷键、描述关系等更细粒度语义。
-- 颜色对比度：`Theme` token 标注 WCAG AA 等级；提供高对比度主题。
-- `prefers-reduced-motion`：动画系统响应系统设置，关闭时禁用 `Signal::animated`。
+- 桌面目标聚焦 Windows、macOS、Linux；README 明确移动端当前不支持。
+- Windows 通知会准备 AppUserModelID 与开始菜单 shortcut；Linux 通知优先 `notify-rust`，失败后尝试 `notify-send`；macOS 普通通知支持 `.app` bundle 原生路径，裸二进制 fallback 到 `osascript`。
+- `WindowControl` 已覆盖拖拽、拖拽调整大小、最小化、最大化、还原、关闭和最大化状态查询。
+- 透明 / 无边框窗口、custom chrome、多窗口、dialog、clipboard、IME request 等已有平台抽象入口。
 
-## 六、文本与国际化
+待实测：
 
-- **IME 健壮性**：Windows IMM / TSF、macOS、fcitx5/ibus 的 composition、候选窗位置、commit/revoke 的边界用例补回归测试。
-- **复杂脚本**：阿拉伯/希伯来 RTL、印度系连字、表情序列（ZWJ）的 shaping 校验；目前 `cosmic-text` 已支持，需要 example 和测试。
-- **字体回退**：系统字体加载失败时的 fallback 链；嵌入一个 `Noto Sans` 子集做最低保证。
-- **i18n 框架**：是否提供 `fluent` 或 `gettext` 的 binding 示例；目前所有示例都是中文/英文硬编码。
-- **行编辑细节**：双击/三击选择、Home/End 行内 vs. 段首段尾、`Alt+←/→` 词跳、撤销/重做（`Input` / `Textarea` 都要有）。
-- **剪贴板**：富文本（多平台 mime 协商）、图片粘贴、Wayland primary selection。
+- **Windows**：DPI awareness、HiDPI、多显示器、透明/无边框窗口、DWM 暗色标题栏、通知 shortcut 清理/升级、MSI/安装后通知身份。
+- **macOS**：签名 `.app` bundle 下的 UserNotifications 权限、普通通知、VoiceOver、输入法、窗口透明/无边框、notarization。
+- **Linux**：GNOME / KDE / wlroots，X11 / Wayland，fractional scaling，fcitx5/ibus，剪贴板，DBus 不可用时的通知降级。
+- **WebAssembly**：当前不支持。README 应明确 wasm 暂不在 0.x 生产目标内，或单独开 roadmap。
+
+## 五、可访问性
+
+已落地：
+
+- 已接入 AccessKit，并按平台使用 `accesskit_windows`、`accesskit_macos`、`accesskit_unix` adapter。
+- a11y tree 从 resolved layout / computed scene 构造，覆盖 window/root、container、scroll view、text、image/icon、canvas、button、checkbox、radio、switch、select、slider、progress/spinner、text input/textarea、toast、modal/drawer、DataGrid/Table、Tree、Tabs、Splitter、audio/video 等基础 role。
+- 焦点与 runtime focus 同源，AccessKit action 通过 channel 回到 runtime。
+- reduced motion 已有应用级配置和窗口绑定：`Application::reduced_motion`、`bind_reduced_motion`、`WindowSpec::bind_reduced_motion`，并参与 style/animation collect。
+
+待补齐：
+
+- NVDA（Windows）、VoiceOver（macOS）、Orca（Linux）至少做 smoke test，并记录版本、桌面环境和已知问题。
+- DataGrid / Tree / Menu / Tabs 等高级组件需要继续增强行列、层级、选区、快捷键、描述关系等语义。
+- `Theme` token 需要标注 WCAG AA/AAA 对比度目标，并提供高对比度主题。
+- reduced motion 当前由应用配置/绑定驱动，还没有看到自动读取系统 `prefers-reduced-motion` 的平台桥接。
+
+## 六、文本、输入与国际化
+
+已落地：
+
+- `Input` / `Textarea` 共享 `TextController`、`TextChangeSet`、selection/caret、scroll、IME composition、clipboard copy/paste/cut、key repeat 等基础设施。
+- IME event path 已处理 enable/disable、preedit、commit、composition caret、surrounding text request，并有 UTF-8 / emoji / composition / scroll 可见性相关测试。
+- 文本布局基于 `cosmic-text`，`Textarea` 使用 `ropey`，并已有 caret/selection/scroll/viewport 增量测试。
+- `Command`、`on_input`、焦点链、overlay close、Tab navigation、Home/End 等 runtime 输入路径已有测试。
+
+待补齐：
+
+- Windows IMM/TSF、macOS 输入法、fcitx5/ibus 的真实设备回归，尤其候选窗位置、commit/revoke、删除周边文本能力和长文本滚动；稳定版 `winit 0.30` 未暴露之前 beta API 中使用过的 `DeleteSurrounding` 事件，需要单独评估替代路径或等待上游稳定支持。
+- RTL/双向文本、阿拉伯/希伯来、印度系连字、ZWJ 表情序列的 example 与回归测试。
+- 字体 fallback 策略需要文档化；系统字体加载失败时是否需要嵌入最小字体子集仍需决策。
+- 行编辑高级行为仍需审计：双击/三击选择、按词移动/选择、撤销/重做、富文本剪贴板、图片粘贴、Wayland primary selection。
+- i18n 示例仍不足，可补 fluent/gettext 或应用侧集成指南。
 
 ## 七、文档与示例
 
-- **`docs/` 太薄**：只有 `canvas.md`。需要：
-  - `architecture.md`（数据流图，已经有口述版）
-  - `state-management.md`（`State`/`Signal`/`TextController`/`AnimatedValue` 区别）
-  - `theming.md`（token、Stateful、light/dark/system）
-  - `windows.md`（多窗口、frameless、close policy）
-  - `media.md`（来源、缓存、错误处理）
-  - `notifications.md` / `dialogs.md` / `audio.md` / `video.md`（feature gate + 平台差异表）
-  - `migration/`（每次 breaking 写迁移指南）
-- **API doc**：所有公开 type 都要有 `///` 文档；CI 加 `RUSTDOCFLAGS="-D warnings"`。
-- **`docs.rs` 配置**：在 `Cargo.toml` 加 `[package.metadata.docs.rs] all-features = true`，并处理 FFmpeg 不可用时的降级。
-- **官方站点**：mdBook 或类似的 GitHub Pages，统一示例 + API 索引。
-- **CONTRIBUTING.md / CODE_OF_CONDUCT.md / SECURITY.md**：三个标准文件目前都缺。
+已落地：
+
+- `docs/` 已是 VitePress 文档站，而不再只有单个 canvas 文档。
+- 当前文档包含 quick start、application、environment、MVVM、layout、theme、widgets、input controls、interaction/portal、window chrome、media、dialogs/notifications、canvas、performance、runtime、examples、migration 等页面。
+- README 已覆盖项目状态、版本承诺、MSRV、feature、性能管线、workspace 结构、公开 API、线程模型、贡献注意事项和 license。
+- 示例工程位于 workspace `examples/*`，覆盖 animation、background effects、basic window、canvas、demo、dialogs、drawer、frameless、virtual list、modal、multi window、MVVM counter、DataGrid/Table、textarea、timeline、toast、tree 等。
+
+待补齐：
+
+- 所有公开 type / 方法的 `///` 文档覆盖率需要系统检查。`cargo doc -D warnings` 能防坏链接，但不能自动保证文档完整。
+- 需要补正式 `CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、`SECURITY.md`。
+- 需要发布流程文档：版本 bump、changelog、migration、tag、package list、docs 发布、crate publish、GitHub release。
+- 音频/视频文档应明确 FFmpeg 安装、动态/静态链接、平台差异和故障排查。
 
 ## 八、性能与资源
 
-> 状态：基础设施已落地。`docs/performance.md` 汇总了 benchmark 基线、`ResourceBudget` 配置、冷启动与空闲帧规则、调优清单。后续在数据点变化时只需更新该文档。
+已落地：
 
-- **基准基线**：`benches/` 现有 9 个 bench；`docs/performance.md` §1 给出代表性中位耗时和 0.x 阶段的 SLA 草案，PR 让任意 bench 退步 > 20% 需要在描述里说明原因。CI 的 `bench-publish` job（见第二章）启用 Bencher.dev 后会自动跟踪回归。
-- **GPU 内存预算**：新增公开类型 [`tgui::application::ResourceBudget`]，覆盖 canvas / widget 阴影离屏纹理缓存、image 与 SVG 多分辨率缓存的 LRU 容量上限；`Application::resource_budget(...)` 注入，`ResourceBudget::compact()` 提供内存受限环境的紧凑组合。详见 `docs/performance.md` §2。
-- **冷启动**：环境变量 `TGUI_PROFILE_STARTUP=1` 启动后，第一帧 `RenderStatus::Rendered` 会通过 `tgui-startup` tag 输出 `first_frame took ...ms` 日志（`src/log/profiler.rs::log_startup_phase` + `src/runtime/render_cycle.rs`）。桌面默认主题目标 < 200 ms。
-- **空闲帧 CPU**：事件循环统一走 `ControlFlow::Wait` / `WaitUntil(deadline)`，无动画 / smooth scroll / caret blink / key repeat 时不会空转；调优入口与排查路径见 `docs/performance.md` §4。
-- **大图片 / 大文档**：`MAX_IMAGE_DIMENSION = 2048` 会把过大的图片在解码前缩到 2048 长边；`Textarea` 走 `ropey` + `cosmic-text` viewport 增量 shape；具体边界在 `docs/performance.md` §5。
-- **多窗口**：每窗一个 `Renderer`（独立 `Surface` + pipeline 集合），共享 `wgpu::Device` / `Queue`；frame pacing 由各 surface 的 `Queue::submit` 独立驱动。
+- `docs/advanced/performance.md` 汇总了 benchmark、`ResourceBudget`、冷启动 profiling、调优方向和细粒度响应式渲染管线。
+- `ResourceBudget` 已公开，覆盖 Canvas shadow、widget shadow、image raster、SVG raster 缓存容量，并提供 `ResourceBudget::compact()`。
+- 细粒度响应式渲染快路径已默认内置：scene command splice、属性级依赖归因、GPU 顶点脏区间增量上传、纯滚动 CPU 子树重收集、纯滚动 GPU 平移。
+- `TGUI_PROFILE_STARTUP=1` 可输出首帧阶段 profiling。
+- 事件循环在无动画/滚动/caret/key repeat 时走等待路径，避免空闲帧忙等。
+
+待补齐：
+
+- 建立稳定 benchmark 基线和阈值，把 Bencher.dev job 启用到主分支。
+- 补真实应用级场景：大表格、长文本、复杂 overlay、图片墙、Canvas retained scene、多窗口、多 DPI。
+- GPU 内存和纹理缓存需要实机上限测试，并记录推荐 `ResourceBudget` 配置。
+- 视觉回归测试仍缺，主题/widget/canvas/渲染管线改动建议接入 reftest 或截图 diff。
 
 ## 九、安全
 
-- **网络层硬化**：`reqwest` blocking + rustls ring 已经在用；需要补：超时、重定向上限、最大响应体（防 SSRF/DoS）、`MediaSource::Url` 的 scheme 白名单。
-- **SVG 解析**：`resvg` 处理恶意 SVG（XXE、嵌入 raster bomb）的边界；`usvg-remote-resolvers` 远程引用要默认关闭或受限。
-- **路径遍历**：`MediaSource::Local` 是否对调用方传入的相对路径做 canonicalize。
-- **依赖审计**：`cargo audit` / `cargo deny advisories` 接 CI；`rustls 0.23 ring` 的 advisory 跟踪。
-- **`SECURITY.md`**：响应窗口、PGP key、CVE 流程。
+已落地：
+
+- 网络媒体使用 `reqwest` blocking + rustls/ring。
+- SVG 外部引用解析已限制远程 scheme 为 `http` / `https`；嵌入 bytes 的 SVG 默认拒绝本地相对路径；本地 SVG 只在文件来源下允许相对本地资源。
+- SVG data URL / nested image 解析失败会记录错误并使加载失败，避免静默吞掉外部资源问题。
+- Windows Toast XML 和 macOS AppleScript fallback 都有转义逻辑。
+- `cargo-deny` 已进入 CI，licenses/advisories/sources 有基础门禁。
+
+待补齐：
+
+- `MediaSource::Url` 顶层加载仍需明确 scheme 白名单、超时、重定向上限、最大响应体大小和可选 host allowlist，避免 SSRF/DoS 风险。
+- 远程 SVG 引用同样需要响应体大小、超时和重定向限制。
+- `MediaSource::Path` 是否 canonicalize、是否限制 sandbox 根目录应交给应用还是框架，需要文档化。
+- `deny.toml` 当前忽略了一个 advisory，需记录原因、影响范围和复查日期。
+- 补 `SECURITY.md`：报告渠道、响应窗口、支持版本、CVE 流程。
 
 ## 十、生态与可用性
 
-- **更多 widget**：`Tabs`、`TreeView`、`Table`（虚拟滚动）、`Menu` / `ContextMenu`、`Tooltip`、`Toast`、`ProgressBar` 是企业级 GUI 的最小集；目前 `widgets` 模块只有基础控件。
-- **拖放**：文件 drop、widget 间 drag-drop 的统一抽象。
-- **窗口能力**：always-on-top、tray icon、global hotkey、单实例。
-- **系统主题事件**：暗色模式切换时已经有过渡，但需要 example 验证；强调色（accent color）跟随系统。
-- **打包**：示例工程加 `cargo-bundle` / `cargo-packager` 配置，生成 `.app` / `.msi` / `.AppImage`。
-- **热重载 / DevTools**：开发期 widget tree inspector、动画时间线、性能 overlay；`bench-support` feature 可以扩成 `dev-tools` feature。
+已落地：
+
+- widget 覆盖已经超过基础控件，公开导出包括 Tabs/TabView、Tree、Table/DataGrid、Menu/ContextMenu/MenuBar、Tooltip、Popover、ToastHost、ProgressBar、Spinner、List/VirtualList、Calendar、DatePicker、TimePicker、ColorPicker、Upload、Pagination、Breadcrumb、Accordion、Combobox/AutoComplete、RichText、Carousel、Rating、Splitter/ResizablePanels、Badge、Avatar、Skeleton、Card、Icon 等。
+- overlay/portal 基础设施、焦点 trap、回焦、菜单/Select/Popover/Tooltip 定位已经成为共享 runtime 能力。
+- 文件 drop、gesture、drag/edge swipe/pinch/long press 等交互类型已公开。
+
+待补齐：
+
+- 系统级能力仍少：tray icon、global hotkey、single instance、always-on-top、taskbar progress、jump list、文件关联。
+- 打包示例仍缺：`.app`、`.msi`、`.AppImage` / Flatpak / deb/rpm，以及音视频依赖打包。
+- DevTools / inspector / 性能 overlay / animation timeline 仍可作为独立 `dev-tools` feature 规划。
+- 示例需要更贴近真实业务：设置页、数据表 CRUD、媒体库、日志查看器、后台任务进度、通知/托盘组合。
 
 ## 十一、维护性
 
-- **`src/runtime/` 与 `src/ui/widget/core/` 的 invariant 文档**：CLAUDE.md 已警告"高风险区"，需要把每个子模块的不变量写成 `// invariant:` 注释或 `docs/runtime.md`。
-- **公共 API 防回退测试**：`cargo public-api` 接 CI，breaking change 需要显式批准。
-- **示例 CI**：`examples/*` 不在 workspace，需要单独脚本批量 `cargo check`，目前只能靠手动。
-- **Issue / PR 模板**：`.github/ISSUE_TEMPLATE/`、`PULL_REQUEST_TEMPLATE.md`。
-- **trace 体系**：用 `tracing` 替换部分 `log`；提供 feature gate 的 `tracing-subscriber` 集成示例。
+已落地：
 
-## 十二、商业可用的细节
+- `AGENTS.md` / `CLAUDE.md` 已标注高风险区域和推荐阅读顺序。
+- 运行时、widget core、渲染 primitive、文本输入、通知、媒体、音视频已有较多模块化测试。
+- 内部 crate 边界已经拆出 `tgui-core`、`tgui-platform`、`tgui-log`、`tgui-mvvm`、`tgui-media`、`tgui-ui`、`tgui-rendering`，根 crate 保持 facade。
 
-- **崩溃报告**：渲染线程 panic 时的 fallback UI，避免整窗黑屏；可选 `human-panic` 集成。
-- **本地化运行时错误**：用户可见的字符串（默认对话框按钮、文件选择器标题）跟随系统语言。
-- **打印 / 截屏 / 离屏渲染**：`Renderer` 渲染到 PNG 的 API（已有部分基础设施），便于 CI 视觉回归。
-- **视觉回归测试**：`reftest` 风格，主题/widget/canvas 改动落地前自动跑。
-- **签名与公证**：macOS notarization、Windows code signing 的示例脚本。
+待补齐：
 
----
+- 把细粒度响应式渲染管线的重要 invariant 从 `FINE_GRAINED_ROADMAP.md` 同步到更稳定的开发文档或代码注释。
+- 公共 API、widget 行为、theme token、layout 行为需要更清晰的变更分类：breaking / compatible / visual-compatible。
+- `tracing` 集成可作为 opt-in 示例，不一定替换现有日志，但要明确 runtime phase、scene patch、GPU upload、media load 的 observability 入口。
 
-## 优先级建议（个人判断）
+## 十二、商业可用细节
 
-1. **现在就该做**：CI 矩阵 + clippy/fmt/audit、CONTRIBUTING/SECURITY、`unsafe` SAFETY 注释、`todo!()` 清理、API 文档覆盖率、AccessKit baseline 的屏幕阅读器 smoke test。
-2. **0.2 之前**：winit 稳定版升级、macOS 通知后端、Linux 通知兼容性、错误类型对外固化、`cargo public-api` 守门。
-3. **0.3 ~ 0.5**：a11y 屏幕阅读器实测、复杂脚本/IME 回归、Tabs/Tooltip/Menu/Table 等 widget、视觉回归测试、桌面打包样例。
-4. **1.0 之前**：API 冻结、性能基线、安全审计、官方站点、多平台 release 工作流。
+待补齐：
+
+- 崩溃报告与 panic hook：渲染/runtime panic 时的日志、用户提示和可恢复策略。
+- 本地化运行时字符串：默认对话框按钮、错误提示、文件选择标题、通知文案。
+- 离屏渲染 / 截图 API：用于 CI 视觉回归和 bug report。
+- macOS signing/notarization、Windows code signing、Linux desktop file/icon/notification identity 的脚本和文档。
+- 长期支持策略：支持哪些 Rust 版本、桌面系统版本、GPU 后端、FFmpeg 版本。
+
+## 优先级建议
+
+现在就该做：
+
+1. 启用 public API 守门，做 0.2 API 面 review。
+2. 补 `CONTRIBUTING.md` / `SECURITY.md` / Issue & PR 模板。
+3. 为 `MediaSource::Url` 和远程 SVG 资源补网络安全默认值。
+4. 跑一轮 Windows / macOS / Linux 的通知、IME、a11y、透明窗口、HiDPI smoke test 并记录结果。
+5. 记录稳定版 `winit 0.30.13` 兼容封装与未来 `0.31` stable 升级的迁移注意事项。
+
+0.3 前：
+
+1. 启用 coverage / Bencher.dev 主分支趋势。
+2. 补音频/视频打包和 FFmpeg 故障排查文档。
+3. 补 RTL/复杂脚本/高级文本编辑测试。
+4. 补真实业务示例和视觉回归基础设施。
+
+1.0 前：
+
+1. API 冻结、SemVer / migration / changelog 流程稳定，并完成 `winit 0.30` 生产实机验证。
+2. a11y 屏幕阅读器实测、IME 实机矩阵、平台通知/对话框/窗口能力验证完成。
+3. 安全响应流程、依赖审计策略、发布签名/公证/打包文档完成。
+4. 性能基线、资源预算指南和高风险渲染快路径回归测试长期稳定。

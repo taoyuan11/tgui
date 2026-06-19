@@ -1,11 +1,11 @@
 use super::*;
 
 impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
-    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
+    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         self.create_or_resume_surface(event_loop, None);
     }
 
-    fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
+    fn user_event(&mut self, event_loop: &winit::event_loop::ActiveEventLoop, _event: ()) {
         self.drain_dialog_completions();
         self.drain_notification_completions();
         self.drain_task_completions();
@@ -21,20 +21,23 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
 
     fn window_event(
         &mut self,
-        event_loop: &dyn ActiveEventLoop,
+        event_loop: &winit::event_loop::ActiveEventLoop,
         window_id: WindowId,
-        event: WindowEvent,
+        event: winit::event::WindowEvent,
     ) {
         if Some(window_id) != self.window_id {
             return;
         }
 
-        if self.handle_bound_window_event(event_loop, event) {
-            event_loop.exit();
+        for event in WindowEvent::from_winit(event, self.physical_cursor_position()) {
+            if self.handle_bound_window_event(event_loop, event) {
+                event_loop.exit();
+                break;
+            }
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         self.drain_dialog_completions();
         self.drain_notification_completions();
         self.drain_task_completions();
@@ -43,7 +46,7 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
         }
     }
 
-    fn suspended(&mut self, _event_loop: &dyn ActiveEventLoop) {
+    fn suspended(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
         self.suspend();
     }
 }

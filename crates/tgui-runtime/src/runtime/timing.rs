@@ -13,6 +13,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         });
     }
 
+    pub(in crate::runtime) fn physical_cursor_position(&self) -> Option<PhysicalPosition<f64>> {
+        let cursor = self.cursor_position?;
+        let scale_factor = self
+            .window
+            .as_ref()
+            .map(|window| window.scale_factor())
+            .unwrap_or(1.0);
+        Some(PhysicalPosition::new(
+            f64::from(cursor.x.get()) * scale_factor,
+            f64::from(cursor.y.get()) * scale_factor,
+        ))
+    }
+
     pub(in crate::runtime) fn unit_context(&self) -> UnitContext {
         let scale_factor = self
             .window

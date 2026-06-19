@@ -146,6 +146,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let Some(layout) = cached.layout.as_mut() else {
                 return false;
             };
+            let mut dependencies = cached.dependencies.clone();
             if layout
                 .update_layout_style_slots(
                     &widget_ids,
@@ -160,7 +161,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             {
                 return false;
             }
-            cached.dependencies = layout.dependencies().clone();
+            dependencies.remove_widget_phase_owners(&owner_ids, DependencyPhase::Layout);
+            dependencies.merge_from(layout.dependencies());
+            cached.dependencies = dependencies;
             cached.layout_valid = true;
             cached.computed_valid = false;
         }

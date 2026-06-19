@@ -11,9 +11,9 @@ use crate::platform::backend::EventLoop;
 use crate::platform::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use crate::platform::window::WindowAttributes;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use raw_window_handle::RawWindowHandle;
 #[cfg(target_os = "windows")]
-use winit_win32::WindowAttributesWindows;
+use winit::platform::windows::WindowAttributesExtWindows;
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[derive(Clone, Copy)]
@@ -40,10 +40,7 @@ pub(super) fn configure_native_modal_window(
     };
 
     match parent.window {
-        RawWindowHandle::Win32(handle) => attributes.with_platform_attributes(Box::new(
-            WindowAttributesWindows::default()
-                .with_owner_window(handle.hwnd.get() as *mut core::ffi::c_void),
-        )),
+        RawWindowHandle::Win32(handle) => attributes.with_owner_window(handle.hwnd.get() as isize),
         _ => attributes,
     }
 }
@@ -60,7 +57,7 @@ pub(super) fn configure_native_modal_window(
     // SAFETY: `parent.window` 来自 `NativeModalParent::from_window`，里面调用
     // `window_handle()` 拿到的 `RawWindowHandle::AppKit` 与 `parent` 同生命周期；
     // 这里仅作为父窗口属性传给 macOS NSWindow，不会持有跨线程的原始指针，由
-    // `winit-appkit` 在主线程立即使用，因此满足 `with_parent_window` 的安全契约。
+    // `winit` 在主线程立即使用，因此满足 `with_parent_window` 的安全契约。
     unsafe { attributes.with_parent_window(Some(parent.window)) }
 }
 
@@ -121,12 +118,9 @@ pub(super) fn default_window_position(
     let monitor = event_loop
         .primary_monitor()
         .or_else(|| event_loop.available_monitors().next())?;
-    let monitor_size = monitor
-        .current_video_mode()
-        .map(|mode| mode.size())
-        .or_else(|| monitor.video_modes().next().map(|mode| mode.size()))?;
+    let monitor_size = monitor.size();
     centered_window_position_for_monitor(
-        monitor.position(),
+        Some(monitor.position()),
         monitor_size,
         monitor.scale_factor(),
         window_size,

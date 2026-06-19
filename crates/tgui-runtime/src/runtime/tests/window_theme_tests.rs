@@ -105,24 +105,11 @@ impl ActiveEventLoop for CapturingEventLoop {
         panic!("not needed in runtime tests")
     }
 
-    fn create_custom_cursor(
-        &self,
-        _custom_cursor: CustomCursorSource,
-    ) -> Result<CustomCursor, RequestError> {
-        panic!("not needed in runtime tests")
-    }
-
     fn available_monitors(&self) -> Box<dyn Iterator<Item = MonitorHandle>> {
         Box::new(std::iter::empty())
     }
 
     fn primary_monitor(&self) -> Option<MonitorHandle> {
-        None
-    }
-
-    fn listen_device_events(&self, _allowed: DeviceEvents) {}
-
-    fn system_theme(&self) -> Option<WindowTheme> {
         None
     }
 
@@ -141,19 +128,6 @@ impl ActiveEventLoop for CapturingEventLoop {
     }
 
     fn exit(&self) {}
-
-    fn exiting(&self) -> bool {
-        false
-    }
-
-    fn owned_display_handle(&self) -> OwnedDisplayHandle {
-        OwnedDisplayHandle::new(Arc::new(TestDisplayHandle))
-    }
-
-    fn rwh_06_handle(&self) -> &dyn HasDisplayHandle {
-        static DISPLAY: TestDisplayHandle = TestDisplayHandle;
-        &DISPLAY
-    }
 }
 
 #[test]
