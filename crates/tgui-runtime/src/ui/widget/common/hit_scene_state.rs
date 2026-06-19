@@ -70,7 +70,7 @@ pub(crate) struct ComputedScene<VM> {
     /// `finalize_overlay_layers` 在 collect 收尾时按 layer 顺序合并到 `scene.overlay_*` /
     /// `overlay_hit_regions` / `overlay_close_handlers`，从而强制 z-order
     /// （Tooltip < Popover < Menu < Modal）。
-    pub overlay_layers: [OverlayLayerBucket<VM>; OVERLAY_LAYER_COUNT],
+    pub overlay_layers: Vec<OverlayLayerBucket<VM>>,
     pub(crate) overlay_layer_graph: OverlayLayerGraph,
     pub scroll_regions: SmallVec<[ScrollRegion; 1]>,
     pub ime_cursor_area: Option<Rect>,
@@ -92,7 +92,7 @@ impl<VM> Clone for ComputedScene<VM> {
             overlay_anchors: self.overlay_anchors.clone(),
             portal_entries: self.portal_entries.clone(),
             external_portal_requests: self.external_portal_requests.clone(),
-            overlay_layers: std::array::from_fn(|i| self.overlay_layers[i].clone()),
+            overlay_layers: self.overlay_layers.iter().cloned().collect(),
             overlay_layer_graph: self.overlay_layer_graph.clone(),
             scroll_regions: self.scroll_regions.clone(),
             ime_cursor_area: self.ime_cursor_area,
@@ -110,6 +110,12 @@ impl<VM> ComputedScene<VM> {
 }
 
 pub(crate) const OVERLAY_LAYER_COUNT: usize = 5;
+
+pub(crate) fn fresh_overlay_layers<VM>() -> Vec<OverlayLayerBucket<VM>> {
+    (0..OVERLAY_LAYER_COUNT)
+        .map(|_| OverlayLayerBucket::default())
+        .collect()
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct OverlayLayerGraph {
@@ -417,7 +423,7 @@ impl<VM> Default for ComputedScene<VM> {
             overlay_anchors: HashMap::new(),
             portal_entries: SmallVec::new(),
             external_portal_requests: SmallVec::new(),
-            overlay_layers: std::array::from_fn(|_| OverlayLayerBucket::default()),
+            overlay_layers: fresh_overlay_layers(),
             overlay_layer_graph: OverlayLayerGraph::default(),
             scroll_regions: SmallVec::new(),
             ime_cursor_area: None,
@@ -708,7 +714,7 @@ impl<VM> ComputedScene<VM> {
             base_close_handlers,
             base_focus_scopes,
         );
-        self.overlay_layers = std::array::from_fn(|_| OverlayLayerBucket::default());
+        self.overlay_layers = fresh_overlay_layers();
         crate::runtime::overlay::collect::finalize_portal_entries(self, viewport);
         self.finalize_overlay_layers();
         self.portal_overlay_counts = PortalOverlayCounts {

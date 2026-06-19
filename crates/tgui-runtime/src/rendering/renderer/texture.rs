@@ -13,6 +13,18 @@ impl Renderer {
         if width == 0 || height == 0 {
             return Ok(None);
         }
+        if !texture_frame.has_valid_rgba_len() {
+            return Err(TguiError::Media(format!(
+                "invalid texture frame: {}x{} requires {} RGBA bytes but has {}",
+                width,
+                height,
+                texture_frame
+                    .expected_rgba_len()
+                    .map(|len| len.to_string())
+                    .unwrap_or_else(|| "an overflowing number of".to_string()),
+                texture_frame.pixels().len()
+            )));
+        }
 
         if let Some(entry) = self.texture_cache.get_mut(&key) {
             if entry.revision == texture_frame.revision() {

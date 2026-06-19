@@ -289,7 +289,7 @@ impl TextureFrame {
             revision: 1,
             width,
             height,
-            pixels: Arc::from(pixels),
+            pixels: Arc::from(normalize_rgba_pixels(width, height, pixels)),
         }
     }
 
@@ -305,7 +305,7 @@ impl TextureFrame {
             revision: revision.max(1),
             width,
             height,
-            pixels: Arc::from(pixels),
+            pixels: Arc::from(normalize_rgba_pixels(width, height, pixels)),
         }
     }
 
@@ -324,6 +324,29 @@ impl TextureFrame {
     pub(crate) fn pixels(&self) -> &[u8] {
         &self.pixels
     }
+
+    pub(crate) fn expected_rgba_len(&self) -> Option<usize> {
+        expected_rgba_len(self.width, self.height)
+    }
+
+    pub(crate) fn has_valid_rgba_len(&self) -> bool {
+        self.expected_rgba_len() == Some(self.pixels.len())
+    }
+}
+
+fn expected_rgba_len(width: u32, height: u32) -> Option<usize> {
+    let pixels = u64::from(width).checked_mul(u64::from(height))?;
+    let bytes = pixels.checked_mul(4)?;
+    usize::try_from(bytes).ok()
+}
+
+fn normalize_rgba_pixels(width: u32, height: u32, mut pixels: Vec<u8>) -> Vec<u8> {
+    let Some(expected_len) = expected_rgba_len(width, height) else {
+        pixels.clear();
+        return pixels;
+    };
+    pixels.resize(expected_len, 0);
+    pixels
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -474,5 +497,26 @@ pub(super) fn clamp_raster_request(width: u32, height: u32) -> RasterRequest {
     RasterRequest {
         width: (width as f32 * scale).round().max(1.0) as u32,
         height: (height as f32 * scale).round().max(1.0) as u32,
+    }
+}
+
+#[cfg(test)]
+mod texture_frame_tests {
+    use super::TextureFrame;
+
+    #[test]
+    fn texture_frame_pads_short_rgba_buffers() {
+        let frame = TextureFrame::new(2, 1, vec![255, 0, 0, 255]);
+
+        assert_eq!(frame.pixels(), &[255, 0, 0, 255, 0, 0, 0, 0]);
+        assert!(frame.has_valid_rgba_len());
+    }
+
+    #[test]
+    fn texture_frame_truncates_long_rgba_buffers() {
+        let frame = TextureFrame::new(1, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+
+        assert_eq!(frame.pixels(), &[1, 2, 3, 4]);
+        assert!(frame.has_valid_rgba_len());
     }
 }

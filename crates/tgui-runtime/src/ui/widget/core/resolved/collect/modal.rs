@@ -41,7 +41,7 @@ impl<VM> ResolvedElement<VM> {
         computed.scroll_regions.clear();
         computed.focus_scopes.clear();
         computed.ime_cursor_area = None;
-        computed.overlay_layers = Default::default();
+        computed.overlay_layers = crate::ui::widget::common::fresh_overlay_layers();
     }
 
     pub(super) fn emit_modal_close_overlay_if_open(
