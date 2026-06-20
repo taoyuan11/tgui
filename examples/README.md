@@ -31,7 +31,6 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 8. `table_datagrid`
 9. `tree`
 10. `text_area`
-11. `task_console`
 
 ## 桌面示例说明
 
@@ -237,22 +236,6 @@ Tree 专项示例。演示：
 
 ```bash
 cargo run --manifest-path examples/tree/Cargo.toml
-```
-
-### `task_console`
-
-真实业务流示例。演示：
-
-- `Form` / `TextFormField` 与 `Input` 校验绑定
-- `DataGrid` 多选、排序、行内编辑和 context menu
-- `ProgressBar`、`Badge`、`ToastHost`
-- `CommandContext::dialogs()` 确认操作
-- `CommandContext::notifications()` 发送系统通知
-
-运行方式：
-
-```bash
-cargo run --manifest-path examples/task_console/Cargo.toml
 ```
 
 ### `text_area`

@@ -103,12 +103,3 @@ Calendar::new(app.demo_date_month.signal(), app.demo_date.signal())
 ## 样式与校验
 
 这些控件都支持 `style(...)` / `style_full(...)`。`DatePicker`、`TimePicker` 和 `NumberInput` 还支持 `validation(...)`，可以直接复用 `FormField` 或 `TextFormField` 的视觉校验状态。
-
-## 文本输入边界
-
-`Input` 和 `Textarea` 的基础编辑路径按 extended grapheme cluster 移动和删除，避免拆开
-ZWJ 表情、组合音标和复杂脚本簇。IME preedit、selection、UTF-8 边界和滚动可见性由运行时
-统一维护。
-
-0.3 暂不内置撤销/重做栈、富文本剪贴板、图片粘贴或 Wayland primary selection。需要这些
-能力的应用可以在 `TextController` 和命令回调层维护自己的编辑历史或剪贴板策略。
