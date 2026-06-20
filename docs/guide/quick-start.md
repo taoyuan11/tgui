@@ -77,3 +77,11 @@ cargo run --manifest-path examples/canvas/Cargo.toml
 ```
 
 更多示例见[示例索引](/advanced/examples)。
+
+## 下一步
+
+- 想配置标题、窗口大小、主题、资源预算和多窗口，读[应用与窗口](/guide/application)。
+- 想理解状态如何驱动 UI，读[MVVM 状态模型](/guide/mvvm)。
+- 想直接查组件用法，读[组件](/features/widgets)和[表单增强控件](/features/input-controls)。
+- 想做自定义绘制或图表，读[Canvas](/features/canvas)。
+- 想使用原生文件选择、系统通知或无边框窗口，读[对话框与通知](/features/dialogs-notifications)和[自定义窗口 Chrome](/features/window-chrome)。
