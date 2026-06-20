@@ -349,12 +349,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         |buffer: &RopeBuffer, state: &TextEditState| {
                             if let Some((start, _)) = state.selection_range() {
                                 if extend {
-                                    buffer.prev_char_boundary_byte(state.cursor)
+                                    buffer.prev_grapheme_boundary_byte(state.cursor)
                                 } else {
                                     start
                                 }
                             } else {
-                                buffer.prev_char_boundary_byte(state.cursor)
+                                buffer.prev_grapheme_boundary_byte(state.cursor)
                             }
                         },
                         extend,
@@ -378,12 +378,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         |buffer: &RopeBuffer, state: &TextEditState| {
                             if let Some((_, end)) = state.selection_range() {
                                 if extend {
-                                    buffer.next_char_boundary_byte(state.cursor)
+                                    buffer.next_grapheme_boundary_byte(state.cursor)
                                 } else {
                                     end
                                 }
                             } else {
-                                buffer.next_char_boundary_byte(state.cursor)
+                                buffer.next_grapheme_boundary_byte(state.cursor)
                             }
                         },
                         extend,

@@ -33,6 +33,7 @@ cargo run --manifest-path examples/basic_window/Cargo.toml
 | `table_datagrid` | 表格和 DataGrid |
 | `toast_snackbar` | toast / snackbar |
 | `tree` | Tree 组件 |
+| `task_console` | 业务任务控制台 |
 
 `examples/demo` 按类型组织组件：`Basics` 覆盖 `Badge`、`Avatar`、`Card`、`Icon`、`RichText`、`Collapse`、`Accordion` 和 `ResizablePanels`；`Forms` 覆盖 `DatePicker`、`TimePicker`、`NumberInput`、`ColorPicker`、`Upload`、`Combobox` / `AutoComplete` 和 `Rating`；`Feedback` 覆盖 `Skeleton`；`Data` 覆盖 `Breadcrumb` 和 `Pagination`；`Media & Canvas` 覆盖 `Carousel`。
 
@@ -43,5 +44,6 @@ cargo run --manifest-path examples/basic_window/Cargo.toml
 3. `canvas`
 4. `frameless_window`
 5. `demo`
+6. `task_console`
 
 如果正在调试某个组件，优先查看同名或相近示例，再阅读对应模块源码。

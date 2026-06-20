@@ -149,7 +149,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let (start, end) = if let Some(range) = state.selection_range() {
                 range
             } else if state.cursor > 0 {
-                (buffer.prev_char_boundary_byte(state.cursor), state.cursor)
+                (
+                    buffer.prev_grapheme_boundary_byte(state.cursor),
+                    state.cursor,
+                )
             } else {
                 return None;
             };
@@ -173,7 +176,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let (start, end) = if let Some(range) = state.selection_range() {
                 range
             } else if state.cursor < buffer.len_bytes() {
-                (state.cursor, buffer.next_char_boundary_byte(state.cursor))
+                (
+                    state.cursor,
+                    buffer.next_grapheme_boundary_byte(state.cursor),
+                )
             } else {
                 return None;
             };

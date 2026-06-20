@@ -7,10 +7,12 @@
 #   - doc              :  cargo doc --all-features  (Linux)
 #   - clippy           :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
 #   - test             :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
+#   - workspace-check  :  cargo check --workspace --all-targets  (Linux)
+#   - public-api       :  cargo-public-api diff against checked-in baselines
 #   - bench-compile    :  cargo check --features bench-support --benches
 #                         (Linux, Criterion target + bench-support 编译可达性)
 #   - deny             :  cargo-deny licenses/advisories/bans/sources  (Linux)
-#   - coverage         :  Codecov 上传，需要 vars.ENABLE_COVERAGE=true 与 secrets.CODECOV_TOKEN
+#   - coverage         :  默认生成 summary/lcov artifact；Codecov 上传需要 secrets.CODECOV_TOKEN
 #   - bench-publish    :  Bencher.dev 上报，需要 vars.ENABLE_BENCH=true 与 secrets.BENCHER_API_TOKEN
 
 name: ci
@@ -62,6 +64,52 @@ jobs:
             pkg-config
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --no-deps --all-features
+
+  workspace-check:
+    name: workspace check (all targets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install FFmpeg dev libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
+            libavcodec-dev libavformat-dev libavdevice-dev \
+            libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
+            pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: workspace-check
+      - run: cargo check --workspace --all-targets --all-features
+
+  public-api:
+    name: public API guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install FFmpeg dev libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
+            libavcodec-dev libavformat-dev libavdevice-dev \
+            libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
+            pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: public-api
+      - name: Install cargo-public-api
+        uses: taiki-e/install-action@cargo-public-api
+      - name: Check public API baselines
+        shell: bash
+        run: |
+          cargo public-api -p tgui --all-features --color never > /tmp/tgui-public-api.txt
+          cargo public-api -p tgui-runtime --all-features --color never > /tmp/tgui-runtime-public-api.txt
+          diff -u public-api/tgui.txt /tmp/tgui-public-api.txt
+          diff -u public-api/tgui-runtime.txt /tmp/tgui-runtime-public-api.txt
 
   clippy:
     name: clippy (${{ matrix.os }} / ${{ matrix.feature_set.label }})
@@ -203,7 +251,7 @@ jobs:
             cargo test --workspace --features "${{ matrix.feature_set.features }}"
           fi
       - name: Run strict reactive no fallback group
-        if: matrix.feature_set.features == 'bench-support'
+        if: contains(matrix.feature_set.features, 'bench-support')
         shell: bash
         run: |
           cargo test strict_reactive_no_fallback --features bench-support --quiet
@@ -230,15 +278,15 @@ jobs:
           arguments: --all-features
 
   # ─────────────────────────────────────────────────────────────────────
-  # 以下两个 job 默认跳过，需要仓库 owner 在 Settings → Secrets and variables
-  # 中配置后启用。这样即便没有外部 token，CI 也不会因 missing secret 失败。
+  # coverage 默认运行并上传 lcov artifact；Codecov / Bencher 上传步骤只有在
+  # 对应 repo secret 配好时才执行，避免 missing secret 让 CI 变红。
   # ─────────────────────────────────────────────────────────────────────
 
   coverage:
     name: coverage (codecov)
     runs-on: ubuntu-latest
-    # TODO: 仓库 owner 在 repo Variables 设 ENABLE_COVERAGE=true，并在 Secrets 添加 CODECOV_TOKEN 后启用。
-    if: ${{ vars.ENABLE_COVERAGE == 'true' }}
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -258,13 +306,21 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate coverage
-        run: cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
+        run: |
+          cargo llvm-cov --workspace --all-features --summary-only
+          cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-lcov
+          path: lcov.info
       - name: Upload to Codecov
+        if: ${{ env.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ env.CODECOV_TOKEN }}
 
   bench-publish:
     name: bench (bencher.dev)
@@ -272,6 +328,8 @@ jobs:
     # TODO: 仓库 owner 在 repo Variables 设 ENABLE_BENCH=true，并在 Secrets 添加 BENCHER_API_TOKEN 后启用。
     # 同时需要在 Bencher.dev 创建项目并把项目 slug 填到下面的 --project 参数。
     if: ${{ vars.ENABLE_BENCH == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    env:
+      BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -287,10 +345,11 @@ jobs:
           key: bench-publish
       - uses: bencherdev/bencher@main
       - name: Run benchmarks and upload
+        if: ${{ env.BENCHER_API_TOKEN != '' }}
         run: |
           bencher run \
             --project tgui \
-            --token "${{ secrets.BENCHER_API_TOKEN }}" \
+            --token "$BENCHER_API_TOKEN" \
             --branch master \
             --testbed ubuntu-latest \
             --adapter rust_criterion \

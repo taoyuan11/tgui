@@ -11,7 +11,7 @@ use crate::application::ResourceBudget;
 use crate::foundation::binding::InvalidationSignal;
 use crate::ui::widget::Rect;
 
-use super::loader::load_media_document;
+use super::loader::{fetch_http_bytes, load_media_document, SVG_EXTERNAL_IMAGE_MAX_BODY_BYTES};
 use super::types::{AnimationClock, ImageSnapshot};
 use super::{MediaManager, MediaSource, MediaTextureKey, RasterRequest, TextureFrame};
 
@@ -191,6 +191,104 @@ fn svg_from_url_resolves_relative_http_images() {
         .expect("SVG with relative HTTP image should decode");
     assert_eq!(document.intrinsic_size.width, 8.0);
     assert_eq!(document.intrinsic_size.height, 8.0);
+}
+
+#[test]
+fn top_level_media_url_rejects_non_http_schemes() {
+    let error = match load_media_document(&MediaSource::url("file:///tmp/tgui-image.gif")) {
+        Ok(_) => panic!("file URL should be rejected for remote media"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("only http and https"));
+}
+
+#[test]
+fn top_level_media_url_rejects_redirect_chains_past_limit() {
+    let mut routes = HashMap::new();
+    for index in 0..6 {
+        routes.insert(
+            format!("/r{index}"),
+            TestResponse::redirect(format!("/r{}", index + 1)),
+        );
+    }
+    routes.insert(
+        "/r6".to_string(),
+        TestResponse::new("image/gif", ONE_BY_ONE_GIF.to_vec()),
+    );
+    let server = TestServer::new(routes);
+
+    let error = match load_media_document(&MediaSource::url(format!("{}/r0", server.base_url))) {
+        Ok(_) => panic!("redirect chain should exceed the media redirect limit"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("redirect"));
+}
+
+#[test]
+fn top_level_media_url_rejects_declared_body_over_limit() {
+    let server = TestServer::new(HashMap::from([(
+        "/too-large.gif".to_string(),
+        TestResponse::new("image/gif", Vec::new()).with_declared_content_length(33 * 1024 * 1024),
+    )]));
+
+    let error = match load_media_document(&MediaSource::url(format!(
+        "{}/too-large.gif",
+        server.base_url
+    ))) {
+        Ok(_) => panic!("oversized media response should be rejected"),
+        Err(error) => error,
+    };
+
+    let message = error.to_string();
+    assert!(message.contains("response body too large"), "{message}");
+}
+
+#[test]
+fn remote_svg_image_rejects_declared_body_over_limit() {
+    let server = TestServer::new(HashMap::from([
+        (
+            "/doc.svg".to_string(),
+            TestResponse::new(
+                "image/svg+xml",
+                br#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><image href="huge.gif" width="8" height="8"/></svg>"#
+                    .to_vec(),
+            ),
+        ),
+        (
+            "/huge.gif".to_string(),
+            TestResponse::new("image/gif", Vec::new())
+                .with_declared_content_length((SVG_EXTERNAL_IMAGE_MAX_BODY_BYTES + 1) as usize),
+        ),
+    ]));
+
+    let error = match load_media_document(&MediaSource::url(format!("{}/doc.svg", server.base_url)))
+    {
+        Ok(_) => panic!("oversized SVG external image should be rejected"),
+        Err(error) => error,
+    };
+
+    let message = error.to_string();
+    assert!(message.contains("response body too large"), "{message}");
+}
+
+#[test]
+fn http_helper_rejects_streaming_body_over_limit_without_content_length() {
+    let server = TestServer::new(HashMap::from([(
+        "/stream.bin".to_string(),
+        TestResponse::new("application/octet-stream", b"12345".to_vec()).without_content_length(),
+    )]));
+    let url = reqwest::Url::parse(&format!("{}/stream.bin", server.base_url))
+        .expect("test URL should parse");
+
+    let error = match fetch_http_bytes(&url, 4, "test media") {
+        Ok(_) => panic!("streaming body should be capped"),
+        Err(error) => error,
+    };
+
+    let message = error.to_string();
+    assert!(message.contains("response body too large"), "{message}");
 }
 
 #[test]
@@ -452,6 +550,9 @@ struct TestResponse {
     content_type: &'static str,
     body: Vec<u8>,
     status_line: &'static str,
+    headers: Vec<(String, String)>,
+    declared_content_length: Option<usize>,
+    include_content_length: bool,
 }
 
 impl TestResponse {
@@ -460,7 +561,36 @@ impl TestResponse {
             content_type,
             body,
             status_line: "HTTP/1.1 200 OK",
+            headers: Vec::new(),
+            declared_content_length: None,
+            include_content_length: true,
         }
+    }
+
+    fn redirect(location: impl Into<String>) -> Self {
+        Self {
+            content_type: "text/plain",
+            body: Vec::new(),
+            status_line: "HTTP/1.1 302 Found",
+            headers: vec![("Location".to_string(), location.into())],
+            declared_content_length: Some(0),
+            include_content_length: true,
+        }
+    }
+
+    fn with_declared_content_length(mut self, length: usize) -> Self {
+        self.declared_content_length = Some(length);
+        self
+    }
+
+    fn without_content_length(mut self) -> Self {
+        self.include_content_length = false;
+        self
+    }
+
+    fn with_status_line(mut self, status_line: &'static str) -> Self {
+        self.status_line = status_line;
+        self
     }
 }
 
@@ -504,23 +634,33 @@ impl TestServer {
                         })
                         .unwrap_or_else(|| "/".to_string());
 
-                    let response = routes.get(&path);
-                    let (status_line, content_type, body) = if let Some(response) = response {
-                        (
-                            response.status_line,
-                            response.content_type,
-                            response.body.clone(),
-                        )
+                    let fallback;
+                    let response = if let Some(response) = routes.get(&path) {
+                        response
                     } else {
-                        ("HTTP/1.1 404 Not Found", "text/plain", b"missing".to_vec())
+                        fallback = TestResponse::new("text/plain", b"missing".to_vec())
+                            .with_status_line("HTTP/1.1 404 Not Found");
+                        &fallback
                     };
-
-                    let header = format!(
-                        "{status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                        body.len()
+                    let mut header = format!(
+                        "{}\r\nContent-Type: {}\r\n",
+                        response.status_line, response.content_type,
                     );
+                    if response.include_content_length {
+                        let length = response
+                            .declared_content_length
+                            .unwrap_or(response.body.len());
+                        header.push_str(&format!("Content-Length: {length}\r\n"));
+                    }
+                    for (name, value) in &response.headers {
+                        header.push_str(name);
+                        header.push_str(": ");
+                        header.push_str(value);
+                        header.push_str("\r\n");
+                    }
+                    header.push_str("Connection: close\r\n\r\n");
                     let _ = stream.write_all(header.as_bytes());
-                    let _ = stream.write_all(&body);
+                    let _ = stream.write_all(&response.body);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(10));

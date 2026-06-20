@@ -160,6 +160,60 @@ fn canvas_scene_query_point_and_stable_export_work() {
 }
 
 #[test]
+fn canvas_scene_release_snapshot_covers_stable_json_and_debug_tree() {
+    let scene = CanvasScene::from_items(vec![super::super::CanvasGroup::new(
+        1_u64,
+        super::super::CanvasGroupMode::Clip,
+        super::super::CanvasGroupShape::path(PathBuilder::new().rect(0.0, 0.0, 96.0, 48.0)),
+        vec![
+            super::super::CanvasPath::new(2_u64, PathBuilder::new().rect(8.0, 8.0, 32.0, 16.0))
+                .name_item("progress-track")
+                .fill(Color::hexa(0xCBD5E1FF))
+                .into(),
+            super::super::CanvasText::new(3_u64, Rect::new(8.0, 26.0, 72.0, 16.0), "Task")
+                .name_item("label")
+                .into(),
+        ],
+    )
+    .name_item("snapshot-root")
+    .into()]);
+
+    let debug = scene.debug_info();
+    assert_eq!(debug.stats.root_items, 1);
+    assert_eq!(debug.stats.total_items, 3);
+    assert_eq!(debug.stats.named_items, 3);
+    assert_eq!(debug.stats.group_items, 1);
+    assert_eq!(debug.stats.path_items, 1);
+    assert_eq!(debug.stats.text_items, 1);
+    assert_eq!(debug.stats.max_depth, 1);
+
+    let root = debug.nodes.first().expect("root debug node should exist");
+    assert_eq!(root.id, 1_u64.into());
+    assert_eq!(root.name.as_deref(), Some("snapshot-root"));
+    assert_eq!(root.kind, super::super::CanvasItemKind::Group);
+    assert_eq!(root.index_path, vec![0]);
+    assert_eq!(root.child_count, 2);
+    assert_eq!(root.children[0].name.as_deref(), Some("progress-track"));
+    assert_eq!(root.children[0].kind, super::super::CanvasItemKind::Path);
+    assert_eq!(root.children[0].index_path, vec![0, 0]);
+    assert_eq!(root.children[1].name.as_deref(), Some("label"));
+    assert_eq!(root.children[1].kind, super::super::CanvasItemKind::Text);
+    assert_eq!(root.children[1].index_path, vec![0, 1]);
+
+    let stable = scene.export_json();
+    assert!(stable.contains("\"format\": \"tgui.canvas.scene\""));
+    assert!(stable.contains("\"version\": 1"));
+    assert!(stable.contains("\"name\": \"snapshot-root\""));
+    assert!(stable.contains("\"name\": \"progress-track\""));
+    assert!(stable.contains("\"kind\":\"plain\""));
+    assert!(stable.contains("\"text\":\"Task\""));
+
+    let debug_json = scene.export_debug_json();
+    assert!(debug_json.contains("\"total_items\": 3"));
+    assert!(debug_json.contains("\"index_path\": [0, 1]"));
+}
+
+#[test]
 fn canvas_scene_query_point_returns_text_hit_for_text_items() {
     let scene = CanvasScene::from_items(vec![super::super::CanvasText::new(
         1_u64,

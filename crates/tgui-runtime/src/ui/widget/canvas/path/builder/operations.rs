@@ -3,7 +3,6 @@ use lyon::math::point;
 use lyon::path::iterator::PathIterator;
 use lyon::path::{Path, PathEvent};
 
-use super::super::super::path_utils::*;
 use super::*;
 
 impl PathBuilder {

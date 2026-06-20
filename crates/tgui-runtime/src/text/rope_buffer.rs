@@ -1,4 +1,5 @@
 use ropey::Rope;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Clone, Debug)]
 pub(crate) struct RopeBuffer {
@@ -85,6 +86,40 @@ impl RopeBuffer {
             byte_index += 1;
         }
         byte_index
+    }
+
+    pub(crate) fn prev_grapheme_boundary_byte(&self, byte_index: usize) -> usize {
+        if self.is_ascii {
+            return self.prev_char_boundary_byte(byte_index);
+        }
+
+        let byte_index = self.clamp_byte_boundary(byte_index);
+        let mut previous = 0;
+        for (index, _) in self.snapshot.grapheme_indices(true) {
+            if index >= byte_index {
+                break;
+            }
+            previous = index;
+        }
+        previous
+    }
+
+    pub(crate) fn next_grapheme_boundary_byte(&self, byte_index: usize) -> usize {
+        if self.is_ascii {
+            return self.next_char_boundary_byte(byte_index);
+        }
+
+        let byte_index = self.clamp_byte_boundary(byte_index);
+        if byte_index >= self.snapshot.len() {
+            return self.snapshot.len();
+        }
+
+        for (index, _) in self.snapshot.grapheme_indices(true) {
+            if index > byte_index {
+                return index;
+            }
+        }
+        self.snapshot.len()
     }
 
     pub(crate) fn replace_byte_range(
@@ -180,6 +215,39 @@ mod tests {
             buffer.next_char_boundary_byte("hello".len()),
             "hello中".len()
         );
+    }
+
+    #[test]
+    fn grapheme_boundaries_keep_zwj_emoji_together() {
+        let family = "👨‍👩‍👧‍👦";
+        let text = format!("a{family}b");
+        let buffer = RopeBuffer::from_str(&text);
+        let emoji_start = "a".len();
+        let emoji_end = "a".len() + family.len();
+
+        assert_eq!(buffer.next_grapheme_boundary_byte(emoji_start), emoji_end);
+        assert_eq!(buffer.prev_grapheme_boundary_byte(emoji_end), emoji_start);
+        assert_eq!(
+            buffer.prev_grapheme_boundary_byte(emoji_start + "👨".len()),
+            emoji_start
+        );
+        assert_eq!(
+            buffer.next_grapheme_boundary_byte(emoji_start + "👨".len()),
+            emoji_end
+        );
+    }
+
+    #[test]
+    fn grapheme_boundaries_keep_combining_marks_together() {
+        let text = "a\u{0301}בक्\u{200d}ष";
+        let buffer = RopeBuffer::from_str(text);
+        let first = "a\u{0301}".len();
+        let second = first + "ב".len();
+
+        assert_eq!(buffer.next_grapheme_boundary_byte(0), first);
+        assert_eq!(buffer.prev_grapheme_boundary_byte(first), 0);
+        assert_eq!(buffer.next_grapheme_boundary_byte(first), second);
+        assert_eq!(buffer.prev_grapheme_boundary_byte(text.len()), second);
     }
 
     #[test]

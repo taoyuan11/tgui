@@ -1,14 +1,13 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use reqwest::header::CONTENT_TYPE;
 use reqwest::Url;
 use resvg::{self, tiny_skia, usvg};
 use usvg_remote_resolvers::HrefStringResolver;
 
 use crate::foundation::error::TguiError;
 
-use super::loader::{http_client, LoadedSource};
+use super::loader::{fetch_http_bytes, LoadedSource, SVG_EXTERNAL_IMAGE_MAX_BODY_BYTES};
 use super::manager::{DocumentContent, DocumentEntry, SvgDocument};
 use super::types::{IntrinsicSize, RasterRequest, TextureFrame};
 
@@ -155,52 +154,18 @@ fn fetch_remote_image_kind(
     options: &usvg::Options<'_>,
     errors: &ExternalErrorSlot,
 ) -> Option<usvg::ImageKind> {
-    let client = match http_client() {
-        Ok(client) => client,
+    let fetched = match fetch_http_bytes(
+        url,
+        SVG_EXTERNAL_IMAGE_MAX_BODY_BYTES,
+        "SVG image reference",
+    ) {
+        Ok(fetched) => fetched,
         Err(error) => {
-            record_external_error(
-                errors,
-                format!("failed to fetch SVG image reference {url}: {error}"),
-            );
+            record_external_error(errors, format!("{error}"));
             return None;
         }
     };
-    let response = match client.get(url.clone()).send() {
-        Ok(response) => response,
-        Err(error) => {
-            record_external_error(
-                errors,
-                format!("failed to fetch SVG image reference {url}: {error}"),
-            );
-            return None;
-        }
-    };
-    let response = match response.error_for_status() {
-        Ok(response) => response,
-        Err(error) => {
-            record_external_error(
-                errors,
-                format!("failed to fetch SVG image reference {url}: {error}"),
-            );
-            return None;
-        }
-    };
-    let content_type = response
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.to_string());
-    let bytes = match response.bytes() {
-        Ok(bytes) => bytes.to_vec(),
-        Err(error) => {
-            record_external_error(
-                errors,
-                format!("failed to read SVG image reference {url}: {error}"),
-            );
-            return None;
-        }
-    };
-    match bytes_to_image_kind(bytes, content_type.as_deref(), options) {
+    match bytes_to_image_kind(fetched.bytes, fetched.content_type.as_deref(), options) {
         Ok(kind) => Some(kind),
         Err(error) => {
             record_external_error(errors, format!("{error}"));

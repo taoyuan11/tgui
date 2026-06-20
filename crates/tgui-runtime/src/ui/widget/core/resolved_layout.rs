@@ -221,7 +221,7 @@ impl<VM> ResolvedElement<VM> {
     ) -> TaffyStyle {
         let default_min_width = match &self.kind {
             ResolvedWidgetKind::Select { .. } if self.layout.min_width.is_none() => {
-                Dimension::from_length(0.0)
+                Dimension::from_length(0.0_f32)
             }
             ResolvedWidgetKind::Slider {
                 style, orientation, ..
@@ -234,7 +234,7 @@ impl<VM> ResolvedElement<VM> {
                 Dimension::from_length(width.get())
             }
             ResolvedWidgetKind::ToastHost { .. } | ResolvedWidgetKind::Portal { .. } => {
-                Dimension::from_length(0.0)
+                Dimension::from_length(0.0_f32)
             }
             _ => Dimension::AUTO,
         };

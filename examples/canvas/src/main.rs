@@ -860,15 +860,6 @@ struct CanvasVm {
 }
 
 impl CanvasVm {
-    fn sample_canvas(scene: CanvasScene) -> Canvas<Self> {
-        Canvas::new(scene)
-            .size(dp(CARD_CANVAS_WIDTH), dp(CARD_CANVAS_HEIGHT))
-            .style_full(canvas_frame_style)
-            .on_item_mouse_move(ValueCommand::new(Self::on_hover))
-            .on_item_click(ValueCommand::new(Self::on_click))
-            .on_item_drag(ValueCommand::new(Self::on_drag))
-    }
-
     fn demo_scene(index: usize) -> CanvasScene {
         match index {
             0 => primitives_scene(),
@@ -899,37 +890,6 @@ impl CanvasVm {
             9 => ("Retained Scene", "展示 CanvasScene 保留式结构生成出的命名分组与图元。"),
             _ => ("Primitives", "矩形、圆角矩形、圆、椭圆、描边对齐和 even-odd 填充规则。"),
         }
-    }
-
-    fn showcase_card(
-        title: &'static str,
-        description: &'static str,
-        height: f32,
-        body: Element<Self>,
-    ) -> Element<Self> {
-        Flex::new(Axis::Vertical)
-            .grow(1.0)
-            .height(dp(height))
-            .padding(Insets::all(dp(18.0)))
-            .gap(dp(12.0))
-            .style_full(card_style)
-            .child(Text::new(title).style_full(|ctx| text_style(ctx, sp(22.0))))
-            .child(Text::new(description).style_full(|ctx| muted_text_style(ctx, sp(14.0))))
-            .child(body)
-            .into()
-    }
-
-    fn static_scene_card(
-        title: &'static str,
-        description: &'static str,
-        scene: CanvasScene,
-    ) -> Element<Self> {
-        Self::showcase_card(
-            title,
-            description,
-            CARD_PANEL_HEIGHT,
-            Self::sample_canvas(scene).into(),
-        )
     }
 
     fn retained_lab_card(
@@ -1350,6 +1310,11 @@ impl ViewModel for CanvasVm {
                             .on_item_drag_end(ValueCommand::new(Self::on_drag_end)),
                     ),
             )
+            .child(Self::retained_lab_card(
+                self.retained_scene.signal(),
+                self.retained_probe.signal(),
+            ))
+            .child(Self::event_lab_card())
             .into()
     }
 }

@@ -18,6 +18,21 @@
 - `MediaBytes`
 - `ContentFit`
 
+## 远程资源安全默认值
+
+`MediaSource::Url` 只允许 `http` 和 `https`。运行时 HTTP client 会限制 redirect 数量、
+连接/总超时和响应体大小：
+
+- 顶层图片 URL：最大 32 MiB。
+- SVG 外部远程图片引用：最大 8 MiB。
+- `Content-Length` 超限会直接拒绝；没有 `Content-Length` 时会在流式读取超过上限后拒绝。
+
+这些默认值用于避免常见 SSRF/DoS 风险，但并不替代应用自己的策略。加载不受信任资源时，
+应用仍应在构造 `MediaSource` 前执行 host allowlist、认证策略、审计日志和业务层内容限制。
+
+`MediaSource::Path` 默认按应用传入路径读取文件。框架不会假设 sandbox 根目录；需要限制本地
+文件访问时，应由应用先 canonicalize 路径并确认它位于允许目录内。
+
 ## 内存 bytes 与零拷贝
 
 如果图片来自资源包、缓存或其他已经共享的数据结构，优先把底层缓冲区保存为
@@ -58,6 +73,8 @@ let source = MediaSource::bytes(MediaBytes::from_shared(shared.clone()));
 - `VideoSource`
 
 `Video` 是浏览器式内置控制栏播放器，组合了画面、底部 SVG 图标控制栏、播放/暂停、seek、缓冲、时间、音量/静音和状态文本。`VideoSurface` 参与布局和渲染，适合把视频画面作为普通 UI 区域嵌入应用并自行组合控制栏。视频 feature 会带上音频能力。
+
+音视频打包和 FFmpeg 故障排查见 [音视频打包与 FFmpeg](/advanced/audio-video-packaging)。
 
 ## 资源预算
 

@@ -342,3 +342,194 @@ fn textarea_replaces_multibyte_selection_via_rope_buffer() {
     let value = handler.with_view_model(|vm| vm.value.clone());
     assert_eq!(value, "abXcd");
 }
+
+#[test]
+fn input_backspace_deletes_zwj_emoji_as_one_grapheme() {
+    let invalidation = InvalidationSignal::new();
+    let family = "👨‍👩‍👧‍👦";
+    let initial = format!("a{family}b");
+    let controller = TextController::from(initial.as_str());
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Input::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = text_input_frame(&mut handler, false);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + frame.width - dp(4.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: "a".len() + family.len(),
+            anchor: "a".len() + family.len(),
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Backspace)));
+    flush_text_input_commits(&mut handler);
+
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value, "ab");
+}
+
+#[test]
+fn input_delete_deletes_combining_cluster_as_one_grapheme() {
+    let invalidation = InvalidationSignal::new();
+    let initial = "a\u{0301}b";
+    let first_grapheme = "a\u{0301}";
+    let controller = TextController::from(initial);
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Input::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = text_input_frame(&mut handler, false);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: 0,
+            anchor: 0,
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Delete)));
+    flush_text_input_commits(&mut handler);
+
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value, &initial[first_grapheme.len()..]);
+}
+
+#[test]
+fn input_arrow_right_moves_by_grapheme_cluster() {
+    let invalidation = InvalidationSignal::new();
+    let family = "👩‍💻";
+    let initial = format!("{family}b");
+    let tree = WidgetTree::new(Input::<TestVm>::new(initial.as_str()));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = text_input_frame(&mut handler, false);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("input should be focused after click");
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: 0,
+            anchor: 0,
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowRight)));
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("input edit state should exist");
+    assert_eq!(state.cursor, family.len());
+    assert_eq!(state.anchor, family.len());
+}
+
+#[test]
+fn textarea_replaces_mixed_rtl_complex_selection() {
+    let invalidation = InvalidationSignal::new();
+    let initial = "Report שלום नमस्ते 👩‍💻 done";
+    let replacement = "تم";
+    let controller = TextController::from(initial);
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Textarea::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = text_input_frame(&mut handler, true);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let selected = "שלום नमस्ते 👩‍💻";
+    let start = "Report ".len();
+    let end = start + selected.len();
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: end,
+            anchor: start,
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    handler.handle_keyboard_input(&text_key_event(replacement));
+    flush_text_input_commits(&mut handler);
+
+    let value = handler.with_view_model(|vm| vm.value.clone());
+    assert_eq!(value, "Report تم done");
+}
+
+fn text_input_frame<VM: 'static>(handler: &mut BoundRuntimeHandler<VM>, multiline: bool) -> Rect {
+    let computed = handler.computed_scene();
+    computed
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::TextInput {
+                multiline: region_multiline,
+                ..
+            } if *region_multiline == multiline => Some(region.rect),
+            _ => None,
+        })
+        .expect("text input hit region should exist")
+}

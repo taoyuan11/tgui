@@ -171,8 +171,8 @@ pub struct TextDecorationPrimitive {
 
 #[derive(Clone)]
 pub struct TexturePrimitive {
-    pub texture: Arc<TextureFrame>,
-    pub media_key: Option<crate::media::MediaTextureKey>,
+    pub(crate) texture: Arc<TextureFrame>,
+    pub(crate) media_key: Option<crate::media::MediaTextureKey>,
     pub(crate) media_layout: Option<crate::media::MediaTextureLayout>,
     pub frame: Rect,
     pub quad: Option<[Point; 4]>,
@@ -208,8 +208,8 @@ pub struct CanvasCompositePrimitive {
     pub inner_shadow_blur_radius: f32,
     pub clip_rect: Option<Rect>,
     pub clip_mask: Option<ClipMask>,
-    pub content_commands: Arc<[RenderCommand]>,
-    pub mask_commands: Option<Arc<[RenderCommand]>>,
+    pub(crate) content_commands: Arc<[RenderCommand]>,
+    pub(crate) mask_commands: Option<Arc<[RenderCommand]>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
